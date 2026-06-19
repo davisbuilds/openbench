@@ -1,0 +1,20 @@
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs and local environment
+*.log
+.env
+.env.*
+
+# Common dependency/build outputs
+node_modules/
+dist/
+build/
+coverage/
+target/
+.venv/
+__pycache__/
+*.py[cod]
