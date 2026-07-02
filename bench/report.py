@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """Statistical report for the agent-harness comparison benchmark.
 
-Reads ``results/results.jsonl`` and prints a table with one row per harness:
-per-task success (x/n), an overall success rate with a Wilson 95% confidence
-interval, mean wall-clock time, and total reported tokens.
+Reads ``results/results.jsonl`` and prints, per harness:
+
+- a **success table**: per-task success (x/n), overall success rate with a
+  Wilson 95% confidence interval, mean wall-clock time, tokens-per-solve, and
+  mean turns; and
+- an **efficiency summary** (the harness-tax view): success rate + Wilson CI,
+  mean wall-time with its 95% CI half-width, tokens-per-solve, and turns-per-solve.
+
+The efficiency metrics are normalised *per solved task* so they measure the cost
+of getting a result, not just raw totals that scale with the trial count. Token
+and turn data is optional per adapter: a harness that reports none shows ``-``
+(never silently counted as zero), and per-solve figures need at least one solve.
 
 Python3 stdlib only.
 """
@@ -61,11 +70,15 @@ def aggregate(rows):
     Returns ``(harnesses, tasks, stats)`` where ``stats[harness]`` holds::
 
         {
-          "per_task": {task: [successes, n]},
-          "succ": int, "n": int,
-          "wall_times": [float, ...],
-          "tokens": int,          # sum of reported tokens
+          "per_task":    {task: [successes, n]},
+          "succ": int, "n": int,        # solves and total cells
+          "wall_times":  [float, ...],  # per-cell wall-clock seconds
+          "token_vals":  [int, ...],    # per-cell tokens, non-null only
+          "turn_vals":   [int, ...],    # per-cell turns, non-null only
         }
+
+    ``token_vals``/``turn_vals`` collect only rows that actually reported the
+    value, so an empty list means "no data" (rendered ``-``) rather than zero.
     """
     harnesses = []
     tasks = []
@@ -77,7 +90,7 @@ def aggregate(rows):
             continue
         if harness not in stats:
             stats[harness] = {"per_task": {}, "succ": 0, "n": 0,
-                              "wall_times": [], "tokens": 0}
+                              "wall_times": [], "token_vals": [], "turn_vals": []}
             harnesses.append(harness)
         if task not in tasks:
             tasks.append(task)
@@ -92,36 +105,70 @@ def aggregate(rows):
             st["succ"] += 1
 
         wt = row.get("wall_time_s")
-        if isinstance(wt, (int, float)):
+        if isinstance(wt, (int, float)) and not isinstance(wt, bool):
             st["wall_times"].append(wt)
         tok = row.get("tokens")
-        if isinstance(tok, (int, float)):
-            st["tokens"] += tok
+        if isinstance(tok, (int, float)) and not isinstance(tok, bool):
+            st["token_vals"].append(tok)
+        turn = row.get("turns")
+        if isinstance(turn, (int, float)) and not isinstance(turn, bool):
+            st["turn_vals"].append(turn)
     return harnesses, tasks, stats
 
 
-def format_table(harnesses, tasks, stats):
-    """Render the aggregated stats as a fixed-width text table."""
-    headers = ["harness"] + tasks + ["overall", "wilson95", "mean_s", "tokens"]
-    rows_text = []
-    for harness in harnesses:
-        st = stats[harness]
-        cells = [harness]
-        for task in tasks:
-            succ, n = st["per_task"].get(task, [0, 0])
-            cells.append(f"{succ}/{n}" if n else "-")
-        n = st["n"]
-        succ = st["succ"]
-        rate = (succ / n) if n else 0.0
-        lo, hi = wilson_ci(succ, n)
-        cells.append(f"{succ}/{n} ({rate:.0%})" if n else "-")
-        cells.append(f"[{lo:.3f}, {hi:.3f}]")
-        mean_s = (sum(st["wall_times"]) / len(st["wall_times"])) \
-            if st["wall_times"] else 0.0
-        cells.append(f"{mean_s:.2f}")
-        cells.append(str(st["tokens"]) if st["tokens"] else "-")
-        rows_text.append(cells)
+# --- derived per-harness metrics (each returns None when undefined) ---------- #
+def mean(vals):
+    """Arithmetic mean, or None for an empty list."""
+    return (sum(vals) / len(vals)) if vals else None
 
+
+def ci_halfwidth(vals, z=1.96):
+    """95% CI half-width of the mean (z * sd / sqrt(n)); None if < 2 samples."""
+    n = len(vals)
+    if n < 2:
+        return None
+    m = sum(vals) / n
+    sd = math.sqrt(sum((x - m) ** 2 for x in vals) / (n - 1))
+    return z * sd / math.sqrt(n)
+
+
+def tokens_per_solve(st):
+    """Total reported tokens divided by number of solves; None if undefined.
+
+    ``None`` when the harness reported no token data at all, or has no solves to
+    normalise by. Reported tokens are never treated as zero when absent.
+    """
+    if not st["token_vals"] or st["succ"] == 0:
+        return None
+    return sum(st["token_vals"]) / st["succ"]
+
+
+def turns_per_solve(st):
+    """Total reported turns divided by number of solves; None if undefined."""
+    if not st["turn_vals"] or st["succ"] == 0:
+        return None
+    return sum(st["turn_vals"]) / st["succ"]
+
+
+# --- cell formatters --------------------------------------------------------- #
+def _fmt_tokens(v):
+    """Compact token count: '-' for None, 'N' below 1k, else 'X.Yk'."""
+    if v is None:
+        return "-"
+    return f"{v / 1000:.1f}k" if v >= 1000 else f"{v:.0f}"
+
+
+def _fmt_turns(v):
+    """One-decimal turn figure, '-' for None."""
+    return "-" if v is None else f"{v:.1f}"
+
+
+def _fmt_secs(v):
+    return "-" if v is None else f"{v:.2f}"
+
+
+def _render(headers, rows_text):
+    """Render a fixed-width text table (2-space gutter) from string cells."""
     widths = [len(h) for h in headers]
     for cells in rows_text:
         for i, cell in enumerate(cells):
@@ -135,8 +182,65 @@ def format_table(harnesses, tasks, stats):
     return "\n".join(lines)
 
 
+def format_table(harnesses, tasks, stats):
+    """Success table: per-task x/n, overall + Wilson CI, mean_s, tok/solve, turns.
+
+    Design note: the raw total-token column was replaced by ``tok/slv``
+    (tokens-per-solve) because a running total scales with the number of trials
+    rather than describing the harness; ``turns`` (mean turns per cell) is added
+    alongside. Both stay ``-`` when the adapter reports no data.
+    """
+    headers = ["harness"] + tasks + ["overall", "wilson95", "mean_s", "tok/slv", "turns"]
+    rows_text = []
+    for harness in harnesses:
+        st = stats[harness]
+        cells = [harness]
+        for task in tasks:
+            succ, n = st["per_task"].get(task, [0, 0])
+            cells.append(f"{succ}/{n}" if n else "-")
+        n = st["n"]
+        succ = st["succ"]
+        rate = (succ / n) if n else 0.0
+        lo, hi = wilson_ci(succ, n)
+        cells.append(f"{succ}/{n} ({rate:.0%})" if n else "-")
+        cells.append(f"[{lo:.3f}, {hi:.3f}]")
+        cells.append(_fmt_secs(mean(st["wall_times"])))
+        cells.append(_fmt_tokens(tokens_per_solve(st)))
+        cells.append(_fmt_turns(mean(st["turn_vals"])))
+        rows_text.append(cells)
+    return _render(headers, rows_text)
+
+
+def format_efficiency(harnesses, stats):
+    """Efficiency summary: the harness-tax view, one row per harness.
+
+    Columns: success (x/n), rate, Wilson 95% CI, mean_s with its 95% CI
+    half-width, tokens-per-solve, turns-per-solve.
+    """
+    headers = ["harness", "success", "rate", "wilson95", "mean_s", "tok/slv", "turns/slv"]
+    rows_text = []
+    for harness in harnesses:
+        st = stats[harness]
+        n, succ = st["n"], st["succ"]
+        rate = (succ / n) if n else 0.0
+        lo, hi = wilson_ci(succ, n)
+        m = mean(st["wall_times"])
+        hw = ci_halfwidth(st["wall_times"])
+        mean_s = "-" if m is None else (f"{m:.2f} ±{hw:.2f}" if hw is not None else f"{m:.2f}")
+        rows_text.append([
+            harness,
+            f"{succ}/{n}" if n else "-",
+            f"{rate:.0%}" if n else "-",
+            f"[{lo:.3f}, {hi:.3f}]",
+            mean_s,
+            _fmt_tokens(tokens_per_solve(st)),
+            _fmt_turns(turns_per_solve(st)),
+        ])
+    return _render(headers, rows_text)
+
+
 def build_report(results_path):
-    """Load, aggregate, and format a report from a results file."""
+    """Load, aggregate, and format the success table from a results file."""
     rows = load_rows(results_path)
     if not rows:
         return f"No results found at {results_path}"
@@ -144,12 +248,28 @@ def build_report(results_path):
     return format_table(harnesses, tasks, stats)
 
 
+def build_efficiency_report(results_path):
+    """Load, aggregate, and format the efficiency summary from a results file."""
+    rows = load_rows(results_path)
+    if not rows:
+        return f"No results found at {results_path}"
+    harnesses, _tasks, stats = aggregate(rows)
+    return format_efficiency(harnesses, stats)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Benchmark results report.")
     parser.add_argument("--results-path", default=DEFAULT_RESULTS_PATH,
                         help="override the results.jsonl path")
+    parser.add_argument("--efficiency", action="store_true",
+                        help="print only the per-harness efficiency summary")
     args = parser.parse_args(argv)
-    print(build_report(args.results_path))
+    if args.efficiency:
+        print(build_efficiency_report(args.results_path))
+    else:
+        print(build_report(args.results_path))
+        print("\nEfficiency summary (per solved task):")
+        print(build_efficiency_report(args.results_path))
     return 0
 
 
