@@ -39,7 +39,7 @@ DEFAULT_MODEL = "gpt-5.5-medium"
 ROW_FIELDS = (
     "run_id", "ts_iso", "harness", "model", "task", "trial",
     "success", "completed", "error", "wall_time_s", "tokens", "turns",
-    "cmd", "checker_exit",
+    "cmd", "checker_exit", "exec_mode",
 )
 
 
@@ -79,6 +79,36 @@ def load_adapter(adapters_dir, name):
     if not hasattr(module, "run"):
         raise AttributeError(f"adapter '{name}' has no run() function")
     return module
+
+
+def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
+                   adapters_dir, docker_image, docker_fallback):
+    """Run the harness for one cell, honoring the execution mode.
+
+    Returns ``(result_dict, exec_used)`` where ``exec_used`` is ``"local"`` or
+    ``"docker"``. In ``docker`` mode each cell runs in a fresh container (the
+    same adapter, unchanged, via ``entry.py``); if the daemon or image is
+    unavailable and ``docker_fallback`` is set, execution falls back to local
+    and ``exec_used`` reflects that. The built-in ``null`` control runs the same
+    way in either mode (its container path proves the plumbing without auth).
+    """
+    if exec_mode == "docker":
+        import docker_exec  # lazy: local mode never needs docker
+        try:
+            result = docker_exec.run_in_container(
+                harness, instruction, workdir, model, timeout_s,
+                adapters_dir, docker_image,
+            )
+            return result, "docker"
+        except docker_exec.DockerUnavailable as exc:
+            if not docker_fallback:
+                raise
+            print(f"WARN docker unavailable ({exc}); falling back to local")
+
+    if harness == "null":
+        return null_run(instruction, workdir, model, timeout_s), "local"
+    adapter = load_adapter(adapters_dir, harness)
+    return adapter.run(instruction, workdir, model, timeout_s), "local"
 
 
 def read_instruction(task_dir):
@@ -140,7 +170,8 @@ def append_row(results_path, row):
 
 
 def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
-             checker_timeout_s):
+             checker_timeout_s, exec_mode="local",
+             docker_image=None, docker_fallback=True):
     """Execute one (task, harness, trial) cell and return its results row.
 
     Copies the task workspace to a temp dir, invokes the adapter (or the
@@ -168,6 +199,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "turns": None,
         "cmd": None,
         "checker_exit": None,
+        "exec_mode": None,
     }
 
     workdir = tempfile.mkdtemp(prefix=f"bench_{harness}_{task}_")
@@ -181,16 +213,17 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
 
         start = time.monotonic()
         try:
-            if harness == "null":
-                result = null_run(instruction, workdir, model, timeout_s)
-            else:
-                adapter = load_adapter(adapters_dir, harness)
-                result = adapter.run(instruction, workdir, model, timeout_s)
+            result, exec_used = invoke_adapter(
+                exec_mode, harness, instruction, workdir, model, timeout_s,
+                adapters_dir, docker_image, docker_fallback,
+            )
         except Exception:  # noqa: BLE001 - never crash the loop on an adapter
             row["error"] = traceback.format_exc(limit=4).strip()
             row["wall_time_s"] = round(time.monotonic() - start, 3)
+            row["exec_mode"] = exec_mode
             return row
         row["wall_time_s"] = round(time.monotonic() - start, 3)
+        row["exec_mode"] = exec_used
 
         # Fold the adapter's self-reported fields into the row.
         row["completed"] = bool(result.get("completed", False))
@@ -237,6 +270,17 @@ def main(argv=None):
                         help="override the adapters directory")
     parser.add_argument("--tasks-dir", default=DEFAULT_TASKS_DIR,
                         help="override the tasks directory")
+    parser.add_argument("--exec", dest="exec_mode", default="local",
+                        choices=("local", "docker"),
+                        help="execution backend: 'local' (host, default) or "
+                             "'docker' (one disposable container per cell)")
+    parser.add_argument("--docker-image", default="openbench-harness:latest",
+                        help="image for --exec docker "
+                             "(default: openbench-harness:latest)")
+    parser.add_argument("--no-docker-fallback", dest="docker_fallback",
+                        action="store_false",
+                        help="in --exec docker, fail instead of falling back to "
+                             "local when the daemon/image is unavailable")
     args = parser.parse_args(argv)
 
     tasks = [t.strip() for t in args.task.split(",") if t.strip()]
@@ -257,6 +301,8 @@ def main(argv=None):
                 row = run_cell(
                     harness, task, args.model, trial, args.timeout,
                     args.tasks_dir, args.adapters_dir, args.checker_timeout,
+                    exec_mode=args.exec_mode, docker_image=args.docker_image,
+                    docker_fallback=args.docker_fallback,
                 )
                 append_row(args.results_path, row)
                 existing.add(run_id)
@@ -264,7 +310,7 @@ def main(argv=None):
                 status = "ok" if row["success"] else "fail"
                 print(f"RUN  {run_id} success={row['success']} "
                       f"completed={row['completed']} checker_exit={row['checker_exit']} "
-                      f"[{status}]")
+                      f"exec={row['exec_mode']} [{status}]")
 
     print(f"\nDone. ran={ran} skipped={skipped} results={args.results_path}")
     return 0
