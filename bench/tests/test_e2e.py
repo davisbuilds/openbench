@@ -146,6 +146,27 @@ class TestEndToEnd(unittest.TestCase):
         self.assertIn("write-marker", text)
         self.assertIn("wilson95", text)
 
+    def test_checker_timeout(self):
+        # The slow-checker fixture sleeps 30s; a 1s --checker-timeout must abort
+        # it and record checker_exit="timeout", success=false, without hanging.
+        proc = subprocess.run(
+            [sys.executable, RUN_PY,
+             "--task", "slow-checker",
+             "--harness", "null",
+             "--model", "gpt-5.5-medium",
+             "--checker-timeout", "1",
+             "--results-path", self.results_path,
+             "--adapters-dir", FIXTURES_DIR,
+             "--tasks-dir", FIXTURES_DIR],
+            capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        rows = read_rows(self.results_path)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["checker_exit"], "timeout")
+        self.assertFalse(row["success"], "a timed-out checker must not succeed")
+
     def test_pristine_workspace_untouched(self):
         # Solving the task writes done.txt into a temp copy, never the fixture.
         marker = os.path.join(FIXTURES_DIR, "write-marker", "workspace", "done.txt")

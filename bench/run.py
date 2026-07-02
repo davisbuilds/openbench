@@ -87,22 +87,27 @@ def read_instruction(task_dir):
         return fh.read()
 
 
-def run_checker(task_dir, workdir):
+def run_checker(task_dir, workdir, timeout_s):
     """Run ``<task_dir>/checker.sh`` with cwd=workdir and TASK_DIR set.
 
-    Returns the checker's integer exit code. The checker decides task success
+    Returns the checker's integer exit code, or the string ``"timeout"`` if the
+    checker exceeds ``timeout_s`` seconds. The checker decides task success
     (exit 0 == success); the adapter never does.
     """
     checker = os.path.join(task_dir, "checker.sh")
     env = dict(os.environ)
     env["TASK_DIR"] = os.path.abspath(task_dir)
-    proc = subprocess.run(
-        ["bash", checker],
-        cwd=workdir,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["bash", checker],
+            cwd=workdir,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired:
+        return "timeout"
     return proc.returncode
 
 
@@ -134,12 +139,15 @@ def append_row(results_path, row):
         fh.write(json.dumps(ordered) + "\n")
 
 
-def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir):
+def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
+             checker_timeout_s):
     """Execute one (task, harness, trial) cell and return its results row.
 
     Copies the task workspace to a temp dir, invokes the adapter (or the
     built-in null adapter), runs the checker, and cleans up. Adapter and
-    checker failures are recorded in the row rather than raised.
+    checker failures are recorded in the row rather than raised. A checker that
+    exceeds ``checker_timeout_s`` records ``checker_exit="timeout"``,
+    ``success=false``.
     """
     run_id = make_run_id(harness, task, model, trial)
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
@@ -193,7 +201,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir):
 
         # The checker is the sole authority on task success.
         try:
-            checker_exit = run_checker(task_dir, workdir)
+            checker_exit = run_checker(task_dir, workdir, checker_timeout_s)
         except Exception:  # noqa: BLE001
             row["checker_exit"] = None
             if row["error"] is None:
@@ -218,6 +226,9 @@ def main(argv=None):
                         help="trials per (task, harness) cell (default: 1)")
     parser.add_argument("--timeout", type=int, default=600,
                         help="per-cell adapter timeout in seconds (default: 600)")
+    parser.add_argument("--checker-timeout", type=int, default=120,
+                        help="checker.sh timeout in seconds (default: 120); "
+                             "on timeout the row records checker_exit='timeout'")
     parser.add_argument("--force", action="store_true",
                         help="re-run cells even if their run_id already exists")
     parser.add_argument("--results-path", default=DEFAULT_RESULTS_PATH,
@@ -245,7 +256,7 @@ def main(argv=None):
                     continue
                 row = run_cell(
                     harness, task, args.model, trial, args.timeout,
-                    args.tasks_dir, args.adapters_dir,
+                    args.tasks_dir, args.adapters_dir, args.checker_timeout,
                 )
                 append_row(args.results_path, row)
                 existing.add(run_id)
