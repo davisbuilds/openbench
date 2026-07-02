@@ -18,3 +18,7 @@ target/
 .venv/
 __pycache__/
 *.py[cod]
+
+# Benchmark outputs and worker proof artifacts
+results/
+.proofs/
