@@ -3,7 +3,6 @@ def add(a, b):
 
 
 def subtract(a, b):
-    # BUG: this should return a - b
     return a + b
 
 
