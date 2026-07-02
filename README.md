@@ -154,6 +154,8 @@ never edits the workspace, every task's checker fails — it is the benchmark's
 
 ## Results
 
+Findings from the first full run are in [`RESULTS.md`](RESULTS.md) (M3 matrix, 2026-07-02).
+
 `bench/run.py` appends one JSON object per line to `results/results.jsonl`. The
 fields:
 
