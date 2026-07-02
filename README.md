@@ -49,9 +49,15 @@ workspace and passes on the golden solution (see "Task format"):
 python3 validate_tasks.py
 ```
 
-**2. Preflight (planned).** A `bench/doctor.py` that checks each harness CLI is
-installed and authenticated is being built separately and is **not yet on disk**;
-skip this step until it lands.
+**2. Preflight.**
+
+```
+python3 bench/doctor.py
+```
+
+For each harness it checks — spending no tokens — that the CLI is installed, its
+auth/login is present, and the canonical model pin resolves to the harness's own
+model string. A failing preflight exits nonzero.
 
 **3. Run.** Pick harnesses and tasks. Start with the zero-cost `null` control to
 confirm the plumbing, then add real harnesses:
