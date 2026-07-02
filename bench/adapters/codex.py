@@ -14,7 +14,14 @@ Notes / quirks:
 - Reasoning effort is set via a config override, not the model string. The
   canonical "-medium" suffix is mapped to model_reasoning_effort.
 - Uses the user's existing `~/.codex` login as-is (read-only).
-- codex exec prints a "tokens used: N" summary line we parse for usage.
+- TOKENS: codex exec prints a "tokens used: N" summary line we parse for usage.
+  This is codex's own total (includes cached context), so its basis differs
+  slightly from the other adapters (which report fresh input+output). Kept as-is
+  to stay reliable.
+- TURNS: left None. `codex exec --json` emits structured events (which would
+  give a turn count), but in testing it buffered/stalled for minutes without
+  flushing, so adopting it would risk regressing the reliable text-mode token
+  parse for no essential gain. Revisit if codex --json stabilizes.
 """
 
 import os
