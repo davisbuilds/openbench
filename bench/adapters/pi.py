@@ -17,10 +17,18 @@ Notes / quirks:
   gpt-5.5 but we prefer the subscription credential.
 - Reasoning effort via `--thinking medium`.
 - The real ~/.pi/agent/auth.json is only READ (copied), never modified.
+- `--mode json` emits a JSONL event stream. The final `agent_end` event carries
+  `messages[]`, each assistant message holding
+  `usage={input,output,cacheRead,cacheWrite,totalTokens}`; `turn_end` events
+  mark model rounds. Token accounting (see ``_parse_json``):
+    tokens = sum of input+output over assistant messages (fresh tokens; cache
+             re-reads excluded, matching the other adapters' definition).
+    turns  = number of `turn_end` events (model rounds).
+  Parsing is defensive: shape drift yields tokens=None/turns=None + raw tail.
 """
 
+import json
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -40,7 +48,57 @@ _THINKING = {
 _PROVIDER = "openai-codex"
 _REAL_AUTH = os.path.expanduser("~/.pi/agent/auth.json")
 
-_TOKENS_RE = re.compile(r"([\d,]+)\s+tokens", re.IGNORECASE)
+
+def _parse_json(stdout):
+    """Parse pi's JSONL event stream into (tokens, turns, tail).
+
+    tokens/turns are None when nothing parseable is found. tail is the
+    concatenated assistant text.
+    """
+    events = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    if not events:
+        return None, None, ""
+
+    turns = sum(1 for e in events if e.get("type") == "turn_end") or None
+
+    # Prefer the final agent_end message list; fall back to message_end events.
+    messages = None
+    for e in events:
+        if e.get("type") == "agent_end" and isinstance(e.get("messages"), list):
+            messages = e["messages"]
+    if messages is None:
+        messages = [e.get("message") for e in events
+                    if e.get("type") == "message_end"]
+
+    total = 0
+    found = False
+    transcript = []
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        # Usage is billed per assistant turn; restrict to assistant messages so
+        # tool/user entries can never double-count.
+        usage = msg.get("usage") or {}
+        for key in ("input", "output"):
+            val = usage.get(key)
+            if isinstance(val, (int, float)):
+                total += int(val)
+                found = True
+        for part in (msg.get("content") or []):
+            if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
+                transcript.append(part["text"])
+
+    tokens = total if found else None
+    tail = "\n".join(transcript)[-2000:]
+    return tokens, turns, tail
 
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
@@ -69,6 +127,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         "--provider", _PROVIDER,
         "--model", MODELS[model],
         "--thinking", _THINKING[model],
+        "--mode", "json",
         instruction,
     ]
 
@@ -103,15 +162,19 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             }
 
         combined = (proc.stdout or "") + (proc.stderr or "")
-        m = _TOKENS_RE.search(combined)
-        tokens = int(m.group(1).replace(",", "")) if m else None
+        try:
+            tokens, turns, tail = _parse_json(proc.stdout or "")
+        except Exception:  # noqa: BLE001 - never let usage parsing break a run
+            tokens, turns, tail = None, None, ""
+        if not tail:
+            tail = combined[-2000:]
 
         return {
             "completed": proc.returncode == 0,
             "error": None if proc.returncode == 0 else f"exit {proc.returncode}",
-            "output_tail": combined[-2000:],
+            "output_tail": tail,
             "tokens": tokens,
-            "turns": None,
+            "turns": turns,
             "cmd": cmd,
         }
     finally:
