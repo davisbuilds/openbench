@@ -2,7 +2,7 @@
 
 Headless invocation:
     cursor-agent -p --force --trust \
-        --model gpt-5.5-medium --output-format text \
+        --model gpt-5.5-medium --output-format json \
         --workspace <workdir> <instruction>
 
 Notes / quirks:
@@ -16,10 +16,18 @@ Notes / quirks:
 - Reasoning effort is baked into the model name: `gpt-5.5-medium` is a
   first-class model id (verified via `cursor-agent models`).
 - Uses the user's existing Cursor login as-is (read-only).
+- `--output-format json` emits ONE final JSON object with a `result` text field
+  and `usage={inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens}`.
+  Token accounting (see ``_parse_json``):
+    tokens = inputTokens + outputTokens (fresh tokens; cache re-reads excluded).
+    turns  = None -- the json result exposes no per-message/turn count; counting
+             turns would require the heavier `--output-format stream-json` event
+             stream. Left as None per ADAPTER_SPEC (report it only if available).
+  Parsing is defensive: shape drift yields tokens=None and the raw tail.
 """
 
+import json
 import os
-import re
 import subprocess
 
 NAME = "cursor"
@@ -29,7 +37,26 @@ MODELS = {
     "gpt-5.5-medium": "gpt-5.5-medium",
 }
 
-_TOKENS_RE = re.compile(r"([\d,]+)\s+tokens", re.IGNORECASE)
+
+def _parse_json(stdout):
+    """Parse cursor's single-object JSON result into (tokens, turns, tail).
+
+    tokens is None if usage is absent/malformed. turns is always None (not
+    reported in this format). tail is the `result` text when present.
+    """
+    stdout = stdout.strip()
+    if not stdout:
+        return None, None, ""
+    obj = json.loads(stdout)  # caller guards with try/except
+    usage = obj.get("usage") or {}
+    tokens = 0
+    for key in ("inputTokens", "outputTokens"):
+        val = usage.get(key)
+        if isinstance(val, (int, float)):
+            tokens += int(val)
+    tail = obj.get("result")
+    tail = tail if isinstance(tail, str) else ""
+    return (tokens or None), None, tail[-2000:]
 
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
@@ -48,7 +75,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         "--force",
         "--trust",
         "--model", MODELS[model],
-        "--output-format", "text",
+        "--output-format", "json",
         "--workspace", workdir,
         instruction,
     ]
@@ -74,14 +101,18 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         }
 
     combined = (proc.stdout or "") + (proc.stderr or "")
-    m = _TOKENS_RE.search(combined)
-    tokens = int(m.group(1).replace(",", "")) if m else None
+    try:
+        tokens, turns, tail = _parse_json(proc.stdout or "")
+    except Exception:  # noqa: BLE001 - never let usage parsing break a run
+        tokens, turns, tail = None, None, ""
+    if not tail:
+        tail = combined[-2000:]
 
     return {
         "completed": proc.returncode == 0,
         "error": None if proc.returncode == 0 else f"exit {proc.returncode}",
-        "output_tail": combined[-2000:],
+        "output_tail": tail,
         "tokens": tokens,
-        "turns": None,
+        "turns": turns,
         "cmd": cmd,
     }
