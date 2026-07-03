@@ -21,6 +21,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -225,9 +226,54 @@ def append_row(results_path, row):
         fh.write(json.dumps(ordered) + "\n")
 
 
+def default_transcripts_dir(results_path):
+    """Base dir for transcripts: a ``transcripts/`` sibling of the results log.
+
+    Co-locating transcripts with their results log keeps them together and
+    means an ephemeral (temp) results path parks its transcripts in the same
+    ephemeral tree -- so nothing leaks into the repo during tests. Override with
+    ``--transcripts-dir``.
+    """
+    return os.path.join(os.path.dirname(os.path.abspath(results_path)),
+                        "transcripts")
+
+
+def transcript_path(transcripts_dir, results_stem, run_id):
+    """Local path for a cell's transcript: <base>/<results-stem>/<run_id>.txt.
+
+    ``run_id`` contains ``:`` separators; sanitize to a filesystem-safe token so
+    the file name is portable and unambiguous.
+    """
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", run_id)
+    return os.path.join(transcripts_dir, results_stem, safe + ".txt")
+
+
+def write_transcript(path, row, body):
+    """Write one cell's full agent transcript to ``path`` (creating dirs).
+
+    LOCAL-ONLY (user directive): transcripts are the raw, UNSCRUBBED harness
+    output and may contain absolute home paths, usernames, hostnames, or leaked
+    secrets. They are never published as-is -- run ``bench/scrub.py --check``
+    for a manual review pass, then ``bench/scrub.py`` to emit scrubbed copies,
+    before sharing any transcript. The runner writes originals here and builds
+    no publishing path of any kind.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    header = (
+        f"# transcript {row['run_id']}\n"
+        f"# harness={row['harness']} model={row['model']} "
+        f"task={row['task']} trial={row['trial']} ts={row['ts_iso']}\n"
+        "# LOCAL-ONLY -- unscrubbed. Review with bench/scrub.py --check before sharing.\n\n"
+    )
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(header)
+        fh.write(body or "")
+
+
 def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              checker_timeout_s, exec_mode="local",
-             docker_image=None, docker_fallback=True, harness_version=None):
+             docker_image=None, docker_fallback=True, harness_version=None,
+             transcripts_dir=None, results_stem=""):
     """Execute one (task, harness, trial) cell and return its results row.
 
     Copies the task workspace to a temp dir, invokes the adapter (or the
@@ -240,6 +286,11 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     Nonzero exit => success=false, score = the checker's SCORE line if any, else
     0.0. Timeout => score 0.0. ``harness_version`` (probed once per harness by
     the caller) is stamped verbatim.
+
+    When ``transcripts_dir`` is set, the cell's full agent transcript
+    (adapter ``full_output`` if present, else ``output_tail``) is persisted
+    LOCAL-ONLY to ``<transcripts_dir>/<results_stem>/<run_id>.txt``. See
+    ``write_transcript`` for the local-only handling rule.
     """
     run_id = make_run_id(harness, task, model, trial)
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
@@ -295,6 +346,21 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["turns"] = result.get("turns")
         row["cmd"] = result.get("cmd")
 
+        # Persist the full agent transcript LOCAL-ONLY (prefer the untruncated
+        # full_output; fall back to the ~2000-char output_tail). Never let a
+        # transcript-write failure break the benchmark loop.
+        if transcripts_dir:
+            body = result.get("full_output")
+            if body is None:
+                body = result.get("output_tail", "")
+            try:
+                write_transcript(
+                    transcript_path(transcripts_dir, results_stem, run_id),
+                    row, body,
+                )
+            except Exception:  # noqa: BLE001 - transcript IO must not fail a cell
+                pass
+
         # The checker is the sole authority on task success (and score).
         try:
             checker_exit, raw_score = run_checker(task_dir, workdir, checker_timeout_s)
@@ -337,6 +403,11 @@ def main(argv=None):
                         help="override the adapters directory")
     parser.add_argument("--tasks-dir", default=DEFAULT_TASKS_DIR,
                         help="override the tasks directory")
+    parser.add_argument("--transcripts-dir", default=None,
+                        help="base dir for LOCAL-ONLY per-cell transcripts "
+                             "(default: a 'transcripts/' sibling of the results "
+                             "log). Transcripts are unscrubbed; review with "
+                             "bench/scrub.py --check before sharing.")
     parser.add_argument("--exec", dest="exec_mode", default="local",
                         choices=("local", "docker"),
                         help="execution backend: 'local' (host, default) or "
@@ -352,6 +423,9 @@ def main(argv=None):
 
     tasks = [t.strip() for t in args.task.split(",") if t.strip()]
     harnesses = [h.strip() for h in args.harness.split(",") if h.strip()]
+
+    transcripts_dir = args.transcripts_dir or default_transcripts_dir(args.results_path)
+    results_stem = os.path.splitext(os.path.basename(args.results_path))[0]
 
     existing = set() if args.force else load_existing_run_ids(args.results_path)
 
@@ -375,6 +449,7 @@ def main(argv=None):
                     exec_mode=args.exec_mode, docker_image=args.docker_image,
                     docker_fallback=args.docker_fallback,
                     harness_version=versions.get(harness),
+                    transcripts_dir=transcripts_dir, results_stem=results_stem,
                 )
                 append_row(args.results_path, row)
                 existing.add(run_id)
