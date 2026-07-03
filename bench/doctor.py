@@ -42,6 +42,16 @@ DEFAULT_MODEL = "gpt-5.5-medium"
 
 CHECKS = ("CLI", "AUTH", "MODEL")
 
+# M4 open canonical model -> the env key its provider needs. When --model is one
+# of these, the AUTH check becomes "is this key exported?" instead of the
+# harness's own subscription-login check. Mirrors the adapters' OPEN_MODELS.
+OPEN_MODEL_ENV = {
+    "glm-5.2": "ZAI_API_KEY",
+    "glm-4.7-flash": "ZAI_API_KEY",
+    "deepseek-v4-flash": "DEEPSEEK_API_KEY",
+    "kimi-k2.7-code": "MOONSHOT_API_KEY",
+}
+
 
 # --------------------------------------------------------------------------- #
 # Probes: every side effect goes through this object so tests can mock it all
@@ -72,6 +82,10 @@ class Probes:
     def exists(self, path):
         """True if ``path`` (file or dir) exists, expanding ``~``."""
         return os.path.exists(os.path.expanduser(path))
+
+    def getenv(self, name):
+        """Return the environment variable ``name`` (or None)."""
+        return os.environ.get(name)
 
     def read_json(self, path):
         """Parse JSON at ``path`` (expanding ``~``); None if missing/invalid."""
@@ -180,7 +194,18 @@ def check_model(p, harness, model):
         return False, "adapter exposes no MODELS dict"
     if model in models:
         return True, f"{model} -> {models[model]}"
-    return False, f"{model} not in MODELS {list(models)}"
+    open_models = getattr(mod, "OPEN_MODELS", None)
+    if isinstance(open_models, dict) and model in open_models:
+        return True, f"{model} -> {open_models[model]['model_id']} (open)"
+    known = list(models) + (list(open_models) if isinstance(open_models, dict) else [])
+    return False, f"{model} not in MODELS/OPEN_MODELS {known}"
+
+
+def check_open_key(p, env_key):
+    """AUTH check for open models: the provider env key must be exported."""
+    if p.getenv(env_key):
+        return True, f"{env_key} present"
+    return False, f"SETUP-NEEDED: export {env_key}"
 
 
 def check_docker(p):
@@ -214,7 +239,11 @@ def evaluate(harnesses, model, probes):
             continue
 
         cli_ok, cli_detail = check_cli(probes, spec["cli"])
-        auth_ok, auth_detail = spec["auth"](probes)
+        if model in OPEN_MODEL_ENV:
+            # Open model: AUTH = provider env key present (harness login is moot).
+            auth_ok, auth_detail = check_open_key(probes, OPEN_MODEL_ENV[model])
+        else:
+            auth_ok, auth_detail = spec["auth"](probes)
         model_ok, model_detail = check_model(probes, name, model)
 
         for check, ok, detail in (
