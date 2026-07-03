@@ -71,6 +71,56 @@ def version():
     return f"{out} ({path})" if path else out
 
 
+# --- M4 open models (first-party pay-per-token, OpenAI-compatible) ----------
+# Wired via a pi provider EXTENSION written into the isolated temp HOME and
+# loaded with `-e` (works even under --no-extensions). Nothing touches the
+# user's ~/.pi. apiKey uses pi's "$ENV_KEY" env resolution. Base URLs verified
+# from official docs 2026-07. Key-gated in run().
+# (Duplicated across pi/opencode/codex so each adapter stays self-contained.)
+OPEN_MODELS = {
+    "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
+    "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
+    "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek"},
+    "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi"},
+}
+
+
+def _unsupported(model):
+    known = list(MODELS) + list(OPEN_MODELS)
+    return {"completed": False, "error": f"unsupported-model: {model!r} (have {known})",
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+
+
+def _setup_needed(env_key, model):
+    return {"completed": False,
+            "error": f"SETUP-NEEDED: export {env_key} to use {model}",
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+
+
+def _pi_provider_ext(spec):
+    """JS extension source registering the open provider (loaded via -e).
+
+    pi resolves "$ENV_KEY" in apiKey from the environment; api
+    "openai-completions" appends /chat/completions to baseUrl.
+    """
+    return (
+        "export default function (pi) {\n"
+        f'  pi.registerProvider("{spec["provider"]}", {{\n'
+        f'    name: "{spec["display"]}",\n'
+        f'    baseUrl: "{spec["base_url"]}",\n'
+        f'    apiKey: "${spec["env_key"]}",\n'
+        '    api: "openai-completions",\n'
+        "    models: [{\n"
+        f'      id: "{spec["model_id"]}", name: "{spec["model_id"]}",\n'
+        "      reasoning: false, input: [\"text\"],\n"
+        "      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },\n"
+        "      contextWindow: 128000, maxTokens: 8192\n"
+        "    }]\n"
+        "  });\n"
+        "}\n"
+    )
+
+
 def _parse_json(stdout):
     """Parse pi's JSONL event stream into (tokens, turns, tail).
 
@@ -124,43 +174,58 @@ def _parse_json(stdout):
 
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
-    if model not in MODELS:
-        return {
-            "completed": False,
-            "error": f"unsupported-model: {model!r} (have {list(MODELS)})",
-            "output_tail": "",
-            "tokens": None,
-            "turns": None,
-            "cmd": None,
-        }
-    if not os.path.exists(_REAL_AUTH):
-        return {
-            "completed": False,
-            "error": f"missing pi auth at {_REAL_AUTH}",
-            "output_tail": "",
-            "tokens": None,
-            "turns": None,
-            "cmd": None,
-        }
-
-    cmd = [
-        "pi", "-p",
-        "--no-extensions",
-        "--provider", _PROVIDER,
-        "--model", MODELS[model],
-        "--thinking", _THINKING[model],
-        "--mode", "json",
-        instruction,
-    ]
+    if model in MODELS:
+        if not os.path.exists(_REAL_AUTH):
+            return {
+                "completed": False,
+                "error": f"missing pi auth at {_REAL_AUTH}",
+                "output_tail": "",
+                "tokens": None,
+                "turns": None,
+                "cmd": None,
+            }
+    elif model in OPEN_MODELS:
+        spec = OPEN_MODELS[model]
+        if not os.environ.get(spec["env_key"]):
+            return _setup_needed(spec["env_key"], model)
+    else:
+        return _unsupported(model)
 
     iso_home = tempfile.mkdtemp(prefix="pi_home_")
     try:
-        agent_dir = os.path.join(iso_home, ".pi", "agent")
-        os.makedirs(agent_dir, exist_ok=True)
-        shutil.copy2(_REAL_AUTH, os.path.join(agent_dir, "auth.json"))
-
         env = dict(os.environ)
         env["HOME"] = iso_home
+
+        if model in MODELS:
+            # Subscription route: isolate HOME with only the copied auth.json.
+            agent_dir = os.path.join(iso_home, ".pi", "agent")
+            os.makedirs(agent_dir, exist_ok=True)
+            shutil.copy2(_REAL_AUTH, os.path.join(agent_dir, "auth.json"))
+            cmd = [
+                "pi", "-p",
+                "--no-extensions",
+                "--provider", _PROVIDER,
+                "--model", MODELS[model],
+                "--thinking", _THINKING[model],
+                "--mode", "json",
+                instruction,
+            ]
+        else:
+            # Open model: register the provider via a temp extension (env key
+            # supplies auth). No subscription auth.json needed.
+            spec = OPEN_MODELS[model]
+            ext_path = os.path.join(iso_home, "open-provider.mjs")
+            with open(ext_path, "w", encoding="utf-8") as fh:
+                fh.write(_pi_provider_ext(spec))
+            cmd = [
+                "pi", "-p",
+                "--no-extensions",
+                "-e", ext_path,
+                "--provider", spec["provider"],
+                "--model", spec["model_id"],
+                "--mode", "json",
+                instruction,
+            ]
 
         try:
             proc = subprocess.run(
