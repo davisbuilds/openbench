@@ -1,16 +1,47 @@
 # Contributing
 
-Thanks for your interest in contributing to OpenBench.
+Thanks for your interest in contributing to OpenBench. There are two main ways
+to contribute, each with its own contract.
 
-## Development
+OpenBench is **Python 3 standard library only** — there is nothing to install.
+Before opening a PR, run the same two checks CI runs (both are offline and use no
+credentials):
 
-Project-specific setup instructions will be added once the implementation stack is selected.
+```
+python3 -m unittest discover bench/tests
+python3 validate_tasks.py
+```
 
-## Pull Requests
+## 1. Contribute a task
+
+New benchmark tasks are the highest-value contribution. A task is a small,
+**original** coding problem with a checker that fails on the unsolved workspace
+and passes on a golden solution. The full contract — directory layout, the
+`SCORE:` partial-credit line, the fail-on-workspace/pass-on-solution discipline,
+the original-code-only rule, and how CI validates it — is in
+**[CONTRIBUTING-TASKS.md](CONTRIBUTING-TASKS.md)**.
+
+You do **not** need API keys or to run any harness to contribute a task; a clean
+`python3 validate_tasks.py` is the bar. Maintainers pilot difficulty post-merge.
+
+## 2. Contribute a harness adapter
+
+To add a coding-agent harness to the comparison, write an adapter module
+`bench/adapters/<name>.py` that maps the canonical model name to that harness's
+CLI flags, runs it headlessly, and returns a normalized result dict. The exact
+interface (`NAME`, `MODELS`, `run(...)`, the optional `version()`, timeout and
+auth rules) is specified in **[bench/ADAPTER_SPEC.md](bench/ADAPTER_SPEC.md)**;
+the existing adapters in `bench/adapters/` are working references. Auth must be
+handled inside the adapter, read-only — never modify the user's real config
+files.
+
+## Pull requests
 
 - Keep changes focused and reviewable.
-- Include tests or verification steps for behavior changes.
+- Include tests or verification steps for behavior changes (the runner, report,
+  and adapters have unit tests under `bench/tests/`).
 - Update documentation when changing user-facing behavior or project workflows.
+- Both CI checks above must pass.
 
 ## Issues
 
@@ -19,3 +50,5 @@ When filing an issue, include:
 - The expected behavior.
 - The actual behavior.
 - Reproduction steps or relevant context.
+
+See also the [Code of Conduct](CODE_OF_CONDUCT.md).
