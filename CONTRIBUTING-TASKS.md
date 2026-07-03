@@ -120,6 +120,21 @@ output you haven't rewritten.** Two reasons:
 Write the workspace, the bug/spec, and the solution yourself. Small, realistic,
 self-contained problems beat large or exotic ones.
 
+## The import tier (`tasks-imported/`)
+
+Alongside the original `tasks/`, the repo carries a maintainer-curated **import
+tier** under `tasks-imported/<collection>/` — for example tasks converted from
+the MIT-licensed [Exercism problem-specifications](https://github.com/exercism/problem-specifications)
+by `tools/convert_exercism.py`, which reuses only the upstream canonical test
+cases (each task records its origin and license in `provenance.json`) while the
+instruction prose and reference solution are written fresh. These tasks are a
+**separate tier**: `validate_tasks.py` proves them like any other task but
+reports them under their own tier, and the benchmark **never blends them into a
+core run** (they carry a higher contamination risk since the exercises exist on
+the public web, so they are scored on their own). Curating imports is a
+maintainer activity; **outside contributions remain original-only** — please add
+your task under `tasks/` following the rules above, not `tasks-imported/`.
+
 ## How CI checks your task
 
 On every pull request, GitHub Actions (`.github/workflows/ci.yml`) runs, with no
