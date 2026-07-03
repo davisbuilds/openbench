@@ -47,6 +47,28 @@ _THINKING = {
 
 _PROVIDER = "openai-codex"
 _REAL_AUTH = os.path.expanduser("~/.pi/agent/auth.json")
+_EXE = "pi"
+
+
+def version():
+    """Return the CLI version string (with binary path), or None on failure.
+
+    Cheap `pi --version` (short-circuits before extensions load, so no isolated
+    HOME needed); never raises (the runner calls this defensively).
+    """
+    try:
+        proc = subprocess.run(
+            [_EXE, "--version"],
+            capture_output=True, text=True, timeout=5,
+            stdin=subprocess.DEVNULL,
+        )
+    except Exception:  # noqa: BLE001 - version probing must never raise
+        return None
+    out = (proc.stdout or proc.stderr or "").strip()
+    if not out:
+        return None
+    path = shutil.which(_EXE)
+    return f"{out} ({path})" if path else out
 
 
 def _parse_json(stdout):

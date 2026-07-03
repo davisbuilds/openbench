@@ -36,10 +36,12 @@ Notes / quirks:
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 
 NAME = "devin"
+_EXE = "devin"
 
 # canonical model name -> devin `--model` string.
 # devin accepts effort-pinned ids dash-separated (verified live + from the
@@ -47,6 +49,26 @@ NAME = "devin"
 MODELS = {
     "gpt-5.5-medium": "gpt-5-5-medium",
 }
+
+
+def version():
+    """Return the CLI version string (with binary path), or None on failure.
+
+    Cheap `devin --version`; never raises (the runner calls this defensively).
+    """
+    try:
+        proc = subprocess.run(
+            [_EXE, "--version"],
+            capture_output=True, text=True, timeout=5,
+            stdin=subprocess.DEVNULL,
+        )
+    except Exception:  # noqa: BLE001 - version probing must never raise
+        return None
+    out = (proc.stdout or proc.stderr or "").strip()
+    if not out:
+        return None
+    path = shutil.which(_EXE)
+    return f"{out} ({path})" if path else out
 
 
 def _parse_export(path):

@@ -29,9 +29,11 @@ Notes / quirks:
 
 import json
 import os
+import shutil
 import subprocess
 
 NAME = "opencode"
+_EXE = "opencode"
 
 # canonical model name -> opencode `-m` model string (provider/model)
 MODELS = {
@@ -42,6 +44,26 @@ MODELS = {
 _VARIANT = {
     "gpt-5.5-medium": "medium",
 }
+
+
+def version():
+    """Return the CLI version string (with binary path), or None on failure.
+
+    Cheap `opencode --version`; never raises (the runner calls this defensively).
+    """
+    try:
+        proc = subprocess.run(
+            [_EXE, "--version"],
+            capture_output=True, text=True, timeout=5,
+            stdin=subprocess.DEVNULL,
+        )
+    except Exception:  # noqa: BLE001 - version probing must never raise
+        return None
+    out = (proc.stdout or proc.stderr or "").strip()
+    if not out:
+        return None
+    path = shutil.which(_EXE)
+    return f"{out} ({path})" if path else out
 
 
 def _parse_json(stdout):
