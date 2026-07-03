@@ -109,6 +109,20 @@ def version():
     return f"{out} ({path})" if path else out
 
 
+def _err_tail(exc, limit=2000):
+    """Last `limit` chars of a TimeoutExpired's captured output, decoding safely.
+
+    On TimeoutExpired, `.stdout`/`.stderr` may be bytes (even under text=True),
+    str, or None. Concatenating bytes with the ``""`` fallback raises TypeError,
+    so decode each part first — the handler must always yield a clean tail.
+    """
+    def _dec(x):
+        if x is None:
+            return ""
+        return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
+    return (_dec(exc.stdout) + _dec(exc.stderr))[-limit:]
+
+
 def _parse_json(stdout):
     """Parse opencode's JSONL event stream into (tokens, turns, tail).
 
@@ -193,7 +207,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             env=env,
         )
     except subprocess.TimeoutExpired as e:
-        tail = ((e.stdout or "") + (e.stderr or ""))[-2000:]
+        tail = _err_tail(e)
         return {
             "completed": False,
             "error": f"timeout after {timeout_s}s",
