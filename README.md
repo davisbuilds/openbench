@@ -83,10 +83,12 @@ bench/run.py           the runner (one row per task x harness x trial)
 bench/report.py        aggregates results into a table with Wilson CIs
 bench/adapters/*.py    one adapter per harness (+ built-in "null" control)
 bench/ADAPTER_SPEC.md  the adapter contract
+bench/scrub.py         PII scrubber for transcripts (local-only; see below)
 bench/entry.py         in-container entrypoint for --exec docker
 bench/docker_exec.py   container-per-cell execution backend
 bench/docker/          isolation image for --exec docker
 results/results.jsonl  append-only results log (gitignored)
+transcripts/           per-cell agent transcripts (gitignored, local-only)
 ```
 
 ## Quickstart
@@ -255,6 +257,30 @@ success (`x/n`), overall success with a Wilson 95% interval, **mean score**
 (averaged over all trials, the discriminating number for partial-credit tasks),
 mean wall-clock time, tokens-per-solve, and mean turns. `--efficiency` prints a
 per-harness efficiency summary; `--results-path` points it at an alternate log.
+
+### Transcripts are LOCAL-ONLY
+
+Alongside each results row, the runner writes that cell's full agent transcript
+to `transcripts/<results-file-stem>/<run_id>.txt` (a `transcripts/` sibling of
+the results log; override with `--transcripts-dir`). These are the **raw,
+unscrubbed** harness output and can contain your absolute home paths, username,
+hostname, email, or secrets the agent echoed (API keys, tokens).
+
+**Hard rule: transcripts are never published as-is.** `transcripts/` is
+gitignored, and there is deliberately no publishing path in this repo. Before
+sharing any transcript you must do a manual review pass:
+
+```bash
+python3 bench/scrub.py transcripts/ --check          # REPORT potential PII (exit 1 if any)
+python3 bench/scrub.py transcripts/ --out scrubbed/   # write scrubbed copies (originals untouched)
+python3 bench/scrub.py scrubbed/ --check             # confirm the copies are clean (idempotent)
+```
+
+`scrub.py` replaces emails, home paths, the local username, hostnames, and
+key/token-shaped strings with placeholders (`<EMAIL>`, `<HOME>`, `<USER>`,
+`<HOST>`, `<REDACTED_KEY>`, …). It never modifies originals and over-redacts on
+purpose — a false positive is cheap, a leaked secret is not. `--check` is a
+report only; read it with your own eyes before trusting the scrubbed output.
 
 ### Reading the Wilson interval
 
