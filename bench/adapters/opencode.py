@@ -45,6 +45,49 @@ _VARIANT = {
     "gpt-5.5-medium": "medium",
 }
 
+# --- M4 open models (first-party pay-per-token, OpenAI-compatible) ----------
+# Wired via a custom provider passed through OPENCODE_CONFIG_CONTENT (inline
+# JSON env var) so nothing touches the user's opencode config and the temp
+# workspace stays clean. apiKey uses opencode's {env:VAR} interpolation. Base
+# URLs verified from official docs 2026-07. Key-gated in run().
+# (Duplicated across pi/opencode/codex so each adapter stays self-contained.)
+OPEN_MODELS = {
+    "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
+    "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
+    "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek"},
+    "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi"},
+}
+
+
+def _unsupported(model):
+    known = list(MODELS) + list(OPEN_MODELS)
+    return {"completed": False, "error": f"unsupported-model: {model!r} (have {known})",
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+
+
+def _setup_needed(env_key, model):
+    return {"completed": False,
+            "error": f"SETUP-NEEDED: export {env_key} to use {model}",
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+
+
+def _open_config_content(spec):
+    """Inline OPENCODE_CONFIG_CONTENT JSON registering the open provider."""
+    prov = spec["provider"]
+    return json.dumps({
+        "provider": {
+            prov: {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": spec["display"],
+                "options": {
+                    "baseURL": spec["base_url"],
+                    "apiKey": "{env:" + spec["env_key"] + "}",
+                },
+                "models": {spec["model_id"]: {}},
+            }
+        }
+    })
+
 
 def version():
     """Return the CLI version string (with binary path), or None on failure.
@@ -111,28 +154,33 @@ def _parse_json(stdout):
 
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
-    if model not in MODELS:
-        return {
-            "completed": False,
-            "error": f"unsupported-model: {model!r} (have {list(MODELS)})",
-            "output_tail": "",
-            "tokens": None,
-            "turns": None,
-            "cmd": None,
-        }
-
-    cmd = [
-        "opencode", "run",
-        "--dir", workdir,
-        "-m", MODELS[model],
-        "--variant", _VARIANT[model],
-        "--auto",
-        "--format", "json",
-        instruction,
-    ]
-
     env = dict(os.environ)
-    env.pop("OPENAI_API_KEY", None)  # force subscription OAuth route
+    if model in MODELS:
+        cmd = [
+            "opencode", "run",
+            "--dir", workdir,
+            "-m", MODELS[model],
+            "--variant", _VARIANT[model],
+            "--auto",
+            "--format", "json",
+            instruction,
+        ]
+        env.pop("OPENAI_API_KEY", None)  # force subscription OAuth route
+    elif model in OPEN_MODELS:
+        spec = OPEN_MODELS[model]
+        if not os.environ.get(spec["env_key"]):
+            return _setup_needed(spec["env_key"], model)
+        cmd = [
+            "opencode", "run",
+            "--dir", workdir,
+            "-m", f'{spec["provider"]}/{spec["model_id"]}',
+            "--auto",
+            "--format", "json",
+            instruction,
+        ]
+        env["OPENCODE_CONFIG_CONTENT"] = _open_config_content(spec)
+    else:
+        return _unsupported(model)
 
     try:
         proc = subprocess.run(
