@@ -1,7 +1,7 @@
 """Adapter for the `codex` CLI (OpenAI Codex, ChatGPT-subscription login).
 
 Headless invocation:
-    codex exec --skip-git-repo-check -C <workdir> \
+    codex exec --json --skip-git-repo-check -C <workdir> \
         -s workspace-write \
         -m gpt-5.5 -c model_reasoning_effort="medium" <instruction>
 
@@ -14,21 +14,26 @@ Notes / quirks:
 - Reasoning effort is set via a config override, not the model string. The
   canonical "-medium" suffix is mapped to model_reasoning_effort.
 - Uses the user's existing `~/.codex` login as-is (read-only).
-- TOKENS: codex exec prints a "tokens used: N" summary line we parse for usage.
-  This is codex's own total (includes cached context), so its basis differs
-  slightly from the other adapters (which report fresh input+output). Kept as-is
-  to stay reliable.
-- TURNS: left None. `codex exec --json` emits structured events (which would
-  give a turn count), but in testing it buffered/stalled for minutes without
-  flushing, so adopting it would risk regressing the reliable text-mode token
-  parse for no essential gain. Revisit if codex --json stabilizes.
+- `--json` emits a JSONL event stream. The final `turn.completed` event carries
+  `usage={input_tokens,cached_input_tokens,output_tokens,reasoning_output_tokens}`.
+  Token accounting (see ``_parse_json``) uses the SAME fresh-basis as the other
+  adapters:
+    tokens = (input_tokens - cached_input_tokens) + output_tokens
+             + reasoning_output_tokens   (cache re-reads excluded)
+    turns  = number of `turn.completed` events (model rounds).
+  Human tail is synthesized from `agent_message`/`file_change` items.
+  NOTE: `codex exec --json` only flushes/exits cleanly when driven as a plain
+  captured subprocess (stdin=DEVNULL); piping it through a shell can stall it.
+  Parsing is defensive: shape drift yields tokens=None/turns=None + raw tail.
 """
 
+import json
 import os
-import re
+import shutil
 import subprocess
 
 NAME = "codex"
+_EXE = "codex"
 
 # canonical model name -> codex `-m` model string
 MODELS = {
@@ -40,7 +45,80 @@ _EFFORT = {
     "gpt-5.5-medium": "medium",
 }
 
-_TOKENS_RE = re.compile(r"tokens used[:\s]+([\d,]+)", re.IGNORECASE)
+
+def version():
+    """Return the CLI version string (with binary path), or None on failure.
+
+    Cheap `codex --version`; never raises (the runner calls this defensively).
+    """
+    try:
+        proc = subprocess.run(
+            [_EXE, "--version"],
+            capture_output=True, text=True, timeout=5,
+            stdin=subprocess.DEVNULL,
+        )
+    except Exception:  # noqa: BLE001 - version probing must never raise
+        return None
+    out = (proc.stdout or proc.stderr or "").strip()
+    if not out:
+        return None
+    path = shutil.which(_EXE)
+    return f"{out} ({path})" if path else out
+
+
+def _parse_json(stdout):
+    """Parse codex's JSONL event stream into (tokens, turns, tail).
+
+    tokens/turns are None when nothing parseable is found. tail is a
+    human-readable transcript synthesized from agent_message / file_change items.
+    """
+    events = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    if not events:
+        return None, None, ""
+
+    tokens = 0
+    found = False
+    turns = 0
+    transcript = []
+    for ev in events:
+        etype = ev.get("type")
+        if etype == "turn.completed":
+            turns += 1
+            usage = ev.get("usage") or {}
+            inp = usage.get("input_tokens")
+            out = usage.get("output_tokens")
+            if isinstance(inp, (int, float)) and isinstance(out, (int, float)):
+                cached = usage.get("cached_input_tokens") or 0
+                reasoning = usage.get("reasoning_output_tokens") or 0
+                tokens += (int(inp) - int(cached)) + int(out) + int(reasoning)
+                found = True
+        elif etype == "item.completed":
+            item = ev.get("item") or {}
+            itype = item.get("type")
+            if itype == "agent_message":
+                text = item.get("text")
+                if text:
+                    transcript.append(text)
+            elif itype == "file_change":
+                names = [os.path.basename(c.get("path", ""))
+                         for c in (item.get("changes") or [])
+                         if isinstance(c, dict) and c.get("path")]
+                transcript.append(f"[file_change: {', '.join(n for n in names if n)}]")
+            elif itype == "command_execution":
+                transcript.append("[command]")
+
+    tokens = tokens if found else None
+    turns = turns or None
+    tail = "\n".join(transcript)[-2000:]
+    return tokens, turns, tail
 
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
@@ -56,6 +134,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
 
     cmd = [
         "codex", "exec",
+        "--json",
         "--skip-git-repo-check",
         "-C", workdir,
         "-s", "workspace-write",
@@ -85,14 +164,18 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         }
 
     combined = (proc.stdout or "") + (proc.stderr or "")
-    m = _TOKENS_RE.search(combined)
-    tokens = int(m.group(1).replace(",", "")) if m else None
+    try:
+        tokens, turns, tail = _parse_json(proc.stdout or "")
+    except Exception:  # noqa: BLE001 - never let usage parsing break a run
+        tokens, turns, tail = None, None, ""
+    if not tail:
+        tail = combined[-2000:]
 
     return {
         "completed": proc.returncode == 0,
         "error": None if proc.returncode == 0 else f"exit {proc.returncode}",
-        "output_tail": combined[-2000:],
+        "output_tail": tail,
         "tokens": tokens,
-        "turns": None,
+        "turns": turns,
         "cmd": cmd,
     }
