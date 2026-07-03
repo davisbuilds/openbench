@@ -309,6 +309,10 @@ small model) drops below: **0.47** via `pi`, with genuine partial credit
 partial-credit design *does* finally bite — but only for the weakest model. Open
 frontier-class models are, on these coding tasks, competitive with GPT-5.5-medium.
 
+**The efficiency thesis in one number: the entire run — 72 real agent runs across
+4 open models, 2 harnesses, 3 hard tasks, 3 trials — cost ~$1.02 total.**
+Frontier-comparable open-model coding for about a dollar.
+
 ## Harness × model interaction (score / mean_s / tokens / $)
 
 Mean score over all 9 cells per combo (n=9). `$` uses combined tokens at an 80/20

@@ -51,6 +51,9 @@ pi (glm-4.7-flash 789 s vs pi 102 s; kimi 371 s vs pi 68 s), those combos time o
 constantly — so opencode's low open-model scores are largely a
 harness-slowness → timeout → adapter-bug artifact, **not** model incapability.
 Filed for the adapter owner; the fix is to decode/`text=True` the timeout tail.
+**The opencode fix is being applied in parallel and postdates this dataset** — so
+these 8 exception cells reflect the adapter as it was *at run time*, not the
+current code.
 
 ## Reproduce
 
