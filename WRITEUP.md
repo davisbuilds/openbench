@@ -166,9 +166,27 @@ that's the point — but reproduce them before you cite them.
 
 ## What's next
 
-- **A task factory** that reliably lands in the 20–80% band for frontier models —
-  longer-horizon, partial-by-design tasks — so correctness can finally
-  discriminate at the top.
+- **A task factory — and the negative result that redirected it.** We built the
+  factory to author tasks that land in the 20–80% band for frontier models, then
+  ran two escalation rounds against a frontier-parity gate probe
+  (`deepseek-v4-flash` via `pi`). **Both were swept.** Round 1's three small tasks
+  went 6/6 at 1.00; Round 2's two hardened candidates — a 7,809-line bug-fix with
+  masked reveal-chains and cross-module misdirection, and a 7,111-line
+  implement-from-spec task with a hidden 43-test suite and regression-gated scoring
+  — scored 1.00 and 0.990 despite baselines (0.28, 0.30) that sat squarely in the
+  target band. Every cheap lever (more bugs, more masking, more misdirection, more
+  lines, opaquer specs) was absorbed; a **sweep at 7–8k lines killed the "bigger
+  codebase is harder" hypothesis** outright. Stated as a finding: *self-contained,
+  deterministic, fully-spec-pinned synthetic tasks don't challenge 2026
+  frontier-parity agents at a feasible authoring cost* — difficulty has to come
+  from somewhere else (the field agrees; FrontierCode budgets ~40 expert-hours per
+  task). So the roadmap forked: **(a)** import proven-hard Terminal-Bench tasks as a
+  separately-scored frontier tier via the docker lane, **(b)** performance/
+  complexity-budget tasks with partial credit designed in, and **(c)** keep the
+  factory on the open/mid band where it *does* discriminate (`glm-4.7-flash` =
+  0.47). Caveat, in keeping with the rest of this write-up: n=3 trials, one probe
+  model, one harness — a weak lever demonstrated, not a proof none exists. Full
+  numbers in `RESULTS.md`.
 - **Longitudinal drift tracking**: the same tasks over time, as models and
   harnesses ship, to catch regressions like the ones above before they reach a run.
 - **Held-out tasks** to guard against the tasks leaking into training or tuning.

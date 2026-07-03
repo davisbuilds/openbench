@@ -392,3 +392,83 @@ model is involved.
 - **glm-4.7-flash is the discriminating model** — it's the natural target for a
   harder-task M4.5.x calibration where partial credit matters.
 - A true input/output token split would sharpen the `$` column.
+
+---
+
+# Task-difficulty calibration: two escalation rounds (negative result) — 2026-07-03
+
+M4/M4.5 kept hitting the same wall: our synthetic tasks saturate frontier-parity
+agents on correctness. So the task factory ran two deliberate **escalation
+rounds**, each trying to author a task that would drop a frontier-parity model
+below 1.0. We used a single **gate probe** — `deepseek-v4-flash` via `pi`, an open
+model that reaches GPT-5.5-medium parity (M4) but is cheap enough to iterate
+against. **Both rounds were swept.** This section records that as a finding: it
+tells us where difficulty does *not* come from.
+
+## What was run
+
+| Round | Candidate | Size | Structure | Baseline | Probe score (deepseek-v4-flash · pi) | Wall (s) |
+|-------|-----------|------|-----------|----------|--------------------------------------|----------|
+| 1 | formula-engine | ~1–3k lines | independent bugs | — | **1.00** (2/2) | 63, 110 |
+| 1 | kv-transactions | ~1–3k lines | independent bugs | — | **1.00** (2/2) | 59, 65 |
+| 1 | log-report | ~1–3k lines | independent bugs | — | **1.00** (2/2) | 18, 34 |
+| 2 | taskflow | 7,809 lines | 7 modules seeded with logic defects — masked reveal-chains (fix one, the next appears) + cross-module misdirection | **0.2800** (7/25 tests) | **1.00 / 1.00 / 1.00** | 78, 89, 97 |
+| 2 | webcore | 7,111 lines | 10-clause feature spec, **zero visible tests**, hidden 43-test suite (19 regression + 24 feature), regression-gated scoring (`0.3·[all reg pass] + 0.7·feature-fraction`) | **0.3000** (19/19 reg, 0/24 feat) | **1.00 / 0.9708 / 1.00** (mean 0.990) | 354, 410, 495 |
+
+- **Round 1** (three small original tasks, source
+  [`results/pilot-tierA-v2.jsonl`](results/pilot-tierA-v2.jsonl)): the gate probe
+  swept **6/6 cells at 1.00**. (The same tasks *do* separate a weaker model —
+  `glm-4.7-flash` scored 1.0/0.0 on formula-engine and timed out on
+  kv-transactions — so the factory discriminates in the open/mid band, just not at
+  the frontier.)
+- **Round 2** (two structurally-hardened candidates, source
+  [`results/gate2-round2.jsonl`](results/gate2-round2.jsonl)): both baselines land
+  in the target band (0.28, 0.30), confirming the scoring discriminates a broken
+  start-state — yet the probe swept **taskflow 1.00×3** and effectively swept
+  **webcore (mean 0.990)**, the single 0.9708 trial (one of 24 feature tests
+  missed once) the only sub-1.0 cell across the six Round-2 trials. Baselines
+  and test counts above were re-derived by running each checker against its
+  pristine workspace.
+
+## Which hardening levers resisted (and none held)
+
+Ranked by the resistance we actually observed — the only lever that produced *any*
+degradation was spec-opacity, and only a single 0.03 dip:
+
+**spec-opacity** (webcore's hidden suite + 10-clause spec: 5× the wall-time —
+354–495 s vs taskflow's 78–97 s — and the only sub-1.0 trial) **> interdependent
+reveal-chains > misdirection > bug count > codebase size.** The last is the
+sharpest negative: a **sweep at 7–8k lines kills the scale hypothesis** — making
+the codebase bigger did not make the task harder for the agent.
+
+## Conclusion
+
+**Self-contained, deterministic, fully-spec-pinned synthetic tasks do not
+challenge 2026 frontier-parity agents at a feasible authoring cost.** Every lever
+we can cheaply author — more bugs, more masking, more misdirection, more lines,
+opaquer specs — was absorbed. Difficulty at the frontier must come from a
+*different source* (genuine long-horizon state, environment/tool friction, or
+under-specification that a human couldn't fully pin either), not from making a
+closed, gradeable task denser. This mirrors the wider field: FrontierCode reports
+**~40 expert-hours per task** — frontier difficulty is expensive to manufacture
+everywhere, not just here.
+
+## Responses (what we do about it)
+
+- **(a) Import proven-hard tasks.** Bring in Terminal-Bench tasks (Apache-2.0) as a
+  **separately-scored frontier tier** via the docker execution lane — difficulty
+  we don't have to author (in progress).
+- **(b) Budget tasks with designed-in partial credit.** Performance /
+  complexity-budget tasks where the score is a continuous margin, not a
+  pass/fail an agent can saturate (prototype approved).
+- **(c) Keep the factory on the band it owns.** The factory demonstrably
+  discriminates in the **open/mid capability band** (`glm-4.7-flash` = 0.474 in
+  M4); it continues to own that band while (a)/(b) cover the frontier.
+
+## Caveats
+
+Deliberately narrow: **n=3 trials per candidate** (Round 2), **one probe model**
+(`deepseek-v4-flash`), **one harness** (`pi`). A sweep by a single frontier-parity
+probe is strong evidence the lever is weak, but it is not a claim about every model
+or a guarantee no authorable lever exists — only that the ones we tried, at the
+cost we can sustain, did not bite.
