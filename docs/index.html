@@ -16,6 +16,7 @@
     --good:#006300;
     --c-pi:#2a78d6; --c-cursor:#1baf7a; --c-devin:#eda100; --c-codex:#008300; --c-opencode:#4a3aa7;
     --c-null:#898781;
+    --m-glm52:#2a78d6; --m-deepseek:#1baf7a; --m-kimi:#4a3aa7; --m-glmflash:#eda100; --m-gpt:#52514e;
     font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
     color:var(--ink-1); background:var(--plane);
     line-height:1.5; max-width:940px; margin:0 auto; padding:28px 20px 64px;
@@ -28,6 +29,7 @@
       --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
       --good:#0ca30c;
       --c-pi:#3987e5; --c-cursor:#199e70; --c-devin:#c98500; --c-codex:#008300; --c-opencode:#9085e9;
+      --m-glm52:#3987e5; --m-deepseek:#199e70; --m-kimi:#9085e9; --m-glmflash:#c98500; --m-gpt:#c3c2b7;
     }
   }
   .viz-root *{box-sizing:border-box;}
@@ -188,6 +190,10 @@
   <p class="lede" style="margin-top:.4em">The efficiency thesis in one number: all
   <strong>72 real agent runs</strong> (4 open models &times; 2 harnesses &times; 3 hard tasks &times; 3 trials)
   cost <strong>~$1.02 total</strong> &mdash; frontier-comparable open-model coding for about a dollar.</p>
+  <p>The dashboard below puts <strong>GPT-5.5-medium in the same panels</strong> as the reference. It is a
+  legitimate head-to-head: the frontier rows come from the M4.5 run on the <em>same three tasks</em>, through
+  the <em>same</em> <code>pi</code> harness, at the <em>same</em> 3&times;3 trial grid (n=9 per model). GPT-5.5
+  is drawn in neutral ink as the baseline; the open models carry their own hues.</p>
 
   <div class="callout" id="opencode-bug">
     <strong>Two apparent harness gaps are an opencode adapter bug, not model capability.</strong>
@@ -199,9 +205,36 @@
     (kimi:pi = 1.00). The 8 cells are excluded from the capability scores below; the bug is filed.
   </div>
 
-  <h3>Score via pi (the clean harness) vs frontier parity</h3>
-  <div class="card"><div id="chart-m4"></div></div>
-  <p class="cap" id="cap-m4"></p>
+  <div class="legend" id="legend-m4"></div>
+
+  <h3>Mean score &mdash; four open models meet the frontier reference</h3>
+  <div class="card"><div id="chart-m4-score"></div></div>
+  <p class="cap" id="cap-m4-score"></p>
+
+  <h3>Tokens per solve &mdash; parity at comparable-or-fewer tokens</h3>
+  <div class="card"><div id="chart-m4-tok"></div></div>
+  <p class="cap" id="cap-m4-tok"></p>
+
+  <h3>Wall-time per solve</h3>
+  <div class="card"><div id="chart-m4-wall"></div></div>
+  <p class="cap" id="cap-m4-wall"></p>
+
+  <h3>Cost per solve &mdash; measured open spend vs frontier list price</h3>
+  <div class="card"><div id="chart-m4-cost"></div></div>
+  <p class="cap" id="cap-m4-cost"></p>
+
+  <h3>Per-task score &mdash; parity isn&rsquo;t a pooling artifact</h3>
+  <div class="sm" id="chart-m4-tasks"></div>
+  <p class="cap" id="cap-m4-tasks"></p>
+
+  <h3>The numbers (table view)</h3>
+  <div class="scroll">
+    <table id="tbl-m4">
+      <caption>Per model, <code>pi</code>-only, n=9 (3 tasks &times; 3 trials). GPT-5.5-medium is the
+      frontier reference (M4.5 run). $/solve is <em>measured</em> API spend for the open models; the GPT-5.5
+      figure is an <em>estimate</em> at OpenAI list price (see cost chart).</caption>
+    </table>
+  </div>
 
   <footer>
     <p class="fn"><sup>*</sup> <strong>codex</strong> (M4.5): tokens are a <em>fresh basis</em> (adapter now
@@ -519,39 +552,162 @@
       "and token-tax stay different axes.";
   })();
 
-  /* ================= M4: open models, score via pi vs parity ================= */
+  /* ================= M4: open models vs frontier reference (5-model dashboard) ================= */
   (function(){
-    // mean score via pi (the clean harness); frontier parity = 1.0
-    const D4=[
-      {m:"glm-5.2",           c:"pi",     s:1.00},
-      {m:"deepseek-v4-flash", c:"cursor", s:1.00},
-      {m:"kimi-k2.7-code",    c:"codex",  s:1.00},
-      {m:"glm-4.7-flash",     c:"devin",  s:0.474}
+    // pi-only, n=9/model. GPT-5.5 = frontier reference (M4.5); opens = M4. Recomputed from results.jsonl.
+    const REF="gpt", tasks=["make-ci-green","add-feature","misleading-error"];
+    const M=[
+      {m:"gpt-5.5-medium",   k:"gpt",      s:1.000, tok:17494, wall:45.6,  cost:0.175, est:true,          byT:[1.000,1.000,1.000]},
+      {m:"glm-5.2",          k:"glm52",    s:1.000, tok:17174, wall:161.9, cost:0.0343,                   byT:[1.000,1.000,1.000]},
+      {m:"deepseek-v4-flash",k:"deepseek", s:1.000, tok:8062,  wall:27.9,  cost:0.00135,                  byT:[1.000,1.000,1.000]},
+      {m:"kimi-k2.7-code",   k:"kimi",     s:1.000, tok:8678,  wall:68.5,  cost:0.0135,                   byT:[1.000,1.000,1.000]},
+      {m:"glm-4.7-flash",    k:"glmflash", s:0.474, tok:null,  wall:101.9, cost:0, free:true, noTok:true, byT:[0.688,0.400,0.333]}
     ];
-    const W=720,H=250,L=150,R=90,T=16,B=44,x0=L,x1=W-R,pw=x1-x0;
-    const n=D4.length,band=(H-T-B)/n,barH=22;
-    const X=v=>x0+v*pw; // 0..1
-    const s=svg(W,H);
-    for(let g=0;g<=1.0001;g+=0.25){
-      s.appendChild(el("line",{class:"gl",x1:X(g),y1:T,x2:X(g),y2:H-B}));
-      s.appendChild(el("text",{class:"tick",x:X(g),y:H-B+18,"text-anchor":"middle","font-size":12}, g.toFixed(2)));
-    }
-    s.appendChild(el("line",{class:"ax",x1:x0,y1:H-B,x2:x1,y2:H-B}));
-    // frontier parity reference at 1.0
-    s.appendChild(el("line",{x1:X(1),y1:T-2,x2:X(1),y2:H-B,stroke:"var(--good)","stroke-width":2,"stroke-dasharray":"4 3"}));
-    s.appendChild(el("text",{x:X(1),y:T-4,"text-anchor":"end","font-size":11,fill:"var(--good)"}, "frontier parity 1.0"));
-    D4.forEach((d,i)=>{
-      const cy=T+band*i+band/2,y=cy-barH/2,bw=Math.max(1,X(d.s)-x0);
-      s.appendChild(el("text",{class:"lab",x:x0-10,y:cy+4,"text-anchor":"end","font-size":12.5}, d.m));
-      title(s.appendChild(el("path",{d:barPath(x0,y,bw,barH,4),fill:`var(--c-${d.c})`})),
-            `${d.m} via pi: mean score ${d.s.toFixed(2)}`);
-      s.appendChild(el("text",{class:"val",x:X(d.s)+8,y:cy+4,"font-size":12.5}, d.s.toFixed(2)));
-    });
-    document.getElementById("chart-m4").appendChild(s);
-    document.getElementById("cap-m4").textContent=
-      "Via pi (the clean harness): glm-5.2, deepseek, and kimi hit frontier parity (1.00); only glm-4.7-flash, "+
-      "the free/small model, breaks the ceiling at 0.47 \u2014 the partial-credit tasks finally bite, but only for "+
-      "the weakest model.";
+    const mcol=k=>`var(--m-${k})`;
+    const tkf=v=>v>=1000?(v/1000).toFixed(1)+"k":(""+Math.round(v));
+    const usd=v=>v===0?"$0":(v<0.01?"$"+v.toFixed(4):"$"+v.toFixed(3));
+    const byKey=k=>M.find(d=>d.k===k);
+    // shared bar geometry
+    const rowChart=(host,rows,{xmax,fmt,label,ref,refLbl,tickStep,tickFmt,valFmt,hatchKey})=>{
+      const W=720,H=54+rows.length*40,L=150,R=118,T=16,B=42,x0=L,x1=W-R,pw=x1-x0;
+      const band=(H-T-B)/rows.length,barH=21;
+      const X=v=>x0+v/xmax*pw;
+      const s=svg(W,H);
+      if(hatchKey){
+        const defs=el("defs",{}); const p=el("pattern",{id:"hatch-"+hatchKey,width:6,height:6,
+          patternUnits:"userSpaceOnUse",patternTransform:"rotate(45)"});
+        p.appendChild(el("rect",{width:6,height:6,fill:mcol(hatchKey),"fill-opacity":0.18}));
+        p.appendChild(el("line",{x1:0,y1:0,x2:0,y2:6,stroke:mcol(hatchKey),"stroke-width":2.4}));
+        defs.appendChild(p); s.appendChild(defs);
+      }
+      for(let g=0;g<=xmax+1e-9;g+=tickStep){
+        s.appendChild(el("line",{class:"gl",x1:X(g),y1:T,x2:X(g),y2:H-B}));
+        s.appendChild(el("text",{class:"tick",x:X(g),y:H-B+18,"text-anchor":"middle","font-size":12}, g===0?"0":tickFmt(g)));
+      }
+      s.appendChild(el("line",{class:"ax",x1:x0,y1:H-B,x2:x1,y2:H-B}));
+      if(ref!==undefined){
+        s.appendChild(el("line",{x1:X(ref),y1:T-2,x2:X(ref),y2:H-B,stroke:"var(--good)","stroke-width":2,"stroke-dasharray":"4 3"}));
+        s.appendChild(el("text",{x:X(ref),y:T-4,"text-anchor":"end","font-size":11,fill:"var(--good)"}, refLbl));
+      }
+      const costMode=!!hatchKey; // only the cost chart passes hatchKey; est/free apply to $ only
+      rows.forEach((d,i)=>{
+        const cy=T+band*i+band/2,y=cy-barH/2,v=d._v,bw=Math.max(0,X(v)-x0);
+        const isRef=d.k===REF, estThis=costMode&&d.est;
+        const nm=isRef?d.m+"  \u25c7":d.m; // diamond marks the reference row
+        s.appendChild(el("text",{class:"lab",x:x0-10,y:cy+4,"text-anchor":"end","font-size":12.5,
+          "font-style":isRef?"italic":"normal"}, nm));
+        const fill=estThis?`url(#hatch-${d.k})`:mcol(d.k);
+        const bar=el("path",{d:barPath(x0,y,bw,barH,4),fill:fill});
+        if(estThis) bar.setAttribute("stroke",mcol(d.k)), bar.setAttribute("stroke-width",1.3);
+        title(s.appendChild(bar), `${d.m}: ${label} = ${valFmt(v)}${estThis?" (estimated at API list price \u2014 not metered)":""}`);
+        const suffix=costMode?(d.est?" est.":d.free?" free":""):"";
+        s.appendChild(el("text",{class:"val",x:X(v)+8,y:cy+4,"font-size":12.5}, valFmt(v)+suffix));
+      });
+      host.appendChild(s);
+    };
+
+    // legend
+    document.getElementById("legend-m4").innerHTML=M.map(d=>
+      `<span><span class="sw" style="background:${d.k===REF?"var(--m-gpt)":mcol(d.k)}"></span>${d.m}${d.k===REF?" <span class=\"asr\">(reference)</span>":""}</span>`).join("");
+
+    /* --- 1. Mean score --- */
+    (function(){
+      const rows=M.map(d=>({...d,_v:d.s}));
+      rowChart(document.getElementById("chart-m4-score"),rows,{
+        xmax:1.0,tickStep:0.25,tickFmt:g=>g.toFixed(2),ref:1.0,refLbl:"frontier parity 1.0",
+        label:"mean score",valFmt:v=>v.toFixed(2)});
+      document.getElementById("cap-m4-score").textContent=
+        "Same pi harness, same three tasks, n=9. glm-5.2, deepseek-v4-flash and kimi-k2.7-code all match "+
+        "GPT-5.5-medium at a clean 1.00; only glm-4.7-flash (free, small) sits below at 0.47 \u2014 genuine "+
+        "partial credit, not an infra artifact (its pi cells ran clean).";
+    })();
+
+    /* --- 2. Tokens per solve (glm-4.7-flash excluded: tokens under-reported) --- */
+    (function(){
+      const rows=M.filter(d=>!d.noTok).map(d=>({...d,_v:d.tok})).sort((a,b)=>a.tok-b.tok);
+      rowChart(document.getElementById("chart-m4-tok"),rows,{
+        xmax:20000,tickStep:5000,tickFmt:tkf,ref:byKey("gpt").tok,refLbl:"frontier "+tkf(byKey("gpt").tok),
+        label:"tokens/solve",valFmt:v=>tkf(v)});
+      document.getElementById("cap-m4-tok").textContent=
+        "The punchline. glm-5.2 spends about the same as GPT-5.5 (17.2k vs 17.5k); deepseek-v4-flash and "+
+        "kimi-k2.7-code reach the same 1.00 score on roughly half the tokens (8.1k, 8.7k). glm-4.7-flash is "+
+        "omitted here \u2014 its adapter reported tokens on only 2 of 9 cells, so no honest per-solve figure exists.";
+    })();
+
+    /* --- 3. Wall-time per solve --- */
+    (function(){
+      const rows=M.map(d=>({...d,_v:d.wall})).sort((a,b)=>a.wall-b.wall);
+      rowChart(document.getElementById("chart-m4-wall"),rows,{
+        xmax:180,tickStep:30,tickFmt:g=>g+"s",ref:byKey("gpt").wall,refLbl:"frontier 45.6s",
+        label:"wall-time/solve",valFmt:v=>v.toFixed(1)+"s"});
+      document.getElementById("cap-m4-wall").textContent=
+        "Wall-time mixes model speed with provider latency and server load, so read it loosely. deepseek is "+
+        "fastest (27.9s); glm-5.2 is slowest (161.9s), driven almost entirely by add-feature (413s mean) on "+
+        "the Z.ai endpoint \u2014 not a per-token cost.";
+    })();
+
+    /* --- 4. Cost per solve --- */
+    (function(){
+      const rows=M.map(d=>({...d,_v:d.cost})).sort((a,b)=>a.cost-b.cost);
+      rowChart(document.getElementById("chart-m4-cost"),rows,{
+        xmax:0.19,tickStep:0.05,tickFmt:g=>"$"+g.toFixed(2),label:"cost/solve",
+        valFmt:usd,hatchKey:"gpt"});
+      document.getElementById("cap-m4-cost").textContent=
+        "Open-model bars are measured API spend (combined tokens at an 80/20 input/output blend of each "+
+        "provider's list rate). The GPT-5.5 bar is hatched because it is an ESTIMATE at OpenAI list price "+
+        "($5/$30 per M tokens, same 80/20 blend \u2248 $0.175/solve) \u2014 NOT what we paid: that run went "+
+        "through a flat-rate subscription and was never metered. Even so, the open models land ~5x (glm-5.2) "+
+        "to ~130x (deepseek) below the frontier list price per solved task; glm-4.7-flash is free.";
+    })();
+
+    /* --- 5. Per-task score small multiples --- */
+    (function(){
+      const host=document.getElementById("chart-m4-tasks");
+      tasks.forEach((t,ti)=>{
+        const W=340,H=190,L=132,R=34,T=8,B=26,x0=L,x1=W-R,pw=x1-x0;
+        const band=(H-T-B)/M.length,barH=13,X=v=>x0+v*pw;
+        const s=svg(W,H);
+        for(let g=0;g<=1.0001;g+=0.5){
+          s.appendChild(el("line",{class:"gl",x1:X(g),y1:T,x2:X(g),y2:H-B}));
+          s.appendChild(el("text",{class:"tick",x:X(g),y:H-B+16,"text-anchor":"middle","font-size":11}, g.toFixed(1)));
+        }
+        s.appendChild(el("line",{class:"ax",x1:x0,y1:H-B,x2:x1,y2:H-B}));
+        s.appendChild(el("line",{x1:X(1),y1:T,x2:X(1),y2:H-B,stroke:"var(--good)","stroke-width":1.5,"stroke-dasharray":"3 3"}));
+        M.forEach((d,i)=>{
+          const v=d.byT[ti],cy=T+band*i+band/2,y=cy-barH/2,bw=Math.max(0.5,X(v)-x0);
+          const isRef=d.k===REF;
+          s.appendChild(el("text",{class:"lab",x:x0-8,y:cy+4,"text-anchor":"end","font-size":10.5,
+            "font-style":isRef?"italic":"normal"}, d.m));
+          title(s.appendChild(el("path",{d:barPath(x0,y,bw,barH,3),fill:isRef?"var(--m-gpt)":mcol(d.k)})),
+                `${d.m} \u00b7 ${t}: score ${v.toFixed(3)}`);
+          s.appendChild(el("text",{class:"val",x:X(v)+5,y:cy+4,"font-size":10}, v.toFixed(2)));
+        });
+        const card=document.createElement("div"); card.className="card";
+        card.innerHTML=`<h3>${t} <span class="m">mean score</span></h3>`;
+        card.appendChild(s); host.appendChild(card);
+      });
+      document.getElementById("cap-m4-tasks").textContent=
+        "Parity holds task by task, not just pooled: the three parity models and GPT-5.5 sit on the 1.00 line "+
+        "in every panel. glm-4.7-flash is the only one that varies (0.69 / 0.40 / 0.33), and add-feature / "+
+        "misleading-error are where it loses the most.";
+    })();
+
+    /* --- 6. Table view --- */
+    (function(){
+      const th=`<thead><tr><th>model</th><th>mean score</th><th>tokens/solve</th><th>wall s</th>`+
+        `<th>$/solve</th><th>note</th></tr></thead>`;
+      const body=M.map(d=>{
+        const isRef=d.k===REF;
+        const sw=`<span class="dot" style="background:${isRef?"var(--m-gpt)":mcol(d.k)}"></span>`;
+        const tok=d.noTok?"\u2014":tkf(d.tok);
+        const cost=d.est?usd(d.cost)+" <span class=\"asr\">est.</span>":d.free?"$0 <span class=\"asr\">free</span>":usd(d.cost);
+        const sc=`<span class="${d.s>=0.999?'pass':''}">${d.s.toFixed(3)}</span>`;
+        const note=isRef?"frontier reference (est. cost)":d.noTok?"tokens under-reported":"measured spend";
+        return `<tr class="${isRef?'ctrl':''}"><td>${sw}${d.m}</td><td>${sc}</td><td>${tok}</td>`+
+          `<td>${d.wall.toFixed(1)}</td><td>${cost}</td><td class="asr" style="text-align:left">${note}</td></tr>`;
+      }).join("");
+      document.getElementById("tbl-m4").innerHTML+=th+`<tbody>${body}</tbody>`;
+    })();
   })();
 })();
 </script>
