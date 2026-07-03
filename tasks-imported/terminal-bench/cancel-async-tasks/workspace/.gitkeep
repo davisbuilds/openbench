@@ -1,0 +1,2 @@
+# The agent starts from an empty working directory and must create run.py.
+# (This placeholder only ensures the directory is tracked; the checker ignores it.)
