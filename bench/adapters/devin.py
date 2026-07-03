@@ -32,10 +32,18 @@ Notes / quirks:
   out of the M4 open panel.)
 - devin prints no usage on stdout, but `--export <path>` writes a JSON
   conversation dump (to an ABSOLUTE temp path OUTSIDE workdir, so the workspace
-  the checker inspects stays clean). Token accounting (see ``_parse_export``):
-    tokens = (total_prompt_tokens - total_cached_tokens) + total_completion_tokens
-             (fresh input+output, cache re-reads excluded to match the other
-             adapters' definition).
+  the checker inspects stays clean). Token accounting (see ``_parse_export``)
+  has TWO bases depending on whether the model reports prompt caching:
+    * cache REPORTED (total_cached_tokens > 0): a MEASURED count,
+      tokens = total_prompt_tokens - total_cached_tokens + total_completion_tokens
+      (fresh input+output, cache re-reads excluded — matches the other adapters).
+    * cache NOT reported (total_cached_tokens 0/None — the account-default model's
+      case): total_prompt_tokens is CUMULATIVE across steps (each step re-sends
+      the whole context), which massively over-counts (e.g. ~185k on a multi-step
+      task, 8-40x the caching harnesses). We instead report a CACHE-EQUIVALENT
+      ESTIMATE = last model step's prompt_tokens + total_completion_tokens — i.e.
+      what a caching provider WOULD bill (peak context + all generated tokens).
+      This is an ESTIMATE, not a measured count.
     turns  = number of steps that carry model metrics (model rounds).
   output_tail stays the human-readable stdout. Parsing is defensive: a missing
   or drifted export yields tokens=None/turns=None, never raising.
@@ -93,19 +101,30 @@ def _parse_export(path):
     fm = data.get("final_metrics") or {}
     prompt = fm.get("total_prompt_tokens")
     completion = fm.get("total_completion_tokens")
-    cached = fm.get("total_cached_tokens") or 0
-    tokens = None
-    if isinstance(prompt, (int, float)) and isinstance(completion, (int, float)):
-        fresh = int(prompt) - int(cached) + int(completion)
-        # Guard against a different cache accounting (cached not a subset of
-        # prompt): never report a negative or absurdly small count.
-        tokens = fresh if fresh >= int(completion) else int(prompt) + int(completion)
+    cached = fm.get("total_cached_tokens")
 
     steps = data.get("steps") or []
-    turns = sum(1 for s in steps
-                if isinstance(s, dict) and isinstance(s.get("metrics"), dict)
-                and "prompt_tokens" in s["metrics"]) or None
+    model_steps = [s for s in steps
+                   if isinstance(s, dict) and isinstance(s.get("metrics"), dict)
+                   and "prompt_tokens" in s["metrics"]]
 
+    tokens = None
+    if isinstance(prompt, (int, float)) and isinstance(completion, (int, float)):
+        prompt, completion = int(prompt), int(completion)
+        # Cache-equivalent estimate = last step's (peak) context + all output.
+        last_prompt = (int(model_steps[-1]["metrics"]["prompt_tokens"])
+                       if model_steps else prompt)
+        if isinstance(cached, (int, float)) and cached > 0:
+            # Cache REPORTED: measured fresh input+output, cache re-reads excluded.
+            fresh = prompt - int(cached) + completion
+            tokens = fresh if fresh >= completion else last_prompt + completion
+        else:
+            # Cache NOT reported: total_prompt_tokens is cumulative across steps
+            # (over-counts); report the cache-equivalent ESTIMATE instead. See
+            # the module docstring.
+            tokens = last_prompt + completion
+
+    turns = len(model_steps) or None
     return tokens, turns
 
 
