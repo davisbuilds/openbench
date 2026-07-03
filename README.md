@@ -25,6 +25,55 @@ canonical `gpt-5.5-medium` collapses to plain `gpt-5.5` at whatever effort devin
 defaults to. Its effort is therefore **unpinned** — treat devin's Track A number
 as approximate, not a like-for-like comparison with the other harnesses.
 
+## Reproduce our results (~$1)
+
+Our **entire M4 open-model matrix** — two harnesses (`pi`, `opencode`) × four
+open models × the three harder tasks × three trials — reproduces for **about $1
+of API credit**. The published dataset is in
+[`data/m4-2026-07-03/`](data/m4-2026-07-03/); here is how to regenerate it. (You
+need the `pi` and `opencode` CLIs installed and logged in — `doctor` checks that
+— plus pay-as-you-go keys for the three model providers.)
+
+**1. Export first-party API keys.** `glm-4.7-flash` has a free tier, so you can
+validate the whole pipeline for **$0** before spending anything:
+
+```
+export ZAI_API_KEY=...        # Z.ai (GLM)      — https://z.ai
+export DEEPSEEK_API_KEY=...   # DeepSeek        — https://platform.deepseek.com
+export MOONSHOT_API_KEY=...   # Moonshot (Kimi) — https://platform.moonshot.ai
+```
+
+**2. Preflight** (spends no tokens) — confirm CLIs, keys, and model pins resolve:
+
+```
+python3 bench/doctor.py --harness pi,opencode --model glm-4.7-flash
+```
+
+**3. Run the matrix.** Each `--model` runs one open model across both harnesses
+and all three tasks, 3 trials each. The loop is **resumable** — re-running skips
+completed cells:
+
+```
+for m in glm-4.7-flash glm-5.2 deepseek-v4-flash kimi-k2.7-code; do
+  python3 bench/run.py --harness pi,opencode \
+    --task make-ci-green,add-feature,misleading-error \
+    --model "$m" --trials 3
+done
+```
+
+**4. Report:**
+
+```
+python3 bench/report.py --efficiency
+```
+
+`pi` is the fastest and leanest harness, so `--harness pi` alone is the cheapest
+subset if you just want to sanity-check the plumbing. `codex` is excluded from
+the open panel — it only speaks the OpenAI Responses API to custom providers,
+which these chat-completions endpoints don't serve; `cursor` and `devin` have
+closed model menus. The full per-model findings are in [`RESULTS.md`](RESULTS.md);
+older datasets (M3, M3.5, M4.5) are alongside under [`data/`](data/).
+
 ## Layout
 
 ```
