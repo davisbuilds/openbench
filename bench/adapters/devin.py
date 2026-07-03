@@ -23,6 +23,9 @@ Notes / quirks:
   ran with the unpinned "gpt-5.5", so it keeps its asterisk; M3.5 onward is
   effort-pinned.
 - Uses the user's existing devin login as-is (read-only).
+- M4 OPEN MODELS (glm-*/deepseek-*/kimi-*) are NOT supported here: devin's
+  `--model` is a closed, account-bound menu with no custom-provider/base-URL
+  override, so open canonicals fall through to the unsupported-model dict.
 - devin prints no usage on stdout, but `--export <path>` writes a JSON
   conversation dump (to an ABSOLUTE temp path OUTSIDE workdir, so the workspace
   the checker inspects stays clean). Token accounting (see ``_parse_export``):

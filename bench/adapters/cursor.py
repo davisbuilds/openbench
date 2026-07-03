@@ -16,6 +16,9 @@ Notes / quirks:
 - Reasoning effort is baked into the model name: `gpt-5.5-medium` is a
   first-class model id (verified via `cursor-agent models`).
 - Uses the user's existing Cursor login as-is (read-only).
+- M4 OPEN MODELS (glm-*/deepseek-*/kimi-*) are NOT supported here: cursor-agent
+  exposes a closed, account-bound model menu with no custom-provider/base-URL
+  override, so open canonicals fall through to the unsupported-model dict.
 - `--output-format json` emits ONE final JSON object with a `result` text field
   and `usage={inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens}`.
   Token accounting (see ``_parse_json``):
