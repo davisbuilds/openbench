@@ -5,6 +5,8 @@ model in a run loop, tool set, and permission policy (codex, pi, opencode,
 cursor, devin). The question it answers is: *given the same underlying model,
 how much does the harness around it matter?*
 
+**New here?** [`WRITEUP.md`](WRITEUP.md) tells the whole story — the question, the method, and the findings arc (M3 → M4) — for a reader who's never seen the repo.
+
 ## What this measures
 
 Each harness runs headlessly against a set of small, self-contained coding
