@@ -1,0 +1,114 @@
+[
+  {
+    "fn": "encode",
+    "kwargs": {
+      "phrase": "yes"
+    },
+    "expected": "bvh",
+    "desc": "encode yes"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "phrase": "no"
+    },
+    "expected": "ml",
+    "desc": "encode no"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "phrase": "OMG"
+    },
+    "expected": "lnt",
+    "desc": "encode OMG"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "phrase": "O M G"
+    },
+    "expected": "lnt",
+    "desc": "encode spaces"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "phrase": "mindblowingly"
+    },
+    "expected": "nrmwy oldrm tob",
+    "desc": "encode mindblowingly"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "phrase": "Testing,1 2 3, testing."
+    },
+    "expected": "gvhgr mt123 gvhgr mt",
+    "desc": "encode numbers"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "phrase": "Truth is fiction."
+    },
+    "expected": "gifgs rhurx grlm",
+    "desc": "encode deep thought"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "phrase": "The quick brown fox jumps over the lazy dog."
+    },
+    "expected": "gsvjf rxpyi ldmul cqfnk hlevi gsvoz abwlt",
+    "desc": "encode all the letters"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "phrase": "vcvix rhn"
+    },
+    "expected": "exercism",
+    "desc": "decode exercism"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "phrase": "zmlyh gzxov rhlug vmzhg vkkrm thglm v"
+    },
+    "expected": "anobstacleisoftenasteppingstone",
+    "desc": "decode a sentence"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "phrase": "gvhgr mt123 gvhgr mt"
+    },
+    "expected": "testing123testing",
+    "desc": "decode numbers"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "phrase": "gsvjf rxpyi ldmul cqfnk hlevi gsvoz abwlt"
+    },
+    "expected": "thequickbrownfoxjumpsoverthelazydog",
+    "desc": "decode all the letters"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "phrase": "vc vix    r hn"
+    },
+    "expected": "exercism",
+    "desc": "decode with too many spaces"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "phrase": "zmlyhgzxovrhlugvmzhgvkkrmthglmv"
+    },
+    "expected": "anobstacleisoftenasteppingstone",
+    "desc": "decode with no spaces"
+  }
+]

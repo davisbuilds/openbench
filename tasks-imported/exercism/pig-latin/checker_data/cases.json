@@ -1,0 +1,186 @@
+[
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "apple"
+    },
+    "expected": "appleay",
+    "desc": "word beginning with a"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "ear"
+    },
+    "expected": "earay",
+    "desc": "word beginning with e"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "igloo"
+    },
+    "expected": "iglooay",
+    "desc": "word beginning with i"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "object"
+    },
+    "expected": "objectay",
+    "desc": "word beginning with o"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "under"
+    },
+    "expected": "underay",
+    "desc": "word beginning with u"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "equal"
+    },
+    "expected": "equalay",
+    "desc": "word beginning with a vowel and followed by a qu"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "pig"
+    },
+    "expected": "igpay",
+    "desc": "word beginning with p"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "koala"
+    },
+    "expected": "oalakay",
+    "desc": "word beginning with k"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "xenon"
+    },
+    "expected": "enonxay",
+    "desc": "word beginning with x"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "qat"
+    },
+    "expected": "atqay",
+    "desc": "word beginning with q without a following u"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "liquid"
+    },
+    "expected": "iquidlay",
+    "desc": "word beginning with consonant and vowel containing qu"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "chair"
+    },
+    "expected": "airchay",
+    "desc": "word beginning with ch"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "queen"
+    },
+    "expected": "eenquay",
+    "desc": "word beginning with qu"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "square"
+    },
+    "expected": "aresquay",
+    "desc": "word beginning with qu and a preceding consonant"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "therapy"
+    },
+    "expected": "erapythay",
+    "desc": "word beginning with th"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "thrush"
+    },
+    "expected": "ushthray",
+    "desc": "word beginning with thr"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "school"
+    },
+    "expected": "oolschay",
+    "desc": "word beginning with sch"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "yttria"
+    },
+    "expected": "yttriaay",
+    "desc": "word beginning with yt"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "xray"
+    },
+    "expected": "xrayay",
+    "desc": "word beginning with xr"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "yellow"
+    },
+    "expected": "ellowyay",
+    "desc": "y is treated like a consonant at the beginning of a word"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "rhythm"
+    },
+    "expected": "ythmrhay",
+    "desc": "y is treated like a vowel at the end of a consonant cluster"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "my"
+    },
+    "expected": "ymay",
+    "desc": "y as second letter in two letter word"
+  },
+  {
+    "fn": "translate",
+    "kwargs": {
+      "phrase": "quick fast run"
+    },
+    "expected": "ickquay astfay unray",
+    "desc": "a whole phrase"
+  }
+]

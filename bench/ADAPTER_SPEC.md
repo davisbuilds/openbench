@@ -27,6 +27,12 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
       "tokens": int | None,     # if the harness reports usage, else None
       "turns": int | None,      # if the harness reports it, else None
       "cmd": list | str,        # what was executed (for the results log)
+      # OPTIONAL keys (extra keys are spec-compatible; the runner ignores
+      # unknown ones). Provide where cheaply available:
+      "full_output": str,       # full UNTRUNCATED stdout+stderr. The runner
+                                # persists this (else output_tail) as the cell's
+                                # local transcript. LOCAL-ONLY: transcripts are
+                                # never published without a manual scrub review.
     }
     """
 ```

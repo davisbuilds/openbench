@@ -1,0 +1,218 @@
+[
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 1
+    },
+    "expected": "I",
+    "desc": "1 is I"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 2
+    },
+    "expected": "II",
+    "desc": "2 is II"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 3
+    },
+    "expected": "III",
+    "desc": "3 is III"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 4
+    },
+    "expected": "IV",
+    "desc": "4 is IV"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 5
+    },
+    "expected": "V",
+    "desc": "5 is V"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 6
+    },
+    "expected": "VI",
+    "desc": "6 is VI"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 9
+    },
+    "expected": "IX",
+    "desc": "9 is IX"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 16
+    },
+    "expected": "XVI",
+    "desc": "16 is XVI"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 27
+    },
+    "expected": "XXVII",
+    "desc": "27 is XXVII"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 48
+    },
+    "expected": "XLVIII",
+    "desc": "48 is XLVIII"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 49
+    },
+    "expected": "XLIX",
+    "desc": "49 is XLIX"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 59
+    },
+    "expected": "LIX",
+    "desc": "59 is LIX"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 66
+    },
+    "expected": "LXVI",
+    "desc": "66 is LXVI"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 93
+    },
+    "expected": "XCIII",
+    "desc": "93 is XCIII"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 141
+    },
+    "expected": "CXLI",
+    "desc": "141 is CXLI"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 163
+    },
+    "expected": "CLXIII",
+    "desc": "163 is CLXIII"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 166
+    },
+    "expected": "CLXVI",
+    "desc": "166 is CLXVI"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 402
+    },
+    "expected": "CDII",
+    "desc": "402 is CDII"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 575
+    },
+    "expected": "DLXXV",
+    "desc": "575 is DLXXV"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 666
+    },
+    "expected": "DCLXVI",
+    "desc": "666 is DCLXVI"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 911
+    },
+    "expected": "CMXI",
+    "desc": "911 is CMXI"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 1024
+    },
+    "expected": "MXXIV",
+    "desc": "1024 is MXXIV"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 1666
+    },
+    "expected": "MDCLXVI",
+    "desc": "1666 is MDCLXVI"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 3000
+    },
+    "expected": "MMM",
+    "desc": "3000 is MMM"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 3001
+    },
+    "expected": "MMMI",
+    "desc": "3001 is MMMI"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 3888
+    },
+    "expected": "MMMDCCCLXXXVIII",
+    "desc": "3888 is MMMDCCCLXXXVIII"
+  },
+  {
+    "fn": "roman",
+    "kwargs": {
+      "number": 3999
+    },
+    "expected": "MMMCMXCIX",
+    "desc": "3999 is MMMCMXCIX"
+  }
+]

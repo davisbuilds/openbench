@@ -1,0 +1,109 @@
+[
+  {
+    "fn": "encode",
+    "kwargs": {
+      "string": ""
+    },
+    "expected": "",
+    "desc": "empty string"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "string": "XYZ"
+    },
+    "expected": "XYZ",
+    "desc": "single characters only are encoded without count"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "string": "AABBBCCCC"
+    },
+    "expected": "2A3B4C",
+    "desc": "string with no single characters"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "string": "WWWWWWWWWWWWBWWWWWWWWWWWWBBBWWWWWWWWWWWWWWWWWWWWWWWWB"
+    },
+    "expected": "12WB12W3B24WB",
+    "desc": "single characters mixed with repeated characters"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "string": "  hsqq qww  "
+    },
+    "expected": "2 hs2q q2w2 ",
+    "desc": "multiple whitespace mixed in string"
+  },
+  {
+    "fn": "encode",
+    "kwargs": {
+      "string": "aabbbcccc"
+    },
+    "expected": "2a3b4c",
+    "desc": "lowercase characters"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "string": ""
+    },
+    "expected": "",
+    "desc": "empty string"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "string": "XYZ"
+    },
+    "expected": "XYZ",
+    "desc": "single characters only"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "string": "2A3B4C"
+    },
+    "expected": "AABBBCCCC",
+    "desc": "string with no single characters"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "string": "12WB12W3B24WB"
+    },
+    "expected": "WWWWWWWWWWWWBWWWWWWWWWWWWBBBWWWWWWWWWWWWWWWWWWWWWWWWB",
+    "desc": "single characters with repeated characters"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "string": "2 hs2q q2w2 "
+    },
+    "expected": "  hsqq qww  ",
+    "desc": "multiple whitespace mixed in string"
+  },
+  {
+    "fn": "decode",
+    "kwargs": {
+      "string": "2a3b4c"
+    },
+    "expected": "aabbbcccc",
+    "desc": "lowercase string"
+  },
+  {
+    "roundtrip": [
+      "decode",
+      "encode"
+    ],
+    "kwargs": {
+      "string": "zzz ZZ  zZ"
+    },
+    "expected": "zzz ZZ  zZ",
+    "desc": "encode followed by decode gives original string"
+  }
+]

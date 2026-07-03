@@ -35,6 +35,12 @@ import tempfile
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 TASKS_DIR = os.path.join(REPO_ROOT, "tasks")
+IMPORTED_DIR = os.path.join(REPO_ROOT, "tasks-imported")
+
+# Task tiers, in report order. "core" holds the original contributed tasks; each
+# tier under tasks-imported/ (e.g. exercism) is maintainer-curated and scored
+# separately -- never blended with core in a benchmark run.
+TASK_ROOTS = [("core", TASKS_DIR), ("imported", IMPORTED_DIR)]
 
 
 def copy_tree(src, dst):
@@ -101,16 +107,25 @@ def run_checker(task_dir, overlay_solution):
 
 
 def discover_tasks():
-    if not os.path.isdir(TASKS_DIR):
-        return []
+    """Find every task across the tiers.
+
+    Returns a list of ``(tier, display_name, task_dir)``. A task is any
+    directory containing a ``checker.sh``; ``tasks/`` holds them one level deep,
+    while ``tasks-imported/`` nests them under a collection (e.g.
+    ``exercism/luhn``), so both roots are walked to any depth.
+    """
     tasks = []
-    for name in sorted(os.listdir(TASKS_DIR)):
-        task_dir = os.path.join(TASKS_DIR, name)
-        if not os.path.isdir(task_dir):
+    for tier, root in TASK_ROOTS:
+        if not os.path.isdir(root):
             continue
-        if not os.path.isfile(os.path.join(task_dir, "checker.sh")):
-            continue
-        tasks.append(task_dir)
+        found = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            if "checker.sh" in filenames:
+                found.append(dirpath)
+                dirnames[:] = []  # a task dir is a leaf; don't descend further
+        for task_dir in sorted(found):
+            display = os.path.relpath(task_dir, root)
+            tasks.append((tier, display, task_dir))
     return tasks
 
 
@@ -126,8 +141,7 @@ def main():
 
     results = []
     all_ok = True
-    for task_dir in tasks:
-        name = os.path.basename(task_dir)
+    for tier, name, task_dir in tasks:
         problems = []
 
         # Required structure.
@@ -155,6 +169,7 @@ def main():
         ok = not problems
         all_ok = all_ok and ok
         results.append({
+            "tier": tier,
             "name": name,
             "ws_code": ws_code,
             "sol_code": sol_code,
@@ -166,21 +181,26 @@ def main():
             "sol_out": sol_out,
         })
 
-    # Table.
+    # Table, grouped by tier so imported tasks are visibly separate from core.
     name_w = max([len(r["name"]) for r in results] + [len("TASK")])
-    header = "{:<{w}}  {:>10}  {:>10}  {:>10}  {:>10}  {:>6}".format(
-        "TASK", "workspace", "base_score", "solution", "sol_score", "RESULT", w=name_w)
+    tier_w = max([len(r["tier"]) for r in results] + [len("TIER")])
+    header = "{:<{tw}}  {:<{w}}  {:>10}  {:>10}  {:>10}  {:>10}  {:>6}".format(
+        "TIER", "TASK", "workspace", "base_score", "solution", "sol_score",
+        "RESULT", tw=tier_w, w=name_w)
     print(header)
     print("-" * len(header))
-    for r in results:
-        ws = "FAIL(ok)" if (r["ws_code"] not in (None, 0)) else (
-            "n/a" if r["ws_code"] is None else "PASS(bad)")
-        sol = "PASS(ok)" if r["sol_code"] == 0 else (
-            "n/a" if r["sol_code"] is None else "FAIL(bad)")
-        result = "PASS" if r["ok"] else "FAIL"
-        print("{:<{w}}  {:>10}  {:>10}  {:>10}  {:>10}  {:>6}".format(
-            r["name"], ws, fmt_score(r["ws_score"]),
-            sol, fmt_score(r["sol_score"]), result, w=name_w))
+    for tier, _root in TASK_ROOTS:
+        for r in results:
+            if r["tier"] != tier:
+                continue
+            ws = "FAIL(ok)" if (r["ws_code"] not in (None, 0)) else (
+                "n/a" if r["ws_code"] is None else "PASS(bad)")
+            sol = "PASS(ok)" if r["sol_code"] == 0 else (
+                "n/a" if r["sol_code"] is None else "FAIL(bad)")
+            result = "PASS" if r["ok"] else "FAIL"
+            print("{:<{tw}}  {:<{w}}  {:>10}  {:>10}  {:>10}  {:>10}  {:>6}".format(
+                r["tier"], r["name"], ws, fmt_score(r["ws_score"]),
+                sol, fmt_score(r["sol_score"]), result, tw=tier_w, w=name_w))
 
     # Detail for any failures.
     for r in results:
@@ -198,9 +218,13 @@ def main():
                     print("    | {}".format(line))
 
     print()
+    per_tier = ", ".join(
+        "{} {}".format(sum(1 for r in results if r["tier"] == tier), tier)
+        for tier, _root in TASK_ROOTS
+        if any(r["tier"] == tier for r in results))
     if all_ok:
-        print("All {} task(s) validated: workspace FAILs, solution PASSes "
-              "(solution score 1.0).".format(len(results)))
+        print("All {} task(s) validated ({}): workspace FAILs, solution PASSes "
+              "(solution score 1.0).".format(len(results), per_tier))
         return 0
     print("Validation FAILED for one or more tasks.")
     return 1
