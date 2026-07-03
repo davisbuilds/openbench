@@ -109,3 +109,86 @@ configuration and provenance are in
   resolve the `devin`/`codex`/`opencode` cluster (or confirm it's a genuine tie).
 - **Repeat across machines/days.** To separate harness overhead from ambient
   latency and establish run-to-run stability.
+
+---
+
+# M3.5: the harness tax in tokens (2026-07-02)
+
+M3.5 re-runs the matrix with **token and turn capture** wired through every
+adapter — 5 harnesses × 3 tasks × **3 trials** (45 real cells + 3 null),
+`gpt-5.5-medium`, all-local, subscription-OAuth only. Correctness is not the
+question here (it already saturated in M3); this measures the **cost of a
+solve**. All 45 real cells passed, zero adapter errors, and every real row
+carried a positive-integer token count (no parser gaps). Dataset:
+[`data/m3.5-2026-07-02/`](data/m3.5-2026-07-02/).
+
+## Headline: tokens separate the field more than time does
+
+Correctness is still a tie (all 9/9, Wilson `[0.701, 1.000]` each). But the
+**token tax spans ~8×** (pi 5.3k → codex 42.5k per solve) — wider than the ~4.7×
+wall-time spread — and, crucially, **the token ranking is not the time ranking.**
+`pi` wins both axes decisively: fastest *and* ~8× leaner than the heaviest.
+
+### Efficiency table (verbatim `report.py --efficiency`)
+
+```
+harness   success  rate  wilson95        mean_s        tok/slv  turns/slv
+--------  -------  ----  --------------  ------------  -------  ---------
+null      0/3      0%    [0.000, 0.562]  0.00 ±0.00    -        -
+codex*    9/9      100%  [0.701, 1.000]  54.90 ±15.44  42.5k    -
+pi        9/9      100%  [0.701, 1.000]  17.63 ±3.54   5.3k     5.6
+opencode  9/9      100%  [0.701, 1.000]  54.36 ±9.60   20.7k    8.0
+cursor    9/9      100%  [0.701, 1.000]  26.32 ±7.72   14.0k    -
+devin**   9/9      100%  [0.701, 1.000]  83.54 ±21.46  33.8k    18.7
+```
+
+`*` **codex** token count *includes cache-read tokens*, so its tax is inflated
+and **not apples-to-apples** with the others — read it as an upper-ish bound.
+`**` **devin** is now effort-pinned (see caveats). `cursor` reports no turns by
+design (its JSON result exposes no turn count).
+
+## Tokens per solve, with 95% CIs
+
+| Harness   | tok/solve | 95% CI (tokens)     | turns/solve |
+|-----------|-----------|---------------------|-------------|
+| pi        | 5,350     | [4,304, 6,396]      | 5.6         |
+| cursor    | 13,997    | [9,731, 18,263]     | —           |
+| opencode  | 20,663    | [15,354, 25,972]    | 8.0         |
+| devin\*\* | 33,759    | [23,634, 43,884]    | 18.7        |
+| codex\*   | 42,503    | [31,491, 53,515]    | —           |
+
+**What's real at n=9:** `pi` is clearly the leanest — its interval clears every
+other by a wide margin. `codex` is clearly the heaviest of the fresh-vs-cache
+caveat aside (its lower bound, 31.5k, sits above opencode's upper bound, 26.0k).
+The middle — `cursor`/`opencode`/`devin` — overlaps pairwise and is **not cleanly
+ordered** at this sample size; `codex` and `devin` also carry large token variance
+(sd ≈ 16k). So the robust token story is **pi ≪ {cursor, opencode} ≲ {devin,
+codex}**, not a clean 1–5 ranking.
+
+## Token rank vs time rank — they diverge
+
+```
+TIME  (fast -> slow): pi < cursor < opencode < codex < devin
+TOKEN (lean -> heavy): pi < cursor < opencode < devin < codex
+```
+
+The two axes agree on the top three (pi < cursor < opencode) but **swap at the
+top**: `devin` is the slowest on the clock yet spends *fewer* tokens than
+`codex`, which is only mid-pack on time. The sharpest illustration is
+`opencode` vs `codex`: **near-identical wall time** (54.4 vs 54.9 s) but codex
+spends **~2× the tokens** (42.5k vs 20.7k). Wall-clock and token-tax are
+genuinely different efficiency axes — a harness can be quick and expensive, or
+slow and comparatively lean. `pi` is the one harness that is unambiguously both
+fast and cheap.
+
+## M3.5 caveats
+
+- **codex tokens include cache reads** — its tax is not comparable to the others;
+  treat the ranking as "codex is heavy" with an asterisk, not a precise multiple.
+- **devin effort now pinned.** Its wall-time roughly doubled vs M3 (43.0 → 83.5 s)
+  and its token tax is high. This is **consistent with either** the newly-pinned
+  reasoning effort **or** day/service-load — deliberately **not** concluded.
+- **3 trials, one host, one day.** Token CIs are still wide; the middle cluster is
+  unresolved. Cross-day/-machine repeats and more trials would tighten it.
+- **M3 ↔ M3.5 wall-times aren't directly comparable** (different trial counts and
+  run day); compare *within* M3.5.
