@@ -286,3 +286,105 @@ A daytime investigation is queued.
 - **A reliable devin harness.** Fix the intermittent fast-fail, the 900 s hangs,
   and the token accounting — and settle the account/service state — before devin's
   numbers can be trusted.
+
+---
+
+# M4: open models — most reach frontier parity; only the smallest breaks the ceiling
+
+M4 runs **open models** on the same three hard tasks that GPT-5.5-medium saturated
+in M4.5, to see if a weaker model finally produces the partial scores the tasks
+were built for. Panel: {`pi`, `opencode`} × {`glm-5.2`, `deepseek-v4-flash`,
+`kimi-k2.7-code`, `glm-4.7-flash`} × 3 tasks × 3 trials = 72 cells, first-party
+APIs, `--timeout 900`. (`codex` excluded — open-model wiring is architecturally
+blocked; see `data/m4-2026-07-03/README.md`.)
+
+## Headline
+
+**3 of 4 open models reach frontier parity.** `glm-5.2`, `deepseek-v4-flash`, and
+`kimi-k2.7-code` (via `pi`) each score a clean **1.00** across all three tasks —
+matching GPT-5.5-medium. The ceiling the tasks couldn't crack with frontier
+harnesses holds for these open models too. **Only `glm-4.7-flash`** (the free,
+small model) drops below: **0.47** via `pi`, with genuine partial credit
+(make-ci-green 0.69, add-feature 0.40, misleading-error 0.33). So the
+partial-credit design *does* finally bite — but only for the weakest model. Open
+frontier-class models are, on these coding tasks, competitive with GPT-5.5-medium.
+
+## Harness × model interaction (score / mean_s / tokens / $)
+
+Mean score over all 9 cells per combo (n=9). `$` uses combined tokens at an 80/20
+in/out blend (see README).
+
+| Model              | Harness   | score  | mean_s | mean_tok | $/combo |
+|--------------------|-----------|--------|--------|----------|---------|
+| glm-5.2            | pi        | 1.00   | 162    | 17.2k    | $0.31   |
+| glm-5.2            | opencode  | 1.00   | 165    | 20.6k    | $0.37   |
+| deepseek-v4-flash  | pi        | 1.00   | 28     | 8.1k     | $0.01   |
+| deepseek-v4-flash  | opencode  | 1.00   | 41     | 17.9k    | $0.03   |
+| kimi-k2.7-code     | pi        | 1.00   | 68     | 8.7k     | $0.12   |
+| kimi-k2.7-code     | opencode  | 0.67 ‡ | 371    | 19.0k    | $0.18   |
+| glm-4.7-flash      | pi        | 0.47   | 102    | (see †)  | $0.00   |
+| glm-4.7-flash      | opencode  | 0.22 ‡ | 789    | 37.9k    | $0.00   |
+
+`†` glm-4.7-flash token counts via `pi` are implausibly small/erratic (mean ~150)
+— unreliable; it's free, so this doesn't affect cost. `‡` these two opencode
+scores are **confounded by an adapter bug** (below) — read them with the caveat,
+not as capability. Total matrix cost **~$1.02**.
+
+## The two "gaps" are an opencode adapter bug, not model capability
+
+An `opencode` adapter bug turns **8 of 72 cells** into exceptions rather than
+model results — `bench/adapters/opencode.py` crashes in its `TimeoutExpired`
+handler (`(e.stdout or "") + (e.stderr or "")` concatenates `bytes` with `str` →
+`TypeError`) whenever opencode hits the 900 s timeout with buffered output. The 8
+affected cells are **7× glm-4.7-flash:opencode + 1× kimi:opencode**. Failure
+taxonomy of the 72 cells:
+
+| class | n | meaning |
+|-------|---|---------|
+| clean pass (1.0) | 55 | solved |
+| adapter-exception | 8 | the opencode timeout-handler bug (infra, not model) |
+| clean timeout | 2 | opencode ran the model past 900 s, handled cleanly |
+| partial-fail | 5 | genuine partial credit (all glm-4.7-flash:pi) |
+| zero | 2 | genuine misses (glm-4.7-flash:pi, misleading-error) |
+
+**glm-4.7-flash pi 0.47 vs opencode 0.22** is *not* a clean 2× harness gap: 7 of
+the 9 opencode cells are the adapter bug (opencode runs glm-4.7-flash at **789 s**
+mean vs pi's 102 s → constant 900 s timeouts → the crash). Only 2 opencode cells
+ran clean. The real glm-4.7-flash signal is the **pi** column, 0.47.
+
+**kimi:opencode** = 0.667 with the adapter-exception cell, **0.750** without it.
+But kimi is fully capable — **kimi:pi = 1.00 on all three tasks**. The opencode
+drop is 2–3 cells timing out because opencode runs kimi at **371 s** vs pi's 68 s
+(~5× slower), crossing the 900 s wall. It is a harness-efficiency × timeout
+interaction, not kimi incapability.
+
+## Harness comparison (model-agnostic quality + tax replication)
+
+`pi` **wins or ties every model**: tie on glm-5.2 and deepseek (both 1.00/1.00),
+`pi` > `opencode` on kimi and glm-4.7-flash. The rankings don't flip per model —
+there is a **model-agnostic harness-quality signal**, and its mechanism is
+efficiency: `opencode` runs the open models much slower (glm-flash 789 vs 102 s;
+kimi 371 vs 68 s; deepseek 41 vs 28 s), and that slowness is what pushes weak/slow
+models past the timeout. This **replicates the GPT-5.5 harness tax**: `pi` is again
+the faster, leaner harness (leaner tokens on deepseek 8.1k vs 17.9k and kimi 8.7k
+vs 19.0k), consistent with M3.5/M4.5.
+
+## Open-vs-frontier parity (per task, vs M4.5's all-1.00 baseline)
+
+| Task | glm-5.2 | deepseek | kimi (pi) | glm-4.7-flash (pi) | frontier (M4.5) |
+|------|---------|----------|-----------|--------------------|-----------------|
+| make-ci-green    | 1.00 | 1.00 | 1.00 | 0.69 | 1.00 |
+| add-feature      | 1.00 | 1.00 | 1.00 | 0.40 | 1.00 |
+| misleading-error | 1.00 | 1.00 | 1.00 | 0.33 | 1.00 |
+
+Only glm-4.7-flash separates from the frontier baseline, and it does so on every
+task — the partial-credit tasks discriminate exactly where a genuinely weaker
+model is involved.
+
+## Follow-ups
+
+- **File the opencode timeout-handler bug** (decode/`text=True` the tail) and,
+  separately, investigate why opencode runs open models so much slower than pi.
+- **glm-4.7-flash is the discriminating model** — it's the natural target for a
+  harder-task M4.5.x calibration where partial credit matters.
+- A true input/output token split would sharpen the `$` column.
