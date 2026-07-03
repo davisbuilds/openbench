@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Contributing guide
+    url: https://github.com/minghinmatthewlam/openbench/blob/main/CONTRIBUTING.md
+    about: How to contribute a task or a harness adapter, and the checks CI runs.
+  - name: Security disclosure
+    url: https://github.com/minghinmatthewlam/openbench/blob/main/SECURITY.md
+    about: Please report suspected security issues privately, not as a public issue.

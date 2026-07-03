@@ -1,0 +1,99 @@
+name: Task proposal
+description: Propose a new benchmark task for tasks/ (original code only)
+title: "[task] <short name>"
+labels: ["task-proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a task! Please read
+        [CONTRIBUTING-TASKS.md](../blob/main/CONTRIBUTING-TASKS.md) first — it is
+        the full contract. This form captures the essentials so a maintainer can
+        evaluate the task quickly. A task must be **original**, its checker must
+        **fail on the unsolved workspace and pass on your golden solution**, and
+        `validate_tasks.py` must prove that offline.
+
+        If you already have the task written, you can open a pull request
+        directly instead of filing this issue.
+
+  - type: input
+    id: task-name
+    attributes:
+      label: Task name
+      description: The directory name under tasks/ (kebab-case, e.g. fix-failing-test).
+      placeholder: my-task-name
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What the task asks
+      description: >
+        The engineering problem, as the harness will see it. Remember
+        instruction.md never mentions the checker, the solution, scoring, or
+        that this is a benchmark.
+      placeholder: e.g. "Repair a small broken project so its tests pass."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: partial-credit
+    attributes:
+      label: Grading
+      description: Does the checker emit a SCORE line for partial credit, or is it binary pass/fail?
+      options:
+        - Binary (exit 0 = solved)
+        - Partial credit (emits SCORE: 0.0-1.0)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: original-code
+    attributes:
+      label: Original code confirmation
+      description: >
+        Copied code carries its original license and risks contamination (a
+        model may have memorized public code). Every task must be your own work,
+        contributable under MIT.
+      options:
+        - label: All workspace, checker, and solution code is original — not copied from other repos, benchmarks, Stack Overflow, or un-rewritten model output.
+          required: true
+
+  - type: checkboxes
+    id: directory-contract
+    attributes:
+      label: Directory contract
+      description: The layout enforced for every task (see CONTRIBUTING-TASKS.md).
+      options:
+        - label: "tasks/<name>/ has instruction.md, workspace/, solution/, and checker.sh."
+          required: true
+        - label: "instruction.md reads as a normal request — no mention of the checker, solution, scoring, or benchmark."
+          required: true
+        - label: "checker.sh uses only bash + python3 stdlib and references its own data via $TASK_DIR (no network, no pip install, no pytest/node)."
+          required: true
+
+  - type: textarea
+    id: validation-output
+    attributes:
+      label: Validation run output
+      description: >
+        Paste the row for your task from `python3 validate_tasks.py`. It should
+        read FAIL(ok) ... PASS(ok) ... PASS (workspace fails as expected, the
+        solution passes with score 1.0).
+      render: text
+      placeholder: |
+        $ python3 validate_tasks.py
+        my-task-name    FAIL(ok)  PASS(ok)  PASS
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: ci-checks
+    attributes:
+      label: Local checks
+      options:
+        - label: "python3 validate_tasks.py passes (my task shows FAIL(ok) ... PASS(ok) ... PASS)."
+          required: true
+        - label: "python3 -m unittest discover bench/tests passes."
+          required: true

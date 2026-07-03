@@ -1,11 +1,16 @@
 # OpenBench
 
+[![CI](https://github.com/minghinmatthewlam/openbench/actions/workflows/ci.yml/badge.svg)](https://github.com/minghinmatthewlam/openbench/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A benchmark for comparing coding-agent **harnesses** — the CLI tools that wrap a
 model in a run loop, tool set, and permission policy (codex, pi, opencode,
 cursor, devin). The question it answers is: *given the same underlying model,
 how much does the harness around it matter?*
 
 **New here?** [`WRITEUP.md`](WRITEUP.md) tells the whole story — the question, the method, and the findings arc (M3 → M4) — for a reader who's never seen the repo.
+
+**Live results:** https://minghinmatthewlam.github.io/openbench/
 
 ## What this measures
 
