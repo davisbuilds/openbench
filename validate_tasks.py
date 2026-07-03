@@ -16,6 +16,14 @@ The checker is invoked with cwd set to the temporary workspace copy and the
 TASK_DIR environment variable pointing at the absolute task directory (so the
 checker can reach its own checker_data/ without depending on cwd).
 
+Partial-credit contract: a checker MAY print a line ``SCORE: <float 0.0-1.0>``
+to stdout (last one wins). Exit 0 means fully solved and implies score 1.0; a
+nonzero exit with a SCORE line means partial credit; no SCORE line falls back
+to the binary interpretation (1.0 on exit 0, 0.0 otherwise). This script parses
+that line so it can report the untouched-workspace baseline score and confirm
+the golden solution reaches 1.0. Pass/fail polarity is still decided by the
+exit code.
+
 Prints a PASS/FAIL table and exits nonzero if any task's checker misbehaves.
 Standard library only.
 """
@@ -39,10 +47,32 @@ def copy_tree(src, dst):
             shutil.copy2(os.path.join(root, name), os.path.join(target_root, name))
 
 
+def parse_score(output):
+    """Return the last ``SCORE: <float>`` value in output, or None if absent."""
+    score = None
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("SCORE:"):
+            try:
+                score = float(stripped[len("SCORE:"):].strip())
+            except ValueError:
+                pass
+    return score
+
+
+def effective_score(exit_code, parsed_score):
+    """Map (exit_code, parsed SCORE) to a 0..1 score per the contract."""
+    if exit_code == 0:
+        return 1.0
+    if parsed_score is not None:
+        return parsed_score
+    return 0.0
+
+
 def run_checker(task_dir, overlay_solution):
     """Set up a workspace copy, optionally overlay solution/, run checker.sh.
 
-    Returns (exit_code, combined_output).
+    Returns (exit_code, combined_output, parsed_score).
     """
     workspace = os.path.join(task_dir, "workspace")
     solution = os.path.join(task_dir, "solution")
@@ -65,7 +95,7 @@ def run_checker(task_dir, overlay_solution):
             stderr=subprocess.STDOUT,
             text=True,
         )
-        return proc.returncode, proc.stdout
+        return proc.returncode, proc.stdout, parse_score(proc.stdout)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -82,6 +112,10 @@ def discover_tasks():
             continue
         tasks.append(task_dir)
     return tasks
+
+
+def fmt_score(value):
+    return "-" if value is None else "{:.3f}".format(value)
 
 
 def main():
@@ -102,16 +136,21 @@ def main():
                 problems.append("missing {}".format(required))
 
         ws_code = ws_out = sol_code = sol_out = None
-        ws_ok = sol_ok = False
+        ws_score = sol_score = None
         if not problems:
-            ws_code, ws_out = run_checker(task_dir, overlay_solution=False)
-            sol_code, sol_out = run_checker(task_dir, overlay_solution=True)
-            ws_ok = ws_code != 0        # workspace must FAIL
-            sol_ok = sol_code == 0      # solution must PASS
-            if not ws_ok:
+            ws_code, ws_out, ws_raw = run_checker(task_dir, overlay_solution=False)
+            sol_code, sol_out, sol_raw = run_checker(task_dir, overlay_solution=True)
+            ws_score = effective_score(ws_code, ws_raw)
+            sol_score = effective_score(sol_code, sol_raw)
+
+            if ws_code == 0:
                 problems.append("workspace checker passed (expected failure)")
-            if not sol_ok:
+            if sol_code != 0:
                 problems.append("solution checker failed (expected pass)")
+            # A checker that exits 0 but reports partial credit is inconsistent.
+            if sol_code == 0 and sol_raw is not None and abs(sol_raw - 1.0) > 1e-9:
+                problems.append(
+                    "solution exited 0 but SCORE={:.3f} (expected 1.0)".format(sol_raw))
 
         ok = not problems
         all_ok = all_ok and ok
@@ -119,6 +158,8 @@ def main():
             "name": name,
             "ws_code": ws_code,
             "sol_code": sol_code,
+            "ws_score": ws_score,
+            "sol_score": sol_score,
             "ok": ok,
             "problems": problems,
             "ws_out": ws_out,
@@ -126,10 +167,9 @@ def main():
         })
 
     # Table.
-    name_w = max(len(r["name"]) for r in results)
-    name_w = max(name_w, len("TASK"))
-    header = "{:<{w}}  {:>13}  {:>13}  {:>6}".format(
-        "TASK", "workspace", "solution", "RESULT", w=name_w)
+    name_w = max([len(r["name"]) for r in results] + [len("TASK")])
+    header = "{:<{w}}  {:>10}  {:>10}  {:>10}  {:>10}  {:>6}".format(
+        "TASK", "workspace", "base_score", "solution", "sol_score", "RESULT", w=name_w)
     print(header)
     print("-" * len(header))
     for r in results:
@@ -138,8 +178,9 @@ def main():
         sol = "PASS(ok)" if r["sol_code"] == 0 else (
             "n/a" if r["sol_code"] is None else "FAIL(bad)")
         result = "PASS" if r["ok"] else "FAIL"
-        print("{:<{w}}  {:>13}  {:>13}  {:>6}".format(
-            r["name"], ws, sol, result, w=name_w))
+        print("{:<{w}}  {:>10}  {:>10}  {:>10}  {:>10}  {:>6}".format(
+            r["name"], ws, fmt_score(r["ws_score"]),
+            sol, fmt_score(r["sol_score"]), result, w=name_w))
 
     # Detail for any failures.
     for r in results:
@@ -158,8 +199,8 @@ def main():
 
     print()
     if all_ok:
-        print("All {} task(s) validated: workspace FAILs, solution PASSes.".format(
-            len(results)))
+        print("All {} task(s) validated: workspace FAILs, solution PASSes "
+              "(solution score 1.0).".format(len(results)))
         return 0
     print("Validation FAILED for one or more tasks.")
     return 1
