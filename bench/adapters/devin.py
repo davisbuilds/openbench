@@ -204,6 +204,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "completed": proc.returncode == 0,
             "error": None if proc.returncode == 0 else f"exit {proc.returncode}",
             "output_tail": combined[-2000:],
+            # Optional (ADAPTER_SPEC v1): full untruncated stdout+stderr for the
+            # runner's local transcript. LOCAL-ONLY; never published unscrubbed.
+            "full_output": combined,
             "tokens": tokens,
             "turns": turns,
             "cmd": cmd,
