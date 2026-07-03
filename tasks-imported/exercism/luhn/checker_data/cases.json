@@ -1,0 +1,178 @@
+[
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "1"
+    },
+    "expected": false,
+    "desc": "single digit strings can not be valid"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "0"
+    },
+    "expected": false,
+    "desc": "a single zero is invalid"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "059"
+    },
+    "expected": true,
+    "desc": "a simple valid SIN that remains valid if reversed"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "59"
+    },
+    "expected": true,
+    "desc": "a simple valid SIN that becomes invalid if reversed"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "055 444 285"
+    },
+    "expected": true,
+    "desc": "a valid Canadian SIN"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "055 444 286"
+    },
+    "expected": false,
+    "desc": "invalid Canadian SIN"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "8273 1232 7352 0569"
+    },
+    "expected": false,
+    "desc": "invalid credit card"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "1 2345 6789 1234 5678 9012"
+    },
+    "expected": false,
+    "desc": "invalid long number with an even remainder"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "1 2345 6789 1234 5678 9013"
+    },
+    "expected": false,
+    "desc": "invalid long number with a remainder divisible by 5"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "095 245 88"
+    },
+    "expected": true,
+    "desc": "valid number with an even number of digits"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "234 567 891 234"
+    },
+    "expected": true,
+    "desc": "valid number with an odd number of spaces"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "059a"
+    },
+    "expected": false,
+    "desc": "valid strings with a non-digit added at the end become invalid"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "055-444-285"
+    },
+    "expected": false,
+    "desc": "valid strings with punctuation included become invalid"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "055# 444$ 285"
+    },
+    "expected": false,
+    "desc": "valid strings with symbols included become invalid"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": " 0"
+    },
+    "expected": false,
+    "desc": "single zero with space is invalid"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "0000 0"
+    },
+    "expected": true,
+    "desc": "more than a single zero is valid"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "091"
+    },
+    "expected": true,
+    "desc": "input digit 9 is correctly converted to output digit 9"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "9999999999 9999999999 9999999999 9999999999"
+    },
+    "expected": true,
+    "desc": "very long input is valid"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "109"
+    },
+    "expected": true,
+    "desc": "valid luhn with an odd number of digits and non zero first digit"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "055b 444 285"
+    },
+    "expected": false,
+    "desc": "using ascii value for non-doubled non-digit isn't allowed"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": ":9"
+    },
+    "expected": false,
+    "desc": "using ascii value for doubled non-digit isn't allowed"
+  },
+  {
+    "fn": "valid",
+    "kwargs": {
+      "value": "59%59"
+    },
+    "expected": false,
+    "desc": "non-numeric, non-space char in the middle with a sum that's divisible by 10 isn't allowed"
+  }
+]

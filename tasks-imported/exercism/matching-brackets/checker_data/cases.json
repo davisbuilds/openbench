@@ -1,0 +1,162 @@
+[
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "[]"
+    },
+    "expected": true,
+    "desc": "paired square brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": ""
+    },
+    "expected": true,
+    "desc": "empty string"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "[["
+    },
+    "expected": false,
+    "desc": "unpaired brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "}{"
+    },
+    "expected": false,
+    "desc": "wrong ordered brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "{]"
+    },
+    "expected": false,
+    "desc": "wrong closing bracket"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "{ }"
+    },
+    "expected": true,
+    "desc": "paired with whitespace"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "{[])"
+    },
+    "expected": false,
+    "desc": "partially paired brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "{[]}"
+    },
+    "expected": true,
+    "desc": "simple nested brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "{}[]"
+    },
+    "expected": true,
+    "desc": "several paired brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "([{}({}[])])"
+    },
+    "expected": true,
+    "desc": "paired and nested brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "{[)][]}"
+    },
+    "expected": false,
+    "desc": "unopened closing brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "([{])"
+    },
+    "expected": false,
+    "desc": "unpaired and nested brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "[({]})"
+    },
+    "expected": false,
+    "desc": "paired and wrong nested brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "[({}])"
+    },
+    "expected": false,
+    "desc": "paired and wrong nested brackets but innermost are correct"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "{}["
+    },
+    "expected": false,
+    "desc": "paired and incomplete brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "[]]"
+    },
+    "expected": false,
+    "desc": "too many closing brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": ")()"
+    },
+    "expected": false,
+    "desc": "early unexpected brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "{)()"
+    },
+    "expected": false,
+    "desc": "early mismatched brackets"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "(((185 + 223.85) * 15) - 543)/2"
+    },
+    "expected": true,
+    "desc": "math expression"
+  },
+  {
+    "fn": "is_paired",
+    "kwargs": {
+      "value": "\\left(\\begin{array}{cc} \\frac{1}{3} & x\\\\ \\mathrm{e}^{x} &... x^2 \\end{array}\\right)"
+    },
+    "expected": true,
+    "desc": "complex latex expression"
+  }
+]

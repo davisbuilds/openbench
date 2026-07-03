@@ -1,0 +1,322 @@
+[
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 2,
+      "digits": [
+        1
+      ],
+      "output_base": 10
+    },
+    "expected": [
+      1
+    ],
+    "desc": "single bit one to decimal"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 2,
+      "digits": [
+        1,
+        0,
+        1
+      ],
+      "output_base": 10
+    },
+    "expected": [
+      5
+    ],
+    "desc": "binary to single decimal"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 10,
+      "digits": [
+        5
+      ],
+      "output_base": 2
+    },
+    "expected": [
+      1,
+      0,
+      1
+    ],
+    "desc": "single decimal to binary"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 2,
+      "digits": [
+        1,
+        0,
+        1,
+        0,
+        1,
+        0
+      ],
+      "output_base": 10
+    },
+    "expected": [
+      4,
+      2
+    ],
+    "desc": "binary to multiple decimal"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 10,
+      "digits": [
+        4,
+        2
+      ],
+      "output_base": 2
+    },
+    "expected": [
+      1,
+      0,
+      1,
+      0,
+      1,
+      0
+    ],
+    "desc": "decimal to binary"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 3,
+      "digits": [
+        1,
+        1,
+        2,
+        0
+      ],
+      "output_base": 16
+    },
+    "expected": [
+      2,
+      10
+    ],
+    "desc": "trinary to hexadecimal"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 16,
+      "digits": [
+        2,
+        10
+      ],
+      "output_base": 3
+    },
+    "expected": [
+      1,
+      1,
+      2,
+      0
+    ],
+    "desc": "hexadecimal to trinary"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 97,
+      "digits": [
+        3,
+        46,
+        60
+      ],
+      "output_base": 73
+    },
+    "expected": [
+      6,
+      10,
+      45
+    ],
+    "desc": "15-bit integer"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 2,
+      "digits": [],
+      "output_base": 10
+    },
+    "expected": [
+      0
+    ],
+    "desc": "empty list"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 10,
+      "digits": [
+        0
+      ],
+      "output_base": 2
+    },
+    "expected": [
+      0
+    ],
+    "desc": "single zero"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 10,
+      "digits": [
+        0,
+        0,
+        0
+      ],
+      "output_base": 2
+    },
+    "expected": [
+      0
+    ],
+    "desc": "multiple zeros"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 7,
+      "digits": [
+        0,
+        6,
+        0
+      ],
+      "output_base": 10
+    },
+    "expected": [
+      4,
+      2
+    ],
+    "desc": "leading zeros"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 1,
+      "digits": [
+        0
+      ],
+      "output_base": 10
+    },
+    "error": true,
+    "desc": "input base is one"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 0,
+      "digits": [],
+      "output_base": 10
+    },
+    "error": true,
+    "desc": "input base is zero"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": -2,
+      "digits": [
+        1
+      ],
+      "output_base": 10
+    },
+    "error": true,
+    "desc": "input base is negative"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 2,
+      "digits": [
+        1,
+        -1,
+        1,
+        0,
+        1,
+        0
+      ],
+      "output_base": 10
+    },
+    "error": true,
+    "desc": "negative digit"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 2,
+      "digits": [
+        1,
+        2,
+        1,
+        0,
+        1,
+        0
+      ],
+      "output_base": 10
+    },
+    "error": true,
+    "desc": "invalid positive digit"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 2,
+      "digits": [
+        1,
+        0,
+        1,
+        0,
+        1,
+        0
+      ],
+      "output_base": 1
+    },
+    "error": true,
+    "desc": "output base is one"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 10,
+      "digits": [
+        7
+      ],
+      "output_base": 0
+    },
+    "error": true,
+    "desc": "output base is zero"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": 2,
+      "digits": [
+        1
+      ],
+      "output_base": -7
+    },
+    "error": true,
+    "desc": "output base is negative"
+  },
+  {
+    "fn": "rebase",
+    "kwargs": {
+      "input_base": -2,
+      "digits": [
+        1
+      ],
+      "output_base": -7
+    },
+    "error": true,
+    "desc": "both bases are negative"
+  }
+]

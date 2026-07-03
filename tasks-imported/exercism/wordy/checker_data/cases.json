@@ -1,0 +1,218 @@
+[
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 5?"
+    },
+    "expected": 5,
+    "desc": "just a number"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 0?"
+    },
+    "expected": 0,
+    "desc": "just a zero"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is -123?"
+    },
+    "expected": -123,
+    "desc": "just a negative number"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 1 plus 1?"
+    },
+    "expected": 2,
+    "desc": "addition"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 0 plus 2?"
+    },
+    "expected": 2,
+    "desc": "addition with a left hand zero"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 3 plus 0?"
+    },
+    "expected": 3,
+    "desc": "addition with a right hand zero"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 53 plus 2?"
+    },
+    "expected": 55,
+    "desc": "more addition"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is -1 plus -10?"
+    },
+    "expected": -11,
+    "desc": "addition with negative numbers"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 123 plus 45678?"
+    },
+    "expected": 45801,
+    "desc": "large addition"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 4 minus -12?"
+    },
+    "expected": 16,
+    "desc": "subtraction"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is -3 multiplied by 25?"
+    },
+    "expected": -75,
+    "desc": "multiplication"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 33 divided by -3?"
+    },
+    "expected": -11,
+    "desc": "division"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 1 plus 1 plus 1?"
+    },
+    "expected": 3,
+    "desc": "multiple additions"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 1 plus 5 minus -2?"
+    },
+    "expected": 8,
+    "desc": "addition and subtraction"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 20 minus 4 minus 13?"
+    },
+    "expected": 3,
+    "desc": "multiple subtraction"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 17 minus 6 plus 3?"
+    },
+    "expected": 14,
+    "desc": "subtraction then addition"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 2 multiplied by -2 multiplied by 3?"
+    },
+    "expected": -12,
+    "desc": "multiple multiplication"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is -3 plus 7 multiplied by -2?"
+    },
+    "expected": -8,
+    "desc": "addition and multiplication"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is -12 divided by 2 divided by -3?"
+    },
+    "expected": 2,
+    "desc": "multiple division"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 52 cubed?"
+    },
+    "error": true,
+    "desc": "unknown operation"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "Who is the President of the United States?"
+    },
+    "error": true,
+    "desc": "Non math question"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 1 plus?"
+    },
+    "error": true,
+    "desc": "reject problem missing an operand"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is?"
+    },
+    "error": true,
+    "desc": "reject problem with no operands or operators"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 1 plus plus 2?"
+    },
+    "error": true,
+    "desc": "reject two operations in a row"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 1 plus 2 1?"
+    },
+    "error": true,
+    "desc": "reject two numbers in a row"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is 1 2 plus?"
+    },
+    "error": true,
+    "desc": "reject postfix notation"
+  },
+  {
+    "fn": "answer",
+    "kwargs": {
+      "question": "What is plus 1 2?"
+    },
+    "error": true,
+    "desc": "reject prefix notation"
+  }
+]

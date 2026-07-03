@@ -1,0 +1,10 @@
+{
+  "source": "exercism/problem-specifications",
+  "exercise": "matching-brackets",
+  "license": "MIT",
+  "canonical_data_url": "https://raw.githubusercontent.com/exercism/problem-specifications/main/exercises/matching-brackets/canonical-data.json",
+  "description_url": "https://raw.githubusercontent.com/exercism/problem-specifications/main/exercises/matching-brackets/instructions.md",
+  "upstream_dir": "https://github.com/exercism/problem-specifications/tree/main/exercises/matching-brackets",
+  "retrieved_utc": "2026-07-03T13:02:07+00:00",
+  "note": "Graded cases are derived from the upstream canonical data. Task prose and the reference solution are original OpenBench work, not copied from Exercism."
+}
