@@ -15,17 +15,21 @@ Notes / quirks:
 - The prompt is passed after `--` so a leading dash in an instruction can never
   be parsed as a flag.
 - cwd=workdir; the agent edits files there.
-- MODEL / REASONING EFFORT: devin DOES accept effort-pinned model ids, written
-  dash-separated: `gpt-5-5-medium` (confirmed from the TUI-persisted value
-  `agent.model` in ~/.config/devin/config.json, and verified live in `-p` mode).
-  So the canonical "gpt-5.5-medium" maps to "gpt-5-5-medium" and the medium
-  effort IS pinned. NOTE: the M3 dataset (2026-07-02) predates this finding and
-  ran with the unpinned "gpt-5.5", so it keeps its asterisk; M3.5 onward is
-  effort-pinned.
+- MODEL / REASONING-EFFORT CAVEAT (asterisk): devin's `--model` takes a bare
+  model id (e.g. "gpt-5.5") and exposes NO reasoning-effort selector, so the
+  canonical "gpt-5.5-medium" maps to plain "gpt-5.5" and effort is whatever
+  devin's default is — NOT independently pinnable. This is the one harness where
+  the "medium" pin is not verifiable; it carries an asterisk in the report.
+  (The dashed form "gpt-5-5-medium" is devin's TUI CONFIG representation, NOT a
+  valid CLI value — passing it errors "Unknown model". A dashed id briefly
+  appeared to work under an older devin build but no longer does; reverted.)
 - Uses the user's existing devin login as-is (read-only).
-- M4 OPEN MODELS (glm-*/deepseek-*/kimi-*) are NOT supported here: devin's
-  `--model` is a closed, account-bound menu with no custom-provider/base-URL
-  override, so open canonicals fall through to the unsupported-model dict.
+- M4 OPEN MODELS (glm-*/deepseek-*/kimi-*) are NOT wired here: devin's `--model`
+  is a closed, account-bound menu with no custom-provider/base-URL override, so
+  the open canonicals fall through to the unsupported-model dict. (devin's menu
+  DOES host some open models, e.g. glm-5.2 / kimi-k2.7 via devin's OWN serving —
+  a different serving path from our first-party endpoints, so intentionally kept
+  out of the M4 open panel.)
 - devin prints no usage on stdout, but `--export <path>` writes a JSON
   conversation dump (to an ABSOLUTE temp path OUTSIDE workdir, so the workspace
   the checker inspects stays clean). Token accounting (see ``_parse_export``):
@@ -47,10 +51,11 @@ NAME = "devin"
 _EXE = "devin"
 
 # canonical model name -> devin `--model` string.
-# devin accepts effort-pinned ids dash-separated (verified live + from the
-# TUI-persisted agent.model in ~/.config/devin/config.json).
+# devin has no CLI reasoning-effort selector; the canonical medium pin collapses
+# to plain "gpt-5.5" (the dashed "gpt-5-5-medium" is a TUI-config id, not a valid
+# CLI value -> "Unknown model"). Effort is unpinned -> asterisk in the report.
 MODELS = {
-    "gpt-5.5-medium": "gpt-5-5-medium",
+    "gpt-5.5-medium": "gpt-5.5",
 }
 
 
@@ -120,10 +125,17 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     fd, export_path = tempfile.mkstemp(prefix="devin_export_", suffix=".json")
     os.close(fd)
 
+    # devin's `--model` CLI values are broken on this account: `gpt-5.5` ->
+    # "/upgrade to access this model", `gpt-5-5-medium` (the TUI id) -> "Unknown
+    # model". Only the ACCOUNT DEFAULT (agent.model in ~/.config/devin/config.json,
+    # currently "gpt-5-5-medium" = GPT-5.5 medium, set via the TUI) is accessible,
+    # and it's used when --model is omitted. So we DON'T pass --model and run the
+    # account-configured model. Effort/model is pinned by the user's devin config,
+    # not our CLI -> keeps the reasoning-effort asterisk. MODELS still gates which
+    # canonical names this adapter accepts.
     cmd = [
         "devin", "-p",
         "--permission-mode", "accept-edits",
-        "--model", MODELS[model],
         "--export", export_path,
         "--", instruction,
     ]
