@@ -45,6 +45,33 @@ _EFFORT = {
     "gpt-5.5-medium": "medium",
 }
 
+# --- M4 open models (first-party pay-per-token, OpenAI-compatible) ----------
+# Wired via codex's `-c model_providers.<id>.*` CLI overrides ONLY (never the
+# user's ~/.codex/config.toml). wire_api="chat" because these vendors speak the
+# Chat Completions API, not codex's default Responses API (base_url gets
+# "/chat/completions" appended). Base URLs verified from official docs 2026-07.
+# Key-gated: run() returns a SETUP-NEEDED dict if the env key is unset.
+# (Duplicated across the pi/opencode/codex adapters so each stays self-contained
+#  under the runner's isolated importer.)
+OPEN_MODELS = {
+    "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
+    "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
+    "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek"},
+    "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi"},
+}
+
+
+def _unsupported(model):
+    known = list(MODELS) + list(OPEN_MODELS)
+    return {"completed": False, "error": f"unsupported-model: {model!r} (have {known})",
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+
+
+def _setup_needed(env_key, model):
+    return {"completed": False,
+            "error": f"SETUP-NEEDED: export {env_key} to use {model}",
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+
 
 def version():
     """Return the CLI version string (with binary path), or None on failure.
@@ -122,26 +149,44 @@ def _parse_json(stdout):
 
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
-    if model not in MODELS:
-        return {
-            "completed": False,
-            "error": f"unsupported-model: {model!r} (have {list(MODELS)})",
-            "output_tail": "",
-            "tokens": None,
-            "turns": None,
-            "cmd": None,
-        }
-
-    cmd = [
+    base = [
         "codex", "exec",
         "--json",
         "--skip-git-repo-check",
         "-C", workdir,
         "-s", "workspace-write",
-        "-m", MODELS[model],
-        "-c", f'model_reasoning_effort="{_EFFORT[model]}"',
-        instruction,
     ]
+    if model in MODELS:
+        cmd = base + [
+            "-m", MODELS[model],
+            "-c", f'model_reasoning_effort="{_EFFORT[model]}"',
+            instruction,
+        ]
+    elif model in OPEN_MODELS:
+        spec = OPEN_MODELS[model]
+        if not os.environ.get(spec["env_key"]):
+            return _setup_needed(spec["env_key"], model)
+        prov = spec["provider"]
+        # NOTE: codex 0.142.x REMOVED wire_api="chat" — custom providers must use
+        # the Responses API ("responses", the only accepted value). CONFIRMED via
+        # live smoke (2026-07-03): codex authenticates + lists /models fine, but
+        # the completion FAILS because Z.ai / DeepSeek / Moonshot only serve
+        # /chat/completions, not /responses. pi and opencode (chat-completions)
+        # solve the same models. So codex open-model support is effectively
+        # BLOCKED for these chat-only providers; the wiring is kept for the day
+        # codex restores chat-wire (or a provider adds /responses). See
+        # discussions/7782. Use pi/opencode for the M4 open panel.
+        cmd = base + [
+            "-c", f'model_providers.{prov}.name="{spec["display"]}"',
+            "-c", f'model_providers.{prov}.base_url="{spec["base_url"]}"',
+            "-c", f'model_providers.{prov}.env_key="{spec["env_key"]}"',
+            "-c", f'model_providers.{prov}.wire_api="responses"',
+            "-c", f'model_provider="{prov}"',
+            "-m", spec["model_id"],
+            instruction,
+        ]
+    else:
+        return _unsupported(model)
 
     try:
         proc = subprocess.run(
