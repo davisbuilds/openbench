@@ -192,3 +192,97 @@ fast and cheap.
   unresolved. Cross-day/-machine repeats and more trials would tighten it.
 - **M3 ↔ M3.5 wall-times aren't directly comparable** (different trial counts and
   run day); compare *within* M3.5.
+
+---
+
+# M4.5: harder tasks — frontier harnesses still saturate; efficiency separates
+
+M4.5 swapped the three trivial M3 tasks for three **harder, partial-credit** ones
+(`make-ci-green` — a 6-bug CI fix; `add-feature` — a config parser with an
+`@include` directive; `misleading-error` — a traceback that points at the wrong
+file), and re-ran the matrix (5 harnesses × 3 tasks × 3 trials, `--timeout 900`).
+
+**The correctness ceiling held.** The four clean harnesses — `codex`, `pi`,
+`opencode`, `cursor` — each scored **9/9, mean-score 1.0**. Correctness separation
+was **not** achieved at the `gpt-5.5-medium` tier; the harder tasks were still too
+easy to tell frontier harnesses apart. A calibration pilot (pi + cursor × 3 tasks
+× 2 trials) **predicted this**: every pilot cell scored 1.0 — the 20–80% target
+band was missed *high*. (`devin` is excluded from all M4.5 results as flaky — see
+the subsection below.) So, as in M3/M3.5, the discriminating signal is efficiency.
+
+## Efficiency on non-trivial tasks (the clean four)
+
+These tasks are a far better efficiency probe than M3's toy tasks — `add-feature`
+and `make-ci-green` are multi-file, multi-step. Per harness (n=9), mean-score 1.0
+for all four:
+
+| Harness   | mean_s (95% CI)    | tokens/solve (95% CI)   | turns/solve |
+|-----------|--------------------|-------------------------|-------------|
+| pi        | 45.6  [27.5, 63.6] | 17,494  [11.1k, 23.9k]  | 10.4        |
+| cursor    | 48.8  [35.2, 62.5] | 21,370  [13.9k, 28.8k]  | —           |
+| codex\*   | 108.4 [72.9, 143.9]| 75,778  [56.6k, 95.0k]  | 1.0         |
+| opencode  | 175.2 [103.5, 247.0]| 44,472 [33.9k, 55.0k]  | 15.0        |
+
+`*` codex tokens are a **fresh basis** here (adapter now parses `--json` usage),
+so this column is **not comparable** with M3.5's codex figure. `cursor` reports no
+turns by design.
+
+**Time vs token rank diverge again:**
+
+```
+TIME  (fast -> slow): pi < cursor < codex < opencode
+TOKEN (lean -> heavy): pi < cursor < opencode < codex
+```
+
+`pi` and `cursor` are the efficient pair on both axes (fastest and leanest; their
+token intervals overlap, so they're not cleanly separable from each other). The
+split is at the top: **`opencode` is the slowest** (175 s, and with a wide CI —
+these harder tasks stretch it far beyond its 63 s M3.5 figure) **yet spends fewer
+tokens than `codex`**, which is quicker on the clock but the **heaviest on tokens**
+(75.8 k/solve, ~4× pi). By token CI, the robust ordering is `{pi, cursor} <
+opencode < codex` — codex clearly heaviest, opencode clearly the middle. Wall-clock
+and token-tax remain genuinely different efficiency axes.
+
+## This 100% table is the frontier baseline for M4
+
+The value of a saturated correctness table is as a **baseline**: the same three
+tasks, same scoring, will be run against open models (GLM-5.2, DeepSeek, Kimi) in
+M4. Those weaker models are much less likely to saturate, so the **partial-credit
+scores should finally bite there** — and because the tasks are identical, the open
+models' scores are directly comparable to this frontier 100%. M4.5's "failure" to
+separate on correctness is the **setup** for the M4 experiment, not a dead end.
+
+## devin — FLAKY, data unreliable, excluded from all rankings
+
+`devin`'s block is retained in the raw dataset for honesty but is **excluded from
+every M4.5 number above.** After an initial adapter regression (an invalid
+effort-pinned CLI model id → 0/9 instant fails, caught by the anomaly scan and
+fixed in 1ba8c80), the re-run was still not trustworthy — of 9 cells:
+
+| # | pattern | detail |
+|---|---------|--------|
+| 5 | clean pass | score 1.0, real tokens/turns |
+| 2 | **900 s hang** | ran to the timeout, killed; checker passed (edits done pre-hang) but tokens=None — same persistent-process pipe issue as the M3 docker hang |
+| 1 | exit-1 but passed | nonzero exit, work done |
+| 1 | **intermittent instant exit-1** | 0.99 s, no attempt, score 0 — the fix reduced but didn't eliminate the fast-fail |
+
+Its token counts are also internally inconsistent by ~20× (make-ci-green 716k vs
+33k on the *same* task), making its tax unusable. **A plausible contributor is
+service-side instability**: devin's account model access changed mid-evening (an
+`/upgrade` wall appeared between the M3.5 and M4.5 runs); this data can't
+distinguish adapter flakiness from service flakiness. devin also carries the
+restored unpinned-effort asterisk (its model is config-pinned, not CLI-pinned).
+A daytime investigation is queued.
+
+## What would change the picture
+
+- **Harder still.** These tasks don't separate frontier harnesses on correctness;
+  M4.5 confirms the ceiling is higher than a 6-bug fix. The next hardening pass
+  needs genuinely longer-horizon or partial-by-design tasks — with the **risk of
+  over-hardening** (tasks so hard everyone floors are as uninformative as tasks
+  everyone solves; aim for the 20–80% band, verified by pilot).
+- **Open models (M4).** The highest-value next step: the same tasks against weaker
+  models, where the partial-credit scores should finally discriminate.
+- **A reliable devin harness.** Fix the intermittent fast-fail, the 900 s hangs,
+  and the token accounting — and settle the account/service state — before devin's
+  numbers can be trusted.
