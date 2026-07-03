@@ -35,17 +35,72 @@ DEFAULT_ADAPTERS_DIR = os.path.join(HERE, "adapters")
 DEFAULT_TASKS_DIR = os.path.join(REPO, "tasks")
 DEFAULT_MODEL = "gpt-5.5-medium"
 
-# Ordered field list for each results row.
+# Ordered field list for each results row. ``score`` and ``harness_version`` are
+# appended last so older logs that predate them stay readable (report derives a
+# score from ``success`` when the field is absent).
 ROW_FIELDS = (
     "run_id", "ts_iso", "harness", "model", "task", "trial",
     "success", "completed", "error", "wall_time_s", "tokens", "turns",
-    "cmd", "checker_exit", "exec_mode",
+    "cmd", "checker_exit", "exec_mode", "score", "harness_version",
 )
 
 
 def make_run_id(harness, task, model, trial):
     """Deterministic identity for a single benchmark cell."""
     return f"{harness}:{task}:{model}:trial{trial}"
+
+
+def parse_score(stdout):
+    """Return the partial-credit score from a checker's stdout, or None.
+
+    A checker MAY print ``SCORE: <float>`` lines; the **last parseable** one
+    wins. Values are clamped to [0.0, 1.0]. A malformed value (not a float) is
+    ignored as if absent, so a trailing garbage line can't erase an earlier
+    valid score. Returns None when no parseable SCORE line is present.
+    """
+    score = None
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("SCORE:"):
+            continue
+        try:
+            val = float(line[len("SCORE:"):].strip())
+        except ValueError:
+            continue  # malformed -> treat this line as absent
+        score = max(0.0, min(1.0, val))
+    return score
+
+
+def _extract_version(module):
+    """Call a module's optional ``version() -> str | None`` defensively.
+
+    Returns the string it yields, or None if the function is missing, returns a
+    non-string, or raises. Never propagates an adapter's error.
+    """
+    fn = getattr(module, "version", None)
+    if not callable(fn):
+        return None
+    try:
+        v = fn()
+    except Exception:  # noqa: BLE001 - a broken version() must not fail the run
+        return None
+    return v if isinstance(v, str) else None
+
+
+def probe_version(harness, adapters_dir):
+    """Best-effort harness version string for stamping into rows.
+
+    The built-in ``null`` control reports ``"builtin"``. Real harnesses import
+    their adapter and call its optional ``version()``; any failure yields None.
+    Callers should cache this (one probe per harness per invocation).
+    """
+    if harness == "null":
+        return "builtin"
+    try:
+        module = load_adapter(adapters_dir, harness)
+    except Exception:  # noqa: BLE001
+        return None
+    return _extract_version(module)
 
 
 def null_run(instruction, workdir, model, timeout_s):
@@ -120,9 +175,10 @@ def read_instruction(task_dir):
 def run_checker(task_dir, workdir, timeout_s):
     """Run ``<task_dir>/checker.sh`` with cwd=workdir and TASK_DIR set.
 
-    Returns the checker's integer exit code, or the string ``"timeout"`` if the
-    checker exceeds ``timeout_s`` seconds. The checker decides task success
-    (exit 0 == success); the adapter never does.
+    Returns ``(checker_exit, raw_score)`` where ``checker_exit`` is the integer
+    exit code (or the string ``"timeout"``) and ``raw_score`` is the float from
+    the checker's last parseable ``SCORE:`` line, or None if it printed none.
+    The checker decides task success (exit 0 == success); the adapter never does.
     """
     checker = os.path.join(task_dir, "checker.sh")
     env = dict(os.environ)
@@ -137,8 +193,8 @@ def run_checker(task_dir, workdir, timeout_s):
             timeout=timeout_s,
         )
     except subprocess.TimeoutExpired:
-        return "timeout"
-    return proc.returncode
+        return "timeout", None
+    return proc.returncode, parse_score(proc.stdout)
 
 
 def load_existing_run_ids(results_path):
@@ -171,7 +227,7 @@ def append_row(results_path, row):
 
 def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              checker_timeout_s, exec_mode="local",
-             docker_image=None, docker_fallback=True):
+             docker_image=None, docker_fallback=True, harness_version=None):
     """Execute one (task, harness, trial) cell and return its results row.
 
     Copies the task workspace to a temp dir, invokes the adapter (or the
@@ -179,6 +235,11 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     checker failures are recorded in the row rather than raised. A checker that
     exceeds ``checker_timeout_s`` records ``checker_exit="timeout"``,
     ``success=false``.
+
+    Scoring: exit 0 => success=true, score=1.0 (a SCORE line can't lower a pass).
+    Nonzero exit => success=false, score = the checker's SCORE line if any, else
+    0.0. Timeout => score 0.0. ``harness_version`` (probed once per harness by
+    the caller) is stamped verbatim.
     """
     run_id = make_run_id(harness, task, model, trial)
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
@@ -200,6 +261,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "cmd": None,
         "checker_exit": None,
         "exec_mode": None,
+        "score": 0.0,
+        "harness_version": harness_version,
     }
 
     workdir = tempfile.mkdtemp(prefix=f"bench_{harness}_{task}_")
@@ -232,9 +295,9 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["turns"] = result.get("turns")
         row["cmd"] = result.get("cmd")
 
-        # The checker is the sole authority on task success.
+        # The checker is the sole authority on task success (and score).
         try:
-            checker_exit = run_checker(task_dir, workdir, checker_timeout_s)
+            checker_exit, raw_score = run_checker(task_dir, workdir, checker_timeout_s)
         except Exception:  # noqa: BLE001
             row["checker_exit"] = None
             if row["error"] is None:
@@ -242,6 +305,10 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             return row
         row["checker_exit"] = checker_exit
         row["success"] = (checker_exit == 0)
+        # exit 0 is a full pass (score 1.0) regardless of any SCORE line; a
+        # nonzero exit takes the SCORE line for partial credit, else 0.0.
+        row["score"] = 1.0 if checker_exit == 0 else (
+            raw_score if raw_score is not None else 0.0)
         return row
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -288,6 +355,10 @@ def main(argv=None):
 
     existing = set() if args.force else load_existing_run_ids(args.results_path)
 
+    # Probe each harness's version at most once per invocation (a version()
+    # probe may spawn a subprocess), then stamp the cached value into every row.
+    versions = {h: probe_version(h, args.adapters_dir) for h in harnesses}
+
     ran = 0
     skipped = 0
     for harness in harnesses:
@@ -303,12 +374,13 @@ def main(argv=None):
                     args.tasks_dir, args.adapters_dir, args.checker_timeout,
                     exec_mode=args.exec_mode, docker_image=args.docker_image,
                     docker_fallback=args.docker_fallback,
+                    harness_version=versions.get(harness),
                 )
                 append_row(args.results_path, row)
                 existing.add(run_id)
                 ran += 1
                 status = "ok" if row["success"] else "fail"
-                print(f"RUN  {run_id} success={row['success']} "
+                print(f"RUN  {run_id} success={row['success']} score={row['score']} "
                       f"completed={row['completed']} checker_exit={row['checker_exit']} "
                       f"exec={row['exec_mode']} [{status}]")
 

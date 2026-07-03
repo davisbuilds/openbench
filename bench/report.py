@@ -72,6 +72,8 @@ def aggregate(rows):
         {
           "per_task":    {task: [successes, n]},
           "succ": int, "n": int,        # solves and total cells
+          "scores":      [float, ...],  # per-cell score (derived from success
+                                        #   when the row predates the field)
           "wall_times":  [float, ...],  # per-cell wall-clock seconds
           "token_vals":  [int, ...],    # per-cell tokens, non-null only
           "turn_vals":   [int, ...],    # per-cell turns, non-null only
@@ -89,7 +91,7 @@ def aggregate(rows):
         if harness is None or task is None:
             continue
         if harness not in stats:
-            stats[harness] = {"per_task": {}, "succ": 0, "n": 0,
+            stats[harness] = {"per_task": {}, "succ": 0, "n": 0, "scores": [],
                               "wall_times": [], "token_vals": [], "turn_vals": []}
             harnesses.append(harness)
         if task not in tasks:
@@ -103,6 +105,13 @@ def aggregate(rows):
         if success:
             pt[0] += 1
             st["succ"] += 1
+
+        # Score is the partial-credit signal, averaged over all trials incl.
+        # failures. Rows predating the field derive it from success (1.0/0.0).
+        sc = row.get("score")
+        if not isinstance(sc, (int, float)) or isinstance(sc, bool):
+            sc = 1.0 if success else 0.0
+        st["scores"].append(float(sc))
 
         wt = row.get("wall_time_s")
         if isinstance(wt, (int, float)) and not isinstance(wt, bool):
@@ -190,7 +199,7 @@ def format_table(harnesses, tasks, stats):
     rather than describing the harness; ``turns`` (mean turns per cell) is added
     alongside. Both stay ``-`` when the adapter reports no data.
     """
-    headers = ["harness"] + tasks + ["overall", "wilson95", "mean_s", "tok/slv", "turns"]
+    headers = ["harness"] + tasks + ["overall", "wilson95", "mscore", "mean_s", "tok/slv", "turns"]
     rows_text = []
     for harness in harnesses:
         st = stats[harness]
@@ -204,6 +213,8 @@ def format_table(harnesses, tasks, stats):
         lo, hi = wilson_ci(succ, n)
         cells.append(f"{succ}/{n} ({rate:.0%})" if n else "-")
         cells.append(f"[{lo:.3f}, {hi:.3f}]")
+        ms = mean(st["scores"])
+        cells.append("-" if ms is None else f"{ms:.2f}")
         cells.append(_fmt_secs(mean(st["wall_times"])))
         cells.append(_fmt_tokens(tokens_per_solve(st)))
         cells.append(_fmt_turns(mean(st["turn_vals"])))
@@ -217,7 +228,7 @@ def format_efficiency(harnesses, stats):
     Columns: success (x/n), rate, Wilson 95% CI, mean_s with its 95% CI
     half-width, tokens-per-solve, turns-per-solve.
     """
-    headers = ["harness", "success", "rate", "wilson95", "mean_s", "tok/slv", "turns/slv"]
+    headers = ["harness", "success", "rate", "wilson95", "mscore", "mean_s", "tok/slv", "turns/slv"]
     rows_text = []
     for harness in harnesses:
         st = stats[harness]
@@ -227,11 +238,13 @@ def format_efficiency(harnesses, stats):
         m = mean(st["wall_times"])
         hw = ci_halfwidth(st["wall_times"])
         mean_s = "-" if m is None else (f"{m:.2f} ±{hw:.2f}" if hw is not None else f"{m:.2f}")
+        ms = mean(st["scores"])
         rows_text.append([
             harness,
             f"{succ}/{n}" if n else "-",
             f"{rate:.0%}" if n else "-",
             f"[{lo:.3f}, {hi:.3f}]",
+            "-" if ms is None else f"{ms:.2f}",
             mean_s,
             _fmt_tokens(tokens_per_solve(st)),
             _fmt_turns(turns_per_solve(st)),

@@ -112,6 +112,23 @@ Contract the runner honors for every cell:
 - Instructions never mention the checker, the solution, or that this is a
   benchmark.
 
+#### Partial credit (the `SCORE:` contract)
+
+A checker exit code is binary, but a checker MAY also emit a **`SCORE:`** line to
+grade partial progress. The rules the runner applies:
+
+- A checker may print `SCORE: <float 0.0–1.0>` to stdout. The **last parseable**
+  such line wins; a malformed value is ignored (as if that line were absent), and
+  values are clamped to `[0.0, 1.0]`.
+- **Exit 0 is always a full pass** — `success = true` and `score` is coerced to
+  `1.0` regardless of any `SCORE:` line.
+- **Nonzero exit** — `success = false`, and `score` is the checker's `SCORE:`
+  value if present, else `0.0`. This is how a task awards partial credit.
+- A checker **timeout** records `score = 0.0`.
+
+`SCORE:` is optional and backward compatible: a checker that never prints one
+behaves exactly as before (pass → 1.0, fail → 0.0).
+
 ### Validation discipline
 
 `validate_tasks.py` enforces that each checker is correctly polarized:
@@ -176,10 +193,17 @@ fields:
 | `cmd`          | the command line executed (for auditability)                            |
 | `checker_exit` | checker's integer exit code, or `"timeout"`                            |
 | `exec_mode`    | `local` or `docker` (what actually ran, after any fallback)             |
+| `score`        | graded score in `[0.0, 1.0]` (see the `SCORE:` contract); `1.0`/`0.0` for a plain pass/fail |
+| `harness_version` | version string from the adapter's optional `version()`, `"builtin"` for `null`, else `null` |
+
+Rows written before `score`/`harness_version` existed simply omit them; the
+report derives a score from `success` (`1.0`/`0.0`) for those.
 
 `bench/report.py` reads that log and prints one row per harness: per-task
-success (`x/n`), overall success with a Wilson 95% interval, mean wall-clock
-time, and total reported tokens. `--results-path` points it at an alternate log.
+success (`x/n`), overall success with a Wilson 95% interval, **mean score**
+(averaged over all trials, the discriminating number for partial-credit tasks),
+mean wall-clock time, tokens-per-solve, and mean turns. `--efficiency` prints a
+per-harness efficiency summary; `--results-path` points it at an alternate log.
 
 ### Reading the Wilson interval
 
