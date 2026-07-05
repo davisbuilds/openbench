@@ -8,7 +8,10 @@ Headless invocation:
 Notes / quirks:
 - `codex exec` is fully non-interactive; there are no approval prompts to
   suppress. `-s workspace-write` is the least-privileged sandbox that still
-  lets the agent edit files inside the workspace root.
+  lets the agent edit files inside the workspace root. In the docker lane
+  (BENCH_IN_CONTAINER=1) it is replaced by
+  `--dangerously-bypass-approvals-and-sandbox`: bwrap cannot nest inside the
+  bench container, and the disposable container is the external sandbox.
 - The runner hands us a disposable temp dir that is usually NOT a git repo,
   so `--skip-git-repo-check` is required or codex refuses to start.
 - Reasoning effort is set via a config override, not the model string. The
@@ -163,13 +166,19 @@ def _parse_json(stdout):
 
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
+    if os.environ.get("BENCH_IN_CONTAINER"):
+        # codex's own sandbox (bwrap) needs user namespaces and cannot nest
+        # inside the bench container; the disposable container IS the external
+        # sandbox, which is the documented intent of this flag.
+        sandbox = ["--dangerously-bypass-approvals-and-sandbox"]
+    else:
+        sandbox = ["-s", "workspace-write"]
     base = [
         "codex", "exec",
         "--json",
         "--skip-git-repo-check",
         "-C", workdir,
-        "-s", "workspace-write",
-    ]
+    ] + sandbox
     if model in MODELS:
         cmd = base + [
             "-m", MODELS[model],
