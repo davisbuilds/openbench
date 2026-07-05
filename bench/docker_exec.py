@@ -56,6 +56,11 @@ AUTH_MOUNTS = {
     "null": [],
 }
 
+# Open-model API keys forwarded into the container when set on the host.
+# Passed as bare ``-e VAR`` (no value) so docker reads them from the client's
+# environment and the secret never appears in argv or logged commands.
+API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY")
+
 
 class DockerUnavailable(Exception):
     """Raised when the daemon/image is unavailable and the caller should fall back."""
@@ -126,6 +131,9 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-w", "/work",
         "-e", f"HOME={CONTAINER_HOME}",
     ]
+    for var in API_KEY_PASSTHROUGH:
+        if os.environ.get(var):
+            cmd += ["-e", var]
     cmd += _auth_mount_args(harness)
     if extra_docker_args:
         cmd += list(extra_docker_args)
