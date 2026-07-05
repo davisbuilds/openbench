@@ -82,7 +82,11 @@ class TestBuildDockerCmd(unittest.TestCase):
         # Use a fake HOME so the test is deterministic regardless of the host.
         home = tempfile.mkdtemp(prefix="fake_home_")
         try:
+            # codex mounts individual auth files, never the whole ~/.codex
+            # (which also holds multi-GB worktrees/sessions).
             os.makedirs(os.path.join(home, ".codex"))
+            with open(os.path.join(home, ".codex", "auth.json"), "w") as fh:
+                fh.write("{}")
             orig = os.path.expanduser
             os.path.expanduser = lambda p: home if p == "~" else orig(p)
             try:
@@ -90,9 +94,13 @@ class TestBuildDockerCmd(unittest.TestCase):
             finally:
                 os.path.expanduser = orig
             self.assertIn("-v", args)
-            self.assertTrue(any(a.endswith(".codex:/bench/auth/.codex:ro")
-                                for a in args),
-                            f"expected read-only staged .codex mount, got {args}")
+            self.assertTrue(
+                any(a.endswith(".codex/auth.json:/bench/auth/.codex/auth.json:ro")
+                    for a in args),
+                f"expected read-only staged auth.json mount, got {args}")
+            self.assertFalse(
+                any(a.endswith(".codex:/bench/auth/.codex:ro") for a in args),
+                "must not mount the whole ~/.codex dir")
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)

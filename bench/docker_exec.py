@@ -49,7 +49,11 @@ _TIMEOUT_GRACE_S = 60
 CONTAINER_HOME = "/root"
 AUTH_STAGING = "/bench/auth"
 AUTH_MOUNTS = {
-    "codex": [".codex"],
+    # codex: mount ONLY the auth/config files. ~/.codex also holds worktrees,
+    # sessions, and sqlite logs (54 GB observed); mounting the whole dir made
+    # entry.py's staging copy run for 13+ minutes and crash on transient
+    # session tmp files vanishing mid-copy.
+    "codex": [".codex/auth.json", ".codex/config.toml"],
     "pi": [".pi"],
     "opencode": [".local/share/opencode", ".config/opencode"],
     "cursor": [".cursor"],

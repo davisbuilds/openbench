@@ -120,9 +120,8 @@ def main(argv):
     # here) can rely on the container as the external sandbox instead.
     os.environ["BENCH_IN_CONTAINER"] = "1"
 
-    _stage_auth()
-
     try:
+        _stage_auth()
         if harness == "null":
             result = _null_run(instruction, WORKDIR, model, timeout_s)
         else:
