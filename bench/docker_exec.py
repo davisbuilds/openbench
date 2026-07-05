@@ -28,6 +28,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -90,15 +91,25 @@ def image_exists(image):
     return proc.returncode == 0
 
 
-def preflight(image):
-    """Raise ``DockerUnavailable`` with a specific reason if we can't run in docker."""
+def preflight(image, retries=3, delay_s=5):
+    """Raise ``DockerUnavailable`` with a specific reason if we can't run in docker.
+
+    Retries a few times before giving up: Docker Desktop's resource saver
+    pauses the VM between cells, and the first probe after a pause can fail
+    transiently even though the daemon and image are fine (observed 2026-07-05:
+    a 15-cell segment burned every cell in ~7s on a paused engine).
+    """
+    for attempt in range(retries):
+        if daemon_running() and image_exists(image):
+            return
+        if attempt < retries - 1:
+            time.sleep(delay_s)
     if not daemon_running():
         raise DockerUnavailable(
             "docker daemon not reachable (is Docker Desktop running?)")
-    if not image_exists(image):
-        raise DockerUnavailable(
-            f"image {image!r} not found (build it: "
-            f"docker build -t {image} {DOCKERFILE_DIR})")
+    raise DockerUnavailable(
+        f"image {image!r} not found (build it: "
+        f"docker build -t {image} {DOCKERFILE_DIR})")
 
 
 def _auth_mount_args(harness):

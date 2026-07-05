@@ -118,7 +118,8 @@ class TestPreflight(unittest.TestCase):
         docker_exec.daemon_running = lambda: False
         try:
             with self.assertRaises(docker_exec.DockerUnavailable):
-                docker_exec.preflight("openbench-harness:latest")
+                docker_exec.preflight("openbench-harness:latest",
+                                      retries=2, delay_s=0)
         finally:
             docker_exec.daemon_running = orig
 
@@ -128,7 +129,7 @@ class TestPreflight(unittest.TestCase):
         docker_exec.image_exists = lambda image: False
         try:
             with self.assertRaises(docker_exec.DockerUnavailable):
-                docker_exec.preflight("nope:latest")
+                docker_exec.preflight("nope:latest", retries=2, delay_s=0)
         finally:
             docker_exec.daemon_running, docker_exec.image_exists = od, oi
 
