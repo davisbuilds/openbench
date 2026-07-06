@@ -58,6 +58,10 @@ AUTH_MOUNTS = {
     "opencode": [".local/share/opencode", ".config/opencode"],
     "cursor": [".cursor"],
     "devin": [".config/devin"],
+    # claude runs OPEN models only (vendor keys via env, forwarded below). Mount
+    # NOTHING: never expose ~/.claude so a container run can't touch the user's
+    # Anthropic subscription. The API key is passed via API_KEY_PASSTHROUGH.
+    "claude": [],
     "null": [],
 }
 
