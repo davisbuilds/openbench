@@ -415,20 +415,20 @@ tells us where difficulty does *not* come from.
 | 2 | taskflow | 7,809 lines | 7 modules seeded with logic defects — masked reveal-chains (fix one, the next appears) + cross-module misdirection | **0.2800** (7/25 tests) | **1.00 / 1.00 / 1.00** | 78, 89, 97 |
 | 2 | webcore | 7,111 lines | 10-clause feature spec, **zero visible tests**, hidden 43-test suite (19 regression + 24 feature), regression-gated scoring (`0.3·[all reg pass] + 0.7·feature-fraction`) | **0.3000** (19/19 reg, 0/24 feat) | **1.00 / 0.9708 / 1.00** (mean 0.990) | 354, 410, 495 |
 
-- **Round 1** (three small original tasks, source
-  [`results/pilot-tierA-v2.jsonl`](results/pilot-tierA-v2.jsonl)): the gate probe
-  swept **6/6 cells at 1.00**. (The same tasks *do* separate a weaker model —
-  `glm-4.7-flash` scored 1.0/0.0 on formula-engine and timed out on
+- **Round 1** (three small original tasks; source scratch log
+  `results/pilot-tierA-v2.jsonl`, not committed because `results/` is local-only):
+  the gate probe swept **6/6 cells at 1.00**. (The same tasks *do* separate a
+  weaker model — `glm-4.7-flash` scored 1.0/0.0 on formula-engine and timed out on
   kv-transactions — so the factory discriminates in the open/mid band, just not at
   the frontier.)
-- **Round 2** (two structurally-hardened candidates, source
-  [`results/gate2-round2.jsonl`](results/gate2-round2.jsonl)): both baselines land
-  in the target band (0.28, 0.30), confirming the scoring discriminates a broken
-  start-state — yet the probe swept **taskflow 1.00×3** and effectively swept
-  **webcore (mean 0.990)**, the single 0.9708 trial (one of 24 feature tests
-  missed once) the only sub-1.0 cell across the six Round-2 trials. Baselines
-  and test counts above were re-derived by running each checker against its
-  pristine workspace.
+- **Round 2** (two structurally-hardened candidates; source scratch log
+  `results/gate2-round2.jsonl`, not committed because `results/` is local-only):
+  both baselines land in the target band (0.28, 0.30), confirming the scoring
+  discriminates a broken start-state — yet the probe swept **taskflow 1.00×3** and
+  effectively swept **webcore (mean 0.990)**, the single 0.9708 trial (one of 24
+  feature tests missed once) the only sub-1.0 cell across the six Round-2 trials.
+  Baselines and test counts above were re-derived by running each checker against
+  its pristine workspace.
 
 ## Which hardening levers resisted (and none held)
 
