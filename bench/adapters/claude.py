@@ -11,7 +11,8 @@ Headless invocation (per open model):
     ANTHROPIC_BASE_URL=<vendor anthropic endpoint>
     ANTHROPIC_API_KEY=<vendor key>            # sent as the x-api-key header
     claude -p --bare --output-format json --model <vendor model id> \
-           --dangerously-skip-permissions --no-session-persistence <instruction>
+           --effort medium --dangerously-skip-permissions \
+           --no-session-persistence <instruction>
 
 Billing-safety (why open models can never touch the Anthropic subscription):
 - ``ANTHROPIC_BASE_URL`` physically points every request at the vendor host, so
@@ -71,11 +72,17 @@ MODELS = {}
 # all three endpoints accept (verified live 2026-07-06). Model ids are the
 # vendors' native ids on the /anthropic route (verified live). Key-gated in
 # run() (SETUP-NEEDED dict if the env key is unset).
+#
+# Thinking parity: Claude Code exposes `--effort`; pass medium for every open
+# model. Vendors that do not expose granular levels on their Anthropic-compatible
+# route clamp this to the route's thinking-on default. Kimi uses Moonshot's
+# Anthropic-compatible endpoint, not the OpenAI-compatible URL, so thinking
+# blocks are enabled through Claude Code's Anthropic request shape.
 OPEN_MODELS = {
-    "glm-5.2":           {"model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/anthropic",     "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
-    "glm-4.7-flash":     {"model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/anthropic",     "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
-    "deepseek-v4-flash": {"model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com/anthropic", "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek"},
-    "kimi-k2.7-code":    {"model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/anthropic",  "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi"},
+    "glm-5.2":           {"model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/anthropic",     "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "effort": "medium"},
+    "glm-4.7-flash":     {"model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/anthropic",     "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "effort": "medium"},
+    "deepseek-v4-flash": {"model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com/anthropic", "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek",      "effort": "medium"},
+    "kimi-k2.7-code":    {"model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/anthropic",  "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "effort": "medium"},
 }
 
 
@@ -274,6 +281,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "--bare",
             "--output-format", "json",
             "--model", spec["model_id"],
+            "--effort", spec["effort"],
             "--dangerously-skip-permissions",
             "--no-session-persistence",
             instruction,

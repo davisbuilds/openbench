@@ -80,13 +80,18 @@ _EFFORT = {
 #
 # Base URLs below are documentation/provenance only; the adapter talks to the
 # bridge, which is configured with these same vendor endpoints.
+#
+# Thinking parity: the adapter requests `model_reasoning_effort="medium"` for
+# every open model. The LiteLLM bridge hook normalizes that to the closest
+# vendor thinking-on setting (GLM-5.2 medium -> Z.ai high; otherwise the
+# vendor's thinking-on default when levels are not exposed on the bridge route).
 # (Duplicated across the pi/opencode/codex adapters so each stays self-contained
 #  under the runner's isolated importer.)
 OPEN_MODELS = {
-    "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
-    "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
-    "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek"},
-    "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi"},
+    "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "effort": "medium"},
+    "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "effort": "medium"},
+    "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek",      "effort": "medium"},
+    "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "effort": "medium"},
 }
 
 # Host-side bridge (LiteLLM proxy). Port must match bench/openmodel_bridge.sh
@@ -268,6 +273,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "-c", f'model_providers.{prov}.env_key="{spec["env_key"]}"',
             "-c", f'model_providers.{prov}.wire_api="responses"',
             "-c", f'model_provider="{prov}"',
+            "-c", f'model_reasoning_effort="{spec["effort"]}"',
             "-m", spec["model_id"],
             instruction,
         ]

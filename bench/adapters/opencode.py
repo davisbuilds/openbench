@@ -50,12 +50,17 @@ _VARIANT = {
 # JSON env var) so nothing touches the user's opencode config and the temp
 # workspace stays clean. apiKey uses opencode's {env:VAR} interpolation. Base
 # URLs verified from official docs 2026-07. Key-gated in run().
+#
+# Thinking parity: run every open model with opencode's `--variant` selector.
+# GLM-5.2 maps medium-equivalent to Z.ai's `high`; the other open models use
+# `medium` as the portable thinking-on request and rely on the provider/default
+# to clamp or ignore unsupported effort levels.
 # (Duplicated across pi/opencode/codex so each adapter stays self-contained.)
 OPEN_MODELS = {
-    "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
-    "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
-    "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek"},
-    "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi"},
+    "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "variant": "high"},
+    "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "variant": "medium"},
+    "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek",      "variant": "medium"},
+    "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "variant": "medium"},
 }
 
 
@@ -188,6 +193,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "opencode", "run",
             "--dir", workdir,
             "-m", f'{spec["provider"]}/{spec["model_id"]}',
+            "--variant", spec["variant"],
             "--auto",
             "--format", "json",
             instruction,
