@@ -90,12 +90,17 @@ def _err_tail(exc, limit=2000):
 # loaded with `-e` (works even under --no-extensions). Nothing touches the
 # user's ~/.pi. apiKey uses pi's "$ENV_KEY" env resolution. Base URLs verified
 # from official docs 2026-07. Key-gated in run().
+#
+# Thinking parity: every open model is registered as reasoning-capable and run
+# with `--thinking medium`. Per-model compat maps that to the closest vendor
+# thinking-on behavior: GLM-5.2 medium -> Z.ai `reasoning_effort=high`; DeepSeek,
+# Kimi, and GLM-4.7 Flash use the vendor's thinking-on default (no medium level).
 # (Duplicated across pi/opencode/codex so each adapter stays self-contained.)
 OPEN_MODELS = {
-    "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
-    "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
-    "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek"},
-    "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi"},
+    "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "thinking": "medium", "compat": {"supportsStore": False, "supportsDeveloperRole": False, "supportsReasoningEffort": True, "thinkingFormat": "zai"},      "thinkingLevelMap": {"minimal": None, "low": "high", "medium": "high", "high": "high", "xhigh": "max"}},
+    "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "thinking": "medium", "compat": {"supportsStore": False, "supportsDeveloperRole": False, "supportsReasoningEffort": False, "thinkingFormat": "zai"},     "thinkingLevelMap": {"off": None}},
+    "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek",      "thinking": "medium", "compat": {"supportsStore": False, "supportsDeveloperRole": False, "supportsReasoningEffort": False, "thinkingFormat": "deepseek", "requiresReasoningContentOnAssistantMessages": True}, "thinkingLevelMap": {"off": None}},
+    "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "thinking": "medium", "compat": {"supportsStore": False, "supportsDeveloperRole": False, "supportsReasoningEffort": False, "maxTokensField": "max_tokens", "supportsStrictMode": False, "thinkingFormat": "deepseek"}, "thinkingLevelMap": {"off": None}},
 }
 
 
@@ -115,7 +120,9 @@ def _pi_provider_ext(spec):
     """JS extension source registering the open provider (loaded via -e).
 
     pi resolves "$ENV_KEY" in apiKey from the environment; api
-    "openai-completions" appends /chat/completions to baseUrl.
+    "openai-completions" appends /chat/completions to baseUrl. The model
+    metadata advertises reasoning plus vendor-specific thinking controls so the
+    CLI's `--thinking medium` becomes a real thinking-on request.
     """
     return (
         "export default function (pi) {\n"
@@ -126,7 +133,9 @@ def _pi_provider_ext(spec):
         '    api: "openai-completions",\n'
         "    models: [{\n"
         f'      id: "{spec["model_id"]}", name: "{spec["model_id"]}",\n'
-        "      reasoning: false, input: [\"text\"],\n"
+        "      reasoning: true, input: [\"text\"],\n"
+        f'      compat: {json.dumps(spec["compat"])},\n'
+        f'      thinkingLevelMap: {json.dumps(spec["thinkingLevelMap"])},\n'
         "      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },\n"
         "      contextWindow: 128000, maxTokens: 8192\n"
         "    }]\n"
@@ -237,6 +246,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 "-e", ext_path,
                 "--provider", spec["provider"],
                 "--model", spec["model_id"],
+                "--thinking", spec["thinking"],
                 "--mode", "json",
                 instruction,
             ]

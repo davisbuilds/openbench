@@ -316,7 +316,9 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "harness_version": harness_version,
     }
 
-    workdir = tempfile.mkdtemp(prefix=f"bench_{harness}_{task}_")
+    # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
+    # a single path component.
+    workdir = tempfile.mkdtemp(prefix=f"bench_{harness}_{task.replace('/', '_')}_")
     try:
         # Copy the pristine workspace into the disposable temp dir. Never touch
         # the source workspace under tasks/.

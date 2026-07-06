@@ -28,6 +28,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -48,13 +49,26 @@ _TIMEOUT_GRACE_S = 60
 CONTAINER_HOME = "/root"
 AUTH_STAGING = "/bench/auth"
 AUTH_MOUNTS = {
-    "codex": [".codex"],
+    # codex: mount ONLY the auth/config files. ~/.codex also holds worktrees,
+    # sessions, and sqlite logs (54 GB observed); mounting the whole dir made
+    # entry.py's staging copy run for 13+ minutes and crash on transient
+    # session tmp files vanishing mid-copy.
+    "codex": [".codex/auth.json", ".codex/config.toml"],
     "pi": [".pi"],
     "opencode": [".local/share/opencode", ".config/opencode"],
     "cursor": [".cursor"],
     "devin": [".config/devin"],
+    # claude runs OPEN models only (vendor keys via env, forwarded below). Mount
+    # NOTHING: never expose ~/.claude so a container run can't touch the user's
+    # Anthropic subscription. The API key is passed via API_KEY_PASSTHROUGH.
+    "claude": [],
     "null": [],
 }
+
+# Open-model API keys forwarded into the container when set on the host.
+# Passed as bare ``-e VAR`` (no value) so docker reads them from the client's
+# environment and the secret never appears in argv or logged commands.
+API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY")
 
 
 class DockerUnavailable(Exception):
@@ -85,15 +99,25 @@ def image_exists(image):
     return proc.returncode == 0
 
 
-def preflight(image):
-    """Raise ``DockerUnavailable`` with a specific reason if we can't run in docker."""
+def preflight(image, retries=3, delay_s=5):
+    """Raise ``DockerUnavailable`` with a specific reason if we can't run in docker.
+
+    Retries a few times before giving up: Docker Desktop's resource saver
+    pauses the VM between cells, and the first probe after a pause can fail
+    transiently even though the daemon and image are fine (observed 2026-07-05:
+    a 15-cell segment burned every cell in ~7s on a paused engine).
+    """
+    for attempt in range(retries):
+        if daemon_running() and image_exists(image):
+            return
+        if attempt < retries - 1:
+            time.sleep(delay_s)
     if not daemon_running():
         raise DockerUnavailable(
             "docker daemon not reachable (is Docker Desktop running?)")
-    if not image_exists(image):
-        raise DockerUnavailable(
-            f"image {image!r} not found (build it: "
-            f"docker build -t {image} {DOCKERFILE_DIR})")
+    raise DockerUnavailable(
+        f"image {image!r} not found (build it: "
+        f"docker build -t {image} {DOCKERFILE_DIR})")
 
 
 def _auth_mount_args(harness):
@@ -126,6 +150,9 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-w", "/work",
         "-e", f"HOME={CONTAINER_HOME}",
     ]
+    for var in API_KEY_PASSTHROUGH:
+        if os.environ.get(var):
+            cmd += ["-e", var]
     cmd += _auth_mount_args(harness)
     if extra_docker_args:
         cmd += list(extra_docker_args)

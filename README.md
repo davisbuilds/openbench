@@ -4,61 +4,95 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A benchmark for comparing coding-agent **harnesses** — the CLI tools that wrap a
-model in a run loop, tool set, and permission policy (codex, pi, opencode,
-cursor, devin). The question it answers is: *given the same underlying model,
-how much does the harness around it matter?*
+model in a run loop, tool set, and permission policy (`codex`, `pi`, `opencode`,
+`cursor`, `devin`, and open-model `claude`). The question it answers is: *given
+the same underlying model and task, how much does the harness around it matter?*
 
-**New here?** [`WRITEUP.md`](WRITEUP.md) tells the whole story — the question, the method, and the findings arc (M3 → M4) — for a reader who's never seen the repo.
+**New here?** [`WRITEUP.md`](WRITEUP.md) tells the story arc; [`RESULTS.md`](RESULTS.md)
+has the milestone analyses; [`SETUP.md`](SETUP.md) is the practical runbook for a
+first local cell, Docker, imported tasks, and open-model keys.
 
 **Live results:** https://minghinmatthewlam.github.io/openbench/
 
 ## What this measures
 
-Each harness runs headlessly against a set of small, self-contained coding
-tasks. A task is graded by a checker script (exit 0 = solved), never by the
-harness's own claim of success. Two framings:
+Each harness runs headlessly against a set of self-contained coding tasks. A task
+is graded by a checker script (exit 0 = solved, optional `SCORE:` for partial
+credit), never by the harness's own claim of success. Current tiers:
 
-- **Track A — same model, harness varies.** Every harness is pinned to the same
-  canonical model, `gpt-5.5-medium`, so differences in the results come from the
-  harness (its scaffolding, tools, and prompting), not the model.
-- **Track B — native stacks.** Each harness runs on the model/config it is
-  actually shipped and tuned for. This measures the product as users experience
-  it, and is not directly comparable across harnesses.
+- **Core synthetic tasks (`tasks/`).** Small-to-medium tasks built in this repo,
+  including partial-credit harder tasks such as `make-ci-green`, `add-feature`,
+  and `misleading-error`.
+- **Exercism imported tier (`tasks-imported/exercism/`).** MIT-licensed problem-
+  specification tasks with per-task provenance.
+- **Terminal-Bench imported frontier tier (`tasks-imported/terminal-bench/`).**
+  Five Apache-2.0 Terminal-Bench tasks adapted for OpenBench's Docker lane and
+  scored separately from the core tier.
 
-**Honest caveat (Track A):** `devin` exposes no reasoning-effort selector, so the
-canonical `gpt-5.5-medium` collapses to plain `gpt-5.5` at whatever effort devin
-defaults to. Its effort is therefore **unpinned** — treat devin's Track A number
-as approximate, not a like-for-like comparison with the other harnesses.
+Two result framings are used:
 
-## Reproduce our results (~$1)
+- **Track A — same model, harness varies.** Every compatible harness is pinned to
+  the same canonical model, `gpt-5.5-medium`, so differences come from the
+  harness (scaffolding, tools, prompting, permissions), not the model.
+- **Open-model panels.** Open models (`glm-5.2`, `deepseek-v4-flash`,
+  `kimi-k2.7-code`, `glm-4.7-flash`) run through adapters that can reach the
+  providers. `pi`, `opencode`, and `claude` call providers directly; `codex` uses
+  the local Responses↔Chat bridge in `bench/openmodel_bridge.sh`.
 
-Our **entire M4 open-model matrix** — two harnesses (`pi`, `opencode`) × four
-open models × the three harder tasks × three trials — reproduces for **about $1
-of API credit**. The published dataset is in
-[`data/m4-2026-07-03/`](data/m4-2026-07-03/); here is how to regenerate it. (You
-need the `pi` and `opencode` CLIs installed and logged in — `doctor` checks that
-— plus pay-as-you-go keys for the three model providers.)
+**Honest caveats:** `devin` is flaky in the latest published analysis and is
+excluded from M4.5 rankings; `cursor`/`devin` have closed model menus for open
+models; `claude` is open-model-only here so a run cannot accidentally bill an
+Anthropic subscription.
 
-**1. Export first-party API keys.** `glm-4.7-flash` has a free tier, so you can
-validate the whole pipeline for **$0** before spending anything:
+## Headline findings so far
 
+- **Correctness saturates for frontier harnesses on repo-authored tasks.** M3 and
+  M4.5 both hit the ceiling: clean frontier harnesses solved every core task, so
+  correctness does not support a leaderboard on those tiers.
+- **Efficiency separates even when correctness does not.** Wall-clock spread is up
+  to ~4× and token tax up to ~8× on the early matrices; `pi` is repeatedly the
+  fastest/leanest harness in the measured panels.
+- **Open models are surprisingly close.** In M4, three of four open models reached
+  the GPT-5.5-medium frontier baseline on the same hard tasks; the 72-run open-
+  model matrix cost about **$1.02** in first-party API spend.
+- **Terminal-Bench is the new frontier tier.** The current local TB frontier run
+  covers 45 cells (3 harnesses × 5 TB tasks × 3 trials) and lands at 12/15 per
+  harness (mean score 0.80), finally below the synthetic-task ceiling. The raw TB
+  run log currently lives under local-only `results/` and should be promoted to a
+  committed dataset before citing it externally.
+
+## Hardware and accounts
+
+No GPU is required. Core and Exercism tasks run on a normal laptop; Terminal-Bench
+cells can take minutes and should use Docker isolation. Real harness runs require
+that harness's CLI and auth. Frontier Track A uses subscription/OAuth logins;
+open-model panels use first-party provider API keys kept outside the repo. See
+[`SETUP.md`](SETUP.md) for install/auth caveats and one-cell commands.
+
+## Reproduce a cheap open-model panel (~$1)
+
+The committed **M4 open-model matrix** — two harnesses (`pi`, `opencode`) × four
+open models × three harder tasks × three trials — reproduces for about **$1 of
+API credit**. The dataset is in [`data/m4-2026-07-03/`](data/m4-2026-07-03/).
+
+Create `~/.openbench/keys.env` (or export the same names) with names only in the
+repo docs; values stay local:
+
+```dotenv
+ZAI_API_KEY=
+DEEPSEEK_API_KEY=
+MOONSHOT_API_KEY=
 ```
-export ZAI_API_KEY=...        # Z.ai (GLM)      — https://z.ai
-export DEEPSEEK_API_KEY=...   # DeepSeek        — https://platform.deepseek.com
-export MOONSHOT_API_KEY=...   # Moonshot (Kimi) — https://platform.moonshot.ai
-```
 
-**2. Preflight** (spends no tokens) — confirm CLIs, keys, and model pins resolve:
+Preflight (no token spend):
 
-```
+```bash
 python3 bench/doctor.py --harness pi,opencode --model glm-4.7-flash
 ```
 
-**3. Run the matrix.** Each `--model` runs one open model across both harnesses
-and all three tasks, 3 trials each. The loop is **resumable** — re-running skips
-completed cells:
+Run the resumable matrix:
 
-```
+```bash
 for m in glm-4.7-flash glm-5.2 deepseek-v4-flash kimi-k2.7-code; do
   python3 bench/run.py --harness pi,opencode \
     --task make-ci-green,add-feature,misleading-error \
@@ -66,42 +100,44 @@ for m in glm-4.7-flash glm-5.2 deepseek-v4-flash kimi-k2.7-code; do
 done
 ```
 
-**4. Report:**
+Report:
 
-```
-python3 bench/report.py --efficiency
+```bash
+python3 bench/report.py --efficiency --results-path results/results.jsonl
 ```
 
-`pi` is the fastest and leanest harness, so `--harness pi` alone is the cheapest
-subset if you just want to sanity-check the plumbing. `codex` is excluded from
-the open panel — it only speaks the OpenAI Responses API to custom providers,
-which these chat-completions endpoints don't serve; `cursor` and `devin` have
-closed model menus. The full per-model findings are in [`RESULTS.md`](RESULTS.md);
-older datasets (M3, M3.5, M4.5) are alongside under [`data/`](data/).
+For a single first run, Docker, imported tasks, `claude`, or `codex` open-model
+runs through the bridge, use [`SETUP.md`](SETUP.md).
 
 ## Layout
 
 ```
-tasks/                 benchmark tasks (see "Task format")
+tasks/                 core benchmark tasks (see "Task format")
+tasks-imported/        separately scored Exercism and Terminal-Bench tiers
 validate_tasks.py      proves every task's checker is correctly polarized
 bench/run.py           the runner (one row per task x harness x trial)
 bench/report.py        aggregates results into a table with Wilson CIs
 bench/adapters/*.py    one adapter per harness (+ built-in "null" control)
 bench/ADAPTER_SPEC.md  the adapter contract
+bench/openmodel_bridge.sh  foreground Codex Responses↔Chat bridge for open models
 bench/scrub.py         PII scrubber for transcripts (local-only; see below)
 bench/entry.py         in-container entrypoint for --exec docker
 bench/docker_exec.py   container-per-cell execution backend
 bench/docker/          isolation image for --exec docker
-results/results.jsonl  append-only results log (gitignored)
+results/results.jsonl  append-only local results log (gitignored)
 transcripts/           per-cell agent transcripts (gitignored, local-only)
 ```
 
 ## Quickstart
 
-Everything is Python 3 standard library only — no dependencies to install.
+Everything in the core harness runner is Python 3 standard library only — no
+Python package install is needed for a local `null` smoke. Real harnesses, Docker,
+and the Codex open-model bridge have external CLI/tool requirements; see
+[`SETUP.md`](SETUP.md).
 
 **1. Validate the tasks.** Confirms each checker fails on the untouched
-workspace and passes on the golden solution (see "Task format"):
+workspace and passes on the golden solution (see "Task format"). This covers both
+`tasks/` and imported tiers under `tasks-imported/`:
 
 ```
 python3 validate_tasks.py
@@ -114,8 +150,8 @@ python3 bench/doctor.py
 ```
 
 For each harness it checks — spending no tokens — that the CLI is installed, its
-auth/login is present, and the canonical model pin resolves to the harness's own
-model string. A failing preflight exits nonzero.
+auth/login or required key name is present, and the canonical model pin resolves
+to the harness's own model string. A failing preflight exits nonzero.
 
 **3. Run.** Pick harnesses and tasks. Start with the zero-cost `null` control to
 confirm the plumbing, then add real harnesses:
@@ -149,7 +185,8 @@ null     0/1               0/1          0/2 (0%)  [0.000, 0.658]  0.00    -
 
 ## Task format
 
-A task is a directory under `tasks/<name>/`:
+A core task is a directory under `tasks/<name>/`; an imported task is addressed
+as `tasks-imported/<collection>/<name>/` and run with `--tasks-dir tasks-imported`:
 
 ```
 instruction.md      what the harness is told (reads as a normal engineering request)
@@ -198,9 +235,9 @@ behaves exactly as before (pass → 1.0, fail → 0.0).
 
 This catches the two ways a checker can silently lie about difficulty, and is
 why expected outputs for data-driven tasks are generated *from* the golden
-solution rather than written by hand. The bundled tasks are `fix-failing-test`
-(fix a planted bug so the unit tests pass), `build-a-cli` (write a word-frequency
-CLI to a precise spec), and `make-it-run` (repair a small broken project).
+solution rather than written by hand. Current validated tiers are 8 core tasks,
+11 Exercism imports, and 5 Terminal-Bench imports; each tier is reported and
+scored separately.
 
 ## Adapters
 
@@ -215,13 +252,14 @@ decides that. Full contract: [`bench/ADAPTER_SPEC.md`](bench/ADAPTER_SPEC.md).
 Auth is handled inside each adapter, read-only — the user's real config files are
 never modified:
 
-| Harness  | Canonical `gpt-5.5-medium` maps to        | Auth handling                                                                 |
-|----------|-------------------------------------------|-------------------------------------------------------------------------------|
-| codex    | `gpt-5.5`, `model_reasoning_effort=medium`| Uses the existing `codex` login as-is                                          |
-| pi       | `gpt-5.5`, `--thinking medium`            | Isolated `HOME` (temp dir) with only `.pi/agent/auth.json` copied in, plus `--no-extensions`, so personal extensions never load |
-| opencode | `openai/gpt-5.5`, `--variant medium`      | Strips `OPENAI_API_KEY` from the child env to force the subscription OAuth credential |
-| cursor   | `gpt-5.5-medium` (effort baked into name) | Uses the existing `cursor-agent` login as-is                                   |
-| devin    | `gpt-5.5` (**no effort selector**)        | Uses the existing `devin` login; reasoning effort unpinned (see caveat above) |
+| Harness  | Frontier `gpt-5.5-medium` | Open models | Auth handling |
+|----------|----------------------------|-------------|---------------|
+| codex    | `gpt-5.5`, `model_reasoning_effort=medium` | Via foreground `bench/openmodel_bridge.sh` | Uses existing `codex` login for frontier; bridge/vendor keys for open models. |
+| pi       | `gpt-5.5`, `--thinking medium` | Direct vendor endpoints | Isolated `HOME` (temp dir) with only `.pi/agent/auth.json` copied in, plus `--no-extensions`, so personal extensions never load. |
+| opencode | `openai/gpt-5.5`, `--variant medium` | Direct vendor endpoints | Strips `OPENAI_API_KEY` from frontier child env to force subscription OAuth; open models use provider keys. |
+| cursor   | `gpt-5.5-medium` (effort baked into name) | Not supported (closed menu) | Uses the existing `cursor-agent` login as-is. |
+| devin    | `gpt-5.5` / configured pin (see caveats) | Not supported (closed menu) | Uses the existing `devin` login; latest data is flaky and excluded where noted. |
+| claude   | Not supported by design | Direct Anthropic-compatible vendor endpoints | Open-model-only adapter; isolated config and vendor keys, never Anthropic subscription/OAuth. |
 
 The built-in `null` adapter does nothing and reports `completed=True`. Because it
 never edits the workspace, every task's checker fails — it is the benchmark's
@@ -229,7 +267,9 @@ never edits the workspace, every task's checker fails — it is the benchmark's
 
 ## Results
 
-Findings from the first full run are in [`RESULTS.md`](RESULTS.md) (M3 matrix, 2026-07-02).
+Findings from the milestone runs are in [`RESULTS.md`](RESULTS.md), with committed
+datasets under [`data/`](data/). Local scratch runs stay under gitignored
+`results/` unless intentionally promoted to `data/`.
 
 `bench/run.py` appends one JSON object per line to `results/results.jsonl`. The
 fields:
@@ -317,8 +357,8 @@ at 0/n and n/n, which the naive formula does not.
   auth bind-mounted read-only at runtime (never baked into the image). If the
   Docker daemon or image is unavailable, the runner falls back to local unless
   `--no-docker-fallback` is set.
-- **Docker image is partial.** Only `codex` and `pi` are installed and
-  version-checked in the default image; `opencode`, `cursor`, and `devin` are
+- **Docker image is partial.** `codex`, `pi`, and open-model `claude` are installed
+  and version-checked in the default image; `opencode`, `cursor`, and `devin` are
   behind `--build-arg INSTALL_UNVERIFIED=true` and their Linux installs are not
   yet confirmed. For those harnesses, use `--exec local` for now.
 - **Sample size.** These are small tasks in small numbers; the current results

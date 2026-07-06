@@ -56,11 +56,37 @@ class TestBuildDockerCmd(unittest.TestCase):
         self.assertIn("entry.py:/bench/entry.py:ro", joined)
         self.assertIn("HOME=/root", joined)
 
+    def test_api_key_passthrough_by_name_only(self):
+        # A set key is forwarded as a bare `-e VAR` (docker reads the value
+        # from the client env; the secret never lands in argv); unset keys are
+        # not mentioned at all.
+        orig_env = dict(os.environ)
+        os.environ["DEEPSEEK_API_KEY"] = "sk-test"
+        os.environ.pop("MOONSHOT_API_KEY", None)
+        try:
+            cmd = docker_exec.build_docker_cmd(
+                harness="pi", workdir="/tmp/wd", model="deepseek-v4-flash",
+                timeout_s=240, adapters_dir="/repo/bench/adapters",
+                image="openbench-harness:latest",
+                instruction_path="/tmp/instr.txt",
+            )
+        finally:
+            os.environ.clear()
+            os.environ.update(orig_env)
+        self.assertIn("DEEPSEEK_API_KEY", cmd)
+        self.assertNotIn("MOONSHOT_API_KEY", cmd)
+        self.assertFalse(any("sk-test" in a for a in cmd),
+                         "secret value must not appear in argv")
+
     def test_auth_mount_readonly_when_present(self):
         # Use a fake HOME so the test is deterministic regardless of the host.
         home = tempfile.mkdtemp(prefix="fake_home_")
         try:
+            # codex mounts individual auth files, never the whole ~/.codex
+            # (which also holds multi-GB worktrees/sessions).
             os.makedirs(os.path.join(home, ".codex"))
+            with open(os.path.join(home, ".codex", "auth.json"), "w") as fh:
+                fh.write("{}")
             orig = os.path.expanduser
             os.path.expanduser = lambda p: home if p == "~" else orig(p)
             try:
@@ -68,9 +94,13 @@ class TestBuildDockerCmd(unittest.TestCase):
             finally:
                 os.path.expanduser = orig
             self.assertIn("-v", args)
-            self.assertTrue(any(a.endswith(".codex:/bench/auth/.codex:ro")
-                                for a in args),
-                            f"expected read-only staged .codex mount, got {args}")
+            self.assertTrue(
+                any(a.endswith(".codex/auth.json:/bench/auth/.codex/auth.json:ro")
+                    for a in args),
+                f"expected read-only staged auth.json mount, got {args}")
+            self.assertFalse(
+                any(a.endswith(".codex:/bench/auth/.codex:ro") for a in args),
+                "must not mount the whole ~/.codex dir")
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)
@@ -96,7 +126,8 @@ class TestPreflight(unittest.TestCase):
         docker_exec.daemon_running = lambda: False
         try:
             with self.assertRaises(docker_exec.DockerUnavailable):
-                docker_exec.preflight("openbench-harness:latest")
+                docker_exec.preflight("openbench-harness:latest",
+                                      retries=2, delay_s=0)
         finally:
             docker_exec.daemon_running = orig
 
@@ -106,7 +137,7 @@ class TestPreflight(unittest.TestCase):
         docker_exec.image_exists = lambda image: False
         try:
             with self.assertRaises(docker_exec.DockerUnavailable):
-                docker_exec.preflight("nope:latest")
+                docker_exec.preflight("nope:latest", retries=2, delay_s=0)
         finally:
             docker_exec.daemon_running, docker_exec.image_exists = od, oi
 

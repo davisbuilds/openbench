@@ -415,20 +415,20 @@ tells us where difficulty does *not* come from.
 | 2 | taskflow | 7,809 lines | 7 modules seeded with logic defects — masked reveal-chains (fix one, the next appears) + cross-module misdirection | **0.2800** (7/25 tests) | **1.00 / 1.00 / 1.00** | 78, 89, 97 |
 | 2 | webcore | 7,111 lines | 10-clause feature spec, **zero visible tests**, hidden 43-test suite (19 regression + 24 feature), regression-gated scoring (`0.3·[all reg pass] + 0.7·feature-fraction`) | **0.3000** (19/19 reg, 0/24 feat) | **1.00 / 0.9708 / 1.00** (mean 0.990) | 354, 410, 495 |
 
-- **Round 1** (three small original tasks, source
-  [`results/pilot-tierA-v2.jsonl`](results/pilot-tierA-v2.jsonl)): the gate probe
-  swept **6/6 cells at 1.00**. (The same tasks *do* separate a weaker model —
-  `glm-4.7-flash` scored 1.0/0.0 on formula-engine and timed out on
+- **Round 1** (three small original tasks; source scratch log
+  `results/pilot-tierA-v2.jsonl`, not committed because `results/` is local-only):
+  the gate probe swept **6/6 cells at 1.00**. (The same tasks *do* separate a
+  weaker model — `glm-4.7-flash` scored 1.0/0.0 on formula-engine and timed out on
   kv-transactions — so the factory discriminates in the open/mid band, just not at
   the frontier.)
-- **Round 2** (two structurally-hardened candidates, source
-  [`results/gate2-round2.jsonl`](results/gate2-round2.jsonl)): both baselines land
-  in the target band (0.28, 0.30), confirming the scoring discriminates a broken
-  start-state — yet the probe swept **taskflow 1.00×3** and effectively swept
-  **webcore (mean 0.990)**, the single 0.9708 trial (one of 24 feature tests
-  missed once) the only sub-1.0 cell across the six Round-2 trials. Baselines
-  and test counts above were re-derived by running each checker against its
-  pristine workspace.
+- **Round 2** (two structurally-hardened candidates; source scratch log
+  `results/gate2-round2.jsonl`, not committed because `results/` is local-only):
+  both baselines land in the target band (0.28, 0.30), confirming the scoring
+  discriminates a broken start-state — yet the probe swept **taskflow 1.00×3** and
+  effectively swept **webcore (mean 0.990)**, the single 0.9708 trial (one of 24
+  feature tests missed once) the only sub-1.0 cell across the six Round-2 trials.
+  Baselines and test counts above were re-derived by running each checker against
+  its pristine workspace.
 
 ## Which hardening levers resisted (and none held)
 
@@ -472,3 +472,59 @@ Deliberately narrow: **n=3 trials per candidate** (Round 2), **one probe model**
 probe is strong evidence the lever is weak, but it is not a claim about every model
 or a guarantee no authorable lever exists — only that the ones we tried, at the
 cost we can sustain, did not bite.
+
+# Terminal-Bench frontier tier — 2026-07-05
+
+The hardest tasks we run: five frontier-hard tasks imported from
+[Terminal-Bench](https://github.com/laude-institute/terminal-bench) (Apache-2.0,
+`tasks-imported/terminal-bench/`), run in the **docker lane** with the same model
+(`gpt-5.5-medium`) across the three container-compatible harnesses. **n=3 per
+(harness, task)**, 45 cells, plus a `deepseek-v4-flash` shakeout baseline. Raw
+data + provenance: [`data/tb-frontier-2026-07-05/`](data/tb-frontier-2026-07-05/).
+
+## Headline
+
+Correctness ties **again**, this time on genuinely hard tasks — and the efficiency
+gap is the whole result. All three harnesses solved the **identical 12/15**
+(everything except `count-call-stack`). Numbers below are **per solved task**
+(mean over successful runs; failed attempts excluded):
+
+| harness | solved | wall/solve | tokens/solve |
+|---|---|---|---|
+| `pi` | 12/15 | **172s** | **31.4k** |
+| `codex` | 12/15 | 210s | 58.4k |
+| `opencode` | 12/15 | 423s | 26.1k |
+
+The spread is **2.5× on wall-time** and **2.2× on tokens**, and the two rankings
+**invert**: `pi` is fastest, `opencode` slowest yet leanest on tokens, `codex`
+mid-speed but heaviest. Time-rank ≠ token-rank — the M3.5 finding replicates on
+the hardest tier.
+
+## Capability lives in the model, not the wrapper
+
+Swap the model and correctness finally moves: `gpt-5.5` solved **4/5** tasks;
+`deepseek-v4-flash` solved **1/5**, timing out at 900s on the three hard tasks
+(`feal`, `batching`, `schemelike`) that `gpt-5.5` cracked in ~80–200s. The wrapper
+never changed *what* got solved; the model did.
+
+## `count-call-stack` is a universal miss
+
+**0/9** frontier trials and **0/1** for the deepseek baseline. It is an exact-match
+precision task over a messy 4 MB profiler log — every model/harness combination
+fails it, each differently (off-by-N trace counts, wrong grouping semantics). The
+task is verified fair: an independent parse reproduces the golden output
+byte-for-byte. Precision-on-messy-data is a difficulty axis that survives both
+frontier capability and harness scaffolding.
+
+## Caveats
+
+- **n=3**, single machine, docker lane. `cursor`/`devin` are excluded (cursor
+  keychain auth can't containerize; devin flaky/free-plan) — they appear in the
+  M3/M4.5 tiers.
+- **`opencode` × `schemelike` trial 1** solved right at the 1800s timeout ceiling
+  (checker passed) — counted as a solve with capped wall and no token data (excluded
+  from token means).
+- Wall/token numbers are **per solved run** (Option A). All three harnesses failed
+  the *same* cheap task, so excluding failure-cost does not change the ranking.
+- Image provenance: `pi` ran on the codex+pi build; `codex`/`opencode` on a rebuild
+  adding their CLIs. Same base layers.

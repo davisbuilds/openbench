@@ -115,9 +115,13 @@ def main(argv):
     with open(INSTRUCTION_PATH, encoding="utf-8") as fh:
         instruction = fh.read()
 
-    _stage_auth()
+    # Tell adapters they are inside the disposable container, so ones that
+    # normally self-sandbox (codex's bwrap needs userns, which can't nest
+    # here) can rely on the container as the external sandbox instead.
+    os.environ["BENCH_IN_CONTAINER"] = "1"
 
     try:
+        _stage_auth()
         if harness == "null":
             result = _null_run(instruction, WORKDIR, model, timeout_s)
         else:
