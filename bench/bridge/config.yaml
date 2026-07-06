@@ -1,0 +1,46 @@
+# OpenBench codex open-model bridge (LiteLLM proxy).
+# Accepts /v1/responses ingress from codex and translates to /chat/completions
+# upstream for chat-only providers (DeepSeek / Z.ai / Moonshot).
+# Provider keys are read from the environment at proxy start (never hardcoded).
+# Started by bench/openmodel_bridge.sh; the benchmark runner does NOT manage it.
+model_list:
+  # Provider prefixes (deepseek/ zai/ moonshot/) are chat-completions-only in
+  # LiteLLM, so /v1/responses ingress auto-bridges to /chat/completions upstream.
+  # (An openai/ prefix would instead attempt the provider's native /responses
+  # endpoint, which these vendors do not serve -> 404.)
+  - model_name: deepseek-v4-flash
+    litellm_params:
+      model: deepseek/deepseek-v4-flash
+      api_base: https://api.deepseek.com
+      api_key: os.environ/DEEPSEEK_API_KEY
+  - model_name: glm-5.2
+    litellm_params:
+      model: zai/glm-5.2
+      api_base: https://api.z.ai/api/paas/v4
+      api_key: os.environ/ZAI_API_KEY
+  - model_name: glm-4.7-flash
+    litellm_params:
+      model: zai/glm-4.7-flash
+      api_base: https://api.z.ai/api/paas/v4
+      api_key: os.environ/ZAI_API_KEY
+  - model_name: kimi-k2.7-code
+    litellm_params:
+      model: moonshot/kimi-k2.7-code
+      api_base: https://api.moonshot.ai/v1
+      api_key: os.environ/MOONSHOT_API_KEY
+
+litellm_settings:
+  # Allow the Responses API -> Chat Completions bridge for models that only
+  # serve /chat/completions upstream.
+  drop_params: true
+  # Normalize codex's Responses input (drop empty assistant placeholders, reorder
+  # each tool call adjacent to its output, keep reasoning) so the Responses->Chat
+  # projection is valid for strict chat vendors. See bench/bridge/hooks.py.
+  # openmodel_bridge.sh puts bench/bridge/ on PYTHONPATH so `hooks` imports.
+  callbacks: ["hooks.reasoning_stripper"]
+
+general_settings:
+  # No master_key: the proxy injects the real provider key upstream from its own
+  # config, so ingress auth is not needed (codex still sends its env_key value as
+  # a bearer; the proxy ignores it). Binds 0.0.0.0 for docker reachability, so
+  # run only on a trusted single-user node -- see openmodel_bridge.sh.
