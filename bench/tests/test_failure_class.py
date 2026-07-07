@@ -31,7 +31,15 @@ class TestClassifyFailure(unittest.TestCase):
 
     def test_rate_limited_beats_timeout_and_wrong_answer(self):
         row = {"success": False, "error": "timeout after 600s", "checker_exit": 1}
-        self.assertEqual(failure_class.classify_failure(row, "quota exhausted"), "rate_limited")
+        self.assertEqual(
+            failure_class.classify_failure(row, "APIError: quota exhausted"),
+            "rate_limited",
+        )
+
+    def test_domain_timeout_text_does_not_force_timeout_class(self):
+        row = {"success": False, "completed": True, "checker_exit": 1, "error": None}
+        transcript = "The task source defines timeout_s and a TimeoutError helper."
+        self.assertEqual(failure_class.classify_failure(row, transcript), "wrong_answer")
 
     def test_domain_text_about_rate_limiting_is_not_provider_rate_limit(self):
         row = {"success": False, "completed": True, "checker_exit": 1, "error": None}

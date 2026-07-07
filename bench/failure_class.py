@@ -16,14 +16,11 @@ EXCLUDED_FROM_SOLVE_RATE = ("rate_limited", "infra")
 # detector intentionally requires provider/API-error context rather than any
 # domain text that happens to mention e.g. HTTP 429 or a rate limiter task.
 _RATE_LIMIT_RES = [
-    re.compile(r"\b(?:APIError|API error|HTTPError|HTTP error)\b[^\n]{0,160}\b(?:429|rate[_ -]?limit|TPD|quota|too many requests)", re.IGNORECASE),
-    re.compile(r"\b(?:HTTP|status(?: code)?|response)\s*[:=]?\s*429\b[^\n]{0,160}\b(?:rate[_ -]?limit|TPD|quota|too many requests)", re.IGNORECASE),
-    re.compile(r"\b(?:429|rate[_ -]?limit|TPD|quota|too many requests)\b[^\n]{0,160}\b(?:APIError|API error|HTTPError|HTTP error|status(?: code)?|response)\b", re.IGNORECASE),
+    re.compile(r"\b(?:APIError|API error|HTTPError|HTTP error|provider|vendor)\b[^\n]{0,200}\b(?:429|rate[_ -]?limit|TPD|quota|too many requests)", re.IGNORECASE),
+    re.compile(r"\b(?:HTTP|status(?: code)?|response)\s*[:=]?\s*429\b[^\n]{0,200}\b(?:rate[_ -]?limit|TPD|quota|too many requests)", re.IGNORECASE),
+    re.compile(r"\b(?:429|rate[_ -]?limit|TPD|quota|too many requests)\b[^\n]{0,200}\b(?:APIError|API error|HTTPError|HTTP error|provider|vendor|status(?: code)?|response)\b", re.IGNORECASE),
+    # Moonshot/Kimi daily-token exhaustion uses this distinctive provider text.
     re.compile(r"\bTPD\b[^\n]{0,160}\b(?:current|limit|rate)", re.IGNORECASE),
-    re.compile(r"\binsufficient[_ -]?quota\b", re.IGNORECASE),
-    re.compile(r"\b(?:out of|over) quota\b", re.IGNORECASE),
-    re.compile(r"\bquota[ _-]?(?:exceeded|exhausted|limit|reached)\b", re.IGNORECASE),
-    re.compile(r"\b(?:exhausted|exceeded)\b[^\n]{0,80}\bquota\b", re.IGNORECASE),
 ]
 
 _INFRA_RE = re.compile(
@@ -87,6 +84,7 @@ def classify_failure(row, adapter_output="", timeout_s=None):
         row.get("error"),
         row.get("checker_exit"),
     )
+    structured_status = _text(row.get("error"), row.get("checker_exit"))
 
     if bool(row.get("success")):
         return "solved"
@@ -94,7 +92,7 @@ def classify_failure(row, adapter_output="", timeout_s=None):
         return "rate_limited"
     if has_infra_marker(combined):
         return "infra"
-    if row.get("checker_exit") == "timeout" or _TIMEOUT_RE.search(combined) or _wall_rode_cap(row, timeout_s):
+    if row.get("checker_exit") == "timeout" or _TIMEOUT_RE.search(structured_status) or _wall_rode_cap(row, timeout_s):
         return "timeout"
     return "wrong_answer"
 
