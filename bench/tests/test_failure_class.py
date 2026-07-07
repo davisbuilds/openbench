@@ -33,6 +33,21 @@ class TestClassifyFailure(unittest.TestCase):
         row = {"success": False, "error": "timeout after 600s", "checker_exit": 1}
         self.assertEqual(failure_class.classify_failure(row, "quota exhausted"), "rate_limited")
 
+    def test_domain_text_about_rate_limiting_is_not_provider_rate_limit(self):
+        row = {"success": False, "completed": True, "checker_exit": 1, "error": None}
+        transcript = (
+            "README says the webcore middleware returns 429 Too Many Requests "
+            "when the application's token-bucket rate limit exceeded path is tested."
+        )
+        self.assertEqual(failure_class.classify_failure(row, transcript), "wrong_answer")
+
+    def test_provider_http_429_context_is_rate_limited(self):
+        row = {"success": False, "completed": False, "checker_exit": 1, "error": None}
+        self.assertEqual(
+            failure_class.classify_failure(row, "HTTP 429 Too Many Requests from API response"),
+            "rate_limited",
+        )
+
     def test_infra_markers(self):
         cases = [
             "docker daemon not reachable (is Docker Desktop running?)",

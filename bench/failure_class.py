@@ -12,19 +12,20 @@ import re
 FAILURE_CLASSES = ("solved", "wrong_answer", "timeout", "rate_limited", "infra")
 EXCLUDED_FROM_SOLVE_RATE = ("rate_limited", "infra")
 
-_RATE_LIMIT_RE = re.compile(
-    r"("
-    r"\b429\b|"
-    r"rate[ _-]?limit(?:ed|ing)?|"
-    r"\bTPD\b|"
-    r"too many requests|"
-    r"insufficient[_ -]?quota|"
-    r"(?:out of|over) quota|"
-    r"quota[ _-]?(?:exceeded|exhausted|limit|reached)|"
-    r"(?:exhausted|exceeded)[^\n]{0,80}\bquota\b"
-    r")",
-    re.IGNORECASE,
-)
+# Rate-limit classification excludes rows from solve-rate denominators, so the
+# detector intentionally requires provider/API-error context rather than any
+# domain text that happens to mention e.g. HTTP 429 or a rate limiter task.
+_RATE_LIMIT_RES = [
+    re.compile(r"\b(?:APIError|API error|HTTPError|HTTP error)\b[^\n]{0,160}\b(?:429|rate[_ -]?limit|TPD|quota|too many requests)", re.IGNORECASE),
+    re.compile(r"\b(?:HTTP|status(?: code)?|response)\s*[:=]?\s*429\b[^\n]{0,160}\b(?:rate[_ -]?limit|TPD|quota|too many requests)", re.IGNORECASE),
+    re.compile(r"\b(?:429|rate[_ -]?limit|TPD|quota|too many requests)\b[^\n]{0,160}\b(?:APIError|API error|HTTPError|HTTP error|status(?: code)?|response)\b", re.IGNORECASE),
+    re.compile(r"\brate_limit\b", re.IGNORECASE),
+    re.compile(r"\bTPD\b[^\n]{0,160}\b(?:current|limit|rate)", re.IGNORECASE),
+    re.compile(r"\binsufficient[_ -]?quota\b", re.IGNORECASE),
+    re.compile(r"\b(?:out of|over) quota\b", re.IGNORECASE),
+    re.compile(r"\bquota[ _-]?(?:exceeded|exhausted|limit|reached)\b", re.IGNORECASE),
+    re.compile(r"\b(?:exhausted|exceeded)\b[^\n]{0,80}\bquota\b", re.IGNORECASE),
+]
 
 _INFRA_RE = re.compile(
     r"("
@@ -50,8 +51,8 @@ def _text(*parts):
 
 
 def has_rate_limit_marker(text):
-    """Return True when CLI output contains a known rate-limit signature."""
-    return bool(_RATE_LIMIT_RE.search(text or ""))
+    """Return True when CLI output contains a high-confidence rate-limit signature."""
+    return any(rx.search(text or "") for rx in _RATE_LIMIT_RES)
 
 
 def has_infra_marker(text):
