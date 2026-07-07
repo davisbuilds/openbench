@@ -98,7 +98,8 @@ def _err_tail(exc, limit=2000):
         if x is None:
             return ""
         return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-    return (_dec(exc.stdout) + _dec(exc.stderr))[-limit:]
+    text = _dec(exc.stdout) + _dec(exc.stderr)
+    return text if limit is None else text[-limit:]
 
 
 def _parse_export(path):
@@ -184,11 +185,12 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired as e:
-            tail = _err_tail(e)
+            full_output = _err_tail(e, limit=None)
             return {
                 "completed": False,
                 "error": f"timeout after {timeout_s}s",
-                "output_tail": tail,
+                "output_tail": full_output[-2000:],
+                "full_output": full_output,
                 "tokens": None,
                 "turns": None,
                 "cmd": cmd,

@@ -28,6 +28,8 @@ import tempfile
 import time
 import traceback
 
+from failure_class import classify_failure
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 
@@ -42,7 +44,8 @@ DEFAULT_MODEL = "gpt-5.5-medium"
 ROW_FIELDS = (
     "run_id", "ts_iso", "harness", "model", "task", "trial",
     "success", "completed", "error", "wall_time_s", "tokens", "turns",
-    "cmd", "checker_exit", "exec_mode", "score", "harness_version",
+    "cmd", "output_tail", "checker_exit", "exec_mode", "score",
+    "harness_version", "failure_class",
 )
 
 
@@ -310,10 +313,12 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "tokens": None,
         "turns": None,
         "cmd": None,
+        "output_tail": "",
         "checker_exit": None,
         "exec_mode": None,
         "score": 0.0,
         "harness_version": harness_version,
+        "failure_class": None,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
@@ -337,6 +342,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             row["error"] = traceback.format_exc(limit=4).strip()
             row["wall_time_s"] = round(time.monotonic() - start, 3)
             row["exec_mode"] = exec_mode
+            row["failure_class"] = classify_failure(row, "", timeout_s)
             return row
         row["wall_time_s"] = round(time.monotonic() - start, 3)
         row["exec_mode"] = exec_used
@@ -347,14 +353,17 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["tokens"] = result.get("tokens")
         row["turns"] = result.get("turns")
         row["cmd"] = result.get("cmd")
+        row["output_tail"] = result.get("output_tail") or ""
+        full_output = result.get("full_output")
+        classifier_output = full_output if full_output is not None else row["output_tail"]
 
         # Persist the full agent transcript LOCAL-ONLY (prefer the untruncated
         # full_output; fall back to the ~2000-char output_tail). Never let a
         # transcript-write failure break the benchmark loop.
         if transcripts_dir:
-            body = result.get("full_output")
+            body = full_output
             if body is None:
-                body = result.get("output_tail", "")
+                body = row["output_tail"]
             try:
                 write_transcript(
                     transcript_path(transcripts_dir, results_stem, run_id),
@@ -370,6 +379,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             row["checker_exit"] = None
             if row["error"] is None:
                 row["error"] = traceback.format_exc(limit=4).strip()
+            row["failure_class"] = classify_failure(row, classifier_output, timeout_s)
             return row
         row["checker_exit"] = checker_exit
         row["success"] = (checker_exit == 0)
@@ -377,6 +387,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         # nonzero exit takes the SCORE line for partial credit, else 0.0.
         row["score"] = 1.0 if checker_exit == 0 else (
             raw_score if raw_score is not None else 0.0)
+        row["failure_class"] = classify_failure(row, classifier_output, timeout_s)
         return row
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
