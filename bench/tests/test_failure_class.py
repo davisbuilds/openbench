@@ -122,7 +122,8 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
         finally:
             run.invoke_adapter, run.run_checker = orig_invoke, orig_checker
 
-        self.assertEqual(row["output_tail"], "tail without marker")
+        self.assertNotIn("output_tail", run.ROW_FIELDS)
+        self.assertEqual(row["output_tail"], "tail without marker")  # internal only, not persisted
         self.assertEqual(row["failure_class"], "rate_limited")
 
 

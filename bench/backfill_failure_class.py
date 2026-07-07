@@ -29,9 +29,19 @@ def iter_rows(path):
                 raise SystemExit(f"{path}:{line_no}: invalid JSON: {exc}") from exc
 
 
+def _same_output_target(in_path, out_path):
+    """Return True when output would alias input, including symlinks/hardlinks."""
+    if os.path.abspath(in_path) == os.path.abspath(out_path):
+        return True
+    try:
+        return os.path.exists(out_path) and os.path.samefile(in_path, out_path)
+    except OSError:
+        return False
+
+
 def backfill(in_path, out_path):
     """Write a new JSONL with failure_class added; return class counts."""
-    if os.path.abspath(in_path) == os.path.abspath(out_path):
+    if _same_output_target(in_path, out_path):
         raise SystemExit("refusing to mutate results in place; choose a different output path")
     counts = Counter()
     rows = 0

@@ -19,7 +19,6 @@ _RATE_LIMIT_RES = [
     re.compile(r"\b(?:APIError|API error|HTTPError|HTTP error)\b[^\n]{0,160}\b(?:429|rate[_ -]?limit|TPD|quota|too many requests)", re.IGNORECASE),
     re.compile(r"\b(?:HTTP|status(?: code)?|response)\s*[:=]?\s*429\b[^\n]{0,160}\b(?:rate[_ -]?limit|TPD|quota|too many requests)", re.IGNORECASE),
     re.compile(r"\b(?:429|rate[_ -]?limit|TPD|quota|too many requests)\b[^\n]{0,160}\b(?:APIError|API error|HTTPError|HTTP error|status(?: code)?|response)\b", re.IGNORECASE),
-    re.compile(r"\brate_limit\b", re.IGNORECASE),
     re.compile(r"\bTPD\b[^\n]{0,160}\b(?:current|limit|rate)", re.IGNORECASE),
     re.compile(r"\binsufficient[_ -]?quota\b", re.IGNORECASE),
     re.compile(r"\b(?:out of|over) quota\b", re.IGNORECASE),

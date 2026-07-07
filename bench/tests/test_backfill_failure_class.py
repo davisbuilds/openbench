@@ -56,6 +56,22 @@ class TestBackfillFailureClass(unittest.TestCase):
         with self.assertRaises(SystemExit):
             backfill_failure_class.backfill("same.jsonl", "same.jsonl")
 
+    def test_refuses_symlink_alias_to_input(self):
+        tmp = tempfile.mkdtemp(prefix="bench_backfill_alias_")
+        try:
+            src = os.path.join(tmp, "in.jsonl")
+            alias = os.path.join(tmp, "alias.jsonl")
+            with open(src, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"success": True}) + "\n")
+            os.symlink(src, alias)
+            with self.assertRaises(SystemExit):
+                backfill_failure_class.backfill(src, alias)
+            with open(src, encoding="utf-8") as fh:
+                self.assertTrue(fh.read().strip(), "input must not be truncated")
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

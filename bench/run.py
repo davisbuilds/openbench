@@ -44,8 +44,8 @@ DEFAULT_MODEL = "gpt-5.5-medium"
 ROW_FIELDS = (
     "run_id", "ts_iso", "harness", "model", "task", "trial",
     "success", "completed", "error", "wall_time_s", "tokens", "turns",
-    "cmd", "output_tail", "checker_exit", "exec_mode", "score",
-    "harness_version", "failure_class",
+    "cmd", "checker_exit", "exec_mode", "score", "harness_version",
+    "failure_class",
 )
 
 
