@@ -52,6 +52,24 @@ class TestBackfillFailureClass(unittest.TestCase):
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_preserves_existing_valid_failure_class(self):
+        tmp = tempfile.mkdtemp(prefix="bench_backfill_preserve_")
+        try:
+            src = os.path.join(tmp, "in.jsonl")
+            dst = os.path.join(tmp, "out.jsonl")
+            # Simulates a write-time-classified row whose provider marker only
+            # existed in full_output and was intentionally not persisted.
+            with open(src, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"success": False, "failure_class": "rate_limited"}) + "\n")
+            count, counts = backfill_failure_class.backfill(src, dst)
+            self.assertEqual(count, 1)
+            self.assertEqual(counts["rate_limited"], 1)
+            with open(dst, encoding="utf-8") as fh:
+                self.assertEqual(json.loads(fh.readline())["failure_class"], "rate_limited")
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_refuses_in_place_mutation(self):
         with self.assertRaises(SystemExit):
             backfill_failure_class.backfill("same.jsonl", "same.jsonl")

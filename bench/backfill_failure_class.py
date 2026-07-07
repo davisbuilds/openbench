@@ -48,7 +48,9 @@ def backfill(in_path, out_path):
     os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as out:
         for _line_no, row in iter_rows(in_path):
-            fc = classify_failure(row, row.get("output_tail") or "")
+            fc = row.get("failure_class")
+            if fc not in FAILURE_CLASSES:
+                fc = classify_failure(row, row.get("output_tail") or "")
             row["failure_class"] = fc
             counts[fc] += 1
             rows += 1

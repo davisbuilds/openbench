@@ -279,6 +279,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         # `docker run` client alone does not stop the container, so removal by
         # name is guaranteed in the finally (a no-op when `--rm` already
         # cleaned up).
+        timeout_result = None
+        cleanup_ok = True
         try:
             try:
                 proc = subprocess.run(
@@ -293,7 +295,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                         return x.decode("utf-8", errors="replace")
                     return x or ""
                 full_output = _text(e.stdout) + _text(e.stderr)
-                return {
+                timeout_result = {
                     "completed": False,
                     "error": f"container timeout after {timeout_s}s (+grace); killed",
                     "output_tail": full_output[-2000:],
@@ -301,7 +303,19 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                     "tokens": None, "turns": None, "cmd": cmd,
                 }
         finally:
-            _force_remove_container(container_name)
+            cleanup_ok = _force_remove_container(container_name)
+        if not cleanup_ok:
+            tail = (timeout_result or {}).get("output_tail", "")
+            return {
+                "completed": False,
+                "error": f"container cleanup failed for {container_name}; "
+                         "container may still be running",
+                "output_tail": tail,
+                "full_output": (timeout_result or {}).get("full_output", tail),
+                "tokens": None, "turns": None, "cmd": cmd,
+            }
+        if timeout_result is not None:
+            return timeout_result
 
         combined = (proc.stdout or "") + (proc.stderr or "")
         result = _parse_result(proc.stdout or "")
