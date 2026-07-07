@@ -314,8 +314,6 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.efficiency:
         print(build_efficiency_report(args.results_path))
-        print("\nFailure taxonomy (all rows):")
-        print(build_taxonomy_report(args.results_path))
     else:
         print(build_report(args.results_path))
         print("\nEfficiency summary (per solved task):")
