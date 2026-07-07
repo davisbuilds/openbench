@@ -24,6 +24,7 @@ Auth expectations are mirrored from the adapters (read them, don't invent):
   opencode  `opencode auth list` shows an OpenAI oauth credential (adapter
             strips OPENAI_API_KEY to force the subscription OAuth route)
   cursor    `cursor-agent status` exits 0 (existing Cursor login)
+  claude    no ~/.claude mount; API-key routes require provider env keys
   devin     ~/.config/devin exists (existing devin login)
 
 Python3 stdlib only.
@@ -34,6 +35,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -51,6 +53,10 @@ OPEN_MODEL_ENV = {
     "deepseek-v4-flash": "DEEPSEEK_API_KEY",
     "kimi-k2.7-code": "MOONSHOT_API_KEY",
 }
+FRONTIER_MODEL_ENV = {
+    "claude-opus-4-8": "ANTHROPIC_API_KEY",
+}
+KEYS_ENV = "~/.openbench/keys.env"
 
 
 # --------------------------------------------------------------------------- #
@@ -95,6 +101,14 @@ class Probes:
         except (OSError, ValueError):
             return None
 
+    def read_text(self, path):
+        """Read text at ``path`` (expanding ``~``); None if missing/unreadable."""
+        try:
+            with open(os.path.expanduser(path), encoding="utf-8") as fh:
+                return fh.read()
+        except OSError:
+            return None
+
     def import_adapter(self, name):
         """Import ``bench/adapters/<name>.py`` and return the module."""
         path = os.path.join(ADAPTERS_DIR, f"{name}.py")
@@ -117,32 +131,39 @@ def _auth_codex(p):
     return False, f"missing {os.path.expanduser(path)}"
 
 
-def _auth_pi(p):
+def _auth_pi_provider(p, provider):
     path = "~/.pi/agent/auth.json"
     if not p.exists(path):
         return False, f"missing {os.path.expanduser(path)}"
     data = p.read_json(path)
     if not isinstance(data, dict):
         return False, f"unreadable JSON at {os.path.expanduser(path)}"
-    entries = [k for k in ("openai-codex", "anthropic") if k in data]
-    if entries:
-        return True, f"entries: {', '.join(entries)}"
-    return False, "no openai-codex/anthropic entry in ~/.pi/agent/auth.json"
+    if provider in data:
+        return True, f"entry: {provider}"
+    return False, f"no {provider} entry in ~/.pi/agent/auth.json"
+
+
+def _auth_pi(p):
+    return _auth_pi_provider(p, "openai-codex")
 
 
 def _auth_opencode(p):
+    return _auth_opencode_provider(p, "openai")
+
+
+def _auth_opencode_provider(p, provider):
     code, out = p.run(["opencode", "auth", "list"])
     if code is None:
         return False, "`opencode auth list` did not run"
     if code != 0:
         return False, f"`opencode auth list` exit {code}"
-    # The subscription credential prints as a single line mentioning both
-    # "OpenAI" and "oauth"; the OPENAI_API_KEY env line has no "oauth".
+    # Subscription credentials print as lines mentioning provider + oauth; API
+    # key env lines have no "oauth" and should not pass subscription checks.
     for line in out.splitlines():
         low = line.lower()
-        if "openai" in low and "oauth" in low:
-            return True, "OpenAI oauth credential present"
-    return False, "no OpenAI oauth credential in `opencode auth list`"
+        if provider.lower() in low and "oauth" in low:
+            return True, f"{provider} oauth credential present"
+    return False, f"no {provider} oauth credential in `opencode auth list`"
 
 
 def _auth_cursor(p):
@@ -167,9 +188,13 @@ HARNESSES = {
     "pi":       {"cli": "pi",           "auth": _auth_pi},
     "opencode": {"cli": "opencode",     "auth": _auth_opencode},
     "cursor":   {"cli": "cursor-agent", "auth": _auth_cursor},
+    "claude":   {"cli": "claude",       "auth": lambda p: (True, "API-key routes checked per model")},
     "devin":    {"cli": "devin",        "auth": _auth_devin},
 }
-ALL_HARNESSES = list(HARNESSES)
+# Default doctor preflight keeps the historical matrix harnesses for the default
+# gpt-5.5-medium model; claude is opt-in because it supports the Opus API-key
+# route, not the default ChatGPT subscription model.
+ALL_HARNESSES = [h for h in HARNESSES if h != "claude"]
 
 
 # --------------------------------------------------------------------------- #
@@ -201,11 +226,59 @@ def check_model(p, harness, model):
     return False, f"{model} not in MODELS/OPEN_MODELS {known}"
 
 
-def check_open_key(p, env_key):
-    """AUTH check for open models: the provider env key must be exported."""
+def _keys_env_has(p, env_key):
+    text = p.read_text(KEYS_ENV)
+    if text is None:
+        return False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        try:
+            parts = shlex.split(line, comments=True, posix=True)
+            first = parts[1] if parts and parts[0] == "export" and len(parts) > 1 else parts[0]
+            key, val = first.split("=", 1)
+        except (ValueError, IndexError):
+            key, val = line.split("=", 1)[0].strip(), line.split("=", 1)[1].strip()
+        if key == env_key and val.strip():
+            return True
+    return False
+
+
+def check_open_key(p, env_key, *, keys_env_ok=False):
+    """AUTH check for API-key routes: env key exported, or keys.env if allowed."""
     if p.getenv(env_key):
         return True, f"{env_key} present"
+    if keys_env_ok and _keys_env_has(p, env_key):
+        return True, f"{env_key} present in {os.path.expanduser(KEYS_ENV)}"
+    if keys_env_ok:
+        return False, f"SETUP-NEEDED: export {env_key} or add it to {os.path.expanduser(KEYS_ENV)}"
     return False, f"SETUP-NEEDED: export {env_key}"
+
+
+def _auth_cursor_container(p):
+    path = "~/.openbench/cursor-container-auth/.config/cursor/auth.json"
+    if p.getenv("CURSOR_API_KEY"):
+        return True, "CURSOR_API_KEY present"
+    if p.exists(path):
+        return True, os.path.expanduser(path)
+    return False, ("SETUP-NEEDED: run bench/cursor_container_login.sh "
+                   f"or export CURSOR_API_KEY (missing {os.path.expanduser(path)})")
+
+
+def _auth_frontier(p, harness, model):
+    env_key = FRONTIER_MODEL_ENV[model]
+    if harness == "pi":
+        return _auth_pi_provider(p, "anthropic")
+    if harness == "opencode":
+        return _auth_opencode_provider(p, "anthropic")
+    if harness == "cursor":
+        return _auth_cursor_container(p)
+    if harness == "codex":
+        return check_open_key(p, env_key, keys_env_ok=True)
+    if harness == "claude":
+        return check_open_key(p, env_key)
+    return HARNESSES[harness]["auth"](p)
 
 
 def check_docker(p):
@@ -239,9 +312,13 @@ def evaluate(harnesses, model, probes):
             continue
 
         cli_ok, cli_detail = check_cli(probes, spec["cli"])
-        if model in OPEN_MODEL_ENV:
+        if model in FRONTIER_MODEL_ENV:
+            auth_ok, auth_detail = _auth_frontier(probes, name, model)
+        elif model in OPEN_MODEL_ENV:
             # Open model: AUTH = provider env key present (harness login is moot).
-            auth_ok, auth_detail = check_open_key(probes, OPEN_MODEL_ENV[model])
+            keys_env_ok = name == "codex"
+            auth_ok, auth_detail = check_open_key(
+                probes, OPEN_MODEL_ENV[model], keys_env_ok=keys_env_ok)
         else:
             auth_ok, auth_detail = spec["auth"](probes)
         model_ok, model_detail = check_model(probes, name, model)

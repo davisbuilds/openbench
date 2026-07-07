@@ -59,9 +59,12 @@ class TestBuildDockerCmd(unittest.TestCase):
     def test_api_key_passthrough_by_name_only(self):
         # A set key is forwarded as a bare `-e VAR` (docker reads the value
         # from the client env; the secret never lands in argv); unset keys are
-        # not mentioned at all.
+        # not mentioned at all. Pass-through is scoped to the exact cell so
+        # unrelated agent containers cannot read extra credentials.
         orig_env = dict(os.environ)
         os.environ["DEEPSEEK_API_KEY"] = "sk-test"
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
+        os.environ["CURSOR_API_KEY"] = "cursor-test"
         os.environ.pop("MOONSHOT_API_KEY", None)
         try:
             cmd = docker_exec.build_docker_cmd(
@@ -70,13 +73,42 @@ class TestBuildDockerCmd(unittest.TestCase):
                 image="openbench-harness:latest",
                 instruction_path="/tmp/instr.txt",
             )
+            claude_cmd = docker_exec.build_docker_cmd(
+                harness="claude", workdir="/tmp/wd", model="claude-opus-4-8",
+                timeout_s=240, adapters_dir="/repo/bench/adapters",
+                image="openbench-harness:latest",
+                instruction_path="/tmp/instr.txt",
+            )
+            cursor_cmd = docker_exec.build_docker_cmd(
+                harness="cursor", workdir="/tmp/wd", model="claude-opus-4-8",
+                timeout_s=240, adapters_dir="/repo/bench/adapters",
+                image="openbench-harness:latest",
+                instruction_path="/tmp/instr.txt",
+            )
+            codex_opus_cmd = docker_exec.build_docker_cmd(
+                harness="codex", workdir="/tmp/wd", model="claude-opus-4-8",
+                timeout_s=240, adapters_dir="/repo/bench/adapters",
+                image="openbench-harness:latest",
+                instruction_path="/tmp/instr.txt",
+            )
         finally:
             os.environ.clear()
             os.environ.update(orig_env)
         self.assertIn("DEEPSEEK_API_KEY", cmd)
+        self.assertNotIn("ANTHROPIC_API_KEY", cmd)
+        self.assertNotIn("CURSOR_API_KEY", cmd)
         self.assertNotIn("MOONSHOT_API_KEY", cmd)
-        self.assertFalse(any("sk-test" in a for a in cmd),
-                         "secret value must not appear in argv")
+        self.assertIn("ANTHROPIC_API_KEY", claude_cmd)
+        self.assertNotIn("CURSOR_API_KEY", claude_cmd)
+        self.assertIn("CURSOR_API_KEY", cursor_cmd)
+        self.assertNotIn("ANTHROPIC_API_KEY", cursor_cmd)
+        self.assertIn("ANTHROPIC_API_KEY=openbench-bridge-placeholder", codex_opus_cmd)
+        self.assertNotIn("ANTHROPIC_API_KEY", codex_opus_cmd)
+        self.assertNotIn("CURSOR_API_KEY", codex_opus_cmd)
+        for argv in (cmd, claude_cmd, cursor_cmd, codex_opus_cmd):
+            for secret in ("sk-test", "sk-ant-test", "cursor-test"):
+                self.assertFalse(any(secret in a for a in argv),
+                                 "secret value must not appear in argv")
 
     def test_auth_mount_readonly_when_present(self):
         # Use a fake HOME so the test is deterministic regardless of the host.
@@ -101,6 +133,54 @@ class TestBuildDockerCmd(unittest.TestCase):
             self.assertFalse(
                 any(a.endswith(".codex:/bench/auth/.codex:ro") for a in args),
                 "must not mount the whole ~/.codex dir")
+        finally:
+            import shutil
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_opencode_mounts_new_data_auth_path(self):
+        home = tempfile.mkdtemp(prefix="fake_home_")
+        try:
+            os.makedirs(os.path.join(home, ".opencode", "data"))
+            with open(os.path.join(home, ".opencode", "data", "auth.json"), "w") as fh:
+                fh.write("{}")
+            orig = os.path.expanduser
+            os.path.expanduser = lambda p: home if p == "~" else orig(p)
+            try:
+                args = docker_exec._auth_mount_args("opencode")
+            finally:
+                os.path.expanduser = orig
+            self.assertTrue(
+                any(a.endswith(".opencode/data:/bench/auth/.opencode/data:ro")
+                    for a in args),
+                f"expected opencode data auth mount, got {args}")
+        finally:
+            import shutil
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_cursor_container_auth_maps_to_linux_home_paths(self):
+        home = tempfile.mkdtemp(prefix="fake_home_")
+        try:
+            os.makedirs(os.path.join(home, ".openbench", "cursor-container-auth",
+                                     ".config", "cursor"))
+            os.makedirs(os.path.join(home, ".openbench", "cursor-container-auth",
+                                     ".cursor"))
+            with open(os.path.join(home, ".openbench", "cursor-container-auth",
+                                   ".config", "cursor", "auth.json"), "w") as fh:
+                fh.write("{}")
+            orig = os.path.expanduser
+            os.path.expanduser = lambda p: home if p == "~" else orig(p)
+            try:
+                args = docker_exec._auth_mount_args("cursor")
+            finally:
+                os.path.expanduser = orig
+            self.assertTrue(
+                any(a.endswith(".openbench/cursor-container-auth/.config/cursor:/bench/auth/.config/cursor:ro")
+                    for a in args),
+                f"expected Linux cursor auth mount, got {args}")
+            self.assertTrue(
+                any(a.endswith(".openbench/cursor-container-auth/.cursor:/bench/auth/.cursor:ro")
+                    for a in args),
+                f"expected Linux cursor CLI config mount, got {args}")
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)
