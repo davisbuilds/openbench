@@ -26,6 +26,7 @@ stdlib only.
 
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 import time
@@ -55,12 +56,20 @@ AUTH_MOUNTS = {
     # session tmp files vanishing mid-copy.
     "codex": [".codex/auth.json", ".codex/config.toml"],
     "pi": [".pi"],
-    "opencode": [".local/share/opencode", ".config/opencode"],
-    "cursor": [".cursor"],
+    "opencode": [".local/share/opencode", ".config/opencode", ".opencode/data"],
+    # Cursor Linux/container auth: `bench/cursor_container_login.sh` mints auth
+    # under ~/.openbench/cursor-container-auth, laid out as a HOME subtree. Map
+    # those host paths back to Linux cursor-agent's HOME paths in the container;
+    # legacy ~/.cursor remains a fallback if no container-auth .cursor exists.
+    "cursor": [
+        (".openbench/cursor-container-auth/.config/cursor", ".config/cursor"),
+        (".openbench/cursor-container-auth/.cursor", ".cursor"),
+        ".cursor",
+    ],
     "devin": [".config/devin"],
-    # claude runs OPEN models only (vendor keys via env, forwarded below). Mount
-    # NOTHING: never expose ~/.claude so a container run can't touch the user's
-    # Anthropic subscription. The API key is passed via API_KEY_PASSTHROUGH.
+    # claude uses API keys only (open-model vendor keys or first-party
+    # ANTHROPIC_API_KEY, forwarded below). Mount NOTHING: never expose ~/.claude
+    # so a container run can't touch the user's Claude Code OAuth subscription.
     "claude": [],
     "null": [],
 }
@@ -68,7 +77,70 @@ AUTH_MOUNTS = {
 # Open-model API keys forwarded into the container when set on the host.
 # Passed as bare ``-e VAR`` (no value) so docker reads them from the client's
 # environment and the secret never appears in argv or logged commands.
-API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY")
+API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "ANTHROPIC_API_KEY", "CURSOR_API_KEY")
+
+_MODEL_API_KEY = {
+    "glm-5.2": "ZAI_API_KEY",
+    "glm-4.7-flash": "ZAI_API_KEY",
+    "deepseek-v4-flash": "DEEPSEEK_API_KEY",
+    "kimi-k2.7-code": "MOONSHOT_API_KEY",
+}
+_KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")
+
+
+def _keys_env_has(var):
+    """True when ~/.openbench/keys.env defines var (without exposing value)."""
+    try:
+        with open(_KEYS_ENV, encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                try:
+                    parts = shlex.split(line, comments=True, posix=True)
+                    first = parts[1] if parts and parts[0] == "export" and len(parts) > 1 else parts[0]
+                    key, val = first.split("=", 1)
+                except (ValueError, IndexError):
+                    key, val = line.split("=", 1)[0].strip(), line.split("=", 1)[1].strip()
+                if key == var and val.strip():
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _host_has_key(var):
+    return bool(os.environ.get(var) or _keys_env_has(var))
+
+
+def _api_key_passthrough(harness, model):
+    """Secret env vars needed by this exact docker cell.
+
+    Keep pass-through scoped: agents can run shell tools, so forwarding Cursor or
+    Anthropic keys into unrelated harness containers would expose credentials in
+    the wrong trust boundary. Codex bridge runs get placeholders instead; the
+    real upstream keys stay only in the host-side LiteLLM bridge process.
+    """
+    needed = set()
+    if harness == "cursor":
+        needed.add("CURSOR_API_KEY")
+    if model == "claude-opus-4-8" and harness == "claude":
+        needed.add("ANTHROPIC_API_KEY")
+    vendor_key = _MODEL_API_KEY.get(model)
+    if vendor_key and harness in {"pi", "opencode", "claude"}:
+        needed.add(vendor_key)
+    return tuple(var for var in API_KEY_PASSTHROUGH if var in needed)
+
+
+def _placeholder_env(harness, model):
+    """Non-secret env assignments needed by CLIs for bridge ingress only."""
+    if harness != "codex":
+        return ()
+    if model == "claude-opus-4-8":
+        var = "ANTHROPIC_API_KEY"
+    else:
+        var = _MODEL_API_KEY.get(model)
+    return (f"{var}=openbench-bridge-placeholder",) if var and _host_has_key(var) else ()
 
 
 class DockerUnavailable(Exception):
@@ -198,10 +270,18 @@ def _auth_mount_args(harness):
     host's real config is never mounted writable.
     """
     args = []
-    for rel in AUTH_MOUNTS.get(harness, []):
-        host_path = os.path.join(os.path.expanduser("~"), rel)
+    staged = set()
+    for item in AUTH_MOUNTS.get(harness, []):
+        if isinstance(item, tuple):
+            host_rel, dest_rel = item
+        else:
+            host_rel = dest_rel = item
+        host_path = os.path.join(os.path.expanduser("~"), host_rel)
+        staged_path = f"{AUTH_STAGING}/{dest_rel}"
+        if staged_path in staged:
+            continue
         if os.path.exists(host_path):
-            staged_path = f"{AUTH_STAGING}/{rel}"
+            staged.add(staged_path)
             args += ["-v", f"{host_path}:{staged_path}:ro"]
     return args
 
@@ -221,7 +301,9 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-w", "/work",
         "-e", f"HOME={CONTAINER_HOME}",
     ]
-    for var in API_KEY_PASSTHROUGH:
+    for assignment in _placeholder_env(harness, model):
+        cmd += ["-e", assignment]
+    for var in _api_key_passthrough(harness, model):
         if os.environ.get(var):
             cmd += ["-e", var]
     cmd += _auth_mount_args(harness)

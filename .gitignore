@@ -22,6 +22,7 @@ __pycache__/
 # Benchmark outputs and worker proof artifacts
 results/
 .proofs/
+.worker/
 
 # LOCAL-ONLY agent transcripts (raw, unscrubbed harness output) and any
 # scrubbed copies. Never committed; publishing requires a manual
