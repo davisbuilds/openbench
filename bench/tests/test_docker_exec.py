@@ -142,6 +142,115 @@ class TestPreflight(unittest.TestCase):
             docker_exec.daemon_running, docker_exec.image_exists = od, oi
 
 
+class TestContainerCleanup(unittest.TestCase):
+    """run_in_container must remove the container by name on EVERY exit path.
+
+    A wedged inner CLI holds the container's stdout pipe open past the adapter
+    timeout, so killing the `docker run` client does not stop the container;
+    only removal by name does. These tests fake subprocess.run to record which
+    docker commands fire on each path.
+    """
+
+    def _patch(self, main_run_effect):
+        """Replace docker_exec's subprocess.run; return the recorded call log.
+
+        ``main_run_effect(cmd)`` handles the `docker run` invocation (return a
+        fake proc or raise). `docker rm -f` / `docker ps` get gone-container
+        stubs so _force_remove_container verifies removal on the first try.
+        """
+        calls = []
+
+        class FakeProc:
+            def __init__(self, stdout="", returncode=0):
+                self.stdout, self.stderr, self.returncode = stdout, "", returncode
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ["docker", "run"]:
+                return main_run_effect(cmd)
+            return FakeProc()  # rm -f / ps probe: container gone
+
+        self._orig = (docker_exec.subprocess.run, docker_exec.preflight)
+        docker_exec.subprocess.run = fake_run
+        docker_exec.preflight = lambda image: None
+        self.addCleanup(self._unpatch)
+        return calls, FakeProc
+
+    def _unpatch(self):
+        docker_exec.subprocess.run, docker_exec.preflight = self._orig
+
+    def _invoke(self):
+        return docker_exec.run_in_container(
+            "pi", "do it", "/tmp/wd", "deepseek-v4-flash", 900,
+            "/repo/bench/adapters")
+
+    def _rm_calls(self, calls):
+        return [c for c in calls if c[:3] == ["docker", "rm", "-f"]]
+
+    def test_timeout_path_removes_container(self):
+        def effect(cmd):
+            raise subprocess.TimeoutExpired(cmd, 960, output=b"partial", stderr=None)
+        calls, _ = self._patch(effect)
+        result = self._invoke()
+        self.assertFalse(result["completed"])
+        self.assertIn("timeout", result["error"])
+        self.assertEqual(result["output_tail"], "partial")
+        self.assertEqual(len(self._rm_calls(calls)), 1)
+
+    def test_unexpected_exception_still_removes_container(self):
+        def effect(cmd):
+            raise RuntimeError("daemon hiccup")
+        calls, _ = self._patch(effect)
+        with self.assertRaises(RuntimeError):
+            self._invoke()
+        self.assertEqual(len(self._rm_calls(calls)), 1)
+
+    def test_clean_return_also_sweeps_name(self):
+        # Even when `docker run --rm` exits normally, removal-by-name fires as
+        # a cheap no-op so a glitched --rm can't leave a wedged container.
+        sentinel = docker_exec.RESULT_SENTINEL + ' {"completed": true}\n'
+        fake_holder = []
+
+        def effect(cmd):
+            return fake_holder[0](stdout=sentinel)
+
+        calls, FakeProc = self._patch(effect)
+        fake_holder.append(FakeProc)
+        result = self._invoke()
+        self.assertTrue(result["completed"])
+        self.assertEqual(len(self._rm_calls(calls)), 1)
+
+    def test_force_remove_retries_until_gone(self):
+        # First rm leaves the container visible in `docker ps` (wedged CLI on a
+        # busy daemon); the retry succeeds.
+        calls = []
+
+        class FakeProc:
+            def __init__(self, stdout=""):
+                self.stdout, self.stderr, self.returncode = stdout, "", 0
+
+        state = {"alive": True}
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ["docker", "ps"]:
+                if state["alive"]:
+                    state["alive"] = False
+                    return FakeProc(stdout="abc123\n")  # still there
+                return FakeProc()
+            return FakeProc()
+
+        orig = docker_exec.subprocess.run
+        docker_exec.subprocess.run = fake_run
+        try:
+            ok = docker_exec._force_remove_container("openbench_x", delay_s=0)
+        finally:
+            docker_exec.subprocess.run = orig
+        self.assertTrue(ok)
+        self.assertEqual(
+            len([c for c in calls if c[:3] == ["docker", "rm", "-f"]]), 2)
+
+
 class TestInvokeAdapterFallback(unittest.TestCase):
     def test_docker_unavailable_falls_back_to_local(self):
         # Force the docker backend to report unavailable; invoke_adapter should

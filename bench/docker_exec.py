@@ -120,6 +120,31 @@ def preflight(image, retries=3, delay_s=5):
         f"docker build -t {image} {DOCKERFILE_DIR})")
 
 
+def _force_remove_container(name, attempts=3, delay_s=2):
+    """Force-remove a container and VERIFY it is gone; retry if not.
+
+    A wedged inner CLI (holding the container's stdout pipe past the adapter
+    timeout) has been observed to survive a single ``docker rm -f`` on a busy
+    daemon, so removal is verified with ``docker ps -a`` and retried. Returns
+    True once the container no longer exists (including "was never created").
+    """
+    for attempt in range(attempts):
+        try:
+            subprocess.run(["docker", "rm", "-f", name],
+                           capture_output=True, text=True, timeout=30)
+            probe = subprocess.run(
+                ["docker", "ps", "-aq", "--filter", f"name=^{name}$"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if probe.returncode == 0 and not probe.stdout.strip():
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        if attempt < attempts - 1:
+            time.sleep(delay_s)
+    return False
+
+
 def _auth_mount_args(harness):
     """Read-only ``-v`` args mounting the harness's auth into the staging dir.
 
@@ -203,24 +228,33 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             extra_docker_args=extra_docker_args,
         )
 
+        # The container must not outlive this call on ANY exit path — timeout,
+        # crash, Ctrl-C, or a clean return where `--rm` glitched. Killing the
+        # `docker run` client alone does not stop the container, so removal by
+        # name is guaranteed in the finally (a no-op when `--rm` already
+        # cleaned up).
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True,
-                timeout=timeout_s + _TIMEOUT_GRACE_S,
-                stdin=subprocess.DEVNULL,
-            )
-        except subprocess.TimeoutExpired as e:
-            # Force-kill AND remove the container so a hung harness leaves no
-            # leak (a bare `docker kill` can leave a "Dead" container behind).
-            subprocess.run(["docker", "rm", "-f", container_name],
-                           capture_output=True, text=True, timeout=30)
-            tail = (e.stdout or "") + (e.stderr or "")
-            return {
-                "completed": False,
-                "error": f"container timeout after {timeout_s}s (+grace); killed",
-                "output_tail": tail[-2000:],
-                "tokens": None, "turns": None, "cmd": cmd,
-            }
+            try:
+                proc = subprocess.run(
+                    cmd, capture_output=True, text=True,
+                    timeout=timeout_s + _TIMEOUT_GRACE_S,
+                    stdin=subprocess.DEVNULL,
+                )
+            except subprocess.TimeoutExpired as e:
+                # TimeoutExpired can carry bytes even under text=True.
+                def _text(x):
+                    if isinstance(x, bytes):
+                        return x.decode("utf-8", errors="replace")
+                    return x or ""
+                tail = _text(e.stdout) + _text(e.stderr)
+                return {
+                    "completed": False,
+                    "error": f"container timeout after {timeout_s}s (+grace); killed",
+                    "output_tail": tail[-2000:],
+                    "tokens": None, "turns": None, "cmd": cmd,
+                }
+        finally:
+            _force_remove_container(container_name)
 
         combined = (proc.stdout or "") + (proc.stderr or "")
         result = _parse_result(proc.stdout or "")
