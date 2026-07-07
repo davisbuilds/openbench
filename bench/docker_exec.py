@@ -99,6 +99,51 @@ def image_exists(image):
     return proc.returncode == 0
 
 
+def _split_image(image):
+    """Return (repository, tag) for a Docker image ref used by this runner."""
+    last = image.rsplit("/", 1)[-1]
+    if ":" in last:
+        return image.rsplit(":", 1)
+    return image, "latest"
+
+
+def _retag_corrupt_image(image):
+    """Repair a corrupted tag when `docker images` can still see its image ID.
+
+    Observed failure: `docker image inspect openbench-harness:latest` says the
+    tag is missing/corrupt, while `docker images` still lists the repository/tag
+    with an image ID. Re-tagging that ID restores inspect/run. Returns True when
+    a re-tag was attempted and inspect succeeds afterwards.
+    """
+    repo, tag = _split_image(image)
+    try:
+        proc = subprocess.run(
+            ["docker", "images", "--format", "{{.Repository}}\t{{.Tag}}\t{{.ID}}"],
+            capture_output=True, text=True, timeout=20,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    if proc.returncode != 0:
+        return False
+    image_id = None
+    for line in (proc.stdout or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 3 and parts[0] == repo and parts[1] == tag and parts[2]:
+            image_id = parts[2]
+            break
+    if not image_id:
+        return False
+    print(f"WARN docker image tag {image!r} failed inspect; re-tagging {image_id} as {image}")
+    try:
+        tag_proc = subprocess.run(
+            ["docker", "tag", image_id, image],
+            capture_output=True, text=True, timeout=20,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return tag_proc.returncode == 0 and image_exists(image)
+
+
 def preflight(image, retries=3, delay_s=5):
     """Raise ``DockerUnavailable`` with a specific reason if we can't run in docker.
 
@@ -108,7 +153,8 @@ def preflight(image, retries=3, delay_s=5):
     a 15-cell segment burned every cell in ~7s on a paused engine).
     """
     for attempt in range(retries):
-        if daemon_running() and image_exists(image):
+        daemon_ok = daemon_running()
+        if daemon_ok and (image_exists(image) or _retag_corrupt_image(image)):
             return
         if attempt < retries - 1:
             time.sleep(delay_s)
@@ -246,11 +292,12 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                     if isinstance(x, bytes):
                         return x.decode("utf-8", errors="replace")
                     return x or ""
-                tail = _text(e.stdout) + _text(e.stderr)
+                full_output = _text(e.stdout) + _text(e.stderr)
                 return {
                     "completed": False,
                     "error": f"container timeout after {timeout_s}s (+grace); killed",
-                    "output_tail": tail[-2000:],
+                    "output_tail": full_output[-2000:],
+                    "full_output": full_output,
                     "tokens": None, "turns": None, "cmd": cmd,
                 }
         finally:
@@ -264,6 +311,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "error": f"container produced no result sentinel "
                          f"(exit {proc.returncode})",
                 "output_tail": combined[-2000:],
+                "full_output": combined,
                 "tokens": None, "turns": None, "cmd": cmd,
             }
         # Record the docker invocation for the results log (adapters record the

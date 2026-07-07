@@ -132,14 +132,59 @@ class TestPreflight(unittest.TestCase):
             docker_exec.daemon_running = orig
 
     def test_raises_when_image_missing(self):
-        od, oi = docker_exec.daemon_running, docker_exec.image_exists
+        od, oi, ort = (docker_exec.daemon_running, docker_exec.image_exists,
+                       docker_exec._retag_corrupt_image)
         docker_exec.daemon_running = lambda: True
         docker_exec.image_exists = lambda image: False
+        docker_exec._retag_corrupt_image = lambda image: False
         try:
             with self.assertRaises(docker_exec.DockerUnavailable):
                 docker_exec.preflight("nope:latest", retries=2, delay_s=0)
         finally:
-            docker_exec.daemon_running, docker_exec.image_exists = od, oi
+            (docker_exec.daemon_running, docker_exec.image_exists,
+             docker_exec._retag_corrupt_image) = od, oi, ort
+
+    def test_retags_corrupt_image_when_images_lists_id(self):
+        calls = []
+        state = {"tagged": False}
+
+        class FakeProc:
+            def __init__(self, stdout="", returncode=0):
+                self.stdout, self.stderr, self.returncode = stdout, "", returncode
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ["docker", "images"]:
+                return FakeProc("openbench-harness\tlatest\tsha256:abc123\n")
+            if cmd[:2] == ["docker", "tag"]:
+                state["tagged"] = True
+                return FakeProc()
+            raise AssertionError(f"unexpected docker command: {cmd}")
+
+        od, oi, osr = (docker_exec.daemon_running, docker_exec.image_exists,
+                       docker_exec.subprocess.run)
+        docker_exec.daemon_running = lambda: True
+        docker_exec.image_exists = lambda image: state["tagged"]
+        docker_exec.subprocess.run = fake_run
+        try:
+            docker_exec.preflight("openbench-harness:latest", retries=1, delay_s=0)
+        finally:
+            (docker_exec.daemon_running, docker_exec.image_exists,
+             docker_exec.subprocess.run) = od, oi, osr
+        self.assertIn(["docker", "tag", "sha256:abc123", "openbench-harness:latest"], calls)
+
+    def test_retag_ignores_non_matching_repo_tag(self):
+        class FakeProc:
+            stdout = "other\tlatest\tsha256:nope\n"
+            stderr = ""
+            returncode = 0
+
+        orig = docker_exec.subprocess.run
+        docker_exec.subprocess.run = lambda *a, **k: FakeProc()
+        try:
+            self.assertFalse(docker_exec._retag_corrupt_image("openbench-harness:latest"))
+        finally:
+            docker_exec.subprocess.run = orig
 
 
 class TestContainerCleanup(unittest.TestCase):
