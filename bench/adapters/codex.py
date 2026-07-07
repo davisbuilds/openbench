@@ -42,6 +42,7 @@ models to cross-check against.
 
 import json
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -88,6 +89,10 @@ _EFFORT = {
 # (Duplicated across the pi/opencode/codex adapters so each stays self-contained
 #  under the runner's isolated importer.)
 OPEN_MODELS = {
+    # Thinking parity for the opus frontier lane: codex requests
+    # `model_reasoning_effort="medium"`; the LiteLLM bridge preserves that as
+    # Anthropic medium reasoning while injecting ANTHROPIC_API_KEY upstream.
+    "claude-opus-4-8":   {"provider": "anthropic", "model_id": "claude-opus-4-8",   "base_url": "https://api.anthropic.com",     "env_key": "ANTHROPIC_API_KEY", "display": "Anthropic Claude", "effort": "medium"},
     "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "effort": "medium"},
     "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "effort": "medium"},
     "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek",      "effort": "medium"},
@@ -97,6 +102,7 @@ OPEN_MODELS = {
 # Host-side bridge (LiteLLM proxy). Port must match bench/openmodel_bridge.sh
 # (both default to 4141; override in lockstep via BENCH_BRIDGE_PORT).
 _BRIDGE_DEFAULT_PORT = 4141
+_KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")
 
 
 def _bridge_host():
@@ -133,6 +139,39 @@ def _bridge_down(model):
                       f"{_bridge_host()}:{_bridge_port()} for {model} "
                       f"(start it: bench/openmodel_bridge.sh)"),
             "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+
+
+def _keys_env_has(env_key):
+    try:
+        with open(_KEYS_ENV, encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                try:
+                    parts = shlex.split(line, comments=True, posix=True)
+                    first = parts[1] if parts and parts[0] == "export" and len(parts) > 1 else parts[0]
+                    key, val = first.split("=", 1)
+                except (ValueError, IndexError):
+                    key, val = line.split("=", 1)[0].strip(), line.split("=", 1)[1].strip()
+                if key == env_key and val.strip():
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _host_has_key(env_key):
+    return bool(os.environ.get(env_key) or _keys_env_has(env_key))
+
+
+def _codex_env_for_bridge(env_key):
+    # The bridge injects the real upstream key from its host process. Give codex
+    # only a non-secret placeholder so its shell-capable agent cannot read API
+    # credentials from the environment.
+    env = {k: v for k, v in os.environ.items() if not k.endswith("_API_KEY")}
+    env[env_key] = "openbench-bridge-placeholder"
+    return env
 
 
 def _unsupported(model):
@@ -259,7 +298,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         ]
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
-        if not os.environ.get(spec["env_key"]):
+        if not _host_has_key(spec["env_key"]):
             return _setup_needed(spec["env_key"], model)
         # Route through the host-side Responses<->Chat bridge (see the OPEN_MODELS
         # docstring and bench/openmodel_bridge.sh). Fail fast with a clear
@@ -289,6 +328,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             text=True,
             timeout=timeout_s,
             stdin=subprocess.DEVNULL,
+            env=_codex_env_for_bridge(spec["env_key"]) if model in OPEN_MODELS else None,
         )
     except subprocess.TimeoutExpired as e:
         full_output = _err_tail(e, limit=None)

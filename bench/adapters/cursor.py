@@ -13,9 +13,12 @@ Notes / quirks:
   Required so the disposable temp workdir doesn't trigger a trust prompt.
 - `--workspace <workdir>` (plus cwd=workdir) points the agent at the task dir;
   edits land there.
-- Reasoning effort is baked into the model name: `gpt-5.5-medium` is a
-  first-class model id (verified via `cursor-agent models`).
-- Uses the user's existing Cursor login as-is (read-only).
+- Reasoning effort is baked into the model name: `gpt-5.5-medium` and
+  `claude-opus-4-8-thinking-medium` are first-class model ids (verified via
+  `cursor-agent models`).
+- Uses Cursor auth from Linux file storage (`~/.config/cursor/auth.json`) or the
+  documented `CURSOR_API_KEY` fallback. Docker auth should be minted with
+  `bench/cursor_container_login.sh` and mounted read-only per run.
 - M4 OPEN MODELS (glm-*/deepseek-*/kimi-*) are NOT supported here: cursor-agent
   exposes a closed, account-bound model menu with no custom-provider/base-URL
   override, so open canonicals fall through to the unsupported-model dict.
@@ -40,7 +43,15 @@ _EXE = "cursor-agent"
 # canonical model name -> cursor-agent `--model` string
 MODELS = {
     "gpt-5.5-medium": "gpt-5.5-medium",
+    # Thinking parity for the opus frontier lane: Cursor exposes a concrete
+    # medium-thinking model id, so no separate effort flag is needed.
+    "claude-opus-4-8": "claude-opus-4-8-thinking-medium",
 }
+
+# Linux cursor-agent stores subscription auth in FILES, not a keychain. The
+# docker lane stages the host-persistent login dir into this path; CURSOR_API_KEY
+# remains the documented env fallback.
+_CURSOR_AUTH = os.path.expanduser("~/.config/cursor/auth.json")
 
 
 def version():
@@ -99,6 +110,13 @@ def _parse_json(stdout):
     return (tokens or None), None, tail[-2000:]
 
 
+def _setup_needed(model):
+    return {"completed": False,
+            "error": (f"SETUP-NEEDED: run bench/cursor_container_login.sh for subscription auth "
+                      f"(missing {_CURSOR_AUTH}) or export CURSOR_API_KEY to use {model}"),
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+
+
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model not in MODELS:
         return {
@@ -109,6 +127,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "turns": None,
             "cmd": None,
         }
+    if (model == "claude-opus-4-8" and os.environ.get("BENCH_IN_CONTAINER")
+            and not (os.environ.get("CURSOR_API_KEY") or os.path.exists(_CURSOR_AUTH))):
+        return _setup_needed(model)
 
     cmd = [
         "cursor-agent", "-p",

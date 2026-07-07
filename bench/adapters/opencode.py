@@ -38,12 +38,31 @@ _EXE = "opencode"
 # canonical model name -> opencode `-m` model string (provider/model)
 MODELS = {
     "gpt-5.5-medium": "openai/gpt-5.5",
+    # Thinking parity for the opus frontier lane: Anthropic's opencode provider
+    # gets the same medium-equivalent request via `--variant medium`.
+    "claude-opus-4-8": "anthropic/claude-opus-4-8",
 }
 
 # canonical model name -> `--variant` reasoning effort
 _VARIANT = {
     "gpt-5.5-medium": "medium",
+    "claude-opus-4-8": "medium",
 }
+
+# opencode's Anthropic OAuth login (`opencode auth login -p anthropic`) writes
+# here on current releases. Older OpenAI subscription paths are still mounted by
+# docker_exec; this guard is only for the new Anthropic frontier route.
+_ANTHROPIC_AUTH = os.path.expanduser("~/.opencode/data/auth.json")
+
+
+def _has_anthropic_oauth():
+    try:
+        with open(_ANTHROPIC_AUTH, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return False
+    text = json.dumps(data).lower()
+    return "anthropic" in text and "oauth" in text
 
 # --- M4 open models (first-party pay-per-token, OpenAI-compatible) ----------
 # Wired via a custom provider passed through OPENCODE_CONFIG_CONTENT (inline
@@ -176,6 +195,10 @@ def _parse_json(stdout):
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     env = dict(os.environ)
     if model in MODELS:
+        if model == "claude-opus-4-8" and not _has_anthropic_oauth():
+            return {"completed": False,
+                    "error": f"SETUP-NEEDED: run `opencode auth login -p anthropic` (missing {_ANTHROPIC_AUTH})",
+                    "output_tail": "", "tokens": None, "turns": None, "cmd": None}
         cmd = [
             "opencode", "run",
             "--dir", workdir,
@@ -186,6 +209,8 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             instruction,
         ]
         env.pop("OPENAI_API_KEY", None)  # force subscription OAuth route
+        if model == "claude-opus-4-8":
+            env.pop("ANTHROPIC_API_KEY", None)  # force Anthropic OAuth route
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
         if not os.environ.get(spec["env_key"]):

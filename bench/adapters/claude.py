@@ -1,10 +1,9 @@
 """Adapter for the `claude` CLI (Claude Code) running OPEN models.
 
-This adapter deliberately supports ONLY open models served over the vendors'
-Anthropic-compatible endpoints. Frontier / subscription models (gpt-5.5 and
-Anthropic's own claude-*) are intentionally UNSUPPORTED here so a benchmark run
-can never bill the user's Anthropic account (``MODELS`` is empty; unknown models
-return the ``_unsupported`` dict).
+This adapter supports open models served over vendors' Anthropic-compatible
+endpoints, plus an explicit first-party Anthropic API-key frontier route for
+`claude-opus-4-8`. It never uses Claude Code OAuth or mounts ~/.claude; the
+frontier route is gated only on `ANTHROPIC_API_KEY`.
 
 Headless invocation (per open model):
     HOME=<isolated tmp>  CLAUDE_CONFIG_DIR=<iso>/.claude
@@ -63,9 +62,12 @@ import tempfile
 NAME = "claude"
 _EXE = "claude"
 
-# This adapter supports open models only; frontier/subscription is deliberately
-# excluded so a run can never bill the user's Anthropic account.
-MODELS = {}
+# First-party Anthropic API-key route. Thinking parity for the opus frontier
+# lane: Claude Code gets `--effort medium`, matching the medium-reasoning tier.
+# Auth is plain ANTHROPIC_API_KEY only; ~/.claude remains unmounted/unused.
+MODELS = {
+    "claude-opus-4-8": {"model_id": "claude-opus-4-8", "env_key": "ANTHROPIC_API_KEY", "effort": "medium"},
+}
 
 # --- Open models via each vendor's Anthropic-compatible endpoint -------------
 # Auth: the vendor key is passed as ANTHROPIC_API_KEY (x-api-key header), which
@@ -122,9 +124,11 @@ def _clean_env(spec, key, iso_home):
     # Isolate config so the user's real ~/.claude is never read/written.
     env["HOME"] = iso_home
     env["CLAUDE_CONFIG_DIR"] = os.path.join(iso_home, ".claude")
-    # Route every request at the vendor host and authenticate with the vendor
-    # key ONLY. See module docstring for the billing-safety argument.
-    env["ANTHROPIC_BASE_URL"] = spec["base_url"]
+    # Route open-model requests at the vendor host; first-party Anthropic uses
+    # Claude Code's default Anthropic endpoint by leaving ANTHROPIC_BASE_URL
+    # unset. Authenticate with the chosen API key ONLY.
+    if spec.get("base_url"):
+        env["ANTHROPIC_BASE_URL"] = spec["base_url"]
     env["ANTHROPIC_API_KEY"] = key
     # In the docker lane the container runs as root, and claude refuses
     # --dangerously-skip-permissions as root UNLESS it's told it's sandboxed.
@@ -263,13 +267,12 @@ def _parse_json(stdout):
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model in MODELS:
-        # Deliberately unreachable (MODELS is empty): frontier/subscription is
-        # unsupported here so a run can never bill the Anthropic account.
-        return _unsupported(model)
-    if model not in OPEN_MODELS:
+        spec = MODELS[model]
+    elif model in OPEN_MODELS:
+        spec = OPEN_MODELS[model]
+    else:
         return _unsupported(model)
 
-    spec = OPEN_MODELS[model]
     key = os.environ.get(spec["env_key"])
     if not key:
         return _setup_needed(spec["env_key"], model)

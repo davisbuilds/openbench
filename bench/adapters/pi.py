@@ -35,17 +35,14 @@ import tempfile
 
 NAME = "pi"
 
-# canonical model name -> pi `--model` string (used with --provider openai-codex)
+# canonical model name -> pi provider/model pair. Both routes use pi's
+# subscription/OAuth credentials under ~/.pi; no API key is required here.
+# Thinking parity for the opus frontier lane: Anthropic Claude Opus 4.8 is run
+# with pi's `--thinking medium`, matching the benchmark's medium-reasoning tier.
 MODELS = {
-    "gpt-5.5-medium": "gpt-5.5",
+    "gpt-5.5-medium": {"provider": "openai-codex", "model_id": "gpt-5.5", "thinking": "medium"},
+    "claude-opus-4-8": {"provider": "anthropic", "model_id": "claude-opus-4-8", "thinking": "medium"},
 }
-
-# canonical model name -> `--thinking` level
-_THINKING = {
-    "gpt-5.5-medium": "medium",
-}
-
-_PROVIDER = "openai-codex"
 _REAL_AUTH = os.path.expanduser("~/.pi/agent/auth.json")
 _EXE = "pi"
 
@@ -115,6 +112,22 @@ def _setup_needed(env_key, model):
     return {"completed": False,
             "error": f"SETUP-NEEDED: export {env_key} to use {model}",
             "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+
+
+def _subscription_setup_needed(provider, model):
+    return {"completed": False,
+            "error": (f"SETUP-NEEDED: login to pi provider {provider!r} for {model} "
+                      f"(missing provider credential in {_REAL_AUTH})"),
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+
+
+def _has_subscription_auth(provider):
+    try:
+        with open(_REAL_AUTH, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(data, dict) and provider in data
 
 
 def _pi_provider_ext(spec):
@@ -199,15 +212,9 @@ def _parse_json(stdout):
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model in MODELS:
-        if not os.path.exists(_REAL_AUTH):
-            return {
-                "completed": False,
-                "error": f"missing pi auth at {_REAL_AUTH}",
-                "output_tail": "",
-                "tokens": None,
-                "turns": None,
-                "cmd": None,
-            }
+        provider = MODELS[model]["provider"]
+        if not _has_subscription_auth(provider):
+            return _subscription_setup_needed(provider, model)
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
         if not os.environ.get(spec["env_key"]):
@@ -222,15 +229,16 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
 
         if model in MODELS:
             # Subscription route: isolate HOME with only the copied auth.json.
+            spec = MODELS[model]
             agent_dir = os.path.join(iso_home, ".pi", "agent")
             os.makedirs(agent_dir, exist_ok=True)
             shutil.copy2(_REAL_AUTH, os.path.join(agent_dir, "auth.json"))
             cmd = [
                 "pi", "-p",
                 "--no-extensions",
-                "--provider", _PROVIDER,
-                "--model", MODELS[model],
-                "--thinking", _THINKING[model],
+                "--provider", spec["provider"],
+                "--model", spec["model_id"],
+                "--thinking", spec["thinking"],
                 "--mode", "json",
                 instruction,
             ]

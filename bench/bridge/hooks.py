@@ -29,6 +29,8 @@ onto that assistant message, satisfying the vendor.
 THINKING: codex sends its configured `model_reasoning_effort` to the bridge as
 Responses-style reasoning metadata. We normalize the four open model routes to
 thinking-on here so parity does not depend on LiteLLM/provider defaults:
+  - Claude Opus 4.8: Anthropic reasoning effort `medium` is preserved as the
+    exact medium-equivalent frontier request.
   - GLM-5.2: Z.ai thinking enabled + provider effort `high` (medium-equivalent;
     Z.ai exposes high/max, not medium).
   - GLM-4.7 Flash, DeepSeek V4 Flash, Kimi K2.7 Code: thinking enabled with the
@@ -124,6 +126,7 @@ def _is_chat_vendor_route(model):
     """True for the chat-only open-model routes served by this bridge."""
     model = _model_key(model)
     return model in {
+        "claude-opus-4-8",
         "deepseek-v4-flash",
         "glm-5.2",
         "glm-4.7-flash",
@@ -153,7 +156,13 @@ def normalize_thinking(data):
     OpenAI-compatible SDK filtering.
     """
     model = _model_key(data.get("model"))
-    if model == "glm-5.2":
+    if model == "claude-opus-4-8":
+        # Anthropic/LiteLLM accepts the portable Responses reasoning field;
+        # keep codex's medium request explicit for frontier parity.
+        data["reasoning"] = {"effort": "medium"}
+        data["reasoning_effort"] = "medium"
+        _merge_extra_body(data, {"reasoning_effort": "medium"})
+    elif model == "glm-5.2":
         data["thinking"] = {"type": "enabled", "clear_thinking": False}
         data["reasoning"] = {"effort": "high"}
         data["reasoning_effort"] = "high"
@@ -195,7 +204,11 @@ def normalize_chat_thinking(model, kwargs):
     if not isinstance(kwargs, dict):
         return kwargs
     model = _model_key(model or kwargs.get("model"))
-    if "glm-5.2" in model:
+    if "claude-opus-4-8" in model:
+        kwargs["reasoning"] = {"effort": "medium"}
+        kwargs["reasoning_effort"] = "medium"
+        _merge_extra_body(kwargs, {"reasoning_effort": "medium"})
+    elif "glm-5.2" in model:
         thinking = {"type": "enabled", "clear_thinking": False}
         kwargs["thinking"] = thinking
         kwargs["reasoning_effort"] = "high"
