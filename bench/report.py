@@ -296,6 +296,15 @@ def build_efficiency_report(results_path):
     return format_efficiency(harnesses, stats)
 
 
+def build_taxonomy_report(results_path):
+    """Load, aggregate, and format the failure taxonomy table."""
+    rows = load_rows(results_path)
+    if not rows:
+        return f"No results found at {results_path}"
+    harnesses, _tasks, stats = aggregate(rows)
+    return format_taxonomy(harnesses, stats)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Benchmark results report.")
     parser.add_argument("--results-path", default=DEFAULT_RESULTS_PATH,
@@ -305,6 +314,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.efficiency:
         print(build_efficiency_report(args.results_path))
+        print("\nFailure taxonomy (all rows):")
+        print(build_taxonomy_report(args.results_path))
     else:
         print(build_report(args.results_path))
         print("\nEfficiency summary (per solved task):")
