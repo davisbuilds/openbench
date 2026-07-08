@@ -31,6 +31,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from types import SimpleNamespace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENTRY_PATH = os.path.join(HERE, "entry.py")
@@ -41,6 +42,8 @@ DEFAULT_IMAGE = "openbench-harness:latest"
 # Extra host-side wall-clock grace beyond the adapter's own timeout before we
 # hard-kill the container.
 _TIMEOUT_GRACE_S = 60
+_DOCKER_CLIENT_POLL_INTERVAL_S = 0.2
+_DOCKER_CLIENT_KILL_GRACE_S = 5
 
 # Per-harness auth surfaces, as $HOME-relative paths. Only those that exist on
 # the host are mounted READ-ONLY into a staging dir; entry.py then copies them
@@ -266,6 +269,90 @@ def _force_remove_container(name, attempts=3, delay_s=2):
     return False
 
 
+def _read_tempfile_text(fh):
+    """Return all bytes currently captured in a temp file as replacement text."""
+    fh.flush()
+    fh.seek(0)
+    return fh.read().decode("utf-8", errors="replace")
+
+
+def _stop_process(proc, terminate_grace_s=_DOCKER_CLIENT_KILL_GRACE_S):
+    """Best-effort stop for a still-running docker client process."""
+    if proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=terminate_grace_s)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=terminate_grace_s)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _run_docker_client_with_deadline(cmd, container_name, host_timeout_s,
+                                     poll_interval_s=_DOCKER_CLIENT_POLL_INTERVAL_S):
+    """Run ``docker run`` without trusting ``Popen.communicate(timeout=...)``.
+
+    ``subprocess.run(..., capture_output=True, timeout=...)`` enforces its
+    deadline from inside ``communicate()``, while the observed wedge had the
+    runner parked in ``select.poll`` there for far longer than the requested
+    timeout. This helper avoids that path entirely: stdout/stderr are redirected
+    to temp files, and a simple host loop polls the docker client while checking
+    both a monotonic deadline and a real wall-clock deadline. On expiry it first
+    force-removes the named container (the only reliable way to stop a live
+    ``docker run`` container), then terminates/kills the client if needed.
+    """
+    proc = None
+    timed_out = False
+    start_monotonic = time.monotonic()
+    start_wall = time.time()
+    with tempfile.TemporaryFile() as stdout_fh, tempfile.TemporaryFile() as stderr_fh:
+        try:
+            proc = subprocess.Popen(
+                cmd, stdout=stdout_fh, stderr=stderr_fh,
+                stdin=subprocess.DEVNULL,
+            )
+            monotonic_deadline = start_monotonic + host_timeout_s
+            wall_deadline = start_wall + host_timeout_s
+            while proc.poll() is None:
+                monotonic_remaining = monotonic_deadline - time.monotonic()
+                wall_remaining = wall_deadline - time.time()
+                remaining = min(monotonic_remaining, wall_remaining)
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                time.sleep(min(poll_interval_s, remaining))
+
+            if timed_out:
+                _force_remove_container(container_name)
+                _stop_process(proc)
+        except BaseException:
+            if proc is not None and proc.poll() is None:
+                _force_remove_container(container_name)
+                _stop_process(proc)
+            raise
+
+        elapsed_s = max(time.monotonic() - start_monotonic,
+                        time.time() - start_wall)
+        return SimpleNamespace(
+            returncode=proc.returncode,
+            stdout=_read_tempfile_text(stdout_fh),
+            stderr=_read_tempfile_text(stderr_fh),
+            timed_out=timed_out,
+            host_wall_time_s=elapsed_s,
+        )
+
+
 def _auth_mount_args(harness):
     """Read-only ``-v`` args mounting the harness's auth into the staging dir.
 
@@ -364,43 +451,36 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         # `docker run` client alone does not stop the container, so removal by
         # name is guaranteed in the finally (a no-op when `--rm` already
         # cleaned up).
-        timeout_result = None
         cleanup_ok = True
         try:
-            try:
-                proc = subprocess.run(
-                    cmd, capture_output=True, text=True,
-                    timeout=timeout_s + _TIMEOUT_GRACE_S,
-                    stdin=subprocess.DEVNULL,
-                )
-            except subprocess.TimeoutExpired as e:
-                # TimeoutExpired can carry bytes even under text=True.
-                def _text(x):
-                    if isinstance(x, bytes):
-                        return x.decode("utf-8", errors="replace")
-                    return x or ""
-                full_output = _text(e.stdout) + _text(e.stderr)
-                timeout_result = {
-                    "completed": False,
-                    "error": f"container timeout after {timeout_s}s (+grace); killed",
-                    "output_tail": full_output[-2000:],
-                    "full_output": full_output,
-                    "tokens": None, "turns": None, "cmd": cmd,
-                }
+            proc = _run_docker_client_with_deadline(
+                cmd, container_name, timeout_s + _TIMEOUT_GRACE_S,
+            )
         finally:
             cleanup_ok = _force_remove_container(container_name)
+        # The final verified sweep is authoritative: a watchdog-timeout removal
+        # can fail transiently and still be recovered here.
         if not cleanup_ok:
-            tail = (timeout_result or {}).get("output_tail", "")
+            full_output = (proc.stdout or "") + (proc.stderr or "") if "proc" in locals() else ""
             return {
                 "completed": False,
                 "error": f"container cleanup failed for {container_name}; "
                          "container may still be running",
-                "output_tail": tail,
-                "full_output": (timeout_result or {}).get("full_output", tail),
+                "output_tail": full_output[-2000:],
+                "full_output": full_output,
                 "tokens": None, "turns": None, "cmd": cmd,
+                "host_wall_time_s": proc.host_wall_time_s if "proc" in locals() else None,
             }
-        if timeout_result is not None:
-            return timeout_result
+        if proc.timed_out:
+            full_output = (proc.stdout or "") + (proc.stderr or "")
+            return {
+                "completed": False,
+                "error": f"container timeout after {timeout_s}s (+grace); killed",
+                "output_tail": full_output[-2000:],
+                "full_output": full_output,
+                "tokens": None, "turns": None, "cmd": cmd,
+                "host_wall_time_s": proc.host_wall_time_s,
+            }
 
         combined = (proc.stdout or "") + (proc.stderr or "")
         result = _parse_result(proc.stdout or "")
@@ -412,10 +492,12 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "output_tail": combined[-2000:],
                 "full_output": combined,
                 "tokens": None, "turns": None, "cmd": cmd,
+                "host_wall_time_s": proc.host_wall_time_s,
             }
         # Record the docker invocation for the results log (adapters record the
         # inner CLI cmd; we prepend the container wrapper for provenance).
         result["cmd"] = {"docker": cmd, "adapter_cmd": result.get("cmd")}
+        result["host_wall_time_s"] = proc.host_wall_time_s
         return result
     finally:
         os.unlink(instruction_path)
