@@ -32,6 +32,14 @@ PARSER_HARNESSES = {"pi", "claude", "codex", "opencode"}
 GROKBUILD = "grokbuild"
 VENDOR_SPLIT = "vendor_split"
 UNAVAILABLE = "unavailable"
+SCALAR_EXACT = "scalar_exact"
+# Lanes whose legacy 'tokens' scalar is already uncached_input + output, so the
+# scalar can be adopted as tokens_fresh when the transcript is unavailable:
+# pi verified exact by the parity probe (zero delta vs bridge ground truth) and
+# by this tool's own self-test; grokbuild computes the scalar from per-call
+# inference_done events with the same formula. claude/codex scalars use other
+# bases and must NEVER be adopted.
+SCALAR_EXACT_HARNESSES = {"pi", GROKBUILD}
 
 
 class BackfillError(RuntimeError):
@@ -217,6 +225,7 @@ def _new_lane_stats() -> dict[str, Any]:
         "rows": 0,
         "updated": 0,
         "unavailable": 0,
+        "scalar_adopted": 0,
         "old_sum": 0,
         "fresh_sum": 0,
         "comparable_rows": 0,
@@ -269,7 +278,13 @@ def backfill_file(results_path: Path, transcripts_dir: Path, write: bool = False
             if not row.get("token_basis"):
                 row["token_basis"] = VENDOR_SPLIT if fresh is not None else UNAVAILABLE
             basis = row.get("token_basis")
-            if basis == UNAVAILABLE:
+            if basis == UNAVAILABLE and old_tokens is not None:
+                row["tokens_fresh"] = old_tokens
+                row["token_basis"] = SCALAR_EXACT
+                basis = SCALAR_EXACT
+                fresh = old_tokens
+                lane["scalar_adopted"] += 1
+            elif basis == UNAVAILABLE:
                 lane["unavailable"] += 1
                 lane["unavailable_reasons"]["native_split_missing"] += 1
             lane["updated"] += 1
@@ -305,9 +320,16 @@ def backfill_file(results_path: Path, transcripts_dir: Path, write: bool = False
         if reason is not None:
             _apply_unavailable(row)
             basis = UNAVAILABLE
-            lane["unavailable"] += 1
-            lane["unavailable_reasons"][reason] += 1
-            unavailable_rows.append({"run_id": row.get("run_id"), "reason": reason, "transcript": str(tpath) if tpath else None})
+            if harness in SCALAR_EXACT_HARNESSES and old_tokens is not None:
+                row["tokens_fresh"] = old_tokens
+                row["token_basis"] = SCALAR_EXACT
+                basis = SCALAR_EXACT
+                fresh = old_tokens
+                lane["scalar_adopted"] += 1
+            else:
+                lane["unavailable"] += 1
+                lane["unavailable_reasons"][reason] += 1
+                unavailable_rows.append({"run_id": row.get("run_id"), "reason": reason, "transcript": str(tpath) if tpath else None})
         else:
             fresh = _apply_usage(row, usage)
             basis = row.get("token_basis")
@@ -350,6 +372,7 @@ def backfill_file(results_path: Path, transcripts_dir: Path, write: bool = False
             "rows": stats["rows"],
             "updated": stats["updated"],
             "unavailable": stats["unavailable"],
+            "scalar_adopted": stats["scalar_adopted"],
             "basis": dict(stats["basis"] or basis_counts[harness]),
             "unavailable_reasons": dict(stats["unavailable_reasons"]),
             "comparable_rows": stats["comparable_rows"],

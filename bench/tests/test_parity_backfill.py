@@ -74,7 +74,34 @@ class ParityBackfillTests(unittest.TestCase):
             self.assertIn("tokens_input_uncached", pi)
             self.assertIn("tokens_cache_read", pi)
 
-    def test_missing_transcript_marks_unavailable_without_guessing(self):
+    def test_missing_transcript_adopts_scalar_only_for_exact_basis_lanes(self):
+        # pi's legacy scalar IS the target basis (probe-verified), so a pi row
+        # with no transcript adopts it as tokens_fresh. claude's scalar uses a
+        # different basis (includes cache writes) and must stay unavailable.
+        with tempfile.TemporaryDirectory() as td:
+            result_path = Path(td) / "results.jsonl"
+            mk = lambda h: json.dumps({
+                "run_id": f"{h}:terminal-bench/missing:deepseek-v4-flash:trial1",
+                "harness": h,
+                "model": "deepseek-v4-flash",
+                "task": "terminal-bench/missing",
+                "trial": 1,
+                "tokens": 99,
+            })
+            result_path.write_text(mk("pi") + "\n" + mk("claude") + "\n")
+            summary = parity_backfill.backfill_file(result_path, Path(td), write=True)
+            self.assertEqual(summary["lanes"]["pi"]["scalar_adopted"], 1)
+            self.assertEqual(summary["lanes"]["pi"]["unavailable"], 0)
+            self.assertEqual(summary["lanes"]["claude"]["unavailable"], 1)
+            pi_row, claude_row = [json.loads(l) for l in result_path.read_text().splitlines()]
+            self.assertEqual(pi_row["token_basis"], "scalar_exact")
+            self.assertEqual(pi_row["tokens_fresh"], 99)
+            for field in parity_backfill.TOKEN_FIELDS:
+                self.assertIsNone(pi_row[field])
+            self.assertEqual(claude_row["token_basis"], "unavailable")
+            self.assertIsNone(claude_row["tokens_fresh"])
+
+    def test_missing_transcript_pi_without_scalar_stays_unavailable(self):
         with tempfile.TemporaryDirectory() as td:
             result_path = Path(td) / "results.jsonl"
             result_path.write_text(json.dumps({
@@ -83,15 +110,13 @@ class ParityBackfillTests(unittest.TestCase):
                 "model": "deepseek-v4-flash",
                 "task": "terminal-bench/missing",
                 "trial": 1,
-                "tokens": 99,
+                "tokens": None,
             }) + "\n")
             summary = parity_backfill.backfill_file(result_path, Path(td), write=True)
             self.assertEqual(summary["lanes"]["pi"]["unavailable"], 1)
             row = json.loads(result_path.read_text())
             self.assertEqual(row["token_basis"], "unavailable")
             self.assertIsNone(row["tokens_fresh"])
-            for field in parity_backfill.TOKEN_FIELDS:
-                self.assertIsNone(row[field])
 
     def test_pi_mismatch_is_fatal(self):
         with tempfile.TemporaryDirectory() as td:
