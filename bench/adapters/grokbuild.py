@@ -346,15 +346,25 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 timeout=timeout_s, stdin=subprocess.DEVNULL, env=env,
             )
         except subprocess.TimeoutExpired as e:
-            def _dec(x):
-                if x is None:
-                    return ""
-                return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-            full_output = _dec(e.stdout) + _dec(e.stderr)
+            stdout = e.stdout.decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+            stderr = e.stderr.decode("utf-8", "replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+            full_output = stdout + stderr
+            token_fields = _token_fields_none()
+            try:
+                tokens, turns, tail = _parse_stream(stdout)
+                usage = _parse_log_usage(grok_dir)
+                if usage is not None:
+                    token_fields = {k: usage.get(k) for k in token_fields}
+                    if tokens is None:
+                        tokens = usage.get("tokens")
+            except Exception:  # noqa: BLE001 - parsing must not break a run
+                tokens, turns, tail = None, None, ""
+            if not tail:
+                tail = full_output[-2000:]
             return {"completed": False, "error": f"timeout after {timeout_s}s",
-                    "output_tail": full_output[-2000:], "full_output": full_output,
-                    "tokens": None, "turns": None, "cmd": cmd,
-                    **_token_fields_none()}
+                    "output_tail": tail, "full_output": full_output,
+                    "tokens": tokens, "turns": turns, "cmd": cmd,
+                    **token_fields}
 
         combined = (proc.stdout or "") + (proc.stderr or "")
         token_fields = _token_fields_none()

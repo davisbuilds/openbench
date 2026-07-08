@@ -247,6 +247,41 @@ class TestRunConstruction(unittest.TestCase):
             self.assertEqual(parsed["model"][model]["temperature"], 0.0)
             self.assertEqual(parsed["model"][model]["top_p"], 0.1)
 
+    def test_timeout_still_reports_log_usage(self):
+        old_run = grokbuild.subprocess.run
+        old_resolve = grokbuild._resolve_exe
+
+        def fake_run(cmd, **kwargs):
+            home = kwargs["env"]["HOME"]
+            log_dir = os.path.join(home, ".grok", "logs")
+            os.makedirs(log_dir)
+            with open(os.path.join(log_dir, "unified.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write(
+                    '{"msg":"shell.turn.inference_done",'
+                    '"ctx":{"prompt_tokens":100,"cached_prompt_tokens":40,'
+                    '"completion_tokens":7,"reasoning_tokens":2}}\n'
+                )
+            raise grokbuild.subprocess.TimeoutExpired(cmd, 5, output='{"type":"text","data":"partial"}\n')
+
+        grokbuild.subprocess.run = fake_run
+        grokbuild._resolve_exe = lambda: "/usr/local/bin/grok"
+        try:
+            with EnvPatch() as env:
+                env["DEEPSEEK_API_KEY"] = "deepseek-test"
+                res = grokbuild.run("do it", "/tmp", "deepseek-v4-flash", 5)
+        finally:
+            grokbuild.subprocess.run = old_run
+            grokbuild._resolve_exe = old_resolve
+
+        self.assertFalse(res["completed"])
+        self.assertEqual(res["error"], "timeout after 5s")
+        self.assertEqual(res["output_tail"], "partial")
+        self.assertEqual(res["tokens"], 67)
+        self.assertEqual(res["tokens_input_uncached"], 60)
+        self.assertEqual(res["tokens_cache_read"], 40)
+        self.assertEqual(res["tokens_output"], 7)
+        self.assertEqual(res["tokens_reasoning"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
