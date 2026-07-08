@@ -295,62 +295,123 @@ class TestPreflight(unittest.TestCase):
 class TestContainerCleanup(unittest.TestCase):
     """run_in_container must remove the container by name on EVERY exit path.
 
-    A wedged inner CLI holds the container's stdout pipe open past the adapter
-    timeout, so killing the `docker run` client does not stop the container;
-    only removal by name does. These tests fake subprocess.run to record which
-    docker commands fire on each path.
+    A wedged inner CLI can keep the docker client alive past the adapter
+    timeout. These tests fake Popen so no Docker daemon is needed and prove our
+    own deadline loop removes the named container instead of relying on
+    subprocess.run(..., timeout=...).
     """
 
-    def _patch(self, main_run_effect):
-        """Replace docker_exec's subprocess.run; return the recorded call log.
+    class FakePopen:
+        def __init__(self, cmd, stdout=None, stderr=None, stdin=None,
+                     *, stdout_text="", stderr_text="", polls_before_exit=0,
+                     returncode=0, raise_on_start=None):
+            if raise_on_start:
+                raise raise_on_start
+            self.cmd = cmd
+            self.returncode = returncode
+            self.polls_before_exit = polls_before_exit
+            self.terminated = False
+            self.killed = False
+            if stdout_text:
+                stdout.write(stdout_text.encode("utf-8"))
+            if stderr_text:
+                stderr.write(stderr_text.encode("utf-8"))
 
-        ``main_run_effect(cmd)`` handles the `docker run` invocation (return a
-        fake proc or raise). `docker rm -f` / `docker ps` get gone-container
-        stubs so _force_remove_container verifies removal on the first try.
-        """
+        def poll(self):
+            if self.terminated or self.killed:
+                self.returncode = -15 if self.terminated else -9
+                return self.returncode
+            if self.polls_before_exit <= 0:
+                return self.returncode
+            self.polls_before_exit -= 1
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self, timeout=None):
+            if self.poll() is None:
+                raise subprocess.TimeoutExpired(self.cmd, timeout)
+            return self.returncode
+
+    def _patch(self, popen_factory):
+        """Replace docker_exec subprocess calls; return the recorded call log."""
         calls = []
 
-        class FakeProc:
+        class FakeRunProc:
             def __init__(self, stdout="", returncode=0):
                 self.stdout, self.stderr, self.returncode = stdout, "", returncode
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
-            if cmd[:2] == ["docker", "run"]:
-                return main_run_effect(cmd)
-            return FakeProc()  # rm -f / ps probe: container gone
+            return FakeRunProc()  # rm -f / ps probe: container gone
 
-        self._orig = (docker_exec.subprocess.run, docker_exec.preflight)
+        def fake_popen(cmd, **kwargs):
+            calls.append(cmd)
+            return popen_factory(cmd, **kwargs)
+
+        self._orig = (docker_exec.subprocess.run, docker_exec.subprocess.Popen,
+                      docker_exec.preflight, docker_exec._TIMEOUT_GRACE_S)
         docker_exec.subprocess.run = fake_run
+        docker_exec.subprocess.Popen = fake_popen
         docker_exec.preflight = lambda image: None
+        docker_exec._TIMEOUT_GRACE_S = 0
         self.addCleanup(self._unpatch)
-        return calls, FakeProc
+        return calls
 
     def _unpatch(self):
-        docker_exec.subprocess.run, docker_exec.preflight = self._orig
+        (docker_exec.subprocess.run, docker_exec.subprocess.Popen,
+         docker_exec.preflight, docker_exec._TIMEOUT_GRACE_S) = self._orig
 
-    def _invoke(self):
+    def _invoke(self, timeout_s=900):
         return docker_exec.run_in_container(
-            "pi", "do it", "/tmp/wd", "deepseek-v4-flash", 900,
+            "pi", "do it", "/tmp/wd", "deepseek-v4-flash", timeout_s,
             "/repo/bench/adapters")
 
     def _rm_calls(self, calls):
         return [c for c in calls if c[:3] == ["docker", "rm", "-f"]]
 
-    def test_timeout_path_removes_container(self):
-        def effect(cmd):
-            raise subprocess.TimeoutExpired(cmd, 960, output=b"partial", stderr=None)
-        calls, _ = self._patch(effect)
-        result = self._invoke()
+    def test_watchdog_timeout_removes_container_and_kills_client(self):
+        fake_holder = []
+
+        def factory(cmd, **kwargs):
+            proc = self.FakePopen(
+                cmd, stdout_text="partial", polls_before_exit=10_000, **kwargs)
+            fake_holder.append(proc)
+            return proc
+
+        calls = self._patch(factory)
+        result = self._invoke(timeout_s=0.05)
         self.assertFalse(result["completed"])
         self.assertIn("timeout", result["error"])
         self.assertEqual(result["output_tail"], "partial")
-        self.assertEqual(len(self._rm_calls(calls)), 1)
+        self.assertTrue(fake_holder[0].terminated)
+        self.assertEqual(len(self._rm_calls(calls)), 2)  # watchdog + final sweep
+        self.assertGreaterEqual(result["host_wall_time_s"], 0)
+
+    def test_recovered_final_cleanup_preserves_timeout_result(self):
+        self._patch(lambda cmd, **kwargs: self.FakePopen(
+            cmd, stdout_text="partial", polls_before_exit=10_000, **kwargs))
+        orig_force = docker_exec._force_remove_container
+        force_results = iter([False, True])
+        docker_exec._force_remove_container = lambda name: next(force_results)
+        try:
+            result = self._invoke(timeout_s=0.05)
+        finally:
+            docker_exec._force_remove_container = orig_force
+        self.assertFalse(result["completed"])
+        self.assertIn("timeout", result["error"])
+        self.assertNotIn("cleanup failed", result["error"])
 
     def test_unexpected_exception_still_removes_container(self):
-        def effect(cmd):
-            raise RuntimeError("daemon hiccup")
-        calls, _ = self._patch(effect)
+        def factory(cmd, **kwargs):
+            return self.FakePopen(
+                cmd, raise_on_start=RuntimeError("daemon hiccup"), **kwargs)
+
+        calls = self._patch(factory)
         with self.assertRaises(RuntimeError):
             self._invoke()
         self.assertEqual(len(self._rm_calls(calls)), 1)
@@ -359,15 +420,12 @@ class TestContainerCleanup(unittest.TestCase):
         # Even when `docker run --rm` exits normally, removal-by-name fires as
         # a cheap no-op so a glitched --rm can't leave a wedged container.
         sentinel = docker_exec.RESULT_SENTINEL + ' {"completed": true}\n'
-        fake_holder = []
 
-        def effect(cmd):
-            return fake_holder[0](stdout=sentinel)
-
-        calls, FakeProc = self._patch(effect)
-        fake_holder.append(FakeProc)
+        calls = self._patch(
+            lambda cmd, **kwargs: self.FakePopen(cmd, stdout_text=sentinel, **kwargs))
         result = self._invoke()
         self.assertTrue(result["completed"])
+        self.assertIn("host_wall_time_s", result)
         self.assertEqual(len(self._rm_calls(calls)), 1)
 
     def test_force_remove_retries_until_gone(self):

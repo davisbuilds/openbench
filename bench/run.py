@@ -275,6 +275,16 @@ def write_transcript(path, row, body):
         fh.write(body or "")
 
 
+def _adapter_wall_time_s(start_monotonic, result, exec_used):
+    """Elapsed adapter wall time, honoring docker_exec's own clock if larger."""
+    elapsed = time.monotonic() - start_monotonic
+    if exec_used == "docker" and isinstance(result, dict):
+        host_elapsed = result.get("host_wall_time_s")
+        if isinstance(host_elapsed, (int, float)) and host_elapsed >= 0:
+            elapsed = max(elapsed, host_elapsed)
+    return round(elapsed, 3)
+
+
 def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              checker_timeout_s, exec_mode="local",
              docker_image=None, docker_fallback=True, harness_version=None,
@@ -353,7 +363,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             row["exec_mode"] = exec_mode
             row["failure_class"] = classify_failure(row, "", timeout_s)
             return row
-        row["wall_time_s"] = round(time.monotonic() - start, 3)
+        row["wall_time_s"] = _adapter_wall_time_s(start, result, exec_used)
         row["exec_mode"] = exec_used
 
         # Fold the adapter's self-reported fields into the row.

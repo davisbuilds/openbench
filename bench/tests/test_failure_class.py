@@ -138,6 +138,62 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
         self.assertEqual(row["output_tail"], "tail without marker")  # internal only, not persisted
         self.assertEqual(row["failure_class"], "rate_limited")
 
+    def test_runner_uses_docker_host_wall_time_when_larger(self):
+        orig_invoke, orig_checker = run.invoke_adapter, run.run_checker
+
+        def fake_invoke(*args, **kwargs):
+            return {
+                "completed": False,
+                "error": "container timeout after 600s (+grace); killed",
+                "output_tail": "",
+                "full_output": "",
+                "tokens": None,
+                "turns": None,
+                "cmd": ["fake"],
+                "host_wall_time_s": 1234.567,
+            }, "docker"
+
+        try:
+            run.invoke_adapter = fake_invoke
+            run.run_checker = lambda *a, **k: (1, None)
+            row = run.run_cell(
+                "fake", self.task, "deepseek-v4-flash", 1, 600,
+                self.tasks_dir, self.tmp, 30,
+            )
+        finally:
+            run.invoke_adapter, run.run_checker = orig_invoke, orig_checker
+
+        self.assertEqual(row["exec_mode"], "docker")
+        self.assertEqual(row["wall_time_s"], 1234.567)
+
+    def test_runner_ignores_local_adapter_host_wall_time_extra(self):
+        orig_invoke, orig_checker = run.invoke_adapter, run.run_checker
+
+        def fake_invoke(*args, **kwargs):
+            return {
+                "completed": False,
+                "error": "exit 1",
+                "output_tail": "",
+                "full_output": "",
+                "tokens": None,
+                "turns": None,
+                "cmd": ["fake"],
+                "host_wall_time_s": 1234.567,
+            }, "local"
+
+        try:
+            run.invoke_adapter = fake_invoke
+            run.run_checker = lambda *a, **k: (1, None)
+            row = run.run_cell(
+                "fake", self.task, "deepseek-v4-flash", 1, 600,
+                self.tasks_dir, self.tmp, 30,
+            )
+        finally:
+            run.invoke_adapter, run.run_checker = orig_invoke, orig_checker
+
+        self.assertEqual(row["exec_mode"], "local")
+        self.assertLess(row["wall_time_s"], 10)
+
 
 if __name__ == "__main__":
     unittest.main()
