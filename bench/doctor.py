@@ -275,7 +275,9 @@ def _auth_frontier(p, harness, model):
     if harness == "opencode":
         return _auth_opencode_provider(p, "anthropic")
     if harness == "cursor":
-        return _auth_cursor_container(p)
+        if p.getenv("BENCH_IN_CONTAINER"):
+            return _auth_cursor_container(p)
+        return _auth_cursor(p)
     if harness == "codex":
         return check_open_key(p, env_key, keys_env_ok=True)
     if harness == "claude":

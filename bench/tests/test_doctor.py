@@ -193,12 +193,24 @@ class TestEvaluate(unittest.TestCase):
         self.assertTrue(auth["ok"])
         self.assertIn("keys.env", auth["detail"])
 
-    def test_frontier_cursor_accepts_container_auth_dir(self):
+    def test_frontier_cursor_uses_local_login_outside_container(self):
         p = all_green_probes()
         p.models_map["cursor"] = {"claude-opus-4-8": "claude-opus-4-8-thinking-medium"}
+        rows, ok = doctor.evaluate(["cursor"], "claude-opus-4-8", p)
+        self.assertTrue(ok)
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        self.assertIn("Logged in", auth["detail"])
+
+    def test_frontier_cursor_accepts_container_auth_dir_in_container(self):
+        p = all_green_probes()
+        p.models_map["cursor"] = {"claude-opus-4-8": "claude-opus-4-8-thinking-medium"}
+        p.env_map["BENCH_IN_CONTAINER"] = "1"
+        p.run_map[("cursor-agent", "status")] = (1, "not logged in")
         p.exists_set.add(os.path.expanduser("~/.openbench/cursor-container-auth/.config/cursor/auth.json"))
         rows, ok = doctor.evaluate(["cursor"], "claude-opus-4-8", p)
         self.assertTrue(ok)
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        self.assertIn("cursor-container-auth", auth["detail"])
 
     def test_grokbuild_open_model_uses_grok_cli_and_vendor_key(self):
         p = all_green_probes()
