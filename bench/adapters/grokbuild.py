@@ -230,6 +230,7 @@ def _parse_log_usage(grok_dir):
         "tokens_reasoning": 0,
     }
     found = False
+    calls = 0
     for raw in lines:
         try:
             obj = json.loads(raw)
@@ -250,9 +251,11 @@ def _parse_log_usage(grok_dir):
             if isinstance(reasoning, (int, float)):
                 totals["tokens_reasoning"] += int(reasoning)
             found = True
+            calls += 1
     if not found:
         return None
     totals["tokens"] = totals["tokens_input_uncached"] + totals["tokens_output"]
+    totals["turns"] = calls
     return totals
 
 
@@ -342,6 +345,8 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                     token_fields = {k: usage.get(k) for k in token_fields}
                     if tokens is None:
                         tokens = usage.get("tokens")
+                    if usage.get("turns"):
+                        turns = usage["turns"]
             except Exception:  # noqa: BLE001 - parsing must not break a run
                 tokens, turns, tail = None, None, ""
             if not tail:
@@ -360,6 +365,8 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 token_fields = {k: usage.get(k) for k in token_fields}
                 if tokens is None:
                     tokens = usage.get("tokens")
+                if usage.get("turns"):
+                    turns = usage["turns"]
         except Exception:  # noqa: BLE001 - parsing must not break a run
             tokens, turns, tail = None, None, ""
         if not tail:

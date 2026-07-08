@@ -100,6 +100,7 @@ class TestStreamParsing(unittest.TestCase):
             self.assertEqual(usage["tokens_cache_read"], 46592)
             self.assertEqual(usage["tokens_output"], 376)
             self.assertEqual(usage["tokens_reasoning"], 80)
+            self.assertEqual(usage["turns"], 5)
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)
