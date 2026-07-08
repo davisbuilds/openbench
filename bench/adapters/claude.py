@@ -43,14 +43,16 @@ Output / token accounting:
 - ``--output-format json`` prints a SINGLE result object with ``num_turns``,
   ``is_error``, ``result`` (final assistant text), a top-level ``usage`` and a
   per-model ``modelUsage`` map. See ``_parse_json``.
-- Token accounting keeps the other adapters' "fresh tokens, cache re-reads
-  excluded" basis, BUT the arithmetic differs because Anthropic-style usage
-  fields are DISJOINT (unlike codex's inclusive ``input_tokens``):
-      tokens = inputTokens + cacheCreationInputTokens + outputTokens
-      (cache-READ tokens excluded; ``input_tokens`` already omits cached reads)
-  Preferred from cumulative ``modelUsage``; falls back to top-level ``usage``.
-  turns  = ``num_turns``.
-  Parsing is defensive: shape drift yields tokens=None/turns=None + raw tail.
+- Token accounting emits TOKEN_PARITY.md split fields. Anthropic-style
+  input/cache fields are disjoint and cumulative ``modelUsage`` is preferred:
+      tokens_input_uncached = inputTokens
+      tokens_cache_read     = cacheReadInputTokens
+      tokens_cache_write    = cacheCreationInputTokens
+      tokens_output         = outputTokens
+      tokens_reasoning      = None  # not exposed by Claude Code JSON today
+      tokens                = tokens_input_uncached + tokens_output
+  Falls back to top-level ``usage`` when ``modelUsage`` is absent. turns =
+  ``num_turns``. Parsing is defensive: shape drift yields None fields + raw tail.
 """
 
 import json
@@ -61,6 +63,36 @@ import tempfile
 
 NAME = "claude"
 _EXE = "claude"
+
+
+def _empty_token_usage():
+    return {
+        "tokens_input_uncached": None,
+        "tokens_cache_read": None,
+        "tokens_cache_write": None,
+        "tokens_output": None,
+        "tokens_reasoning": None,
+        "usage_raw": None,
+        "token_basis": None,
+    }
+
+
+def _legacy_tokens(token_usage):
+    # Delegated TOKEN_PARITY contract: keep the legacy scalar as
+    # uncached_input + output. Cache reads and cache writes remain available in
+    # split fields but are intentionally not folded into this compatibility
+    # value.
+    inp = token_usage.get("tokens_input_uncached")
+    out = token_usage.get("tokens_output")
+    if isinstance(inp, int) and isinstance(out, int):
+        return inp + out
+    return None
+
+
+def _num(value, default=None):
+    if isinstance(value, (int, float)):
+        return int(value)
+    return default
 
 # First-party Anthropic API-key route. Thinking parity for the opus frontier
 # lane: Claude Code gets `--effort medium`, matching the medium-reasoning tier.
@@ -148,13 +180,15 @@ def _clean_env(spec, key, iso_home):
 def _unsupported(model):
     known = list(MODELS) + list(OPEN_MODELS)
     return {"completed": False, "error": f"unsupported-model: {model!r} (have {known})",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
 
 def _setup_needed(env_key, model):
     return {"completed": False,
             "error": f"SETUP-NEEDED: export {env_key} to use {model}",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
 
 def version():
@@ -193,41 +227,73 @@ def _err_tail(exc, limit=2000):
     return text if limit is None else text[-limit:]
 
 
-def _tokens_from_model_usage(model_usage):
-    """Sum fresh tokens across the per-model cumulative usage map, or None."""
+def _usage_from_model_usage(model_usage):
+    """Sum Claude Code's cumulative per-model usage map, or empty usage."""
+    token_usage = _empty_token_usage()
     if not isinstance(model_usage, dict):
-        return None
-    total = 0
+        return token_usage
+    totals = {
+        "tokens_input_uncached": 0,
+        "tokens_cache_read": 0,
+        "tokens_cache_write": 0,
+        "tokens_output": 0,
+        "tokens_reasoning": None,
+    }
     found = False
+    invariant_ok = True
     for m in model_usage.values():
         if not isinstance(m, dict):
             continue
-        inp = m.get("inputTokens")
-        out = m.get("outputTokens")
-        if isinstance(inp, (int, float)) and isinstance(out, (int, float)):
-            cc = m.get("cacheCreationInputTokens") or 0
-            total += int(inp) + int(cc) + int(out)
-            found = True
-    return total if found else None
+        inp = _num(m.get("inputTokens"))
+        out = _num(m.get("outputTokens"))
+        if inp is None or out is None:
+            continue
+        cache_read = _num(m.get("cacheReadInputTokens"), 0)
+        cache_write = _num(m.get("cacheCreationInputTokens"), 0)
+        if cache_read is None or cache_write is None or min(inp, out, cache_read, cache_write) < 0:
+            invariant_ok = False
+            cache_read = cache_read or 0
+            cache_write = cache_write or 0
+        totals["tokens_input_uncached"] += inp
+        totals["tokens_cache_read"] += cache_read
+        totals["tokens_cache_write"] += cache_write
+        totals["tokens_output"] += out
+        found = True
+    if found:
+        token_usage.update(totals)
+        token_usage["token_basis"] = "vendor_split" if invariant_ok else "estimated"
+    return token_usage
 
 
-def _tokens_from_usage(usage):
-    """Fresh tokens from a top-level Anthropic-style usage dict, or None."""
+def _usage_from_top_level(usage):
+    """Split usage from a top-level Anthropic-style usage dict, or empty."""
+    token_usage = _empty_token_usage()
     if not isinstance(usage, dict):
-        return None
-    inp = usage.get("input_tokens")
-    out = usage.get("output_tokens")
-    if not (isinstance(inp, (int, float)) and isinstance(out, (int, float))):
-        return None
-    cc = usage.get("cache_creation_input_tokens") or 0
-    return int(inp) + int(cc) + int(out)
+        return token_usage
+    inp = _num(usage.get("input_tokens"))
+    out = _num(usage.get("output_tokens"))
+    if inp is None or out is None:
+        return token_usage
+    cache_read = _num(usage.get("cache_read_input_tokens"), 0)
+    cache_write = _num(usage.get("cache_creation_input_tokens"), 0)
+    invariant_ok = cache_read is not None and cache_write is not None and min(inp, out, cache_read, cache_write) >= 0
+    token_usage.update({
+        "tokens_input_uncached": inp,
+        "tokens_cache_read": cache_read or 0,
+        "tokens_cache_write": cache_write or 0,
+        "tokens_output": out,
+        "tokens_reasoning": None,
+        "token_basis": "vendor_split" if invariant_ok else "estimated",
+    })
+    return token_usage
 
 
-def _parse_json(stdout):
-    """Parse claude's `--output-format json` result into (tokens, turns, tail, ok).
+def _parse_json_with_usage(stdout):
+    """Parse claude's JSON result into (tokens, turns, tail, ok, token_usage).
 
-    ``ok`` is True/False from ``is_error`` (None if unknown). tokens/turns are
-    None when nothing parseable is found; tail is the final ``result`` text.
+    ``modelUsage`` is preferred because TOKEN_PARITY.md verified it is the
+    cumulative run total. Claude Code does not expose reasoning tokens today, so
+    ``tokens_reasoning`` is deliberately ``None``.
     """
     obj = None
     txt = (stdout or "").strip()
@@ -248,11 +314,14 @@ def _parse_json(stdout):
                 obj = cand
                 break
     if not isinstance(obj, dict):
-        return None, None, "", None
+        return None, None, "", None, _empty_token_usage()
 
-    tokens = _tokens_from_model_usage(obj.get("modelUsage"))
-    if tokens is None:
-        tokens = _tokens_from_usage(obj.get("usage"))
+    token_usage = _usage_from_model_usage(obj.get("modelUsage"))
+    if token_usage.get("token_basis") is None:
+        token_usage = _usage_from_top_level(obj.get("usage"))
+    if token_usage.get("token_basis") is not None:
+        token_usage["usage_raw"] = {"usage": obj.get("usage"), "modelUsage": obj.get("modelUsage")}
+    tokens = _legacy_tokens(token_usage)
 
     turns = obj.get("num_turns")
     turns = int(turns) if isinstance(turns, (int, float)) else None
@@ -262,8 +331,14 @@ def _parse_json(stdout):
 
     tail = obj.get("result")
     tail = str(tail)[-2000:] if tail else ""
-    return tokens, turns, tail, ok
+    return tokens, turns, tail, ok, token_usage
 
+
+
+def _parse_json(stdout):
+    """Backward-compatible parser returning legacy fields only."""
+    tokens, turns, tail, ok, token_usage = _parse_json_with_usage(stdout)
+    return tokens, turns, tail, ok
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model in MODELS:
@@ -311,13 +386,14 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 "tokens": None,
                 "turns": None,
                 "cmd": cmd,
+                **_empty_token_usage(),
             }
 
         combined = (proc.stdout or "") + (proc.stderr or "")
         try:
-            tokens, turns, tail, ok = _parse_json(proc.stdout or "")
+            tokens, turns, tail, ok, token_usage = _parse_json_with_usage(proc.stdout or "")
         except Exception:  # noqa: BLE001 - never let usage parsing break a run
-            tokens, turns, tail, ok = None, None, "", None
+            tokens, turns, tail, ok, token_usage = None, None, "", None, _empty_token_usage()
         if not tail:
             tail = combined[-2000:]
 
@@ -342,6 +418,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "tokens": tokens,
             "turns": turns,
             "cmd": cmd,
+            **token_usage,
         }
     finally:
         shutil.rmtree(iso_home, ignore_errors=True)

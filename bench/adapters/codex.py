@@ -19,10 +19,13 @@ Notes / quirks:
 - Uses the user's existing `~/.codex` login as-is (read-only).
 - `--json` emits a JSONL event stream. The final `turn.completed` event carries
   `usage={input_tokens,cached_input_tokens,output_tokens,reasoning_output_tokens}`.
-  Token accounting (see ``_parse_json``) uses the SAME fresh-basis as the other
-  adapters:
-    tokens = (input_tokens - cached_input_tokens) + output_tokens
-             + reasoning_output_tokens   (cache re-reads excluded)
+  Token accounting emits TOKEN_PARITY.md split fields from the final aggregate:
+    tokens_input_uncached = input_tokens - cached_input_tokens
+    tokens_cache_read     = cached_input_tokens
+    tokens_cache_write    = 0
+    tokens_output         = output_tokens  # already reasoning-inclusive
+    tokens_reasoning      = reasoning_output_tokens
+    tokens                = tokens_input_uncached + tokens_output
     turns  = number of `turn.completed` events (model rounds).
   Human tail is synthesized from `agent_message`/`file_change` items.
   NOTE: `codex exec --json` only flushes/exits cleanly when driven as a plain
@@ -49,6 +52,34 @@ import subprocess
 
 NAME = "codex"
 _EXE = "codex"
+
+
+def _empty_token_usage():
+    return {
+        "tokens_input_uncached": None,
+        "tokens_cache_read": None,
+        "tokens_cache_write": None,
+        "tokens_output": None,
+        "tokens_reasoning": None,
+        "usage_raw": None,
+        "token_basis": None,
+    }
+
+
+def _legacy_tokens(token_usage):
+    # Delegated TOKEN_PARITY contract: keep the legacy scalar as
+    # uncached_input + output. Cache reads and cache writes remain available in
+    # split fields but are intentionally not folded into this compatibility
+    # value.
+    inp = token_usage.get("tokens_input_uncached")
+    out = token_usage.get("tokens_output")
+    if isinstance(inp, int) and isinstance(out, int):
+        return inp + out
+    return None
+
+
+def _num(value):
+    return int(value) if isinstance(value, (int, float)) else None
 
 # canonical model name -> codex `-m` model string
 MODELS = {
@@ -138,7 +169,8 @@ def _bridge_down(model):
             "error": (f"SETUP-NEEDED: open-model bridge unreachable at "
                       f"{_bridge_host()}:{_bridge_port()} for {model} "
                       f"(start it: bench/openmodel_bridge.sh)"),
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
 
 def _keys_env_has(env_key):
@@ -177,13 +209,15 @@ def _codex_env_for_bridge(env_key):
 def _unsupported(model):
     known = list(MODELS) + list(OPEN_MODELS)
     return {"completed": False, "error": f"unsupported-model: {model!r} (have {known})",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
 
 def _setup_needed(env_key, model):
     return {"completed": False,
             "error": f"SETUP-NEEDED: export {env_key} to use {model}",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
 
 def version():
@@ -221,11 +255,12 @@ def _err_tail(exc, limit=2000):
     return text if limit is None else text[-limit:]
 
 
-def _parse_json(stdout):
-    """Parse codex's JSONL event stream into (tokens, turns, tail).
+def _parse_json_with_usage(stdout):
+    """Parse codex's JSONL event stream into (tokens, turns, tail, usage).
 
-    tokens/turns are None when nothing parseable is found. tail is a
-    human-readable transcript synthesized from agent_message / file_change items.
+    Codex's final aggregate ``input_tokens`` is cache-inclusive and
+    ``output_tokens`` is reasoning-inclusive. Reasoning is recorded separately
+    as a subset and must not be added to the legacy scalar.
     """
     events = []
     for line in stdout.splitlines():
@@ -237,10 +272,11 @@ def _parse_json(stdout):
         except json.JSONDecodeError:
             continue
     if not events:
-        return None, None, ""
+        return None, None, "", _empty_token_usage()
 
-    tokens = 0
-    found = False
+    token_usage = _empty_token_usage()
+    usage_raw = []
+    last_usage = None
     turns = 0
     transcript = []
     for ev in events:
@@ -248,13 +284,9 @@ def _parse_json(stdout):
         if etype == "turn.completed":
             turns += 1
             usage = ev.get("usage") or {}
-            inp = usage.get("input_tokens")
-            out = usage.get("output_tokens")
-            if isinstance(inp, (int, float)) and isinstance(out, (int, float)):
-                cached = usage.get("cached_input_tokens") or 0
-                reasoning = usage.get("reasoning_output_tokens") or 0
-                tokens += (int(inp) - int(cached)) + int(out) + int(reasoning)
-                found = True
+            if isinstance(usage, dict):
+                usage_raw.append(usage)
+                last_usage = usage
         elif etype == "item.completed":
             item = ev.get("item") or {}
             itype = item.get("type")
@@ -270,11 +302,34 @@ def _parse_json(stdout):
             elif itype == "command_execution":
                 transcript.append("[command]")
 
-    tokens = tokens if found else None
-    turns = turns or None
-    tail = "\n".join(transcript)[-2000:]
-    return tokens, turns, tail
+    if last_usage is not None:
+        inp = _num(last_usage.get("input_tokens"))
+        cached = _num(last_usage.get("cached_input_tokens"))
+        out = _num(last_usage.get("output_tokens"))
+        reasoning = _num(last_usage.get("reasoning_output_tokens"))
+        invariant_ok = None not in (inp, cached, out, reasoning)
+        if invariant_ok and (cached > inp or reasoning > out):
+            invariant_ok = False
+        if invariant_ok:
+            token_usage.update({
+                "tokens_input_uncached": inp - cached,
+                "tokens_cache_read": cached,
+                "tokens_cache_write": 0,
+                "tokens_output": out,
+                "tokens_reasoning": reasoning,
+            })
+        token_usage["usage_raw"] = last_usage
+        token_usage["token_basis"] = "vendor_split" if invariant_ok else "estimated"
 
+    tail = "\n".join(transcript)[-2000:]
+    return _legacy_tokens(token_usage), (turns or None), tail, token_usage
+
+
+
+def _parse_json(stdout):
+    """Backward-compatible parser returning legacy fields only."""
+    tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
+    return tokens, turns, tail
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if os.environ.get("BENCH_IN_CONTAINER"):
@@ -340,13 +395,14 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "tokens": None,
             "turns": None,
             "cmd": cmd,
+            **_empty_token_usage(),
         }
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     try:
-        tokens, turns, tail = _parse_json(proc.stdout or "")
+        tokens, turns, tail, token_usage = _parse_json_with_usage(proc.stdout or "")
     except Exception:  # noqa: BLE001 - never let usage parsing break a run
-        tokens, turns, tail = None, None, ""
+        tokens, turns, tail, token_usage = None, None, "", _empty_token_usage()
     if not tail:
         tail = combined[-2000:]
 
@@ -361,4 +417,5 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         "tokens": tokens,
         "turns": turns,
         "cmd": cmd,
+        **token_usage,
     }
