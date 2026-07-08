@@ -88,14 +88,12 @@
     "tokens_input_uncached": 350,
     "tokens_output": 158,
     "tokens_reasoning": 46,
-    "usage_raw": [
-      {
-        "cached_input_tokens": 55808,
-        "input_tokens": 56158,
-        "output_tokens": 158,
-        "reasoning_output_tokens": 46
-      }
-    ]
+    "usage_raw": {
+      "cached_input_tokens": 55808,
+      "input_tokens": 56158,
+      "output_tokens": 158,
+      "reasoning_output_tokens": 46
+    }
   },
   "opencode": {
     "opencode_visible_output_tokens": 154,

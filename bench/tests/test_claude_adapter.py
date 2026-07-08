@@ -41,8 +41,14 @@ class TestParseJson(unittest.TestCase):
             '"outputTokens":40,"cacheReadInputTokens":999,'
             '"cacheCreationInputTokens":10}}}'
         )
-        tokens, turns, tail, ok = claude._parse_json(payload)
-        self.assertEqual(tokens, 150)  # 100 + 10 + 40 (cacheRead 999 excluded)
+        tokens, turns, tail, ok, usage = claude._parse_json_with_usage(payload)
+        self.assertEqual(tokens, 140)  # legacy scalar = input + output
+        self.assertEqual(usage["tokens_input_uncached"], 100)
+        self.assertEqual(usage["tokens_cache_read"], 999)
+        self.assertEqual(usage["tokens_cache_write"], 10)
+        self.assertEqual(usage["tokens_output"], 40)
+        self.assertIsNone(usage["tokens_reasoning"])
+        self.assertEqual(usage["token_basis"], "vendor_split")
         self.assertEqual(turns, 3)
         self.assertEqual(tail, "all done")
         self.assertTrue(ok)
@@ -54,8 +60,9 @@ class TestParseJson(unittest.TestCase):
             '"b":{"inputTokens":20,"outputTokens":1,'
             '"cacheCreationInputTokens":4}}}'
         )
-        tokens, _, _, _ = claude._parse_json(payload)
-        self.assertEqual(tokens, 10 + 5 + 20 + 1 + 4)
+        tokens, _, _, _, usage = claude._parse_json_with_usage(payload)
+        self.assertEqual(tokens, 10 + 5 + 20 + 1)
+        self.assertEqual(usage["tokens_cache_write"], 4)
 
     def test_falls_back_to_top_level_usage(self):
         payload = (
@@ -63,19 +70,21 @@ class TestParseJson(unittest.TestCase):
             '"usage":{"input_tokens":50,"output_tokens":8,'
             '"cache_creation_input_tokens":2,"cache_read_input_tokens":99}}'
         )
-        tokens, turns, tail, ok = claude._parse_json(payload)
-        self.assertEqual(tokens, 60)  # 50 + 2 + 8 (cache_read 99 excluded)
+        tokens, turns, tail, ok, usage = claude._parse_json_with_usage(payload)
+        self.assertEqual(tokens, 58)  # legacy scalar = input + output
+        self.assertEqual(usage["tokens_cache_read"], 99)
+        self.assertEqual(usage["tokens_cache_write"], 2)
         self.assertEqual(turns, 1)
 
     def test_is_error_true_reported(self):
         payload = '{"num_turns":1,"is_error":true,"result":"boom"}'
-        tokens, turns, tail, ok = claude._parse_json(payload)
+        tokens, turns, tail, ok, usage = claude._parse_json_with_usage(payload)
         self.assertIsNone(tokens)
         self.assertEqual(turns, 1)
         self.assertFalse(ok)
 
     def test_garbage_is_defensive(self):
-        tokens, turns, tail, ok = claude._parse_json("not json at all")
+        tokens, turns, tail, ok, usage = claude._parse_json_with_usage("not json at all")
         self.assertIsNone(tokens)
         self.assertIsNone(turns)
         self.assertEqual(tail, "")
@@ -83,7 +92,7 @@ class TestParseJson(unittest.TestCase):
 
     def test_result_line_amid_noise(self):
         stdout = "startup log line\n" + '{"num_turns":1,"is_error":false,"result":"hi"}'
-        tokens, turns, tail, ok = claude._parse_json(stdout)
+        tokens, turns, tail, ok, usage = claude._parse_json_with_usage(stdout)
         self.assertEqual(tail, "hi")
         self.assertTrue(ok)
 
