@@ -91,6 +91,10 @@ class TestClassifyFailure(unittest.TestCase):
         row = {"success": False, "completed": True, "checker_exit": 1, "error": None}
         self.assertEqual(failure_class.classify_failure(row, "normal transcript"), "wrong_answer")
 
+    def test_completed_run_near_cap_is_wrong_answer_not_timeout(self):
+        row = {"success": False, "completed": True, "checker_exit": 1, "wall_time_s": 1185.0}
+        self.assertEqual(failure_class.classify_failure(row, "", timeout_s=1200), "wrong_answer")
+
 
 class TestRunnerWriteTimeClassification(unittest.TestCase):
     def setUp(self):

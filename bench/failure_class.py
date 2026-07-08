@@ -92,7 +92,10 @@ def classify_failure(row, adapter_output="", timeout_s=None):
         return "rate_limited"
     if has_infra_marker(combined):
         return "infra"
-    if row.get("checker_exit") == "timeout" or _TIMEOUT_RE.search(structured_status) or _wall_rode_cap(row, timeout_s):
+    # Wall time riding the cap only means "timeout" when the runner killed the
+    # agent; a CLI that exited on its own (completed=True) just ran slow.
+    rode_cap = _wall_rode_cap(row, timeout_s) and not bool(row.get("completed"))
+    if row.get("checker_exit") == "timeout" or _TIMEOUT_RE.search(structured_status) or rode_cap:
         return "timeout"
     return "wrong_answer"
 
