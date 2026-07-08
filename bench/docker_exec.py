@@ -71,6 +71,9 @@ AUTH_MOUNTS = {
     # ANTHROPIC_API_KEY, forwarded below). Mount NOTHING: never expose ~/.claude
     # so a container run can't touch the user's Claude Code OAuth subscription.
     "claude": [],
+    # grokbuild uses BYOK custom models with vendor env keys only. Probe showed
+    # no ~/.grok/auth.json is needed for BYOK; do not mount user Grok OAuth.
+    "grokbuild": [],
     "null": [],
 }
 
@@ -127,7 +130,7 @@ def _api_key_passthrough(harness, model):
     if model == "claude-opus-4-8" and harness == "claude":
         needed.add("ANTHROPIC_API_KEY")
     vendor_key = _MODEL_API_KEY.get(model)
-    if vendor_key and harness in {"pi", "opencode", "claude"}:
+    if vendor_key and harness in {"pi", "opencode", "claude", "grokbuild"}:
         needed.add(vendor_key)
     return tuple(var for var in API_KEY_PASSTHROUGH if var in needed)
 

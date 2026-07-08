@@ -25,6 +25,7 @@ Auth expectations are mirrored from the adapters (read them, don't invent):
             strips OPENAI_API_KEY to force the subscription OAuth route)
   cursor    `cursor-agent status` exits 0 (existing Cursor login)
   claude    no ~/.claude mount; API-key routes require provider env keys
+  grokbuild no ~/.grok mount; BYOK open-model routes require provider env keys
   devin     ~/.config/devin exists (existing devin login)
 
 Python3 stdlib only.
@@ -189,12 +190,13 @@ HARNESSES = {
     "opencode": {"cli": "opencode",     "auth": _auth_opencode},
     "cursor":   {"cli": "cursor-agent", "auth": _auth_cursor},
     "claude":   {"cli": "claude",       "auth": lambda p: (True, "API-key routes checked per model")},
+    "grokbuild": {"cli": "grok",         "auth": lambda p: (True, "BYOK routes checked per model")},
     "devin":    {"cli": "devin",        "auth": _auth_devin},
 }
 # Default doctor preflight keeps the historical matrix harnesses for the default
-# gpt-5.5-medium model; claude is opt-in because it supports the Opus API-key
-# route, not the default ChatGPT subscription model.
-ALL_HARNESSES = [h for h in HARNESSES if h != "claude"]
+# gpt-5.5-medium model; claude/grokbuild are opt-in because they support
+# API-key/open-model routes, not the default ChatGPT subscription model.
+ALL_HARNESSES = [h for h in HARNESSES if h not in {"claude", "grokbuild"}]
 
 
 # --------------------------------------------------------------------------- #

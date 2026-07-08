@@ -23,16 +23,19 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Verified Linux-portable harness CLIs (Node packages) ------------------
-# Package names confirmed from the host install:
+# Package names confirmed from the host install / scratch probes:
 #   codex -> @openai/codex, pi -> @earendil-works/pi-coding-agent,
-#   claude -> @anthropic-ai/claude-code (open models only; auth via env keys)
+#   claude -> @anthropic-ai/claude-code (open models only; auth via env keys),
+#   grok -> @xai-official/grok (Grok Build; open models via BYOK config)
 RUN npm install -g \
         @openai/codex \
         @earendil-works/pi-coding-agent \
         @anthropic-ai/claude-code \
+        @xai-official/grok \
     && codex --version \
     && pi --version \
-    && claude --version
+    && claude --version \
+    && grok --version
 
 # --- Best-effort native CLIs (opencode / cursor-agent / devin) -------------
 # These ship as platform-specific binaries; their Linux installs are NOT yet

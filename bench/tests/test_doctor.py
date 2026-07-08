@@ -74,13 +74,14 @@ def all_green_probes():
     return FakeProbes(
         which_map={"codex": "/b/codex", "pi": "/b/pi", "opencode": "/b/opencode",
                    "cursor-agent": "/b/cursor-agent", "claude": "/b/claude",
-                   "devin": "/b/devin", "docker": "/b/docker"},
+                   "grok": "/b/grok", "devin": "/b/devin", "docker": "/b/docker"},
         run_map={
             ("codex", "--version"): (0, "codex 1"),
             ("pi", "--version"): (0, "pi 1"),
             ("opencode", "--version"): (0, "opencode 1"),
             ("cursor-agent", "--version"): (0, "cursor 1"),
             ("claude", "--version"): (0, "claude 1"),
+            ("grok", "--version"): (0, "grok 1"),
             ("devin", "--version"): (0, "devin 1"),
             ("opencode", "auth", "list"): (0, "OpenAI oauth\n"),
             ("cursor-agent", "status"): (0, "Logged in as x\n"),
@@ -198,6 +199,28 @@ class TestEvaluate(unittest.TestCase):
         p.exists_set.add(os.path.expanduser("~/.openbench/cursor-container-auth/.config/cursor/auth.json"))
         rows, ok = doctor.evaluate(["cursor"], "claude-opus-4-8", p)
         self.assertTrue(ok)
+
+    def test_grokbuild_open_model_uses_grok_cli_and_vendor_key(self):
+        p = all_green_probes()
+        p.models_map["grokbuild"] = ({}, {"deepseek-v4-flash": {"model_id": "deepseek-v4-flash"}})
+        p.env_map["DEEPSEEK_API_KEY"] = "sk-test"
+        rows, ok = doctor.evaluate(["grokbuild"], "deepseek-v4-flash", p)
+        self.assertTrue(ok)
+        cli = next(r for r in rows if r["check"] == "CLI")
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        model = next(r for r in rows if r["check"] == "MODEL")
+        self.assertIn("/b/grok", cli["detail"])
+        self.assertIn("DEEPSEEK_API_KEY", auth["detail"])
+        self.assertIn("(open)", model["detail"])
+
+    def test_grokbuild_open_model_requires_exported_key(self):
+        p = all_green_probes()
+        p.models_map["grokbuild"] = ({}, {"deepseek-v4-flash": {"model_id": "deepseek-v4-flash"}})
+        rows, ok = doctor.evaluate(["grokbuild"], "deepseek-v4-flash", p)
+        self.assertFalse(ok)
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        self.assertFalse(auth["ok"])
+        self.assertIn("export DEEPSEEK_API_KEY", auth["detail"])
 
 
 class TestExitCode(unittest.TestCase):

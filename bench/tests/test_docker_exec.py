@@ -91,6 +91,12 @@ class TestBuildDockerCmd(unittest.TestCase):
                 image="openbench-harness:latest",
                 instruction_path="/tmp/instr.txt",
             )
+            grokbuild_cmd = docker_exec.build_docker_cmd(
+                harness="grokbuild", workdir="/tmp/wd", model="deepseek-v4-flash",
+                timeout_s=240, adapters_dir="/repo/bench/adapters",
+                image="openbench-harness:latest",
+                instruction_path="/tmp/instr.txt",
+            )
         finally:
             os.environ.clear()
             os.environ.update(orig_env)
@@ -105,7 +111,10 @@ class TestBuildDockerCmd(unittest.TestCase):
         self.assertIn("ANTHROPIC_API_KEY=openbench-bridge-placeholder", codex_opus_cmd)
         self.assertNotIn("ANTHROPIC_API_KEY", codex_opus_cmd)
         self.assertNotIn("CURSOR_API_KEY", codex_opus_cmd)
-        for argv in (cmd, claude_cmd, cursor_cmd, codex_opus_cmd):
+        self.assertIn("DEEPSEEK_API_KEY", grokbuild_cmd)
+        self.assertNotIn("ANTHROPIC_API_KEY", grokbuild_cmd)
+        self.assertNotIn("CURSOR_API_KEY", grokbuild_cmd)
+        for argv in (cmd, claude_cmd, cursor_cmd, codex_opus_cmd, grokbuild_cmd):
             for secret in ("sk-test", "sk-ant-test", "cursor-test"):
                 self.assertFalse(any(secret in a for a in argv),
                                  "secret value must not appear in argv")
@@ -133,6 +142,22 @@ class TestBuildDockerCmd(unittest.TestCase):
             self.assertFalse(
                 any(a.endswith(".codex:/bench/auth/.codex:ro") for a in args),
                 "must not mount the whole ~/.codex dir")
+        finally:
+            import shutil
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_grokbuild_mounts_no_user_auth(self):
+        home = tempfile.mkdtemp(prefix="fake_home_")
+        try:
+            os.makedirs(os.path.join(home, ".grok"))
+            with open(os.path.join(home, ".grok", "auth.json"), "w") as fh:
+                fh.write("{}")
+            orig = os.path.expanduser
+            os.path.expanduser = lambda p: home if p == "~" else orig(p)
+            try:
+                self.assertEqual(docker_exec._auth_mount_args("grokbuild"), [])
+            finally:
+                os.path.expanduser = orig
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)
