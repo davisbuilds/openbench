@@ -104,6 +104,13 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(fake_row["success"], "fake adapter should solve task")
         self.assertEqual(fake_row["checker_exit"], 0)
         self.assertEqual(fake_row["tokens"], 42)
+        self.assertEqual(fake_row["tokens_input_uncached"], 30)
+        self.assertEqual(fake_row["tokens_cache_read"], 5)
+        self.assertEqual(fake_row["tokens_cache_write"], 7)
+        self.assertEqual(fake_row["tokens_output"], 12)
+        self.assertEqual(fake_row["tokens_reasoning"], 3)
+        self.assertEqual(fake_row["usage_raw"], {"fixture": True})
+        self.assertEqual(fake_row["token_basis"], "vendor_split")
         self.assertEqual(fake_row["turns"], 1)
         self.assertIsInstance(fake_row["wall_time_s"], (int, float))
 
