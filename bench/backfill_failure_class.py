@@ -7,15 +7,20 @@ Usage:
 The runner's write-time classifier can scan adapter ``full_output`` before it is
 trimmed. Historical rows normally contain only saved fields (notably
 ``output_tail`` when present), so backfill uses row fields + ``output_tail`` and
-can miss markers truncated out of the tail.
+can miss markers truncated out of the tail. Backfill still applies cap-riding
+empty-output detection when the timeout cap is saved in the row or recoverable
+from timeout boilerplate such as ``timeout after 1200s``.
 """
 
 import argparse
 import json
 import os
+import re
 from collections import Counter
 
 from failure_class import FAILURE_CLASSES, classify_failure
+
+_TIMEOUT_AFTER_RE = re.compile(r"\btimeout after (\d+(?:\.\d+)?)s\b", re.IGNORECASE)
 
 
 def iter_rows(path):
@@ -39,6 +44,17 @@ def _same_output_target(in_path, out_path):
         return False
 
 
+def _timeout_s_for_row(row):
+    """Return a timeout cap saved on, or inferable from, a historical row."""
+    if row.get("timeout_s") is not None:
+        return row.get("timeout_s")
+    for field in ("error", "output_tail"):
+        match = _TIMEOUT_AFTER_RE.search(str(row.get(field) or ""))
+        if match:
+            return float(match.group(1))
+    return None
+
+
 def backfill(in_path, out_path):
     """Write a new JSONL with failure_class added; return class counts."""
     if _same_output_target(in_path, out_path):
@@ -50,7 +66,7 @@ def backfill(in_path, out_path):
         for _line_no, row in iter_rows(in_path):
             fc = row.get("failure_class")
             if fc not in FAILURE_CLASSES:
-                fc = classify_failure(row, row.get("output_tail") or "")
+                fc = classify_failure(row, row.get("output_tail") or "", _timeout_s_for_row(row))
             row["failure_class"] = fc
             counts[fc] += 1
             rows += 1

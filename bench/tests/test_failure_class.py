@@ -83,9 +83,49 @@ class TestClassifyFailure(unittest.TestCase):
             "timeout",
         )
         self.assertEqual(
-            failure_class.classify_failure({"success": False, "wall_time_s": 599.0}, "", timeout_s=600),
+            failure_class.classify_failure({"success": False, "wall_time_s": 599.0, "tokens": 10}, "", timeout_s=600),
             "timeout",
         )
+
+    def test_silent_cap_riding_retry_loop_is_infra(self):
+        row = {
+            "success": False,
+            "completed": False,
+            "wall_time_s": 1201.0,
+            "tokens": None,
+            "turns": None,
+            "output_tail": "",
+            "error": "timeout after 1200s",
+            "checker_exit": None,
+        }
+        self.assertEqual(failure_class.classify_failure(row, "", timeout_s=1200), "infra")
+
+    def test_cap_riding_with_work_evidence_stays_timeout(self):
+        row = {
+            "success": False,
+            "completed": False,
+            "wall_time_s": 1201.0,
+            "tokens": 90000,
+            "turns": 20,
+            "output_tail": "",
+            "error": "timeout after 1200s",
+            "checker_exit": None,
+        }
+        self.assertEqual(failure_class.classify_failure(row, "", timeout_s=1200), "timeout")
+
+    def test_cap_riding_with_meaningful_output_stays_timeout(self):
+        row = {
+            "success": False,
+            "completed": False,
+            "wall_time_s": 1201.0,
+            "tokens": None,
+            "turns": None,
+            "output_tail": "",
+            "error": "timeout after 1200s",
+            "checker_exit": None,
+        }
+        output = "I inspected the failing tests and started rewriting the parser. " * 4
+        self.assertEqual(failure_class.classify_failure(row, output, timeout_s=1200), "timeout")
 
     def test_wrong_answer_when_agent_finished_and_checker_failed(self):
         row = {"success": False, "completed": True, "checker_exit": 1, "error": None}

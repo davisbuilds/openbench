@@ -31,6 +31,12 @@ class TestBackfillFailureClass(unittest.TestCase):
                  "output_tail": MOONSHOT_429},
                 {"harness": "h", "model": "m", "task": "c", "success": False,
                  "error": "No such image: openbench-harness:latest"},
+                {"harness": "h", "model": "m", "task": "d", "success": False,
+                 "wall_time_s": 1201, "tokens": None, "turns": None,
+                 "output_tail": "", "error": "timeout after 1200s"},
+                {"harness": "h", "model": "m", "task": "e", "success": False,
+                 "wall_time_s": 1201, "tokens": 90000, "turns": 20,
+                 "output_tail": "", "error": "timeout after 1200s"},
             ]
             with open(src, "w", encoding="utf-8") as fh:
                 for row in rows:
@@ -38,14 +44,15 @@ class TestBackfillFailureClass(unittest.TestCase):
 
             count, counts = backfill_failure_class.backfill(src, dst)
 
-            self.assertEqual(count, 3)
+            self.assertEqual(count, 5)
             self.assertEqual(counts["solved"], 1)
             self.assertEqual(counts["rate_limited"], 1)
-            self.assertEqual(counts["infra"], 1)
+            self.assertEqual(counts["infra"], 2)
+            self.assertEqual(counts["timeout"], 1)
             with open(dst, encoding="utf-8") as fh:
                 out = [json.loads(line) for line in fh]
             self.assertEqual([r["failure_class"] for r in out],
-                             ["solved", "rate_limited", "infra"])
+                             ["solved", "rate_limited", "infra", "infra", "timeout"])
             summary = backfill_failure_class.format_summary(count, counts, dst)
             self.assertIn("tail-only detection is weaker", summary)
         finally:
