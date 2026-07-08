@@ -51,19 +51,10 @@ _AUX_MODEL_ALIASES = ("grok-build",)
 # for reasoning-heavy GLM/Kimi/DeepSeek runs while staying within these models'
 # advertised large context windows.
 _MAX_COMPLETION_TOKENS = 65536
-_TEMPERATURE = 0.0
-_TOP_P = 0.1
 
-# GLM's default reasoning verbosity can spend the entire 1200s benchmark budget
-# before producing final edits. Keep the harness deterministic and completion-
-# oriented by requesting low effort explicitly.
-_EFFORT = "low"
-_AGENT = "grok-build-concise"
-_RUN_RULES = (
-    "Benchmark mode: reason briefly, do not write long analysis, and use tools "
-    "as soon as you know the next concrete file operation. Prefer completing "
-    "an attempted solution over extended deliberation."
-)
+# Match the benchmark's medium-equivalent thinking convention. Grok Build exposes
+# both `--effort` and `--reasoning-effort` for this control.
+_EFFORT = "medium"
 # Exact OpenAI-compatible endpoint data copied from bench/adapters/pi.py.
 OPEN_MODELS = {
     "glm-5.2":           {"model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
@@ -129,9 +120,7 @@ def _model_section(alias, spec):
         'api_backend = "chat_completions"\n'
         "stream_tool_calls = false\n"
         "context_window = 128000\n"
-        f"max_completion_tokens = {_MAX_COMPLETION_TOKENS}\n"
-        f"temperature = {_TEMPERATURE}\n"
-        f"top_p = {_TOP_P}\n\n"
+        f"max_completion_tokens = {_MAX_COMPLETION_TOKENS}\n\n"
     )
 
 
@@ -145,8 +134,6 @@ def _config_toml(model, spec):
         f"session_summary = {_toml_str(model)}\n"
         f"image_description = {_toml_str(model)}\n"
         f"max_completion_tokens = {_MAX_COMPLETION_TOKENS}\n"
-        f"temperature = {_TEMPERATURE}\n"
-        f"top_p = {_TOP_P}\n"
         f"default_reasoning_effort = {_toml_str(_EFFORT)}\n\n"
         "[ui]\n"
         f"fork_secondary_model = {_toml_str(model)}\n\n"
@@ -328,11 +315,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "--no-auto-update",
             "-p", instruction,
             "--model", model,
-            "--agent", _AGENT,
             "--output-format", "streaming-json",
             "--effort", _EFFORT,
             "--reasoning-effort", _EFFORT,
-            "--rules", _RUN_RULES,
             "--always-approve",
             "--no-plan",
             "--no-subagents",
