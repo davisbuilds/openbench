@@ -14,6 +14,7 @@ import unittest
 BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADAPTER_PATH = os.path.join(BENCH_DIR, "adapters", "grokbuild.py")
 FIXTURE_PATH = os.path.join(BENCH_DIR, "tests", "fixtures", "grokbuild_stream_deepseek.jsonl")
+LOG_FIXTURE_PATH = os.path.join(BENCH_DIR, "tests", "fixtures", "grokbuild_unified_multiturn.jsonl")
 
 
 def _load_grokbuild():
@@ -72,9 +73,33 @@ class TestStreamParsing(unittest.TestCase):
                 fh.write(
                     '{"msg":"shell.turn.inference_done",'
                     '"ctx":{"prompt_tokens":100,"cached_prompt_tokens":40,'
-                    '"completion_tokens":7}}\n'
+                    '"completion_tokens":7,"reasoning_tokens":2}}\n'
                 )
-            self.assertEqual(grokbuild._parse_log_usage(home), 67)
+            usage = grokbuild._parse_log_usage(home)
+            self.assertEqual(usage["tokens"], 67)
+            self.assertEqual(usage["tokens_input_uncached"], 60)
+            self.assertEqual(usage["tokens_cache_read"], 40)
+            self.assertEqual(usage["tokens_output"], 7)
+            self.assertEqual(usage["tokens_reasoning"], 2)
+        finally:
+            import shutil
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_multi_turn_log_usage_sums_per_call_counters(self):
+        home = tempfile.mkdtemp(prefix="grokbuild_log_test_")
+        try:
+            log_dir = os.path.join(home, "logs")
+            os.makedirs(log_dir)
+            with open(LOG_FIXTURE_PATH, encoding="utf-8") as src:
+                data = src.read()
+            with open(os.path.join(log_dir, "unified.jsonl"), "w", encoding="utf-8") as dst:
+                dst.write(data)
+            usage = grokbuild._parse_log_usage(home)
+            self.assertEqual(usage["tokens"], 1898)
+            self.assertEqual(usage["tokens_input_uncached"], 1522)
+            self.assertEqual(usage["tokens_cache_read"], 46592)
+            self.assertEqual(usage["tokens_output"], 376)
+            self.assertEqual(usage["tokens_reasoning"], 80)
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)
@@ -147,6 +172,14 @@ class TestRunConstruction(unittest.TestCase):
             home = kwargs["env"]["HOME"]
             with open(os.path.join(home, ".grok", "config.toml"), encoding="utf-8") as cfg_fh:
                 cfg = cfg_fh.read()
+            log_dir = os.path.join(home, ".grok", "logs")
+            os.makedirs(log_dir)
+            with open(os.path.join(log_dir, "unified.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write(
+                    '{"msg":"shell.turn.inference_done",'
+                    '"ctx":{"prompt_tokens":100,"cached_prompt_tokens":40,'
+                    '"completion_tokens":7,"reasoning_tokens":2}}\n'
+                )
             calls.append((cmd, kwargs, cfg))
             return FakeProc(stdout=fixture)
 
@@ -164,6 +197,11 @@ class TestRunConstruction(unittest.TestCase):
                     self.assertTrue(res["completed"])
                     self.assertEqual(res["output_tail"], "OK")
                     self.assertEqual(res["turns"], 1)
+                    self.assertEqual(res["tokens"], 67)
+                    self.assertEqual(res["tokens_input_uncached"], 60)
+                    self.assertEqual(res["tokens_cache_read"], 40)
+                    self.assertEqual(res["tokens_output"], 7)
+                    self.assertEqual(res["tokens_reasoning"], 2)
         finally:
             grokbuild.subprocess.run = old_run
             grokbuild._resolve_exe = old_resolve

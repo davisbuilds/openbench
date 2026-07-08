@@ -47,15 +47,26 @@ OPEN_MODELS = {
 }
 
 
+def _token_fields_none():
+    return {
+        "tokens_input_uncached": None,
+        "tokens_cache_read": None,
+        "tokens_output": None,
+        "tokens_reasoning": None,
+    }
+
+
 def _unsupported(model):
     return {"completed": False,
             "error": f"unsupported-model: {model!r} (have {list(OPEN_MODELS)})",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_token_fields_none()}
 
 
 def _setup_needed(msg):
     return {"completed": False, "error": f"SETUP-NEEDED: {msg}",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_token_fields_none()}
 
 
 def _resolve_exe():
@@ -165,12 +176,13 @@ def _usage_tokens(obj):
 
 
 def _parse_log_usage(grok_dir):
-    """Return fresh token count from Grok's local run log, if present.
+    """Return token usage totals from Grok's local run log, if present.
 
-    The observed streaming-json events do not carry usage, but Grok writes a
-    final ``shell.turn.inference_done`` log with prompt/completion counters.
-    Treat cached prompt tokens like other adapters do: cache reads are excluded
-    from the fresh-token total.
+    The observed streaming-json events do not carry usage, but Grok writes one
+    ``shell.turn.inference_done`` log record per model call. Counters are
+    PER-CALL, not cumulative, so sum every event in the fresh isolated HOME.
+    Assumption: every adapter run creates a fresh HOME, so the log contains only
+    this run's events; if Grok ever reuses a HOME, filter events by session id.
     """
     log_path = os.path.join(grok_dir, "logs", "unified.jsonl")
     try:
@@ -178,7 +190,15 @@ def _parse_log_usage(grok_dir):
             lines = fh.read().splitlines()
     except OSError:
         return None
-    for raw in reversed(lines):
+
+    totals = {
+        "tokens_input_uncached": 0,
+        "tokens_cache_read": 0,
+        "tokens_output": 0,
+        "tokens_reasoning": 0,
+    }
+    found = False
+    for raw in lines:
         try:
             obj = json.loads(raw)
         except json.JSONDecodeError:
@@ -189,9 +209,19 @@ def _parse_log_usage(grok_dir):
         prompt = ctx.get("prompt_tokens")
         cached = ctx.get("cached_prompt_tokens") or 0
         completion = ctx.get("completion_tokens")
+        reasoning = ctx.get("reasoning_tokens") or 0
         if isinstance(prompt, (int, float)) and isinstance(completion, (int, float)):
-            return max(0, int(prompt) - int(cached)) + int(completion)
-    return None
+            cached_i = int(cached) if isinstance(cached, (int, float)) else 0
+            totals["tokens_input_uncached"] += max(0, int(prompt) - cached_i)
+            totals["tokens_cache_read"] += cached_i
+            totals["tokens_output"] += int(completion)
+            if isinstance(reasoning, (int, float)):
+                totals["tokens_reasoning"] += int(reasoning)
+            found = True
+    if not found:
+        return None
+    totals["tokens"] = totals["tokens_input_uncached"] + totals["tokens_output"]
+    return totals
 
 
 def _parse_stream(stdout):
@@ -270,13 +300,18 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             full_output = _err_tail(e, limit=None)
             return {"completed": False, "error": f"timeout after {timeout_s}s",
                     "output_tail": full_output[-2000:], "full_output": full_output,
-                    "tokens": None, "turns": None, "cmd": cmd}
+                    "tokens": None, "turns": None, "cmd": cmd,
+                    **_token_fields_none()}
 
         combined = (proc.stdout or "") + (proc.stderr or "")
+        token_fields = _token_fields_none()
         try:
             tokens, turns, tail = _parse_stream(proc.stdout or "")
-            if tokens is None:
-                tokens = _parse_log_usage(grok_dir)
+            usage = _parse_log_usage(grok_dir)
+            if usage is not None:
+                token_fields = {k: usage.get(k) for k in token_fields}
+                if tokens is None:
+                    tokens = usage.get("tokens")
         except Exception:  # noqa: BLE001 - parsing must not break a run
             tokens, turns, tail = None, None, ""
         if not tail:
@@ -284,6 +319,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         return {"completed": proc.returncode == 0,
                 "error": None if proc.returncode == 0 else f"exit {proc.returncode}",
                 "output_tail": tail, "full_output": combined,
-                "tokens": tokens, "turns": turns, "cmd": cmd}
+                "tokens": tokens, "turns": turns, "cmd": cmd,
+                **token_fields}
     finally:
         shutil.rmtree(iso_home, ignore_errors=True)
