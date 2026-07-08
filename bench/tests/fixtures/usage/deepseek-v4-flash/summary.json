@@ -1,0 +1,194 @@
+{
+  "bridge": {
+    "claude_all": {
+      "records": 2,
+      "tokens_cache_read": 0,
+      "tokens_cache_write": 0,
+      "tokens_input_uncached": 651,
+      "tokens_output": 368,
+      "tokens_reasoning": 353
+    },
+    "codex": {
+      "records": 3,
+      "tokens_cache_read": 55808,
+      "tokens_cache_write": 0,
+      "tokens_input_uncached": 350,
+      "tokens_output": 158,
+      "tokens_reasoning": 46
+    },
+    "opencode_all": {
+      "records": 4,
+      "tokens_cache_read": 22400,
+      "tokens_cache_write": 0,
+      "tokens_input_uncached": 283,
+      "tokens_output": 513,
+      "tokens_reasoning": 353
+    },
+    "opencode_main_only": {
+      "records": 3,
+      "tokens_cache_read": 21888,
+      "tokens_cache_write": 0,
+      "tokens_input_uncached": 247,
+      "tokens_output": 197,
+      "tokens_reasoning": 43
+    },
+    "pi": {
+      "records": 3,
+      "tokens_cache_read": 4608,
+      "tokens_cache_write": 0,
+      "tokens_input_uncached": 284,
+      "tokens_output": 150,
+      "tokens_reasoning": 43
+    }
+  },
+  "claude": {
+    "token_basis": "vendor_split",
+    "tokens_cache_read": 0,
+    "tokens_cache_write": 0,
+    "tokens_input_uncached": 651,
+    "tokens_output": 368,
+    "tokens_reasoning": null,
+    "usage_raw": {
+      "modelUsage": {
+        "deepseek-v4-flash": {
+          "cacheCreationInputTokens": 0,
+          "cacheReadInputTokens": 0,
+          "contextWindow": 200000,
+          "costUSD": 0.012455,
+          "inputTokens": 651,
+          "maxOutputTokens": 32000,
+          "outputTokens": 368,
+          "webSearchRequests": 0
+        }
+      },
+      "usage": {
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "inference_geo": "",
+        "input_tokens": 284,
+        "iterations": [],
+        "output_tokens": 266,
+        "server_tool_use": {
+          "web_fetch_requests": 0,
+          "web_search_requests": 0
+        },
+        "service_tier": "standard",
+        "speed": "standard"
+      }
+    }
+  },
+  "codex": {
+    "token_basis": "vendor_split",
+    "tokens_cache_read": 55808,
+    "tokens_cache_write": 0,
+    "tokens_input_uncached": 350,
+    "tokens_output": 158,
+    "tokens_reasoning": 46,
+    "usage_raw": {
+      "cached_input_tokens": 55808,
+      "input_tokens": 56158,
+      "output_tokens": 158,
+      "reasoning_output_tokens": 46
+    }
+  },
+  "opencode": {
+    "opencode_visible_output_tokens": 154,
+    "token_basis": "vendor_split",
+    "tokens_cache_read": 21888,
+    "tokens_cache_write": 0,
+    "tokens_input_uncached": 247,
+    "tokens_output": 197,
+    "tokens_reasoning": 43,
+    "usage_raw": [
+      {
+        "cache": {
+          "read": 7168,
+          "write": 0
+        },
+        "input": 74,
+        "output": 84,
+        "reasoning": 33,
+        "total": 7359
+      },
+      {
+        "cache": {
+          "read": 7296,
+          "write": 0
+        },
+        "input": 79,
+        "output": 68,
+        "reasoning": 8,
+        "total": 7451
+      },
+      {
+        "cache": {
+          "read": 7424,
+          "write": 0
+        },
+        "input": 94,
+        "output": 2,
+        "reasoning": 2,
+        "total": 7522
+      }
+    ]
+  },
+  "pi": {
+    "token_basis": "vendor_split",
+    "tokens_cache_read": 4608,
+    "tokens_cache_write": 0,
+    "tokens_input_uncached": 284,
+    "tokens_output": 150,
+    "tokens_reasoning": 43,
+    "usage_raw": [
+      {
+        "cacheRead": 1408,
+        "cacheWrite": 0,
+        "cost": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "input": 0,
+          "output": 0,
+          "total": 0
+        },
+        "input": 124,
+        "output": 96,
+        "reasoning": 36,
+        "totalTokens": 1628
+      },
+      {
+        "cacheRead": 1536,
+        "cacheWrite": 0,
+        "cost": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "input": 0,
+          "output": 0,
+          "total": 0
+        },
+        "input": 113,
+        "output": 49,
+        "reasoning": 5,
+        "totalTokens": 1698
+      },
+      {
+        "cacheRead": 1664,
+        "cacheWrite": 0,
+        "cost": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "input": 0,
+          "output": 0,
+          "total": 0
+        },
+        "input": 47,
+        "output": 5,
+        "reasoning": 2,
+        "totalTokens": 1716
+      }
+    ]
+  }
+}

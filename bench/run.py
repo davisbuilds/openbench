@@ -43,8 +43,10 @@ DEFAULT_MODEL = "gpt-5.5-medium"
 # score from ``success`` when the field is absent).
 ROW_FIELDS = (
     "run_id", "ts_iso", "harness", "model", "task", "trial",
-    "success", "completed", "error", "wall_time_s", "tokens", "turns",
-    "cmd", "checker_exit", "exec_mode", "score", "harness_version",
+    "success", "completed", "error", "wall_time_s", "tokens",
+    "tokens_input_uncached", "tokens_cache_read", "tokens_cache_write",
+    "tokens_output", "tokens_reasoning", "usage_raw", "token_basis",
+    "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
     "failure_class",
 )
 
@@ -311,6 +313,13 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "error": None,
         "wall_time_s": None,
         "tokens": None,
+        "tokens_input_uncached": None,
+        "tokens_cache_read": None,
+        "tokens_cache_write": None,
+        "tokens_output": None,
+        "tokens_reasoning": None,
+        "usage_raw": None,
+        "token_basis": None,
         "turns": None,
         "cmd": None,
         "output_tail": "",
@@ -351,6 +360,13 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["completed"] = bool(result.get("completed", False))
         row["error"] = result.get("error")
         row["tokens"] = result.get("tokens")
+        row["tokens_input_uncached"] = result.get("tokens_input_uncached")
+        row["tokens_cache_read"] = result.get("tokens_cache_read")
+        row["tokens_cache_write"] = result.get("tokens_cache_write")
+        row["tokens_output"] = result.get("tokens_output")
+        row["tokens_reasoning"] = result.get("tokens_reasoning")
+        row["usage_raw"] = result.get("usage_raw")
+        row["token_basis"] = result.get("token_basis")
         row["turns"] = result.get("turns")
         row["cmd"] = result.get("cmd")
         row["output_tail"] = result.get("output_tail") or ""

@@ -40,6 +40,18 @@ import subprocess
 NAME = "cursor"
 _EXE = "cursor-agent"
 
+
+def _empty_token_usage():
+    return {
+        "tokens_input_uncached": None,
+        "tokens_cache_read": None,
+        "tokens_cache_write": None,
+        "tokens_output": None,
+        "tokens_reasoning": None,
+        "usage_raw": None,
+        "token_basis": None,
+    }
+
 # canonical model name -> cursor-agent `--model` string
 MODELS = {
     "gpt-5.5-medium": "gpt-5.5-medium",
@@ -89,7 +101,7 @@ def _err_tail(exc, limit=2000):
     return text if limit is None else text[-limit:]
 
 
-def _parse_json(stdout):
+def _parse_json_with_usage(stdout):
     """Parse cursor's single-object JSON result into (tokens, turns, tail).
 
     tokens is None if usage is absent/malformed. turns is always None (not
@@ -97,25 +109,40 @@ def _parse_json(stdout):
     """
     stdout = stdout.strip()
     if not stdout:
-        return None, None, ""
+        return None, None, "", _empty_token_usage()
     obj = json.loads(stdout)  # caller guards with try/except
     usage = obj.get("usage") or {}
     tokens = 0
+    found = False
     for key in ("inputTokens", "outputTokens"):
         val = usage.get(key)
         if isinstance(val, (int, float)):
             tokens += int(val)
+            found = True
+    token_usage = _empty_token_usage()
+    if found:
+        # Cursor's JSON surface is harness-reported and not proven vendor-split;
+        # preserve the legacy scalar and leave normalized split lanes unknown.
+        token_usage["usage_raw"] = usage
+        token_usage["token_basis"] = "harness_reported"
     tail = obj.get("result")
     tail = tail if isinstance(tail, str) else ""
-    return (tokens or None), None, tail[-2000:]
+    return (tokens if found else None), None, tail[-2000:], token_usage
 
 
 def _setup_needed(model):
     return {"completed": False,
             "error": (f"SETUP-NEEDED: run bench/cursor_container_login.sh for subscription auth "
                       f"(missing {_CURSOR_AUTH}) or export CURSOR_API_KEY to use {model}"),
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
+
+
+def _parse_json(stdout):
+    """Backward-compatible parser returning legacy fields only."""
+    tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
+    return tokens, turns, tail
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model not in MODELS:
@@ -126,6 +153,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "tokens": None,
             "turns": None,
             "cmd": None,
+            **_empty_token_usage(),
         }
     if (model == "claude-opus-4-8" and os.environ.get("BENCH_IN_CONTAINER")
             and not (os.environ.get("CURSOR_API_KEY") or os.path.exists(_CURSOR_AUTH))):
@@ -160,13 +188,14 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "tokens": None,
             "turns": None,
             "cmd": cmd,
+            **_empty_token_usage(),
         }
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     try:
-        tokens, turns, tail = _parse_json(proc.stdout or "")
+        tokens, turns, tail, token_usage = _parse_json_with_usage(proc.stdout or "")
     except Exception:  # noqa: BLE001 - never let usage parsing break a run
-        tokens, turns, tail = None, None, ""
+        tokens, turns, tail, token_usage = None, None, "", _empty_token_usage()
     if not tail:
         tail = combined[-2000:]
 
@@ -180,4 +209,5 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         "tokens": tokens,
         "turns": turns,
         "cmd": cmd,
+        **token_usage,
     }
