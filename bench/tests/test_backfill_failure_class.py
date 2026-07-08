@@ -77,6 +77,51 @@ class TestBackfillFailureClass(unittest.TestCase):
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_reclassify_recomputes_existing_failure_class(self):
+        tmp = tempfile.mkdtemp(prefix="bench_backfill_reclassify_")
+        try:
+            src = os.path.join(tmp, "in.jsonl")
+            fill_only_dst = os.path.join(tmp, "fill-only.jsonl")
+            reclass_dst = os.path.join(tmp, "reclass.jsonl")
+            row = {
+                "success": False,
+                "failure_class": "timeout",
+                "wall_time_s": 1201,
+                "error": "timeout after 1200s",
+                "tokens": None,
+                "turns": None,
+                "output_tail": "",
+            }
+            with open(src, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(row) + "\n")
+
+            backfill_failure_class.backfill(src, fill_only_dst)
+            backfill_failure_class.backfill(src, reclass_dst, reclassify=True)
+
+            with open(fill_only_dst, encoding="utf-8") as fh:
+                self.assertEqual(json.loads(fh.readline())["failure_class"], "timeout")
+            with open(reclass_dst, encoding="utf-8") as fh:
+                self.assertEqual(json.loads(fh.readline())["failure_class"], "infra")
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_reclassify_preserves_existing_rate_limited_when_marker_was_not_saved(self):
+        tmp = tempfile.mkdtemp(prefix="bench_backfill_reclassify_rate_")
+        try:
+            src = os.path.join(tmp, "in.jsonl")
+            dst = os.path.join(tmp, "out.jsonl")
+            with open(src, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"success": False, "failure_class": "rate_limited", "error": "exit 1"}) + "\n")
+            count, counts = backfill_failure_class.backfill(src, dst, reclassify=True)
+            self.assertEqual(count, 1)
+            self.assertEqual(counts["rate_limited"], 1)
+            with open(dst, encoding="utf-8") as fh:
+                self.assertEqual(json.loads(fh.readline())["failure_class"], "rate_limited")
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_refuses_in_place_mutation(self):
         with self.assertRaises(SystemExit):
             backfill_failure_class.backfill("same.jsonl", "same.jsonl")
