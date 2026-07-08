@@ -119,6 +119,19 @@ class TestConfigAndGating(unittest.TestCase):
         self.assertIn('[models]\ndefault = "deepseek-v4-flash"', cfg)
         self.assertIn('api_backend = "chat_completions"', cfg)
         self.assertIn('stream_tool_calls = false', cfg)
+        self.assertIn('max_completion_tokens = 65536', cfg)
+        self.assertEqual(parsed["models"]["temperature"], 0.0)
+        self.assertEqual(parsed["models"]["top_p"], 0.1)
+        self.assertEqual(parsed["models"]["default_reasoning_effort"], "low")
+        self.assertIn('[model."grok-build"]', cfg)
+        self.assertEqual(parsed["models"]["web_search"], "deepseek-v4-flash")
+        self.assertEqual(parsed["models"]["session_summary"], "deepseek-v4-flash")
+        self.assertEqual(parsed["models"]["image_description"], "deepseek-v4-flash")
+        self.assertEqual(parsed["ui"]["fork_secondary_model"], "deepseek-v4-flash")
+        self.assertEqual(parsed["compaction"]["memory_flush"]["flush_model"], "deepseek-v4-flash")
+        self.assertEqual(parsed["goal"]["planner_model"], "deepseek-v4-flash")
+        self.assertEqual(parsed["goal"]["strategist_model"], "deepseek-v4-flash")
+        self.assertEqual(parsed["goal"]["skeptic_models"], ["deepseek-v4-flash"])
         self.assertIn('[compat.claude]', cfg)
 
     def test_dotted_model_aliases_are_quoted_toml_keys(self):
@@ -211,7 +224,12 @@ class TestRunConstruction(unittest.TestCase):
             spec = grokbuild.OPEN_MODELS[model]
             self.assertEqual(cmd[:4], ["/usr/local/bin/grok", "--no-auto-update", "-p", "do it"])
             self.assertEqual(cmd[cmd.index("--model") + 1], model)
+            self.assertEqual(cmd[cmd.index("--agent") + 1], "grok-build-concise")
             self.assertEqual(cmd[cmd.index("--output-format") + 1], "streaming-json")
+            self.assertEqual(cmd[cmd.index("--effort") + 1], "low")
+            self.assertEqual(cmd[cmd.index("--reasoning-effort") + 1], "low")
+            self.assertIn("--rules", cmd)
+            self.assertIn("Benchmark mode", cmd[cmd.index("--rules") + 1])
             self.assertIn("--always-approve", cmd)
             self.assertIn("--no-plan", cmd)
             self.assertIn("--no-subagents", cmd)
@@ -222,6 +240,12 @@ class TestRunConstruction(unittest.TestCase):
             self.assertIn(f'model = "{spec["model_id"]}"', cfg)
             self.assertIn(f'base_url = "{spec["base_url"]}"', cfg)
             self.assertIn(f'env_key = "{spec["env_key"]}"', cfg)
+            parsed = tomllib.loads(cfg)
+            self.assertEqual(parsed["model"]["grok-build"]["model"], spec["model_id"])
+            self.assertEqual(parsed["model"]["grok-build"]["base_url"], spec["base_url"])
+            self.assertEqual(parsed["model"][model]["max_completion_tokens"], 65536)
+            self.assertEqual(parsed["model"][model]["temperature"], 0.0)
+            self.assertEqual(parsed["model"][model]["top_p"], 0.1)
 
 
 if __name__ == "__main__":

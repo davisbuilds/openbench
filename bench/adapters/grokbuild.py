@@ -39,6 +39,31 @@ _EXE = "grok"
 # Required by ADAPTER_SPEC / doctor.py. This adapter is open-model-only for now.
 MODELS = {}
 
+# Grok has built-in auxiliary roles (session summaries/titles/image descriptions)
+# that can otherwise fall back to the built-in `grok-build` model id. Override
+# that alias to the selected BYOK endpoint and point every documented role key at
+# the selected custom model so no internal request is routed to an xAI model.
+_AUX_MODEL_ALIASES = ("grok-build",)
+
+# Long-thinking coding tasks can exceed the docs' example 8192 cap, and a live
+# GLM scheme-evaluator cell still truncated at 32768. Grok treats provider
+# max-token truncation as fatal, so use a high per-request cap that leaves room
+# for reasoning-heavy GLM/Kimi/DeepSeek runs while staying within these models'
+# advertised large context windows.
+_MAX_COMPLETION_TOKENS = 65536
+_TEMPERATURE = 0.0
+_TOP_P = 0.1
+
+# GLM's default reasoning verbosity can spend the entire 1200s benchmark budget
+# before producing final edits. Keep the harness deterministic and completion-
+# oriented by requesting low effort explicitly.
+_EFFORT = "low"
+_AGENT = "grok-build-concise"
+_RUN_RULES = (
+    "Benchmark mode: reason briefly, do not write long analysis, and use tools "
+    "as soon as you know the next concrete file operation. Prefer completing "
+    "an attempted solution over extended deliberation."
+)
 # Exact OpenAI-compatible endpoint data copied from bench/adapters/pi.py.
 OPEN_MODELS = {
     "glm-5.2":           {"model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
@@ -94,14 +119,9 @@ def _toml_str(value):
     return json.dumps(str(value))
 
 
-def _config_toml(model, spec):
+def _model_section(alias, spec):
     return (
-        "[cli]\n"
-        "auto_update = false\n\n"
-        "[models]\n"
-        f"default = {_toml_str(model)}\n"
-        f"web_search = {_toml_str(model)}\n\n"
-        f"[model.{_toml_str(model)}]\n"
+        f"[model.{_toml_str(alias)}]\n"
         f"model = {_toml_str(spec['model_id'])}\n"
         f"base_url = {_toml_str(spec['base_url'])}\n"
         f"name = {_toml_str(spec['display'])}\n"
@@ -109,15 +129,48 @@ def _config_toml(model, spec):
         'api_backend = "chat_completions"\n'
         "stream_tool_calls = false\n"
         "context_window = 128000\n"
-        "max_completion_tokens = 8192\n\n"
+        f"max_completion_tokens = {_MAX_COMPLETION_TOKENS}\n"
+        f"temperature = {_TEMPERATURE}\n"
+        f"top_p = {_TOP_P}\n\n"
+    )
+
+
+def _config_toml(model, spec):
+    sections = [
+        "[cli]\n"
+        "auto_update = false\n\n"
+        "[models]\n"
+        f"default = {_toml_str(model)}\n"
+        f"web_search = {_toml_str(model)}\n"
+        f"session_summary = {_toml_str(model)}\n"
+        f"image_description = {_toml_str(model)}\n"
+        f"max_completion_tokens = {_MAX_COMPLETION_TOKENS}\n"
+        f"temperature = {_TEMPERATURE}\n"
+        f"top_p = {_TOP_P}\n"
+        f"default_reasoning_effort = {_toml_str(_EFFORT)}\n\n"
+        "[ui]\n"
+        f"fork_secondary_model = {_toml_str(model)}\n\n"
+        "[compaction.memory_flush]\n"
+        f"flush_model = {_toml_str(model)}\n\n"
+        "[goal]\n"
+        f"planner_model = {_toml_str(model)}\n"
+        f"strategist_model = {_toml_str(model)}\n"
+        f"skeptic_models = [{_toml_str(model)}]\n\n"
+        "[subagents]\n"
+        "enabled = false\n\n"
+        "[subagents.models]\n"
+        f"explore = {_toml_str(model)}\n"
+        f"plan = {_toml_str(model)}\n\n"
+    ]
+    for alias in (model, *_AUX_MODEL_ALIASES):
+        sections.append(_model_section(alias, spec))
+    sections.append(
         "[session]\n"
         "save_on_end = false\n\n"
         "[memory]\n"
         "enabled = false\n\n"
         "[memory.session]\n"
         "save_on_end = false\n\n"
-        "[subagents]\n"
-        "enabled = false\n\n"
         "[compat.cursor]\n"
         "skills = false\n"
         "rules = false\n"
@@ -131,6 +184,7 @@ def _config_toml(model, spec):
         "mcps = false\n"
         "hooks = false\n"
     )
+    return "".join(sections)
 
 
 def _write_config(iso_home, model, spec):
@@ -140,15 +194,6 @@ def _write_config(iso_home, model, spec):
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(_config_toml(model, spec))
     return path
-
-
-def _err_tail(exc, limit=2000):
-    def _dec(x):
-        if x is None:
-            return ""
-        return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-    text = _dec(exc.stdout) + _dec(exc.stderr)
-    return text if limit is None else text[-limit:]
 
 
 def _usage_tokens(obj):
@@ -283,7 +328,11 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "--no-auto-update",
             "-p", instruction,
             "--model", model,
+            "--agent", _AGENT,
             "--output-format", "streaming-json",
+            "--effort", _EFFORT,
+            "--reasoning-effort", _EFFORT,
+            "--rules", _RUN_RULES,
             "--always-approve",
             "--no-plan",
             "--no-subagents",
@@ -297,7 +346,11 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 timeout=timeout_s, stdin=subprocess.DEVNULL, env=env,
             )
         except subprocess.TimeoutExpired as e:
-            full_output = _err_tail(e, limit=None)
+            def _dec(x):
+                if x is None:
+                    return ""
+                return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
+            full_output = _dec(e.stdout) + _dec(e.stderr)
             return {"completed": False, "error": f"timeout after {timeout_s}s",
                     "output_tail": full_output[-2000:], "full_output": full_output,
                     "tokens": None, "turns": None, "cmd": cmd,
