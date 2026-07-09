@@ -162,8 +162,10 @@ class TokenParityFixtureTests(unittest.TestCase):
         self.assertEqual(tokens, 46)
         self.assertIsNone(turns)
         self.assertEqual(usage["token_basis"], "harness_reported")
-        self.assertIsNone(usage["tokens_input_uncached"])
-        self.assertIsNone(usage["tokens_output"])
+        self.assertEqual(usage["tokens_input_uncached"], 12)
+        self.assertEqual(usage["tokens_cache_read"], 56)
+        self.assertEqual(usage["tokens_cache_write"], 78)
+        self.assertEqual(usage["tokens_output"], 34)
 
     def test_cursor_empty_output_is_defensive(self):
         cursor = load_adapter("cursor")

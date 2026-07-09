@@ -111,6 +111,7 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(fake_row["tokens_reasoning"], 3)
         self.assertEqual(fake_row["usage_raw"], {"fixture": True})
         self.assertEqual(fake_row["token_basis"], "vendor_split")
+        self.assertEqual(fake_row["tokens_fresh"], 42)
         self.assertEqual(fake_row["turns"], 1)
         self.assertIsInstance(fake_row["wall_time_s"], (int, float))
 

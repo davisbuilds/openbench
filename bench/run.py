@@ -46,7 +46,7 @@ ROW_FIELDS = (
     "success", "completed", "error", "wall_time_s", "tokens",
     "tokens_input_uncached", "tokens_cache_read", "tokens_cache_write",
     "tokens_output", "tokens_reasoning", "usage_raw", "token_basis",
-    "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
+    "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
     "failure_class",
 )
 
@@ -330,6 +330,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "tokens_reasoning": None,
         "usage_raw": None,
         "token_basis": None,
+        "tokens_fresh": None,
         "turns": None,
         "cmd": None,
         "output_tail": "",
@@ -377,6 +378,12 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["tokens_reasoning"] = result.get("tokens_reasoning")
         row["usage_raw"] = result.get("usage_raw")
         row["token_basis"] = result.get("token_basis")
+        row["tokens_fresh"] = result.get("tokens_fresh")
+        if row["tokens_fresh"] is None:
+            inp = row["tokens_input_uncached"]
+            out = row["tokens_output"]
+            if isinstance(inp, int) and isinstance(out, int):
+                row["tokens_fresh"] = inp + out
         row["turns"] = result.get("turns")
         row["cmd"] = result.get("cmd")
         row["output_tail"] = result.get("output_tail") or ""
