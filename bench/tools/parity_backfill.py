@@ -278,13 +278,15 @@ def backfill_file(results_path: Path, transcripts_dir: Path, write: bool = False
             if not row.get("token_basis"):
                 row["token_basis"] = VENDOR_SPLIT if fresh is not None else UNAVAILABLE
             basis = row.get("token_basis")
-            if basis == UNAVAILABLE and old_tokens is not None:
+            if fresh is None and basis in (UNAVAILABLE, SCALAR_EXACT) and old_tokens is not None:
                 row["tokens_fresh"] = old_tokens
                 row["token_basis"] = SCALAR_EXACT
                 basis = SCALAR_EXACT
                 fresh = old_tokens
                 lane["scalar_adopted"] += 1
-            elif basis == UNAVAILABLE:
+            elif fresh is None and basis in (UNAVAILABLE, SCALAR_EXACT):
+                row["token_basis"] = UNAVAILABLE
+                basis = UNAVAILABLE
                 lane["unavailable"] += 1
                 lane["unavailable_reasons"]["native_split_missing"] += 1
             lane["updated"] += 1

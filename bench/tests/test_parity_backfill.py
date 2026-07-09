@@ -101,6 +101,26 @@ class ParityBackfillTests(unittest.TestCase):
             self.assertEqual(claude_row["token_basis"], "unavailable")
             self.assertIsNone(claude_row["tokens_fresh"])
 
+    def test_scalar_adoption_is_idempotent_across_passes(self):
+        # A grokbuild row with only a legacy scalar must keep tokens_fresh
+        # through repeated backfill passes (regression: pass 2 wiped the
+        # adopted value while leaving token_basis=scalar_exact).
+        with tempfile.TemporaryDirectory() as td:
+            result_path = Path(td) / "results.jsonl"
+            result_path.write_text(json.dumps({
+                "run_id": "grokbuild:terminal-bench/x:deepseek-v4-flash:trial1",
+                "harness": "grokbuild",
+                "model": "deepseek-v4-flash",
+                "task": "terminal-bench/x",
+                "trial": 1,
+                "tokens": 8982,
+            }) + "\n")
+            for _ in range(3):
+                parity_backfill.backfill_file(result_path, Path(td), write=True)
+                row = json.loads(result_path.read_text())
+                self.assertEqual(row["tokens_fresh"], 8982)
+                self.assertEqual(row["token_basis"], "scalar_exact")
+
     def test_missing_transcript_pi_without_scalar_stays_unavailable(self):
         with tempfile.TemporaryDirectory() as td:
             result_path = Path(td) / "results.jsonl"
