@@ -52,9 +52,14 @@ def _empty_token_usage():
         "token_basis": None,
     }
 
+
+def _num(value):
+    return int(value) if isinstance(value, (int, float)) else None
+
 # canonical model name -> cursor-agent `--model` string
 MODELS = {
     "gpt-5.5-medium": "gpt-5.5-medium",
+    "gpt-5.6-sol": "gpt-5.6-sol-medium",
     # Thinking parity for the opus frontier lane: Cursor exposes a concrete
     # medium-thinking model id, so no separate effort flag is needed.
     "claude-opus-4-8": "claude-opus-4-8-thinking-medium",
@@ -121,8 +126,21 @@ def _parse_json_with_usage(stdout):
             found = True
     token_usage = _empty_token_usage()
     if found:
-        # Cursor's JSON surface is harness-reported and not proven vendor-split;
-        # preserve the legacy scalar and leave normalized split lanes unknown.
+        inp = _num(usage.get("inputTokens"))
+        out = _num(usage.get("outputTokens"))
+        cache_read = _num(usage.get("cacheReadTokens"))
+        cache_write = _num(usage.get("cacheWriteTokens"))
+        if None not in (inp, out):
+            token_usage.update({
+                "tokens_input_uncached": inp,
+                "tokens_cache_read": cache_read,
+                "tokens_cache_write": cache_write,
+                "tokens_output": out,
+                "tokens_reasoning": None,
+            })
+        # Cursor's JSON surface is harness-reported rather than independently
+        # vendor-verified, so keep the basis explicit even when split fields are
+        # available for the runner's fresh-token smoke check.
         token_usage["usage_raw"] = usage
         token_usage["token_basis"] = "harness_reported"
     tail = obj.get("result")

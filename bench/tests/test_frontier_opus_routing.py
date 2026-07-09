@@ -71,6 +71,34 @@ class TestPiOpus(unittest.TestCase):
         self.assertIn("anthropic", res["error"])
         self.assertIsNone(res["cmd"])
 
+    def test_constructs_gpt56_sol_medium_command(self):
+        calls = []
+        old_run = self.pi.subprocess.run
+        old_auth = self.pi._REAL_AUTH
+        fd, auth = tempfile.mkstemp()
+        with os.fdopen(fd, "w") as fh:
+            json.dump({"openai-codex": {"type": "oauth", "access": "x"}}, fh)
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            usage = {"input": 3, "cacheRead": 0, "cacheWrite": 0, "output": 4, "reasoning": 1, "totalTokens": 7}
+            return FakeProc(stdout=json.dumps({"type": "turn_end", "message": {"usage": usage}}) + "\n")
+
+        self.pi.subprocess.run = fake_run
+        self.pi._REAL_AUTH = auth
+        try:
+            res = self.pi.run("hi", "/tmp", "gpt-5.6-sol", 5)
+        finally:
+            self.pi.subprocess.run = old_run
+            self.pi._REAL_AUTH = old_auth
+            os.unlink(auth)
+        self.assertTrue(res["completed"])
+        cmd = calls[0][0]
+        self.assertEqual(cmd[cmd.index("--provider") + 1], "openai-codex")
+        self.assertEqual(cmd[cmd.index("--model") + 1], "gpt-5.6-sol")
+        self.assertEqual(cmd[cmd.index("--thinking") + 1], "medium")
+        self.assertEqual(res["token_basis"], "vendor_split")
+
     def test_constructs_anthropic_medium_command(self):
         calls = []
         old_run = self.pi.subprocess.run
@@ -113,6 +141,27 @@ class TestOpencodeOpus(unittest.TestCase):
         self.assertFalse(res["completed"])
         self.assertIn("SETUP-NEEDED", res["error"])
         self.assertIn("opencode auth login -p anthropic", res["error"])
+
+    def test_constructs_gpt56_sol_medium_command(self):
+        old_run = self.openc.subprocess.run
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            tok = {"input": 3, "output": 2, "reasoning": 1, "cache": {"read": 0, "write": 0}, "total": 6}
+            return FakeProc(stdout=json.dumps({"type": "step_finish", "part": {"tokens": tok}}) + "\n")
+
+        self.openc.subprocess.run = fake_run
+        try:
+            res = self.openc.run("hi", "/tmp", "gpt-5.6-sol", 5)
+        finally:
+            self.openc.subprocess.run = old_run
+        self.assertTrue(res["completed"])
+        cmd, kwargs = calls[0]
+        self.assertEqual(cmd[cmd.index("-m") + 1], "openai/gpt-5.6-sol")
+        self.assertEqual(cmd[cmd.index("--variant") + 1], "medium")
+        self.assertNotIn("OPENAI_API_KEY", kwargs["env"])
+        self.assertEqual(res["token_basis"], "vendor_split")
 
     def test_constructs_anthropic_medium_command(self):
         old_run = self.openc.subprocess.run
@@ -193,6 +242,29 @@ class TestCodexOpus(unittest.TestCase):
         self.assertIn("SETUP-NEEDED", res["error"])
         self.assertIn("ANTHROPIC_API_KEY", res["error"])
 
+    def test_constructs_gpt56_sol_medium_command(self):
+        old_run = self.codex.subprocess.run
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            usage = {"input_tokens": 5, "cached_input_tokens": 1, "output_tokens": 3, "reasoning_output_tokens": 1}
+            return FakeProc(stdout=json.dumps({"type": "turn.completed", "usage": usage}) + "\n")
+
+        self.codex.subprocess.run = fake_run
+        try:
+            res = self.codex.run("hi", "/tmp", "gpt-5.6-sol", 5)
+        finally:
+            self.codex.subprocess.run = old_run
+        self.assertTrue(res["completed"])
+        cmd = calls[0][0]
+        self.assertIn('model_reasoning_effort="medium"', cmd)
+        self.assertIn('service_tier="default"', cmd)
+        self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-5.6-sol")
+        self.assertIsNone(calls[0][1]["env"])
+        self.assertEqual(res["token_basis"], "estimated")
+        self.assertIsNone(res["tokens_cache_write"])
+
     def test_constructs_bridge_medium_command(self):
         old_run = self.codex.subprocess.run
         old_reach = self.codex._bridge_reachable
@@ -239,6 +311,24 @@ class TestCursorOpus(unittest.TestCase):
         self.assertFalse(res["completed"])
         self.assertIn("SETUP-NEEDED", res["error"])
         self.assertIn("CURSOR_API_KEY", res["error"])
+
+    def test_constructs_gpt56_sol_medium_model(self):
+        old_run = self.cursor.subprocess.run
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return FakeProc(stdout='{"result":"ok","usage":{"inputTokens":1,"outputTokens":2}}')
+
+        self.cursor.subprocess.run = fake_run
+        try:
+            res = self.cursor.run("hi", "/tmp", "gpt-5.6-sol", 5)
+        finally:
+            self.cursor.subprocess.run = old_run
+        self.assertTrue(res["completed"])
+        cmd = calls[0][0]
+        self.assertEqual(cmd[cmd.index("--model") + 1], "gpt-5.6-sol-medium")
+        self.assertEqual(res["token_basis"], "harness_reported")
 
     def test_constructs_medium_thinking_model_with_api_key_fallback(self):
         old_run = self.cursor.subprocess.run

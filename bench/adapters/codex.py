@@ -84,11 +84,19 @@ def _num(value):
 # canonical model name -> codex `-m` model string
 MODELS = {
     "gpt-5.5-medium": "gpt-5.5",
+    "gpt-5.6-sol": "gpt-5.6-sol",
 }
 
 # canonical model name -> reasoning effort passed via `-c model_reasoning_effort`
 _EFFORT = {
     "gpt-5.5-medium": "medium",
+    "gpt-5.6-sol": "medium",
+}
+
+# canonical model name -> service tier override. GPT-5.6 Sol must stay on the
+# normal/non-fast lane even if the operator's Codex config defaults to priority.
+_SERVICE_TIER = {
+    "gpt-5.6-sol": "default",
 }
 
 # --- M4 open models (first-party pay-per-token, chat-only vendors) -----------
@@ -305,16 +313,22 @@ def _parse_json_with_usage(stdout):
     if last_usage is not None:
         inp = _num(last_usage.get("input_tokens"))
         cached = _num(last_usage.get("cached_input_tokens"))
+        cache_write = _num(
+            last_usage.get("cache_write_tokens")
+            or last_usage.get("cache_creation_input_tokens")
+            or last_usage.get("cache_creation_tokens")
+            or 0
+        )
         out = _num(last_usage.get("output_tokens"))
         reasoning = _num(last_usage.get("reasoning_output_tokens"))
-        invariant_ok = None not in (inp, cached, out, reasoning)
-        if invariant_ok and (cached > inp or reasoning > out):
+        invariant_ok = None not in (inp, cached, cache_write, out, reasoning)
+        if invariant_ok and (cached + cache_write > inp or reasoning > out):
             invariant_ok = False
         if invariant_ok:
             token_usage.update({
-                "tokens_input_uncached": inp - cached,
+                "tokens_input_uncached": inp - cached - cache_write,
                 "tokens_cache_read": cached,
-                "tokens_cache_write": 0,
+                "tokens_cache_write": cache_write,
                 "tokens_output": out,
                 "tokens_reasoning": reasoning,
             })
@@ -349,8 +363,10 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         cmd = base + [
             "-m", MODELS[model],
             "-c", f'model_reasoning_effort="{_EFFORT[model]}"',
-            instruction,
         ]
+        if model in _SERVICE_TIER:
+            cmd += ["-c", f'service_tier="{_SERVICE_TIER[model]}"']
+        cmd += [instruction]
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
         if not _host_has_key(spec["env_key"]):
@@ -405,6 +421,17 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         tokens, turns, tail, token_usage = None, None, "", _empty_token_usage()
     if not tail:
         tail = combined[-2000:]
+
+    if model == "gpt-5.6-sol" and token_usage.get("token_basis") == "vendor_split":
+        raw = token_usage.get("usage_raw") or {}
+        if not any(k in raw for k in ("cache_write_tokens", "cache_creation_input_tokens", "cache_creation_tokens")):
+            # GPT-5.6 may expose billable cache writes on newer Codex event
+            # schemas. If this CLI omits the field, keep the legacy fresh-ish
+            # scalar usable for the smoke contract but do not assert complete
+            # split parity: cache writes are unknown and the uncached lane may
+            # include writes depending on Codex's aggregate input semantics.
+            token_usage["tokens_cache_write"] = None
+            token_usage["token_basis"] = "estimated"
 
     return {
         "completed": proc.returncode == 0,

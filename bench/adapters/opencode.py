@@ -68,6 +68,7 @@ def _num(value):
 # canonical model name -> opencode `-m` model string (provider/model)
 MODELS = {
     "gpt-5.5-medium": "openai/gpt-5.5",
+    "gpt-5.6-sol": "openai/gpt-5.6-sol",
     # Thinking parity for the opus frontier lane: Anthropic's opencode provider
     # gets the same medium-equivalent request via `--variant medium`.
     "claude-opus-4-8": "anthropic/claude-opus-4-8",
@@ -76,6 +77,7 @@ MODELS = {
 # canonical model name -> `--variant` reasoning effort
 _VARIANT = {
     "gpt-5.5-medium": "medium",
+    "gpt-5.6-sol": "medium",
     "claude-opus-4-8": "medium",
 }
 
