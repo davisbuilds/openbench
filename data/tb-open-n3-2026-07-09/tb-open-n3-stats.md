@@ -74,6 +74,56 @@ The table below preserves the previous matched-cell coverage view over the all-5
 | codex | 77232 | 14/16 | 735.40 | 14/16 | 2 | $0.200 | 14/16 |
 | grokbuild | 83987 | 15/15 | 635.68 | 13/15 | 2 | $0.344 | 7/15 |
 
+### Strict headline C — core four, token composition (5 strict cells)
+
+Same strict construction, restricted to the 5 cells where every core-4 harness has the complete input/output/cache split AND under-cap wall data; all columns computed on the same cells. Output is priced ~3× input at these vendors; cache reads ~0.1×.
+
+| Harness | input_uncached/solve | output/solve | cache_read/solve | s/solve under-cap |
+| --- | ---: | ---: | ---: | ---: |
+| pi | 22551 | 20912 | 310016 | 466.33 |
+| opencode | 31440 | 27439 | 621513 | 644.84 |
+| claude | 15893 | 33241 | 525568 | 604.47 |
+| codex | 17864 | 36018 | 196288 | 713.71 |
+
+Cells (5): deepseek-v4-flash × cancel-async-tasks; glm-5.2 × feal-differential-cryptanalysis; glm-5.2 × llm-inference-batching-scheduler; kimi-k2.7-code × feal-differential-cryptanalysis; kimi-k2.7-code × llm-inference-batching-scheduler.
+Composition read (descriptive): pi has the lowest output (the expensive class) and is the only harness with output < input; claude runs the leanest context but generates verbosely; codex is output-heaviest; opencode re-reads most (highest input and ~2× cache traffic). Note claude's s/solve here (604s) differs from Strict B (526s) because the cell set differs — B includes deepseek cells where claude is fast.
+
+### Per-model strict tables — all five harnesses
+
+Same strict rule applied within each model: cells solved by all five harnesses with complete tokens_fresh and under-cap wall data; per cell median over solving trials, then median over cells. Solve rates are intentionally omitted here (different denominator scope — see Layer 2). Descriptive medians over 1–2 cells; not statistically separated.
+
+**deepseek-v4-flash (2 strict cells: cancel-async-tasks, llm-inference-batching-scheduler)** — widest spread in the dataset:
+
+| Harness | tokens_fresh/solve | s/solve under-cap |
+| --- | ---: | ---: |
+| pi | 49712 | 270.30 |
+| claude | 81812 | 383.34 |
+| opencode | 83134 | 441.63 |
+| codex | 109336 | 637.22 |
+| grokbuild | 128112 | 720.13 |
+
+**glm-5.2 (1 strict cell: feal-differential-cryptanalysis)** — single-cell, direction only:
+
+| Harness | tokens_fresh/solve | s/solve under-cap |
+| --- | ---: | ---: |
+| claude | 23463 | 262.71 |
+| opencode | 24826 | 156.24 |
+| pi | 34951 | 248.86 |
+| grokbuild | 36088 | 251.32 |
+| codex | 54468 | 713.71 |
+
+**kimi-k2.7-code (2 strict cells: feal-differential-cryptanalysis, llm-inference-batching-scheduler)** — near-parity cluster:
+
+| Harness | tokens_fresh/solve | s/solve under-cap |
+| --- | ---: | ---: |
+| opencode | 63068 | 695.99 |
+| claude | 63069 | 730.05 |
+| grokbuild | 71448 | 733.13 |
+| pi | 71750 | 563.28 |
+| codex | 85517 | 594.10 |
+
+Pattern: harness efficiency spread scales with model verbosity — deepseek (long reasoning chains) separates harnesses up to ~2.6×; kimi (terse) compresses them to near-parity.
+
 ## 2. Layer 2 capability — solve rates with Wilson 95% CIs
 
 | Harness | Model | Solves/valid | Solve rate | Wilson 95% CI |
@@ -250,7 +300,7 @@ Grok×kimi inclusion gate evidence: 12/12 final grokbuild×kimi rows are post-sw
 
 ## Verification
 
-`stats_check.py` in `[LOCAL_PATH] recomputes every aggregate through two independent paths, asserts equality, and asserts this report body exactly matches the recomputed rendering. Intermediate values are not rounded; formatting occurs only at render time.
+`stats_check.py` in `/Users/matthewlam/dev/openbench-stats` recomputes every aggregate through two independent paths, asserts equality, and asserts this report body exactly matches the recomputed rendering. Intermediate values are not rounded; formatting occurs only at render time.
 
 <!-- STATS_JSON_START
 {
