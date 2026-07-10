@@ -42,6 +42,8 @@ NAME = "pi"
 MODELS = {
     "gpt-5.5-medium": {"provider": "openai-codex", "model_id": "gpt-5.5", "thinking": "medium"},
     "gpt-5.6-sol": {"provider": "openai-codex", "model_id": "gpt-5.6-sol", "thinking": "medium"},
+    "gpt-5.6-terra": {"provider": "openai-codex", "model_id": "gpt-5.6-terra", "thinking": "medium"},
+    "gpt-5.6-luna": {"provider": "openai-codex", "model_id": "gpt-5.6-luna", "thinking": "medium"},
     "claude-opus-4-8": {"provider": "anthropic", "model_id": "claude-opus-4-8", "thinking": "medium"},
 }
 _REAL_AUTH = os.path.expanduser("~/.pi/agent/auth.json")

@@ -60,6 +60,8 @@ def _num(value):
 MODELS = {
     "gpt-5.5-medium": "gpt-5.5-medium",
     "gpt-5.6-sol": "gpt-5.6-sol-medium",
+    "gpt-5.6-terra": "gpt-5.6-terra-medium",
+    "gpt-5.6-luna": "gpt-5.6-luna-medium",
     # Thinking parity for the opus frontier lane: Cursor exposes a concrete
     # medium-thinking model id, so no separate effort flag is needed.
     "claude-opus-4-8": "claude-opus-4-8-thinking-medium",

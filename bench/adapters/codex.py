@@ -85,18 +85,24 @@ def _num(value):
 MODELS = {
     "gpt-5.5-medium": "gpt-5.5",
     "gpt-5.6-sol": "gpt-5.6-sol",
+    "gpt-5.6-terra": "gpt-5.6-terra",
+    "gpt-5.6-luna": "gpt-5.6-luna",
 }
 
 # canonical model name -> reasoning effort passed via `-c model_reasoning_effort`
 _EFFORT = {
     "gpt-5.5-medium": "medium",
     "gpt-5.6-sol": "medium",
+    "gpt-5.6-terra": "medium",
+    "gpt-5.6-luna": "medium",
 }
 
 # canonical model name -> service tier override. GPT-5.6 Sol must stay on the
 # normal/non-fast lane even if the operator's Codex config defaults to priority.
 _SERVICE_TIER = {
     "gpt-5.6-sol": "default",
+    "gpt-5.6-terra": "default",
+    "gpt-5.6-luna": "default",
 }
 
 # --- M4 open models (first-party pay-per-token, chat-only vendors) -----------
@@ -422,7 +428,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if not tail:
         tail = combined[-2000:]
 
-    if model == "gpt-5.6-sol" and token_usage.get("token_basis") == "vendor_split":
+    if model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna") and token_usage.get("token_basis") == "vendor_split":
         raw = token_usage.get("usage_raw") or {}
         if not any(k in raw for k in ("cache_write_tokens", "cache_creation_input_tokens", "cache_creation_tokens")):
             # GPT-5.6 may expose billable cache writes on newer Codex event
