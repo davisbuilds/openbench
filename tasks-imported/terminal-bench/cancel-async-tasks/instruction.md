@@ -12,4 +12,5 @@ number of tasks that may run concurrently. Put the function in a file called
 Use the system Python (standard library is sufficient). Sometimes runs are
 cancelled via a keyboard interrupt (SIGINT), but the tasks' cleanup code (the
 `finally` blocks) must still run to completion for every task that has started —
-including when a cancellation arrives.
+including when a cancellation arrives. After cancellation begins, tasks that have
+not yet started must not be started; only started tasks' cleanups must run.
