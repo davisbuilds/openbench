@@ -60,6 +60,31 @@ disclosed prominently. Evidence: openbench-hacksweep/hack-report.md.
   opencode/pi have timestamps. Timeout sub-characterization is therefore only
   possible for some lanes — disclose, don't guess.
 
+## QUARANTINE: cancel-async-tasks (2026-07-10) — binding on all datasets
+
+cancel-async-tasks is QUARANTINED from headline solve-rate and efficiency
+claims until its checker is fixed and the column is rerun. Its checker is
+proven non-deterministic under load: it SIGINTs the test child at a
+hardcoded 0.5s and requires exit within 5s — both constants break when the
+host is busy (e.g. right after container teardown). Proof (audit
+openbench-cancelaudit/cancel-audit.md + follow-up): the sha256 of the
+run.py the checker graded FAIL (luna pi trial1, recorded via
+checker_workspace_files) matches the transcript-extracted file, which then
+passed 11/11 reruns (idle, CPU-stressed, in-Docker, and via
+bench/run.run_checker). Audit also flipped 4/4 sampled Sol/Terra rows and
+1 feal row (opencode×kimi trial1 — feal failures are otherwise genuine).
+All near-floor cancel-async numbers (Sol/Terra/Luna 0/12, open ~17%) are
+grader noise, not difficulty. Fix spec: readiness-based SIGINT (wait for
+two "Task started." lines, unbuffered child), ~20s exit deadline;
+acceptance = reference + luna graded bytes 20/20 under stress. Reports
+citing cancel-async must footnote the quarantine; matched-cell tables
+already exclude most of it.
+
+Related runner fix (merged c402277): every row now persists
+checker_stdout/checker_stderr (scrubbed tails), checker_workspace_files
+(sha256 manifest at check time), and image_digest — wrong_answer rows are
+auditable from the Luna dataset onward.
+
 ## Speed metric policy (solved-at-cap wall inflation)
 
 Solved-at-cap rows record wall_time = cap, not time-to-solve. Audit quantified

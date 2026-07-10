@@ -2,6 +2,14 @@
 
 Generated 2026-07-09. Dataset: 180 rows (176 valid for solve-rate denominators after excluding rate_limited/infra).
 
+> **QUARANTINE NOTE (added 2026-07-10):** `cancel-async-tasks` rows are under
+> quarantine — its checker was proven non-deterministic under load (hardcoded
+> 0.5s SIGINT + 5s exit deadline; hash-verified graded-FAIL bytes pass on
+> rerun). Its per-task solve rates are grader noise. The Layer-1 matched-cell
+> headlines below are largely unaffected (strict cells mostly exclude it);
+> treat any cancel-async-specific number as invalid pending checker fix +
+> rerun. Details: tb-open-n3-methodology-notes.md "QUARANTINE" section.
+
 ## 1. Headline — Layer 1 matched-cell efficiency
 
 Strict rule for this headline: for each metric, first select task×model cells solved by every harness in the comparison set, then further restrict to cells where every harness has that metric available. Per-cell medians use telemetry-AVAILABLE solving trials for that metric; the complete-telemetry dollar sensitivity below shows the stricter alternative. The headline aggregate is the median of those same cell medians. Speed uses only under-cap solved trials (wall_time_s < 1176). Tokens use tokens_fresh only. Dollars use only rows with input/cache/output split fields priceable from the dated vendor table.
