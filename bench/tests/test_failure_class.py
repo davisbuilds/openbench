@@ -95,6 +95,39 @@ class TestClassifyFailure(unittest.TestCase):
         row = {"success": False, "completed": True, "checker_exit": 1, "wall_time_s": 1185.0}
         self.assertEqual(failure_class.classify_failure(row, "", timeout_s=1200), "wrong_answer")
 
+    def test_instant_bare_cli_exit_without_tokens_is_infra(self):
+        row = {
+            "run_id": "codex:terminal-bench/cancel-async-tasks:gpt-5.6-sol:trial1",
+            "harness": "codex",
+            "model": "gpt-5.6-sol",
+            "task": "terminal-bench/cancel-async-tasks",
+            "trial": 1,
+            "success": False,
+            "completed": False,
+            "failure_class": "wrong_answer",
+            "error": "exit 1",
+            "tokens": None,
+            "tokens_fresh": None,
+            "turns": None,
+            "wall_time_s": 4.344,
+            "checker_exit": 1,
+            "score": 0.0,
+        }
+        self.assertEqual(failure_class.classify_failure(row, ""), "infra")
+        self.assertTrue(failure_class.has_instant_cli_exit_shape(row))
+
+    def test_slow_exit_with_model_tokens_stays_wrong_answer(self):
+        row = {
+            "success": False,
+            "completed": False,
+            "error": "exit 1",
+            "tokens": 12345,
+            "wall_time_s": 300.0,
+            "checker_exit": 1,
+        }
+        self.assertEqual(failure_class.classify_failure(row, ""), "wrong_answer")
+        self.assertFalse(failure_class.has_instant_cli_exit_shape(row))
+
 
 class TestRunnerWriteTimeClassification(unittest.TestCase):
     def setUp(self):
