@@ -56,6 +56,27 @@ def has_infra_marker(text):
     return bool(_INFRA_RE.search(text or ""))
 
 
+def has_instant_cli_exit_shape(row):
+    """Return True for near-instant adapter CLI exits with no model traffic.
+
+    The post-run gate uses the same predicate as a drift guard. The contract is
+    deliberately narrow and structural: a bare ``exit N`` before 30 seconds with
+    no aggregate token count is a local CLI/configuration failure, not a task
+    wrong answer.
+    """
+    row = row or {}
+    if bool(row.get("completed")):
+        return False
+    if not re.match(r"^exit \d+$", str(row.get("error") or "")):
+        return False
+    if row.get("tokens") not in (None, 0):
+        return False
+    wall = row.get("wall_time_s")
+    if not isinstance(wall, (int, float)) or isinstance(wall, bool):
+        return False
+    return float(wall) < 30.0
+
+
 def _wall_rode_cap(row, timeout_s):
     if not timeout_s:
         return False
@@ -91,6 +112,8 @@ def classify_failure(row, adapter_output="", timeout_s=None):
     if has_rate_limit_marker(combined):
         return "rate_limited"
     if has_infra_marker(combined):
+        return "infra"
+    if has_instant_cli_exit_shape(row):
         return "infra"
     # Wall time riding the cap only means "timeout" when the runner killed the
     # agent; a CLI that exited on its own (completed=True) just ran slow.
