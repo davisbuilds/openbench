@@ -18,17 +18,22 @@ subprocess, never the ``timeout`` command).
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import shutil
+import signal
+import stat
 import subprocess
 import tempfile
+import threading
 import time
 import traceback
 
 from failure_class import classify_failure
+from scrub import build_context as build_scrub_context, scrub_text
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -37,6 +42,12 @@ DEFAULT_RESULTS_PATH = os.path.join(REPO, "results", "results.jsonl")
 DEFAULT_ADAPTERS_DIR = os.path.join(HERE, "adapters")
 DEFAULT_TASKS_DIR = os.path.join(REPO, "tasks")
 DEFAULT_MODEL = "gpt-5.5-medium"
+CHECKER_CAPTURE_LIMIT = 8000
+CHECKER_CAPTURE_TRUNCATED_PREFIX = "[truncated to last 8000 chars]\n"
+WORKSPACE_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024
+WORKSPACE_EVIDENCE_MAX_TOTAL_BYTES = 8 * 1024 * 1024
+WORKSPACE_EVIDENCE_MAX_FILES = 2000
+WORKSPACE_EVIDENCE_META_KEY = "\0manifest"
 
 # Ordered field list for each results row. ``score`` and ``harness_version`` are
 # appended last so older logs that predate them stay readable (report derives a
@@ -47,13 +58,198 @@ ROW_FIELDS = (
     "tokens_input_uncached", "tokens_cache_read", "tokens_cache_write",
     "tokens_output", "tokens_reasoning", "usage_raw", "token_basis",
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
-    "failure_class",
+    "failure_class", "checker_stdout", "checker_stderr", "checker_workspace_files",
+    "image_digest",
 )
 
 
 def make_run_id(harness, task, model, trial):
     """Deterministic identity for a single benchmark cell."""
     return f"{harness}:{task}:{model}:trial{trial}"
+
+
+def truncate_checker_output(text, limit=CHECKER_CAPTURE_LIMIT):
+    """Return ``text`` bounded to its last ``limit`` chars with a marker."""
+    text = text or ""
+    if len(text) <= limit:
+        return text
+    return CHECKER_CAPTURE_TRUNCATED_PREFIX + text[-limit:]
+
+
+def _environment_values(environ=None):
+    environ = environ or os.environ
+    return sorted({value for value in environ.values() if value and len(value) >= 4},
+                  key=len, reverse=True)
+
+
+def redact_environment_values(text, environ=None):
+    """Redact exact inherited environment values from checker output."""
+    text = text or ""
+    for value in _environment_values(environ):
+        text = text.replace(value, "<REDACTED_ENV>")
+    return text
+
+
+class EnvValueRedactor:
+    """Streaming exact-value redactor for inherited environment values."""
+
+    def __init__(self, environ=None):
+        self.values = _environment_values(environ)
+        self.keep = max((len(v) for v in self.values), default=1) - 1
+        self.pending = ""
+
+    def feed(self, chunk):
+        text = self.pending + (chunk or "")
+        redacted = self._redact(text)
+        if len(redacted) <= self.keep:
+            self.pending = redacted
+            return ""
+        if self.keep:
+            emit, self.pending = redacted[:-self.keep], redacted[-self.keep:]
+        else:
+            emit, self.pending = redacted, ""
+        return emit
+
+    def close(self):
+        text = self._redact(self.pending)
+        self.pending = ""
+        return text
+
+    def _redact(self, text):
+        for value in self.values:
+            text = text.replace(value, "<REDACTED_ENV>")
+        return text
+
+
+def redact_truncation_boundary(text):
+    """Redact the first partial token retained after tail truncation.
+
+    If truncation cuts through a secret, the retained suffix starts immediately
+    after the marker and may not match the original env value or generic secret
+    regexes. Over-redact that leading token fragment before persistence.
+    """
+    if not text.startswith(CHECKER_CAPTURE_TRUNCATED_PREFIX):
+        return text
+    body = text[len(CHECKER_CAPTURE_TRUNCATED_PREFIX):]
+    # If truncation retained the suffix of a secret token, exact/pattern scrubbers
+    # may not recognize it. Redact a plausible leading secret fragment while
+    # leaving punctuation-only tails (common in tests/log separators) intact.
+    body = re.sub(
+        r"^(\s*)(?=\S{8,})(?=\S*[A-Za-z0-9])\S+",
+        r"\1<REDACTED_BOUNDARY>", body, count=1,
+    )
+    return CHECKER_CAPTURE_TRUNCATED_PREFIX + body
+
+
+def scrub_workspace_evidence_paths(evidence):
+    """Redact sensitive relative paths in workspace evidence keys."""
+    if not isinstance(evidence, dict):
+        return evidence
+    try:
+        context = build_scrub_context()
+        scrubbed = {}
+        for path, item in evidence.items():
+            if path == WORKSPACE_EVIDENCE_META_KEY:
+                key_base = path
+            else:
+                key_base = scrub_text(redact_environment_values(str(path)), context)
+                key_base = key_base or "<REDACTED_PATH>"
+            key = key_base
+            n = 2
+            while key in scrubbed:
+                key = f"{key_base}#{n}"
+                n += 1
+            scrubbed[key] = item
+        return scrubbed
+    except Exception:  # noqa: BLE001 - never fail a row while redacting paths
+        return {WORKSPACE_EVIDENCE_META_KEY: {"skipped": "path_redaction_failed"}}
+
+
+def scrub_checker_output(text):
+    """Redact high-risk local/secret tokens before persisting checker output."""
+    try:
+        redacted = redact_environment_values(text or "")
+        redacted = scrub_text(redacted, build_scrub_context())
+        return redact_truncation_boundary(redacted)
+    except Exception:  # noqa: BLE001 - never persist unsanitized checker output
+        return "<CHECKER_OUTPUT_REDACTION_FAILED>"
+
+
+class TailCapture:
+    """Bounded text capture that keeps only the final ``limit`` chars."""
+
+    def __init__(self, limit=CHECKER_CAPTURE_LIMIT):
+        self.limit = limit
+        self.total_chars = 0
+        self.tail = ""
+
+    def append(self, chunk):
+        if not chunk:
+            return
+        self.total_chars += len(chunk)
+        self.tail = (self.tail + chunk)[-self.limit:]
+
+    def text(self):
+        if self.total_chars <= self.limit:
+            return self.tail
+        return CHECKER_CAPTURE_TRUNCATED_PREFIX + self.tail
+
+
+class StreamingScoreParser:
+    """Incrementally parse SCORE lines without retaining full stdout."""
+
+    def __init__(self, max_line_chars=CHECKER_CAPTURE_LIMIT):
+        self.score = None
+        self.max_line_chars = max_line_chars
+        self._buf = ""
+
+    def feed(self, chunk):
+        self._buf += chunk
+        lines = self._buf.split("\n")
+        self._buf = lines.pop()
+        if len(self._buf) > self.max_line_chars:
+            self._buf = self._buf[-self.max_line_chars:]
+        for line in lines:
+            self._consume_line(line)
+
+    def close(self):
+        if self._buf:
+            self._consume_line(self._buf)
+            self._buf = ""
+        return self.score
+
+    def _consume_line(self, line):
+        line = line.strip()
+        if not line.startswith("SCORE:"):
+            return
+        try:
+            val = float(line[len("SCORE:"):].strip())
+        except ValueError:
+            return
+        self.score = max(0.0, min(1.0, val))
+
+
+def _read_stream(pipe, capture, score_parser=None, redactor=None):
+    try:
+        with pipe:
+            read1 = getattr(getattr(pipe, "buffer", None), "read1", None)
+            while True:
+                if read1 is not None:
+                    data = read1(4096)
+                    chunk = data.decode("utf-8", errors="replace") if data else ""
+                else:
+                    chunk = pipe.read(4096)
+                if not chunk:
+                    break
+                safe_chunk = redactor.feed(chunk) if redactor is not None else chunk
+                capture.append(safe_chunk)
+                if score_parser is not None:
+                    score_parser.feed(chunk)
+    except Exception:  # noqa: BLE001 - stream capture must not crash a cell
+        pass
+    finally:
+        if redactor is not None:
+            capture.append(redactor.close())
 
 
 def parse_score(stdout):
@@ -178,29 +374,305 @@ def read_instruction(task_dir):
         return fh.read()
 
 
+def capture_workspace_files(workdir, max_bytes=WORKSPACE_EVIDENCE_MAX_BYTES,
+                            max_total_bytes=WORKSPACE_EVIDENCE_MAX_TOTAL_BYTES,
+                            max_files=WORKSPACE_EVIDENCE_MAX_FILES):
+    """Return bounded recursive evidence for files visible to the checker.
+
+    Paths are workspace-relative POSIX strings. Regular files up to
+    ``max_bytes`` get sha256, byte size, and mtime; larger or unsafe entries are
+    listed as skipped without hashing. Traversal uses directory/file descriptors
+    with no-follow opens so symlink races cannot escape the workspace.
+    """
+    evidence = {}
+    hashed_bytes = 0
+    entries_seen = 0
+
+    def add_meta(reason):
+        evidence[WORKSPACE_EVIDENCE_META_KEY] = {"skipped": reason}
+
+    def add(rel, item):
+        if len(evidence) >= max_files:
+            add_meta(f"file_count_limit>{max_files}")
+            return False
+        evidence[rel] = item
+        return True
+
+    def rel_join(parent, name):
+        return f"{parent}/{name}" if parent else name
+
+    dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    file_flags = os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0)
+
+    try:
+        root_fd = os.open(workdir, dir_flags | nofollow)
+    except OSError as exc:
+        add_meta(f"scan_error:{type(exc).__name__}")
+        return evidence
+
+    stack = [("", root_fd)]
+
+    def finish():
+        while stack:
+            _, pending_fd = stack.pop()
+            try:
+                os.close(pending_fd)
+            except OSError:
+                pass
+        return evidence
+
+    while stack:
+        rel_dir, dir_fd = stack.pop()
+        try:
+            try:
+                names = sorted(os.listdir(dir_fd))
+            except OSError as exc:
+                target = rel_dir or "."
+                if not add(target, {"skipped": f"scan_error:{type(exc).__name__}"}):
+                    return finish()
+                continue
+            for name in names:
+                if name in {".git", "__pycache__"}:
+                    continue
+                entries_seen += 1
+                if entries_seen > max_files:
+                    add_meta(f"entry_count_limit>{max_files}")
+                    return finish()
+                rel = rel_join(rel_dir, name)
+                try:
+                    st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+                except OSError as exc:
+                    if not add(rel, {"skipped": f"stat_error:{type(exc).__name__}"}):
+                        return finish()
+                    continue
+                item = {"bytes": st.st_size, "mtime": st.st_mtime}
+                if stat.S_ISDIR(st.st_mode):
+                    try:
+                        child_fd = os.open(name, dir_flags | nofollow, dir_fd=dir_fd)
+                        child_st = os.fstat(child_fd)
+                        if not stat.S_ISDIR(child_st.st_mode):
+                            os.close(child_fd)
+                            item["skipped"] = "not_directory"
+                            if not add(rel, item):
+                                return finish()
+                        else:
+                            stack.append((rel, child_fd))
+                    except OSError as exc:
+                        item["skipped"] = f"open_dir_error:{type(exc).__name__}"
+                        if not add(rel, item):
+                            return finish()
+                    continue
+                if not stat.S_ISREG(st.st_mode):
+                    item["skipped"] = "not_regular"
+                    if not add(rel, item):
+                        return finish()
+                    continue
+                if st.st_size > max_bytes:
+                    item["skipped"] = f"too_large>{max_bytes}"
+                    if not add(rel, item):
+                        return finish()
+                    continue
+                if hashed_bytes + st.st_size > max_total_bytes:
+                    item["skipped"] = f"total_bytes_limit>{max_total_bytes}"
+                    if not add(rel, item):
+                        return finish()
+                    continue
+                try:
+                    h = hashlib.sha256()
+                    fd = os.open(name, file_flags, dir_fd=dir_fd)
+                    try:
+                        opened_st = os.fstat(fd)
+                        item = {"bytes": opened_st.st_size, "mtime": opened_st.st_mtime}
+                        if not stat.S_ISREG(opened_st.st_mode):
+                            item["skipped"] = "not_regular"
+                        elif opened_st.st_size > max_bytes:
+                            item["skipped"] = f"too_large>{max_bytes}"
+                        elif hashed_bytes + opened_st.st_size > max_total_bytes:
+                            item["skipped"] = f"total_bytes_limit>{max_total_bytes}"
+                        else:
+                            remaining = opened_st.st_size
+                            while remaining > 0:
+                                chunk = os.read(fd, min(1024 * 1024, remaining))
+                                if not chunk:
+                                    item["skipped"] = "changed_during_read"
+                                    break
+                                h.update(chunk)
+                                remaining -= len(chunk)
+                            if "skipped" not in item:
+                                item["sha256"] = h.hexdigest()
+                                hashed_bytes += opened_st.st_size
+                    finally:
+                        os.close(fd)
+                except OSError as exc:
+                    item["skipped"] = f"read_error:{type(exc).__name__}"
+                if not add(rel, item):
+                    return finish()
+        finally:
+            os.close(dir_fd)
+    return evidence
+
+
+def docker_image_digest(image):
+    """Best-effort immutable identity for the docker image used by a cell."""
+    if not image:
+        return None
+    for fmt in ("{{index .RepoDigests 0}}", "{{.Id}}"):
+        try:
+            proc = subprocess.run(
+                ["docker", "inspect", "--format", fmt, image],
+                capture_output=True, text=True, timeout=20,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        value = (proc.stdout or "").strip()
+        if proc.returncode == 0 and value and value != "<no value>":
+            return value
+    return None
+
+
+def _kill_process_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
+def _descendant_pids(root_pid):
+    try:
+        proc = subprocess.run(
+            ["ps", "-axo", "pid=,ppid="], capture_output=True, text=True, timeout=2,
+        )
+    except Exception:  # noqa: BLE001 - best-effort cleanup helper
+        return set()
+    if proc.returncode != 0:
+        return set()
+    children = {}
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        children.setdefault(ppid, set()).add(pid)
+    found = set()
+    stack = list(children.get(root_pid, ()))
+    while stack:
+        pid = stack.pop()
+        if pid in found:
+            continue
+        found.add(pid)
+        stack.extend(children.get(pid, ()))
+    return found
+
+
+def _track_descendants(root_pid, seen, stop_event):
+    while not stop_event.is_set():
+        seen.update(_descendant_pids(root_pid))
+        stop_event.wait(0.05)
+
+
+def _kill_pids(pids):
+    current = os.getpid()
+    for pid in sorted(set(pids), reverse=True):
+        if pid <= 1 or pid == current:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _close_pipe(pipe):
+    if pipe is None:
+        return
+    try:
+        pipe.close()
+    except OSError:
+        pass
+
+
 def run_checker(task_dir, workdir, timeout_s):
     """Run ``<task_dir>/checker.sh`` with cwd=workdir and TASK_DIR set.
 
-    Returns ``(checker_exit, raw_score)`` where ``checker_exit`` is the integer
-    exit code (or the string ``"timeout"``) and ``raw_score`` is the float from
-    the checker's last parseable ``SCORE:`` line, or None if it printed none.
-    The checker decides task success (exit 0 == success); the adapter never does.
+    Returns ``(checker_exit, raw_score, stdout, stderr)`` where
+    ``checker_exit`` is the integer exit code (or the string ``"timeout"``) and
+    ``raw_score`` is the float from the checker's last parseable ``SCORE:`` line,
+    or None if it printed none. Captured stdout/stderr are bounded tails. The
+    checker decides task success (exit 0 == success); the adapter never does.
     """
     checker = os.path.join(task_dir, "checker.sh")
     env = dict(os.environ)
     env["TASK_DIR"] = os.path.abspath(task_dir)
+    stdout_capture = TailCapture()
+    stderr_capture = TailCapture()
+    score_parser = StreamingScoreParser()
+    proc = subprocess.Popen(
+        ["bash", "-c", 'bash "$1"; rc=$?; sleep 0.1; exit "$rc"',
+         "checker-wrapper", checker],
+        cwd=workdir,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        start_new_session=True,
+    )
+    descendant_pids = set()
+    tracker_stop = threading.Event()
+    tracker_thread = threading.Thread(
+        target=_track_descendants, args=(proc.pid, descendant_pids, tracker_stop),
+        daemon=True,
+    )
+    tracker_thread.start()
+    stdout_thread = threading.Thread(
+        target=_read_stream,
+        args=(proc.stdout, stdout_capture, score_parser, EnvValueRedactor()),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_read_stream,
+        args=(proc.stderr, stderr_capture, None, EnvValueRedactor()),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
     try:
-        proc = subprocess.run(
-            ["bash", checker],
-            cwd=workdir,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
+        returncode = proc.wait(timeout=timeout_s)
     except subprocess.TimeoutExpired:
-        return "timeout", None
-    return proc.returncode, parse_score(proc.stdout)
+        _kill_process_group(proc)
+        _kill_pids(descendant_pids | _descendant_pids(proc.pid))
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        returncode = "timeout"
+    finally:
+        descendant_pids.update(_descendant_pids(proc.pid))
+        tracker_stop.set()
+        tracker_thread.join(timeout=1)
+        _kill_pids(descendant_pids)
+
+    # If the checker shell exited but background descendants inherited the
+    # pipes, reap the whole checker process group so capture cannot leak threads
+    # or processes beyond this cell.
+    stdout_thread.join(timeout=1)
+    stderr_thread.join(timeout=1)
+    if stdout_thread.is_alive() or stderr_thread.is_alive():
+        _kill_process_group(proc)
+        _kill_pids(descendant_pids)
+        _close_pipe(proc.stdout)
+        _close_pipe(proc.stderr)
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
+
+    raw_score = None if returncode == "timeout" else score_parser.close()
+    return returncode, raw_score, stdout_capture.text(), stderr_capture.text()
 
 
 def load_existing_run_ids(results_path):
@@ -339,6 +811,10 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "score": 0.0,
         "harness_version": harness_version,
         "failure_class": None,
+        "checker_stdout": None,
+        "checker_stderr": None,
+        "checker_workspace_files": None,
+        "image_digest": None,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
@@ -366,6 +842,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             return row
         row["wall_time_s"] = _adapter_wall_time_s(start, result, exec_used)
         row["exec_mode"] = exec_used
+        if exec_used == "docker":
+            row["image_digest"] = result.get("image_digest")
 
         # Fold the adapter's self-reported fields into the row.
         row["completed"] = bool(result.get("completed", False))
@@ -405,15 +883,21 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             except Exception:  # noqa: BLE001 - transcript IO must not fail a cell
                 pass
 
-        # The checker is the sole authority on task success (and score).
+        # The checker is the sole authority on task success (and score). Capture
+        # the workspace just before it runs so unauditable rows can be replayed.
         try:
-            checker_exit, raw_score = run_checker(task_dir, workdir, checker_timeout_s)
+            row["checker_workspace_files"] = scrub_workspace_evidence_paths(
+                capture_workspace_files(workdir))
+            checker_exit, raw_score, checker_stdout, checker_stderr = run_checker(
+                task_dir, workdir, checker_timeout_s)
         except Exception:  # noqa: BLE001
             row["checker_exit"] = None
             if row["error"] is None:
                 row["error"] = traceback.format_exc(limit=4).strip()
             row["failure_class"] = classify_failure(row, classifier_output, timeout_s)
             return row
+        row["checker_stdout"] = scrub_checker_output(checker_stdout)
+        row["checker_stderr"] = scrub_checker_output(checker_stderr)
         row["checker_exit"] = checker_exit
         row["success"] = (checker_exit == 0)
         # exit 0 is a full pass (score 1.0) regardless of any SCORE line; a

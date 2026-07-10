@@ -146,6 +146,10 @@ def finding(rule, run_ids, action, message, **extra):
     return payload
 
 
+def info(rule, run_ids, message, **extra):
+    return finding(rule, run_ids, "none", message, level="info", **extra)
+
+
 def check_completeness(rows, expect_arg=None):
     findings = []
     valid_rows = [row for row in rows if is_structurally_valid_row(row)]
@@ -395,6 +399,25 @@ def check_instant_fails(rows):
     return findings
 
 
+def check_unauditable_rows(rows):
+    infos = []
+    for row in rows:
+        if "_invalid_json" in row:
+            continue
+        checker_stdout = row.get("checker_stdout")
+        missing_stdout = (checker_stdout is None or
+                          (isinstance(checker_stdout, str) and not checker_stdout.strip()))
+        if (not bool(row.get("success")) and
+                row.get("failure_class") == "wrong_answer" and
+                missing_stdout):
+            infos.append(info(
+                "unauditable.missing_checker_stdout",
+                [_safe_run_id(row)],
+                "wrong_answer row is missing checker_stdout evidence",
+            ))
+    return infos
+
+
 def validate(results_path, transcripts_dir=None, expect_arg=None):
     rows = load_rows(results_path)
     findings = []
@@ -420,6 +443,7 @@ def validate(results_path, transcripts_dir=None, expect_arg=None):
     findings.extend(check_contamination(rows, results_path, transcripts_dir))
     findings.extend(check_telemetry(rows))
     findings.extend(check_instant_fails(rows))
+    infos = check_unauditable_rows(rows)
     return {
         "status": "FAIL" if findings else "PASS",
         "pass": not findings,
@@ -427,6 +451,8 @@ def validate(results_path, transcripts_dir=None, expect_arg=None):
         "rows": len(rows),
         "findings_count": len(findings),
         "findings": findings,
+        "infos_count": len(infos),
+        "infos": infos,
     }
 
 
@@ -437,6 +463,11 @@ def format_text(verdict):
         if len(item["run_ids"]) > 5:
             run_ids += f", ... (+{len(item['run_ids']) - 5})"
         lines.append(f"- {item['rule']} action={item['suggested_action']} run_ids=[{run_ids}] {item['message']}")
+    for item in verdict.get("infos", []):
+        run_ids = ", ".join(item["run_ids"][:5])
+        if len(item["run_ids"]) > 5:
+            run_ids += f", ... (+{len(item['run_ids']) - 5})"
+        lines.append(f"- INFO {item['rule']} run_ids=[{run_ids}] {item['message']}")
     return "\n".join(lines)
 
 

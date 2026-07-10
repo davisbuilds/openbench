@@ -418,6 +418,22 @@ def _parse_result(stdout):
     return None
 
 
+def image_digest(image):
+    """Return RepoDigest or image ID for an already-preflighted docker image."""
+    for fmt in ("{{index .RepoDigests 0}}", "{{.Id}}"):
+        try:
+            proc = subprocess.run(
+                ["docker", "image", "inspect", "--format", fmt, image],
+                capture_output=True, text=True, timeout=20,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        value = (proc.stdout or "").strip()
+        if proc.returncode == 0 and value and value != "<no value>":
+            return value
+    return None
+
+
 def run_in_container(harness, instruction, workdir, model, timeout_s,
                      adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None):
     """Run one cell in a container and return the adapter result dict.
@@ -428,6 +444,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     keeps going.
     """
     preflight(image)
+    resolved_image = image_digest(image)
+    image_for_run = resolved_image or image
 
     # Instruction goes through a mounted temp file (avoids env/arg size and
     # quoting issues with multi-line task instructions).
@@ -441,7 +459,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         # the `docker run` client alone does NOT stop the container.
         container_name = f"openbench_{harness}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
         cmd = build_docker_cmd(
-            harness, workdir, model, timeout_s, adapters_dir, image,
+            harness, workdir, model, timeout_s, adapters_dir, image_for_run,
             instruction_path, container_name=container_name,
             extra_docker_args=extra_docker_args,
         )
@@ -470,6 +488,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "full_output": full_output,
                 "tokens": None, "turns": None, "cmd": cmd,
                 "host_wall_time_s": proc.host_wall_time_s if "proc" in locals() else None,
+                "image_digest": resolved_image,
             }
         if proc.timed_out:
             full_output = (proc.stdout or "") + (proc.stderr or "")
@@ -480,6 +499,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "full_output": full_output,
                 "tokens": None, "turns": None, "cmd": cmd,
                 "host_wall_time_s": proc.host_wall_time_s,
+                "image_digest": resolved_image,
             }
 
         combined = (proc.stdout or "") + (proc.stderr or "")
@@ -493,11 +513,13 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "full_output": combined,
                 "tokens": None, "turns": None, "cmd": cmd,
                 "host_wall_time_s": proc.host_wall_time_s,
+                "image_digest": resolved_image,
             }
         # Record the docker invocation for the results log (adapters record the
         # inner CLI cmd; we prepend the container wrapper for provenance).
         result["cmd"] = {"docker": cmd, "adapter_cmd": result.get("cmd")}
         result["host_wall_time_s"] = proc.host_wall_time_s
+        result["image_digest"] = resolved_image
         return result
     finally:
         os.unlink(instruction_path)

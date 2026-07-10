@@ -63,6 +63,21 @@ class ValidateRunTests(unittest.TestCase):
         self.assertTrue(verdict["pass"])
         self.assertEqual(verdict["findings"], [])
 
+    def test_wrong_answer_missing_checker_stdout_is_info_only(self):
+        self.write_rows([
+            row(trial=1),
+            row(trial=2, checker_stdout="checker details\n"),
+            row(trial=3, checker_stdout="   \n"),
+        ])
+        verdict = validate_run.validate(self.results)
+        self.assertTrue(verdict["pass"])
+        self.assertEqual(verdict["findings"], [])
+        infos = [f for f in verdict["infos"] if f["rule"] == "unauditable.missing_checker_stdout"]
+        self.assertEqual(len(infos), 2)
+        self.assertEqual({item["level"] for item in infos}, {"info"})
+        self.assertEqual({item["suggested_action"] for item in infos}, {"none"})
+        self.assertEqual([item["run_ids"] for item in infos], [["h1:t1:m1:trial1"], ["h1:t1:m1:trial3"]])
+
     def test_completeness_flags_duplicates_and_expected_holes(self):
         r1 = row(harness="h1", task="a", trial=1)
         r2 = row(harness="h1", task="a", trial=1)
