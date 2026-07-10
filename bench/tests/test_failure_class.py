@@ -159,7 +159,7 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
 
         try:
             run.invoke_adapter = fake_invoke
-            run.run_checker = lambda *a, **k: (1, None)
+            run.run_checker = lambda *a, **k: (1, None, "", "")
             row = run.run_cell(
                 "fake", self.task, "kimi-k2.7-code", 1, 600,
                 self.tasks_dir, self.tmp, 30,
@@ -188,7 +188,7 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
 
         try:
             run.invoke_adapter = fake_invoke
-            run.run_checker = lambda *a, **k: (1, None)
+            run.run_checker = lambda *a, **k: (1, None, "", "")
             row = run.run_cell(
                 "fake", self.task, "deepseek-v4-flash", 1, 600,
                 self.tasks_dir, self.tmp, 30,
@@ -216,7 +216,7 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
 
         try:
             run.invoke_adapter = fake_invoke
-            run.run_checker = lambda *a, **k: (1, None)
+            run.run_checker = lambda *a, **k: (1, None, "", "")
             row = run.run_cell(
                 "fake", self.task, "deepseek-v4-flash", 1, 600,
                 self.tasks_dir, self.tmp, 30,
