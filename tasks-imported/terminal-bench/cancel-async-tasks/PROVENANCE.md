@@ -20,3 +20,8 @@
   openbench-harness image. `python` invocations were changed to `python3`.
 - `solution/run.py`: the reference implementation extracted verbatim from the
   upstream `solution.sh`.
+- `checker_data/run_checks.py`: cancellation checks were hardened to wait for
+  readiness from unbuffered child output before sending SIGINT, with documented
+  timing slack for host load.
+- `instruction.md`: clarified that cancellation must not start queued tasks and
+  only already-started tasks require cleanup.
