@@ -69,6 +69,8 @@ def _num(value):
 MODELS = {
     "gpt-5.5-medium": "openai/gpt-5.5",
     "gpt-5.6-sol": "openai/gpt-5.6-sol",
+    "gpt-5.6-terra": "openai/gpt-5.6-terra",
+    "gpt-5.6-luna": "openai/gpt-5.6-luna",
     # Thinking parity for the opus frontier lane: Anthropic's opencode provider
     # gets the same medium-equivalent request via `--variant medium`.
     "claude-opus-4-8": "anthropic/claude-opus-4-8",
@@ -78,6 +80,8 @@ MODELS = {
 _VARIANT = {
     "gpt-5.5-medium": "medium",
     "gpt-5.6-sol": "medium",
+    "gpt-5.6-terra": "medium",
+    "gpt-5.6-luna": "medium",
     "claude-opus-4-8": "medium",
 }
 

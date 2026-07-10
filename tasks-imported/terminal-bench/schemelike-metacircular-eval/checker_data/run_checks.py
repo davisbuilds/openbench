@@ -17,9 +17,12 @@ and, for a few programs, also
 All must match (after stripping a trailing "True" line that eval.scm emits).
 Exit 0 iff every program passes. This mirrors tests/test_outputs.py without pytest.
 """
+import atexit
 import os
+import stat
 import subprocess
 import sys
+import tempfile
 
 CHECKER_DATA = os.path.join(os.environ["TASK_DIR"], "checker_data")
 INTERP_REF = os.path.join(CHECKER_DATA, "interp_ref.py")
@@ -27,6 +30,7 @@ INTERP_REF = os.path.join(CHECKER_DATA, "interp_ref.py")
 DIRECT_TIMEOUT = 15
 EVAL_TIMEOUT = 90
 META_PROGRAMS = ("05-simple", "calculator.scm", "closures.scm")
+MAX_EVAL_BYTES = 2 * 1024 * 1024
 
 
 def run_direct(prog, input_data):
@@ -38,8 +42,8 @@ def run_direct(prog, input_data):
         return "", "TIMEOUT", -1
 
 
-def run_through_eval(prog, input_data, metacirc=False):
-    eval_input = "eval.scm\n" if metacirc else ""
+def run_through_eval(prog, input_data, selfhost_source=None):
+    eval_input = f"{selfhost_source}\n" if selfhost_source else ""
     eval_input += f"{prog}\n"
     if input_data:
         eval_input += input_data
@@ -89,6 +93,48 @@ def find_test_files():
     return sorted(files)
 
 
+def copy_eval_for_selfhost():
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        src_fd = os.open("eval.scm", flags)
+    except OSError as exc:
+        print(f"FAIL: could not open eval.scm safely: {exc}")
+        sys.exit(1)
+
+    selfhost_path = None
+    try:
+        st = os.fstat(src_fd)
+        if not stat.S_ISREG(st.st_mode):
+            print("FAIL: eval.scm must be a regular file")
+            sys.exit(1)
+        if st.st_size > MAX_EVAL_BYTES:
+            print(f"FAIL: eval.scm is too large ({st.st_size} bytes)")
+            sys.exit(1)
+
+        dst_fd, selfhost_path = tempfile.mkstemp(prefix="selfhost_", suffix=".scm", dir=os.getcwd())
+        try:
+            total = 0
+            while True:
+                chunk = os.read(src_fd, 65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_EVAL_BYTES:
+                    print(f"FAIL: eval.scm is too large (>{MAX_EVAL_BYTES} bytes)")
+                    sys.exit(1)
+                written = 0
+                while written < len(chunk):
+                    written += os.write(dst_fd, chunk[written:])
+            os.fchmod(dst_fd, 0o444)
+        finally:
+            os.close(dst_fd)
+    finally:
+        os.close(src_fd)
+
+    atexit.register(lambda: os.path.exists(selfhost_path) and os.unlink(selfhost_path))
+    return os.path.basename(selfhost_path)
+
+
 def main():
     if not os.path.exists("eval.scm"):
         print("FAIL: eval.scm does not exist")
@@ -98,6 +144,13 @@ def main():
     if not progs:
         print("FAIL: no test programs found")
         sys.exit(1)
+
+    # Harden the self-hosting path against solutions that special-case the
+    # literal deliverable filename (eval.scm) and transparently pass through
+    # instead of interpreting themselves.  The outer interpreter still starts
+    # from eval.scm, but the nested evaluator is a randomized copy, so checks
+    # like (eq? source-name 'eval.scm) no longer identify the self-host case.
+    selfhost_source = copy_eval_for_selfhost()
 
     passed = 0
     for prog in progs:
@@ -122,7 +175,7 @@ def main():
             sys.exit(1)
 
         if any(tag in prog for tag in META_PROGRAMS):
-            m_out, m_err, _ = run_through_eval(prog, inp, metacirc=True)
+            m_out, m_err, _ = run_through_eval(prog, inp, selfhost_source=selfhost_source)
             if m_err == "TIMEOUT":
                 print(f"FAIL: self-hosted eval.scm timed out on {prog}")
                 sys.exit(1)

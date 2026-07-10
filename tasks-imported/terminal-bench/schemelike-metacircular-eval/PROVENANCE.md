@@ -19,8 +19,11 @@
 - `checker.sh` + `checker_data/run_checks.py`: a pure-stdlib re-implementation of
   the upstream `tests/test_outputs.py`. It runs each program directly through
   the reference interpreter and through the agent's `eval.scm` (and, for
-  `05-simple*`, `calculator.scm`, `closures.scm`, through `eval.scm`
-  interpreting `eval.scm`) and requires identical output. pytest is not used.
+  `05-simple*`, `calculator.scm`, `closures.scm`, through a randomized
+  checker-scratch copy of `eval.scm` interpreting the target program) and
+  requires identical output. Randomizing the nested evaluator filename hardens
+  the self-hosting check against solutions that special-case the literal
+  `eval.scm` name as a transparent pass-through. pytest is not used.
   Per-run timeouts were raised (direct 15 s, via-eval 90 s) to absorb the
   slower minimal-image CPU.
 - **Checker-owned oracle**: grading uses `checker_data/interp_ref.py` and the
