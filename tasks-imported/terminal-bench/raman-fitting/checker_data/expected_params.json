@@ -1,0 +1,20 @@
+{
+  "G": {
+    "x0": 1580.3,
+    "gamma": 9.06,
+    "amplitude": 8382.69,
+    "offset": 5561.03
+  },
+  "2D": {
+    "x0": 2670.08,
+    "gamma": 17.52,
+    "amplitude": 12314.42,
+    "offset": 1239.09
+  },
+  "tolerances": {
+    "x0_abs": 5.0,
+    "gamma_abs": 1.0,
+    "amplitude_rel": 0.05,
+    "offset_rel": 0.10
+  }
+}

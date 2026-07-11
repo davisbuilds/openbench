@@ -1,6 +1,6 @@
-# Terminal-Bench imported tier (frontier-hard)
+# Terminal-Bench imported tier
 
-Five frontier-hard tasks imported from **Terminal-Bench**
+Nine maintainer-curated tasks imported from **Terminal-Bench**
 (https://github.com/laude-institute/terminal-bench), a benchmark of hard,
 self-contained terminal tasks hand-crafted by academic and industry researchers.
 
@@ -15,14 +15,15 @@ self-contained terminal tasks hand-crafted by academic and industry researchers.
 This tier lives under `tasks-imported/` and is **scored separately from the core
 `tasks/` tier** — `validate_tasks.py` and the benchmark runner treat each
 `tasks-imported/<collection>` as its own maintainer-curated collection and never
-blend it into core results. Treat these five as a distinct, harder difficulty
+blend it into core results. Treat these tasks as a distinct, harder difficulty
 band; do not average their scores with core or with the exercism tier.
 
 ## How to run
 
 These tasks are selected and adapted for OpenBench's **docker lane**. The agent
-runs in the `openbench-harness:latest` image (python3.11 stdlib + node + bash;
-**no pip, no compilers, no GPU, no network**), so run them with `--exec docker`:
+runs in the `openbench-harness:latest` image (python3 stdlib + node + bash;
+**no pip, no compilers, no GPU, no network** by default), so run them with
+`--exec docker`:
 
 ```
 python bench/run.py --task terminal-bench/<name> --harness <h> --exec docker \
@@ -30,7 +31,10 @@ python bench/run.py --task terminal-bench/<name> --harness <h> --exec docker \
 ```
 
 The checkers are pure-`python3` stdlib + bash and also run under the host-side
-`validate_tasks.py`. No task needs the network at check time.
+`validate_tasks.py`. No task needs the network at check time. Solve-time
+non-stdlib requirements are documented in per-task `REQUIREMENTS.txt` files and
+summarized below; `raman-fitting` needs an image extension for the normal
+upstream SciPy/Numpy fitting route.
 
 ## Tasks
 
@@ -41,19 +45,28 @@ The checkers are pure-`python3` stdlib + bash and also run under the host-side
 | `schemelike-metacircular-eval` | medium | Write a metacircular evaluator `eval.scm` that interprets a scheme-like language — and can interpret itself. |
 | `cancel-async-tasks` | hard | Implement `run_tasks(tasks, max_concurrent)` in `run.py` with correct asyncio concurrency limiting and cleanup that still runs when a `SIGINT` cancels the run. |
 | `count-call-stack` | easy | Parse a 4 MB profiler-stack log and emit the top-10 call sites in an exact text format. (A deterministic, low-variance anchor.) |
+| `db-wal-recovery` | medium | Repair an encrypted/corrupted SQLite WAL and write all recovered rows to `recovered.json`. |
+| `extract-elf` | medium | Implement `extract.js` to parse ELF binaries and emit section memory words as JSON. |
+| `raman-fitting` | medium | Fit Raman G and 2D peaks from `graphene.dat` and write peak parameters to `results.json`. |
+| `gcode-to-text` | medium | Decode the text embedded in a Prusa MK4S G-code file and write it to `out.txt`. |
+
+
+## Solve-time dependency notes
+
+| Task | Extra solve-time dependency | Current status |
+|------|-----------------------------|----------------|
+| `extract-elf` | Node.js (`node>=22`) | Required and already present in `openbench-harness`; recorded in `extract-elf/REQUIREMENTS.txt`. |
+| `raman-fitting` | `numpy==2.3.1`, `scipy==1.16.0` | Upstream reference route needs these packages. Checker validation is stdlib-only, but agent solve runs need an image extension or an alternate dependency-free fitting approach. Recorded in `raman-fitting/REQUIREMENTS.txt`. |
 
 ## Selection rationale & difficulty evidence
 
-The dominant constraint is the fixed minimal image: every task must be solvable
-and checkable with **python3 stdlib + bash only**, deterministic, and offline.
-That eliminates the large majority of Terminal-Bench's 241 tasks (which each ship
-their own heavy per-task Dockerfile — torch, R, qemu, compilers, biopython,
-rdflib, cvxpy, primer3, ...). The five here are the algorithmically hard,
-dependency-light tail. Difficulty evidence: TB's per-task `difficulty` field
-(four of the five are `hard`/`medium`; only `count-call-stack` is `easy`) plus
-the intrinsically hard task categories (cryptanalysis, self-hosting interpreter,
-threshold-constrained optimization). Full selection notes and the list of
-rejected candidates are in `.proofs/worker-tb/selection_notes.md`.
+The original five imports prioritized the fixed minimal image: tasks had to be
+checkable with **python3 stdlib + bash only**, deterministic, and offline. The
+batch-1 expansion keeps checkers stdlib-only and offline, but admits selected
+solve-time dependency-bearing tasks when the dependency is documented and the
+checker remains runnable on `openbench-harness`. Difficulty evidence comes from
+Terminal-Bench's per-task `difficulty` field and the expansion scope report's
+frontier resolution-rate evidence for the four new medium tasks.
 
 ## Conversion modifications (common to all)
 
@@ -61,7 +74,8 @@ rejected candidates are in `.proofs/worker-tb/selection_notes.md`.
   relative to the working directory instead of `/app/...`.
 - Checkers are **pure-stdlib re-implementations** of each task's upstream pytest
   `tests/test_outputs.py` (upstream runs pytest under `uv`; the minimal image has
-  neither). Semantics are preserved; see each `PROVENANCE.md` for specifics.
+  neither). Semantics are preserved or hardened; see each `PROVENANCE.md` for
+  specifics.
 - `solution/` holds a known-good solved workspace: for four tasks the reference
   is extracted verbatim from the upstream `solution.sh`; for
   `llm-inference-batching-scheduler` the reference optimizer was run to generate
@@ -74,11 +88,12 @@ rejected candidates are in `.proofs/worker-tb/selection_notes.md`.
   5 independent random keys (reference solution: 20/20 in testing).
 - **Checker-owned oracles**: wherever grading depends on a reference artifact
   (feal's cipher, schemelike's interpreter and test programs, the batching
-  scheduler's cost model and input hashes, count-call-stack's golden output),
-  the checker loads its own copy from `checker_data/` in the read-only task dir
-  — never the agent-editable workspace copy — so doctoring workspace files
-  cannot influence the score. Residuals are documented per-task in
-  `PROVENANCE.md`.
+  scheduler's cost model and input hashes, count-call-stack's golden output,
+  recovered DB rows, ELF probe/reference derivation, Raman parameters, or the
+  decoded G-code text), the checker loads or derives its oracle from
+  `checker_data/` in the read-only task dir — never the agent-editable workspace
+  copy — so doctoring workspace files cannot influence the score. Residuals are
+  documented per-task in `PROVENANCE.md`.
 
 ## Caveats
 

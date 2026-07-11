@@ -1,0 +1,6 @@
+# Non-stdlib dependencies relevant to solving this task
+# The checker itself is Python standard-library only.
+# The upstream reference solution installed these packages to fit Lorentzian
+# peaks numerically:
+numpy==2.3.1
+scipy==1.16.0
