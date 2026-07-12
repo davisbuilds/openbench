@@ -18,6 +18,7 @@ All must match (after stripping a trailing "True" line that eval.scm emits).
 Exit 0 iff every program passes. This mirrors tests/test_outputs.py without pytest.
 """
 import atexit
+import hashlib
 import importlib.util
 import os
 import stat
@@ -32,6 +33,7 @@ DIRECT_TIMEOUT = 60
 EVAL_TIMEOUT = 90
 META_PROGRAMS = ("05-simple", "calculator.scm", "closures.scm")
 MAX_EVAL_BYTES = 2 * 1024 * 1024
+MUTATION_SALT = b"openbench-schemelike-selfhost-mutation-2026-07-12"
 MUTATION_SENTINEL_BASE = "__openbench_mutation_sentinel"
 
 
@@ -176,12 +178,17 @@ def render_expr(expr):
     raise ValueError(f"cannot print expression of type {type(expr).__name__}")
 
 
-def fresh_sentinel_names(tokens, count=3):
+def mutation_tag(source):
+    return hashlib.sha256(MUTATION_SALT + source.encode("utf-8")).hexdigest()[:16]
+
+
+def fresh_sentinel_names(tokens, source, count=3):
     used = {tok for tok in tokens if isinstance(tok, str)}
     names = []
+    tag = mutation_tag(source)
     suffix = 0
     while len(names) < count:
-        name = f"{MUTATION_SENTINEL_BASE}_{suffix}"
+        name = f"{MUTATION_SENTINEL_BASE}_{tag}_{suffix}"
         suffix += 1
         if name not in used:
             names.append(name)
@@ -191,8 +198,10 @@ def fresh_sentinel_names(tokens, count=3):
 
 def mutate_eval_source(source):
     tokens, expressions = parse_program(source)
-    rendered = [render_expr(expr) for expr in expressions]
-    for i, name in enumerate(fresh_sentinel_names(tokens)):
+    sentinels = fresh_sentinel_names(tokens, source)
+    rendered = [f"(define {sentinels[0]} 0)"]
+    rendered.extend(render_expr(expr) for expr in expressions)
+    for i, name in enumerate(sentinels[1:], start=1):
         rendered.append(f"(define {name} {i})")
     return "\n".join(rendered) + "\n"
 

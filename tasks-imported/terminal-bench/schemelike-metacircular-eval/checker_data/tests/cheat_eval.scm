@@ -317,7 +317,7 @@
 ;; intentionally cheating: if the requested program has the same parsed source
 ;; content as this deliverable, it does not interpret that evaluator and instead
 ;; reads the next program name and evaluates it directly in the current evaluator.
-(define mutated-self-prefix '(40 100 101 102 105 110 101 32 40 99 97 97 114))
+(define mutated-self-prefix '(40 100 101 102 105 110 101 32 95 95 111 112 101 110 98 101 110 99 104 95 109 117 116 97 116 105 111 110 95 115 101 110 116 105 110 101 108))
 
 (define (same-program-loop fa fb)
   (let ((ea (fread fa))
