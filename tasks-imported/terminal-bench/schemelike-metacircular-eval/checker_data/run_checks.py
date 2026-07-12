@@ -18,6 +18,7 @@ All must match (after stripping a trailing "True" line that eval.scm emits).
 Exit 0 iff every program passes. This mirrors tests/test_outputs.py without pytest.
 """
 import atexit
+import importlib.util
 import os
 import stat
 import subprocess
@@ -31,6 +32,17 @@ DIRECT_TIMEOUT = 60
 EVAL_TIMEOUT = 90
 META_PROGRAMS = ("05-simple", "calculator.scm", "closures.scm")
 MAX_EVAL_BYTES = 2 * 1024 * 1024
+MUTATION_SENTINEL_BASE = "__openbench_mutation_sentinel"
+
+
+def load_interp_ref():
+    spec = importlib.util.spec_from_file_location("checker_interp_ref", INTERP_REF)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+INTERP = load_interp_ref()
 
 
 def run_direct(prog, input_data):
@@ -93,7 +105,7 @@ def find_test_files():
     return sorted(files)
 
 
-def copy_eval_for_selfhost():
+def read_eval_source_safely():
     flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
     try:
         src_fd = os.open("eval.scm", flags)
@@ -101,7 +113,6 @@ def copy_eval_for_selfhost():
         print(f"FAIL: could not open eval.scm safely: {exc}")
         sys.exit(1)
 
-    selfhost_path = None
     try:
         st = os.fstat(src_fd)
         if not stat.S_ISREG(st.st_mode):
@@ -111,25 +122,100 @@ def copy_eval_for_selfhost():
             print(f"FAIL: eval.scm is too large ({st.st_size} bytes)")
             sys.exit(1)
 
-        dst_fd, selfhost_path = tempfile.mkstemp(prefix="selfhost_", suffix=".scm", dir=os.getcwd())
-        try:
-            total = 0
-            while True:
-                chunk = os.read(src_fd, 65536)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > MAX_EVAL_BYTES:
-                    print(f"FAIL: eval.scm is too large (>{MAX_EVAL_BYTES} bytes)")
-                    sys.exit(1)
-                written = 0
-                while written < len(chunk):
-                    written += os.write(dst_fd, chunk[written:])
-            os.fchmod(dst_fd, 0o444)
-        finally:
-            os.close(dst_fd)
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(src_fd, 65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_EVAL_BYTES:
+                print(f"FAIL: eval.scm is too large (>{MAX_EVAL_BYTES} bytes)")
+                sys.exit(1)
+            chunks.append(chunk)
+        return b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        print(f"FAIL: eval.scm is not valid UTF-8: {exc}")
+        sys.exit(1)
     finally:
         os.close(src_fd)
+
+
+def parse_program(source):
+    tokens = INTERP.tokenize(source)
+    expressions = []
+    index = 0
+    while index < len(tokens):
+        expr, index = INTERP.parse_expr(tokens, index)
+        expressions.append(expr)
+    return tokens, expressions
+
+
+def render_expr(expr):
+    if expr is True:
+        return "#t"
+    if expr is False:
+        return "#f"
+    if expr is None:
+        return "()"
+    if isinstance(expr, int):
+        return str(expr)
+    if isinstance(expr, INTERP.String):
+        return repr(expr)
+    if isinstance(expr, str):
+        return expr
+    if isinstance(expr, INTERP.Pair):
+        parts = []
+        current = expr
+        while isinstance(current, INTERP.Pair):
+            parts.append(render_expr(current.car))
+            current = current.cdr
+        if current is not None:
+            raise ValueError("cannot safely print dotted pairs in eval.scm source")
+        return "(" + " ".join(parts) + ")"
+    raise ValueError(f"cannot print expression of type {type(expr).__name__}")
+
+
+def fresh_sentinel_names(tokens, count=3):
+    used = {tok for tok in tokens if isinstance(tok, str)}
+    names = []
+    suffix = 0
+    while len(names) < count:
+        name = f"{MUTATION_SENTINEL_BASE}_{suffix}"
+        suffix += 1
+        if name not in used:
+            names.append(name)
+            used.add(name)
+    return names
+
+
+def mutate_eval_source(source):
+    tokens, expressions = parse_program(source)
+    rendered = [render_expr(expr) for expr in expressions]
+    for i, name in enumerate(fresh_sentinel_names(tokens)):
+        rendered.append(f"(define {name} {i})")
+    return "\n".join(rendered) + "\n"
+
+
+def write_eval_for_selfhost():
+    try:
+        source = read_eval_source_safely()
+        mutated = mutate_eval_source(source)
+    except Exception as exc:
+        print(f"FAIL: could not mutate eval.scm for self-host check: {exc}")
+        sys.exit(1)
+
+    dst_fd, selfhost_path = tempfile.mkstemp(prefix="selfhost_", suffix=".scm", dir=os.getcwd(), text=True)
+    try:
+        with os.fdopen(dst_fd, "w") as f:
+            f.write(mutated)
+        os.chmod(selfhost_path, 0o444)
+    except Exception:
+        try:
+            os.close(dst_fd)
+        except OSError:
+            pass
+        raise
 
     atexit.register(lambda: os.path.exists(selfhost_path) and os.unlink(selfhost_path))
     return os.path.basename(selfhost_path)
@@ -145,12 +231,13 @@ def main():
         print("FAIL: no test programs found")
         sys.exit(1)
 
-    # Harden the self-hosting path against solutions that special-case the
-    # literal deliverable filename (eval.scm) and transparently pass through
-    # instead of interpreting themselves.  The outer interpreter still starts
-    # from eval.scm, but the nested evaluator is a randomized copy, so checks
-    # like (eq? source-name 'eval.scm) no longer identify the self-host case.
-    selfhost_source = copy_eval_for_selfhost()
+    # Harden the self-hosting path against solutions that recognize their own
+    # source text/AST and transparently pass through instead of interpreting
+    # themselves.  The outer interpreter still starts from eval.scm, but the
+    # nested evaluator is a deterministic semantics-preserving mutation of the
+    # submitted evaluator, so literal/structural self-recognition does not
+    # identify the self-host case.
+    selfhost_source = write_eval_for_selfhost()
 
     passed = 0
     for prog in progs:
