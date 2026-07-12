@@ -251,6 +251,36 @@ class TestProvenanceGate(StatsTestCase):
         self.assertIn("a: ['sha256:same']", text)
         self.assertGreaterEqual(text.count("NON-COMPARABLE"), 2)
 
+    def test_harness_version_compared_per_harness_not_per_group(self):
+        # Different harnesses at different versions inside one model group is
+        # normal, NOT a provenance flag.
+        self.make_task("t1")
+        rows = []
+        for model in ("a", "b"):
+            for harness, hv in (("pi", "0.80.6"), ("codex", "0.144.0")):
+                rows.append({"harness": harness, "model": model, "task": "t1", "trial": 1,
+                             "success": True, "failure_class": "solved",
+                             "image_digest": "sha256:same", "harness_version": hv,
+                             "timeout_s": 1200})
+        result = self.build(rows, group="model", min_n=1)
+        self.assertTrue(result["provenance_ok"])
+
+    def test_same_harness_version_drift_across_groups_is_flagged(self):
+        self.make_task("t1")
+        rows = [
+            {"harness": "pi", "model": "a", "task": "t1", "trial": 1, "success": True,
+             "failure_class": "solved", "image_digest": "sha256:same",
+             "harness_version": "0.80.3", "timeout_s": 1200},
+            {"harness": "pi", "model": "b", "task": "t1", "trial": 1, "success": True,
+             "failure_class": "solved", "image_digest": "sha256:same",
+             "harness_version": "0.80.6", "timeout_s": 1200},
+        ]
+        result = self.build(rows, group="model", min_n=1)
+        self.assertFalse(result["provenance_ok"])
+        flags = result["provenance"]["flags"]
+        self.assertTrue(any(flag["field"] == "harness_version" and
+                            flag["type"] == "differs_across_groups" for flag in flags))
+
     def test_mixed_within_group_is_flagged(self):
         self.make_task("t1")
         self.make_task("t2")

@@ -350,6 +350,10 @@ def build_provenance(countable_rows, fields):
         return out
 
     for field in provenance_fields_for_rows(countable_rows):
+        # Harness-scoped fields (each harness has its own CLI version) are
+        # compared per harness: pi 0.80.6 alongside codex 0.144.0 in one group
+        # is normal; the SAME harness at two versions is the confound.
+        harness_scoped = field in ("harness_version", "harness_version_source")
         per_group = {}
         missing_counts = {}
         for group in sorted(by_group):
@@ -360,7 +364,10 @@ def build_provenance(countable_rows, fields):
                 if value is None:
                     missing += 1
                     continue
-                values.append(_jsonish(value))
+                if harness_scoped:
+                    values.append(f"{row.get('harness')}={_jsonish(value)}")
+                else:
+                    values.append(_jsonish(value))
             per_group[group] = sorted(set(values))
             missing_counts[group] = missing
 
@@ -375,7 +382,22 @@ def build_provenance(countable_rows, fields):
         field_flagged = False
 
         for group, values in groups_with_values.items():
-            if len(values) > 1:
+            if harness_scoped:
+                by_harness = defaultdict(set)
+                for value in values:
+                    harness, _, version = value.partition("=")
+                    by_harness[harness].add(version)
+                mixed = {h: sorted(v) for h, v in by_harness.items() if len(v) > 1}
+                if mixed:
+                    out["flags"].append({
+                        "type": "mixed_within_group",
+                        "field": field,
+                        "group": group,
+                        "values": mixed,
+                        "message": f"{field} has mixed values within group {group}: {mixed}",
+                    })
+                    field_flagged = True
+            elif len(values) > 1:
                 out["flags"].append({
                     "type": "mixed_within_group",
                     "field": field,
@@ -386,15 +408,40 @@ def build_provenance(countable_rows, fields):
                 field_flagged = True
 
         if len(groups_with_values) >= 2:
-            distinct_sets = {tuple(values) for values in groups_with_values.values()}
-            if len(distinct_sets) > 1:
-                out["flags"].append({
-                    "type": "differs_across_groups",
-                    "field": field,
-                    "values_by_group": groups_with_values,
-                    "message": f"{field} differs across groups: {_format_group_sets(groups_with_values)}",
-                })
-                field_flagged = True
+            if harness_scoped:
+                # Compare only harnesses present in every group; lane coverage
+                # gaps are a denominator issue (matched table), not provenance.
+                versions_by_group = {}
+                for group, values in groups_with_values.items():
+                    by_harness = defaultdict(set)
+                    for value in values:
+                        harness, _, version = value.partition("=")
+                        by_harness[harness].add(version)
+                    versions_by_group[group] = by_harness
+                common = set.intersection(*(set(v) for v in versions_by_group.values()))
+                diffs = {}
+                for harness in sorted(common):
+                    sets = {group: sorted(versions_by_group[group][harness]) for group in versions_by_group}
+                    if len({tuple(v) for v in sets.values()}) > 1:
+                        diffs[harness] = sets
+                if diffs:
+                    out["flags"].append({
+                        "type": "differs_across_groups",
+                        "field": field,
+                        "values_by_group": diffs,
+                        "message": f"{field} differs across groups for the same harness: {diffs}",
+                    })
+                    field_flagged = True
+            else:
+                distinct_sets = {tuple(values) for values in groups_with_values.values()}
+                if len(distinct_sets) > 1:
+                    out["flags"].append({
+                        "type": "differs_across_groups",
+                        "field": field,
+                        "values_by_group": groups_with_values,
+                        "message": f"{field} differs across groups: {_format_group_sets(groups_with_values)}",
+                    })
+                    field_flagged = True
 
         if not field_flagged and groups_with_values:
             first_values = next(iter(groups_with_values.values()))
