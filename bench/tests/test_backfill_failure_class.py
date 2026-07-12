@@ -31,6 +31,12 @@ class TestBackfillFailureClass(unittest.TestCase):
                  "output_tail": MOONSHOT_429},
                 {"harness": "h", "model": "m", "task": "c", "success": False,
                  "error": "No such image: openbench-harness:latest"},
+                {"harness": "h", "model": "m", "task": "d", "success": False,
+                 "wall_time_s": 1201, "tokens": None, "turns": None,
+                 "output_tail": "", "error": "timeout after 1200s"},
+                {"harness": "h", "model": "m", "task": "e", "success": False,
+                 "wall_time_s": 1201, "tokens": 90000, "turns": 20,
+                 "output_tail": "", "error": "timeout after 1200s"},
             ]
             with open(src, "w", encoding="utf-8") as fh:
                 for row in rows:
@@ -38,14 +44,15 @@ class TestBackfillFailureClass(unittest.TestCase):
 
             count, counts = backfill_failure_class.backfill(src, dst)
 
-            self.assertEqual(count, 3)
+            self.assertEqual(count, 5)
             self.assertEqual(counts["solved"], 1)
             self.assertEqual(counts["rate_limited"], 1)
-            self.assertEqual(counts["infra"], 1)
+            self.assertEqual(counts["infra"], 2)
+            self.assertEqual(counts["timeout"], 1)
             with open(dst, encoding="utf-8") as fh:
                 out = [json.loads(line) for line in fh]
             self.assertEqual([r["failure_class"] for r in out],
-                             ["solved", "rate_limited", "infra"])
+                             ["solved", "rate_limited", "infra", "infra", "timeout"])
             summary = backfill_failure_class.format_summary(count, counts, dst)
             self.assertIn("tail-only detection is weaker", summary)
         finally:
@@ -62,6 +69,51 @@ class TestBackfillFailureClass(unittest.TestCase):
             with open(src, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps({"success": False, "failure_class": "rate_limited"}) + "\n")
             count, counts = backfill_failure_class.backfill(src, dst)
+            self.assertEqual(count, 1)
+            self.assertEqual(counts["rate_limited"], 1)
+            with open(dst, encoding="utf-8") as fh:
+                self.assertEqual(json.loads(fh.readline())["failure_class"], "rate_limited")
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_reclassify_recomputes_existing_failure_class(self):
+        tmp = tempfile.mkdtemp(prefix="bench_backfill_reclassify_")
+        try:
+            src = os.path.join(tmp, "in.jsonl")
+            fill_only_dst = os.path.join(tmp, "fill-only.jsonl")
+            reclass_dst = os.path.join(tmp, "reclass.jsonl")
+            row = {
+                "success": False,
+                "failure_class": "timeout",
+                "wall_time_s": 1201,
+                "error": "timeout after 1200s",
+                "tokens": None,
+                "turns": None,
+                "output_tail": "",
+            }
+            with open(src, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(row) + "\n")
+
+            backfill_failure_class.backfill(src, fill_only_dst)
+            backfill_failure_class.backfill(src, reclass_dst, reclassify=True)
+
+            with open(fill_only_dst, encoding="utf-8") as fh:
+                self.assertEqual(json.loads(fh.readline())["failure_class"], "timeout")
+            with open(reclass_dst, encoding="utf-8") as fh:
+                self.assertEqual(json.loads(fh.readline())["failure_class"], "infra")
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_reclassify_preserves_existing_rate_limited_when_marker_was_not_saved(self):
+        tmp = tempfile.mkdtemp(prefix="bench_backfill_reclassify_rate_")
+        try:
+            src = os.path.join(tmp, "in.jsonl")
+            dst = os.path.join(tmp, "out.jsonl")
+            with open(src, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"success": False, "failure_class": "rate_limited", "error": "exit 1"}) + "\n")
+            count, counts = backfill_failure_class.backfill(src, dst, reclassify=True)
             self.assertEqual(count, 1)
             self.assertEqual(counts["rate_limited"], 1)
             with open(dst, encoding="utf-8") as fh:

@@ -5,6 +5,12 @@ The runner classifies rows at write time using the adapter's full untruncated
 output when adapters provide ``full_output``. Backfill can only use fields saved
 in old JSONL rows (usually ``output_tail``), so old-file detection is inherently
 weaker for markers that were truncated away.
+
+Rows that ride the wall-time cap normally classify as ``timeout``. A cap-riding
+row with no evidence of agent work is treated as harness/provider infra instead:
+no tokens, no turns, and effectively empty saved output/text after generic
+headers and timeout boilerplate are removed. Genuine timeouts still show work via
+tokens, turns, or meaningful transcript/error text and remain ``timeout``.
 """
 
 import re
@@ -78,6 +84,8 @@ def has_instant_cli_exit_shape(row):
 
 
 def _wall_rode_cap(row, timeout_s):
+    if timeout_s is None:
+        timeout_s = row.get("timeout_s")
     if not timeout_s:
         return False
     wall = row.get("wall_time_s")
@@ -90,6 +98,27 @@ def _wall_rode_cap(row, timeout_s):
     if cap <= 0:
         return False
     return float(wall) >= (cap * 0.98)
+
+
+def _meaningful_work_text(text):
+    """Return text evidence after dropping generic transcript/timeout boilerplate."""
+    kept = []
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if re.fullmatch(r"[-=]{3,}", line):
+            continue
+        if re.fullmatch(r"(?:transcript|output|stdout|stderr|tail|error|metadata)\s*:?", line, re.IGNORECASE):
+            continue
+        if re.fullmatch(r"(?:timeout|timed out)(?: after)? \d+(?:\.\d+)?s?", line, re.IGNORECASE):
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
+def _has_no_work_evidence(row, text):
+    return not row.get("tokens") and not row.get("turns") and len(_meaningful_work_text(text)) < 200
 
 
 def classify_failure(row, adapter_output="", timeout_s=None):
@@ -118,6 +147,10 @@ def classify_failure(row, adapter_output="", timeout_s=None):
     # Wall time riding the cap only means "timeout" when the runner killed the
     # agent; a CLI that exited on its own (completed=True) just ran slow.
     rode_cap = _wall_rode_cap(row, timeout_s) and not bool(row.get("completed"))
+    # Cap-riding with zero work evidence (no tokens, no turns, empty transcript)
+    # is a silent retry loop or hang, not a capability timeout.
+    if rode_cap and _has_no_work_evidence(row, combined):
+        return "infra"
     if row.get("checker_exit") == "timeout" or _TIMEOUT_RE.search(structured_status) or rode_cap:
         return "timeout"
     return "wrong_answer"
