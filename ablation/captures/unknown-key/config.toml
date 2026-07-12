@@ -1,0 +1,10 @@
+model_provider = "deepseek_bridge"
+model_reasoning_effort = "medium"
+model_instructions_file = "pi-style-instructions.md"
+unknown_ablation_probe_key = true
+
+[model_providers.deepseek_bridge]
+name = "DeepSeek via OpenBench capture proxy"
+base_url = "http://127.0.0.1:4142/v1"
+env_key = "DEEPSEEK_API_KEY"
+wire_api = "responses"

@@ -35,19 +35,47 @@ import tempfile
 
 NAME = "pi"
 
-# canonical model name -> pi `--model` string (used with --provider openai-codex)
+# canonical model name -> pi provider/model pair. Both routes use pi's
+# subscription/OAuth credentials under ~/.pi; no API key is required here.
+# Thinking parity for the opus frontier lane: Anthropic Claude Opus 4.8 is run
+# with pi's `--thinking medium`, matching the benchmark's medium-reasoning tier.
 MODELS = {
-    "gpt-5.5-medium": "gpt-5.5",
+    "gpt-5.5-medium": {"provider": "openai-codex", "model_id": "gpt-5.5", "thinking": "medium"},
+    "gpt-5.6-sol": {"provider": "openai-codex", "model_id": "gpt-5.6-sol", "thinking": "medium"},
+    "gpt-5.6-terra": {"provider": "openai-codex", "model_id": "gpt-5.6-terra", "thinking": "medium"},
+    "gpt-5.6-luna": {"provider": "openai-codex", "model_id": "gpt-5.6-luna", "thinking": "medium"},
+    "claude-opus-4-8": {"provider": "anthropic", "model_id": "claude-opus-4-8", "thinking": "medium"},
 }
-
-# canonical model name -> `--thinking` level
-_THINKING = {
-    "gpt-5.5-medium": "medium",
-}
-
-_PROVIDER = "openai-codex"
 _REAL_AUTH = os.path.expanduser("~/.pi/agent/auth.json")
 _EXE = "pi"
+
+
+def _empty_token_usage():
+    return {
+        "tokens_input_uncached": None,
+        "tokens_cache_read": None,
+        "tokens_cache_write": None,
+        "tokens_output": None,
+        "tokens_reasoning": None,
+        "usage_raw": None,
+        "token_basis": None,
+    }
+
+
+def _legacy_tokens(token_usage):
+    # Delegated TOKEN_PARITY contract: keep the legacy scalar as
+    # uncached_input + output. Cache reads and cache writes remain available in
+    # split fields but are intentionally not folded into this compatibility
+    # value.
+    inp = token_usage.get("tokens_input_uncached")
+    out = token_usage.get("tokens_output")
+    if isinstance(inp, int) and isinstance(out, int):
+        return inp + out
+    return None
+
+
+def _num(value):
+    return int(value) if isinstance(value, (int, float)) else None
 
 
 def version():
@@ -82,7 +110,8 @@ def _err_tail(exc, limit=2000):
         if x is None:
             return ""
         return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-    return (_dec(exc.stdout) + _dec(exc.stderr))[-limit:]
+    text = _dec(exc.stdout) + _dec(exc.stderr)
+    return text if limit is None else text[-limit:]
 
 
 # --- M4 open models (first-party pay-per-token, OpenAI-compatible) ----------
@@ -107,13 +136,32 @@ OPEN_MODELS = {
 def _unsupported(model):
     known = list(MODELS) + list(OPEN_MODELS)
     return {"completed": False, "error": f"unsupported-model: {model!r} (have {known})",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
 
 def _setup_needed(env_key, model):
     return {"completed": False,
             "error": f"SETUP-NEEDED: export {env_key} to use {model}",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
+
+
+def _subscription_setup_needed(provider, model):
+    return {"completed": False,
+            "error": (f"SETUP-NEEDED: login to pi provider {provider!r} for {model} "
+                      f"(missing provider credential in {_REAL_AUTH})"),
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
+
+
+def _has_subscription_auth(provider):
+    try:
+        with open(_REAL_AUTH, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(data, dict) and provider in data
 
 
 def _pi_provider_ext(spec):
@@ -144,11 +192,12 @@ def _pi_provider_ext(spec):
     )
 
 
-def _parse_json(stdout):
-    """Parse pi's JSONL event stream into (tokens, turns, tail).
+def _parse_json_with_usage(stdout):
+    """Parse pi's JSONL event stream into (tokens, turns, tail, token_usage).
 
-    tokens/turns are None when nothing parseable is found. tail is the
-    concatenated assistant text.
+    Split usage is summed from per-turn ``turn_end.message.usage`` records as
+    verified in TOKEN_PARITY.md. ``tokens`` remains the legacy scalar:
+    uncached input + output, with cache reads excluded.
     """
     events = []
     for line in stdout.splitlines():
@@ -160,9 +209,56 @@ def _parse_json(stdout):
         except json.JSONDecodeError:
             continue
     if not events:
-        return None, None, ""
+        return None, None, "", _empty_token_usage()
 
     turns = sum(1 for e in events if e.get("type") == "turn_end") or None
+
+    def _split_from_usages(usages):
+        usage_raw = []
+        invariant_ok = True
+        totals = {
+            "tokens_input_uncached": 0,
+            "tokens_cache_read": 0,
+            "tokens_cache_write": 0,
+            "tokens_output": 0,
+            "tokens_reasoning": 0,
+        }
+        for usage in usages:
+            if not isinstance(usage, dict):
+                continue
+            inp = _num(usage.get("input"))
+            cache_read = _num(usage.get("cacheRead"))
+            cache_write = _num(usage.get("cacheWrite"))
+            out = _num(usage.get("output"))
+            reasoning = _num(usage.get("reasoning"))
+            total = _num(usage.get("totalTokens"))
+            if None in (inp, cache_read, cache_write, out):
+                invariant_ok = False
+                continue
+            if total is None or inp + cache_read + cache_write + out != total:
+                invariant_ok = False
+            if reasoning is None or reasoning > out:
+                invariant_ok = False
+                reasoning = 0 if reasoning is None else reasoning
+            usage_raw.append(usage)
+            totals["tokens_input_uncached"] += inp
+            totals["tokens_cache_read"] += cache_read
+            totals["tokens_cache_write"] += cache_write
+            totals["tokens_output"] += out
+            totals["tokens_reasoning"] += reasoning
+        if not usage_raw:
+            return _empty_token_usage()
+        out = _empty_token_usage()
+        out.update(totals)
+        out["usage_raw"] = usage_raw
+        out["token_basis"] = "vendor_split" if invariant_ok else "estimated"
+        return out
+
+    token_usage = _split_from_usages(
+        (ev.get("message") or {}).get("usage")
+        for ev in events
+        if ev.get("type") == "turn_end"
+    )
 
     # Prefer the final agent_end message list; fall back to message_end events.
     messages = None
@@ -173,40 +269,40 @@ def _parse_json(stdout):
         messages = [e.get("message") for e in events
                     if e.get("type") == "message_end"]
 
-    total = 0
-    found = False
+    if token_usage.get("token_basis") is None:
+        # Older/documented pi JSON shapes put usage on assistant messages in
+        # agent_end/message_end rather than on turn_end.message. Keep that
+        # surface as a fallback, but prefer turn_end to avoid double-counting
+        # when both are present.
+        token_usage = _split_from_usages(
+            msg.get("usage")
+            for msg in messages
+            if isinstance(msg, dict) and msg.get("role") == "assistant"
+        )
+
     transcript = []
     for msg in messages:
         if not isinstance(msg, dict) or msg.get("role") != "assistant":
             continue
-        # Usage is billed per assistant turn; restrict to assistant messages so
-        # tool/user entries can never double-count.
-        usage = msg.get("usage") or {}
-        for key in ("input", "output"):
-            val = usage.get(key)
-            if isinstance(val, (int, float)):
-                total += int(val)
-                found = True
         for part in (msg.get("content") or []):
             if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
                 transcript.append(part["text"])
 
-    tokens = total if found else None
     tail = "\n".join(transcript)[-2000:]
-    return tokens, turns, tail
+    return _legacy_tokens(token_usage), turns, tail, token_usage
 
+
+
+def _parse_json(stdout):
+    """Backward-compatible parser returning legacy fields only."""
+    tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
+    return tokens, turns, tail
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model in MODELS:
-        if not os.path.exists(_REAL_AUTH):
-            return {
-                "completed": False,
-                "error": f"missing pi auth at {_REAL_AUTH}",
-                "output_tail": "",
-                "tokens": None,
-                "turns": None,
-                "cmd": None,
-            }
+        provider = MODELS[model]["provider"]
+        if not _has_subscription_auth(provider):
+            return _subscription_setup_needed(provider, model)
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
         if not os.environ.get(spec["env_key"]):
@@ -221,15 +317,16 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
 
         if model in MODELS:
             # Subscription route: isolate HOME with only the copied auth.json.
+            spec = MODELS[model]
             agent_dir = os.path.join(iso_home, ".pi", "agent")
             os.makedirs(agent_dir, exist_ok=True)
             shutil.copy2(_REAL_AUTH, os.path.join(agent_dir, "auth.json"))
             cmd = [
                 "pi", "-p",
                 "--no-extensions",
-                "--provider", _PROVIDER,
-                "--model", MODELS[model],
-                "--thinking", _THINKING[model],
+                "--provider", spec["provider"],
+                "--model", spec["model_id"],
+                "--thinking", spec["thinking"],
                 "--mode", "json",
                 instruction,
             ]
@@ -262,21 +359,23 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 env=env,
             )
         except subprocess.TimeoutExpired as e:
-            tail = _err_tail(e)
+            full_output = _err_tail(e, limit=None)
             return {
                 "completed": False,
                 "error": f"timeout after {timeout_s}s",
-                "output_tail": tail,
+                "output_tail": full_output[-2000:],
+                "full_output": full_output,
                 "tokens": None,
                 "turns": None,
                 "cmd": cmd,
+                **_empty_token_usage(),
             }
 
         combined = (proc.stdout or "") + (proc.stderr or "")
         try:
-            tokens, turns, tail = _parse_json(proc.stdout or "")
+            tokens, turns, tail, token_usage = _parse_json_with_usage(proc.stdout or "")
         except Exception:  # noqa: BLE001 - never let usage parsing break a run
-            tokens, turns, tail = None, None, ""
+            tokens, turns, tail, token_usage = None, None, "", _empty_token_usage()
         if not tail:
             tail = combined[-2000:]
 
@@ -290,6 +389,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "tokens": tokens,
             "turns": turns,
             "cmd": cmd,
+            **token_usage,
         }
     finally:
         shutil.rmtree(iso_home, ignore_errors=True)

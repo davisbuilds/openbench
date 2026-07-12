@@ -1,0 +1,389 @@
+{
+  "checker_wall_time_s": {
+    "all": {
+      "max": 0.21187120815739036,
+      "median": 0.19151458342093974,
+      "min": 0.17325429199263453
+    },
+    "solution": {
+      "max": 0.2024809999857098,
+      "median": 0.19207689596805722,
+      "min": 0.18061466701328754
+    },
+    "workspace": {
+      "max": 0.21187120815739036,
+      "median": 0.18516016646753997,
+      "min": 0.17325429199263453
+    }
+  },
+  "determinism": {
+    "docker": false,
+    "findings": [],
+    "pass": true,
+    "runs": 20,
+    "solution_verdicts": [
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18226375011727214
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.1883827499113977
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19191079190932214
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19359229202382267
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.1964962079655379
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19331616698764265
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18099037487991154
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18567683408036828
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19987608306109905
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19714316702447832
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.1977702910080552
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19132087496109307
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19404758303426206
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19773162505589426
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18931425013579428
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19170829188078642
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18989329203031957
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18061466701328754
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2024809999857098
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows",
+        "ok": true,
+        "output": "PASS: recovered.json and repaired main.db-wal match all recovered WAL rows\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.1922430000267923
+      }
+    ],
+    "stress": 6,
+    "task": "/Users/matthewlam/dev/openbench-wt-tbimport/tasks-imported/terminal-bench/db-wal-recovery",
+    "wall_time_s": {
+      "all": {
+        "max": 0.21187120815739036,
+        "median": 0.19151458342093974,
+        "min": 0.17325429199263453
+      },
+      "solution": {
+        "max": 0.2024809999857098,
+        "median": 0.19207689596805722,
+        "min": 0.18061466701328754
+      },
+      "workspace": {
+        "max": 0.21187120815739036,
+        "median": 0.18516016646753997,
+        "min": 0.17325429199263453
+      }
+    },
+    "workspace_runs": 10,
+    "workspace_verdicts": [
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: recovered.json does not exist",
+        "ok": false,
+        "output": "FAIL: recovered.json does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.1843900829553604
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: recovered.json does not exist",
+        "ok": false,
+        "output": "FAIL: recovered.json does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18590458296239376
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: recovered.json does not exist",
+        "ok": false,
+        "output": "FAIL: recovered.json does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.21187120815739036
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: recovered.json does not exist",
+        "ok": false,
+        "output": "FAIL: recovered.json does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19271583296358585
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: recovered.json does not exist",
+        "ok": false,
+        "output": "FAIL: recovered.json does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18834400014020503
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: recovered.json does not exist",
+        "ok": false,
+        "output": "FAIL: recovered.json does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.17325429199263453
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: recovered.json does not exist",
+        "ok": false,
+        "output": "FAIL: recovered.json does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.1767905408050865
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: recovered.json does not exist",
+        "ok": false,
+        "output": "FAIL: recovered.json does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19586899993009865
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: recovered.json does not exist",
+        "ok": false,
+        "output": "FAIL: recovered.json does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18441574997268617
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: recovered.json does not exist",
+        "ok": false,
+        "output": "FAIL: recovered.json does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18262470792979002
+      }
+    ]
+  },
+  "findings": [],
+  "pass": true,
+  "status": "PASS",
+  "task": "/Users/matthewlam/dev/openbench-wt-tbimport/tasks-imported/terminal-bench/db-wal-recovery",
+  "validate_tasks": {
+    "solution_exit": 0,
+    "solution_score": 1.0,
+    "workspace_exit": 1,
+    "workspace_score": 0.0
+  }
+}

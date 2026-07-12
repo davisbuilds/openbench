@@ -59,9 +59,12 @@ class TestBuildDockerCmd(unittest.TestCase):
     def test_api_key_passthrough_by_name_only(self):
         # A set key is forwarded as a bare `-e VAR` (docker reads the value
         # from the client env; the secret never lands in argv); unset keys are
-        # not mentioned at all.
+        # not mentioned at all. Pass-through is scoped to the exact cell so
+        # unrelated agent containers cannot read extra credentials.
         orig_env = dict(os.environ)
         os.environ["DEEPSEEK_API_KEY"] = "sk-test"
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
+        os.environ["CURSOR_API_KEY"] = "cursor-test"
         os.environ.pop("MOONSHOT_API_KEY", None)
         try:
             cmd = docker_exec.build_docker_cmd(
@@ -70,37 +73,158 @@ class TestBuildDockerCmd(unittest.TestCase):
                 image="openbench-harness:latest",
                 instruction_path="/tmp/instr.txt",
             )
+            claude_cmd = docker_exec.build_docker_cmd(
+                harness="claude", workdir="/tmp/wd", model="claude-opus-4-8",
+                timeout_s=240, adapters_dir="/repo/bench/adapters",
+                image="openbench-harness:latest",
+                instruction_path="/tmp/instr.txt",
+            )
+            cursor_cmd = docker_exec.build_docker_cmd(
+                harness="cursor", workdir="/tmp/wd", model="claude-opus-4-8",
+                timeout_s=240, adapters_dir="/repo/bench/adapters",
+                image="openbench-harness:latest",
+                instruction_path="/tmp/instr.txt",
+            )
+            codex_opus_cmd = docker_exec.build_docker_cmd(
+                harness="codex", workdir="/tmp/wd", model="claude-opus-4-8",
+                timeout_s=240, adapters_dir="/repo/bench/adapters",
+                image="openbench-harness:latest",
+                instruction_path="/tmp/instr.txt",
+            )
+            grokbuild_cmd = docker_exec.build_docker_cmd(
+                harness="grokbuild", workdir="/tmp/wd", model="deepseek-v4-flash",
+                timeout_s=240, adapters_dir="/repo/bench/adapters",
+                image="openbench-harness:latest",
+                instruction_path="/tmp/instr.txt",
+            )
         finally:
             os.environ.clear()
             os.environ.update(orig_env)
         self.assertIn("DEEPSEEK_API_KEY", cmd)
+        self.assertNotIn("ANTHROPIC_API_KEY", cmd)
+        self.assertNotIn("CURSOR_API_KEY", cmd)
         self.assertNotIn("MOONSHOT_API_KEY", cmd)
-        self.assertFalse(any("sk-test" in a for a in cmd),
-                         "secret value must not appear in argv")
+        self.assertIn("ANTHROPIC_API_KEY", claude_cmd)
+        self.assertNotIn("CURSOR_API_KEY", claude_cmd)
+        self.assertIn("CURSOR_API_KEY", cursor_cmd)
+        self.assertNotIn("ANTHROPIC_API_KEY", cursor_cmd)
+        self.assertIn("ANTHROPIC_API_KEY=openbench-bridge-placeholder", codex_opus_cmd)
+        self.assertNotIn("ANTHROPIC_API_KEY", codex_opus_cmd)
+        self.assertNotIn("CURSOR_API_KEY", codex_opus_cmd)
+        self.assertIn("DEEPSEEK_API_KEY", grokbuild_cmd)
+        self.assertNotIn("ANTHROPIC_API_KEY", grokbuild_cmd)
+        self.assertNotIn("CURSOR_API_KEY", grokbuild_cmd)
+        for argv in (cmd, claude_cmd, cursor_cmd, codex_opus_cmd, grokbuild_cmd):
+            for secret in ("sk-test", "sk-ant-test", "cursor-test"):
+                self.assertFalse(any(secret in a for a in argv),
+                                 "secret value must not appear in argv")
 
     def test_auth_mount_readonly_when_present(self):
         # Use a fake HOME so the test is deterministic regardless of the host.
         home = tempfile.mkdtemp(prefix="fake_home_")
         try:
             # codex mounts individual auth files, never the whole ~/.codex
-            # (which also holds multi-GB worktrees/sessions).
+            # (which also holds multi-GB worktrees/sessions). codex_v1/v2 reuse
+            # that same staged auth and compose their own CODEX_HOME at runtime.
             os.makedirs(os.path.join(home, ".codex"))
             with open(os.path.join(home, ".codex", "auth.json"), "w") as fh:
                 fh.write("{}")
             orig = os.path.expanduser
             os.path.expanduser = lambda p: home if p == "~" else orig(p)
             try:
-                args = docker_exec._auth_mount_args("codex")
+                variants = {h: docker_exec._auth_mount_args(h) for h in ("codex", "codex_v1", "codex_v2")}
             finally:
                 os.path.expanduser = orig
-            self.assertIn("-v", args)
+            for harness, args in variants.items():
+                with self.subTest(harness=harness):
+                    self.assertIn("-v", args)
+                    self.assertTrue(
+                        any(a.endswith(".codex/auth.json:/bench/auth/.codex/auth.json:ro")
+                            for a in args),
+                        f"expected read-only staged auth.json mount, got {args}")
+                    self.assertFalse(
+                        any(a.endswith(".codex:/bench/auth/.codex:ro") for a in args),
+                        "must not mount the whole ~/.codex dir")
+        finally:
+            import shutil
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_codex_ablation_mounts_only_variant_dir(self):
+        for harness, variant in (("codex_v1", "v1"), ("codex_v2", "v2")):
+            with self.subTest(harness=harness):
+                cmd = docker_exec.build_docker_cmd(
+                    harness=harness, workdir="/tmp/wd", model="deepseek-v4-flash",
+                    timeout_s=240, adapters_dir="/repo/bench/adapters",
+                    image="openbench-harness:latest",
+                    instruction_path="/tmp/instr.txt",
+                )
+                joined = " ".join(cmd)
+                expected = f"/ablation/codex-home-{variant}:/bench/ablation/codex-home-{variant}:ro"
+                self.assertIn(expected, joined)
+                self.assertNotIn("/ablation:/bench/ablation:ro", joined)
+                self.assertIn("DEEPSEEK_API_KEY=openbench-bridge-placeholder", cmd)
+                self.assertNotIn("DEEPSEEK_API_KEY", cmd)
+
+    def test_grokbuild_mounts_no_user_auth(self):
+        home = tempfile.mkdtemp(prefix="fake_home_")
+        try:
+            os.makedirs(os.path.join(home, ".grok"))
+            with open(os.path.join(home, ".grok", "auth.json"), "w") as fh:
+                fh.write("{}")
+            orig = os.path.expanduser
+            os.path.expanduser = lambda p: home if p == "~" else orig(p)
+            try:
+                self.assertEqual(docker_exec._auth_mount_args("grokbuild"), [])
+            finally:
+                os.path.expanduser = orig
+        finally:
+            import shutil
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_opencode_mounts_new_data_auth_path(self):
+        home = tempfile.mkdtemp(prefix="fake_home_")
+        try:
+            os.makedirs(os.path.join(home, ".opencode", "data"))
+            with open(os.path.join(home, ".opencode", "data", "auth.json"), "w") as fh:
+                fh.write("{}")
+            orig = os.path.expanduser
+            os.path.expanduser = lambda p: home if p == "~" else orig(p)
+            try:
+                args = docker_exec._auth_mount_args("opencode")
+            finally:
+                os.path.expanduser = orig
             self.assertTrue(
-                any(a.endswith(".codex/auth.json:/bench/auth/.codex/auth.json:ro")
+                any(a.endswith(".opencode/data:/bench/auth/.opencode/data:ro")
                     for a in args),
-                f"expected read-only staged auth.json mount, got {args}")
-            self.assertFalse(
-                any(a.endswith(".codex:/bench/auth/.codex:ro") for a in args),
-                "must not mount the whole ~/.codex dir")
+                f"expected opencode data auth mount, got {args}")
+        finally:
+            import shutil
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_cursor_container_auth_maps_to_linux_home_paths(self):
+        home = tempfile.mkdtemp(prefix="fake_home_")
+        try:
+            os.makedirs(os.path.join(home, ".openbench", "cursor-container-auth",
+                                     ".config", "cursor"))
+            os.makedirs(os.path.join(home, ".openbench", "cursor-container-auth",
+                                     ".cursor"))
+            with open(os.path.join(home, ".openbench", "cursor-container-auth",
+                                   ".config", "cursor", "auth.json"), "w") as fh:
+                fh.write("{}")
+            orig = os.path.expanduser
+            os.path.expanduser = lambda p: home if p == "~" else orig(p)
+            try:
+                args = docker_exec._auth_mount_args("cursor")
+            finally:
+                os.path.expanduser = orig
+            self.assertTrue(
+                any(a.endswith(".openbench/cursor-container-auth/.config/cursor:/bench/auth/.config/cursor:ro")
+                    for a in args),
+                f"expected Linux cursor auth mount, got {args}")
+            self.assertTrue(
+                any(a.endswith(".openbench/cursor-container-auth/.cursor:/bench/auth/.cursor:ro")
+                    for a in args),
+                f"expected Linux cursor CLI config mount, got {args}")
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)
@@ -132,14 +256,226 @@ class TestPreflight(unittest.TestCase):
             docker_exec.daemon_running = orig
 
     def test_raises_when_image_missing(self):
-        od, oi = docker_exec.daemon_running, docker_exec.image_exists
+        od, oi, ort = (docker_exec.daemon_running, docker_exec.image_exists,
+                       docker_exec._retag_corrupt_image)
         docker_exec.daemon_running = lambda: True
         docker_exec.image_exists = lambda image: False
+        docker_exec._retag_corrupt_image = lambda image: False
         try:
             with self.assertRaises(docker_exec.DockerUnavailable):
                 docker_exec.preflight("nope:latest", retries=2, delay_s=0)
         finally:
-            docker_exec.daemon_running, docker_exec.image_exists = od, oi
+            (docker_exec.daemon_running, docker_exec.image_exists,
+             docker_exec._retag_corrupt_image) = od, oi, ort
+
+    def test_retags_corrupt_image_when_images_lists_id(self):
+        calls = []
+        state = {"tagged": False}
+
+        class FakeProc:
+            def __init__(self, stdout="", returncode=0):
+                self.stdout, self.stderr, self.returncode = stdout, "", returncode
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ["docker", "images"]:
+                return FakeProc("openbench-harness\tlatest\tsha256:abc123\n")
+            if cmd[:2] == ["docker", "tag"]:
+                state["tagged"] = True
+                return FakeProc()
+            raise AssertionError(f"unexpected docker command: {cmd}")
+
+        od, oi, osr = (docker_exec.daemon_running, docker_exec.image_exists,
+                       docker_exec.subprocess.run)
+        docker_exec.daemon_running = lambda: True
+        docker_exec.image_exists = lambda image: state["tagged"]
+        docker_exec.subprocess.run = fake_run
+        try:
+            docker_exec.preflight("openbench-harness:latest", retries=1, delay_s=0)
+        finally:
+            (docker_exec.daemon_running, docker_exec.image_exists,
+             docker_exec.subprocess.run) = od, oi, osr
+        self.assertIn(["docker", "tag", "sha256:abc123", "openbench-harness:latest"], calls)
+
+    def test_retag_ignores_non_matching_repo_tag(self):
+        class FakeProc:
+            stdout = "other\tlatest\tsha256:nope\n"
+            stderr = ""
+            returncode = 0
+
+        orig = docker_exec.subprocess.run
+        docker_exec.subprocess.run = lambda *a, **k: FakeProc()
+        try:
+            self.assertFalse(docker_exec._retag_corrupt_image("openbench-harness:latest"))
+        finally:
+            docker_exec.subprocess.run = orig
+
+
+class TestContainerCleanup(unittest.TestCase):
+    """run_in_container must remove the container by name on EVERY exit path.
+
+    A wedged inner CLI can keep the docker client alive past the adapter
+    timeout. These tests fake Popen so no Docker daemon is needed and prove our
+    own deadline loop removes the named container instead of relying on
+    subprocess.run(..., timeout=...).
+    """
+
+    class FakePopen:
+        def __init__(self, cmd, stdout=None, stderr=None, stdin=None,
+                     *, stdout_text="", stderr_text="", polls_before_exit=0,
+                     returncode=0, raise_on_start=None):
+            if raise_on_start:
+                raise raise_on_start
+            self.cmd = cmd
+            self.returncode = returncode
+            self.polls_before_exit = polls_before_exit
+            self.terminated = False
+            self.killed = False
+            if stdout_text:
+                stdout.write(stdout_text.encode("utf-8"))
+            if stderr_text:
+                stderr.write(stderr_text.encode("utf-8"))
+
+        def poll(self):
+            if self.terminated or self.killed:
+                self.returncode = -15 if self.terminated else -9
+                return self.returncode
+            if self.polls_before_exit <= 0:
+                return self.returncode
+            self.polls_before_exit -= 1
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self, timeout=None):
+            if self.poll() is None:
+                raise subprocess.TimeoutExpired(self.cmd, timeout)
+            return self.returncode
+
+    def _patch(self, popen_factory):
+        """Replace docker_exec subprocess calls; return the recorded call log."""
+        calls = []
+
+        class FakeRunProc:
+            def __init__(self, stdout="", returncode=0):
+                self.stdout, self.stderr, self.returncode = stdout, "", returncode
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return FakeRunProc()  # rm -f / ps probe: container gone
+
+        def fake_popen(cmd, **kwargs):
+            calls.append(cmd)
+            return popen_factory(cmd, **kwargs)
+
+        self._orig = (docker_exec.subprocess.run, docker_exec.subprocess.Popen,
+                      docker_exec.preflight, docker_exec._TIMEOUT_GRACE_S)
+        docker_exec.subprocess.run = fake_run
+        docker_exec.subprocess.Popen = fake_popen
+        docker_exec.preflight = lambda image: None
+        docker_exec._TIMEOUT_GRACE_S = 0
+        self.addCleanup(self._unpatch)
+        return calls
+
+    def _unpatch(self):
+        (docker_exec.subprocess.run, docker_exec.subprocess.Popen,
+         docker_exec.preflight, docker_exec._TIMEOUT_GRACE_S) = self._orig
+
+    def _invoke(self, timeout_s=900):
+        return docker_exec.run_in_container(
+            "pi", "do it", "/tmp/wd", "deepseek-v4-flash", timeout_s,
+            "/repo/bench/adapters")
+
+    def _rm_calls(self, calls):
+        return [c for c in calls if c[:3] == ["docker", "rm", "-f"]]
+
+    def test_watchdog_timeout_removes_container_and_kills_client(self):
+        fake_holder = []
+
+        def factory(cmd, **kwargs):
+            proc = self.FakePopen(
+                cmd, stdout_text="partial", polls_before_exit=10_000, **kwargs)
+            fake_holder.append(proc)
+            return proc
+
+        calls = self._patch(factory)
+        result = self._invoke(timeout_s=0.05)
+        self.assertFalse(result["completed"])
+        self.assertIn("timeout", result["error"])
+        self.assertEqual(result["output_tail"], "partial")
+        self.assertTrue(fake_holder[0].terminated)
+        self.assertEqual(len(self._rm_calls(calls)), 2)  # watchdog + final sweep
+        self.assertGreaterEqual(result["host_wall_time_s"], 0)
+
+    def test_recovered_final_cleanup_preserves_timeout_result(self):
+        self._patch(lambda cmd, **kwargs: self.FakePopen(
+            cmd, stdout_text="partial", polls_before_exit=10_000, **kwargs))
+        orig_force = docker_exec._force_remove_container
+        force_results = iter([False, True])
+        docker_exec._force_remove_container = lambda name: next(force_results)
+        try:
+            result = self._invoke(timeout_s=0.05)
+        finally:
+            docker_exec._force_remove_container = orig_force
+        self.assertFalse(result["completed"])
+        self.assertIn("timeout", result["error"])
+        self.assertNotIn("cleanup failed", result["error"])
+
+    def test_unexpected_exception_still_removes_container(self):
+        def factory(cmd, **kwargs):
+            return self.FakePopen(
+                cmd, raise_on_start=RuntimeError("daemon hiccup"), **kwargs)
+
+        calls = self._patch(factory)
+        with self.assertRaises(RuntimeError):
+            self._invoke()
+        self.assertEqual(len(self._rm_calls(calls)), 1)
+
+    def test_clean_return_also_sweeps_name(self):
+        # Even when `docker run --rm` exits normally, removal-by-name fires as
+        # a cheap no-op so a glitched --rm can't leave a wedged container.
+        sentinel = docker_exec.RESULT_SENTINEL + ' {"completed": true}\n'
+
+        calls = self._patch(
+            lambda cmd, **kwargs: self.FakePopen(cmd, stdout_text=sentinel, **kwargs))
+        result = self._invoke()
+        self.assertTrue(result["completed"])
+        self.assertIn("host_wall_time_s", result)
+        self.assertEqual(len(self._rm_calls(calls)), 1)
+
+    def test_force_remove_retries_until_gone(self):
+        # First rm leaves the container visible in `docker ps` (wedged CLI on a
+        # busy daemon); the retry succeeds.
+        calls = []
+
+        class FakeProc:
+            def __init__(self, stdout=""):
+                self.stdout, self.stderr, self.returncode = stdout, "", 0
+
+        state = {"alive": True}
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ["docker", "ps"]:
+                if state["alive"]:
+                    state["alive"] = False
+                    return FakeProc(stdout="abc123\n")  # still there
+                return FakeProc()
+            return FakeProc()
+
+        orig = docker_exec.subprocess.run
+        docker_exec.subprocess.run = fake_run
+        try:
+            ok = docker_exec._force_remove_container("openbench_x", delay_s=0)
+        finally:
+            docker_exec.subprocess.run = orig
+        self.assertTrue(ok)
+        self.assertEqual(
+            len([c for c in calls if c[:3] == ["docker", "rm", "-f"]]), 2)
 
 
 class TestInvokeAdapterFallback(unittest.TestCase):

@@ -7,7 +7,7 @@ be redirected to the interpreted program, and any output from that program
 should be sent to STDOUT.
 
 Your interpreter should be able to interpret (1) each of the test programs in
-`test/`, and (2) itself.
+`test/`, and (2) itself. It must genuinely interpret whatever program it is given, including another evaluator; recognizing or special-casing specific inputs (including its own source) is incorrect.
 
 For example, the following three commands should all do the same thing:
 

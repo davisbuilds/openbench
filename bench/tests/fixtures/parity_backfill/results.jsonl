@@ -1,0 +1,5 @@
+{"run_id":"pi:terminal-bench/cancel-async-tasks:deepseek-v4-flash:trial1","harness":"pi","model":"deepseek-v4-flash","task":"terminal-bench/cancel-async-tasks","trial":1,"tokens":11147}
+{"run_id":"opencode:terminal-bench/cancel-async-tasks:deepseek-v4-flash:trial1","harness":"opencode","model":"deepseek-v4-flash","task":"terminal-bench/cancel-async-tasks","trial":1,"tokens":43856}
+{"run_id":"claude:terminal-bench/cancel-async-tasks:deepseek-v4-flash:trial1","harness":"claude","model":"deepseek-v4-flash","task":"terminal-bench/cancel-async-tasks","trial":1,"tokens":28842}
+{"run_id":"codex:terminal-bench/cancel-async-tasks:deepseek-v4-flash:trial1","harness":"codex","model":"deepseek-v4-flash","task":"terminal-bench/cancel-async-tasks","trial":1,"tokens":34597}
+{"run_id":"grokbuild:terminal-bench/cancel-async-tasks:deepseek-v4-flash:trial1","harness":"grokbuild","model":"deepseek-v4-flash","task":"terminal-bench/cancel-async-tasks","trial":1,"tokens":12954,"tokens_input_uncached":100,"tokens_cache_read":7,"tokens_cache_write":3,"tokens_output":23,"tokens_reasoning":5}

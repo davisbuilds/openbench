@@ -18,9 +18,11 @@ Notes / quirks:
 - `--format json` emits a JSONL event stream. Each ``step_finish`` event is one
   model round and carries ``part.tokens={input,output,reasoning,cache{...}}``.
   Token accounting (see ``_parse_json``):
-    tokens = sum of input+output+reasoning across step_finish events (fresh
-             tokens actually processed; cache re-reads are excluded so a
-             multi-step run isn't inflated by re-sent context).
+    tokens_input_uncached/cache/output/reasoning are summed across
+    ``step_finish`` records. opencode reports visible output and reasoning as
+    separate fields, so tokens_output is normalized to output+reasoning. The
+    legacy tokens scalar is tokens_input_uncached + tokens_output, with cache
+    reads excluded.
     turns  = number of step_finish events (model rounds; one assistant message
              each).
   Parsing is defensive: on any shape drift it yields tokens=None/turns=None and
@@ -35,15 +37,68 @@ import subprocess
 NAME = "opencode"
 _EXE = "opencode"
 
+
+def _empty_token_usage():
+    return {
+        "tokens_input_uncached": None,
+        "tokens_cache_read": None,
+        "tokens_cache_write": None,
+        "tokens_output": None,
+        "tokens_reasoning": None,
+        "usage_raw": None,
+        "token_basis": None,
+    }
+
+
+def _legacy_tokens(token_usage):
+    # Delegated TOKEN_PARITY contract: keep the legacy scalar as
+    # uncached_input + output. Cache reads and cache writes remain available in
+    # split fields but are intentionally not folded into this compatibility
+    # value.
+    inp = token_usage.get("tokens_input_uncached")
+    out = token_usage.get("tokens_output")
+    if isinstance(inp, int) and isinstance(out, int):
+        return inp + out
+    return None
+
+
+def _num(value):
+    return int(value) if isinstance(value, (int, float)) else None
+
 # canonical model name -> opencode `-m` model string (provider/model)
 MODELS = {
     "gpt-5.5-medium": "openai/gpt-5.5",
+    "gpt-5.6-sol": "openai/gpt-5.6-sol",
+    "gpt-5.6-terra": "openai/gpt-5.6-terra",
+    "gpt-5.6-luna": "openai/gpt-5.6-luna",
+    # Thinking parity for the opus frontier lane: Anthropic's opencode provider
+    # gets the same medium-equivalent request via `--variant medium`.
+    "claude-opus-4-8": "anthropic/claude-opus-4-8",
 }
 
 # canonical model name -> `--variant` reasoning effort
 _VARIANT = {
     "gpt-5.5-medium": "medium",
+    "gpt-5.6-sol": "medium",
+    "gpt-5.6-terra": "medium",
+    "gpt-5.6-luna": "medium",
+    "claude-opus-4-8": "medium",
 }
+
+# opencode's Anthropic OAuth login (`opencode auth login -p anthropic`) writes
+# here on current releases. Older OpenAI subscription paths are still mounted by
+# docker_exec; this guard is only for the new Anthropic frontier route.
+_ANTHROPIC_AUTH = os.path.expanduser("~/.opencode/data/auth.json")
+
+
+def _has_anthropic_oauth():
+    try:
+        with open(_ANTHROPIC_AUTH, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return False
+    text = json.dumps(data).lower()
+    return "anthropic" in text and "oauth" in text
 
 # --- M4 open models (first-party pay-per-token, OpenAI-compatible) ----------
 # Wired via a custom provider passed through OPENCODE_CONFIG_CONTENT (inline
@@ -67,13 +122,15 @@ OPEN_MODELS = {
 def _unsupported(model):
     known = list(MODELS) + list(OPEN_MODELS)
     return {"completed": False, "error": f"unsupported-model: {model!r} (have {known})",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
 
 def _setup_needed(env_key, model):
     return {"completed": False,
             "error": f"SETUP-NEEDED: export {env_key} to use {model}",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
 
 def _open_config_content(spec):
@@ -125,14 +182,17 @@ def _err_tail(exc, limit=2000):
         if x is None:
             return ""
         return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-    return (_dec(exc.stdout) + _dec(exc.stderr))[-limit:]
+    text = _dec(exc.stdout) + _dec(exc.stderr)
+    return text if limit is None else text[-limit:]
 
 
-def _parse_json(stdout):
-    """Parse opencode's JSONL event stream into (tokens, turns, tail).
+def _parse_json_with_usage(stdout):
+    """Parse opencode's JSONL event stream into (tokens, turns, tail, usage).
 
-    tokens/turns are None if nothing parseable is found. tail is a
-    human-readable transcript synthesized from text and tool events.
+    opencode reports visible output and reasoning separately; TOKEN_PARITY.md
+    normalizes ``tokens_output`` to vendor completion tokens by adding them.
+    A vendor-side hidden title/background call is not present in CLI JSONL, so
+    this parser intentionally accounts only for reported ``step_finish`` events.
     """
     events = []
     for line in stdout.splitlines():
@@ -144,21 +204,44 @@ def _parse_json(stdout):
         except json.JSONDecodeError:
             continue
     if not events:
-        return None, None, ""
+        return None, None, "", _empty_token_usage()
 
-    tokens = 0
     turns = 0
     transcript = []
+    token_usage = _empty_token_usage()
+    usage_raw = []
+    invariant_ok = True
+    totals = {
+        "tokens_input_uncached": 0,
+        "tokens_cache_read": 0,
+        "tokens_cache_write": 0,
+        "tokens_output": 0,
+        "tokens_reasoning": 0,
+    }
     for ev in events:
         etype = ev.get("type")
         part = ev.get("part") or {}
         if etype == "step_finish":
             turns += 1
             tok = part.get("tokens") or {}
-            for key in ("input", "output", "reasoning"):
-                val = tok.get(key)
-                if isinstance(val, (int, float)):
-                    tokens += int(val)
+            cache = tok.get("cache") or {}
+            inp = _num(tok.get("input"))
+            visible_out = _num(tok.get("output"))
+            reasoning = _num(tok.get("reasoning"))
+            cache_read = _num(cache.get("read"))
+            cache_write = _num(cache.get("write"))
+            total = _num(tok.get("total"))
+            if None in (inp, visible_out, reasoning, cache_read, cache_write):
+                invariant_ok = False
+                continue
+            if total is None or inp + cache_read + cache_write + visible_out + reasoning != total:
+                invariant_ok = False
+            usage_raw.append(tok)
+            totals["tokens_input_uncached"] += inp
+            totals["tokens_cache_read"] += cache_read
+            totals["tokens_cache_write"] += cache_write
+            totals["tokens_output"] += visible_out + reasoning
+            totals["tokens_reasoning"] += reasoning
         elif etype == "text":
             text = part.get("text")
             if text:
@@ -168,13 +251,29 @@ def _parse_json(stdout):
             if tool:
                 transcript.append(f"[tool: {tool}]")
 
-    tail = "\n".join(transcript)[-2000:]
-    return (tokens or None), (turns or None), tail
+    if usage_raw:
+        token_usage.update(totals)
+        token_usage["usage_raw"] = usage_raw
+        token_usage["token_basis"] = "vendor_split" if invariant_ok else "estimated"
 
+    tail = "\n".join(transcript)[-2000:]
+    return _legacy_tokens(token_usage), (turns or None), tail, token_usage
+
+
+
+def _parse_json(stdout):
+    """Backward-compatible parser returning legacy fields only."""
+    tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
+    return tokens, turns, tail
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     env = dict(os.environ)
     if model in MODELS:
+        if model == "claude-opus-4-8" and not _has_anthropic_oauth():
+            return {"completed": False,
+                    "error": f"SETUP-NEEDED: run `opencode auth login -p anthropic` (missing {_ANTHROPIC_AUTH})",
+                    "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+                    **_empty_token_usage()}
         cmd = [
             "opencode", "run",
             "--dir", workdir,
@@ -185,6 +284,8 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             instruction,
         ]
         env.pop("OPENAI_API_KEY", None)  # force subscription OAuth route
+        if model == "claude-opus-4-8":
+            env.pop("ANTHROPIC_API_KEY", None)  # force Anthropic OAuth route
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
         if not os.environ.get(spec["env_key"]):
@@ -213,21 +314,23 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             env=env,
         )
     except subprocess.TimeoutExpired as e:
-        tail = _err_tail(e)
+        full_output = _err_tail(e, limit=None)
         return {
             "completed": False,
             "error": f"timeout after {timeout_s}s",
-            "output_tail": tail,
+            "output_tail": full_output[-2000:],
+            "full_output": full_output,
             "tokens": None,
             "turns": None,
             "cmd": cmd,
+            **_empty_token_usage(),
         }
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     try:
-        tokens, turns, tail = _parse_json(proc.stdout or "")
+        tokens, turns, tail, token_usage = _parse_json_with_usage(proc.stdout or "")
     except Exception:  # noqa: BLE001 - never let usage parsing break a run
-        tokens, turns, tail = None, None, ""
+        tokens, turns, tail, token_usage = None, None, "", _empty_token_usage()
     if not tail:
         tail = combined[-2000:]
 
@@ -241,4 +344,5 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         "tokens": tokens,
         "turns": turns,
         "cmd": cmd,
+        **token_usage,
     }

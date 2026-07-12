@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2608847919618711
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26748375000897795
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2734855000162497
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28436920896638185
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28226354194339365
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2791813750518486
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2513247079914436
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2640412920154631
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28570545790717006
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25626924994867295
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28026970801874995
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27527870901394635
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2815864580916241
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26642695802729577
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26807370805181563
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26115104102063924
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2680131250526756
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27001854206901044
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28643245808780193
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "25/25 tests passing",
+      "ok": true,
+      "output": "25/25 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2753950000042096
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks/taskflow",
+  "wall_time_s": {
+    "all": {
+      "max": 0.3108421249780804,
+      "median": 0.2770893750130199,
+      "min": 0.2513247079914436
+    },
+    "solution": {
+      "max": 0.28643245808780193,
+      "median": 0.2717520210426301,
+      "min": 0.2513247079914436
+    },
+    "workspace": {
+      "max": 0.3108421249780804,
+      "median": 0.29299691651249304,
+      "min": 0.2723643750650808
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_config.ConfigTest.test_deep_merge_direct",
+      "ok": false,
+      "output": "FAIL test_config.ConfigTest.test_deep_merge_direct\nFAIL test_config.ConfigTest.test_task_retry_override_preserved\nFAIL test_retry.RetryTest.test_should_retry_boundary\nFAIL test_queue.ReadyQueueTest.test_priority_order\nFAIL test_pipelines.PipelineTest.test_retry_succeeds_on_third_attempt\nFAIL test_pipelines.PipelineTest.test_retry_exhausts_to_permanent_failure\nFAIL test_pipelines.PipelineTest.test_retry_unblocks_downstream\nFAIL test_pipelines.PipelineTest.test_priority_dispatch_order\nFAIL test_pipelines.PipelineTest.test_priority_four_way_batch\nFAIL test_pipelines.PipelineTest.test_priority_respected_after_dependency\nFAIL test_pipelines.PipelineTest.test_resource_serialized_run_all_finish\nFAIL test_pipelines.PipelineTest.test_resource_peak_and_completion\nFAIL test_pipelines.PipelineTest.test_transitive_skip_chain\nFAIL test_pipelines.PipelineTest.test_diamond_transitive_skip\nFAIL test_pipelines.PipelineTest.test_history_terminal_events_delivered\nFAIL test_pipelines.PipelineTest.test_history_failed_and_skipped_sets\nFAIL test_pipelines.PipelineTest.test_history_outcome_counts_mixed\nFAIL test_pipelines.PipelineTest.test_full_pipeline_retry_priority_resources\n7/25 tests passing\nSCORE: 0.2800\n",
+      "parsed_score": 0.28,
+      "score": 0.28,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2723643750650808
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_config.ConfigTest.test_deep_merge_direct",
+      "ok": false,
+      "output": "FAIL test_config.ConfigTest.test_deep_merge_direct\nFAIL test_config.ConfigTest.test_task_retry_override_preserved\nFAIL test_retry.RetryTest.test_should_retry_boundary\nFAIL test_queue.ReadyQueueTest.test_priority_order\nFAIL test_pipelines.PipelineTest.test_retry_succeeds_on_third_attempt\nFAIL test_pipelines.PipelineTest.test_retry_exhausts_to_permanent_failure\nFAIL test_pipelines.PipelineTest.test_retry_unblocks_downstream\nFAIL test_pipelines.PipelineTest.test_priority_dispatch_order\nFAIL test_pipelines.PipelineTest.test_priority_four_way_batch\nFAIL test_pipelines.PipelineTest.test_priority_respected_after_dependency\nFAIL test_pipelines.PipelineTest.test_resource_serialized_run_all_finish\nFAIL test_pipelines.PipelineTest.test_resource_peak_and_completion\nFAIL test_pipelines.PipelineTest.test_transitive_skip_chain\nFAIL test_pipelines.PipelineTest.test_diamond_transitive_skip\nFAIL test_pipelines.PipelineTest.test_history_terminal_events_delivered\nFAIL test_pipelines.PipelineTest.test_history_failed_and_skipped_sets\nFAIL test_pipelines.PipelineTest.test_history_outcome_counts_mixed\nFAIL test_pipelines.PipelineTest.test_full_pipeline_retry_priority_resources\n7/25 tests passing\nSCORE: 0.2800\n",
+      "parsed_score": 0.28,
+      "score": 0.28,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.302661083987914
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_config.ConfigTest.test_deep_merge_direct",
+      "ok": false,
+      "output": "FAIL test_config.ConfigTest.test_deep_merge_direct\nFAIL test_config.ConfigTest.test_task_retry_override_preserved\nFAIL test_retry.RetryTest.test_should_retry_boundary\nFAIL test_queue.ReadyQueueTest.test_priority_order\nFAIL test_pipelines.PipelineTest.test_retry_succeeds_on_third_attempt\nFAIL test_pipelines.PipelineTest.test_retry_exhausts_to_permanent_failure\nFAIL test_pipelines.PipelineTest.test_retry_unblocks_downstream\nFAIL test_pipelines.PipelineTest.test_priority_dispatch_order\nFAIL test_pipelines.PipelineTest.test_priority_four_way_batch\nFAIL test_pipelines.PipelineTest.test_priority_respected_after_dependency\nFAIL test_pipelines.PipelineTest.test_resource_serialized_run_all_finish\nFAIL test_pipelines.PipelineTest.test_resource_peak_and_completion\nFAIL test_pipelines.PipelineTest.test_transitive_skip_chain\nFAIL test_pipelines.PipelineTest.test_diamond_transitive_skip\nFAIL test_pipelines.PipelineTest.test_history_terminal_events_delivered\nFAIL test_pipelines.PipelineTest.test_history_failed_and_skipped_sets\nFAIL test_pipelines.PipelineTest.test_history_outcome_counts_mixed\nFAIL test_pipelines.PipelineTest.test_full_pipeline_retry_priority_resources\n7/25 tests passing\nSCORE: 0.2800\n",
+      "parsed_score": 0.28,
+      "score": 0.28,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2947334999917075
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_config.ConfigTest.test_deep_merge_direct",
+      "ok": false,
+      "output": "FAIL test_config.ConfigTest.test_deep_merge_direct\nFAIL test_config.ConfigTest.test_task_retry_override_preserved\nFAIL test_retry.RetryTest.test_should_retry_boundary\nFAIL test_queue.ReadyQueueTest.test_priority_order\nFAIL test_pipelines.PipelineTest.test_retry_succeeds_on_third_attempt\nFAIL test_pipelines.PipelineTest.test_retry_exhausts_to_permanent_failure\nFAIL test_pipelines.PipelineTest.test_retry_unblocks_downstream\nFAIL test_pipelines.PipelineTest.test_priority_dispatch_order\nFAIL test_pipelines.PipelineTest.test_priority_four_way_batch\nFAIL test_pipelines.PipelineTest.test_priority_respected_after_dependency\nFAIL test_pipelines.PipelineTest.test_resource_serialized_run_all_finish\nFAIL test_pipelines.PipelineTest.test_resource_peak_and_completion\nFAIL test_pipelines.PipelineTest.test_transitive_skip_chain\nFAIL test_pipelines.PipelineTest.test_diamond_transitive_skip\nFAIL test_pipelines.PipelineTest.test_history_terminal_events_delivered\nFAIL test_pipelines.PipelineTest.test_history_failed_and_skipped_sets\nFAIL test_pipelines.PipelineTest.test_history_outcome_counts_mixed\nFAIL test_pipelines.PipelineTest.test_full_pipeline_retry_priority_resources\n7/25 tests passing\nSCORE: 0.2800\n",
+      "parsed_score": 0.28,
+      "score": 0.28,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2787837500218302
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_config.ConfigTest.test_deep_merge_direct",
+      "ok": false,
+      "output": "FAIL test_config.ConfigTest.test_deep_merge_direct\nFAIL test_config.ConfigTest.test_task_retry_override_preserved\nFAIL test_retry.RetryTest.test_should_retry_boundary\nFAIL test_queue.ReadyQueueTest.test_priority_order\nFAIL test_pipelines.PipelineTest.test_retry_succeeds_on_third_attempt\nFAIL test_pipelines.PipelineTest.test_retry_exhausts_to_permanent_failure\nFAIL test_pipelines.PipelineTest.test_retry_unblocks_downstream\nFAIL test_pipelines.PipelineTest.test_priority_dispatch_order\nFAIL test_pipelines.PipelineTest.test_priority_four_way_batch\nFAIL test_pipelines.PipelineTest.test_priority_respected_after_dependency\nFAIL test_pipelines.PipelineTest.test_resource_serialized_run_all_finish\nFAIL test_pipelines.PipelineTest.test_resource_peak_and_completion\nFAIL test_pipelines.PipelineTest.test_transitive_skip_chain\nFAIL test_pipelines.PipelineTest.test_diamond_transitive_skip\nFAIL test_pipelines.PipelineTest.test_history_terminal_events_delivered\nFAIL test_pipelines.PipelineTest.test_history_failed_and_skipped_sets\nFAIL test_pipelines.PipelineTest.test_history_outcome_counts_mixed\nFAIL test_pipelines.PipelineTest.test_full_pipeline_retry_priority_resources\n7/25 tests passing\nSCORE: 0.2800\n",
+      "parsed_score": 0.28,
+      "score": 0.28,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27460649993736297
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_config.ConfigTest.test_deep_merge_direct",
+      "ok": false,
+      "output": "FAIL test_config.ConfigTest.test_deep_merge_direct\nFAIL test_config.ConfigTest.test_task_retry_override_preserved\nFAIL test_retry.RetryTest.test_should_retry_boundary\nFAIL test_queue.ReadyQueueTest.test_priority_order\nFAIL test_pipelines.PipelineTest.test_retry_succeeds_on_third_attempt\nFAIL test_pipelines.PipelineTest.test_retry_exhausts_to_permanent_failure\nFAIL test_pipelines.PipelineTest.test_retry_unblocks_downstream\nFAIL test_pipelines.PipelineTest.test_priority_dispatch_order\nFAIL test_pipelines.PipelineTest.test_priority_four_way_batch\nFAIL test_pipelines.PipelineTest.test_priority_respected_after_dependency\nFAIL test_pipelines.PipelineTest.test_resource_serialized_run_all_finish\nFAIL test_pipelines.PipelineTest.test_resource_peak_and_completion\nFAIL test_pipelines.PipelineTest.test_transitive_skip_chain\nFAIL test_pipelines.PipelineTest.test_diamond_transitive_skip\nFAIL test_pipelines.PipelineTest.test_history_terminal_events_delivered\nFAIL test_pipelines.PipelineTest.test_history_failed_and_skipped_sets\nFAIL test_pipelines.PipelineTest.test_history_outcome_counts_mixed\nFAIL test_pipelines.PipelineTest.test_full_pipeline_retry_priority_resources\n7/25 tests passing\nSCORE: 0.2800\n",
+      "parsed_score": 0.28,
+      "score": 0.28,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3014372910838574
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_config.ConfigTest.test_deep_merge_direct",
+      "ok": false,
+      "output": "FAIL test_config.ConfigTest.test_deep_merge_direct\nFAIL test_config.ConfigTest.test_task_retry_override_preserved\nFAIL test_retry.RetryTest.test_should_retry_boundary\nFAIL test_queue.ReadyQueueTest.test_priority_order\nFAIL test_pipelines.PipelineTest.test_retry_succeeds_on_third_attempt\nFAIL test_pipelines.PipelineTest.test_retry_exhausts_to_permanent_failure\nFAIL test_pipelines.PipelineTest.test_retry_unblocks_downstream\nFAIL test_pipelines.PipelineTest.test_priority_dispatch_order\nFAIL test_pipelines.PipelineTest.test_priority_four_way_batch\nFAIL test_pipelines.PipelineTest.test_priority_respected_after_dependency\nFAIL test_pipelines.PipelineTest.test_resource_serialized_run_all_finish\nFAIL test_pipelines.PipelineTest.test_resource_peak_and_completion\nFAIL test_pipelines.PipelineTest.test_transitive_skip_chain\nFAIL test_pipelines.PipelineTest.test_diamond_transitive_skip\nFAIL test_pipelines.PipelineTest.test_history_terminal_events_delivered\nFAIL test_pipelines.PipelineTest.test_history_failed_and_skipped_sets\nFAIL test_pipelines.PipelineTest.test_history_outcome_counts_mixed\nFAIL test_pipelines.PipelineTest.test_full_pipeline_retry_priority_resources\n7/25 tests passing\nSCORE: 0.2800\n",
+      "parsed_score": 0.28,
+      "score": 0.28,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2799077919917181
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_config.ConfigTest.test_deep_merge_direct",
+      "ok": false,
+      "output": "FAIL test_config.ConfigTest.test_deep_merge_direct\nFAIL test_config.ConfigTest.test_task_retry_override_preserved\nFAIL test_retry.RetryTest.test_should_retry_boundary\nFAIL test_queue.ReadyQueueTest.test_priority_order\nFAIL test_pipelines.PipelineTest.test_retry_succeeds_on_third_attempt\nFAIL test_pipelines.PipelineTest.test_retry_exhausts_to_permanent_failure\nFAIL test_pipelines.PipelineTest.test_retry_unblocks_downstream\nFAIL test_pipelines.PipelineTest.test_priority_dispatch_order\nFAIL test_pipelines.PipelineTest.test_priority_four_way_batch\nFAIL test_pipelines.PipelineTest.test_priority_respected_after_dependency\nFAIL test_pipelines.PipelineTest.test_resource_serialized_run_all_finish\nFAIL test_pipelines.PipelineTest.test_resource_peak_and_completion\nFAIL test_pipelines.PipelineTest.test_transitive_skip_chain\nFAIL test_pipelines.PipelineTest.test_diamond_transitive_skip\nFAIL test_pipelines.PipelineTest.test_history_terminal_events_delivered\nFAIL test_pipelines.PipelineTest.test_history_failed_and_skipped_sets\nFAIL test_pipelines.PipelineTest.test_history_outcome_counts_mixed\nFAIL test_pipelines.PipelineTest.test_full_pipeline_retry_priority_resources\n7/25 tests passing\nSCORE: 0.2800\n",
+      "parsed_score": 0.28,
+      "score": 0.28,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2912603330332786
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_config.ConfigTest.test_deep_merge_direct",
+      "ok": false,
+      "output": "FAIL test_config.ConfigTest.test_deep_merge_direct\nFAIL test_config.ConfigTest.test_task_retry_override_preserved\nFAIL test_retry.RetryTest.test_should_retry_boundary\nFAIL test_queue.ReadyQueueTest.test_priority_order\nFAIL test_pipelines.PipelineTest.test_retry_succeeds_on_third_attempt\nFAIL test_pipelines.PipelineTest.test_retry_exhausts_to_permanent_failure\nFAIL test_pipelines.PipelineTest.test_retry_unblocks_downstream\nFAIL test_pipelines.PipelineTest.test_priority_dispatch_order\nFAIL test_pipelines.PipelineTest.test_priority_four_way_batch\nFAIL test_pipelines.PipelineTest.test_priority_respected_after_dependency\nFAIL test_pipelines.PipelineTest.test_resource_serialized_run_all_finish\nFAIL test_pipelines.PipelineTest.test_resource_peak_and_completion\nFAIL test_pipelines.PipelineTest.test_transitive_skip_chain\nFAIL test_pipelines.PipelineTest.test_diamond_transitive_skip\nFAIL test_pipelines.PipelineTest.test_history_terminal_events_delivered\nFAIL test_pipelines.PipelineTest.test_history_failed_and_skipped_sets\nFAIL test_pipelines.PipelineTest.test_history_outcome_counts_mixed\nFAIL test_pipelines.PipelineTest.test_full_pipeline_retry_priority_resources\n7/25 tests passing\nSCORE: 0.2800\n",
+      "parsed_score": 0.28,
+      "score": 0.28,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3108421249780804
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_config.ConfigTest.test_deep_merge_direct",
+      "ok": false,
+      "output": "FAIL test_config.ConfigTest.test_deep_merge_direct\nFAIL test_config.ConfigTest.test_task_retry_override_preserved\nFAIL test_retry.RetryTest.test_should_retry_boundary\nFAIL test_queue.ReadyQueueTest.test_priority_order\nFAIL test_pipelines.PipelineTest.test_retry_succeeds_on_third_attempt\nFAIL test_pipelines.PipelineTest.test_retry_exhausts_to_permanent_failure\nFAIL test_pipelines.PipelineTest.test_retry_unblocks_downstream\nFAIL test_pipelines.PipelineTest.test_priority_dispatch_order\nFAIL test_pipelines.PipelineTest.test_priority_four_way_batch\nFAIL test_pipelines.PipelineTest.test_priority_respected_after_dependency\nFAIL test_pipelines.PipelineTest.test_resource_serialized_run_all_finish\nFAIL test_pipelines.PipelineTest.test_resource_peak_and_completion\nFAIL test_pipelines.PipelineTest.test_transitive_skip_chain\nFAIL test_pipelines.PipelineTest.test_diamond_transitive_skip\nFAIL test_pipelines.PipelineTest.test_history_terminal_events_delivered\nFAIL test_pipelines.PipelineTest.test_history_failed_and_skipped_sets\nFAIL test_pipelines.PipelineTest.test_history_outcome_counts_mixed\nFAIL test_pipelines.PipelineTest.test_full_pipeline_retry_priority_resources\n7/25 tests passing\nSCORE: 0.2800\n",
+      "parsed_score": 0.28,
+      "score": 0.28,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3090449169976637
+    }
+  ]
+}

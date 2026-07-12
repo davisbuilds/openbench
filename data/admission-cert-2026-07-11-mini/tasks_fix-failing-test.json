@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2325655419845134
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24099954101257026
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23670233390294015
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22340300003997982
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23952662490773946
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2295484159840271
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2351065840339288
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2644267500145361
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22217904205899686
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2313127500237897
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24014216603245586
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22196512494701892
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2398923330474645
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2595210000872612
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2391498750075698
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2440900841029361
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.257741125067696
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2236366249853745
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22503500001039356
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "test_add (test_calculator.TestCalculator.test_add) ... ok",
+      "ok": true,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22009891597554088
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks/fix-failing-test",
+  "wall_time_s": {
+    "all": {
+      "max": 0.2955672499956563,
+      "median": 0.23933824995765463,
+      "min": 0.22009891597554088
+    },
+    "solution": {
+      "max": 0.2644267500145361,
+      "median": 0.23590445896843448,
+      "min": 0.22009891597554088
+    },
+    "workspace": {
+      "max": 0.2955672499956563,
+      "median": 0.24738518748199567,
+      "min": 0.22826300002634525
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "test_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL",
+      "ok": false,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL\n\n======================================================================\nFAIL: test_subtract (test_calculator.TestCalculator.test_subtract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/test_calculator.py\", line 11, in test_subtract\n    self.assertEqual(subtract(5, 3), 2)\nAssertionError: 8 != 2\n\n----------------------------------------------------------------------\nRan 4 tests in 0.001s\n\nFAILED (failures=1)\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24906904203817248
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "test_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL",
+      "ok": false,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL\n\n======================================================================\nFAIL: test_subtract (test_calculator.TestCalculator.test_subtract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/test_calculator.py\", line 11, in test_subtract\n    self.assertEqual(subtract(5, 3), 2)\nAssertionError: 8 != 2\n\n----------------------------------------------------------------------\nRan 4 tests in 0.001s\n\nFAILED (failures=1)\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2562902090139687
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "test_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL",
+      "ok": false,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL\n\n======================================================================\nFAIL: test_subtract (test_calculator.TestCalculator.test_subtract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/test_calculator.py\", line 11, in test_subtract\n    self.assertEqual(subtract(5, 3), 2)\nAssertionError: 8 != 2\n\n----------------------------------------------------------------------\nRan 4 tests in 0.001s\n\nFAILED (failures=1)\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23011883301660419
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "test_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL",
+      "ok": false,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL\n\n======================================================================\nFAIL: test_subtract (test_calculator.TestCalculator.test_subtract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/test_calculator.py\", line 11, in test_subtract\n    self.assertEqual(subtract(5, 3), 2)\nAssertionError: 8 != 2\n\n----------------------------------------------------------------------\nRan 4 tests in 0.001s\n\nFAILED (failures=1)\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22826300002634525
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "test_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL",
+      "ok": false,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL\n\n======================================================================\nFAIL: test_subtract (test_calculator.TestCalculator.test_subtract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/test_calculator.py\", line 11, in test_subtract\n    self.assertEqual(subtract(5, 3), 2)\nAssertionError: 8 != 2\n\n----------------------------------------------------------------------\nRan 4 tests in 0.001s\n\nFAILED (failures=1)\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24749116599559784
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "test_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL",
+      "ok": false,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL\n\n======================================================================\nFAIL: test_subtract (test_calculator.TestCalculator.test_subtract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/test_calculator.py\", line 11, in test_subtract\n    self.assertEqual(subtract(5, 3), 2)\nAssertionError: 8 != 2\n\n----------------------------------------------------------------------\nRan 4 tests in 0.001s\n\nFAILED (failures=1)\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23315612494479865
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "test_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL",
+      "ok": false,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL\n\n======================================================================\nFAIL: test_subtract (test_calculator.TestCalculator.test_subtract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/test_calculator.py\", line 11, in test_subtract\n    self.assertEqual(subtract(5, 3), 2)\nAssertionError: 8 != 2\n\n----------------------------------------------------------------------\nRan 4 tests in 0.001s\n\nFAILED (failures=1)\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2472792089683935
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "test_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL",
+      "ok": false,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL\n\n======================================================================\nFAIL: test_subtract (test_calculator.TestCalculator.test_subtract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/test_calculator.py\", line 11, in test_subtract\n    self.assertEqual(subtract(5, 3), 2)\nAssertionError: 8 != 2\n\n----------------------------------------------------------------------\nRan 4 tests in 0.001s\n\nFAILED (failures=1)\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2955672499956563
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "test_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL",
+      "ok": false,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL\n\n======================================================================\nFAIL: test_subtract (test_calculator.TestCalculator.test_subtract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/test_calculator.py\", line 11, in test_subtract\n    self.assertEqual(subtract(5, 3), 2)\nAssertionError: 8 != 2\n\n----------------------------------------------------------------------\nRan 4 tests in 0.001s\n\nFAILED (failures=1)\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24613095808308572
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "test_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL",
+      "ok": false,
+      "output": "test_add (test_calculator.TestCalculator.test_add) ... ok\ntest_divide (test_calculator.TestCalculator.test_divide) ... ok\ntest_multiply (test_calculator.TestCalculator.test_multiply) ... ok\ntest_subtract (test_calculator.TestCalculator.test_subtract) ... FAIL\n\n======================================================================\nFAIL: test_subtract (test_calculator.TestCalculator.test_subtract)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/test_calculator.py\", line 11, in test_subtract\n    self.assertEqual(subtract(5, 3), 2)\nAssertionError: 8 != 2\n\n----------------------------------------------------------------------\nRan 4 tests in 0.001s\n\nFAILED (failures=1)\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2486625830642879
+    }
+  ]
+}

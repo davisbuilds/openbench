@@ -58,6 +58,18 @@ import tempfile
 NAME = "devin"
 _EXE = "devin"
 
+
+def _empty_token_usage():
+    return {
+        "tokens_input_uncached": None,
+        "tokens_cache_read": None,
+        "tokens_cache_write": None,
+        "tokens_output": None,
+        "tokens_reasoning": None,
+        "usage_raw": None,
+        "token_basis": None,
+    }
+
 # canonical model name -> devin `--model` string.
 # devin has no CLI reasoning-effort selector; the canonical medium pin collapses
 # to plain "gpt-5.5" (the dashed "gpt-5-5-medium" is a TUI-config id, not a valid
@@ -98,19 +110,21 @@ def _err_tail(exc, limit=2000):
         if x is None:
             return ""
         return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-    return (_dec(exc.stdout) + _dec(exc.stderr))[-limit:]
+    text = _dec(exc.stdout) + _dec(exc.stderr)
+    return text if limit is None else text[-limit:]
 
 
-def _parse_export(path):
-    """Parse devin's --export JSON into (tokens, turns).
+def _parse_export_with_usage(path):
+    """Parse devin's --export JSON into (tokens, turns, token_usage).
 
-    Returns (None, None) if the file is missing or the shape drifts.
+    Devin lacks a verified split surface. Preserve the legacy estimated scalar
+    and leave normalized split lanes unknown per TOKEN_PARITY.md.
     """
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, json.JSONDecodeError):
-        return None, None
+        return None, None, _empty_token_usage()
 
     fm = data.get("final_metrics") or {}
     prompt = fm.get("total_prompt_tokens")
@@ -138,9 +152,20 @@ def _parse_export(path):
             # the module docstring.
             tokens = last_prompt + completion
 
-    turns = len(model_steps) or None
-    return tokens, turns
+    token_usage = _empty_token_usage()
+    if tokens is not None:
+        token_usage["usage_raw"] = fm
+        token_usage["token_basis"] = "estimated"
 
+    turns = len(model_steps) or None
+    return tokens, turns, token_usage
+
+
+
+def _parse_export(stdout):
+    """Backward-compatible parser returning legacy fields only."""
+    tokens, turns, token_usage = _parse_export_with_usage(stdout)
+    return tokens, turns
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model not in MODELS:
@@ -151,6 +176,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "tokens": None,
             "turns": None,
             "cmd": None,
+            **_empty_token_usage(),
         }
 
     # Export goes to an absolute temp path OUTSIDE workdir so it never pollutes
@@ -184,21 +210,23 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired as e:
-            tail = _err_tail(e)
+            full_output = _err_tail(e, limit=None)
             return {
                 "completed": False,
                 "error": f"timeout after {timeout_s}s",
-                "output_tail": tail,
+                "output_tail": full_output[-2000:],
+                "full_output": full_output,
                 "tokens": None,
                 "turns": None,
                 "cmd": cmd,
+                **_empty_token_usage(),
             }
 
         combined = (proc.stdout or "") + (proc.stderr or "")
         try:
-            tokens, turns = _parse_export(export_path)
+            tokens, turns, token_usage = _parse_export_with_usage(export_path)
         except Exception:  # noqa: BLE001 - never let usage parsing break a run
-            tokens, turns = None, None
+            tokens, turns, token_usage = None, None, _empty_token_usage()
 
         return {
             "completed": proc.returncode == 0,
@@ -210,6 +238,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "tokens": tokens,
             "turns": turns,
             "cmd": cmd,
+            **token_usage,
         }
     finally:
         try:

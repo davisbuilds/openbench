@@ -1,0 +1,5 @@
+{"ts":"2026-07-08T00:00:01.000Z","src":"shell","pid":1,"lvl":"info","sid":"multi-turn-probe","msg":"shell.turn.inference_done","ctx":{"prompt_tokens":9392,"cached_prompt_tokens":8192,"completion_tokens":118,"reasoning_tokens":40}}
+{"ts":"2026-07-08T00:00:02.000Z","src":"shell","pid":1,"lvl":"info","sid":"multi-turn-probe","msg":"shell.turn.inference_done","ctx":{"prompt_tokens":9527,"cached_prompt_tokens":9472,"completion_tokens":80,"reasoning_tokens":10}}
+{"ts":"2026-07-08T00:00:03.000Z","src":"shell","pid":1,"lvl":"info","sid":"multi-turn-probe","msg":"shell.turn.inference_done","ctx":{"prompt_tokens":9626,"cached_prompt_tokens":9600,"completion_tokens":91,"reasoning_tokens":13}}
+{"ts":"2026-07-08T00:00:04.000Z","src":"shell","pid":1,"lvl":"info","sid":"multi-turn-probe","msg":"shell.turn.inference_done","ctx":{"prompt_tokens":9734,"cached_prompt_tokens":9600,"completion_tokens":78,"reasoning_tokens":11}}
+{"ts":"2026-07-08T00:00:05.000Z","src":"shell","pid":1,"lvl":"info","sid":"multi-turn-probe","msg":"shell.turn.inference_done","ctx":{"prompt_tokens":9835,"cached_prompt_tokens":9728,"completion_tokens":9,"reasoning_tokens":6}}

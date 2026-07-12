@@ -19,10 +19,15 @@
 - `checker.sh` + `checker_data/run_checks.py`: a pure-stdlib re-implementation of
   the upstream `tests/test_outputs.py`. It runs each program directly through
   the reference interpreter and through the agent's `eval.scm` (and, for
-  `05-simple*`, `calculator.scm`, `closures.scm`, through `eval.scm`
-  interpreting `eval.scm`) and requires identical output. pytest is not used.
-  Per-run timeouts were raised (direct 15 s, via-eval 90 s) to absorb the
-  slower minimal-image CPU.
+  `05-simple*`, `calculator.scm`, `closures.scm`, through a deterministic
+  checker-scratch mutation of `eval.scm` interpreting the target program) and
+  requires identical output. The nested evaluator source is parsed with the
+  checker-owned `interp_ref.py` reader, re-rendered in normalized form, and
+  extended with fresh unreferenced top-level definitions. This 2026-07-12
+  hardening blocks the observed self-host collapse hack where solutions
+  recognize their own source text/structure and pass through without genuinely
+  interpreting the evaluator. pytest is not used. Per-run timeouts were raised
+  (direct 15 s, via-eval 90 s) to absorb the slower minimal-image CPU.
 - **Checker-owned oracle**: grading uses `checker_data/interp_ref.py` and the
   test programs under `checker_data/{test,shadow_test}/` (read-only task dir) —
   never the agent-editable workspace copies. The only workspace artifact the
@@ -31,3 +36,6 @@
   agent's own iteration.
 - `solution/eval.scm`: the reference evaluator extracted verbatim from the
   upstream `solution.sh`.
+- `checker_data/tests/cheat_eval.scm`: non-agent fixture documenting the
+  2026-07-12 self-host source-recognition collapse hack; it passed the old
+  self-host checker and is rejected by the mutated self-host lane.

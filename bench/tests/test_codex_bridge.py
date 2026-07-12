@@ -91,12 +91,15 @@ class TestBridgeGating(unittest.TestCase):
 
     def test_missing_env_key_is_setup_needed(self):
         saved = os.environ.pop("DEEPSEEK_API_KEY", None)
+        old_keys = self.codex._KEYS_ENV
+        self.codex._KEYS_ENV = "/definitely/missing/openbench-keys.env"
         try:
             res = self.codex.run("hi", "/tmp", "deepseek-v4-flash", 5)
             self.assertFalse(res["completed"])
             self.assertIn("SETUP-NEEDED", res["error"])
             self.assertIn("DEEPSEEK_API_KEY", res["error"])
         finally:
+            self.codex._KEYS_ENV = old_keys
             if saved is not None:
                 os.environ["DEEPSEEK_API_KEY"] = saved
 
@@ -184,7 +187,7 @@ class TestToolSanitize(unittest.TestCase):
         self.assertTrue(self.h._is_zai_route("glm-4.7-flash"))
         self.assertFalse(self.h._is_zai_route("deepseek-v4-flash"))
         self.assertFalse(self.h._is_zai_route(None))
-        for model in ("glm-5.2", "glm-4.7-flash", "deepseek-v4-flash", "kimi-k2.7-code"):
+        for model in ("claude-opus-4-8", "glm-5.2", "glm-4.7-flash", "deepseek-v4-flash", "kimi-k2.7-code"):
             self.assertTrue(self.h._is_chat_vendor_route(model))
         self.assertFalse(self.h._is_chat_vendor_route("gpt-5.4"))
 

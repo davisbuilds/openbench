@@ -26,12 +26,15 @@ stdlib only.
 
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 import time
 import uuid
+from types import SimpleNamespace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(HERE)
 ENTRY_PATH = os.path.join(HERE, "entry.py")
 DOCKERFILE_DIR = os.path.join(HERE, "docker")
 RESULT_SENTINEL = "__BENCH_RESULT__"
@@ -40,6 +43,8 @@ DEFAULT_IMAGE = "openbench-harness:latest"
 # Extra host-side wall-clock grace beyond the adapter's own timeout before we
 # hard-kill the container.
 _TIMEOUT_GRACE_S = 60
+_DOCKER_CLIENT_POLL_INTERVAL_S = 0.2
+_DOCKER_CLIENT_KILL_GRACE_S = 5
 
 # Per-harness auth surfaces, as $HOME-relative paths. Only those that exist on
 # the host are mounted READ-ONLY into a staging dir; entry.py then copies them
@@ -52,23 +57,100 @@ AUTH_MOUNTS = {
     # codex: mount ONLY the auth/config files. ~/.codex also holds worktrees,
     # sessions, and sqlite logs (54 GB observed); mounting the whole dir made
     # entry.py's staging copy run for 13+ minutes and crash on transient
-    # session tmp files vanishing mid-copy.
+    # session tmp files vanishing mid-copy. codex_v1/v2 compose a fresh runtime
+    # CODEX_HOME in the adapter and reuse this same staged auth surface.
     "codex": [".codex/auth.json", ".codex/config.toml"],
+    "codex_v1": [".codex/auth.json", ".codex/config.toml"],
+    "codex_v2": [".codex/auth.json", ".codex/config.toml"],
     "pi": [".pi"],
-    "opencode": [".local/share/opencode", ".config/opencode"],
-    "cursor": [".cursor"],
+    "opencode": [".local/share/opencode", ".config/opencode", ".opencode/data"],
+    # Cursor Linux/container auth: `bench/cursor_container_login.sh` mints auth
+    # under ~/.openbench/cursor-container-auth, laid out as a HOME subtree. Map
+    # those host paths back to Linux cursor-agent's HOME paths in the container;
+    # legacy ~/.cursor remains a fallback if no container-auth .cursor exists.
+    "cursor": [
+        (".openbench/cursor-container-auth/.config/cursor", ".config/cursor"),
+        (".openbench/cursor-container-auth/.cursor", ".cursor"),
+        ".cursor",
+    ],
     "devin": [".config/devin"],
-    # claude runs OPEN models only (vendor keys via env, forwarded below). Mount
-    # NOTHING: never expose ~/.claude so a container run can't touch the user's
-    # Anthropic subscription. The API key is passed via API_KEY_PASSTHROUGH.
+    # claude uses API keys only (open-model vendor keys or first-party
+    # ANTHROPIC_API_KEY, forwarded below). Mount NOTHING: never expose ~/.claude
+    # so a container run can't touch the user's Claude Code OAuth subscription.
     "claude": [],
+    # grokbuild uses BYOK custom models with vendor env keys only. Probe showed
+    # no ~/.grok/auth.json is needed for BYOK; do not mount user Grok OAuth.
+    "grokbuild": [],
     "null": [],
 }
 
 # Open-model API keys forwarded into the container when set on the host.
 # Passed as bare ``-e VAR`` (no value) so docker reads them from the client's
 # environment and the secret never appears in argv or logged commands.
-API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY")
+API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "ANTHROPIC_API_KEY", "CURSOR_API_KEY")
+
+_MODEL_API_KEY = {
+    "glm-5.2": "ZAI_API_KEY",
+    "glm-4.7-flash": "ZAI_API_KEY",
+    "deepseek-v4-flash": "DEEPSEEK_API_KEY",
+    "kimi-k2.7-code": "MOONSHOT_API_KEY",
+}
+_KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")
+
+
+def _keys_env_has(var):
+    """True when ~/.openbench/keys.env defines var (without exposing value)."""
+    try:
+        with open(_KEYS_ENV, encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                try:
+                    parts = shlex.split(line, comments=True, posix=True)
+                    first = parts[1] if parts and parts[0] == "export" and len(parts) > 1 else parts[0]
+                    key, val = first.split("=", 1)
+                except (ValueError, IndexError):
+                    key, val = line.split("=", 1)[0].strip(), line.split("=", 1)[1].strip()
+                if key == var and val.strip():
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _host_has_key(var):
+    return bool(os.environ.get(var) or _keys_env_has(var))
+
+
+def _api_key_passthrough(harness, model):
+    """Secret env vars needed by this exact docker cell.
+
+    Keep pass-through scoped: agents can run shell tools, so forwarding Cursor or
+    Anthropic keys into unrelated harness containers would expose credentials in
+    the wrong trust boundary. Codex bridge runs get placeholders instead; the
+    real upstream keys stay only in the host-side LiteLLM bridge process.
+    """
+    needed = set()
+    if harness == "cursor":
+        needed.add("CURSOR_API_KEY")
+    if model == "claude-opus-4-8" and harness == "claude":
+        needed.add("ANTHROPIC_API_KEY")
+    vendor_key = _MODEL_API_KEY.get(model)
+    if vendor_key and harness in {"pi", "opencode", "claude", "grokbuild"}:
+        needed.add(vendor_key)
+    return tuple(var for var in API_KEY_PASSTHROUGH if var in needed)
+
+
+def _placeholder_env(harness, model):
+    """Non-secret env assignments needed by CLIs for bridge ingress only."""
+    if harness not in {"codex", "codex_v1", "codex_v2"}:
+        return ()
+    if model == "claude-opus-4-8":
+        var = "ANTHROPIC_API_KEY"
+    else:
+        var = _MODEL_API_KEY.get(model)
+    return (f"{var}=openbench-bridge-placeholder",) if var and _host_has_key(var) else ()
 
 
 class DockerUnavailable(Exception):
@@ -99,6 +181,51 @@ def image_exists(image):
     return proc.returncode == 0
 
 
+def _split_image(image):
+    """Return (repository, tag) for a Docker image ref used by this runner."""
+    last = image.rsplit("/", 1)[-1]
+    if ":" in last:
+        return image.rsplit(":", 1)
+    return image, "latest"
+
+
+def _retag_corrupt_image(image):
+    """Repair a corrupted tag when `docker images` can still see its image ID.
+
+    Observed failure: `docker image inspect openbench-harness:latest` says the
+    tag is missing/corrupt, while `docker images` still lists the repository/tag
+    with an image ID. Re-tagging that ID restores inspect/run. Returns True when
+    a re-tag was attempted and inspect succeeds afterwards.
+    """
+    repo, tag = _split_image(image)
+    try:
+        proc = subprocess.run(
+            ["docker", "images", "--format", "{{.Repository}}\t{{.Tag}}\t{{.ID}}"],
+            capture_output=True, text=True, timeout=20,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    if proc.returncode != 0:
+        return False
+    image_id = None
+    for line in (proc.stdout or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 3 and parts[0] == repo and parts[1] == tag and parts[2]:
+            image_id = parts[2]
+            break
+    if not image_id:
+        return False
+    print(f"WARN docker image tag {image!r} failed inspect; re-tagging {image_id} as {image}")
+    try:
+        tag_proc = subprocess.run(
+            ["docker", "tag", image_id, image],
+            capture_output=True, text=True, timeout=20,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return tag_proc.returncode == 0 and image_exists(image)
+
+
 def preflight(image, retries=3, delay_s=5):
     """Raise ``DockerUnavailable`` with a specific reason if we can't run in docker.
 
@@ -108,7 +235,8 @@ def preflight(image, retries=3, delay_s=5):
     a 15-cell segment burned every cell in ~7s on a paused engine).
     """
     for attempt in range(retries):
-        if daemon_running() and image_exists(image):
+        daemon_ok = daemon_running()
+        if daemon_ok and (image_exists(image) or _retag_corrupt_image(image)):
             return
         if attempt < retries - 1:
             time.sleep(delay_s)
@@ -120,6 +248,115 @@ def preflight(image, retries=3, delay_s=5):
         f"docker build -t {image} {DOCKERFILE_DIR})")
 
 
+def _force_remove_container(name, attempts=3, delay_s=2):
+    """Force-remove a container and VERIFY it is gone; retry if not.
+
+    A wedged inner CLI (holding the container's stdout pipe past the adapter
+    timeout) has been observed to survive a single ``docker rm -f`` on a busy
+    daemon, so removal is verified with ``docker ps -a`` and retried. Returns
+    True once the container no longer exists (including "was never created").
+    """
+    for attempt in range(attempts):
+        try:
+            subprocess.run(["docker", "rm", "-f", name],
+                           capture_output=True, text=True, timeout=30)
+            probe = subprocess.run(
+                ["docker", "ps", "-aq", "--filter", f"name=^{name}$"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if probe.returncode == 0 and not probe.stdout.strip():
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        if attempt < attempts - 1:
+            time.sleep(delay_s)
+    return False
+
+
+def _read_tempfile_text(fh):
+    """Return all bytes currently captured in a temp file as replacement text."""
+    fh.flush()
+    fh.seek(0)
+    return fh.read().decode("utf-8", errors="replace")
+
+
+def _stop_process(proc, terminate_grace_s=_DOCKER_CLIENT_KILL_GRACE_S):
+    """Best-effort stop for a still-running docker client process."""
+    if proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=terminate_grace_s)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=terminate_grace_s)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _run_docker_client_with_deadline(cmd, container_name, host_timeout_s,
+                                     poll_interval_s=_DOCKER_CLIENT_POLL_INTERVAL_S):
+    """Run ``docker run`` without trusting ``Popen.communicate(timeout=...)``.
+
+    ``subprocess.run(..., capture_output=True, timeout=...)`` enforces its
+    deadline from inside ``communicate()``, while the observed wedge had the
+    runner parked in ``select.poll`` there for far longer than the requested
+    timeout. This helper avoids that path entirely: stdout/stderr are redirected
+    to temp files, and a simple host loop polls the docker client while checking
+    both a monotonic deadline and a real wall-clock deadline. On expiry it first
+    force-removes the named container (the only reliable way to stop a live
+    ``docker run`` container), then terminates/kills the client if needed.
+    """
+    proc = None
+    timed_out = False
+    start_monotonic = time.monotonic()
+    start_wall = time.time()
+    with tempfile.TemporaryFile() as stdout_fh, tempfile.TemporaryFile() as stderr_fh:
+        try:
+            proc = subprocess.Popen(
+                cmd, stdout=stdout_fh, stderr=stderr_fh,
+                stdin=subprocess.DEVNULL,
+            )
+            monotonic_deadline = start_monotonic + host_timeout_s
+            wall_deadline = start_wall + host_timeout_s
+            while proc.poll() is None:
+                monotonic_remaining = monotonic_deadline - time.monotonic()
+                wall_remaining = wall_deadline - time.time()
+                remaining = min(monotonic_remaining, wall_remaining)
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                time.sleep(min(poll_interval_s, remaining))
+
+            if timed_out:
+                _force_remove_container(container_name)
+                _stop_process(proc)
+        except BaseException:
+            if proc is not None and proc.poll() is None:
+                _force_remove_container(container_name)
+                _stop_process(proc)
+            raise
+
+        elapsed_s = max(time.monotonic() - start_monotonic,
+                        time.time() - start_wall)
+        return SimpleNamespace(
+            returncode=proc.returncode,
+            stdout=_read_tempfile_text(stdout_fh),
+            stderr=_read_tempfile_text(stderr_fh),
+            timed_out=timed_out,
+            host_wall_time_s=elapsed_s,
+        )
+
+
 def _auth_mount_args(harness):
     """Read-only ``-v`` args mounting the harness's auth into the staging dir.
 
@@ -127,10 +364,18 @@ def _auth_mount_args(harness):
     host's real config is never mounted writable.
     """
     args = []
-    for rel in AUTH_MOUNTS.get(harness, []):
-        host_path = os.path.join(os.path.expanduser("~"), rel)
+    staged = set()
+    for item in AUTH_MOUNTS.get(harness, []):
+        if isinstance(item, tuple):
+            host_rel, dest_rel = item
+        else:
+            host_rel = dest_rel = item
+        host_path = os.path.join(os.path.expanduser("~"), host_rel)
+        staged_path = f"{AUTH_STAGING}/{dest_rel}"
+        if staged_path in staged:
+            continue
         if os.path.exists(host_path):
-            staged_path = f"{AUTH_STAGING}/{rel}"
+            staged.add(staged_path)
             args += ["-v", f"{host_path}:{staged_path}:ro"]
     return args
 
@@ -140,6 +385,11 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                      extra_docker_args=None):
     """Assemble the ``docker run`` argv for one cell (pure; unit-testable)."""
     cmd = ["docker", "run", "--rm"]
+    # Bound each cell's CPU quota so co-tenant host load cannot starve a cell
+    # (and cells cannot starve each other). Matches the determinism-cert config.
+    cell_cpus = os.environ.get("OPENBENCH_CELL_CPUS", "4")
+    if cell_cpus and cell_cpus != "0":
+        cmd += ["--cpus", cell_cpus]
     if container_name:
         cmd += ["--name", container_name]
     cmd += [
@@ -147,10 +397,19 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-v", f"{os.path.abspath(adapters_dir)}:/bench/adapters:ro",
         "-v", f"{ENTRY_PATH}:/bench/entry.py:ro",
         "-v", f"{os.path.abspath(instruction_path)}:/bench/instruction.txt:ro",
+    ]
+    if harness in {"codex_v1", "codex_v2"}:
+        variant = harness.replace("codex_", "")
+        host_variant = os.path.join(REPO_ROOT, "ablation", f"codex-home-{variant}")
+        container_variant = f"/bench/ablation/codex-home-{variant}"
+        cmd += ["-v", f"{host_variant}:{container_variant}:ro"]
+    cmd += [
         "-w", "/work",
         "-e", f"HOME={CONTAINER_HOME}",
     ]
-    for var in API_KEY_PASSTHROUGH:
+    for assignment in _placeholder_env(harness, model):
+        cmd += ["-e", assignment]
+    for var in _api_key_passthrough(harness, model):
         if os.environ.get(var):
             cmd += ["-e", var]
     cmd += _auth_mount_args(harness)
@@ -175,6 +434,22 @@ def _parse_result(stdout):
     return None
 
 
+def image_digest(image):
+    """Return RepoDigest or image ID for an already-preflighted docker image."""
+    for fmt in ("{{index .RepoDigests 0}}", "{{.Id}}"):
+        try:
+            proc = subprocess.run(
+                ["docker", "image", "inspect", "--format", fmt, image],
+                capture_output=True, text=True, timeout=20,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        value = (proc.stdout or "").strip()
+        if proc.returncode == 0 and value and value != "<no value>":
+            return value
+    return None
+
+
 def run_in_container(harness, instruction, workdir, model, timeout_s,
                      adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None):
     """Run one cell in a container and return the adapter result dict.
@@ -185,10 +460,18 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     keeps going.
     """
     preflight(image)
+    resolved_image = image_digest(image)
+    image_for_run = resolved_image or image
 
     # Instruction goes through a mounted temp file (avoids env/arg size and
-    # quoting issues with multi-line task instructions).
-    fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt")
+    # quoting issues with multi-line task instructions). The file must live in
+    # a directory the docker VM can bind-mount: on colima the default macOS
+    # /var/folders temp path is NOT shared into the VM, so default to a
+    # repo-local dir (override with OPENBENCH_DOCKER_TMPDIR).
+    instr_dir = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".bench-tmp")
+    os.makedirs(instr_dir, exist_ok=True)
+    fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt", dir=instr_dir)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(instruction)
@@ -198,28 +481,47 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         # the `docker run` client alone does NOT stop the container.
         container_name = f"openbench_{harness}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
         cmd = build_docker_cmd(
-            harness, workdir, model, timeout_s, adapters_dir, image,
+            harness, workdir, model, timeout_s, adapters_dir, image_for_run,
             instruction_path, container_name=container_name,
             extra_docker_args=extra_docker_args,
         )
 
+        # The container must not outlive this call on ANY exit path — timeout,
+        # crash, Ctrl-C, or a clean return where `--rm` glitched. Killing the
+        # `docker run` client alone does not stop the container, so removal by
+        # name is guaranteed in the finally (a no-op when `--rm` already
+        # cleaned up).
+        cleanup_ok = True
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True,
-                timeout=timeout_s + _TIMEOUT_GRACE_S,
-                stdin=subprocess.DEVNULL,
+            proc = _run_docker_client_with_deadline(
+                cmd, container_name, timeout_s + _TIMEOUT_GRACE_S,
             )
-        except subprocess.TimeoutExpired as e:
-            # Force-kill AND remove the container so a hung harness leaves no
-            # leak (a bare `docker kill` can leave a "Dead" container behind).
-            subprocess.run(["docker", "rm", "-f", container_name],
-                           capture_output=True, text=True, timeout=30)
-            tail = (e.stdout or "") + (e.stderr or "")
+        finally:
+            cleanup_ok = _force_remove_container(container_name)
+        # The final verified sweep is authoritative: a watchdog-timeout removal
+        # can fail transiently and still be recovered here.
+        if not cleanup_ok:
+            full_output = (proc.stdout or "") + (proc.stderr or "") if "proc" in locals() else ""
+            return {
+                "completed": False,
+                "error": f"container cleanup failed for {container_name}; "
+                         "container may still be running",
+                "output_tail": full_output[-2000:],
+                "full_output": full_output,
+                "tokens": None, "turns": None, "cmd": cmd,
+                "host_wall_time_s": proc.host_wall_time_s if "proc" in locals() else None,
+                "image_digest": resolved_image,
+            }
+        if proc.timed_out:
+            full_output = (proc.stdout or "") + (proc.stderr or "")
             return {
                 "completed": False,
                 "error": f"container timeout after {timeout_s}s (+grace); killed",
-                "output_tail": tail[-2000:],
+                "output_tail": full_output[-2000:],
+                "full_output": full_output,
                 "tokens": None, "turns": None, "cmd": cmd,
+                "host_wall_time_s": proc.host_wall_time_s,
+                "image_digest": resolved_image,
             }
 
         combined = (proc.stdout or "") + (proc.stderr or "")
@@ -230,11 +532,16 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "error": f"container produced no result sentinel "
                          f"(exit {proc.returncode})",
                 "output_tail": combined[-2000:],
+                "full_output": combined,
                 "tokens": None, "turns": None, "cmd": cmd,
+                "host_wall_time_s": proc.host_wall_time_s,
+                "image_digest": resolved_image,
             }
         # Record the docker invocation for the results log (adapters record the
         # inner CLI cmd; we prepend the container wrapper for provenance).
         result["cmd"] = {"docker": cmd, "adapter_cmd": result.get("cmd")}
+        result["host_wall_time_s"] = proc.host_wall_time_s
+        result["image_digest"] = resolved_image
         return result
     finally:
         os.unlink(instruction_path)

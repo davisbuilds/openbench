@@ -24,15 +24,19 @@ class FakeProbes:
     ``exists_set``  : set of paths (expanded) that "exist"
     ``json_map``    : path (expanded) -> parsed dict
     ``models_map``  : harness -> MODELS dict (None => import raises)
+    ``env_map``     : environment variable -> value
+    ``text_map``    : path (expanded) -> file text
     """
 
     def __init__(self, which_map=None, run_map=None, exists_set=None,
-                 json_map=None, models_map=None):
+                 json_map=None, models_map=None, env_map=None, text_map=None):
         self.which_map = which_map or {}
         self.run_map = run_map or {}
         self.exists_set = set(exists_set or [])
         self.json_map = json_map or {}
         self.models_map = models_map or {}
+        self.env_map = env_map or {}
+        self.text_map = text_map or {}
 
     def which(self, cli):
         return self.which_map.get(cli)
@@ -46,12 +50,21 @@ class FakeProbes:
     def read_json(self, path):
         return self.json_map.get(os.path.expanduser(path))
 
+    def read_text(self, path):
+        return self.text_map.get(os.path.expanduser(path))
+
+    def getenv(self, name):
+        return self.env_map.get(name)
+
     def import_adapter(self, name):
         models = self.models_map.get(name)
         if models is None:
             raise FileNotFoundError(f"no adapter {name}")
         mod = types.ModuleType(f"fake_{name}")
-        mod.MODELS = models
+        if isinstance(models, tuple):
+            mod.MODELS, mod.OPEN_MODELS = models
+        else:
+            mod.MODELS = models
         return mod
 
 
@@ -60,13 +73,15 @@ def all_green_probes():
     home = os.path.expanduser("~")
     return FakeProbes(
         which_map={"codex": "/b/codex", "pi": "/b/pi", "opencode": "/b/opencode",
-                   "cursor-agent": "/b/cursor-agent", "devin": "/b/devin",
-                   "docker": "/b/docker"},
+                   "cursor-agent": "/b/cursor-agent", "claude": "/b/claude",
+                   "grok": "/b/grok", "devin": "/b/devin", "docker": "/b/docker"},
         run_map={
             ("codex", "--version"): (0, "codex 1"),
             ("pi", "--version"): (0, "pi 1"),
             ("opencode", "--version"): (0, "opencode 1"),
             ("cursor-agent", "--version"): (0, "cursor 1"),
+            ("claude", "--version"): (0, "claude 1"),
+            ("grok", "--version"): (0, "grok 1"),
             ("devin", "--version"): (0, "devin 1"),
             ("opencode", "auth", "list"): (0, "OpenAI oauth\n"),
             ("cursor-agent", "status"): (0, "Logged in as x\n"),
@@ -85,8 +100,8 @@ class TestEvaluate(unittest.TestCase):
         rows, ok = doctor.evaluate(
             doctor.ALL_HARNESSES, "gpt-5.5-medium", all_green_probes())
         self.assertTrue(ok)
-        # 5 harnesses x 3 checks, all OK.
-        self.assertEqual(len(rows), 15)
+        # all harnesses x 3 checks, all OK.
+        self.assertEqual(len(rows), len(doctor.ALL_HARNESSES) * 3)
         self.assertTrue(all(r["ok"] for r in rows))
 
     def test_missing_cli_fails(self):
@@ -147,6 +162,77 @@ class TestEvaluate(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertFalse(rows[0]["ok"])
         self.assertIn("unknown harness", rows[0]["detail"])
+
+    def test_frontier_pi_requires_anthropic_entry(self):
+        p = all_green_probes()
+        p.models_map["pi"] = {"claude-opus-4-8": {"provider": "anthropic"}}
+        p.json_map[os.path.expanduser("~/.pi/agent/auth.json")] = {"openai-codex": {}}
+        rows, ok = doctor.evaluate(["pi"], "claude-opus-4-8", p)
+        self.assertFalse(ok)
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        self.assertFalse(auth["ok"])
+        self.assertIn("anthropic", auth["detail"])
+
+    def test_frontier_opencode_requires_anthropic_oauth(self):
+        p = all_green_probes()
+        p.models_map["opencode"] = {"claude-opus-4-8": "anthropic/claude-opus-4-8"}
+        p.run_map[("opencode", "auth", "list")] = (0, "OpenAI oauth\n")
+        rows, ok = doctor.evaluate(["opencode"], "claude-opus-4-8", p)
+        self.assertFalse(ok)
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        self.assertFalse(auth["ok"])
+        self.assertIn("anthropic", auth["detail"])
+
+    def test_frontier_codex_accepts_keys_env_not_container_secret(self):
+        p = all_green_probes()
+        p.models_map["codex"] = ({}, {"claude-opus-4-8": {"model_id": "claude-opus-4-8"}})
+        p.text_map[os.path.expanduser("~/.openbench/keys.env")] = "ANTHROPIC_API_KEY=sk-test\n"
+        rows, ok = doctor.evaluate(["codex"], "claude-opus-4-8", p)
+        self.assertTrue(ok)
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        self.assertTrue(auth["ok"])
+        self.assertIn("keys.env", auth["detail"])
+
+    def test_frontier_cursor_uses_local_login_outside_container(self):
+        p = all_green_probes()
+        p.models_map["cursor"] = {"claude-opus-4-8": "claude-opus-4-8-thinking-medium"}
+        rows, ok = doctor.evaluate(["cursor"], "claude-opus-4-8", p)
+        self.assertTrue(ok)
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        self.assertIn("Logged in", auth["detail"])
+
+    def test_frontier_cursor_accepts_container_auth_dir_in_container(self):
+        p = all_green_probes()
+        p.models_map["cursor"] = {"claude-opus-4-8": "claude-opus-4-8-thinking-medium"}
+        p.env_map["BENCH_IN_CONTAINER"] = "1"
+        p.run_map[("cursor-agent", "status")] = (1, "not logged in")
+        p.exists_set.add(os.path.expanduser("~/.openbench/cursor-container-auth/.config/cursor/auth.json"))
+        rows, ok = doctor.evaluate(["cursor"], "claude-opus-4-8", p)
+        self.assertTrue(ok)
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        self.assertIn("cursor-container-auth", auth["detail"])
+
+    def test_grokbuild_open_model_uses_grok_cli_and_vendor_key(self):
+        p = all_green_probes()
+        p.models_map["grokbuild"] = ({}, {"deepseek-v4-flash": {"model_id": "deepseek-v4-flash"}})
+        p.env_map["DEEPSEEK_API_KEY"] = "sk-test"
+        rows, ok = doctor.evaluate(["grokbuild"], "deepseek-v4-flash", p)
+        self.assertTrue(ok)
+        cli = next(r for r in rows if r["check"] == "CLI")
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        model = next(r for r in rows if r["check"] == "MODEL")
+        self.assertIn("/b/grok", cli["detail"])
+        self.assertIn("DEEPSEEK_API_KEY", auth["detail"])
+        self.assertIn("(open)", model["detail"])
+
+    def test_grokbuild_open_model_requires_exported_key(self):
+        p = all_green_probes()
+        p.models_map["grokbuild"] = ({}, {"deepseek-v4-flash": {"model_id": "deepseek-v4-flash"}})
+        rows, ok = doctor.evaluate(["grokbuild"], "deepseek-v4-flash", p)
+        self.assertFalse(ok)
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        self.assertFalse(auth["ok"])
+        self.assertIn("export DEEPSEEK_API_KEY", auth["detail"])
 
 
 class TestExitCode(unittest.TestCase):

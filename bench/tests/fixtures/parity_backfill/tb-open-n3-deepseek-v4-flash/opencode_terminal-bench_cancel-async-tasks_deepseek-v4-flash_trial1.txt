@@ -1,0 +1,6 @@
+{"type":"step_finish","part":{"tokens":{"total":37464,"input":7392,"output":351,"reasoning":29721,"cache":{"write":0,"read":0}}}}
+{"type":"step_finish","part":{"tokens":{"total":37857,"input":104,"output":354,"reasoning":23,"cache":{"write":0,"read":37376}}}}
+{"type":"step_finish","part":{"tokens":{"total":42467,"input":1291,"output":109,"reasoning":3307,"cache":{"write":0,"read":37760}}}}
+{"type":"step_finish","part":{"tokens":{"total":42725,"input":129,"output":120,"reasoning":108,"cache":{"write":0,"read":42368}}}}
+{"type":"step_finish","part":{"tokens":{"total":43298,"input":116,"output":550,"reasoning":8,"cache":{"write":0,"read":42624}}}}
+{"type":"step_finish","part":{"tokens":{"total":43437,"input":101,"output":58,"reasoning":14,"cache":{"write":0,"read":43264}}}}

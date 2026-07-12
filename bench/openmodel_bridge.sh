@@ -63,7 +63,7 @@ if [ -f "$KEYS" ]; then
 fi
 
 missing=()
-for v in DEEPSEEK_API_KEY ZAI_API_KEY MOONSHOT_API_KEY; do
+for v in ANTHROPIC_API_KEY DEEPSEEK_API_KEY ZAI_API_KEY MOONSHOT_API_KEY; do
   if [ -z "${!v:-}" ]; then missing+=("$v"); fi
 done
 if [ "${#missing[@]}" -gt 0 ]; then

@@ -1,0 +1,4 @@
+# Non-stdlib runtime required by this task and checker
+# The checker itself is Python standard-library only, but it executes the
+# submitted JavaScript extractor under Node's permission system.
+node>=22

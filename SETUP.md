@@ -110,7 +110,7 @@ python3 bench/run.py \
   --results-path /tmp/openbench-tb.jsonl
 ```
 
-The default Docker image installs the verified Linux-portable CLIs (`codex`, `pi`, `claude`). `opencode`, `cursor`, and `devin` are behind `--build-arg INSTALL_UNVERIFIED=true` and should be treated as best-effort until their Linux installs are verified.
+The default Docker image pins and installs the container-supported CLIs (`codex`, `pi`, `claude`, `grok`, `opencode`, and `cursor-agent`) and stamps their in-image `--version` output into `/etc/openbench-cli-versions.json`. Docker-mode result rows use those container versions, not host CLI versions.
 
 ## Open-model bridge for Codex
 

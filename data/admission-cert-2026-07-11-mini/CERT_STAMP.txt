@@ -1,0 +1,5 @@
+hostname: Matthews-Mac-mini.local
+exec-mode: docker --cpus 4
+image: sha256:a6fc4415be102e511239cb22c80861275a4f5b65ffc7fa4aaf5b36043cc215eb
+started: 2026-07-12T03:59:36Z
+finished: 2026-07-12T04:27:50Z

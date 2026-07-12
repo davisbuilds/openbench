@@ -73,7 +73,7 @@ overlap:
 Each cell copies the task workspace to a fresh temp dir, runs the harness
 headlessly on `gpt-5.5-medium`, and grades the result solely by `checker.sh` exit
 0 — never the harness's self-report. All 90 cells ran locally and sequentially on
-a single macOS host on one day, with `OPENAI_API_KEY` unset so every harness used
+a single macOS host on one day, with the OpenAI key unset so every harness used
 its subscription OAuth credential (no API-key billing). The `null` adapter does
 nothing and is the negative control. Full contract, task format, and the Wilson-
 interval rationale are in the repo [`README.md`](README.md); the exact run
@@ -395,7 +395,45 @@ model is involved.
 
 ---
 
-# Task-difficulty calibration: two escalation rounds (negative result) — 2026-07-03
+# TB open-model n=3 (2026-07-09)
+
+Terminal-Bench open-model n=3 promotes the first 5-harness comparison on four
+harder Terminal-Bench tasks: 5 harnesses × 3 open models × 4 TB tasks × 3 trials
+= **180 rows**. Dataset and methodology artifacts are in
+[`data/tb-open-n3-2026-07-09/`](data/tb-open-n3-2026-07-09/).
+
+## Headline
+
+**`pi` separates on correctness under the valid-row denominator.** Pooled across
+models and tasks, `pi` solves **26/32 = 81%** valid rows; the field sits at
+**47–58%** (`opencode` 21/36 = 58%, `claude` 18/36 = 50%, `codex` 18/36 = 50%,
+`grokbuild` 17/36 = 47%). The strongest single lane is **GLM-5.2 under `pi`:
+11/11 solved** after excluding one documented infra row.
+
+**Efficiency remains matched-cell sensitive.** The strict matched-cell summaries
+in [`tb-open-n3-stats.md`](data/tb-open-n3-2026-07-09/tb-open-n3-stats.md)
+restrict to cells solved by every harness in the comparison set and to trials with
+that metric available. On the all-5 strict slice, `pi` is effectively tied for the
+lowest fresh-token median (63,058 tokens/solve vs `opencode` 63,068) while
+`claude` is numerically fastest under-cap. On the core-four slice
+(`pi`/`opencode`/`claude`/`codex`), `opencode` is numerically lowest on fresh
+tokens (66,536) and `pi` is numerically fastest under-cap (466 s). The primary
+priced table is telemetry-censoring-sensitive, so the README and stats keep the
+strict and sensitivity views separate rather than over-ranking the field.
+
+**The main mechanism is efficiency → correctness through timeouts.** Slow harness
+× model lanes accumulate timeout/cap-rider failures; faster lanes, especially
+`pi`, convert the same open models into more completed solves before the 1200 s
+cap. The timeout sensitivity and internal-timeout audit leave the rankings
+unchanged, so this is not just a bookkeeping artifact.
+
+Methodology notes: write-time classifier, contamination purge and rerun,
+independent audit, parity backfill, and adversarial review are summarized in
+[`tb-open-n3-methodology-notes.md`](data/tb-open-n3-2026-07-09/tb-open-n3-methodology-notes.md).
+
+---
+
+# Task difficulty calibration: two escalation rounds (negative result) — 2026-07-03
 
 M4/M4.5 kept hitting the same wall: our synthetic tasks saturate frontier-parity
 agents on correctness. So the task factory ran two deliberate **escalation

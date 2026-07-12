@@ -26,6 +26,13 @@ def run(instruction, workdir, model, timeout_s):
         # field the runner wrote.
         "full_output": "FULL_TRANSCRIPT_BEGIN\nwrote done.txt\nFULL_TRANSCRIPT_END",
         "tokens": 42,
+        "tokens_input_uncached": 30,
+        "tokens_cache_read": 5,
+        "tokens_cache_write": 7,
+        "tokens_output": 12,
+        "tokens_reasoning": 3,
+        "usage_raw": {"fixture": True},
+        "token_basis": "vendor_split",
         "turns": 1,
         "cmd": ["fake_adapter", "write", "done.txt"],
     }

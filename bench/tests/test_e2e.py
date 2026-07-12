@@ -104,6 +104,14 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(fake_row["success"], "fake adapter should solve task")
         self.assertEqual(fake_row["checker_exit"], 0)
         self.assertEqual(fake_row["tokens"], 42)
+        self.assertEqual(fake_row["tokens_input_uncached"], 30)
+        self.assertEqual(fake_row["tokens_cache_read"], 5)
+        self.assertEqual(fake_row["tokens_cache_write"], 7)
+        self.assertEqual(fake_row["tokens_output"], 12)
+        self.assertEqual(fake_row["tokens_reasoning"], 3)
+        self.assertEqual(fake_row["usage_raw"], {"fixture": True})
+        self.assertEqual(fake_row["token_basis"], "vendor_split")
+        self.assertEqual(fake_row["tokens_fresh"], 42)
         self.assertEqual(fake_row["turns"], 1)
         self.assertIsInstance(fake_row["wall_time_s"], (int, float))
 
@@ -118,6 +126,23 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(len(second), 1, "resumed run must not duplicate the cell")
         self.assertIn("SKIP", proc.stdout)
         self.assertIn("skipped=1", proc.stdout)
+
+    def test_trial_runs_only_requested_trial(self):
+        proc = subprocess.run(
+            [sys.executable, RUN_PY,
+             "--task", "write-marker",
+             "--harness", "fake_adapter",
+             "--model", "gpt-5.5-medium",
+             "--trial", "2",
+             "--results-path", self.results_path,
+             "--adapters-dir", FIXTURES_DIR,
+             "--tasks-dir", FIXTURES_DIR],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        rows = read_rows(self.results_path)
+        self.assertEqual([row["trial"] for row in rows], [2])
+        self.assertEqual(rows[0]["run_id"], "fake_adapter:write-marker:gpt-5.5-medium:trial2")
 
     def test_force_reruns_cell(self):
         self._run("fake_adapter")

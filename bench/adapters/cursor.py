@@ -13,9 +13,12 @@ Notes / quirks:
   Required so the disposable temp workdir doesn't trigger a trust prompt.
 - `--workspace <workdir>` (plus cwd=workdir) points the agent at the task dir;
   edits land there.
-- Reasoning effort is baked into the model name: `gpt-5.5-medium` is a
-  first-class model id (verified via `cursor-agent models`).
-- Uses the user's existing Cursor login as-is (read-only).
+- Reasoning effort is baked into the model name: `gpt-5.5-medium` and
+  `claude-opus-4-8-thinking-medium` are first-class model ids (verified via
+  `cursor-agent models`).
+- Uses Cursor auth from Linux file storage (`~/.config/cursor/auth.json`) or the
+  documented `CURSOR_API_KEY` fallback. Docker auth should be minted with
+  `bench/cursor_container_login.sh` and mounted read-only per run.
 - M4 OPEN MODELS (glm-*/deepseek-*/kimi-*) are NOT supported here: cursor-agent
   exposes a closed, account-bound model menu with no custom-provider/base-URL
   override, so open canonicals fall through to the unsupported-model dict.
@@ -37,10 +40,37 @@ import subprocess
 NAME = "cursor"
 _EXE = "cursor-agent"
 
+
+def _empty_token_usage():
+    return {
+        "tokens_input_uncached": None,
+        "tokens_cache_read": None,
+        "tokens_cache_write": None,
+        "tokens_output": None,
+        "tokens_reasoning": None,
+        "usage_raw": None,
+        "token_basis": None,
+    }
+
+
+def _num(value):
+    return int(value) if isinstance(value, (int, float)) else None
+
 # canonical model name -> cursor-agent `--model` string
 MODELS = {
     "gpt-5.5-medium": "gpt-5.5-medium",
+    "gpt-5.6-sol": "gpt-5.6-sol-medium",
+    "gpt-5.6-terra": "gpt-5.6-terra-medium",
+    "gpt-5.6-luna": "gpt-5.6-luna-medium",
+    # Thinking parity for the opus frontier lane: Cursor exposes a concrete
+    # medium-thinking model id, so no separate effort flag is needed.
+    "claude-opus-4-8": "claude-opus-4-8-thinking-medium",
 }
+
+# Linux cursor-agent stores subscription auth in FILES, not a keychain. The
+# docker lane stages the host-persistent login dir into this path; CURSOR_API_KEY
+# remains the documented env fallback.
+_CURSOR_AUTH = os.path.expanduser("~/.config/cursor/auth.json")
 
 
 def version():
@@ -74,10 +104,11 @@ def _err_tail(exc, limit=2000):
         if x is None:
             return ""
         return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-    return (_dec(exc.stdout) + _dec(exc.stderr))[-limit:]
+    text = _dec(exc.stdout) + _dec(exc.stderr)
+    return text if limit is None else text[-limit:]
 
 
-def _parse_json(stdout):
+def _parse_json_with_usage(stdout):
     """Parse cursor's single-object JSON result into (tokens, turns, tail).
 
     tokens is None if usage is absent/malformed. turns is always None (not
@@ -85,18 +116,53 @@ def _parse_json(stdout):
     """
     stdout = stdout.strip()
     if not stdout:
-        return None, None, ""
+        return None, None, "", _empty_token_usage()
     obj = json.loads(stdout)  # caller guards with try/except
     usage = obj.get("usage") or {}
     tokens = 0
+    found = False
     for key in ("inputTokens", "outputTokens"):
         val = usage.get(key)
         if isinstance(val, (int, float)):
             tokens += int(val)
+            found = True
+    token_usage = _empty_token_usage()
+    if found:
+        inp = _num(usage.get("inputTokens"))
+        out = _num(usage.get("outputTokens"))
+        cache_read = _num(usage.get("cacheReadTokens"))
+        cache_write = _num(usage.get("cacheWriteTokens"))
+        if None not in (inp, out):
+            token_usage.update({
+                "tokens_input_uncached": inp,
+                "tokens_cache_read": cache_read,
+                "tokens_cache_write": cache_write,
+                "tokens_output": out,
+                "tokens_reasoning": None,
+            })
+        # Cursor's JSON surface is harness-reported rather than independently
+        # vendor-verified, so keep the basis explicit even when split fields are
+        # available for the runner's fresh-token smoke check.
+        token_usage["usage_raw"] = usage
+        token_usage["token_basis"] = "harness_reported"
     tail = obj.get("result")
     tail = tail if isinstance(tail, str) else ""
-    return (tokens or None), None, tail[-2000:]
+    return (tokens if found else None), None, tail[-2000:], token_usage
 
+
+def _setup_needed(model):
+    return {"completed": False,
+            "error": (f"SETUP-NEEDED: run bench/cursor_container_login.sh for subscription auth "
+                      f"(missing {_CURSOR_AUTH}) or export CURSOR_API_KEY to use {model}"),
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
+
+
+
+def _parse_json(stdout):
+    """Backward-compatible parser returning legacy fields only."""
+    tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
+    return tokens, turns, tail
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model not in MODELS:
@@ -107,7 +173,11 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "tokens": None,
             "turns": None,
             "cmd": None,
+            **_empty_token_usage(),
         }
+    if (model == "claude-opus-4-8" and os.environ.get("BENCH_IN_CONTAINER")
+            and not (os.environ.get("CURSOR_API_KEY") or os.path.exists(_CURSOR_AUTH))):
+        return _setup_needed(model)
 
     cmd = [
         "cursor-agent", "-p",
@@ -129,21 +199,23 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired as e:
-        tail = _err_tail(e)
+        full_output = _err_tail(e, limit=None)
         return {
             "completed": False,
             "error": f"timeout after {timeout_s}s",
-            "output_tail": tail,
+            "output_tail": full_output[-2000:],
+            "full_output": full_output,
             "tokens": None,
             "turns": None,
             "cmd": cmd,
+            **_empty_token_usage(),
         }
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     try:
-        tokens, turns, tail = _parse_json(proc.stdout or "")
+        tokens, turns, tail, token_usage = _parse_json_with_usage(proc.stdout or "")
     except Exception:  # noqa: BLE001 - never let usage parsing break a run
-        tokens, turns, tail = None, None, ""
+        tokens, turns, tail, token_usage = None, None, "", _empty_token_usage()
     if not tail:
         tail = combined[-2000:]
 
@@ -157,4 +229,5 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         "tokens": tokens,
         "turns": turns,
         "cmd": cmd,
+        **token_usage,
     }

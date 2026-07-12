@@ -19,10 +19,13 @@ Notes / quirks:
 - Uses the user's existing `~/.codex` login as-is (read-only).
 - `--json` emits a JSONL event stream. The final `turn.completed` event carries
   `usage={input_tokens,cached_input_tokens,output_tokens,reasoning_output_tokens}`.
-  Token accounting (see ``_parse_json``) uses the SAME fresh-basis as the other
-  adapters:
-    tokens = (input_tokens - cached_input_tokens) + output_tokens
-             + reasoning_output_tokens   (cache re-reads excluded)
+  Token accounting emits TOKEN_PARITY.md split fields from the final aggregate:
+    tokens_input_uncached = input_tokens - cached_input_tokens
+    tokens_cache_read     = cached_input_tokens
+    tokens_cache_write    = 0
+    tokens_output         = output_tokens  # already reasoning-inclusive
+    tokens_reasoning      = reasoning_output_tokens
+    tokens                = tokens_input_uncached + tokens_output
     turns  = number of `turn.completed` events (model rounds).
   Human tail is synthesized from `agent_message`/`file_change` items.
   NOTE: `codex exec --json` only flushes/exits cleanly when driven as a plain
@@ -42,6 +45,7 @@ models to cross-check against.
 
 import json
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -49,14 +53,56 @@ import subprocess
 NAME = "codex"
 _EXE = "codex"
 
+
+def _empty_token_usage():
+    return {
+        "tokens_input_uncached": None,
+        "tokens_cache_read": None,
+        "tokens_cache_write": None,
+        "tokens_output": None,
+        "tokens_reasoning": None,
+        "usage_raw": None,
+        "token_basis": None,
+    }
+
+
+def _legacy_tokens(token_usage):
+    # Delegated TOKEN_PARITY contract: keep the legacy scalar as
+    # uncached_input + output. Cache reads and cache writes remain available in
+    # split fields but are intentionally not folded into this compatibility
+    # value.
+    inp = token_usage.get("tokens_input_uncached")
+    out = token_usage.get("tokens_output")
+    if isinstance(inp, int) and isinstance(out, int):
+        return inp + out
+    return None
+
+
+def _num(value):
+    return int(value) if isinstance(value, (int, float)) else None
+
 # canonical model name -> codex `-m` model string
 MODELS = {
     "gpt-5.5-medium": "gpt-5.5",
+    "gpt-5.6-sol": "gpt-5.6-sol",
+    "gpt-5.6-terra": "gpt-5.6-terra",
+    "gpt-5.6-luna": "gpt-5.6-luna",
 }
 
 # canonical model name -> reasoning effort passed via `-c model_reasoning_effort`
 _EFFORT = {
     "gpt-5.5-medium": "medium",
+    "gpt-5.6-sol": "medium",
+    "gpt-5.6-terra": "medium",
+    "gpt-5.6-luna": "medium",
+}
+
+# canonical model name -> service tier override. GPT-5.6 Sol must stay on the
+# normal/non-fast lane even if the operator's Codex config defaults to priority.
+_SERVICE_TIER = {
+    "gpt-5.6-sol": "default",
+    "gpt-5.6-terra": "default",
+    "gpt-5.6-luna": "default",
 }
 
 # --- M4 open models (first-party pay-per-token, chat-only vendors) -----------
@@ -88,6 +134,10 @@ _EFFORT = {
 # (Duplicated across the pi/opencode/codex adapters so each stays self-contained
 #  under the runner's isolated importer.)
 OPEN_MODELS = {
+    # Thinking parity for the opus frontier lane: codex requests
+    # `model_reasoning_effort="medium"`; the LiteLLM bridge preserves that as
+    # Anthropic medium reasoning while injecting ANTHROPIC_API_KEY upstream.
+    "claude-opus-4-8":   {"provider": "anthropic", "model_id": "claude-opus-4-8",   "base_url": "https://api.anthropic.com",     "env_key": "ANTHROPIC_API_KEY", "display": "Anthropic Claude", "effort": "medium"},
     "glm-5.2":           {"provider": "zai",      "model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "effort": "medium"},
     "glm-4.7-flash":     {"provider": "zai",      "model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "effort": "medium"},
     "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek",      "effort": "medium"},
@@ -97,6 +147,7 @@ OPEN_MODELS = {
 # Host-side bridge (LiteLLM proxy). Port must match bench/openmodel_bridge.sh
 # (both default to 4141; override in lockstep via BENCH_BRIDGE_PORT).
 _BRIDGE_DEFAULT_PORT = 4141
+_KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")
 
 
 def _bridge_host():
@@ -132,19 +183,55 @@ def _bridge_down(model):
             "error": (f"SETUP-NEEDED: open-model bridge unreachable at "
                       f"{_bridge_host()}:{_bridge_port()} for {model} "
                       f"(start it: bench/openmodel_bridge.sh)"),
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
+
+
+def _keys_env_has(env_key):
+    try:
+        with open(_KEYS_ENV, encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                try:
+                    parts = shlex.split(line, comments=True, posix=True)
+                    first = parts[1] if parts and parts[0] == "export" and len(parts) > 1 else parts[0]
+                    key, val = first.split("=", 1)
+                except (ValueError, IndexError):
+                    key, val = line.split("=", 1)[0].strip(), line.split("=", 1)[1].strip()
+                if key == env_key and val.strip():
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _host_has_key(env_key):
+    return bool(os.environ.get(env_key) or _keys_env_has(env_key))
+
+
+def _codex_env_for_bridge(env_key):
+    # The bridge injects the real upstream key from its host process. Give codex
+    # only a non-secret placeholder so its shell-capable agent cannot read API
+    # credentials from the environment.
+    env = {k: v for k, v in os.environ.items() if not k.endswith("_API_KEY")}
+    env[env_key] = "openbench-bridge-placeholder"
+    return env
 
 
 def _unsupported(model):
     known = list(MODELS) + list(OPEN_MODELS)
     return {"completed": False, "error": f"unsupported-model: {model!r} (have {known})",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
 
 def _setup_needed(env_key, model):
     return {"completed": False,
             "error": f"SETUP-NEEDED: export {env_key} to use {model}",
-            "output_tail": "", "tokens": None, "turns": None, "cmd": None}
+            "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+            **_empty_token_usage()}
 
 
 def version():
@@ -178,14 +265,16 @@ def _err_tail(exc, limit=2000):
         if x is None:
             return ""
         return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-    return (_dec(exc.stdout) + _dec(exc.stderr))[-limit:]
+    text = _dec(exc.stdout) + _dec(exc.stderr)
+    return text if limit is None else text[-limit:]
 
 
-def _parse_json(stdout):
-    """Parse codex's JSONL event stream into (tokens, turns, tail).
+def _parse_json_with_usage(stdout):
+    """Parse codex's JSONL event stream into (tokens, turns, tail, usage).
 
-    tokens/turns are None when nothing parseable is found. tail is a
-    human-readable transcript synthesized from agent_message / file_change items.
+    Codex's final aggregate ``input_tokens`` is cache-inclusive and
+    ``output_tokens`` is reasoning-inclusive. Reasoning is recorded separately
+    as a subset and must not be added to the legacy scalar.
     """
     events = []
     for line in stdout.splitlines():
@@ -197,10 +286,11 @@ def _parse_json(stdout):
         except json.JSONDecodeError:
             continue
     if not events:
-        return None, None, ""
+        return None, None, "", _empty_token_usage()
 
-    tokens = 0
-    found = False
+    token_usage = _empty_token_usage()
+    usage_raw = []
+    last_usage = None
     turns = 0
     transcript = []
     for ev in events:
@@ -208,13 +298,9 @@ def _parse_json(stdout):
         if etype == "turn.completed":
             turns += 1
             usage = ev.get("usage") or {}
-            inp = usage.get("input_tokens")
-            out = usage.get("output_tokens")
-            if isinstance(inp, (int, float)) and isinstance(out, (int, float)):
-                cached = usage.get("cached_input_tokens") or 0
-                reasoning = usage.get("reasoning_output_tokens") or 0
-                tokens += (int(inp) - int(cached)) + int(out) + int(reasoning)
-                found = True
+            if isinstance(usage, dict):
+                usage_raw.append(usage)
+                last_usage = usage
         elif etype == "item.completed":
             item = ev.get("item") or {}
             itype = item.get("type")
@@ -230,13 +316,42 @@ def _parse_json(stdout):
             elif itype == "command_execution":
                 transcript.append("[command]")
 
-    tokens = tokens if found else None
-    turns = turns or None
+    if last_usage is not None:
+        inp = _num(last_usage.get("input_tokens"))
+        cached = _num(last_usage.get("cached_input_tokens"))
+        cache_write = _num(
+            last_usage.get("cache_write_tokens")
+            or last_usage.get("cache_creation_input_tokens")
+            or last_usage.get("cache_creation_tokens")
+            or 0
+        )
+        out = _num(last_usage.get("output_tokens"))
+        reasoning = _num(last_usage.get("reasoning_output_tokens"))
+        invariant_ok = None not in (inp, cached, cache_write, out, reasoning)
+        if invariant_ok and (cached + cache_write > inp or reasoning > out):
+            invariant_ok = False
+        if invariant_ok:
+            token_usage.update({
+                "tokens_input_uncached": inp - cached - cache_write,
+                "tokens_cache_read": cached,
+                "tokens_cache_write": cache_write,
+                "tokens_output": out,
+                "tokens_reasoning": reasoning,
+            })
+        token_usage["usage_raw"] = last_usage
+        token_usage["token_basis"] = "vendor_split" if invariant_ok else "estimated"
+
     tail = "\n".join(transcript)[-2000:]
+    return _legacy_tokens(token_usage), (turns or None), tail, token_usage
+
+
+
+def _parse_json(stdout):
+    """Backward-compatible parser returning legacy fields only."""
+    tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
     return tokens, turns, tail
 
-
-def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
+def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override=None) -> dict:
     if os.environ.get("BENCH_IN_CONTAINER"):
         # codex's own sandbox (bwrap) needs user namespaces and cannot nest
         # inside the bench container; the disposable container IS the external
@@ -254,11 +369,13 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         cmd = base + [
             "-m", MODELS[model],
             "-c", f'model_reasoning_effort="{_EFFORT[model]}"',
-            instruction,
         ]
+        if model in _SERVICE_TIER:
+            cmd += ["-c", f'service_tier="{_SERVICE_TIER[model]}"']
+        cmd += [instruction]
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
-        if not os.environ.get(spec["env_key"]):
+        if not _host_has_key(spec["env_key"]):
             return _setup_needed(spec["env_key"], model)
         # Route through the host-side Responses<->Chat bridge (see the OPEN_MODELS
         # docstring and bench/openmodel_bridge.sh). Fail fast with a clear
@@ -280,6 +397,12 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     else:
         return _unsupported(model)
 
+    child_env = _codex_env_for_bridge(spec["env_key"]) if model in OPEN_MODELS else None
+    if env_override:
+        if child_env is None:
+            child_env = os.environ.copy()
+        child_env.update(env_override)
+
     try:
         proc = subprocess.run(
             cmd,
@@ -288,25 +411,39 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             text=True,
             timeout=timeout_s,
             stdin=subprocess.DEVNULL,
+            env=child_env,
         )
     except subprocess.TimeoutExpired as e:
-        tail = _err_tail(e)
+        full_output = _err_tail(e, limit=None)
         return {
             "completed": False,
             "error": f"timeout after {timeout_s}s",
-            "output_tail": tail,
+            "output_tail": full_output[-2000:],
+            "full_output": full_output,
             "tokens": None,
             "turns": None,
             "cmd": cmd,
+            **_empty_token_usage(),
         }
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     try:
-        tokens, turns, tail = _parse_json(proc.stdout or "")
+        tokens, turns, tail, token_usage = _parse_json_with_usage(proc.stdout or "")
     except Exception:  # noqa: BLE001 - never let usage parsing break a run
-        tokens, turns, tail = None, None, ""
+        tokens, turns, tail, token_usage = None, None, "", _empty_token_usage()
     if not tail:
         tail = combined[-2000:]
+
+    if model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna") and token_usage.get("token_basis") == "vendor_split":
+        raw = token_usage.get("usage_raw") or {}
+        if not any(k in raw for k in ("cache_write_tokens", "cache_creation_input_tokens", "cache_creation_tokens")):
+            # GPT-5.6 may expose billable cache writes on newer Codex event
+            # schemas. If this CLI omits the field, keep the legacy fresh-ish
+            # scalar usable for the smoke contract but do not assert complete
+            # split parity: cache writes are unknown and the uncached lane may
+            # include writes depending on Codex's aggregate input semantics.
+            token_usage["tokens_cache_write"] = None
+            token_usage["token_basis"] = "estimated"
 
     return {
         "completed": proc.returncode == 0,
@@ -319,4 +456,5 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         "tokens": tokens,
         "turns": turns,
         "cmd": cmd,
+        **token_usage,
     }

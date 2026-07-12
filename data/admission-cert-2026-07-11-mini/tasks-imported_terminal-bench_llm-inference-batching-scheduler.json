@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.42733079206664115
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.29173316608648747
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.30687712493818253
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3154832919826731
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3064389160135761
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28599145798943937
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27625108300708234
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.30043337505776435
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.31932808295823634
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.30298741697333753
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.307233874918893
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3470651250099763
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2746647499734536
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.29145112494006753
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.29540754097979516
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3628807080676779
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.35940658301115036
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.30658008297905326
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27918774995487183
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: plans satisfy all schema, coverage, and performance checks",
+      "ok": true,
+      "output": "PASS: plans satisfy all schema, coverage, and performance checks\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.31477558391634375
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks-imported/terminal-bench/llm-inference-batching-scheduler",
+  "wall_time_s": {
+    "all": {
+      "max": 0.42733079206664115,
+      "median": 0.29792045801877975,
+      "min": 0.23280870798043907
+    },
+    "solution": {
+      "max": 0.42733079206664115,
+      "median": 0.3065094994963147,
+      "min": 0.2746647499734536
+    },
+    "workspace": {
+      "max": 0.3158614169806242,
+      "median": 0.26886893750634044,
+      "min": 0.23280870798043907
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl",
+      "ok": false,
+      "output": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23280870798043907
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl",
+      "ok": false,
+      "output": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26625770807731897
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl",
+      "ok": false,
+      "output": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2714801669353619
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl",
+      "ok": false,
+      "output": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2807128749554977
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl",
+      "ok": false,
+      "output": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2802276249276474
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl",
+      "ok": false,
+      "output": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23729824996553361
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl",
+      "ok": false,
+      "output": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2596995420753956
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl",
+      "ok": false,
+      "output": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3089889589464292
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl",
+      "ok": false,
+      "output": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3158614169806242
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl",
+      "ok": false,
+      "output": "FAIL: missing required output file: task_file/output_data/plan_b1.jsonl\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2661831669975072
+    }
+  ]
+}

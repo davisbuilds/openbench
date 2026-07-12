@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2111354999942705
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22780308302026242
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2673846249235794
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2545378339709714
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2613255000906065
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26098874991293997
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25630529201589525
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2408396250102669
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23481862503103912
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23935641697607934
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2200118750333786
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2619900000281632
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2643877089722082
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2354536250932142
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23845745902508497
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23327737499494106
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26829820801503956
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2424266670132056
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25119604100473225
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: results.json matches checker-owned Raman fit parameters",
+      "ok": true,
+      "output": "PASS: results.json matches checker-owned Raman fit parameters\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.20749545795843005
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks-imported/terminal-bench/raman-fitting",
+  "wall_time_s": {
+    "all": {
+      "max": 0.27660458302125335,
+      "median": 0.2495831245323643,
+      "min": 0.20749545795843005
+    },
+    "solution": {
+      "max": 0.26829820801503956,
+      "median": 0.24163314601173624,
+      "min": 0.20749545795843005
+    },
+    "workspace": {
+      "max": 0.27660458302125335,
+      "median": 0.25376193749252707,
+      "min": 0.2211584170581773
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: results.json does not exist",
+      "ok": false,
+      "output": "FAIL: results.json does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2227687919512391
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: results.json does not exist",
+      "ok": false,
+      "output": "FAIL: results.json does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2552849999628961
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: results.json does not exist",
+      "ok": false,
+      "output": "FAIL: results.json does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.252238875022158
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: results.json does not exist",
+      "ok": false,
+      "output": "FAIL: results.json does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2211584170581773
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: results.json does not exist",
+      "ok": false,
+      "output": "FAIL: results.json does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2624367499956861
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: results.json does not exist",
+      "ok": false,
+      "output": "FAIL: results.json does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2557873340556398
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: results.json does not exist",
+      "ok": false,
+      "output": "FAIL: results.json does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23412420798558742
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: results.json does not exist",
+      "ok": false,
+      "output": "FAIL: results.json does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24797020805999637
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: results.json does not exist",
+      "ok": false,
+      "output": "FAIL: results.json does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25643933308310807
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: results.json does not exist",
+      "ok": false,
+      "output": "FAIL: results.json does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27660458302125335
+    }
+  ]
+}

@@ -22,6 +22,8 @@ import json
 import math
 import os
 
+from failure_class import FAILURE_CLASSES, class_for_report, is_excluded_from_solve_rate
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 DEFAULT_RESULTS_PATH = os.path.join(REPO, "results", "results.jsonl")
@@ -71,8 +73,9 @@ def aggregate(rows):
 
         {
           "per_task":    {task: [successes, n]},
-          "succ": int, "n": int,        # solves and total cells
-          "scores":      [float, ...],  # per-cell score (derived from success
+          "succ": int, "n": int,        # solves and countable cells
+          "taxonomy":    {failure_class: count},  # all cells, including excluded
+          "scores":      [float, ...],  # per-countable-cell score (derived from success
                                         #   when the row predates the field)
           "wall_times":  [float, ...],  # per-cell wall-clock seconds
           "token_vals":  [int, ...],    # per-cell tokens, non-null only
@@ -92,12 +95,24 @@ def aggregate(rows):
             continue
         if harness not in stats:
             stats[harness] = {"per_task": {}, "succ": 0, "n": 0, "scores": [],
-                              "wall_times": [], "token_vals": [], "turn_vals": []}
+                              "wall_times": [], "token_vals": [], "turn_vals": [],
+                              "taxonomy": {fc: 0 for fc in FAILURE_CLASSES},
+                              "taxonomy_by_model": {}}
             harnesses.append(harness)
         if task not in tasks:
             tasks.append(task)
 
         st = stats[harness]
+        fc = class_for_report(row)
+        st["taxonomy"][fc] = st["taxonomy"].get(fc, 0) + 1
+        model = row.get("model") or "-"
+        key = (harness, model)
+        model_counts = st["taxonomy_by_model"].setdefault(
+            key, {klass: 0 for klass in FAILURE_CLASSES})
+        model_counts[fc] = model_counts.get(fc, 0) + 1
+        if is_excluded_from_solve_rate(row):
+            continue
+
         pt = st["per_task"].setdefault(task, [0, 0])
         success = bool(row.get("success"))
         pt[1] += 1
@@ -106,7 +121,7 @@ def aggregate(rows):
             pt[0] += 1
             st["succ"] += 1
 
-        # Score is the partial-credit signal, averaged over all trials incl.
+        # Score is the partial-credit signal, averaged over all countable trials incl.
         # failures. Rows predating the field derive it from success (1.0/0.0).
         sc = row.get("score")
         if not isinstance(sc, (int, float)) or isinstance(sc, bool):
@@ -252,13 +267,24 @@ def format_efficiency(harnesses, stats):
     return _render(headers, rows_text)
 
 
+def format_taxonomy(harnesses, stats):
+    """Failure taxonomy counts per harness x model, including excluded rows."""
+    headers = ["harness", "model"] + list(FAILURE_CLASSES)
+    rows_text = []
+    for harness in harnesses:
+        items = sorted(stats[harness]["taxonomy_by_model"].items(), key=lambda kv: kv[0][1])
+        for (_harness, model), counts in items:
+            rows_text.append([harness, model] + [str(counts.get(fc, 0)) for fc in FAILURE_CLASSES])
+    return _render(headers, rows_text)
+
+
 def build_report(results_path):
-    """Load, aggregate, and format the success table from a results file."""
+    """Load, aggregate, and format the success and taxonomy tables."""
     rows = load_rows(results_path)
     if not rows:
         return f"No results found at {results_path}"
     harnesses, tasks, stats = aggregate(rows)
-    return format_table(harnesses, tasks, stats)
+    return format_table(harnesses, tasks, stats) + "\n\nFailure taxonomy (all rows):\n" + format_taxonomy(harnesses, stats)
 
 
 def build_efficiency_report(results_path):
@@ -268,6 +294,15 @@ def build_efficiency_report(results_path):
         return f"No results found at {results_path}"
     harnesses, _tasks, stats = aggregate(rows)
     return format_efficiency(harnesses, stats)
+
+
+def build_taxonomy_report(results_path):
+    """Load, aggregate, and format the failure taxonomy table."""
+    rows = load_rows(results_path)
+    if not rows:
+        return f"No results found at {results_path}"
+    harnesses, _tasks, stats = aggregate(rows)
+    return format_taxonomy(harnesses, stats)
 
 
 def main(argv=None):
