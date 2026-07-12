@@ -8,12 +8,20 @@
 #
 # Build:
 #   docker build -t openbench-harness:latest bench/docker
-#   # include the three non-Node CLIs (best-effort Linux installs):
-#   docker build --build-arg INSTALL_UNVERIFIED=true -t openbench-harness:latest bench/docker
 #
-# node base gives us node+npm for the two Node-based CLIs; python3 comes from
-# apt. Both are required.
+# node base gives us node+npm for the Node-based CLIs; python3 comes from apt.
+# Both are required.
 FROM node:22-slim
+
+ARG CODEX_VERSION=0.144.1
+ARG PI_VERSION=0.80.6
+ARG CLAUDE_VERSION=2.1.206
+ARG GROK_VERSION=0.2.93
+ARG OPENCODE_VERSION=1.17.18
+ARG CURSOR_AGENT_VERSION=2026.07.09-a3815c0
+
+ENV PATH="/root/.local/bin:${PATH}"
+ENV CURSOR_AGENT_VERSION=${CURSOR_AGENT_VERSION}
 
 # python3 runs entry.py and the adapters; git/curl/ca-certificates support the
 # CLIs and their installers.
@@ -22,39 +30,62 @@ RUN apt-get update \
         python3 ca-certificates curl git bash \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Verified Linux-portable harness CLIs (Node packages) ------------------
+# --- Harness CLIs ----------------------------------------------------------
 # Package names confirmed from the host install / scratch probes:
 #   codex -> @openai/codex, pi -> @earendil-works/pi-coding-agent,
 #   claude -> @anthropic-ai/claude-code (open models only; auth via env keys),
-#   grok -> @xai-official/grok (Grok Build; open models via BYOK config)
+#   grok -> @xai-official/grok (Grok Build; open models via BYOK config),
+#   opencode -> opencode-ai.
 RUN npm install -g \
-        @openai/codex \
-        @earendil-works/pi-coding-agent \
-        @anthropic-ai/claude-code \
-        @xai-official/grok \
+        @openai/codex@${CODEX_VERSION} \
+        @earendil-works/pi-coding-agent@${PI_VERSION} \
+        @anthropic-ai/claude-code@${CLAUDE_VERSION} \
+        @xai-official/grok@${GROK_VERSION} \
+        opencode-ai@${OPENCODE_VERSION} \
     && codex --version \
     && pi --version \
     && claude --version \
-    && grok --version
+    && grok --version \
+    && opencode --version
 
-# --- Best-effort native CLIs (opencode / cursor-agent / devin) -------------
-# These ship as platform-specific binaries; their Linux installs are NOT yet
-# verified in this image. Opt in with --build-arg INSTALL_UNVERIFIED=true.
-# Kept out of the default build so the core image (codex + pi) always builds.
-#
-# NOTE: the exact opencode npm package name and the cursor/devin Linux
-# installers must be confirmed before relying on this layer. Update the
-# commands below once verified.
-ARG INSTALL_UNVERIFIED=false
-RUN if [ "$INSTALL_UNVERIFIED" = "true" ]; then \
-        set -eux; \
-        npm install -g opencode-ai; \
-        curl -fsSL https://cursor.com/install | bash; \
-        # devin: add the official Linux installer here once known, e.g.
-        #   curl -fsSL https://<devin-install-url> | bash
-        echo "opencode/cursor installed (best-effort); devin TODO"; \
-    fi
-ENV PATH="/root/.local/bin:${PATH}"
+# cursor-agent is not npm-distributed; install the version-addressed Linux
+# package directly and fail the build if the executable reports anything else.
+RUN set -eux; \
+    case "$(uname -m)" in \
+        x86_64|amd64) cursor_arch="x64" ;; \
+        arm64|aarch64) cursor_arch="arm64" ;; \
+        *) echo "unsupported cursor-agent architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    cursor_dir="/root/.local/share/cursor-agent/versions/${CURSOR_AGENT_VERSION}"; \
+    mkdir -p "$cursor_dir" /root/.local/bin; \
+    curl -fsSL "https://downloads.cursor.com/lab/${CURSOR_AGENT_VERSION}/linux/${cursor_arch}/agent-cli-package.tar.gz" \
+        | tar --strip-components=1 -xzf - -C "$cursor_dir"; \
+    ln -sf "$cursor_dir/cursor-agent" /root/.local/bin/agent; \
+    ln -sf "$cursor_dir/cursor-agent" /root/.local/bin/cursor-agent; \
+    test "$(cursor-agent --version)" = "$CURSOR_AGENT_VERSION"
+
+# Stamp the in-image CLI versions once at build time. Docker-mode benchmark rows
+# read this file and record these container versions, never the host versions.
+RUN python3 - <<'PY'
+import json
+import subprocess
+
+commands = {
+    "codex": ["codex", "--version"],
+    "pi": ["pi", "--version"],
+    "claude": ["claude", "--version"],
+    "grokbuild": ["grok", "--version"],
+    "opencode": ["opencode", "--version"],
+    "cursor": ["cursor-agent", "--version"],
+}
+versions = {
+    name: subprocess.check_output(cmd, text=True).strip()
+    for name, cmd in commands.items()
+}
+with open("/etc/openbench-cli-versions.json", "w", encoding="utf-8") as fh:
+    json.dump(versions, fh, sort_keys=True)
+    fh.write("\n")
+PY
 
 # entry.py + adapters are bind-mounted at run time (read-only) so the image
 # does not need rebuilding when an adapter changes. WORKDIR is the mounted
