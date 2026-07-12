@@ -924,6 +924,9 @@ def main(argv=None):
                         help=f"canonical model name (default: {DEFAULT_MODEL})")
     parser.add_argument("--trials", type=int, default=1,
                         help="trials per (task, harness) cell (default: 1)")
+    parser.add_argument("--trial", type=int, default=None,
+                        help="run only this trial number (for matrix wrappers; "
+                             "default: run 1..--trials)")
     parser.add_argument("--timeout", type=int, default=600,
                         help="per-cell adapter timeout in seconds (default: 600)")
     parser.add_argument("--checker-timeout", type=int, default=120,
@@ -967,11 +970,15 @@ def main(argv=None):
     # probe may spawn a subprocess), then stamp the cached value into every row.
     versions = {h: probe_version(h, args.adapters_dir) for h in harnesses}
 
+    if args.trial is not None and args.trial < 1:
+        parser.error("--trial must be >= 1")
+    trial_numbers = [args.trial] if args.trial is not None else range(1, args.trials + 1)
+
     ran = 0
     skipped = 0
     for harness in harnesses:
         for task in tasks:
-            for trial in range(1, args.trials + 1):
+            for trial in trial_numbers:
                 run_id = make_run_id(harness, task, args.model, trial)
                 if run_id in existing:
                     skipped += 1

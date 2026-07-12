@@ -127,6 +127,23 @@ class TestEndToEnd(unittest.TestCase):
         self.assertIn("SKIP", proc.stdout)
         self.assertIn("skipped=1", proc.stdout)
 
+    def test_trial_runs_only_requested_trial(self):
+        proc = subprocess.run(
+            [sys.executable, RUN_PY,
+             "--task", "write-marker",
+             "--harness", "fake_adapter",
+             "--model", "gpt-5.5-medium",
+             "--trial", "2",
+             "--results-path", self.results_path,
+             "--adapters-dir", FIXTURES_DIR,
+             "--tasks-dir", FIXTURES_DIR],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        rows = read_rows(self.results_path)
+        self.assertEqual([row["trial"] for row in rows], [2])
+        self.assertEqual(rows[0]["run_id"], "fake_adapter:write-marker:gpt-5.5-medium:trial2")
+
     def test_force_reruns_cell(self):
         self._run("fake_adapter")
         proc = subprocess.run(
