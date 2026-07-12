@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover - direct package import fallback
     from . import determinism_check
 
 EXIT_FINDINGS = 3
-REQUIRED_ENTRIES = ("instruction.md", "workspace", "checker.sh", "checker_data", "solution", "PROVENANCE.md")
+REQUIRED_ENTRIES = ("instruction.md", "workspace", "checker.sh", "solution", "PROVENANCE.md")
 HARD = "hard"
 WARN = "warn"
 
@@ -87,11 +87,27 @@ def structure_findings(task_dir):
 
 
 def checker_data_nonempty(task_dir):
+    """checker_data/ is required only when checker.sh references it.
+
+    A self-contained checker.sh (oracle inline, no checker_data reads) still
+    satisfies oracle ownership.
+    """
     checker_data = os.path.join(task_dir, "checker_data")
+    referenced = False
+    checker_sh = os.path.join(task_dir, "checker.sh")
+    try:
+        with open(checker_sh, "r", encoding="utf-8", errors="replace") as fh:
+            referenced = "checker_data" in fh.read()
+    except OSError:
+        pass
     if not os.path.isdir(checker_data):
-        return [Finding("ownership.checker_data_missing", HARD, "checker_data/ is missing", "checker_data")]
+        if referenced:
+            return [Finding("ownership.checker_data_missing", HARD, "checker.sh references checker_data/ but it is missing", "checker_data")]
+        return []
     if not any(files for _root, _dirs, files in os.walk(checker_data)):
-        return [Finding("ownership.checker_data_empty", HARD, "checker_data/ is empty", "checker_data")]
+        if referenced:
+            return [Finding("ownership.checker_data_empty", HARD, "checker.sh references checker_data/ but it is empty", "checker_data")]
+        return []
     return []
 
 
@@ -383,7 +399,7 @@ def scan_ownership(task_dir):
                     {"line": lineno, "path": norm},
                 ))
         for lineno, message in time_warnings:
-            findings.append(Finding("timing_sensitivity", WARN, message, rel, {"line": lineno}))
+            findings.append(Finding("timing_sensitivity", HARD, message, rel, {"line": lineno}))
     return findings
 
 

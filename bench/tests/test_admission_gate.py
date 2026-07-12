@@ -153,6 +153,41 @@ class AdmissionGateTests(unittest.TestCase):
         rules = {finding["rule"] for finding in result["findings"]}
         self.assertIn("ownership.workspace_py_reference", rules)
 
+    def test_timing_sensitive_checker_is_hard_failure(self):
+        task = self.make_task(
+            "timing-sensitive",
+            """
+            set -eu
+            python3 "$TASK_DIR/checker_data/check.py"
+            """,
+            solution={"answer.txt": "ok\n"},
+            checker_data={
+                "check.py": "import subprocess\nsubprocess.run(['true'], timeout=5)\nprint('PASS')\n"
+            },
+        )
+        result = admission_gate.gate(task, determinism_runs=2, stress=0)
+        self.assertEqual(result["status"], "FAIL")
+        findings = {(f["rule"], f["level"]) for f in result["findings"]}
+        self.assertIn(("timing_sensitivity", "hard"), findings)
+
+    def test_self_contained_checker_without_checker_data_passes(self):
+        task = self.make_task(
+            "self-contained",
+            """
+            set -eu
+            if [ "$(cat answer.txt 2>/dev/null || true)" = "ok" ]; then
+              echo PASS
+              exit 0
+            fi
+            echo FAIL missing answer
+            exit 1
+            """,
+            solution={"answer.txt": "ok\n"},
+        )
+        shutil.rmtree(os.path.join(task, "checker_data"))
+        result = admission_gate.gate(task, determinism_runs=2, stress=0)
+        self.assertEqual(result["status"], "PASS")
+
     def test_workspace_python_oracle_is_hard_failure(self):
         task = self.make_task(
             "workspace-oracle",
