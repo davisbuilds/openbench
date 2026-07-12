@@ -381,6 +381,11 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                      extra_docker_args=None):
     """Assemble the ``docker run`` argv for one cell (pure; unit-testable)."""
     cmd = ["docker", "run", "--rm"]
+    # Bound each cell's CPU quota so co-tenant host load cannot starve a cell
+    # (and cells cannot starve each other). Matches the determinism-cert config.
+    cell_cpus = os.environ.get("OPENBENCH_CELL_CPUS", "4")
+    if cell_cpus and cell_cpus != "0":
+        cmd += ["--cpus", cell_cpus]
     if container_name:
         cmd += ["--name", container_name]
     cmd += [
@@ -448,8 +453,14 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     image_for_run = resolved_image or image
 
     # Instruction goes through a mounted temp file (avoids env/arg size and
-    # quoting issues with multi-line task instructions).
-    fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt")
+    # quoting issues with multi-line task instructions). The file must live in
+    # a directory the docker VM can bind-mount: on colima the default macOS
+    # /var/folders temp path is NOT shared into the VM, so default to a
+    # repo-local dir (override with OPENBENCH_DOCKER_TMPDIR).
+    instr_dir = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".bench-tmp")
+    os.makedirs(instr_dir, exist_ok=True)
+    fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt", dir=instr_dir)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(instruction)
