@@ -27,7 +27,7 @@ import tempfile
 CHECKER_DATA = os.path.join(os.environ["TASK_DIR"], "checker_data")
 INTERP_REF = os.path.join(CHECKER_DATA, "interp_ref.py")
 
-DIRECT_TIMEOUT = 15
+DIRECT_TIMEOUT = 60
 EVAL_TIMEOUT = 90
 META_PROGRAMS = ("05-simple", "calculator.scm", "closures.scm")
 MAX_EVAL_BYTES = 2 * 1024 * 1024

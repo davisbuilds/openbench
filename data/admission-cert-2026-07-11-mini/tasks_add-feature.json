@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2381765409372747
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2549275839701295
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2729995839763433
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25910737505182624
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2648480829084292
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25852249993477017
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25501462491229177
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25179758307058364
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24981258297339082
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2369884999934584
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2594430419849232
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2634232910349965
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.34129779192153364
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27502208296209574
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27371291699819267
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2485027089715004
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2841240830020979
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2686833339976147
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2512689169961959
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "feature 6/6, regression-groups 4/4",
+      "ok": true,
+      "output": "feature 6/6, regression-groups 4/4\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2740035420283675
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks/add-feature",
+  "wall_time_s": {
+    "all": {
+      "max": 0.36191850004252046,
+      "median": 0.2705310215242207,
+      "min": 0.2369884999934584
+    },
+    "solution": {
+      "max": 0.34129779192153364,
+      "median": 0.2592752085183747,
+      "min": 0.2369884999934584
+    },
+    "workspace": {
+      "max": 0.36191850004252046,
+      "median": 0.2736820415011607,
+      "min": 0.2673412919975817
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL feature test_include.IncludeTest.test_basic_include",
+      "ok": false,
+      "output": "FAIL feature test_include.IncludeTest.test_basic_include\nFAIL feature test_include.IncludeTest.test_nested_include\nFAIL feature test_include.IncludeTest.test_relative_to_including_file\nFAIL feature test_include.IncludeTest.test_override_after_include\nFAIL feature test_include.IncludeTest.test_missing_include_raises\nFAIL feature test_include.IncludeTest.test_cycle_raises\nfeature 0/6, regression-groups 4/4\nSCORE: 0.4000\n",
+      "parsed_score": 0.4,
+      "score": 0.4,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27237870905082673
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL feature test_include.IncludeTest.test_basic_include",
+      "ok": false,
+      "output": "FAIL feature test_include.IncludeTest.test_basic_include\nFAIL feature test_include.IncludeTest.test_nested_include\nFAIL feature test_include.IncludeTest.test_relative_to_including_file\nFAIL feature test_include.IncludeTest.test_override_after_include\nFAIL feature test_include.IncludeTest.test_missing_include_raises\nFAIL feature test_include.IncludeTest.test_cycle_raises\nfeature 0/6, regression-groups 4/4\nSCORE: 0.4000\n",
+      "parsed_score": 0.4,
+      "score": 0.4,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27317362499888986
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL feature test_include.IncludeTest.test_basic_include",
+      "ok": false,
+      "output": "FAIL feature test_include.IncludeTest.test_basic_include\nFAIL feature test_include.IncludeTest.test_nested_include\nFAIL feature test_include.IncludeTest.test_relative_to_including_file\nFAIL feature test_include.IncludeTest.test_override_after_include\nFAIL feature test_include.IncludeTest.test_missing_include_raises\nFAIL feature test_include.IncludeTest.test_cycle_raises\nfeature 0/6, regression-groups 4/4\nSCORE: 0.4000\n",
+      "parsed_score": 0.4,
+      "score": 0.4,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2673412919975817
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL feature test_include.IncludeTest.test_basic_include",
+      "ok": false,
+      "output": "FAIL feature test_include.IncludeTest.test_basic_include\nFAIL feature test_include.IncludeTest.test_nested_include\nFAIL feature test_include.IncludeTest.test_relative_to_including_file\nFAIL feature test_include.IncludeTest.test_override_after_include\nFAIL feature test_include.IncludeTest.test_missing_include_raises\nFAIL feature test_include.IncludeTest.test_cycle_raises\nfeature 0/6, regression-groups 4/4\nSCORE: 0.4000\n",
+      "parsed_score": 0.4,
+      "score": 0.4,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.32571558305062354
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL feature test_include.IncludeTest.test_basic_include",
+      "ok": false,
+      "output": "FAIL feature test_include.IncludeTest.test_basic_include\nFAIL feature test_include.IncludeTest.test_nested_include\nFAIL feature test_include.IncludeTest.test_relative_to_including_file\nFAIL feature test_include.IncludeTest.test_override_after_include\nFAIL feature test_include.IncludeTest.test_missing_include_raises\nFAIL feature test_include.IncludeTest.test_cycle_raises\nfeature 0/6, regression-groups 4/4\nSCORE: 0.4000\n",
+      "parsed_score": 0.4,
+      "score": 0.4,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.36191850004252046
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL feature test_include.IncludeTest.test_basic_include",
+      "ok": false,
+      "output": "FAIL feature test_include.IncludeTest.test_basic_include\nFAIL feature test_include.IncludeTest.test_nested_include\nFAIL feature test_include.IncludeTest.test_relative_to_including_file\nFAIL feature test_include.IncludeTest.test_override_after_include\nFAIL feature test_include.IncludeTest.test_missing_include_raises\nFAIL feature test_include.IncludeTest.test_cycle_raises\nfeature 0/6, regression-groups 4/4\nSCORE: 0.4000\n",
+      "parsed_score": 0.4,
+      "score": 0.4,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2748056669952348
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL feature test_include.IncludeTest.test_basic_include",
+      "ok": false,
+      "output": "FAIL feature test_include.IncludeTest.test_basic_include\nFAIL feature test_include.IncludeTest.test_nested_include\nFAIL feature test_include.IncludeTest.test_relative_to_including_file\nFAIL feature test_include.IncludeTest.test_override_after_include\nFAIL feature test_include.IncludeTest.test_missing_include_raises\nFAIL feature test_include.IncludeTest.test_cycle_raises\nfeature 0/6, regression-groups 4/4\nSCORE: 0.4000\n",
+      "parsed_score": 0.4,
+      "score": 0.4,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27419045800343156
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL feature test_include.IncludeTest.test_basic_include",
+      "ok": false,
+      "output": "FAIL feature test_include.IncludeTest.test_basic_include\nFAIL feature test_include.IncludeTest.test_nested_include\nFAIL feature test_include.IncludeTest.test_relative_to_including_file\nFAIL feature test_include.IncludeTest.test_override_after_include\nFAIL feature test_include.IncludeTest.test_missing_include_raises\nFAIL feature test_include.IncludeTest.test_cycle_raises\nfeature 0/6, regression-groups 4/4\nSCORE: 0.4000\n",
+      "parsed_score": 0.4,
+      "score": 0.4,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27262762503232807
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL feature test_include.IncludeTest.test_basic_include",
+      "ok": false,
+      "output": "FAIL feature test_include.IncludeTest.test_basic_include\nFAIL feature test_include.IncludeTest.test_nested_include\nFAIL feature test_include.IncludeTest.test_relative_to_including_file\nFAIL feature test_include.IncludeTest.test_override_after_include\nFAIL feature test_include.IncludeTest.test_missing_include_raises\nFAIL feature test_include.IncludeTest.test_cycle_raises\nfeature 0/6, regression-groups 4/4\nSCORE: 0.4000\n",
+      "parsed_score": 0.4,
+      "score": 0.4,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27274200005922467
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL feature test_include.IncludeTest.test_basic_include",
+      "ok": false,
+      "output": "FAIL feature test_include.IncludeTest.test_basic_include\nFAIL feature test_include.IncludeTest.test_nested_include\nFAIL feature test_include.IncludeTest.test_relative_to_including_file\nFAIL feature test_include.IncludeTest.test_override_after_include\nFAIL feature test_include.IncludeTest.test_missing_include_raises\nFAIL feature test_include.IncludeTest.test_cycle_raises\nfeature 0/6, regression-groups 4/4\nSCORE: 0.4000\n",
+      "parsed_score": 0.4,
+      "score": 0.4,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28070941695477813
+    }
+  ]
+}

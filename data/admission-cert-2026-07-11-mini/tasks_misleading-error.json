@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.21129445906262845
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22905229101888835
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2559354999102652
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24446908407844603
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24681074998807162
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.21373041695915163
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24019291601143777
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25070279103238136
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26466416602488607
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2262979169609025
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2649334999732673
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2577979590278119
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26235404203180224
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23695979197509587
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23136604204773903
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2513514169258997
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2508888329612091
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24965762498322874
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2569547499297187
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "main.py ran and printed the expected line.",
+      "ok": true,
+      "output": "main.py ran and printed the expected line.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23894666705746204
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks/misleading-error",
+  "wall_time_s": {
+    "all": {
+      "max": 0.2750709580723196,
+      "median": 0.24957174994051456,
+      "min": 0.20962920901365578
+    },
+    "solution": {
+      "max": 0.2649334999732673,
+      "median": 0.24823418748565018,
+      "min": 0.21129445906262845
+    },
+    "workspace": {
+      "max": 0.2750709580723196,
+      "median": 0.2503319584648125,
+      "min": 0.20962920901365578
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: python3 main.py exited with status 1",
+      "ok": false,
+      "output": "FAIL: python3 main.py exited with status 1\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26506754208821803
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: python3 main.py exited with status 1",
+      "ok": false,
+      "output": "FAIL: python3 main.py exited with status 1\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23714324994944036
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: python3 main.py exited with status 1",
+      "ok": false,
+      "output": "FAIL: python3 main.py exited with status 1\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2750709580723196
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: python3 main.py exited with status 1",
+      "ok": false,
+      "output": "FAIL: python3 main.py exited with status 1\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2311192920897156
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: python3 main.py exited with status 1",
+      "ok": false,
+      "output": "FAIL: python3 main.py exited with status 1\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26248670800123364
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: python3 main.py exited with status 1",
+      "ok": false,
+      "output": "FAIL: python3 main.py exited with status 1\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24948587489780039
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: python3 main.py exited with status 1",
+      "ok": false,
+      "output": "FAIL: python3 main.py exited with status 1\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2511780420318246
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: python3 main.py exited with status 1",
+      "ok": false,
+      "output": "FAIL: python3 main.py exited with status 1\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.228332957951352
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: python3 main.py exited with status 1",
+      "ok": false,
+      "output": "FAIL: python3 main.py exited with status 1\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.20962920901365578
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: python3 main.py exited with status 1",
+      "ok": false,
+      "output": "FAIL: python3 main.py exited with status 1\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2525470840046182
+    }
+  ]
+}

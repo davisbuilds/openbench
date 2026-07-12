@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.717804208979942
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.555552917066962
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.570945541956462
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.580794082954526
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.598498000064865
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.597428667009808
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.612299042055383
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.555490083061159
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.63578129094094
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.624768457957543
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.636750500067137
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.589401750010438
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.589143624994904
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.627605792018585
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.564524874906056
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.616182792000473
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.604342542006634
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.603173916926607
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.615849790978245
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all cancel-async-tasks scenarios passed",
+      "ok": true,
+      "output": "PASS: all cancel-async-tasks scenarios passed\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 12.588601125054993
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks-imported/terminal-bench/cancel-async-tasks",
+  "wall_time_s": {
+    "all": {
+      "max": 12.717804208979942,
+      "median": 12.58469760400476,
+      "min": 0.20873112499248236
+    },
+    "solution": {
+      "max": 12.717804208979942,
+      "median": 12.600835958495736,
+      "min": 12.555490083061159
+    },
+    "workspace": {
+      "max": 0.2721936251036823,
+      "median": 0.2569226664490998,
+      "min": 0.20873112499248236
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: run.py does not exist",
+      "ok": false,
+      "output": "FAIL: run.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2685760000022128
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: run.py does not exist",
+      "ok": false,
+      "output": "FAIL: run.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2594513329677284
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: run.py does not exist",
+      "ok": false,
+      "output": "FAIL: run.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22732616600114852
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: run.py does not exist",
+      "ok": false,
+      "output": "FAIL: run.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2498344579944387
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: run.py does not exist",
+      "ok": false,
+      "output": "FAIL: run.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2721936251036823
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: run.py does not exist",
+      "ok": false,
+      "output": "FAIL: run.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.20873112499248236
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: run.py does not exist",
+      "ok": false,
+      "output": "FAIL: run.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2575113750062883
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: run.py does not exist",
+      "ok": false,
+      "output": "FAIL: run.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24424954201094806
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: run.py does not exist",
+      "ok": false,
+      "output": "FAIL: run.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2622842089040205
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: run.py does not exist",
+      "ok": false,
+      "output": "FAIL: run.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25633395789191127
+    }
+  ]
+}

@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24101787502877414
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28441149997524917
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2819656250067055
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23143954097758979
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28363995801191777
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2779370410135016
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2867623750353232
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26745008397847414
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2677649590186775
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2914681249530986
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.29482729092705995
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2593268329510465
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.30146824999246746
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27799141709692776
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27661912492476404
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2628233750583604
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2871490840334445
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2796255830908194
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.260379874962382
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "All wordcount cases passed.",
+      "ok": true,
+      "output": "All wordcount cases passed.\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2930254169041291
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks/build-a-cli",
+  "wall_time_s": {
+    "all": {
+      "max": 0.30146824999246746,
+      "median": 0.26513672951841727,
+      "min": 0.19238837505690753
+    },
+    "solution": {
+      "max": 0.30146824999246746,
+      "median": 0.2788085000938736,
+      "min": 0.23143954097758979
+    },
+    "workspace": {
+      "max": 0.24278929096180946,
+      "median": 0.2167776040150784,
+      "min": 0.19238837505690753
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: wordcount.py not found in workspace",
+      "ok": false,
+      "output": "FAIL: wordcount.py not found in workspace\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.20951433305162936
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: wordcount.py not found in workspace",
+      "ok": false,
+      "output": "FAIL: wordcount.py not found in workspace\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.21691479196306318
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: wordcount.py not found in workspace",
+      "ok": false,
+      "output": "FAIL: wordcount.py not found in workspace\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24278929096180946
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: wordcount.py not found in workspace",
+      "ok": false,
+      "output": "FAIL: wordcount.py not found in workspace\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2359208749840036
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: wordcount.py not found in workspace",
+      "ok": false,
+      "output": "FAIL: wordcount.py not found in workspace\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.19238837505690753
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: wordcount.py not found in workspace",
+      "ok": false,
+      "output": "FAIL: wordcount.py not found in workspace\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2151496249716729
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: wordcount.py not found in workspace",
+      "ok": false,
+      "output": "FAIL: wordcount.py not found in workspace\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22964183299336582
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: wordcount.py not found in workspace",
+      "ok": false,
+      "output": "FAIL: wordcount.py not found in workspace\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.21335329196881503
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: wordcount.py not found in workspace",
+      "ok": false,
+      "output": "FAIL: wordcount.py not found in workspace\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22192137502133846
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: wordcount.py not found in workspace",
+      "ok": false,
+      "output": "FAIL: wordcount.py not found in workspace\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2166404160670936
+    }
+  ]
+}
