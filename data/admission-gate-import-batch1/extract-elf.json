@@ -1,0 +1,389 @@
+{
+  "checker_wall_time_s": {
+    "all": {
+      "max": 0.3776737079024315,
+      "median": 0.25729606254026294,
+      "min": 0.18880270794034004
+    },
+    "solution": {
+      "max": 0.2965697080362588,
+      "median": 0.2635921040782705,
+      "min": 0.2505909998435527
+    },
+    "workspace": {
+      "max": 0.3776737079024315,
+      "median": 0.20295525004621595,
+      "min": 0.18880270794034004
+    }
+  },
+  "determinism": {
+    "docker": false,
+    "findings": [],
+    "pass": true,
+    "runs": 20,
+    "solution_verdicts": [
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2563074170611799
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2717806249856949
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2713215418625623
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2663597909267992
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.26789833419024944
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.27250050008296967
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.27982137515209615
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2551616248674691
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2505909998435527
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2965697080362588
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2584276660345495
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.258284708019346
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.26317024999298155
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.26176112494431436
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2535302499309182
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.25533437519334257
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.27057612501084805
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2725387499667704
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2544901669025421
+      },
+      {
+        "exit_code": 0,
+        "first_fail_line": "PASS: extracted 117/117 checker-owned memory words (100.00%)",
+        "ok": true,
+        "output": "PASS: extracted 117/117 checker-owned memory words (100.00%)\n",
+        "parsed_score": null,
+        "score": 1.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.26401395816355944
+      }
+    ],
+    "stress": 6,
+    "task": "/Users/matthewlam/dev/openbench-wt-tbimport/tasks-imported/terminal-bench/extract-elf",
+    "wall_time_s": {
+      "all": {
+        "max": 0.3776737079024315,
+        "median": 0.25729606254026294,
+        "min": 0.18880270794034004
+      },
+      "solution": {
+        "max": 0.2965697080362588,
+        "median": 0.2635921040782705,
+        "min": 0.2505909998435527
+      },
+      "workspace": {
+        "max": 0.3776737079024315,
+        "median": 0.20295525004621595,
+        "min": 0.18880270794034004
+      }
+    },
+    "workspace_runs": 10,
+    "workspace_verdicts": [
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: extract.js does not exist",
+        "ok": false,
+        "output": "FAIL: extract.js does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.20348104205913842
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: extract.js does not exist",
+        "ok": false,
+        "output": "FAIL: extract.js does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.20663512498140335
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: extract.js does not exist",
+        "ok": false,
+        "output": "FAIL: extract.js does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.18880270794034004
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: extract.js does not exist",
+        "ok": false,
+        "output": "FAIL: extract.js does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2014143329579383
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: extract.js does not exist",
+        "ok": false,
+        "output": "FAIL: extract.js does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.21406208304688334
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: extract.js does not exist",
+        "ok": false,
+        "output": "FAIL: extract.js does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19619924994185567
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: extract.js does not exist",
+        "ok": false,
+        "output": "FAIL: extract.js does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.2094064170960337
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: extract.js does not exist",
+        "ok": false,
+        "output": "FAIL: extract.js does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.19446754199452698
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: extract.js does not exist",
+        "ok": false,
+        "output": "FAIL: extract.js does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.20242945803329349
+      },
+      {
+        "exit_code": 1,
+        "first_fail_line": "FAIL: extract.js does not exist",
+        "ok": false,
+        "output": "FAIL: extract.js does not exist\n",
+        "parsed_score": null,
+        "score": 0.0,
+        "score_errors": [],
+        "timed_out": false,
+        "wall_time_s": 0.3776737079024315
+      }
+    ]
+  },
+  "findings": [],
+  "pass": true,
+  "status": "PASS",
+  "task": "/Users/matthewlam/dev/openbench-wt-tbimport/tasks-imported/terminal-bench/extract-elf",
+  "validate_tasks": {
+    "solution_exit": 0,
+    "solution_score": 1.0,
+    "workspace_exit": 1,
+    "workspace_score": 0.0
+  }
+}
