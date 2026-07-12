@@ -360,7 +360,10 @@ def harness_version_for_source(harness, exec_used, host_version, docker_image=No
         if harness == "null":
             return "builtin", "container"
         versions = container_versions_reader(docker_image, image_digest)
-        return versions.get(harness), "container"
+        # Ablation variants (codex_v1, codex_v2, ...) run the stock codex CLI
+        # with a different CODEX_HOME; the binary version is codex's.
+        base = harness.split("_", 1)[0] if harness.startswith("codex_") else harness
+        return versions.get(harness) or versions.get(base), "container"
     return host_version, "host"
 
 
@@ -895,7 +898,15 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
     # a single path component.
-    workdir = tempfile.mkdtemp(prefix=f"bench_{harness}_{task.replace('/', '_')}_")
+    # Docker mode bind-mounts this dir; on colima the default macOS /var/folders
+    # temp path is NOT shared into the VM and mounts as an EMPTY dir, so create
+    # it somewhere the VM can see (same policy as docker_exec instruction files).
+    workdir_parent = None
+    if exec_mode == "docker":
+        workdir_parent = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".bench-tmp")
+        os.makedirs(workdir_parent, exist_ok=True)
+    workdir = tempfile.mkdtemp(prefix=f"bench_{harness}_{task.replace('/', '_')}_", dir=workdir_parent)
     try:
         # Copy the pristine workspace into the disposable temp dir. Never touch
         # the source workspace under tasks/.
