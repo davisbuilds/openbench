@@ -220,6 +220,110 @@ class TestFlagsEfficiencyAndCost(StatsTestCase):
         self.assertEqual(row["median_cost_solved"], 7.0)
 
 
+class TestProvenanceGate(StatsTestCase):
+    def provenance_rows(self, digest_a="sha256:same", digest_b="sha256:same"):
+        self.make_task("t1")
+        return [
+            {"harness": "h", "model": "a", "task": "t1", "trial": 1, "success": True,
+             "failure_class": "solved", "image_digest": digest_a, "harness_version": "hv1",
+             "timeout_s": 1200, "checker_digest": "check1"},
+            {"harness": "h", "model": "b", "task": "t1", "trial": 1, "success": False,
+             "failure_class": "wrong_answer", "image_digest": digest_b, "harness_version": "hv1",
+             "timeout_s": 1200, "checker_digest": "check1"},
+        ]
+
+    def test_same_digest_is_provenance_ok(self):
+        result = self.build(self.provenance_rows(), group="model", min_n=1)
+        self.assertTrue(result["provenance_ok"])
+        self.assertEqual(result["provenance"]["shared"]["image_digest"], ["sha256:same"])
+        text = stats.render_text(result)
+        self.assertIn("PROVENANCE: OK (all compared groups share", text)
+        self.assertIn("image_digest=sha256:same", text)
+
+    def test_differing_digests_are_flagged(self):
+        result = self.build(self.provenance_rows(digest_b="sha256:other"), group="model", min_n=1)
+        self.assertFalse(result["provenance_ok"])
+        flags = result["provenance"]["flags"]
+        self.assertTrue(any(flag["field"] == "image_digest" and
+                            flag["type"] == "differs_across_groups" for flag in flags))
+        text = stats.render_text(result)
+        self.assertIn("NON-COMPARABLE: image_digest differs across groups", text)
+        self.assertIn("a: ['sha256:same']", text)
+        self.assertGreaterEqual(text.count("NON-COMPARABLE"), 2)
+
+    def test_mixed_within_group_is_flagged(self):
+        self.make_task("t1")
+        self.make_task("t2")
+        rows = [
+            {"harness": "h", "model": "a", "task": "t1", "trial": 1, "success": True,
+             "failure_class": "solved", "image_digest": "sha256:one", "harness_version": "hv1"},
+            {"harness": "h", "model": "a", "task": "t2", "trial": 1, "success": True,
+             "failure_class": "solved", "image_digest": "sha256:two", "harness_version": "hv1"},
+            {"harness": "h", "model": "b", "task": "t1", "trial": 1, "success": False,
+             "failure_class": "wrong_answer", "image_digest": "sha256:one", "harness_version": "hv1"},
+            {"harness": "h", "model": "b", "task": "t2", "trial": 1, "success": False,
+             "failure_class": "wrong_answer", "image_digest": "sha256:one", "harness_version": "hv1"},
+        ]
+        result = self.build(rows, group="model", min_n=1)
+        self.assertFalse(result["provenance_ok"])
+        self.assertTrue(any(flag["field"] == "image_digest" and
+                            flag["type"] == "mixed_within_group" and
+                            flag["group"] == "a" for flag in result["provenance"]["flags"]))
+        self.assertIn("image_digest has mixed values within group a", stats.render_text(result))
+
+    def test_absent_image_digest_is_info_not_flag(self):
+        self.make_task("t1")
+        rows = [
+            {"harness": "h", "model": "a", "task": "t1", "trial": 1, "success": True,
+             "failure_class": "solved"},
+            {"harness": "h", "model": "b", "task": "t1", "trial": 1, "success": False,
+             "failure_class": "wrong_answer"},
+        ]
+        result = self.build(rows, group="model", min_n=1)
+        self.assertTrue(result["provenance_ok"])
+        self.assertEqual(result["provenance"]["unknown_provenance_rows"], 2)
+        self.assertIn("unknown provenance: 2 rows", stats.render_text(result))
+
+    def test_partially_absent_image_digest_is_info_not_flag(self):
+        self.make_task("t1")
+        rows = [
+            {"harness": "h", "model": "a", "task": "t1", "trial": 1, "success": True,
+             "failure_class": "solved", "image_digest": "sha256:same", "harness_version": "hv1"},
+            {"harness": "h", "model": "b", "task": "t1", "trial": 1, "success": False,
+             "failure_class": "wrong_answer", "harness_version": "hv1"},
+        ]
+        result = self.build(rows, group="model", min_n=1)
+        self.assertTrue(result["provenance_ok"])
+        self.assertEqual(result["provenance"]["unknown_provenance_rows"], 1)
+        self.assertEqual(result["provenance"]["fields"]["image_digest"]["missing_by_group"]["b"], 1)
+        self.assertIn("unknown provenance: 1 rows", stats.render_text(result))
+
+    def test_non_finite_optional_provenance_is_ignored_not_crash(self):
+        self.make_task("t1")
+        rows = [
+            {"harness": "h", "model": "a", "task": "t1", "trial": 1, "success": True,
+             "failure_class": "solved", "image_digest": "sha256:same", "harness_version": "hv1",
+             "timeout_s": float("nan")},
+            {"harness": "h", "model": "b", "task": "t1", "trial": 1, "success": False,
+             "failure_class": "wrong_answer", "image_digest": "sha256:same", "harness_version": "hv1",
+             "timeout_s": 1200},
+        ]
+        result = self.build(rows, group="model", min_n=1)
+        self.assertTrue(result["provenance_ok"])
+        self.assertEqual(result["provenance"]["fields"]["timeout_s"]["missing_by_group"]["a"], 1)
+        text = stats.render_text(result)
+        self.assertIn("PROVENANCE: OK", text)
+        self.assertIn("missing timeout_s: 1 rows", text)
+
+    def test_strict_provenance_exits_2_on_flag(self):
+        self.write_rows(self.provenance_rows(digest_b="sha256:other"))
+        cmd = [sys.executable, os.path.join(os.path.dirname(os.path.dirname(__file__)), "stats.py"),
+               self.results, "--group", "model", "--tasks-dir", self.tasks, "--strict-provenance"]
+        proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("NON-COMPARABLE: image_digest differs across groups", proc.stdout)
+
+
 class TestCliOutput(StatsTestCase):
     def test_cli_text_and_json(self):
         self.make_task("t1")
@@ -231,6 +335,7 @@ class TestCliOutput(StatsTestCase):
         self.assertIn("ALL COUNTABLE ROWS (NON-COMPARABLE", text)
         raw = subprocess.check_output(cmd + ["--json"], text=True)
         payload = json.loads(raw)
+        self.assertTrue(payload["provenance_ok"])
         self.assertEqual(payload["tables"]["all_countable_non_comparable"][0]["group"], "m")
 
 

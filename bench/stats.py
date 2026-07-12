@@ -34,6 +34,16 @@ DEFAULT_TASK_DIRS = (
 )
 EXCLUDED_FAILURE_CLASSES = {"infra", "rate_limited"}
 GROUP_CHOICES = ("harness,model", "model", "harness")
+PROVENANCE_CORE_FIELDS = ("image_digest", "harness_version", "harness_version_source", "timeout_s")
+PROVENANCE_CHECKER_FIELDS = (
+    "checker_digest",
+    "checker_sha256",
+    "checker_hash",
+    "checker_version",
+    "checker_image_digest",
+    "checker_config_digest",
+    "checker_timeout_s",
+)
 Z_95 = 1.96
 
 try:  # Package import path (`import bench.stats`).
@@ -257,6 +267,170 @@ def matched_cell_key(row, fields):
     return tuple(parts)
 
 
+def _present_provenance_value(value):
+    if value is None or value == "":
+        return False
+    try:
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _jsonish(value):
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _docker_entry_timeout(row):
+    cmd = row.get("cmd")
+    if not isinstance(cmd, dict):
+        return None
+    docker = cmd.get("docker")
+    if not isinstance(docker, list):
+        return None
+    try:
+        entry_idx = docker.index("/bench/entry.py")
+    except ValueError:
+        return None
+    timeout_idx = entry_idx + 3
+    if timeout_idx < len(docker):
+        candidate = docker[timeout_idx]
+        if _present_provenance_value(candidate):
+            return candidate
+    return None
+
+
+def provenance_value(row, field):
+    if field == "timeout_s":
+        for key in ("timeout_s", "timeout_config", "adapter_timeout_s", "harness_timeout_s", "timeout"):
+            value = row.get(key)
+            if _present_provenance_value(value):
+                return value
+        return _docker_entry_timeout(row)
+    value = row.get(field)
+    return value if _present_provenance_value(value) else None
+
+
+def provenance_fields_for_rows(rows):
+    fields = list(PROVENANCE_CORE_FIELDS)
+    for field in PROVENANCE_CHECKER_FIELDS:
+        if any(provenance_value(row, field) is not None for row in rows):
+            fields.append(field)
+    return fields
+
+
+def _format_group_sets(group_sets):
+    parts = []
+    for group in sorted(group_sets):
+        values = ", ".join(repr(value) for value in group_sets[group])
+        parts.append(f"{group}: [{values}]")
+    return "{" + ", ".join(parts) + "}"
+
+
+def build_provenance(countable_rows, fields):
+    by_group = defaultdict(list)
+    for row in countable_rows:
+        by_group[group_label(group_key(row, fields), fields)].append(row)
+
+    unknown_rows = sum(1 for row in countable_rows if provenance_value(row, "image_digest") is None)
+    out = {
+        "checked": len(by_group) >= 2,
+        "ok": True,
+        "unknown_provenance_rows": unknown_rows,
+        "info": [],
+        "fields": {},
+        "flags": [],
+        "shared": {},
+    }
+    if unknown_rows:
+        out["info"].append(f"unknown provenance: {unknown_rows} rows")
+    if len(by_group) < 2:
+        return out
+
+    for field in provenance_fields_for_rows(countable_rows):
+        per_group = {}
+        missing_counts = {}
+        for group in sorted(by_group):
+            values = []
+            missing = 0
+            for row in by_group[group]:
+                value = provenance_value(row, field)
+                if value is None:
+                    missing += 1
+                    continue
+                values.append(_jsonish(value))
+            per_group[group] = sorted(set(values))
+            missing_counts[group] = missing
+
+        out["fields"][field] = {
+            "values_by_group": per_group,
+            "missing_by_group": missing_counts,
+        }
+        groups_with_values = {group: values for group, values in per_group.items() if values}
+        missing_total = sum(missing_counts.values())
+        if field != "image_digest" and groups_with_values and missing_total:
+            out["info"].append(f"missing {field}: {missing_total} rows")
+        field_flagged = False
+
+        for group, values in groups_with_values.items():
+            if len(values) > 1:
+                out["flags"].append({
+                    "type": "mixed_within_group",
+                    "field": field,
+                    "group": group,
+                    "values": values,
+                    "message": f"{field} has mixed values within group {group}: {values}",
+                })
+                field_flagged = True
+
+        if len(groups_with_values) >= 2:
+            distinct_sets = {tuple(values) for values in groups_with_values.values()}
+            if len(distinct_sets) > 1:
+                out["flags"].append({
+                    "type": "differs_across_groups",
+                    "field": field,
+                    "values_by_group": groups_with_values,
+                    "message": f"{field} differs across groups: {_format_group_sets(groups_with_values)}",
+                })
+                field_flagged = True
+
+        if not field_flagged and groups_with_values:
+            first_values = next(iter(groups_with_values.values()))
+            if all(values == first_values for values in groups_with_values.values()):
+                out["shared"][field] = first_values
+
+    out["ok"] = not out["flags"]
+    return out
+
+
+def render_provenance_banner(provenance):
+    info = provenance.get("info") or []
+    info_text = ("; " + "; ".join(info)) if info else ""
+    if provenance.get("ok"):
+        if not provenance.get("checked"):
+            return "PROVENANCE: OK (fewer than 2 groups; comparison provenance not checked" + info_text + ")"
+        shared = provenance.get("shared") or {}
+        if shared:
+            parts = []
+            for field in sorted(shared):
+                values = shared[field]
+                rendered = values[0] if len(values) == 1 else "[" + ", ".join(values) + "]"
+                parts.append(f"{field}={rendered}")
+            detail = "all compared groups share " + ", ".join(parts)
+        else:
+            detail = "no comparable provenance fields recorded"
+        return f"PROVENANCE: OK ({detail}{info_text})"
+
+    messages = [flag["message"] for flag in provenance.get("flags", [])]
+    lines = ["!" * 72, "NON-COMPARABLE: " + "; ".join(messages)]
+    if info:
+        lines.append("PROVENANCE INFO: " + "; ".join(info))
+    lines.append("!" * 72)
+    return "\n".join(lines)
+
+
 def _empty_acc(label):
     return {
         "group": label,
@@ -423,6 +597,7 @@ def build_stats(paths, group="harness,model", min_n=5, tasks_dirs=None, pricing=
     overall = aggregate_table(countable, fields, min_n, pricing=pricing)
     mrows, mdiag = matched_rows(countable, fields)
     matched = aggregate_table(mrows, fields, min_n, pricing=pricing) if mdiag else None
+    provenance = build_provenance(countable, fields)
     return {
         "inputs": list(paths),
         "group": group,
@@ -438,6 +613,8 @@ def build_stats(paths, group="harness,model", min_n=5, tasks_dirs=None, pricing=
             "matched_comparable": matched,
         },
         "matched": mdiag,
+        "provenance_ok": provenance["ok"],
+        "provenance": provenance,
         "pricing": {"enabled": pricing is not None},
     }
 
@@ -513,12 +690,19 @@ def render_text(stats):
         lines.append("Quarantined dropped tasks: " + ", ".join(
             f"{task}={count}" for task, count in sorted(stats["quarantined_tasks"].items())))
     lines.append("")
+    provenance = stats.get("provenance") or {"ok": True, "checked": False}
+    provenance_banner = render_provenance_banner(provenance)
+    lines.append(provenance_banner)
+    lines.append("")
     lines.append("ALL COUNTABLE ROWS (NON-COMPARABLE; denominators may differ)")
     include_cost = stats.get("pricing", {}).get("enabled", False)
     lines.append(render_table(stats["tables"]["all_countable_non_comparable"], include_cost=include_cost))
     matched = stats.get("matched")
     if matched:
         lines.append("")
+        if not provenance.get("ok", True):
+            lines.append(provenance_banner)
+            lines.append("")
         lines.append("MATCHED DENOMINATORS (COMPARABLE; cells present in every group)")
         diag = (
             f"Matched cells/group={matched['matched_cells_per_group']} "
@@ -544,6 +728,8 @@ def parse_args(argv):
     parser.add_argument("--tasks-dir", action="append",
                         help="task root to inspect for DROPPED.md; may be repeated or comma-separated")
     parser.add_argument("--pricing", help="optional pricing JSON: {model: {input_per_mtok, output_per_mtok}}")
+    parser.add_argument("--strict-provenance", action="store_true",
+                        help="exit 2 when grouped comparison provenance differs")
     return parser.parse_args(argv)
 
 
@@ -561,6 +747,8 @@ def main(argv=None):
         print(json.dumps(stats, indent=2, sort_keys=True, allow_nan=False))
     else:
         print(render_text(stats))
+    if args.strict_provenance and not stats["provenance_ok"]:
+        return 2
     return 0
 
 
