@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.29204929200932384
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27810062502976507
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2807289579650387
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2759385829558596
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.286034082993865
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2866202499717474
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27866262500174344
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3001407500123605
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2972798750270158
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3049387080827728
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2845962910214439
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28002075001131743
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2811089580645785
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2863579170079902
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28392670792527497
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.30494149995502084
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28509966598358005
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2832217919640243
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27770566707476974
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "regression 19/19  feature 24/24",
+      "ok": true,
+      "output": "regression 19/19  feature 24/24\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28707620804198086
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks/webcore",
+  "wall_time_s": {
+    "all": {
+      "max": 0.31396620790474117,
+      "median": 0.28640014596749097,
+      "min": 0.2759385829558596
+    },
+    "solution": {
+      "max": 0.30494149995502084,
+      "median": 0.284847978502512,
+      "min": 0.2759385829558596
+    },
+    "workspace": {
+      "max": 0.31396620790474117,
+      "median": 0.29087991651613265,
+      "min": 0.2781505410093814
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int",
+      "ok": false,
+      "output": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_slug_converter_accepts_and_rejects\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_path_converter_matches_multiple_segments\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_int_route_wins_for_digits\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_non_int_falls_through_to_slug\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_no_candidate_is_404\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_static_beats_dynamic_regardless_of_order\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_path_converter_is_lowest_precedence\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_int_param_arrives_as_int\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_path_param_contains_slashes\nFAIL(feat) test_feature_mount.MountFeatureTest.test_parametric_prefix_and_route_params_merged\nFAIL(feat) test_feature_mount.MountFeatureTest.test_static_prefix_mount\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_then_child_then_handler\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_middleware_short_circuits_child\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_extra_slash_redirects_to_registered\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_query_string_preserved_on_redirect\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_registered_with_slash_redirects_missing_slash\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_wrong_method_is_405\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_allow_header_is_sorted\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_int_formatting_and_query_string\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_mount_prefix_included\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_missing_param_raises\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_head_has_headers_but_empty_body\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_options_returns_204_with_allow\nregression 19/19  feature 0/24\nSCORE: 0.3000\n",
+      "parsed_score": 0.3,
+      "score": 0.3,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.292200000025332
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int",
+      "ok": false,
+      "output": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_slug_converter_accepts_and_rejects\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_path_converter_matches_multiple_segments\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_int_route_wins_for_digits\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_non_int_falls_through_to_slug\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_no_candidate_is_404\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_static_beats_dynamic_regardless_of_order\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_path_converter_is_lowest_precedence\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_int_param_arrives_as_int\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_path_param_contains_slashes\nFAIL(feat) test_feature_mount.MountFeatureTest.test_parametric_prefix_and_route_params_merged\nFAIL(feat) test_feature_mount.MountFeatureTest.test_static_prefix_mount\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_then_child_then_handler\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_middleware_short_circuits_child\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_extra_slash_redirects_to_registered\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_query_string_preserved_on_redirect\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_registered_with_slash_redirects_missing_slash\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_wrong_method_is_405\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_allow_header_is_sorted\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_int_formatting_and_query_string\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_mount_prefix_included\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_missing_param_raises\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_head_has_headers_but_empty_body\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_options_returns_204_with_allow\nregression 19/19  feature 0/24\nSCORE: 0.3000\n",
+      "parsed_score": 0.3,
+      "score": 0.3,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2975141250062734
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int",
+      "ok": false,
+      "output": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_slug_converter_accepts_and_rejects\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_path_converter_matches_multiple_segments\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_int_route_wins_for_digits\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_non_int_falls_through_to_slug\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_no_candidate_is_404\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_static_beats_dynamic_regardless_of_order\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_path_converter_is_lowest_precedence\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_int_param_arrives_as_int\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_path_param_contains_slashes\nFAIL(feat) test_feature_mount.MountFeatureTest.test_parametric_prefix_and_route_params_merged\nFAIL(feat) test_feature_mount.MountFeatureTest.test_static_prefix_mount\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_then_child_then_handler\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_middleware_short_circuits_child\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_extra_slash_redirects_to_registered\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_query_string_preserved_on_redirect\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_registered_with_slash_redirects_missing_slash\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_wrong_method_is_405\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_allow_header_is_sorted\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_int_formatting_and_query_string\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_mount_prefix_included\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_missing_param_raises\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_head_has_headers_but_empty_body\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_options_returns_204_with_allow\nregression 19/19  feature 0/24\nSCORE: 0.3000\n",
+      "parsed_score": 0.3,
+      "score": 0.3,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.29742837499361485
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int",
+      "ok": false,
+      "output": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_slug_converter_accepts_and_rejects\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_path_converter_matches_multiple_segments\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_int_route_wins_for_digits\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_non_int_falls_through_to_slug\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_no_candidate_is_404\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_static_beats_dynamic_regardless_of_order\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_path_converter_is_lowest_precedence\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_int_param_arrives_as_int\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_path_param_contains_slashes\nFAIL(feat) test_feature_mount.MountFeatureTest.test_parametric_prefix_and_route_params_merged\nFAIL(feat) test_feature_mount.MountFeatureTest.test_static_prefix_mount\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_then_child_then_handler\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_middleware_short_circuits_child\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_extra_slash_redirects_to_registered\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_query_string_preserved_on_redirect\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_registered_with_slash_redirects_missing_slash\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_wrong_method_is_405\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_allow_header_is_sorted\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_int_formatting_and_query_string\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_mount_prefix_included\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_missing_param_raises\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_head_has_headers_but_empty_body\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_options_returns_204_with_allow\nregression 19/19  feature 0/24\nSCORE: 0.3000\n",
+      "parsed_score": 0.3,
+      "score": 0.3,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2781505410093814
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int",
+      "ok": false,
+      "output": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_slug_converter_accepts_and_rejects\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_path_converter_matches_multiple_segments\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_int_route_wins_for_digits\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_non_int_falls_through_to_slug\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_no_candidate_is_404\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_static_beats_dynamic_regardless_of_order\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_path_converter_is_lowest_precedence\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_int_param_arrives_as_int\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_path_param_contains_slashes\nFAIL(feat) test_feature_mount.MountFeatureTest.test_parametric_prefix_and_route_params_merged\nFAIL(feat) test_feature_mount.MountFeatureTest.test_static_prefix_mount\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_then_child_then_handler\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_middleware_short_circuits_child\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_extra_slash_redirects_to_registered\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_query_string_preserved_on_redirect\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_registered_with_slash_redirects_missing_slash\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_wrong_method_is_405\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_allow_header_is_sorted\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_int_formatting_and_query_string\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_mount_prefix_included\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_missing_param_raises\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_head_has_headers_but_empty_body\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_options_returns_204_with_allow\nregression 19/19  feature 0/24\nSCORE: 0.3000\n",
+      "parsed_score": 0.3,
+      "score": 0.3,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28031854098662734
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int",
+      "ok": false,
+      "output": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_slug_converter_accepts_and_rejects\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_path_converter_matches_multiple_segments\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_int_route_wins_for_digits\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_non_int_falls_through_to_slug\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_no_candidate_is_404\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_static_beats_dynamic_regardless_of_order\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_path_converter_is_lowest_precedence\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_int_param_arrives_as_int\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_path_param_contains_slashes\nFAIL(feat) test_feature_mount.MountFeatureTest.test_parametric_prefix_and_route_params_merged\nFAIL(feat) test_feature_mount.MountFeatureTest.test_static_prefix_mount\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_then_child_then_handler\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_middleware_short_circuits_child\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_extra_slash_redirects_to_registered\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_query_string_preserved_on_redirect\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_registered_with_slash_redirects_missing_slash\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_wrong_method_is_405\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_allow_header_is_sorted\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_int_formatting_and_query_string\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_mount_prefix_included\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_missing_param_raises\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_head_has_headers_but_empty_body\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_options_returns_204_with_allow\nregression 19/19  feature 0/24\nSCORE: 0.3000\n",
+      "parsed_score": 0.3,
+      "score": 0.3,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.31396620790474117
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int",
+      "ok": false,
+      "output": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_slug_converter_accepts_and_rejects\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_path_converter_matches_multiple_segments\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_int_route_wins_for_digits\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_non_int_falls_through_to_slug\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_no_candidate_is_404\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_static_beats_dynamic_regardless_of_order\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_path_converter_is_lowest_precedence\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_int_param_arrives_as_int\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_path_param_contains_slashes\nFAIL(feat) test_feature_mount.MountFeatureTest.test_parametric_prefix_and_route_params_merged\nFAIL(feat) test_feature_mount.MountFeatureTest.test_static_prefix_mount\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_then_child_then_handler\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_middleware_short_circuits_child\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_extra_slash_redirects_to_registered\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_query_string_preserved_on_redirect\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_registered_with_slash_redirects_missing_slash\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_wrong_method_is_405\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_allow_header_is_sorted\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_int_formatting_and_query_string\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_mount_prefix_included\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_missing_param_raises\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_head_has_headers_but_empty_body\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_options_returns_204_with_allow\nregression 19/19  feature 0/24\nSCORE: 0.3000\n",
+      "parsed_score": 0.3,
+      "score": 0.3,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.30728549999184906
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int",
+      "ok": false,
+      "output": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_slug_converter_accepts_and_rejects\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_path_converter_matches_multiple_segments\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_int_route_wins_for_digits\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_non_int_falls_through_to_slug\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_no_candidate_is_404\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_static_beats_dynamic_regardless_of_order\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_path_converter_is_lowest_precedence\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_int_param_arrives_as_int\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_path_param_contains_slashes\nFAIL(feat) test_feature_mount.MountFeatureTest.test_parametric_prefix_and_route_params_merged\nFAIL(feat) test_feature_mount.MountFeatureTest.test_static_prefix_mount\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_then_child_then_handler\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_middleware_short_circuits_child\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_extra_slash_redirects_to_registered\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_query_string_preserved_on_redirect\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_registered_with_slash_redirects_missing_slash\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_wrong_method_is_405\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_allow_header_is_sorted\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_int_formatting_and_query_string\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_mount_prefix_included\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_missing_param_raises\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_head_has_headers_but_empty_body\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_options_returns_204_with_allow\nregression 19/19  feature 0/24\nSCORE: 0.3000\n",
+      "parsed_score": 0.3,
+      "score": 0.3,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28955983300693333
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int",
+      "ok": false,
+      "output": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_slug_converter_accepts_and_rejects\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_path_converter_matches_multiple_segments\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_int_route_wins_for_digits\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_non_int_falls_through_to_slug\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_no_candidate_is_404\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_static_beats_dynamic_regardless_of_order\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_path_converter_is_lowest_precedence\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_int_param_arrives_as_int\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_path_param_contains_slashes\nFAIL(feat) test_feature_mount.MountFeatureTest.test_parametric_prefix_and_route_params_merged\nFAIL(feat) test_feature_mount.MountFeatureTest.test_static_prefix_mount\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_then_child_then_handler\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_middleware_short_circuits_child\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_extra_slash_redirects_to_registered\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_query_string_preserved_on_redirect\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_registered_with_slash_redirects_missing_slash\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_wrong_method_is_405\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_allow_header_is_sorted\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_int_formatting_and_query_string\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_mount_prefix_included\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_missing_param_raises\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_head_has_headers_but_empty_body\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_options_returns_204_with_allow\nregression 19/19  feature 0/24\nSCORE: 0.3000\n",
+      "parsed_score": 0.3,
+      "score": 0.3,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28644237492699176
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int",
+      "ok": false,
+      "output": "FAIL(feat) test_feature_converters.ConverterFeatureTest.test_int_converter_matches_digits_as_int\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_slug_converter_accepts_and_rejects\nFAIL(feat) test_feature_converters.ConverterFeatureTest.test_path_converter_matches_multiple_segments\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_int_route_wins_for_digits\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_non_int_falls_through_to_slug\nFAIL(feat) test_feature_fallthrough.FallthroughFeatureTest.test_no_candidate_is_404\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_static_beats_dynamic_regardless_of_order\nFAIL(feat) test_feature_precedence.PrecedenceFeatureTest.test_path_converter_is_lowest_precedence\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_int_param_arrives_as_int\nFAIL(feat) test_feature_paramtypes.ParamTypeFeatureTest.test_path_param_contains_slashes\nFAIL(feat) test_feature_mount.MountFeatureTest.test_parametric_prefix_and_route_params_merged\nFAIL(feat) test_feature_mount.MountFeatureTest.test_static_prefix_mount\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_then_child_then_handler\nFAIL(feat) test_feature_mountmiddleware.MountMiddlewareFeatureTest.test_parent_middleware_short_circuits_child\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_extra_slash_redirects_to_registered\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_query_string_preserved_on_redirect\nFAIL(feat) test_feature_trailing.TrailingSlashFeatureTest.test_registered_with_slash_redirects_missing_slash\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_wrong_method_is_405\nFAIL(feat) test_feature_method.MethodNotAllowedFeatureTest.test_allow_header_is_sorted\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_int_formatting_and_query_string\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_mount_prefix_included\nFAIL(feat) test_feature_urlfor.UrlForFeatureTest.test_missing_param_raises\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_head_has_headers_but_empty_body\nFAIL(feat) test_feature_headoptions.HeadOptionsFeatureTest.test_options_returns_204_with_allow\nregression 19/19  feature 0/24\nSCORE: 0.3000\n",
+      "parsed_score": 0.3,
+      "score": 0.3,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28743166697677225
+    }
+  ]
+}

@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 825645d0",
+      "ok": true,
+      "output": "The key is 825645d0\nThe key is 12d19ec3\nThe key is 738d3a72\nThe key is 4bdea3f8\nThe key is 489052de\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.381168624968268
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 23bcf76c",
+      "ok": true,
+      "output": "The key is 23bcf76c\nThe key is fb5ffe09\nThe key is d8516986\nThe key is 3a2e8e43\nThe key is 65fe212d\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.3991066250018775
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 07440df8",
+      "ok": true,
+      "output": "The key is 07440df8\nThe key is 1ca9bb8a\nThe key is add003dd\nThe key is 28681e6b\nThe key is 89039f90\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.582086791982874
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 6890cb5b",
+      "ok": true,
+      "output": "The key is 6890cb5b\nThe key is 63d6415e\nThe key is b8674b2c\nThe key is 5d59b9b4\nThe key is 2e2bc86b\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.377767291967757
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 5f2b1a5f",
+      "ok": true,
+      "output": "The key is 5f2b1a5f\nThe key is fecae611\nThe key is 440c3d8e\nThe key is 74a930fc\nThe key is 1aa62428\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.468615332967602
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 5fbfaf9c",
+      "ok": true,
+      "output": "The key is 5fbfaf9c\nThe key is cc543632\nThe key is 4c882eb7\nThe key is 2c9e105d\nThe key is 49e15974\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.607587292091921
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 7113b3a9",
+      "ok": true,
+      "output": "The key is 7113b3a9\nThe key is ab625c76\nThe key is 40d2279c\nThe key is f4b4b331\nThe key is 3782d0c3\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.394500416936353
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is d1595ff1",
+      "ok": true,
+      "output": "The key is d1595ff1\nThe key is 70d219f4\nThe key is ec23223f\nThe key is eca6fff0\nThe key is 3ea4b549\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.449835582985543
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is ce6c08bc",
+      "ok": true,
+      "output": "The key is ce6c08bc\nThe key is 724da5c2\nThe key is d0631675\nThe key is 0b4236af\nThe key is a56156b7\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.472548417048529
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 05433fd8",
+      "ok": true,
+      "output": "The key is 05433fd8\nThe key is 02610dab\nThe key is c5150064\nThe key is 3d1a80d7\nThe key is f0af9355\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.58125516702421
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is d2374062",
+      "ok": true,
+      "output": "The key is d2374062\nThe key is 11f7ec35\nThe key is 62949dc6\nThe key is fb46daa4\nThe key is 50b2fba1\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.565990417031571
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 3bd613fd",
+      "ok": true,
+      "output": "The key is 3bd613fd\nThe key is c586c1e8\nThe key is eca37c54\nThe key is 9f8c3ad1\nThe key is 3b539aed\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.399427665979601
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 9c36f292",
+      "ok": true,
+      "output": "The key is 9c36f292\nThe key is 3b3dfb24\nThe key is 0e00cab6\nThe key is f6ad258b\nThe key is ea898acf\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.53081387502607
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is b9a4c0e1",
+      "ok": true,
+      "output": "The key is b9a4c0e1\nThe key is ecaa7379\nThe key is 885acf2b\nThe key is cbb68ad5\nThe key is 471c788f\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.522238541976549
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 7da8ffd6",
+      "ok": true,
+      "output": "The key is 7da8ffd6\nThe key is c33ec78f\nThe key is b714f008\nThe key is 7a5edc9f\nThe key is 1dbc9bf4\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.476116791949607
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 76691fc1",
+      "ok": true,
+      "output": "The key is 76691fc1\nThe key is 57c63783\nThe key is fd87ddd8\nThe key is 631f729c\nThe key is 270cad27\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.542844667099416
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is ea447d91",
+      "ok": true,
+      "output": "The key is ea447d91\nThe key is 601f44e0\nThe key is 5a4e66f0\nThe key is 83d76422\nThe key is c96c7181\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.394044332904741
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is c293d82f",
+      "ok": true,
+      "output": "The key is c293d82f\nThe key is 9298be01\nThe key is bda184f7\nThe key is c0ccf245\nThe key is 459f8820\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.530753250000998
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 8e4bc7a5",
+      "ok": true,
+      "output": "The key is 8e4bc7a5\nThe key is 3c853140\nThe key is 5354f8ba\nThe key is deab0d64\nThe key is 55e364f2\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.481554541969672
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "The key is 10c4f141",
+      "ok": true,
+      "output": "The key is 10c4f141\nThe key is 1891c527\nThe key is fd994fbe\nThe key is 6198c1c6\nThe key is 447a7b76\nPASS: attack recovered key[5] on all 5 trials\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 4.449656875105575
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks-imported/terminal-bench/feal-differential-cryptanalysis",
+  "wall_time_s": {
+    "all": {
+      "max": 4.607587292091921,
+      "median": 4.3992671454907395,
+      "min": 0.20122275000903755
+    },
+    "solution": {
+      "max": 4.607587292091921,
+      "median": 4.474332604499068,
+      "min": 4.377767291967757
+    },
+    "workspace": {
+      "max": 0.28548962506465614,
+      "median": 0.24944345850963145,
+      "min": 0.20122275000903755
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: attack.py does not exist",
+      "ok": false,
+      "output": "FAIL: attack.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2499795419862494
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: attack.py does not exist",
+      "ok": false,
+      "output": "FAIL: attack.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.20122275000903755
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: attack.py does not exist",
+      "ok": false,
+      "output": "FAIL: attack.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24890737503301352
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: attack.py does not exist",
+      "ok": false,
+      "output": "FAIL: attack.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2517547080060467
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: attack.py does not exist",
+      "ok": false,
+      "output": "FAIL: attack.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24507754191290587
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: attack.py does not exist",
+      "ok": false,
+      "output": "FAIL: attack.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23267070797737688
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: attack.py does not exist",
+      "ok": false,
+      "output": "FAIL: attack.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23852749995421618
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: attack.py does not exist",
+      "ok": false,
+      "output": "FAIL: attack.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2659410838969052
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: attack.py does not exist",
+      "ok": false,
+      "output": "FAIL: attack.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.28548962506465614
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: attack.py does not exist",
+      "ok": false,
+      "output": "FAIL: attack.py does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2727705000434071
+    }
+  ]
+}

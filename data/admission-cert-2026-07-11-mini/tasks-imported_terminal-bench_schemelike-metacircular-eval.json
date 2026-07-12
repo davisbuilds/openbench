@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.545859916950576
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.47609370900318
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.67907008295879
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.59032595902681
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.32795966695994
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 62.84346266591456
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.53290058404673
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 65.0241415000055
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.485770332976244
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.34441112494096
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.4226399170002
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.29774870793335
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.32991312490776
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.20264591590967
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.01401337503921
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.29802587500308
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.1975592499366
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.247001167037524
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.5775857080007
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: all 63 scheme programs match via eval.scm",
+      "ok": true,
+      "output": "PASS: all 63 scheme programs match via eval.scm\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 63.49818574998062
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks-imported/terminal-bench/schemelike-metacircular-eval",
+  "wall_time_s": {
+    "all": {
+      "max": 65.0241415000055,
+      "median": 63.27237493748544,
+      "min": 0.21171895891893655
+    },
+    "solution": {
+      "max": 65.0241415000055,
+      "median": 63.38352552097058,
+      "min": 62.84346266591456
+    },
+    "workspace": {
+      "max": 0.2559666669694707,
+      "median": 0.24015091656474397,
+      "min": 0.21171895891893655
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: eval.scm does not exist",
+      "ok": false,
+      "output": "FAIL: eval.scm does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2341474579880014
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: eval.scm does not exist",
+      "ok": false,
+      "output": "FAIL: eval.scm does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2482187090208754
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: eval.scm does not exist",
+      "ok": false,
+      "output": "FAIL: eval.scm does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24582033301703632
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: eval.scm does not exist",
+      "ok": false,
+      "output": "FAIL: eval.scm does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24141391611192375
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: eval.scm does not exist",
+      "ok": false,
+      "output": "FAIL: eval.scm does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24480604205746204
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: eval.scm does not exist",
+      "ok": false,
+      "output": "FAIL: eval.scm does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2559666669694707
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: eval.scm does not exist",
+      "ok": false,
+      "output": "FAIL: eval.scm does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.21171895891893655
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: eval.scm does not exist",
+      "ok": false,
+      "output": "FAIL: eval.scm does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23888791701756418
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: eval.scm does not exist",
+      "ok": false,
+      "output": "FAIL: eval.scm does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22279220796190202
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: eval.scm does not exist",
+      "ok": false,
+      "output": "FAIL: eval.scm does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.21838220802601427
+    }
+  ]
+}

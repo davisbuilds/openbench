@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24444362497888505
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2744899579556659
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24980070802848786
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25629737495910376
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24716916703619063
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.33972345804795623
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.36786633299198
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25089641590602696
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24418795888777822
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2880673750769347
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24273420800454915
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2561532499967143
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24656758294440806
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2760005419841036
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2828240420203656
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2840482909232378
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.32000695797614753
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24923125002533197
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24716416699811816
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "16/16 tests passing",
+      "ok": true,
+      "output": "16/16 tests passing\nSCORE: 1.0000\n",
+      "parsed_score": 1.0,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2762521669501439
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks/make-ci-green",
+  "wall_time_s": {
+    "all": {
+      "max": 0.36786633299198,
+      "median": 0.2658927709562704,
+      "min": 0.24273420800454915
+    },
+    "solution": {
+      "max": 0.36786633299198,
+      "median": 0.25622531247790903,
+      "min": 0.24273420800454915
+    },
+    "workspace": {
+      "max": 0.2964076669886708,
+      "median": 0.2671760834637098,
+      "min": 0.25298474996816367
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_books.BooksTest.test_year_is_int",
+      "ok": false,
+      "output": "FAIL test_books.BooksTest.test_year_is_int\nFAIL test_books.BooksTest.test_age\nFAIL test_inventory.InventoryTest.test_recent_returns_n_events\nFAIL test_members.MembersTest.test_borrow_up_to_five\nFAIL test_members.MembersTest.test_sixth_borrow_raises\nFAIL test_fees.FeesTest.test_one_day_late\nFAIL test_fees.FeesTest.test_several_days_late\nFAIL test_search.SearchTest.test_search_by_author_normalizes\nFAIL test_search.SearchTest.test_sort_by_year\nFAIL test_factory.FactoryTest.test_sample_count\nFAIL test_factory.FactoryTest.test_sample_titles\n5/16 tests passing\nSCORE: 0.3125\n",
+      "parsed_score": 0.3125,
+      "score": 0.3125,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2668346669524908
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_books.BooksTest.test_year_is_int",
+      "ok": false,
+      "output": "FAIL test_books.BooksTest.test_year_is_int\nFAIL test_books.BooksTest.test_age\nFAIL test_inventory.InventoryTest.test_recent_returns_n_events\nFAIL test_members.MembersTest.test_borrow_up_to_five\nFAIL test_members.MembersTest.test_sixth_borrow_raises\nFAIL test_fees.FeesTest.test_one_day_late\nFAIL test_fees.FeesTest.test_several_days_late\nFAIL test_search.SearchTest.test_search_by_author_normalizes\nFAIL test_search.SearchTest.test_sort_by_year\nFAIL test_factory.FactoryTest.test_sample_count\nFAIL test_factory.FactoryTest.test_sample_titles\n5/16 tests passing\nSCORE: 0.3125\n",
+      "parsed_score": 0.3125,
+      "score": 0.3125,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2694103749236092
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_books.BooksTest.test_year_is_int",
+      "ok": false,
+      "output": "FAIL test_books.BooksTest.test_year_is_int\nFAIL test_books.BooksTest.test_age\nFAIL test_inventory.InventoryTest.test_recent_returns_n_events\nFAIL test_members.MembersTest.test_borrow_up_to_five\nFAIL test_members.MembersTest.test_sixth_borrow_raises\nFAIL test_fees.FeesTest.test_one_day_late\nFAIL test_fees.FeesTest.test_several_days_late\nFAIL test_search.SearchTest.test_search_by_author_normalizes\nFAIL test_search.SearchTest.test_sort_by_year\nFAIL test_factory.FactoryTest.test_sample_count\nFAIL test_factory.FactoryTest.test_sample_titles\n5/16 tests passing\nSCORE: 0.3125\n",
+      "parsed_score": 0.3125,
+      "score": 0.3125,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2675174999749288
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_books.BooksTest.test_year_is_int",
+      "ok": false,
+      "output": "FAIL test_books.BooksTest.test_year_is_int\nFAIL test_books.BooksTest.test_age\nFAIL test_inventory.InventoryTest.test_recent_returns_n_events\nFAIL test_members.MembersTest.test_borrow_up_to_five\nFAIL test_members.MembersTest.test_sixth_borrow_raises\nFAIL test_fees.FeesTest.test_one_day_late\nFAIL test_fees.FeesTest.test_several_days_late\nFAIL test_search.SearchTest.test_search_by_author_normalizes\nFAIL test_search.SearchTest.test_sort_by_year\nFAIL test_factory.FactoryTest.test_sample_count\nFAIL test_factory.FactoryTest.test_sample_titles\n5/16 tests passing\nSCORE: 0.3125\n",
+      "parsed_score": 0.3125,
+      "score": 0.3125,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26495087496005
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_books.BooksTest.test_year_is_int",
+      "ok": false,
+      "output": "FAIL test_books.BooksTest.test_year_is_int\nFAIL test_books.BooksTest.test_age\nFAIL test_inventory.InventoryTest.test_recent_returns_n_events\nFAIL test_members.MembersTest.test_borrow_up_to_five\nFAIL test_members.MembersTest.test_sixth_borrow_raises\nFAIL test_fees.FeesTest.test_one_day_late\nFAIL test_fees.FeesTest.test_several_days_late\nFAIL test_search.SearchTest.test_search_by_author_normalizes\nFAIL test_search.SearchTest.test_sort_by_year\nFAIL test_factory.FactoryTest.test_sample_count\nFAIL test_factory.FactoryTest.test_sample_titles\n5/16 tests passing\nSCORE: 0.3125\n",
+      "parsed_score": 0.3125,
+      "score": 0.3125,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2964076669886708
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_books.BooksTest.test_year_is_int",
+      "ok": false,
+      "output": "FAIL test_books.BooksTest.test_year_is_int\nFAIL test_books.BooksTest.test_age\nFAIL test_inventory.InventoryTest.test_recent_returns_n_events\nFAIL test_members.MembersTest.test_borrow_up_to_five\nFAIL test_members.MembersTest.test_sixth_borrow_raises\nFAIL test_fees.FeesTest.test_one_day_late\nFAIL test_fees.FeesTest.test_several_days_late\nFAIL test_search.SearchTest.test_search_by_author_normalizes\nFAIL test_search.SearchTest.test_sort_by_year\nFAIL test_factory.FactoryTest.test_sample_count\nFAIL test_factory.FactoryTest.test_sample_titles\n5/16 tests passing\nSCORE: 0.3125\n",
+      "parsed_score": 0.3125,
+      "score": 0.3125,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25298474996816367
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_books.BooksTest.test_year_is_int",
+      "ok": false,
+      "output": "FAIL test_books.BooksTest.test_year_is_int\nFAIL test_books.BooksTest.test_age\nFAIL test_inventory.InventoryTest.test_recent_returns_n_events\nFAIL test_members.MembersTest.test_borrow_up_to_five\nFAIL test_members.MembersTest.test_sixth_borrow_raises\nFAIL test_fees.FeesTest.test_one_day_late\nFAIL test_fees.FeesTest.test_several_days_late\nFAIL test_search.SearchTest.test_search_by_author_normalizes\nFAIL test_search.SearchTest.test_sort_by_year\nFAIL test_factory.FactoryTest.test_sample_count\nFAIL test_factory.FactoryTest.test_sample_titles\n5/16 tests passing\nSCORE: 0.3125\n",
+      "parsed_score": 0.3125,
+      "score": 0.3125,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26061170792672783
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_books.BooksTest.test_year_is_int",
+      "ok": false,
+      "output": "FAIL test_books.BooksTest.test_year_is_int\nFAIL test_books.BooksTest.test_age\nFAIL test_inventory.InventoryTest.test_recent_returns_n_events\nFAIL test_members.MembersTest.test_borrow_up_to_five\nFAIL test_members.MembersTest.test_sixth_borrow_raises\nFAIL test_fees.FeesTest.test_one_day_late\nFAIL test_fees.FeesTest.test_several_days_late\nFAIL test_search.SearchTest.test_search_by_author_normalizes\nFAIL test_search.SearchTest.test_sort_by_year\nFAIL test_factory.FactoryTest.test_sample_count\nFAIL test_factory.FactoryTest.test_sample_titles\n5/16 tests passing\nSCORE: 0.3125\n",
+      "parsed_score": 0.3125,
+      "score": 0.3125,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2758948750561103
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_books.BooksTest.test_year_is_int",
+      "ok": false,
+      "output": "FAIL test_books.BooksTest.test_year_is_int\nFAIL test_books.BooksTest.test_age\nFAIL test_inventory.InventoryTest.test_recent_returns_n_events\nFAIL test_members.MembersTest.test_borrow_up_to_five\nFAIL test_members.MembersTest.test_sixth_borrow_raises\nFAIL test_fees.FeesTest.test_one_day_late\nFAIL test_fees.FeesTest.test_several_days_late\nFAIL test_search.SearchTest.test_search_by_author_normalizes\nFAIL test_search.SearchTest.test_sort_by_year\nFAIL test_factory.FactoryTest.test_sample_count\nFAIL test_factory.FactoryTest.test_sample_titles\n5/16 tests passing\nSCORE: 0.3125\n",
+      "parsed_score": 0.3125,
+      "score": 0.3125,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26026075007393956
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL test_books.BooksTest.test_year_is_int",
+      "ok": false,
+      "output": "FAIL test_books.BooksTest.test_year_is_int\nFAIL test_books.BooksTest.test_age\nFAIL test_inventory.InventoryTest.test_recent_returns_n_events\nFAIL test_members.MembersTest.test_borrow_up_to_five\nFAIL test_members.MembersTest.test_sixth_borrow_raises\nFAIL test_fees.FeesTest.test_one_day_late\nFAIL test_fees.FeesTest.test_several_days_late\nFAIL test_search.SearchTest.test_search_by_author_normalizes\nFAIL test_search.SearchTest.test_sort_by_year\nFAIL test_factory.FactoryTest.test_sample_count\nFAIL test_factory.FactoryTest.test_sample_titles\n5/16 tests passing\nSCORE: 0.3125\n",
+      "parsed_score": 0.3125,
+      "score": 0.3125,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.29102733405306935
+    }
+  ]
+}
