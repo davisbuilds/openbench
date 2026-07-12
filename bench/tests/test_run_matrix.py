@@ -30,6 +30,8 @@ class RunMatrixTests(unittest.TestCase):
     def make_task(self, name, dropped=False):
         path = os.path.join(self.tasks_dir, name)
         os.makedirs(path)
+        with open(os.path.join(path, "instruction.md"), "w", encoding="utf-8") as fh:
+            fh.write("fixture task\n")
         if dropped:
             with open(os.path.join(path, "DROPPED.md"), "w", encoding="utf-8") as fh:
                 fh.write("dropped\n")
@@ -76,6 +78,15 @@ class RunMatrixTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("SKIP pi:t1:a:trial1", text)
         self.assertIn("dry-run: cells=24 runnable=23 skipped=1", text)
+
+    def test_refuses_unknown_task(self):
+        self.make_task("t1")
+        # t2 never created: wrong --tasks-dir / typo must be caught up front
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = run_matrix.main(self.argv("--dry-run"))
+        self.assertEqual(code, 1)
+        self.assertIn("unknown task 't2'", stderr.getvalue())
 
     def test_refuses_dropped_task(self):
         self.make_task("t1", dropped=True)

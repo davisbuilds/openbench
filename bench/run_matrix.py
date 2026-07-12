@@ -191,6 +191,12 @@ def run_matrix(args):
     if args.trials < 1:
         raise SystemExit("--trials must be >= 1")
 
+    missing = [task for task in tasks
+               if not os.path.isfile(os.path.join(task_dir(args.tasks_dir, task), "instruction.md"))]
+    if missing:
+        raise SystemExit("\n".join(
+            f"unknown task {task!r}: no instruction.md under {task_dir(args.tasks_dir, task)} "
+            "(check --tasks-dir)" for task in missing))
     assert_not_dropped(args.tasks_dir, tasks)
     if not args.skip_gate:
         warn_missing_gate_records(tasks)
