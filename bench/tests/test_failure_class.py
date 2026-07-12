@@ -63,6 +63,7 @@ class TestClassifyFailure(unittest.TestCase):
             "SETUP-NEEDED: export MOONSHOT_API_KEY to use kimi-k2.7-code",
             "missing pi auth at /home/me/.pi/agent/auth.json",
             "No such image: openbench-harness:latest",
+            '"stopReason":"error","errorMessage":"No API key for provider: openai-codex"',
         ]
         for text in cases:
             with self.subTest(text=text):

@@ -37,6 +37,7 @@ _INFRA_RE = re.compile(
     r"no result sentinel|"
     r"SETUP-NEEDED|"
     r"missing [^\n]*(?:auth|credential|api[_ -]?key)|"
+    r"No API key for provider|"
     r"not logged in|login required|please log in|"
     r"No such image:\s*[^\s]+|"
     r"image ['\"]?[^'\"\n]+['\"]? not found|"
