@@ -34,6 +34,7 @@ import uuid
 from types import SimpleNamespace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(HERE)
 ENTRY_PATH = os.path.join(HERE, "entry.py")
 DOCKERFILE_DIR = os.path.join(HERE, "docker")
 RESULT_SENTINEL = "__BENCH_RESULT__"
@@ -56,8 +57,11 @@ AUTH_MOUNTS = {
     # codex: mount ONLY the auth/config files. ~/.codex also holds worktrees,
     # sessions, and sqlite logs (54 GB observed); mounting the whole dir made
     # entry.py's staging copy run for 13+ minutes and crash on transient
-    # session tmp files vanishing mid-copy.
+    # session tmp files vanishing mid-copy. codex_v1/v2 compose a fresh runtime
+    # CODEX_HOME in the adapter and reuse this same staged auth surface.
     "codex": [".codex/auth.json", ".codex/config.toml"],
+    "codex_v1": [".codex/auth.json", ".codex/config.toml"],
+    "codex_v2": [".codex/auth.json", ".codex/config.toml"],
     "pi": [".pi"],
     "opencode": [".local/share/opencode", ".config/opencode", ".opencode/data"],
     # Cursor Linux/container auth: `bench/cursor_container_login.sh` mints auth
@@ -140,7 +144,7 @@ def _api_key_passthrough(harness, model):
 
 def _placeholder_env(harness, model):
     """Non-secret env assignments needed by CLIs for bridge ingress only."""
-    if harness != "codex":
+    if harness not in {"codex", "codex_v1", "codex_v2"}:
         return ()
     if model == "claude-opus-4-8":
         var = "ANTHROPIC_API_KEY"
@@ -393,6 +397,13 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-v", f"{os.path.abspath(adapters_dir)}:/bench/adapters:ro",
         "-v", f"{ENTRY_PATH}:/bench/entry.py:ro",
         "-v", f"{os.path.abspath(instruction_path)}:/bench/instruction.txt:ro",
+    ]
+    if harness in {"codex_v1", "codex_v2"}:
+        variant = harness.replace("codex_", "")
+        host_variant = os.path.join(REPO_ROOT, "ablation", f"codex-home-{variant}")
+        container_variant = f"/bench/ablation/codex-home-{variant}"
+        cmd += ["-v", f"{host_variant}:{container_variant}:ro"]
+    cmd += [
         "-w", "/work",
         "-e", f"HOME={CONTAINER_HOME}",
     ]

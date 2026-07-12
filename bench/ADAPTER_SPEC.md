@@ -46,6 +46,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
   - `opencode`: strip `OPENAI_API_KEY` from the child env to force subscription
     OAuth (stored credential at `~/.local/share/opencode/auth.json`).
   - `codex` / `cursor`: use the user's existing login as-is.
+  - `codex_v1` / `codex_v2`: compose a runtime temp `CODEX_HOME` from the
+    checked-in ablation config/instructions plus only the runtime Codex
+    `auth.json`; auth is never copied into the repo.
 - Never modify the user's real config files (`~/.codex/config.toml`,
   `~/.pi/*`, `~/.cursor/*`, opencode config). Read-only use.
 - Task success is decided by the runner's checker, never by the adapter.
@@ -62,6 +65,8 @@ returns completed=True) is used as a negative control.
 | Harness  | Invocation hint (verify against --help before relying on it)        |
 |----------|---------------------------------------------------------------------|
 | codex    | `codex exec -m gpt-5.5 -c model_reasoning_effort="medium" ...`       |
+| codex_v1 | `codex` with runtime `CODEX_HOME` from `ablation/codex-home-v1`       |
+| codex_v2 | `codex` with runtime `CODEX_HOME` from `ablation/codex-home-v2`       |
 | pi       | `pi -p --model openai/gpt-5.5 ...` (thinking-level syntax `:medium`) |
 | opencode | `opencode run -m openai/gpt-5.5 --variant medium ...`                |
 | cursor   | `cursor-agent -p --force --model gpt-5.5-medium ...`                 |

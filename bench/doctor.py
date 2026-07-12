@@ -19,6 +19,7 @@ Exit status is nonzero if any requested harness fails any of CLI/AUTH/MODEL.
 
 Auth expectations are mirrored from the adapters (read them, don't invent):
   codex     ~/.codex/auth.json exists (adapter uses ~/.codex login as-is)
+  codex_v1/codex_v2 same auth as codex; adapters compose temp CODEX_HOME
   pi        ~/.pi/agent/auth.json exists AND has an "openai-codex" or
             "anthropic" entry (adapter's isolated-HOME route reads this file)
   opencode  `opencode auth list` shows an OpenAI oauth credential (adapter
@@ -186,6 +187,8 @@ def _auth_devin(p):
 # harness name (cursor's binary is cursor-agent but its adapter is cursor.py).
 HARNESSES = {
     "codex":    {"cli": "codex",        "auth": _auth_codex},
+    "codex_v1": {"cli": "codex",        "auth": _auth_codex},
+    "codex_v2": {"cli": "codex",        "auth": _auth_codex},
     "pi":       {"cli": "pi",           "auth": _auth_pi},
     "opencode": {"cli": "opencode",     "auth": _auth_opencode},
     "cursor":   {"cli": "cursor-agent", "auth": _auth_cursor},
@@ -278,7 +281,7 @@ def _auth_frontier(p, harness, model):
         if p.getenv("BENCH_IN_CONTAINER"):
             return _auth_cursor_container(p)
         return _auth_cursor(p)
-    if harness == "codex":
+    if harness in {"codex", "codex_v1", "codex_v2"}:
         return check_open_key(p, env_key, keys_env_ok=True)
     if harness == "claude":
         return check_open_key(p, env_key)
@@ -320,7 +323,7 @@ def evaluate(harnesses, model, probes):
             auth_ok, auth_detail = _auth_frontier(probes, name, model)
         elif model in OPEN_MODEL_ENV:
             # Open model: AUTH = provider env key present (harness login is moot).
-            keys_env_ok = name == "codex"
+            keys_env_ok = name in {"codex", "codex_v1", "codex_v2"}
             auth_ok, auth_detail = check_open_key(
                 probes, OPEN_MODEL_ENV[model], keys_env_ok=keys_env_ok)
         else:
