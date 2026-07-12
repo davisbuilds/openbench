@@ -1,0 +1,360 @@
+{
+  "docker": true,
+  "findings": [],
+  "pass": true,
+  "runs": 20,
+  "solution_verdicts": [
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.20574445801321417
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2333945829886943
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.240313833928667
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25538591702934355
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2433529170230031
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.27171554195228964
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.253351666033268
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3072163329925388
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2542185839265585
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.23549066693522036
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.26094750000629574
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25650250003673136
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22728462505619973
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22948125004768372
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2496035419171676
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2780335829593241
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.24415287503506988
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22601904103066772
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.22928595903795213
+    },
+    {
+      "exit_code": 0,
+      "first_fail_line": "PASS: out.txt matches checker-owned decoded text",
+      "ok": true,
+      "output": "PASS: out.txt matches checker-owned decoded text\n",
+      "parsed_score": null,
+      "score": 1.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2687409999780357
+    }
+  ],
+  "stress": 6,
+  "task": "/Users/matthewlam/dev/openbench-admission-cert/tasks-imported/terminal-bench/gcode-to-text",
+  "wall_time_s": {
+    "all": {
+      "max": 0.3072163329925388,
+      "median": 0.2550262294826098,
+      "min": 0.20574445801321417
+    },
+    "solution": {
+      "max": 0.3072163329925388,
+      "median": 0.24687820847611874,
+      "min": 0.20574445801321417
+    },
+    "workspace": {
+      "max": 0.3033467079512775,
+      "median": 0.25757524953223765,
+      "min": 0.2411029579816386
+    }
+  },
+  "workspace_runs": 10,
+  "workspace_verdicts": [
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: out.txt does not exist",
+      "ok": false,
+      "output": "FAIL: out.txt does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.25675683293957263
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: out.txt does not exist",
+      "ok": false,
+      "output": "FAIL: out.txt does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2411029579816386
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: out.txt does not exist",
+      "ok": false,
+      "output": "FAIL: out.txt does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2575741660548374
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: out.txt does not exist",
+      "ok": false,
+      "output": "FAIL: out.txt does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2556296249385923
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: out.txt does not exist",
+      "ok": false,
+      "output": "FAIL: out.txt does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.254666541935876
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: out.txt does not exist",
+      "ok": false,
+      "output": "FAIL: out.txt does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2590060420334339
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: out.txt does not exist",
+      "ok": false,
+      "output": "FAIL: out.txt does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2575763330096379
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: out.txt does not exist",
+      "ok": false,
+      "output": "FAIL: out.txt does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2649387080455199
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: out.txt does not exist",
+      "ok": false,
+      "output": "FAIL: out.txt does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.2922234160359949
+    },
+    {
+      "exit_code": 1,
+      "first_fail_line": "FAIL: out.txt does not exist",
+      "ok": false,
+      "output": "FAIL: out.txt does not exist\n",
+      "parsed_score": null,
+      "score": 0.0,
+      "score_errors": [],
+      "timed_out": false,
+      "wall_time_s": 0.3033467079512775
+    }
+  ]
+}
