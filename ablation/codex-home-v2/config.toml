@@ -1,0 +1,18 @@
+# V2: V1 plus context-bloat reduction knobs; provider settings only route live probes through the local capture proxy.
+model_provider = "deepseek_bridge"
+model_reasoning_effort = "medium"
+model_instructions_file = "pi-style-instructions.md"
+include_permissions_instructions = false
+include_environment_context = false
+include_apps_instructions = false
+include_collaboration_mode_instructions = false
+project_doc_max_bytes = 4096
+
+[skills]
+include_instructions = false
+
+[model_providers.deepseek_bridge]
+name = "DeepSeek via OpenBench capture proxy"
+base_url = "http://127.0.0.1:4142/v1"
+env_key = "DEEPSEEK_API_KEY"
+wire_api = "responses"
