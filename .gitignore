@@ -29,3 +29,4 @@ results/
 # `bench/scrub.py --check` review first. Matches at any depth.
 transcripts/
 scrubbed/
+.bench-tmp/
