@@ -124,27 +124,46 @@ class TestBuildDockerCmd(unittest.TestCase):
         home = tempfile.mkdtemp(prefix="fake_home_")
         try:
             # codex mounts individual auth files, never the whole ~/.codex
-            # (which also holds multi-GB worktrees/sessions).
+            # (which also holds multi-GB worktrees/sessions). codex_v1/v2 reuse
+            # that same staged auth and compose their own CODEX_HOME at runtime.
             os.makedirs(os.path.join(home, ".codex"))
             with open(os.path.join(home, ".codex", "auth.json"), "w") as fh:
                 fh.write("{}")
             orig = os.path.expanduser
             os.path.expanduser = lambda p: home if p == "~" else orig(p)
             try:
-                args = docker_exec._auth_mount_args("codex")
+                variants = {h: docker_exec._auth_mount_args(h) for h in ("codex", "codex_v1", "codex_v2")}
             finally:
                 os.path.expanduser = orig
-            self.assertIn("-v", args)
-            self.assertTrue(
-                any(a.endswith(".codex/auth.json:/bench/auth/.codex/auth.json:ro")
-                    for a in args),
-                f"expected read-only staged auth.json mount, got {args}")
-            self.assertFalse(
-                any(a.endswith(".codex:/bench/auth/.codex:ro") for a in args),
-                "must not mount the whole ~/.codex dir")
+            for harness, args in variants.items():
+                with self.subTest(harness=harness):
+                    self.assertIn("-v", args)
+                    self.assertTrue(
+                        any(a.endswith(".codex/auth.json:/bench/auth/.codex/auth.json:ro")
+                            for a in args),
+                        f"expected read-only staged auth.json mount, got {args}")
+                    self.assertFalse(
+                        any(a.endswith(".codex:/bench/auth/.codex:ro") for a in args),
+                        "must not mount the whole ~/.codex dir")
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)
+
+    def test_codex_ablation_mounts_only_variant_dir(self):
+        for harness, variant in (("codex_v1", "v1"), ("codex_v2", "v2")):
+            with self.subTest(harness=harness):
+                cmd = docker_exec.build_docker_cmd(
+                    harness=harness, workdir="/tmp/wd", model="deepseek-v4-flash",
+                    timeout_s=240, adapters_dir="/repo/bench/adapters",
+                    image="openbench-harness:latest",
+                    instruction_path="/tmp/instr.txt",
+                )
+                joined = " ".join(cmd)
+                expected = f"/ablation/codex-home-{variant}:/bench/ablation/codex-home-{variant}:ro"
+                self.assertIn(expected, joined)
+                self.assertNotIn("/ablation:/bench/ablation:ro", joined)
+                self.assertIn("DEEPSEEK_API_KEY=openbench-bridge-placeholder", cmd)
+                self.assertNotIn("DEEPSEEK_API_KEY", cmd)
 
     def test_grokbuild_mounts_no_user_auth(self):
         home = tempfile.mkdtemp(prefix="fake_home_")

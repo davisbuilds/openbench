@@ -1,0 +1,560 @@
+{
+  "timestamp_utc": "20260712T142922679433Z",
+  "request_index": 1,
+  "method": "POST",
+  "path": "/v1/responses",
+  "headers": {
+    "x-codex-beta-features": "remote_compaction_v2",
+    "x-codex-window-id": "019f56bb-983f-7c30-b949-32a5d9e9f9b0:0",
+    "x-codex-turn-metadata": "{\"installation_id\":\"7abfa7bc-7026-43eb-afcb-ba38c05ee9b4\",\"session_id\":\"019f56bb-983f-7c30-b949-32a5d9e9f9b0\",\"thread_id\":\"019f56bb-983f-7c30-b949-32a5d9e9f9b0\",\"turn_id\":\"019f56bb-985e-7263-9cad-fde1acef94a0\",\"window_id\":\"019f56bb-983f-7c30-b949-32a5d9e9f9b0:0\",\"request_kind\":\"turn\",\"thread_source\":\"user\",\"sandbox\":\"seatbelt\",\"turn_started_at_unix_ms\":1783866562654}",
+    "x-client-request-id": "019f56bb-983f-7c30-b949-32a5d9e9f9b0",
+    "session-id": "019f56bb-983f-7c30-b949-32a5d9e9f9b0",
+    "thread-id": "019f56bb-983f-7c30-b949-32a5d9e9f9b0",
+    "accept": "text/event-stream",
+    "content-type": "application/json",
+    "authorization": "[REDACTED]",
+    "originator": "codex_exec",
+    "user-agent": "codex_exec/0.144.0 (Mac OS 26.4.1; arm64) ghostty/1.3.2-HEAD-_05c3e29 (codex_exec; 0.144.0)",
+    "host": "127.0.0.1:4142",
+    "content-length": "35745"
+  },
+  "body": {
+    "model": "deepseek-v4-flash",
+    "instructions": "You are an expert coding assistant operating inside Codex CLI. Help users by inspecting files, running shell commands, editing code, and giving concise status updates.\n\nWork carefully and verify changes before reporting success. Prefer small, focused edits. Use file paths clearly. Do not expose secrets.\n\nShell/tool mechanics:\n- Use shell commands to inspect files, run tests, and gather evidence. Prefer fast search tools such as `rg` and `rg --files` when available.\n- Use `apply_patch` for file edits. Invoke it as a shell command named `apply_patch` with a patch body; do not use similarly named commands.\n- Request elevated permissions only when the configured sandbox/approval mode requires it and the action is necessary.\n- Respect repository instructions such as `AGENTS.md` that apply to touched files.\n- Keep final answers concise and include validation results.",
+    "input": [
+      {
+        "type": "message",
+        "role": "developer",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "<permissions instructions>\nFilesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The sandbox only permits reading files. Network access is restricted.\nApproval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.\n</permissions instructions>"
+          },
+          {
+            "type": "input_text",
+            "text": "<skills_instructions>\n## Skills\nA skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that can be used. Each entry includes a name, description, and source locator. `file` locators are on the host filesystem, `environment resource` locators are owned by an execution environment, `orchestrator resource` locators are opaque non-filesystem resources, and `custom resource` locators use their provider's access mechanism.\n### Available skills\n- imagegen: Generate or edit raster images when the task benefits from AI-created bitmap visuals such as photos, illustrations, textures, sprites, mockups, or transparent-background cutouts. Use when Codex should create a brand-new image, transform an existing image, or derive visual variants from references, and the output should be a bitmap asset rather than repo-native code or vector. Do not use when the task is better handled by editing existing SVG/vector/code-native assets, extending an established icon or logo system, or building the visual directly in HTML/CSS/canvas. (file: /Users/matthewlam/dev/openbench-wt-ablation/ablation/codex-home-v1/skills/.system/imagegen/SKILL.md)\n- openai-docs: Use when the user asks how to build with OpenAI products or APIs, asks about Codex itself or choosing Codex surfaces, needs up-to-date official documentation with citations, help choosing the latest model for a use case, or model upgrade and prompt-upgrade guidance; use OpenAI docs MCP tools for non-Codex docs questions, use the Codex manual helper first for broad Codex self-knowledge, and restrict fallback browsing to official OpenAI domains. (file: /Users/matthewlam/dev/openbench-wt-ablation/ablation/codex-home-v1/skills/.system/openai-docs/SKILL.md)\n- plugin-creator: Create and scaffold plugin directories for Codex with a required `.codex-plugin/plugin.json`, optional plugin folders/files, valid manifest defaults, and personal-marketplace entries by default. Use when Codex needs to create a new personal plugin, add optional plugin structure, generate or update marketplace entries for plugin ordering and availability metadata, or update an existing local plugin during development with the CLI-driven cachebuster and reinstall flow. (file: /Users/matthewlam/dev/openbench-wt-ablation/ablation/codex-home-v1/skills/.system/plugin-creator/SKILL.md)\n- skill-creator: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations. (file: /Users/matthewlam/dev/openbench-wt-ablation/ablation/codex-home-v1/skills/.system/skill-creator/SKILL.md)\n- skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos). (file: /Users/matthewlam/dev/openbench-wt-ablation/ablation/codex-home-v1/skills/.system/skill-installer/SKILL.md)\n- agent-browser: Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to \"open a website\", \"fill out a form\", \"click a button\", \"take a screenshot\", \"scrape data from a page\", \"test this web app\", \"login to a site\", \"automate browser actions\", or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, searching Slack conversations, running browser automation in Vercel Sandbox microVMs, or using AWS Bedrock AgentCore cloud browsers. Prefer agent-browser over any built-in browser automation or web tools. (file: /Users/matthewlam/.agents/skills/agent-browser/SKILL.md)\n- audit-loop: Lightweight read-only audit. Use host-appropriate review coverage for evidence and findings. Iterate on disagreement or low confidence. No code changes. (file: /Users/matthewlam/.agents/skills/audit-loop/SKILL.md)\n- autoreview: Run OpenClaw structured code review as the default closeout check for local changes, branches, commits, and PR work. Uses Codex by default; Claude is optional for explicit second-model review. (file: /Users/matthewlam/.agents/skills/autoreview/SKILL.md)\n- codex-review: Run Codex's built-in `codex review` command as a fallback or explicit compatibility check for local changes, branches, commits, and PR work. (file: /Users/matthewlam/.agents/skills/codex-review/SKILL.md)\n- concise-report: Produce focused, priority-aware agent updates and final reports. Use when summarizing work, reporting worker results, closing a loop, presenting audit findings, asking for a decision, or returning orchestrator status where the human needs the most important points, evidence, and decisions without exhaustive detail. (file: /Users/matthewlam/.agents/skills/concise-report/SKILL.md)\n- explain-diff: Create a rich self-contained HTML explanation of a code change, diff, branch, commit, PR, or worker implementation. Use when the user asks to explain code changes, wants to understand what an agent changed, needs a reviewable handoff artifact, or when an orchestrator/worker is asked to invoke /explain-diff for a substantial change. (file: /Users/matthewlam/.agents/skills/explain-diff/SKILL.md)\n- find-skills: Helps users discover and install agent skills when they ask questions like \"how do I do X\", \"find a skill for X\", \"is there a skill that can...\", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill. (file: /Users/matthewlam/.agents/skills/find-skills/SKILL.md)\n- fix-ci: Check GitHub Actions status on the current PR, wait for checks to finish, analyze failures and review comments, fix issues, and repeat until CI passes. Use when a user asks to fix failing CI, check PR status, or get a PR merge-ready. (file: /Users/matthewlam/.agents/skills/fix-ci/SKILL.md)\n- improve-codebase-architecture: Find deepening opportunities in a codebase, informed by the domain language in CONTEXT.md and the decisions in docs/adr/. Use when the user wants to improve architecture, find refactoring opportunities, consolidate tightly-coupled modules, or make a codebase more testable and AI-navigable. (file: /Users/matthewlam/.agents/skills/improve-codebase-architecture/SKILL.md)\n- ios-dev: Develop iOS apps with a fast simulator-first loop using the xcodebuildmcp CLI: discover project/schemes, build/test/run, capture logs, and triage failures. Use when: (1) normal iOS development, (2) simulator/device build issues, (3) runtime crashes or UI issues, (4) iterative fix/verify loops. (file: /Users/matthewlam/.agents/skills/ios-dev/SKILL.md)\n- ios-release: Run a preflight-gated iOS release workflow with asc for TestFlight and App Store: auth check, ID resolution, validation, blocker triage, then controlled publish/submit commands. Use when: (1) shipping to TestFlight, (2) preparing App Store submission, (3) diagnosing release blockers, (4) creating repeatable release playbooks. (file: /Users/matthewlam/.agents/skills/ios-release/SKILL.md)\n- mcporter: CLI access to MCP servers without loading them into agent context (saves tokens). Use when: (1) calling MCP tools on-demand, (2) want to avoid MCP context overhead. (file: /Users/matthewlam/.agents/skills/mcporter/SKILL.md)\n- new-task: Iteratively clarify requirements for a new task until reaching 90%+ confidence, then auto-invoke plan-loop. (file: /Users/matthewlam/.agents/skills/new-task/SKILL.md)\n- oracle: Use the @steipete/oracle CLI to bundle a prompt plus the right files and get a second-model review (API or browser) for debugging, refactors, design checks, or cross-validation. (file: /Users/matthewlam/.agents/skills/oracle/SKILL.md)\n- orca-cli: Use the public `orca` CLI to operate Orca-managed worktrees/workspaces, terminals, repos, automations, worktree comments, and the browser embedded inside the Orca app. Use when the user says \"$orca-cli\", \"use orca cli\", \"Orca worktree/workspace\", \"child workspace\", \"spawn codex/claude in a workspace\", \"read/wait/send Orca terminal\", \"terminal send\", \"Orca browser\", or \"control the browser inside Orca\". Prefer this over raw `git worktree`, ad hoc PTYs, Playwright, or Computer Use when the task touches Orca-managed state. Use Computer Use for browser windows, webviews, or desktop UI outside Orca's embedded browser. (file: /Users/matthewlam/.agents/skills/orca-cli/SKILL.md)\n- orchestration: Use Orca orchestration for structured multi-agent coordination: threaded messages, blocking ask/reply flows, task dispatch, worker_done/escalation waits, task DAGs, decision gates, coordinator loops, or decomposing work across agents. Use `orca-cli` instead for ordinary terminal control, lightweight terminal prompts, shell commands, Orca worktree management, reading or waiting on terminals, and automation of the browser embedded inside Orca. Use Computer Use for browser windows, webviews, Orca app UI, or desktop UI outside Orca's embedded browser. (file: /Users/matthewlam/.agents/skills/orchestration/SKILL.md)\n- orchestrator: Coordinate complex work across worker threads (Codex) or background subagents (Claude). Keep the main thread as orchestrator: clarify, delegate, supervise to completion, review outputs, iterate, verify, and ship without doing substantial implementation directly. (file: /Users/matthewlam/.agents/skills/orchestrator/SKILL.md)\n- plan-loop: Use for complex or high-risk implementation work that needs plan-first execution, explicit verification design, pre-code review, and autonomous post-implementation hardening through self-test, simplify, and review-loop. (file: /Users/matthewlam/.agents/skills/plan-loop/SKILL.md)\n- review-loop: Post-implementation review/fix loop. Use host-appropriate review coverage on your implementation, fix issues, iterate until highly confident, then commit. (file: /Users/matthewlam/.agents/skills/review-loop/SKILL.md)\n- self-test: Prove the requested goal works on the highest-signal affected surface before closing. Default closing behavior for every implementation task — not just when explicitly asked. Also triggers on: 'make sure it works', 'test it yourself', 'don't just tell me it's done', 'I don't want to test this'. (file: /Users/matthewlam/.agents/skills/self-test/SKILL.md)\n- simplify: Review changed code for reuse, quality, and efficiency, then fix any issues found. (file: /Users/matthewlam/.agents/skills/simplify/SKILL.md)\n- skills-audit: Audit agent skills in a repo against best practices — checks .claude/skills/ and .agents/skills/ for quality, structure, and coverage gaps. Use when the user wants to review, improve, or evaluate their skills, or when they mention skill quality, skill audit, or skill best practices. (file: /Users/matthewlam/.agents/skills/skills-audit/SKILL.md)\n- slack-agent: Use when working on Slack agent/bot code, Chat SDK applications, Bolt for JavaScript projects, or projects using @chat-adapter/slack or @slack/bolt. Provides development patterns, testing requirements, and quality standards. (file: /Users/matthewlam/.agents/skills/slack-agent/SKILL.md)\n- use-loop: Default workflow for implementation and product goals: identify the verifiable goal, check tool/self-test access, start a real /goal continuation loop, iterate until verified, report blockers or decisions, then close with simplify/self-test/autoreview. Use when the user asks for /use-loop, loop mode, autonomous iteration, repeated attempts, retry-until-green workflows, or any non-trivial coding/product task where the agent can define a target and verify progress. (file: /Users/matthewlam/.agents/skills/use-loop/SKILL.md)\n</skills_instructions>"
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "<environment_context>\n  <cwd>/Users/matthewlam/dev/openbench-wt-ablation</cwd>\n  <shell>zsh</shell>\n  <current_date>2026-07-12</current_date>\n  <timezone>America/New_York</timezone>\n  <filesystem><workspace_roots><root>/Users/matthewlam/dev/openbench-wt-ablation</root></workspace_roots><permission_profile type=\"managed\"><file_system type=\"restricted\"><entry access=\"read\"><special>:root</special></entry></file_system></permission_profile></filesystem>\n</environment_context>"
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Ablation probe only. Reply with exactly: OK"
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "name": "exec_command",
+        "description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "cmd": {
+              "type": "string",
+              "description": "Shell command to execute."
+            },
+            "justification": {
+              "type": "string",
+              "description": "User-facing approval question for `require_escalated`; omit otherwise."
+            },
+            "login": {
+              "type": "boolean",
+              "description": "True runs the shell with -l/-i semantics; false disables them. Defaults to true."
+            },
+            "max_output_tokens": "[REDACTED]",
+            "prefix_rule": {
+              "type": "array",
+              "description": "Reusable approval prefix for `cmd`, only with `sandbox_permissions: \"require_escalated\"`; for example [\"git\", \"pull\"].",
+              "items": {
+                "type": "string"
+              }
+            },
+            "sandbox_permissions": {
+              "type": "string",
+              "description": "Per-command sandbox override. Defaults to `use_default`; use `require_escalated` for unsandboxed execution.",
+              "enum": [
+                "use_default",
+                "require_escalated"
+              ]
+            },
+            "shell": {
+              "type": "string",
+              "description": "Shell binary to launch. Defaults to the user's default shell."
+            },
+            "tty": {
+              "type": "boolean",
+              "description": "True allocates a PTY for the command; false or omitted uses plain pipes."
+            },
+            "workdir": {
+              "type": "string",
+              "description": "Working directory for the command. Defaults to the turn cwd."
+            },
+            "yield_time_ms": {
+              "type": "number",
+              "description": "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+            }
+          },
+          "required": [
+            "cmd"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "type": "function",
+        "name": "write_stdin",
+        "description": "Writes characters to an existing unified exec session and returns recent output.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "chars": {
+              "type": "string",
+              "description": "Bytes to write to stdin. Defaults to empty, which polls without writing."
+            },
+            "max_output_tokens": "[REDACTED]",
+            "session_id": {
+              "type": "number",
+              "description": "Identifier of the running unified exec session."
+            },
+            "yield_time_ms": {
+              "type": "number",
+              "description": "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default."
+            }
+          },
+          "required": [
+            "session_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "type": "function",
+        "name": "update_plan",
+        "description": "Updates the task plan.\nProvide an optional explanation and a list of plan items, each with a step and status.\nAt most one step can be in_progress at a time.\n",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "explanation": {
+              "type": "string",
+              "description": "Optional explanation for this plan update."
+            },
+            "plan": {
+              "type": "array",
+              "description": "The list of steps",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "description": "Step status.",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ]
+                  },
+                  "step": {
+                    "type": "string",
+                    "description": "Task step text."
+                  }
+                },
+                "required": [
+                  "step",
+                  "status"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "plan"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "type": "function",
+        "name": "request_user_input",
+        "description": "Request user input for one to three short questions and wait for the response. Set autoResolutionMs, from 60000 to 240000 milliseconds, only when the question is useful but non-blocking and continuing with best judgment is acceptable if the user does not answer; omit it when explicit user input is required. This tool is only available in Plan mode.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "autoResolutionMs": {
+              "type": "number",
+              "description": "Optional auto-resolution window in milliseconds, from 60000 to 240000. Include this only when the question is useful but non-blocking and continuing with best judgment is acceptable if the user does not answer; omit it when explicit user input is required before continuing. Use 60000 for lightly helpful context and up to 240000 when the answer would materially unblock better work."
+            },
+            "questions": {
+              "type": "array",
+              "description": "Questions to show the user. Prefer 1 and do not exceed 3",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "header": {
+                    "type": "string",
+                    "description": "Short header label shown in the UI (12 or fewer chars)."
+                  },
+                  "id": {
+                    "type": "string",
+                    "description": "Stable identifier for mapping answers (snake_case)."
+                  },
+                  "options": {
+                    "type": "array",
+                    "description": "Provide 2-3 mutually exclusive choices. Put the recommended option first and suffix its label with \"(Recommended)\". Do not include an \"Other\" option in this list; the client will add a free-form \"Other\" option automatically.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "description": {
+                          "type": "string",
+                          "description": "One short sentence explaining impact/tradeoff if selected."
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "User-facing label (1-5 words)."
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "description"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "question": {
+                    "type": "string",
+                    "description": "Single-sentence prompt shown to the user."
+                  }
+                },
+                "required": [
+                  "id",
+                  "header",
+                  "question",
+                  "options"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "questions"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "type": "function",
+        "name": "view_image",
+        "description": "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Local filesystem path to an image file."
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "type": "namespace",
+        "name": "multi_agent_v1",
+        "description": "Tools for spawning and managing sub-agents.",
+        "tools": [
+          {
+            "type": "function",
+            "name": "close_agent",
+            "description": "Close an agent and any open descendants when they are no longer needed, and return the target agent's previous status before shutdown was requested. Completed agents remain open and count toward the concurrency limit until closed. Don't keep agents open for too long if they are not needed anymore.",
+            "strict": false,
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "description": "Agent id to close (from spawn_agent)."
+                }
+              },
+              "required": [
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          },
+          {
+            "type": "function",
+            "name": "resume_agent",
+            "description": "Resume a previously closed agent by id so it can receive send_input and wait_agent calls.",
+            "strict": false,
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Agent id to resume."
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          {
+            "type": "function",
+            "name": "send_input",
+            "description": "Send a message to an existing agent. Use interrupt=true to redirect work immediately. You should reuse the agent by send_input if you believe your assigned task is highly dependent on the context of a previous task.",
+            "strict": false,
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "interrupt": {
+                  "type": "boolean",
+                  "description": "True interrupts the current task and handles this message immediately; false or omitted queues it."
+                },
+                "items": {
+                  "type": "array",
+                  "description": "Structured input items. Use this to pass explicit mentions (for example app:// connector paths).",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "image_url": {
+                        "type": "string",
+                        "description": "Image URL when type is image."
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Display name when type is skill or mention."
+                      },
+                      "path": {
+                        "type": "string",
+                        "description": "Path when type is local_image/skill, or structured mention target such as app://<connector-id> or plugin://<plugin-name>@<marketplace-name> when type is mention."
+                      },
+                      "text": {
+                        "type": "string",
+                        "description": "Text content when type is text."
+                      },
+                      "type": {
+                        "type": "string",
+                        "description": "Input item type: text, image, local_image, skill, or mention."
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Legacy plain-text message to send to the agent. Use either message or items."
+                },
+                "target": {
+                  "type": "string",
+                  "description": "Agent id to message (from spawn_agent)."
+                }
+              },
+              "required": [
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          },
+          {
+            "type": "function",
+            "name": "spawn_agent",
+            "description": "[REDACTED]",
+            "strict": false,
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "agent_type": {
+                  "type": "string",
+                  "description": "Optional type name for the new agent. If omitted, `default` is used.\nAvailable roles:\ndefault: {\nDefault agent.\n}\nexplorer: {\nUse `explorer` for specific codebase questions.\nExplorers are fast and authoritative.\nThey must be used to ask specific, well-scoped questions on the codebase.\nRules:\n- In order to avoid redundant work, you should avoid exploring the same problem that explorers have already covered. Typically, you should trust the explorer results without additional verification. You are still allowed to inspect the code yourself to gain the needed context!\n- You are encouraged to spawn up multiple explorers in parallel when you have multiple distinct questions to ask about the codebase that can be answered independently. This allows you to get more information faster without waiting for one question to finish before asking the next. While waiting for the explorer results, you can continue working on other local tasks that do not depend on those results. This parallelism is a key advantage of delegation, so use it whenever you have multiple questions to ask.\n- Reuse existing explorers for related questions.\n}\nworker: {\nUse for execution and production work.\nTypical tasks:\n- Implement part of a feature\n- Fix tests or bugs\n- Split large refactors into independent chunks\nRules:\n- Explicitly assign **ownership** of the task (files / responsibility). When the subtask involves code changes, you should clearly specify which files or modules the worker is responsible for. This helps avoid merge conflicts and ensures accountability. For example, you can say \"Worker 1 is responsible for updating the authentication module, while Worker 2 will handle the database layer.\" By defining clear ownership, you can delegate more effectively and reduce coordination overhead.\n- Always tell workers they are **not alone in the codebase**, and they should not revert the edits made by others, and they should adjust their implementation to accommodate the changes made by others. This is important because there may be multiple workers making changes in parallel, and they need to be aware of each other's work to avoid conflicts and ensure a cohesive final product.\n}"
+                },
+                "fork_context": {
+                  "type": "boolean",
+                  "description": "True forks the current thread history into the new agent; false or omitted starts with only the initial prompt."
+                },
+                "items": {
+                  "type": "array",
+                  "description": "Structured input items. Use this to pass explicit mentions (for example app:// connector paths).",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "image_url": {
+                        "type": "string",
+                        "description": "Image URL when type is image."
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Display name when type is skill or mention."
+                      },
+                      "path": {
+                        "type": "string",
+                        "description": "Path when type is local_image/skill, or structured mention target such as app://<connector-id> or plugin://<plugin-name>@<marketplace-name> when type is mention."
+                      },
+                      "text": {
+                        "type": "string",
+                        "description": "Text content when type is text."
+                      },
+                      "type": {
+                        "type": "string",
+                        "description": "Input item type: text, image, local_image, skill, or mention."
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Initial plain-text task for the new agent. Use either message or items."
+                },
+                "model": {
+                  "type": "string",
+                  "description": "Model override for the new agent. Omit unless an explicit override is needed."
+                },
+                "reasoning_effort": {
+                  "type": "string",
+                  "description": "Reasoning effort override for the new agent. Omit to inherit the parent effort."
+                },
+                "service_tier": {
+                  "type": "string",
+                  "description": "Service tier override for the new agent. Omit unless explicitly requested."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          {
+            "type": "function",
+            "name": "wait_agent",
+            "description": "Wait for agents to reach a final status. Completed statuses may include the agent's final message. Returns empty status when timed out. Once the agent reaches a final status, a notification message will be received containing the same completed status.",
+            "strict": false,
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "targets": {
+                  "type": "array",
+                  "description": "Agent ids to wait on. Pass multiple ids to wait for whichever finishes first.",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "timeout_ms": {
+                  "type": "number",
+                  "description": "Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000. Prefer longer waits (minutes) to avoid busy polling."
+                }
+              },
+              "required": [
+                "targets"
+              ],
+              "additionalProperties": false
+            }
+          }
+        ]
+      },
+      {
+        "type": "function",
+        "name": "get_goal",
+        "description": "Get the current goal for this thread, including status, budgets, token and elapsed-time usage, and remaining token budget.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      {
+        "type": "function",
+        "name": "create_goal",
+        "description": "Create a goal only when explicitly requested by the user or system/developer instructions; do not infer goals from ordinary tasks.\nSet token_budget only when an explicit token budget is requested. Fails if an unfinished goal exists; use update_goal only for status.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "objective": {
+              "type": "string",
+              "description": "Required. The concrete objective to start pursuing. This starts a new active goal when no goal exists or replaces the current goal when it is complete."
+            },
+            "token_budget": "[REDACTED]"
+          },
+          "required": [
+            "objective"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "type": "function",
+        "name": "update_goal",
+        "description": "Update the existing goal.\nUse this tool only to mark the goal achieved or genuinely blocked.\nSet status to `complete` only when the objective has actually been achieved and no required work remains.\nSet status to `blocked` only when the same blocking condition has repeated for at least three consecutive goal turns, counting the original/user-triggered turn and any automatic continuations, and the agent cannot make meaningful progress without user input or an external-state change.\nIf the user resumes a goal that was previously marked `blocked`, treat the resumed run as a fresh blocked audit. If the same blocking condition then repeats for at least three consecutive resumed goal turns, set status to `blocked` again.\nOnce the blocked threshold is satisfied, do not keep reporting that you are still blocked while leaving the goal active; set status to `blocked`.\nDo not use `blocked` merely because the work is hard, slow, uncertain, incomplete, or would benefit from clarification.\nDo not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work.\nYou cannot use this tool to pause, resume, budget-limit, or usage-limit a goal; those status changes are controlled by the user or system.\nWhen marking a budgeted goal achieved with status `complete`, report the final token usage from the tool result to the user.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "description": "Required. Set to `complete` only when the objective is achieved and no required work remains. Set to `blocked` only after the same blocking condition has recurred for at least three consecutive goal turns and the agent is at an impasse. After a previously blocked goal is resumed, the resumed run starts a fresh blocked audit.",
+              "enum": [
+                "complete",
+                "blocked"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "type": "web_search",
+        "external_web_access": false
+      }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": false,
+    "reasoning": null,
+    "store": false,
+    "stream": true,
+    "include": [],
+    "prompt_cache_key": "[REDACTED]",
+    "client_metadata": {
+      "turn_id": "019f56bb-985e-7263-9cad-fde1acef94a0",
+      "thread_id": "019f56bb-983f-7c30-b949-32a5d9e9f9b0",
+      "x-codex-window-id": "019f56bb-983f-7c30-b949-32a5d9e9f9b0:0",
+      "x-codex-turn-metadata": "{\"installation_id\":\"7abfa7bc-7026-43eb-afcb-ba38c05ee9b4\",\"session_id\":\"019f56bb-983f-7c30-b949-32a5d9e9f9b0\",\"thread_id\":\"019f56bb-983f-7c30-b949-32a5d9e9f9b0\",\"turn_id\":\"019f56bb-985e-7263-9cad-fde1acef94a0\",\"window_id\":\"019f56bb-983f-7c30-b949-32a5d9e9f9b0:0\",\"request_kind\":\"turn\",\"thread_source\":\"user\",\"sandbox\":\"seatbelt\",\"turn_started_at_unix_ms\":1783866562654}",
+      "x-codex-installation-id": "7abfa7bc-7026-43eb-afcb-ba38c05ee9b4",
+      "session_id": "019f56bb-983f-7c30-b949-32a5d9e9f9b0"
+    }
+  },
+  "meta": {
+    "model": "deepseek-v4-flash",
+    "has_instructions": true,
+    "instructions_chars": 873,
+    "tools_count": 10,
+    "input_items": 3,
+    "messages_count": null
+  }
+}

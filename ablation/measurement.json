@@ -1,0 +1,231 @@
+{
+  "probes": {
+    "V0_project_docs": {
+      "base_instructions": {
+        "chars": 20751,
+        "tokens": 4458,
+        "words": 3259
+      },
+      "extra_blocks": {
+        "chars": 12961,
+        "tokens": 2986,
+        "words": 1504
+      },
+      "project_docs": {
+        "chars": 32910,
+        "tokens": 5782,
+        "words": 5753
+      },
+      "tool_schemas": {
+        "chars": 15214,
+        "tokens": 4311,
+        "words": 1453
+      },
+      "total": {
+        "chars": 81836,
+        "tokens": 17537,
+        "words": 11969
+      }
+    },
+    "V2_project_docs": {
+      "base_instructions": {
+        "chars": 873,
+        "tokens": 172,
+        "words": 128
+      },
+      "extra_blocks": {
+        "chars": 0,
+        "tokens": 0,
+        "words": 0
+      },
+      "project_docs": {
+        "chars": 4238,
+        "tokens": 751,
+        "words": 722
+      },
+      "tool_schemas": {
+        "chars": 15214,
+        "tokens": 4311,
+        "words": 1453
+      },
+      "total": {
+        "chars": 20325,
+        "tokens": 5234,
+        "words": 2303
+      }
+    },
+    "markers": {
+      "project-docs-v0": {
+        "has_environment": true,
+        "has_permissions": true,
+        "has_project_doc_end": false,
+        "has_project_doc_start": true,
+        "has_skills": true,
+        "input_items": 3,
+        "instructions_chars": 20751,
+        "tools_count": 10
+      },
+      "project-docs-v2": {
+        "has_environment": false,
+        "has_permissions": false,
+        "has_project_doc_end": false,
+        "has_project_doc_start": true,
+        "has_skills": false,
+        "input_items": 2,
+        "instructions_chars": 873,
+        "tools_count": 10
+      },
+      "unknown-key": {
+        "has_environment": true,
+        "has_permissions": true,
+        "has_project_doc_end": false,
+        "has_project_doc_start": false,
+        "has_skills": true,
+        "input_items": 3,
+        "instructions_chars": 873,
+        "tools_count": 10
+      },
+      "v0": {
+        "has_environment": true,
+        "has_permissions": true,
+        "has_project_doc_end": false,
+        "has_project_doc_start": false,
+        "has_skills": true,
+        "input_items": 3,
+        "instructions_chars": 20751,
+        "tools_count": 10
+      },
+      "v1": {
+        "has_environment": true,
+        "has_permissions": true,
+        "has_project_doc_end": false,
+        "has_project_doc_start": false,
+        "has_skills": true,
+        "input_items": 3,
+        "instructions_chars": 873,
+        "tools_count": 10
+      },
+      "v2": {
+        "has_environment": false,
+        "has_permissions": false,
+        "has_project_doc_end": false,
+        "has_project_doc_start": false,
+        "has_skills": false,
+        "input_items": 1,
+        "instructions_chars": 873,
+        "tools_count": 10
+      }
+    }
+  },
+  "token_method": "regex_approx_words_punct",
+  "variants": {
+    "V0": {
+      "base_instructions": {
+        "chars": 20751,
+        "tokens": 4458,
+        "words": 3259
+      },
+      "extra_blocks": {
+        "chars": 12887,
+        "tokens": 2966,
+        "words": 1504
+      },
+      "project_docs": {
+        "chars": 0,
+        "tokens": 0,
+        "words": 0
+      },
+      "tool_schemas": {
+        "chars": 15214,
+        "tokens": 4311,
+        "words": 1453
+      },
+      "total": {
+        "chars": 48852,
+        "tokens": 11735,
+        "words": 6216
+      }
+    },
+    "V1": {
+      "base_instructions": {
+        "chars": 873,
+        "tokens": 172,
+        "words": 128
+      },
+      "extra_blocks": {
+        "chars": 12887,
+        "tokens": 2966,
+        "words": 1504
+      },
+      "project_docs": {
+        "chars": 0,
+        "tokens": 0,
+        "words": 0
+      },
+      "tool_schemas": {
+        "chars": 15214,
+        "tokens": 4311,
+        "words": 1453
+      },
+      "total": {
+        "chars": 28974,
+        "tokens": 7449,
+        "words": 3085
+      }
+    },
+    "V2": {
+      "base_instructions": {
+        "chars": 873,
+        "tokens": 172,
+        "words": 128
+      },
+      "extra_blocks": {
+        "chars": 0,
+        "tokens": 0,
+        "words": 0
+      },
+      "project_docs": {
+        "chars": 0,
+        "tokens": 0,
+        "words": 0
+      },
+      "tool_schemas": {
+        "chars": 15214,
+        "tokens": 4311,
+        "words": 1453
+      },
+      "total": {
+        "chars": 16087,
+        "tokens": 4483,
+        "words": 1581
+      }
+    },
+    "pi": {
+      "base_instructions": {
+        "chars": 2498,
+        "tokens": 585,
+        "words": 321
+      },
+      "extra_blocks": {
+        "chars": 0,
+        "tokens": 0,
+        "words": 0
+      },
+      "project_docs": {
+        "chars": 0,
+        "tokens": 0,
+        "words": 0
+      },
+      "tool_schemas": {
+        "chars": 2900,
+        "tokens": 904,
+        "words": 278
+      },
+      "total": {
+        "chars": 5398,
+        "tokens": 1489,
+        "words": 599
+      }
+    }
+  }
+}

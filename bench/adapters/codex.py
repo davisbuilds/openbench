@@ -351,7 +351,7 @@ def _parse_json(stdout):
     tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
     return tokens, turns, tail
 
-def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
+def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override=None) -> dict:
     if os.environ.get("BENCH_IN_CONTAINER"):
         # codex's own sandbox (bwrap) needs user namespaces and cannot nest
         # inside the bench container; the disposable container IS the external
@@ -397,6 +397,12 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     else:
         return _unsupported(model)
 
+    child_env = _codex_env_for_bridge(spec["env_key"]) if model in OPEN_MODELS else None
+    if env_override:
+        if child_env is None:
+            child_env = os.environ.copy()
+        child_env.update(env_override)
+
     try:
         proc = subprocess.run(
             cmd,
@@ -405,7 +411,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             text=True,
             timeout=timeout_s,
             stdin=subprocess.DEVNULL,
-            env=_codex_env_for_bridge(spec["env_key"]) if model in OPEN_MODELS else None,
+            env=child_env,
         )
     except subprocess.TimeoutExpired as e:
         full_output = _err_tail(e, limit=None)

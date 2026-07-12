@@ -1,0 +1,5 @@
+Error loading config.toml:
+/Users/matthewlam/dev/openbench-wt-ablation/ablation/codex-home-unknown/config.toml:4:1: unknown configuration field `unknown_ablation_probe_key`
+  |
+4 | unknown_ablation_probe_key = true
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^
