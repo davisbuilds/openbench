@@ -39,7 +39,7 @@ The checkers are pure-`python3` stdlib + bash and also run under the host-side
 | `feal-differential-cryptanalysis` | hard | Implement a differential chosen-plaintext attack (`attack.py`) that recovers `key[5]` of a FEAL-like cipher. |
 | `llm-inference-batching-scheduler` | hard | Produce shape-aware batching plans that cover all requests and beat tight cost / pad-ratio / p95-latency / sequential-timecost thresholds with ≤8 unique tensor shapes. |
 | `schemelike-metacircular-eval` | medium | Write a metacircular evaluator `eval.scm` that interprets a scheme-like language — and can interpret itself. |
-| `cancel-async-tasks` | hard | Implement `run_tasks(tasks, max_concurrent)` in `run.py` with correct asyncio concurrency limiting and cleanup that still runs when a `SIGINT` cancels the run. |
+| `cancel-async-tasks` (**DROPPED 2026-07-11**) | hard | Implement `run_tasks(tasks, max_concurrent)` in `run.py` with correct asyncio concurrency limiting and cleanup that still runs when a `SIGINT` cancels the run. Dropped: the checker is load-sensitive — correct solutions scored FAIL under host load and PASS idle on three separate occasions, surviving a readiness-based rewrite. See `cancel-async-tasks/DROPPED.md`. |
 | `count-call-stack` | easy | Parse a 4 MB profiler-stack log and emit the top-10 call sites in an exact text format. (A deterministic, low-variance anchor.) |
 
 ## Selection rationale & difficulty evidence

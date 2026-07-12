@@ -783,6 +783,10 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
     # correctly regardless of the caller's cwd or a relative --tasks-dir.
     task_dir = os.path.abspath(os.path.join(tasks_dir, task))
+    if os.path.exists(os.path.join(task_dir, "DROPPED.md")):
+        raise SystemExit(
+            f"task {task!r} is dropped from the active set "
+            f"(see {os.path.join(task_dir, 'DROPPED.md')}); refusing to schedule it")
     row = {
         "run_id": run_id,
         "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
