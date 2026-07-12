@@ -48,6 +48,8 @@ WORKSPACE_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024
 WORKSPACE_EVIDENCE_MAX_TOTAL_BYTES = 8 * 1024 * 1024
 WORKSPACE_EVIDENCE_MAX_FILES = 2000
 WORKSPACE_EVIDENCE_META_KEY = "\0manifest"
+CONTAINER_CLI_VERSIONS_PATH = "/etc/openbench-cli-versions.json"
+_CONTAINER_CLI_VERSION_CACHE = {}
 
 # Ordered field list for each results row. ``score`` and ``harness_version`` are
 # appended last so older logs that predate them stay readable (report derives a
@@ -58,7 +60,7 @@ ROW_FIELDS = (
     "tokens_input_uncached", "tokens_cache_read", "tokens_cache_write",
     "tokens_output", "tokens_reasoning", "usage_raw", "token_basis",
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
-    "failure_class", "checker_stdout", "checker_stderr", "checker_workspace_files",
+    "harness_version_source", "failure_class", "checker_stdout", "checker_stderr", "checker_workspace_files",
     "image_digest",
 )
 
@@ -290,7 +292,7 @@ def _extract_version(module):
 
 
 def probe_version(harness, adapters_dir):
-    """Best-effort harness version string for stamping into rows.
+    """Best-effort host harness version string for local-mode row stamping.
 
     The built-in ``null`` control reports ``"builtin"``. Real harnesses import
     their adapter and call its optional ``version()``; any failure yields None.
@@ -303,6 +305,63 @@ def probe_version(harness, adapters_dir):
     except Exception:  # noqa: BLE001
         return None
     return _extract_version(module)
+
+
+def parse_container_cli_versions(text):
+    """Parse ``/etc/openbench-cli-versions.json`` into ``{harness: version}``.
+
+    The Docker image writes a simple JSON object with harness adapter names as
+    keys (for example ``grokbuild`` for the ``grok`` CLI). Only string values are
+    accepted; malformed JSON, arrays, or non-string values yield an empty dict
+    so a broken/old image is visible as ``harness_version=null`` rather than
+    crashing an in-flight benchmark cell.
+    """
+    try:
+        data = json.loads(text or "")
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): value for key, value in data.items() if isinstance(value, str)}
+
+
+def read_container_cli_versions(image, image_digest=None):
+    """Return CLI versions stamped inside a Docker image, cached per digest.
+
+    Reads ``CONTAINER_CLI_VERSIONS_PATH`` with ``docker run --rm <image> cat``.
+    The cache key is the immutable image digest/ID when available, falling back
+    to the image ref only when Docker cannot provide one (for example in unit
+    tests or a broken daemon path).
+    """
+    if not image and not image_digest:
+        return {}
+    cache_key = image_digest or docker_image_digest(image) or image
+    if cache_key in _CONTAINER_CLI_VERSION_CACHE:
+        return dict(_CONTAINER_CLI_VERSION_CACHE[cache_key])
+    image_ref = image_digest or image
+    try:
+        proc = subprocess.run(
+            ["docker", "run", "--rm", image_ref, "cat", CONTAINER_CLI_VERSIONS_PATH],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        versions = {}
+    else:
+        versions = parse_container_cli_versions(proc.stdout) if proc.returncode == 0 else {}
+    _CONTAINER_CLI_VERSION_CACHE[cache_key] = dict(versions)
+    return versions
+
+
+def harness_version_for_source(harness, exec_used, host_version, docker_image=None,
+                               image_digest=None,
+                               container_versions_reader=read_container_cli_versions):
+    """Return ``(version, source)`` for a row after the actual exec lane is known."""
+    if exec_used == "docker":
+        if harness == "null":
+            return "builtin", "container"
+        versions = container_versions_reader(docker_image, image_digest)
+        return versions.get(harness), "container"
+    return host_version, "host"
 
 
 def null_run(instruction, workdir, model, timeout_s):
@@ -338,6 +397,11 @@ def load_adapter(adapters_dir, name):
     return module
 
 
+def _raise_with_exec_used(exc, exec_used):
+    setattr(exc, "bench_exec_used", exec_used)
+    raise exc
+
+
 def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                    adapters_dir, docker_image, docker_fallback):
     """Run the harness for one cell, honoring the execution mode.
@@ -359,13 +423,18 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
             return result, "docker"
         except docker_exec.DockerUnavailable as exc:
             if not docker_fallback:
-                raise
+                _raise_with_exec_used(exc, "docker")
             print(f"WARN docker unavailable ({exc}); falling back to local")
+        except Exception as exc:  # noqa: BLE001 - caller records row failure
+            _raise_with_exec_used(exc, "docker")
 
     if harness == "null":
         return null_run(instruction, workdir, model, timeout_s), "local"
-    adapter = load_adapter(adapters_dir, harness)
-    return adapter.run(instruction, workdir, model, timeout_s), "local"
+    try:
+        adapter = load_adapter(adapters_dir, harness)
+        return adapter.run(instruction, workdir, model, timeout_s), "local"
+    except Exception as exc:  # noqa: BLE001 - caller records row failure
+        _raise_with_exec_used(exc, "local")
 
 
 def read_instruction(task_dir):
@@ -760,6 +829,7 @@ def _adapter_wall_time_s(start_monotonic, result, exec_used):
 def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              checker_timeout_s, exec_mode="local",
              docker_image=None, docker_fallback=True, harness_version=None,
+             container_versions_reader=read_container_cli_versions,
              transcripts_dir=None, results_stem=""):
     """Execute one (task, harness, trial) cell and return its results row.
 
@@ -771,8 +841,9 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
 
     Scoring: exit 0 => success=true, score=1.0 (a SCORE line can't lower a pass).
     Nonzero exit => success=false, score = the checker's SCORE line if any, else
-    0.0. Timeout => score 0.0. ``harness_version`` (probed once per harness by
-    the caller) is stamped verbatim.
+    0.0. Timeout => score 0.0. Local mode stamps ``harness_version`` from the
+    host adapter probe; docker mode stamps it from the in-container versions
+    file and records ``harness_version_source`` accordingly.
 
     When ``transcripts_dir`` is set, the cell's full agent transcript
     (adapter ``full_output`` if present, else ``output_tail``) is persisted
@@ -813,7 +884,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "checker_exit": None,
         "exec_mode": None,
         "score": 0.0,
-        "harness_version": harness_version,
+        "harness_version": None,
+        "harness_version_source": None,
         "failure_class": None,
         "checker_stdout": None,
         "checker_stderr": None,
@@ -838,16 +910,25 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 exec_mode, harness, instruction, workdir, model, timeout_s,
                 adapters_dir, docker_image, docker_fallback,
             )
-        except Exception:  # noqa: BLE001 - never crash the loop on an adapter
+        except Exception as exc:  # noqa: BLE001 - never crash the loop on an adapter
+            exec_used = getattr(exc, "bench_exec_used", exec_mode)
             row["error"] = traceback.format_exc(limit=4).strip()
             row["wall_time_s"] = round(time.monotonic() - start, 3)
-            row["exec_mode"] = exec_mode
+            row["exec_mode"] = exec_used
+            row["harness_version"], row["harness_version_source"] = harness_version_for_source(
+                harness, exec_used, harness_version, docker_image, None,
+                container_versions_reader,
+            )
             row["failure_class"] = classify_failure(row, "", timeout_s)
             return row
         row["wall_time_s"] = _adapter_wall_time_s(start, result, exec_used)
         row["exec_mode"] = exec_used
         if exec_used == "docker":
             row["image_digest"] = result.get("image_digest")
+        row["harness_version"], row["harness_version_source"] = harness_version_for_source(
+            harness, exec_used, harness_version, docker_image, row["image_digest"],
+            container_versions_reader,
+        )
 
         # Fold the adapter's self-reported fields into the row.
         row["completed"] = bool(result.get("completed", False))
