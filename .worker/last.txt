@@ -1,11 +1,15 @@
-Status: BLOCKED on authenticated local Cursor proof; implementation/audit complete otherwise.
+Status: follow-up corrections complete; original local Cursor authentication blocker remains.
 
-Audit summary: all 12 adapter×exec lanes are documented in `.worker/AUDIT.md`. Leaks fixed for Codex (local/docker), Pi inherited-config edge, OpenCode (local/docker), and Cursor (local/docker); Claude and Grok were already HOME-isolated. Docker mounts now expose auth files only. Factory features remain enabled; Pi rejects executable task-local configuration without disabling built-in tools.
+Corrections:
+- Restored Codex `--disable apps --disable plugins --disable multi_agent` on top of fresh-CODEX_HOME isolation (commit `a24fe32`).
+- Restored Claude `DISABLE_AUTOUPDATER=1` as a pinned-version provenance guard (commit `a216ca2`).
+- Restored Claude `--bare` for every supported lane. Git history (`001ca71`) and the adapter rationale confirm it is a billing boundary: all supported Claude lanes are API-key routed, and bare mode prevents OAuth/keychain reads and Anthropic-billed side calls. Other `DISABLE_*` variables remain removed.
 
-Files changed: bench/adapters/{claude,codex,cursor,grokbuild,opencode,pi}.py, bench/docker_exec.py, four bench test files, .worker/AUDIT.md, .worker/last.txt.
+Evidence:
+- `python3 -m unittest discover bench/tests`: 331 tests passed.
+- Codex local `make-it-run` smoke after restoration: completed=true, success=true, score=1.0 (`/tmp/openbench-codex-correction.Qj2JSC/codex.jsonl`).
+- Updated audit: `.worker/AUDIT.md`.
 
-Commits: d9462d4, fd5436a, 3682c8b, ad52b51, 72484c9 (plus final handoff commit).
+Files changed in this follow-up: `bench/adapters/codex.py`, `bench/adapters/claude.py`, `bench/tests/test_codex_disable.py`, `bench/tests/test_frontier_opus_routing.py`, `.worker/AUDIT.md`, `.worker/last.txt`.
 
-Tests: 331 passed (`python3 -m unittest discover bench/tests`). Authenticated local runner smokes passed for codex, pi, opencode, and grokbuild on tasks/make-it-run. Autoreview clean. Claude had no leaking lane and this host lacks ANTHROPIC_API_KEY.
-
-Residual risk/blocker: installed macOS cursor-agent couples subscription OAuth to the real owner HOME; isolated HOME rejects both the available dedicated Linux auth.json and authInfo projection, and no CURSOR_API_KEY is available. Falling back to real HOME would violate the task. A CURSOR_API_KEY (or supported exportable macOS auth file) is required to complete the Cursor smoke. The no-modify-personal-config permission also precluded planting a real sentinel; deterministic path/mount tests provide the non-destructive isolation proof.
+Residual risk: unchanged from the original audit—installed macOS cursor-agent couples subscription OAuth to real owner HOME, and no `CURSOR_API_KEY` or exportable macOS auth file is available. Falling back to real HOME would reintroduce config leakage.

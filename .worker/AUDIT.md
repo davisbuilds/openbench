@@ -4,9 +4,9 @@ Date: 2026-07-13. Scope: `bench/run.py` adapters, local and disposable-container
 
 | adapter | exec | config files read before fix | leakage | what leaked / final state |
 |---|---|---|---|---|
-| codex | local | `~/.codex/config.toml` plus owner CODEX_HOME resources (instructions, skills, MCP/plugins, rules/memories); `auth.json` | yes | Owner defaults/tools/instructions. **Fixed:** fresh CODEX_HOME, auth.json only; factory features are not disabled. |
+| codex | local | `~/.codex/config.toml` plus owner CODEX_HOME resources (instructions, skills, MCP/plugins, rules/memories); `auth.json` | yes | Owner defaults/tools/instructions. **Fixed:** fresh CODEX_HOME, auth.json only; approved variance guards still disable apps/plugins/multi_agent. |
 | codex | docker | mounted `~/.codex/config.toml` and `auth.json` into `/root/.codex` | yes | Same config.toml customization. **Fixed:** auth.json is the only mount; adapter composes fresh CODEX_HOME. |
-| claude | local | none; existing adapter used fresh HOME and CLAUDE_CONFIG_DIR; auth from selected API-key env | no | No `~/.claude/CLAUDE.md`, settings.json, credentials, hooks/plugins. Removed `--bare`/DISABLE_* policy overrides so isolated execution keeps factory features. |
+| claude | local | none; existing adapter used fresh HOME and CLAUDE_CONFIG_DIR; auth from selected API-key env | no | No `~/.claude/CLAUDE.md`, settings.json, credentials, hooks/plugins. `--bare` is retained on every API-key lane as a billing boundary (no OAuth/keychain or Anthropic-billed side calls); `DISABLE_AUTOUPDATER=1` preserves pinned-version provenance. Other DISABLE_* policy overrides remain removed. |
 | claude | docker | none; no auth/config mount, selected API-key env only | no | Fresh image/container + adapter temp HOME. |
 | pi | local | fresh HOME and copied `~/.pi/agent/auth.json`; inherited `PI_CODING_AGENT_DIR` could bypass HOME | yes (env override edge) | Owner settings/resources if override was set. **Fixed:** PI_CODING_AGENT_DIR forced into temp HOME; only auth copied; no `--no-extensions`, so factory resources remain. |
 | pi | docker | host `.pi` tree was staged, though CLI's second temp HOME copied only auth | no CLI leak (overbroad exposure) | **Hardened:** mount only `.pi/agent/auth.json`; temp PI_CODING_AGENT_DIR. |
@@ -19,9 +19,9 @@ Date: 2026-07-13. Scope: `bench/run.py` adapters, local and disposable-container
 
 ## Verification
 
-- Full suite: `python3 -m unittest discover bench/tests` → **331 tests, OK** (14.768s).
+- Full suite after follow-up corrections: `python3 -m unittest discover bench/tests` → **331 tests, OK** (18.313s).
 - Authenticated runner smokes, local `tasks/make-it-run`, artifacts outside repo at `/tmp/openbench-config-smoke.YU0FtW`:
-  - codex / gpt-5.5-medium: completed, checker score 1.0.
+  - codex / gpt-5.5-medium: completed, checker score 1.0. Re-run after restoring feature guards also passed at `/tmp/openbench-codex-correction.Qj2JSC/codex.jsonl`.
   - pi / gpt-5.5-medium: completed, checker score 1.0.
   - opencode / gpt-5.5-medium: completed, checker score 1.0.
   - grokbuild / deepseek-v4-flash: completed, checker score 1.0.
