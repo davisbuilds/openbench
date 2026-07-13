@@ -1,0 +1,19 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Terminal-Bench//Meeting Scheduler//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+
+BEGIN:VEVENT
+UID:team-meeting-20240117110000@terminal-bench.ai
+DTSTART:20240117T110000Z
+DTEND:20240117T120000Z
+SUMMARY:Team Planning Meeting
+DESCRIPTION:Scheduled team planning meeting for Alice, Bob, and Carol
+ATTENDEE:MAILTO:alice@example.com
+ATTENDEE:MAILTO:bob@example.com
+ATTENDEE:MAILTO:carol@example.com
+LOCATION:Conference Room
+END:VEVENT
+
+END:VCALENDAR
