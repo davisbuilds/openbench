@@ -300,6 +300,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     env, iso_home = _isolated_env()
     if model in MODELS:
         if model == "claude-opus-4-8" and not _has_anthropic_oauth():
+            shutil.rmtree(iso_home, ignore_errors=True)
             return {"completed": False,
                     "error": f"SETUP-NEEDED: run `opencode auth login -p anthropic` (missing {_ANTHROPIC_AUTH})",
                     "output_tail": "", "tokens": None, "turns": None, "cmd": None,
@@ -319,6 +320,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
         if not os.environ.get(spec["env_key"]):
+            shutil.rmtree(iso_home, ignore_errors=True)
             return _setup_needed(spec["env_key"], model)
         cmd = [
             "opencode", "run",
@@ -331,6 +333,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         ]
         env["OPENCODE_CONFIG_CONTENT"] = _open_config_content(spec)
     else:
+        shutil.rmtree(iso_home, ignore_errors=True)
         return _unsupported(model)
 
     try:
