@@ -59,19 +59,17 @@ AUTH_MOUNTS = {
     # entry.py's staging copy run for 13+ minutes and crash on transient
     # session tmp files vanishing mid-copy. codex_v1/v2 compose a fresh runtime
     # CODEX_HOME in the adapter and reuse this same staged auth surface.
-    "codex": [".codex/auth.json", ".codex/config.toml"],
-    "codex_v1": [".codex/auth.json", ".codex/config.toml"],
-    "codex_v2": [".codex/auth.json", ".codex/config.toml"],
-    "pi": [".pi"],
-    "opencode": [".local/share/opencode", ".config/opencode", ".opencode/data"],
+    "codex": [".codex/auth.json"],
+    "codex_v1": [".codex/auth.json"],
+    "codex_v2": [".codex/auth.json"],
+    "pi": [".pi/agent/auth.json"],
+    "opencode": [".local/share/opencode/auth.json", ".opencode/data/auth.json"],
     # Cursor Linux/container auth: `bench/cursor_container_login.sh` mints auth
     # under ~/.openbench/cursor-container-auth, laid out as a HOME subtree. Map
     # those host paths back to Linux cursor-agent's HOME paths in the container;
     # legacy ~/.cursor remains a fallback if no container-auth .cursor exists.
     "cursor": [
-        (".openbench/cursor-container-auth/.config/cursor", ".config/cursor"),
-        (".openbench/cursor-container-auth/.cursor", ".cursor"),
-        ".cursor",
+        (".openbench/cursor-container-auth/.config/cursor/auth.json", ".config/cursor/auth.json"),
     ],
     "devin": [".config/devin"],
     # claude uses API keys only (open-model vendor keys or first-party

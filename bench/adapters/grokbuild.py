@@ -143,34 +143,12 @@ def _config_toml(model, spec):
         f"planner_model = {_toml_str(model)}\n"
         f"strategist_model = {_toml_str(model)}\n"
         f"skeptic_models = [{_toml_str(model)}]\n\n"
-        "[subagents]\n"
-        "enabled = false\n\n"
         "[subagents.models]\n"
         f"explore = {_toml_str(model)}\n"
         f"plan = {_toml_str(model)}\n\n"
     ]
     for alias in (model, *_AUX_MODEL_ALIASES):
         sections.append(_model_section(alias, spec))
-    sections.append(
-        "[session]\n"
-        "save_on_end = false\n\n"
-        "[memory]\n"
-        "enabled = false\n\n"
-        "[memory.session]\n"
-        "save_on_end = false\n\n"
-        "[compat.cursor]\n"
-        "skills = false\n"
-        "rules = false\n"
-        "agents = false\n"
-        "mcps = false\n"
-        "hooks = false\n\n"
-        "[compat.claude]\n"
-        "skills = false\n"
-        "rules = false\n"
-        "agents = false\n"
-        "mcps = false\n"
-        "hooks = false\n"
-    )
     return "".join(sections)
 
 
@@ -322,10 +300,6 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "--effort", _EFFORT,
             "--reasoning-effort", _EFFORT,
             "--always-approve",
-            "--no-plan",
-            "--no-subagents",
-            "--disable-web-search",
-            "--no-memory",
             "--cwd", workdir,
         ]
         try:

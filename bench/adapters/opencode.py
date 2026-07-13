@@ -33,6 +33,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 
 NAME = "opencode"
 _EXE = "opencode"
@@ -105,7 +106,12 @@ _VARIANT = {
 # opencode's Anthropic OAuth login (`opencode auth login -p anthropic`) writes
 # here on current releases. Older OpenAI subscription paths are still mounted by
 # docker_exec; this guard is only for the new Anthropic frontier route.
-_ANTHROPIC_AUTH = os.path.expanduser("~/.opencode/data/auth.json")
+_AUTH_CANDIDATES = (
+    os.path.expanduser("~/.local/share/opencode/auth.json"),
+    os.path.expanduser("~/.opencode/data/auth.json"),
+)
+_ANTHROPIC_AUTH = next((path for path in _AUTH_CANDIDATES if os.path.isfile(path)),
+                       _AUTH_CANDIDATES[-1])
 
 
 def _has_anthropic_oauth():
@@ -283,10 +289,35 @@ def _parse_json(stdout):
     tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
     return tokens, turns, tail
 
-def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
+def _isolated_env():
+    """Return (environment, temp HOME) containing only opencode auth files."""
+    iso_home = tempfile.mkdtemp(prefix="opencode_home_")
     env = dict(os.environ)
+    env["HOME"] = iso_home
+    env["XDG_CONFIG_HOME"] = os.path.join(iso_home, ".config")
+    env["XDG_DATA_HOME"] = os.path.join(iso_home, ".local", "share")
+    env["XDG_STATE_HOME"] = os.path.join(iso_home, ".local", "state")
+    env["XDG_CACHE_HOME"] = os.path.join(iso_home, ".cache")
+    # These variables can point directly at an owner's config outside HOME.
+    for name in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT"):
+        env.pop(name, None)
+    for source in _AUTH_CANDIDATES:
+        if not os.path.isfile(source):
+            continue
+        # Current releases use XDG_DATA_HOME/opencode/auth.json. Normalize old
+        # auth locations there too; never copy adjacent config/state files.
+        dest = os.path.join(env["XDG_DATA_HOME"], "opencode", "auth.json")
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy2(source, dest)
+        break
+    return env, iso_home
+
+
+def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
+    env, iso_home = _isolated_env()
     if model in MODELS:
         if model == "claude-opus-4-8" and not _has_anthropic_oauth():
+            shutil.rmtree(iso_home, ignore_errors=True)
             return {"completed": False,
                     "error": f"SETUP-NEEDED: run `opencode auth login -p anthropic` (missing {_ANTHROPIC_AUTH})",
                     "output_tail": "", "tokens": None, "turns": None, "cmd": None,
@@ -307,6 +338,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
         if not os.environ.get(spec["env_key"]):
+            shutil.rmtree(iso_home, ignore_errors=True)
             return _setup_needed(spec["env_key"], model)
         cmd = [
             "opencode", "run",
@@ -320,30 +352,34 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         ]
         env["OPENCODE_CONFIG_CONTENT"] = _open_config_content(spec)
     else:
+        shutil.rmtree(iso_home, ignore_errors=True)
         return _unsupported(model)
 
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=workdir,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            stdin=subprocess.DEVNULL,
-            env=env,
-        )
-    except subprocess.TimeoutExpired as e:
-        full_output = _err_tail(e, limit=None)
-        return {
-            "completed": False,
-            "error": f"timeout after {timeout_s}s",
-            "output_tail": full_output[-2000:],
-            "full_output": full_output,
-            "tokens": None,
-            "turns": None,
-            "cmd": cmd,
-            **_empty_token_usage(),
-        }
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                stdin=subprocess.DEVNULL,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as e:
+            full_output = _err_tail(e, limit=None)
+            return {
+                "completed": False,
+                "error": f"timeout after {timeout_s}s",
+                "output_tail": full_output[-2000:],
+                "full_output": full_output,
+                "tokens": None,
+                "turns": None,
+                "cmd": cmd,
+                **_empty_token_usage(),
+            }
+    finally:
+        shutil.rmtree(iso_home, ignore_errors=True)
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     try:

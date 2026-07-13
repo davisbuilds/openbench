@@ -212,7 +212,7 @@ class TestClaudeOpus(unittest.TestCase):
         self.assertIn("SETUP-NEEDED", res["error"])
         self.assertIn("ANTHROPIC_API_KEY", res["error"])
 
-    def test_constructs_bare_first_party_medium_command(self):
+    def test_constructs_isolated_first_party_medium_command(self):
         old_run = self.claude.subprocess.run
         old_resolve = self.claude._resolve_exe
         calls = []
@@ -233,6 +233,8 @@ class TestClaudeOpus(unittest.TestCase):
         self.assertTrue(res["completed"])
         cmd, kwargs = calls[0]
         self.assertIn("--bare", cmd)
+        self.assertNotEqual(kwargs["env"]["HOME"], os.path.expanduser("~"))
+        self.assertEqual(kwargs["env"]["DISABLE_AUTOUPDATER"], "1")
         self.assertEqual(cmd[cmd.index("--model") + 1], "claude-opus-4-8")
         self.assertEqual(cmd[cmd.index("--effort") + 1], "medium")
         self.assertEqual(kwargs["env"]["ANTHROPIC_API_KEY"], "test-key")
@@ -271,7 +273,8 @@ class TestCodexOpus(unittest.TestCase):
                     self.assertIn('model_reasoning_effort="medium"', cmd)
                     self.assertIn('service_tier="default"', cmd)
                     self.assertEqual(cmd[cmd.index("-m") + 1], model)
-                    self.assertIsNone(kwargs["env"])
+                    self.assertIn("CODEX_HOME", kwargs["env"])
+                    self.assertNotEqual(kwargs["env"]["CODEX_HOME"], os.path.expanduser("~/.codex"))
                     self.assertEqual(res["token_basis"], "estimated")
                     self.assertIsNone(res["tokens_cache_write"])
         finally:
