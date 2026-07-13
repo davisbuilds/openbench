@@ -1,0 +1,34 @@
+# OpenBench harness config-isolation audit
+
+Date: 2026-07-13. Scope: `bench/run.py` adapters, local and disposable-container execution. “Reads” below means host-owner files made reachable to the CLI (auth is listed separately and intentionally preserved).
+
+| adapter | exec | config files read before fix | leakage | what leaked / final state |
+|---|---|---|---|---|
+| codex | local | `~/.codex/config.toml` plus owner CODEX_HOME resources (instructions, skills, MCP/plugins, rules/memories); `auth.json` | yes | Owner defaults/tools/instructions. **Fixed:** fresh CODEX_HOME, auth.json only; factory features are not disabled. |
+| codex | docker | mounted `~/.codex/config.toml` and `auth.json` into `/root/.codex` | yes | Same config.toml customization. **Fixed:** auth.json is the only mount; adapter composes fresh CODEX_HOME. |
+| claude | local | none; existing adapter used fresh HOME and CLAUDE_CONFIG_DIR; auth from selected API-key env | no | No `~/.claude/CLAUDE.md`, settings.json, credentials, hooks/plugins. Removed `--bare`/DISABLE_* policy overrides so isolated execution keeps factory features. |
+| claude | docker | none; no auth/config mount, selected API-key env only | no | Fresh image/container + adapter temp HOME. |
+| pi | local | fresh HOME and copied `~/.pi/agent/auth.json`; inherited `PI_CODING_AGENT_DIR` could bypass HOME | yes (env override edge) | Owner settings/resources if override was set. **Fixed:** PI_CODING_AGENT_DIR forced into temp HOME; only auth copied; no `--no-extensions`, so factory resources remain. |
+| pi | docker | host `.pi` tree was staged, though CLI's second temp HOME copied only auth | no CLI leak (overbroad exposure) | **Hardened:** mount only `.pi/agent/auth.json`; temp PI_CODING_AGENT_DIR. |
+| opencode | local | XDG/global config (`~/.config/opencode`), OPENCODE_CONFIG/CONFIG_DIR/CONFIG_CONTENT, auth under `~/.local/share/opencode` or `~/.opencode/data` | yes | Providers, plugins, MCPs, permissions/instructions and other owner settings. **Fixed:** fresh HOME/XDG dirs, config env removed, auth.json only copied. |
+| opencode | docker | entire auth/data and config directories mounted/staged | yes | `.config/opencode` and adjacent data. **Fixed:** auth.json files only; adapter re-isolates HOME/XDG. |
+| cursor | local | `~/.cursor/cli-config.json` plus owner Cursor hooks/rules/skills/extensions; macOS desktop auth is coupled to owner state | yes | Model, permissions, network, hooks/rules/skills. **Fixed fail-closed:** fresh HOME/XDG; only Linux auth.json or authInfo projection copied, or CURSOR_API_KEY env. Current macOS desktop OAuth cannot authenticate after isolation (see blocker). |
+| cursor | docker | dedicated container-auth `.config/cursor` and `.cursor` trees, plus legacy host `.cursor` fallback | yes | Mixed cli-config/customizations could enter container. **Fixed:** only dedicated `.config/cursor/auth.json` mounted. |
+| grok | local | none; generated `~/.grok/config.toml` in fresh HOME, vendor API-key env | no | No owner `~/.grok`. Removed no-plan/no-subagents/no-web/no-memory and compat-disable policy overrides; generated config only pins benchmark model/routing. |
+| grok | docker | none; no host Grok mount, fresh container and adapter HOME | no | Vendor API-key env only. |
+
+## Verification
+
+- Full suite: `python3 -m unittest discover bench/tests` → **331 tests, OK** (14.768s).
+- Authenticated runner smokes, local `tasks/make-it-run`, artifacts outside repo at `/tmp/openbench-config-smoke.YU0FtW`:
+  - codex / gpt-5.5-medium: completed, checker score 1.0.
+  - pi / gpt-5.5-medium: completed, checker score 1.0.
+  - opencode / gpt-5.5-medium: completed, checker score 1.0.
+  - grokbuild / deepseek-v4-flash: completed, checker score 1.0.
+  - cursor: fails authentication after isolation on this macOS host. The available desktop OAuth works only with the real HOME; dedicated Linux/container auth.json and projected authInfo are not accepted by the macOS binary, and CURSOR_API_KEY is unavailable. The adapter deliberately does not fall back to owner HOME.
+  - claude: no ANTHROPIC_API_KEY is available on this host; this adapter was already non-leaking and API-key-only.
+- Sentinel policy: the task explicitly forbids modifying personal config, so no sentinel was planted in real files. `bench/tests/test_codex_disable.py` uses subprocess capture to prove a fresh CODEX_HOME and absence of owner feature overrides; mount tests prove Docker receives auth-file paths only. Static temp-HOME construction proves owner config paths are unreachable for the other adapters. No secret values were recorded.
+
+## Residual blocker/risk
+
+Cursor local subscription OAuth on macOS is inseparable, with the installed CLI, from owner HOME state. Completing the required authenticated local Cursor smoke needs a `CURSOR_API_KEY` or a supported exportable auth file; using real HOME would reintroduce the exact leakage being fixed. Claude live smoke likewise needs ANTHROPIC_API_KEY, but Claude had no leaking lane before this change.
