@@ -31,6 +31,7 @@ import tempfile
 import threading
 import time
 import traceback
+from contextlib import contextmanager
 
 from failure_class import classify_failure
 from scrub import build_context as build_scrub_context, scrub_text
@@ -42,6 +43,12 @@ DEFAULT_RESULTS_PATH = os.path.join(REPO, "results", "results.jsonl")
 DEFAULT_ADAPTERS_DIR = os.path.join(HERE, "adapters")
 DEFAULT_TASKS_DIR = os.path.join(REPO, "tasks")
 DEFAULT_MODEL = "gpt-5.5-medium"
+PROXY_HARNESSES = {"codex", "pi", "claude", "opencode"}
+PROXY_CODEX_SUBSCRIPTION_MODELS = {
+    "gpt-5.5-medium", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+}
+PROXY_CHAT_MODELS = {"glm-5.2", "glm-4.7-flash", "deepseek-v4-flash", "kimi-k2.7-code"}
+PROXY_CLAUDE_MODELS = PROXY_CHAT_MODELS | {"claude-opus-4-8"}
 CHECKER_CAPTURE_LIMIT = 8000
 CHECKER_CAPTURE_TRUNCATED_PREFIX = "[truncated to last 8000 chars]\n"
 WORKSPACE_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024
@@ -59,6 +66,9 @@ ROW_FIELDS = (
     "success", "completed", "error", "wall_time_s", "t_env_setup_s", "t_agent_s", "t_checker_s", "tokens",
     "tokens_input_uncached", "tokens_cache_read", "tokens_cache_write",
     "tokens_output", "tokens_reasoning", "usage_raw", "token_basis",
+    "tokens_proxy_input_uncached", "tokens_proxy_cache_read", "tokens_proxy_cache_write",
+    "tokens_proxy_output", "tokens_proxy_reasoning", "tokens_proxy_calls",
+    "sampling_observed", "token_basis_proxy",
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
     "harness_version_source", "failure_class", "checker_stdout", "checker_stderr", "checker_workspace_files",
     "image_digest",
@@ -424,8 +434,101 @@ def _with_phase_timings(result, env_setup_s=None, agent_wall_time_s=None):
     return result
 
 
+@contextmanager
+def _temporary_environ(updates):
+    """Temporarily overlay environment variables for one adapter call."""
+    if not updates:
+        yield
+        return
+    old = {key: os.environ.get(key) for key in updates}
+    try:
+        for key, value in updates.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = str(value)
+        yield
+    finally:
+        for key, value in old.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _proxy_env(proxy_ctx, cell_token, for_docker=False):
+    if not proxy_ctx:
+        return None
+    base = proxy_ctx["docker_base_url"] if for_docker else proxy_ctx["local_base_url"]
+    return {
+        "OPENBENCH_PROXY": "1",
+        "OPENBENCH_PROXY_BASE_URL": base,
+        "OPENBENCH_PROXY_CELL_TOKEN": cell_token,
+    }
+
+
+def _proxy_docker_args(proxy_ctx):
+    if not proxy_ctx:
+        return None
+    return ["--add-host", "host.docker.internal:host-gateway"]
+
+
+def proxy_supported_for_cell(harness, model):
+    """True when --proxy has proven adapter wiring for this harness/model."""
+    if harness == "codex":
+        return model in PROXY_CODEX_SUBSCRIPTION_MODELS
+    if harness == "pi":
+        return model in PROXY_CODEX_SUBSCRIPTION_MODELS
+    if harness == "claude":
+        return model in PROXY_CLAUDE_MODELS
+    if harness == "opencode":
+        return model in PROXY_CHAT_MODELS
+    return False
+
+
+def _proxy_sampling_for_cell(harness, model):
+    """Non-secret sampling metadata requested by the adapter, for ledger context."""
+    subscription_models = {
+        "gpt-5.5-medium": "gpt-5.5",
+        "gpt-5.6-sol": "gpt-5.6-sol",
+        "gpt-5.6-terra": "gpt-5.6-terra",
+        "gpt-5.6-luna": "gpt-5.6-luna",
+    }
+    if harness == "codex" and model in subscription_models:
+        return {"model": subscription_models[model], "reasoning_effort": "medium"}
+    if harness == "pi" and model in subscription_models:
+        return {"provider": "openai-codex", "model": subscription_models[model], "thinking": "medium"}
+    if harness == "opencode" and model in PROXY_CHAT_MODELS:
+        return {"model": model, "variant": "medium"}
+    if harness == "claude" and model in PROXY_CLAUDE_MODELS:
+        return {"model": model, "effort": "medium"}
+    return {}
+
+
+def _write_proxy_cell_metadata(proxy_ctx, cell_token, harness, model):
+    if not proxy_ctx or not cell_token:
+        return
+    ledger_dir = proxy_ctx.get("ledger_dir")
+    if not ledger_dir:
+        return
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", cell_token)
+    meta = {
+        "source": "runner_configured",
+        "harness": harness,
+        "model": model,
+        "sampling": _proxy_sampling_for_cell(harness, model),
+    }
+    try:
+        os.makedirs(str(ledger_dir), exist_ok=True)
+        with open(os.path.join(str(ledger_dir), safe + ".meta.json"), "w", encoding="utf-8") as fh:
+            json.dump(meta, fh, sort_keys=True)
+    except OSError:
+        pass
+
+
 def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
-                   adapters_dir, docker_image, docker_fallback):
+                   adapters_dir, docker_image, docker_fallback,
+                   proxy_ctx=None, cell_token=None):
     """Run the harness for one cell, honoring the execution mode.
 
     Returns ``(result_dict, exec_used)`` where ``exec_used`` is ``"local"`` or
@@ -443,6 +546,8 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
             result = docker_exec.run_in_container(
                 harness, instruction, workdir, model, timeout_s,
                 adapters_dir, docker_image,
+                extra_docker_args=_proxy_docker_args(proxy_ctx),
+                extra_env=_proxy_env(proxy_ctx, cell_token, for_docker=True),
             )
             return result, "docker"
         except docker_exec.DockerUnavailable as exc:
@@ -465,11 +570,12 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
 
     local_start = time.monotonic()
     try:
-        if harness == "null":
-            result = null_run(instruction, workdir, model, timeout_s)
-        else:
-            adapter = load_adapter(adapters_dir, harness)
-            result = adapter.run(instruction, workdir, model, timeout_s)
+        with _temporary_environ(_proxy_env(proxy_ctx, cell_token, for_docker=False)):
+            if harness == "null":
+                result = null_run(instruction, workdir, model, timeout_s)
+            else:
+                adapter = load_adapter(adapters_dir, harness)
+                result = adapter.run(instruction, workdir, model, timeout_s)
         if fallback_env_setup_s is not None:
             result = _with_phase_timings(
                 result,
@@ -894,11 +1000,184 @@ def _add_host_env_setup_s(row, result, exec_used):
         row["t_env_setup_s"] = round((row.get("t_env_setup_s") or 0.0) + host_setup, 3)
 
 
+def _num(value, default=None):
+    return int(value) if isinstance(value, (int, float)) else default
+
+
+def _empty_proxy_usage():
+    return {
+        "tokens_proxy_input_uncached": None,
+        "tokens_proxy_cache_read": None,
+        "tokens_proxy_cache_write": None,
+        "tokens_proxy_output": None,
+        "tokens_proxy_reasoning": None,
+    }
+
+
+def proxy_split_from_usage(usage):
+    """Normalize provider usage JSON to the row's proxy split fields."""
+    out = _empty_proxy_usage()
+    if not isinstance(usage, dict):
+        return out
+
+    # pi-normalized shape: input, cacheRead, cacheWrite, output, reasoning.
+    if {"input", "output"} & set(usage) and "totalTokens" in usage:
+        inp = _num(usage.get("input"))
+        out_tok = _num(usage.get("output"))
+        if inp is not None and out_tok is not None:
+            out.update({
+                "tokens_proxy_input_uncached": inp,
+                "tokens_proxy_cache_read": _num(usage.get("cacheRead"), 0),
+                "tokens_proxy_cache_write": _num(usage.get("cacheWrite"), 0),
+                "tokens_proxy_output": out_tok,
+                "tokens_proxy_reasoning": _num(usage.get("reasoning")),
+            })
+        return out
+
+    # OpenAI/Codex Responses and Anthropic Messages shapes.
+    if "input_tokens" in usage or "output_tokens" in usage:
+        inp = _num(usage.get("input_tokens"))
+        details = usage.get("input_tokens_details") or {}
+        anthropic_cache_shape = (
+            "cache_read_input_tokens" in usage
+            or "cache_creation_input_tokens" in usage
+        )
+        cache_read = _num(usage.get("cache_read_input_tokens"), None)
+        if cache_read is None:
+            cache_read = _num(usage.get("cached_input_tokens"), None)
+        if cache_read is None and isinstance(details, dict):
+            cache_read = _num(details.get("cached_tokens"), 0)
+        cache_write = _num(
+            usage.get("cache_creation_input_tokens")
+            or usage.get("cache_write_tokens")
+            or (details.get("cache_write_tokens") if isinstance(details, dict) else None),
+            0,
+        )
+        out_tok = _num(usage.get("output_tokens"))
+        out_details = usage.get("output_tokens_details") or {}
+        reasoning = _num(usage.get("reasoning_output_tokens"), None)
+        if reasoning is None and isinstance(out_details, dict):
+            reasoning = _num(out_details.get("reasoning_tokens"))
+        if inp is not None and out_tok is not None:
+            input_uncached = inp if anthropic_cache_shape else max(0, inp - (cache_read or 0) - (cache_write or 0))
+            out.update({
+                "tokens_proxy_input_uncached": input_uncached,
+                "tokens_proxy_cache_read": cache_read or 0,
+                "tokens_proxy_cache_write": cache_write or 0,
+                "tokens_proxy_output": out_tok,
+                "tokens_proxy_reasoning": reasoning,
+            })
+        return out
+
+    # OpenAI-compatible chat completions shape.
+    if "prompt_tokens" in usage or "completion_tokens" in usage:
+        prompt = _num(usage.get("prompt_tokens"))
+        details = usage.get("prompt_tokens_details") or {}
+        cache_read = _num(usage.get("prompt_cache_hit_tokens"), None)
+        if cache_read is None and isinstance(details, dict):
+            cache_read = _num(details.get("cached_tokens"), 0)
+        uncached = _num(usage.get("prompt_cache_miss_tokens"), None)
+        if uncached is None and prompt is not None:
+            uncached = max(0, prompt - (cache_read or 0))
+        completion = _num(usage.get("completion_tokens"))
+        out_details = usage.get("completion_tokens_details") or {}
+        reasoning = _num(usage.get("reasoning_tokens"), None)
+        if reasoning is None and isinstance(out_details, dict):
+            reasoning = _num(out_details.get("reasoning_tokens"))
+        if uncached is not None and completion is not None:
+            out.update({
+                "tokens_proxy_input_uncached": uncached,
+                "tokens_proxy_cache_read": cache_read or 0,
+                "tokens_proxy_cache_write": _num(usage.get("prompt_cache_write_tokens"), 0),
+                "tokens_proxy_output": completion,
+                "tokens_proxy_reasoning": reasoning,
+            })
+        return out
+
+    return out
+
+
+def _add_proxy_totals(total, split):
+    for key in _empty_proxy_usage():
+        val = split.get(key)
+        if isinstance(val, int):
+            total[key] = (total.get(key) or 0) + val
+
+
+def read_proxy_ledger(ledger_dir, token, wait_s=0.0, stable_s=0.1):
+    if not ledger_dir or not token:
+        return []
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", token)
+    path = os.path.join(str(ledger_dir), safe + ".jsonl")
+    deadline = time.monotonic() + max(wait_s, 0.0)
+    last_size = None
+    stable_since = None
+    while wait_s and time.monotonic() < deadline:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            time.sleep(0.02)
+            continue
+        if size > 0 and size == last_size:
+            if stable_since is None:
+                stable_since = time.monotonic()
+            if time.monotonic() - stable_since >= stable_s:
+                break
+        else:
+            last_size = size
+            stable_since = None
+        time.sleep(0.02)
+    rows = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return []
+    return rows
+
+
+def apply_proxy_ledger(row, ledger_rows):
+    """Populate proxy-measured token fields from scrubbed ledger rows."""
+    calls = [r for r in ledger_rows if isinstance(r, dict) and isinstance(r.get("usage"), dict)]
+    row["tokens_proxy_calls"] = len(calls) or None
+    if not calls:
+        return row
+    totals = _empty_proxy_usage()
+    samplings = []
+    seen_sampling = set()
+    for rec in calls:
+        _add_proxy_totals(totals, proxy_split_from_usage(rec.get("usage")))
+        sampling = rec.get("sampling_observed")
+        if isinstance(sampling, dict) and sampling:
+            key = json.dumps(sampling, sort_keys=True, separators=(",", ":"))
+            if key not in seen_sampling:
+                seen_sampling.add(key)
+                samplings.append(sampling)
+    row.update(totals)
+    row["sampling_observed"] = samplings or None
+    row["token_basis_proxy"] = "proxy_measured"
+    return row
+
+
+def _populate_proxy_row(row, proxy_ctx, cell_token, wait_s=0.0):
+    if not proxy_ctx or not cell_token:
+        return row
+    return apply_proxy_ledger(
+        row, read_proxy_ledger(proxy_ctx.get("ledger_dir"), cell_token, wait_s=wait_s))
+
+
 def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              checker_timeout_s, exec_mode="local",
              docker_image=None, docker_fallback=True, harness_version=None,
              container_versions_reader=read_container_cli_versions,
-             transcripts_dir=None, results_stem=""):
+             transcripts_dir=None, results_stem="", proxy_ctx=None):
     """Execute one (task, harness, trial) cell and return its results row.
 
     Copies the task workspace to a temp dir, invokes the adapter (or the
@@ -919,6 +1198,12 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     ``write_transcript`` for the local-only handling rule.
     """
     run_id = make_run_id(harness, task, model, trial)
+    cell_token = None
+    active_proxy_ctx = proxy_ctx if proxy_supported_for_cell(harness, model) else None
+    if active_proxy_ctx:
+        import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
+        cell_token = counting_proxy.new_cell_token()
+        _write_proxy_cell_metadata(active_proxy_ctx, cell_token, harness, model)
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
     # correctly regardless of the caller's cwd or a relative --tasks-dir.
     task_dir = os.path.abspath(os.path.join(tasks_dir, task))
@@ -948,6 +1233,14 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "tokens_reasoning": None,
         "usage_raw": None,
         "token_basis": None,
+        "tokens_proxy_input_uncached": None,
+        "tokens_proxy_cache_read": None,
+        "tokens_proxy_cache_write": None,
+        "tokens_proxy_output": None,
+        "tokens_proxy_reasoning": None,
+        "tokens_proxy_calls": None,
+        "sampling_observed": None,
+        "token_basis_proxy": None,
         "tokens_fresh": None,
         "turns": None,
         "cmd": None,
@@ -990,6 +1283,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             result, exec_used = invoke_adapter(
                 exec_mode, harness, instruction, workdir, model, timeout_s,
                 adapters_dir, docker_image, docker_fallback,
+                proxy_ctx=active_proxy_ctx, cell_token=cell_token,
             )
         except Exception as exc:  # noqa: BLE001 - never crash the loop on an adapter
             exec_used = getattr(exc, "bench_exec_used", exec_mode)
@@ -1008,7 +1302,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 container_versions_reader,
             )
             row["failure_class"] = classify_failure(row, "", timeout_s)
-            return row
+            return _populate_proxy_row(row, active_proxy_ctx, cell_token, wait_s=2.0)
         row["wall_time_s"] = _adapter_wall_time_s(start, result, exec_used)
         row["t_agent_s"] = _agent_wall_time_s(start, result, exec_used)
         _add_host_env_setup_s(row, result, exec_used)
@@ -1042,6 +1336,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["output_tail"] = result.get("output_tail") or ""
         full_output = result.get("full_output")
         classifier_output = full_output if full_output is not None else row["output_tail"]
+        _populate_proxy_row(row, active_proxy_ctx, cell_token, wait_s=2.0)
 
         # Persist the full agent transcript LOCAL-ONLY (prefer the untruncated
         # full_output; fall back to the ~2000-char output_tail). Never let a
@@ -1074,7 +1369,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             if row["error"] is None:
                 row["error"] = traceback.format_exc(limit=4).strip()
             row["failure_class"] = classify_failure(row, classifier_output, timeout_s)
-            return row
+            return _populate_proxy_row(row, active_proxy_ctx, cell_token)
         row["checker_stdout"] = scrub_checker_output(checker_stdout)
         row["checker_stderr"] = scrub_checker_output(checker_stderr)
         row["checker_exit"] = checker_exit
@@ -1084,7 +1379,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["score"] = 1.0 if checker_exit == 0 else (
             raw_score if raw_score is not None else 0.0)
         row["failure_class"] = classify_failure(row, classifier_output, timeout_s)
-        return row
+        return _populate_proxy_row(row, active_proxy_ctx, cell_token)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
@@ -1131,6 +1426,9 @@ def main(argv=None):
                         action="store_false",
                         help="in --exec docker, fail instead of falling back to "
                              "local when the daemon/image is unavailable")
+    parser.add_argument("--proxy", action="store_true",
+                        help="start one owned counting proxy and inject it into "
+                             "supported harnesses (codex, pi, claude, opencode)")
     args = parser.parse_args(argv)
 
     tasks = [t.strip() for t in args.task.split(",") if t.strip()]
@@ -1149,31 +1447,60 @@ def main(argv=None):
         parser.error("--trial must be >= 1")
     trial_numbers = [args.trial] if args.trial is not None else range(1, args.trials + 1)
 
+    proxy_ctx = None
+    proxy_server = None
+    if args.proxy:
+        import proxy as counting_proxy
+        ledger_parent = os.environ.get("OPENBENCH_PROXY_LEDGER_DIR") or tempfile.mkdtemp(
+            prefix="openbench_proxy_", dir=os.environ.get("OPENBENCH_DOCKER_TMPDIR") or None)
+        listen_host = "0.0.0.0" if args.exec_mode == "docker" else "127.0.0.1"
+        proxy_server, _thread = counting_proxy.start_in_thread(listen_host, 0, ledger_parent)
+        port = proxy_server.server_address[1]
+        proxy_ctx = {
+            "ledger_dir": ledger_parent,
+            "local_base_url": f"http://127.0.0.1:{port}",
+            "docker_base_url": f"http://host.docker.internal:{port}",
+        }
+        unsupported = sorted(set(harnesses) - PROXY_HARNESSES)
+        unsupported_cells = [h for h in harnesses if h in PROXY_HARNESSES and not proxy_supported_for_cell(h, args.model)]
+        if unsupported:
+            print("WARN --proxy does not wire these harnesses yet: " + ",".join(unsupported))
+        if unsupported_cells:
+            print("WARN --proxy does not wire these harness/model cells yet: "
+                  + ",".join(f"{h}:{args.model}" for h in unsupported_cells))
+        print(f"PROXY listening={proxy_ctx['local_base_url']} ledger_dir={ledger_parent}")
+
     ran = 0
     skipped = 0
-    for harness in harnesses:
-        for task in tasks:
-            for trial in trial_numbers:
-                run_id = make_run_id(harness, task, args.model, trial)
-                if run_id in existing:
-                    skipped += 1
-                    print(f"SKIP {run_id}")
-                    continue
-                row = run_cell(
-                    harness, task, args.model, trial, args.timeout,
-                    args.tasks_dir, args.adapters_dir, args.checker_timeout,
-                    exec_mode=args.exec_mode, docker_image=args.docker_image,
-                    docker_fallback=args.docker_fallback,
-                    harness_version=versions.get(harness),
-                    transcripts_dir=transcripts_dir, results_stem=results_stem,
-                )
-                append_row(args.results_path, row)
-                existing.add(run_id)
-                ran += 1
-                status = "ok" if row["success"] else "fail"
-                print(f"RUN  {run_id} success={row['success']} score={row['score']} "
-                      f"completed={row['completed']} checker_exit={row['checker_exit']} "
-                      f"exec={row['exec_mode']} [{status}]")
+    try:
+        for harness in harnesses:
+            for task in tasks:
+                for trial in trial_numbers:
+                    run_id = make_run_id(harness, task, args.model, trial)
+                    if run_id in existing:
+                        skipped += 1
+                        print(f"SKIP {run_id}")
+                        continue
+                    row = run_cell(
+                        harness, task, args.model, trial, args.timeout,
+                        args.tasks_dir, args.adapters_dir, args.checker_timeout,
+                        exec_mode=args.exec_mode, docker_image=args.docker_image,
+                        docker_fallback=args.docker_fallback,
+                        harness_version=versions.get(harness),
+                        transcripts_dir=transcripts_dir, results_stem=results_stem,
+                        proxy_ctx=proxy_ctx,
+                    )
+                    append_row(args.results_path, row)
+                    existing.add(run_id)
+                    ran += 1
+                    status = "ok" if row["success"] else "fail"
+                    print(f"RUN  {run_id} success={row['success']} score={row['score']} "
+                          f"completed={row['completed']} checker_exit={row['checker_exit']} "
+                          f"exec={row['exec_mode']} [{status}]")
+    finally:
+        if proxy_server is not None:
+            proxy_server.shutdown()
+            proxy_server.server_close()
 
     print(f"\nDone. ran={ran} skipped={skipped} results={args.results_path}")
     return 0

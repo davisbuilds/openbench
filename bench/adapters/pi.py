@@ -31,6 +31,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from urllib.parse import urlsplit
 
 NAME = "pi"
 
@@ -75,6 +76,26 @@ def _legacy_tokens(token_usage):
 
 def _num(value):
     return int(value) if isinstance(value, (int, float)) else None
+
+
+def _proxy_cell_url(*parts):
+    base = os.environ.get("OPENBENCH_PROXY_BASE_URL")
+    token = os.environ.get("OPENBENCH_PROXY_CELL_TOKEN")
+    if not os.environ.get("OPENBENCH_PROXY") or not base or not token:
+        return None
+    path = "/".join(str(p).strip("/") for p in ("cell", token, *parts) if str(p).strip("/"))
+    return base.rstrip("/") + "/" + path
+
+
+def _proxied_base_url(route, original_url=None):
+    if not os.environ.get("OPENBENCH_PROXY"):
+        return original_url
+    if route == "codex":
+        return _proxy_cell_url("codex", "backend-api")
+    parsed = urlsplit(original_url or "")
+    tail = (parsed.path or "").strip("/")
+    vendor = route
+    return _proxy_cell_url("chat", vendor, tail)
 
 
 def version():
@@ -163,6 +184,10 @@ def _has_subscription_auth(provider):
     return isinstance(data, dict) and provider in data
 
 
+def _pi_models_override(base_url):
+    return json.dumps({"providers": {"openai-codex": {"baseUrl": base_url}}}, indent=2)
+
+
 def _pi_provider_ext(spec):
     """JS extension source registering the open provider (loaded via -e).
 
@@ -175,7 +200,7 @@ def _pi_provider_ext(spec):
         "export default function (pi) {\n"
         f'  pi.registerProvider("{spec["provider"]}", {{\n'
         f'    name: "{spec["display"]}",\n'
-        f'    baseUrl: "{spec["base_url"]}",\n'
+        f'    baseUrl: "{_proxied_base_url(spec["provider"], spec["base_url"])}",\n'
         f'    apiKey: "${spec["env_key"]}",\n'
         '    api: "openai-completions",\n'
         "    models: [{\n"
@@ -325,6 +350,10 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             agent_dir = os.path.join(iso_home, ".pi", "agent")
             os.makedirs(agent_dir, exist_ok=True)
             shutil.copy2(_REAL_AUTH, os.path.join(agent_dir, "auth.json"))
+            proxy_url = _proxied_base_url("codex")
+            if proxy_url:
+                with open(os.path.join(agent_dir, "models.json"), "w", encoding="utf-8") as fh:
+                    fh.write(_pi_models_override(proxy_url))
             cmd = [
                 "pi", "-p",
                 # Benchmark workspaces are data, not executable configuration.

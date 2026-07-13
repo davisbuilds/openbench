@@ -66,6 +66,23 @@ def _legacy_tokens(token_usage):
 def _num(value):
     return int(value) if isinstance(value, (int, float)) else None
 
+
+def _proxy_cell_url(*parts):
+    base = os.environ.get("OPENBENCH_PROXY_BASE_URL")
+    token = os.environ.get("OPENBENCH_PROXY_CELL_TOKEN")
+    if not os.environ.get("OPENBENCH_PROXY") or not base or not token:
+        return None
+    path = "/".join(str(p).strip("/") for p in ("cell", token, *parts) if str(p).strip("/"))
+    return base.rstrip("/") + "/" + path
+
+
+def _proxied_base_url(spec):
+    if not os.environ.get("OPENBENCH_PROXY"):
+        return spec["base_url"]
+    from urllib.parse import urlsplit
+    tail = (urlsplit(spec["base_url"]).path or "").strip("/")
+    return _proxy_cell_url("chat", spec["provider"], tail)
+
 # canonical model name -> opencode `-m` model string (provider/model)
 MODELS = {
     "gpt-5.5-medium": "openai/gpt-5.5",
@@ -148,7 +165,7 @@ def _open_config_content(spec):
                 "npm": "@ai-sdk/openai-compatible",
                 "name": spec["display"],
                 "options": {
-                    "baseURL": spec["base_url"],
+                    "baseURL": _proxied_base_url(spec),
                     "apiKey": "{env:" + spec["env_key"] + "}",
                 },
                 "models": {spec["model_id"]: {}},
@@ -312,6 +329,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "--variant", _VARIANT[model],
             "--auto",
             "--format", "json",
+            "--title", "openbench",
             instruction,
         ]
         env.pop("OPENAI_API_KEY", None)  # force subscription OAuth route
@@ -329,6 +347,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "--variant", spec["variant"],
             "--auto",
             "--format", "json",
+            "--title", "openbench",
             instruction,
         ]
         env["OPENCODE_CONFIG_CONTENT"] = _open_config_content(spec)

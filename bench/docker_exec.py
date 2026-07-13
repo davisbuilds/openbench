@@ -380,7 +380,7 @@ def _auth_mount_args(harness):
 
 def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                      instruction_path, container_name=None,
-                     extra_docker_args=None):
+                     extra_docker_args=None, extra_env=None):
     """Assemble the ``docker run`` argv for one cell (pure; unit-testable)."""
     cmd = ["docker", "run", "--rm"]
     # Bound each cell's CPU quota so co-tenant host load cannot starve a cell
@@ -410,6 +410,8 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
     for var in _api_key_passthrough(harness, model):
         if os.environ.get(var):
             cmd += ["-e", var]
+    for key, value in (extra_env or {}).items():
+        cmd += ["-e", f"{key}={value}"]
     cmd += _auth_mount_args(harness)
     if extra_docker_args:
         cmd += list(extra_docker_args)
@@ -449,7 +451,8 @@ def image_digest(image):
 
 
 def run_in_container(harness, instruction, workdir, model, timeout_s,
-                     adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None):
+                     adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None,
+                     extra_env=None):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -484,7 +487,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         cmd = build_docker_cmd(
             harness, workdir, model, timeout_s, adapters_dir, image_for_run,
             instruction_path, container_name=container_name,
-            extra_docker_args=extra_docker_args,
+            extra_docker_args=extra_docker_args, extra_env=extra_env,
         )
         host_env_setup_s = round(time.monotonic() - env_setup_start, 3)
 
