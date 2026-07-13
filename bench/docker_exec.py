@@ -459,20 +459,23 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     failed result dict (``completed=False``), never raised, so the runner loop
     keeps going.
     """
-    preflight(image)
-    resolved_image = image_digest(image)
-    image_for_run = resolved_image or image
-
-    # Instruction goes through a mounted temp file (avoids env/arg size and
-    # quoting issues with multi-line task instructions). The file must live in
-    # a directory the docker VM can bind-mount: on colima the default macOS
-    # /var/folders temp path is NOT shared into the VM, so default to a
-    # repo-local dir (override with OPENBENCH_DOCKER_TMPDIR).
-    instr_dir = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".bench-tmp")
-    os.makedirs(instr_dir, exist_ok=True)
-    fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt", dir=instr_dir)
+    env_setup_start = time.monotonic()
+    instruction_path = None
+    agent_started = False
     try:
+        preflight(image)
+        resolved_image = image_digest(image)
+        image_for_run = resolved_image or image
+
+        # Instruction goes through a mounted temp file (avoids env/arg size and
+        # quoting issues with multi-line task instructions). The file must live in
+        # a directory the docker VM can bind-mount: on colima the default macOS
+        # /var/folders temp path is NOT shared into the VM, so default to a
+        # repo-local dir (override with OPENBENCH_DOCKER_TMPDIR).
+        instr_dir = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".bench-tmp")
+        os.makedirs(instr_dir, exist_ok=True)
+        fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt", dir=instr_dir)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(instruction)
 
@@ -485,6 +488,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             instruction_path, container_name=container_name,
             extra_docker_args=extra_docker_args,
         )
+        host_env_setup_s = round(time.monotonic() - env_setup_start, 3)
 
         # The container must not outlive this call on ANY exit path — timeout,
         # crash, Ctrl-C, or a clean return where `--rm` glitched. Killing the
@@ -493,6 +497,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         # cleaned up).
         cleanup_ok = True
         try:
+            agent_started = True
             proc = _run_docker_client_with_deadline(
                 cmd, container_name, timeout_s + _TIMEOUT_GRACE_S,
             )
@@ -502,6 +507,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         # can fail transiently and still be recovered here.
         if not cleanup_ok:
             full_output = (proc.stdout or "") + (proc.stderr or "") if "proc" in locals() else ""
+            agent_wall = proc.host_wall_time_s if "proc" in locals() else None
             return {
                 "completed": False,
                 "error": f"container cleanup failed for {container_name}; "
@@ -509,7 +515,9 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "output_tail": full_output[-2000:],
                 "full_output": full_output,
                 "tokens": None, "turns": None, "cmd": cmd,
-                "host_wall_time_s": proc.host_wall_time_s if "proc" in locals() else None,
+                "host_wall_time_s": agent_wall,
+                "host_env_setup_s": host_env_setup_s,
+                "host_agent_wall_time_s": agent_wall,
                 "image_digest": resolved_image,
             }
         if proc.timed_out:
@@ -521,6 +529,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "full_output": full_output,
                 "tokens": None, "turns": None, "cmd": cmd,
                 "host_wall_time_s": proc.host_wall_time_s,
+                "host_env_setup_s": host_env_setup_s,
+                "host_agent_wall_time_s": proc.host_wall_time_s,
                 "image_digest": resolved_image,
             }
 
@@ -535,13 +545,23 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "full_output": combined,
                 "tokens": None, "turns": None, "cmd": cmd,
                 "host_wall_time_s": proc.host_wall_time_s,
+                "host_env_setup_s": host_env_setup_s,
+                "host_agent_wall_time_s": proc.host_wall_time_s,
                 "image_digest": resolved_image,
             }
         # Record the docker invocation for the results log (adapters record the
         # inner CLI cmd; we prepend the container wrapper for provenance).
         result["cmd"] = {"docker": cmd, "adapter_cmd": result.get("cmd")}
         result["host_wall_time_s"] = proc.host_wall_time_s
+        result["host_env_setup_s"] = host_env_setup_s
+        result["host_agent_wall_time_s"] = proc.host_wall_time_s
         result["image_digest"] = resolved_image
         return result
+    except BaseException as exc:
+        if not agent_started:
+            setattr(exc, "bench_env_setup_s", round(time.monotonic() - env_setup_start, 3))
+            setattr(exc, "bench_agent_wall_time_s", 0.0)
+        raise
     finally:
-        os.unlink(instruction_path)
+        if instruction_path is not None:
+            os.unlink(instruction_path)

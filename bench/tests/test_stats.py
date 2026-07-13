@@ -169,10 +169,10 @@ class TestFlagsEfficiencyAndCost(StatsTestCase):
         self.make_task("t1")
         rows = [
             {"harness": "h", "model": "m", "task": "t1", "trial": 1, "success": True,
-             "failure_class": "solved", "wall_time_s": 10, "tokens_total": 100,
+             "failure_class": "solved", "wall_time_s": 10, "t_agent_s": 8, "tokens_total": 100,
              "tokens_input": 80, "tokens_output": 20, "score": 1.0},
             {"harness": "h", "model": "m", "task": "t1", "trial": 2, "success": True,
-             "failure_class": "solved", "wall_time_s": 30, "tokens_total": 300,
+             "failure_class": "solved", "wall_time_s": 30, "t_agent_s": 12, "tokens_total": 300,
              "tokens_input": 200, "tokens_output": 100, "score": 1.0},
             {"harness": "h", "model": "m", "task": "t1", "trial": 3, "success": False,
              "failure_class": "wrong_answer", "wall_time_s": 999, "tokens_total": 999,
@@ -183,6 +183,7 @@ class TestFlagsEfficiencyAndCost(StatsTestCase):
         self.assertTrue(row["low_n"])
         self.assertEqual(row["flags"], ["LOW-N"])
         self.assertEqual(row["median_wall_time_s_solved"], 20)
+        self.assertEqual(row["median_t_agent_s_solved"], 10)
         self.assertEqual(row["median_tokens_total_solved"], 200)
         self.assertEqual(row["median_tokens_input_solved"], 140)
         self.assertEqual(row["median_tokens_output_solved"], 60)

@@ -56,7 +56,7 @@ _CONTAINER_CLI_VERSION_CACHE = {}
 # score from ``success`` when the field is absent).
 ROW_FIELDS = (
     "run_id", "ts_iso", "harness", "model", "task", "trial",
-    "success", "completed", "error", "wall_time_s", "tokens",
+    "success", "completed", "error", "wall_time_s", "t_env_setup_s", "t_agent_s", "t_checker_s", "tokens",
     "tokens_input_uncached", "tokens_cache_read", "tokens_cache_write",
     "tokens_output", "tokens_reasoning", "usage_raw", "token_basis",
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
@@ -400,9 +400,28 @@ def load_adapter(adapters_dir, name):
     return module
 
 
-def _raise_with_exec_used(exc, exec_used):
+def _raise_with_exec_used(exc, exec_used, env_setup_s=None, agent_wall_time_s=None):
     setattr(exc, "bench_exec_used", exec_used)
+    if isinstance(env_setup_s, (int, float)) and env_setup_s >= 0:
+        setattr(exc, "bench_env_setup_s", env_setup_s)
+    if isinstance(agent_wall_time_s, (int, float)) and agent_wall_time_s >= 0:
+        setattr(exc, "bench_agent_wall_time_s", agent_wall_time_s)
     raise exc
+
+
+def _with_phase_timings(result, env_setup_s=None, agent_wall_time_s=None):
+    """Attach runner phase timing hints to an adapter result when known."""
+    if not isinstance(result, dict):
+        return result
+    if (not isinstance(env_setup_s, (int, float))
+            and not isinstance(agent_wall_time_s, (int, float))):
+        return result
+    result = dict(result)
+    if isinstance(env_setup_s, (int, float)) and env_setup_s >= 0:
+        result["host_env_setup_s"] = env_setup_s
+    if isinstance(agent_wall_time_s, (int, float)) and agent_wall_time_s >= 0:
+        result["host_agent_wall_time_s"] = agent_wall_time_s
+    return result
 
 
 def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
@@ -416,8 +435,10 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
     and ``exec_used`` reflects that. The built-in ``null`` control runs the same
     way in either mode (its container path proves the plumbing without auth).
     """
+    fallback_env_setup_s = None
     if exec_mode == "docker":
         import docker_exec  # lazy: local mode never needs docker
+        docker_start = time.monotonic()
         try:
             result = docker_exec.run_in_container(
                 harness, instruction, workdir, model, timeout_s,
@@ -425,19 +446,44 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
             )
             return result, "docker"
         except docker_exec.DockerUnavailable as exc:
+            fallback_env_setup_s = round(time.monotonic() - docker_start, 3)
             if not docker_fallback:
-                _raise_with_exec_used(exc, "docker")
+                _raise_with_exec_used(
+                    exc, "docker", env_setup_s=fallback_env_setup_s,
+                    agent_wall_time_s=0.0)
             print(f"WARN docker unavailable ({exc}); falling back to local")
         except Exception as exc:  # noqa: BLE001 - caller records row failure
-            _raise_with_exec_used(exc, "docker")
+            _raise_with_exec_used(
+                exc,
+                "docker",
+                env_setup_s=getattr(exc, "bench_env_setup_s", None),
+                agent_wall_time_s=getattr(
+                    exc, "bench_agent_wall_time_s",
+                    round(time.monotonic() - docker_start, 3),
+                ),
+            )
 
-    if harness == "null":
-        return null_run(instruction, workdir, model, timeout_s), "local"
+    local_start = time.monotonic()
     try:
-        adapter = load_adapter(adapters_dir, harness)
-        return adapter.run(instruction, workdir, model, timeout_s), "local"
+        if harness == "null":
+            result = null_run(instruction, workdir, model, timeout_s)
+        else:
+            adapter = load_adapter(adapters_dir, harness)
+            result = adapter.run(instruction, workdir, model, timeout_s)
+        if fallback_env_setup_s is not None:
+            result = _with_phase_timings(
+                result,
+                env_setup_s=fallback_env_setup_s,
+                agent_wall_time_s=round(time.monotonic() - local_start, 3),
+            )
+        return result, "local"
     except Exception as exc:  # noqa: BLE001 - caller records row failure
-        _raise_with_exec_used(exc, "local")
+        _raise_with_exec_used(
+            exc,
+            "local",
+            env_setup_s=fallback_env_setup_s,
+            agent_wall_time_s=round(time.monotonic() - local_start, 3),
+        )
 
 
 def read_instruction(task_dir):
@@ -829,6 +875,25 @@ def _adapter_wall_time_s(start_monotonic, result, exec_used):
     return round(elapsed, 3)
 
 
+def _agent_wall_time_s(start_monotonic, result, exec_used):
+    """Elapsed agent/CLI wall time, excluding setup/preflight when available."""
+    elapsed = time.monotonic() - start_monotonic
+    if isinstance(result, dict):
+        host_elapsed = result.get("host_agent_wall_time_s")
+        if isinstance(host_elapsed, (int, float)) and host_elapsed >= 0:
+            elapsed = host_elapsed
+    return round(elapsed, 3)
+
+
+def _add_host_env_setup_s(row, result, exec_used):
+    """Fold host-side preflight/staging timing into the setup phase."""
+    if not isinstance(result, dict):
+        return
+    host_setup = result.get("host_env_setup_s")
+    if isinstance(host_setup, (int, float)) and host_setup >= 0:
+        row["t_env_setup_s"] = round((row.get("t_env_setup_s") or 0.0) + host_setup, 3)
+
+
 def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              checker_timeout_s, exec_mode="local",
              docker_image=None, docker_fallback=True, harness_version=None,
@@ -872,6 +937,9 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "completed": False,
         "error": None,
         "wall_time_s": None,
+        "t_env_setup_s": None,
+        "t_agent_s": None,
+        "t_checker_s": None,
         "tokens": None,
         "tokens_input_uncached": None,
         "tokens_cache_read": None,
@@ -901,6 +969,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     # Docker mode bind-mounts this dir; on colima the default macOS /var/folders
     # temp path is NOT shared into the VM and mounts as an EMPTY dir, so create
     # it somewhere the VM can see (same policy as docker_exec instruction files).
+    env_setup_start = time.monotonic()
     workdir_parent = None
     if exec_mode == "docker":
         workdir_parent = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
@@ -914,6 +983,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         shutil.copytree(os.path.join(task_dir, "workspace"), workdir)
 
         instruction = read_instruction(task_dir)
+        row["t_env_setup_s"] = round(time.monotonic() - env_setup_start, 3)
 
         start = time.monotonic()
         try:
@@ -924,6 +994,13 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         except Exception as exc:  # noqa: BLE001 - never crash the loop on an adapter
             exec_used = getattr(exc, "bench_exec_used", exec_mode)
             row["error"] = traceback.format_exc(limit=4).strip()
+            env_extra = getattr(exc, "bench_env_setup_s", None)
+            if isinstance(env_extra, (int, float)) and env_extra >= 0:
+                row["t_env_setup_s"] = round((row.get("t_env_setup_s") or 0.0) + env_extra, 3)
+            agent_elapsed = getattr(exc, "bench_agent_wall_time_s", None)
+            if not isinstance(agent_elapsed, (int, float)) or agent_elapsed < 0:
+                agent_elapsed = time.monotonic() - start
+            row["t_agent_s"] = round(agent_elapsed, 3)
             row["wall_time_s"] = round(time.monotonic() - start, 3)
             row["exec_mode"] = exec_used
             row["harness_version"], row["harness_version_source"] = harness_version_for_source(
@@ -933,6 +1010,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             row["failure_class"] = classify_failure(row, "", timeout_s)
             return row
         row["wall_time_s"] = _adapter_wall_time_s(start, result, exec_used)
+        row["t_agent_s"] = _agent_wall_time_s(start, result, exec_used)
+        _add_host_env_setup_s(row, result, exec_used)
         row["exec_mode"] = exec_used
         if exec_used == "docker":
             row["image_digest"] = result.get("image_digest")
@@ -984,8 +1063,12 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         try:
             row["checker_workspace_files"] = scrub_workspace_evidence_paths(
                 capture_workspace_files(workdir))
-            checker_exit, raw_score, checker_stdout, checker_stderr = run_checker(
-                task_dir, workdir, checker_timeout_s)
+            checker_start = time.monotonic()
+            try:
+                checker_exit, raw_score, checker_stdout, checker_stderr = run_checker(
+                    task_dir, workdir, checker_timeout_s)
+            finally:
+                row["t_checker_s"] = round(time.monotonic() - checker_start, 3)
         except Exception:  # noqa: BLE001
             row["checker_exit"] = None
             if row["error"] is None:

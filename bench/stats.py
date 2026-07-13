@@ -485,6 +485,7 @@ def _empty_acc(label):
         "n": 0,
         "score_values": [],
         "solved_wall_time_s": [],
+        "solved_t_agent_s": [],
         "solved_tokens_total": [],
         "solved_tokens_input": [],
         "solved_tokens_output": [],
@@ -500,6 +501,9 @@ def _add_row(acc, row, pricing):
         wall = row.get("wall_time_s")
         if is_nonnegative_number(wall):
             acc["solved_wall_time_s"].append(wall)
+        agent_time = row.get("t_agent_s")
+        if is_nonnegative_number(agent_time):
+            acc["solved_t_agent_s"].append(agent_time)
         tok_total = total_tokens(row)
         if is_number(tok_total):
             acc["solved_tokens_total"].append(tok_total)
@@ -532,6 +536,7 @@ def summarize_acc(acc, min_n, include_cost):
         "wilson95": [lo, hi],
         "mean_score": score,
         "median_wall_time_s_solved": median(acc["solved_wall_time_s"]),
+        "median_t_agent_s_solved": median(acc["solved_t_agent_s"]),
         "median_tokens_total_solved": median(acc["solved_tokens_total"]),
         "median_tokens_input_solved": median(acc["solved_tokens_input"]),
         "median_tokens_output_solved": median(acc["solved_tokens_output"]),
@@ -688,7 +693,7 @@ def fmt_cost(value):
 def render_table(rows, include_cost=False):
     headers = [
         "group", "solved", "n", "rate", "wilson95", "score",
-        "med_s/solve", "med_tok/solve", "med_in/solve", "med_out/solve",
+        "med_s/solve", "med_agent_s/solve", "med_tok/solve", "med_in/solve", "med_out/solve",
         "flags",
     ]
     if include_cost:
@@ -703,6 +708,7 @@ def render_table(rows, include_cost=False):
             f"[{row['wilson95'][0]:.3f}, {row['wilson95'][1]:.3f}]",
             fmt_num(row["mean_score"], 3),
             fmt_num(row["median_wall_time_s_solved"], 2),
+            fmt_num(row["median_t_agent_s_solved"], 2),
             fmt_tokens(row["median_tokens_total_solved"]),
             fmt_tokens(row["median_tokens_input_solved"]),
             fmt_tokens(row["median_tokens_output_solved"]),

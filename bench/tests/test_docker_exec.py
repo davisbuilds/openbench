@@ -497,6 +497,10 @@ class TestInvokeAdapterFallback(unittest.TestCase):
             )
             self.assertEqual(exec_used, "local")
             self.assertTrue(result["completed"])
+            self.assertIn("host_env_setup_s", result)
+            self.assertIn("host_agent_wall_time_s", result)
+            self.assertGreaterEqual(result["host_env_setup_s"], 0)
+            self.assertGreaterEqual(result["host_agent_wall_time_s"], 0)
             self.assertTrue(os.path.exists(os.path.join(workdir, "done.txt")))
         finally:
             docker_exec.run_in_container = orig
@@ -511,14 +515,30 @@ class TestInvokeAdapterFallback(unittest.TestCase):
 
         docker_exec.run_in_container = boom
         try:
-            with self.assertRaises(docker_exec.DockerUnavailable):
+            with self.assertRaises(docker_exec.DockerUnavailable) as cm:
                 run.invoke_adapter(
                     "docker", "fake_adapter", "x", tempfile.mkdtemp(),
                     "gpt-5.5-medium", 30, FIXTURES_DIR,
                     "img:latest", docker_fallback=False,
                 )
+            self.assertEqual(getattr(cm.exception, "bench_exec_used"), "docker")
+            self.assertGreaterEqual(getattr(cm.exception, "bench_env_setup_s"), 0)
+            self.assertEqual(getattr(cm.exception, "bench_agent_wall_time_s"), 0.0)
         finally:
             docker_exec.run_in_container = orig
+
+    def test_docker_setup_exception_is_timed_as_setup_not_agent(self):
+        orig = docker_exec.preflight
+        docker_exec.preflight = lambda image: (_ for _ in ()).throw(RuntimeError("preflight broke"))
+        try:
+            with self.assertRaises(RuntimeError) as cm:
+                docker_exec.run_in_container(
+                    "pi", "do it", "/tmp/wd", "deepseek-v4-flash", 30,
+                    "/repo/bench/adapters")
+        finally:
+            docker_exec.preflight = orig
+        self.assertGreaterEqual(getattr(cm.exception, "bench_env_setup_s"), 0)
+        self.assertEqual(getattr(cm.exception, "bench_agent_wall_time_s"), 0.0)
 
 
 class TestEntryRoundTrip(unittest.TestCase):
