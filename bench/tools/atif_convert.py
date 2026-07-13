@@ -27,12 +27,21 @@ RUN_RE = re.compile(r"^# transcript (?P<harness>[^:]+):(?P<task>.+):(?P<model>[^
 def _num(value: Any, default: int | None = None) -> int | None:
     if isinstance(value, bool) or value is None:
         return default
-    if isinstance(value, (int, float)):
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError(f"token count must be integral, got {value!r}")
         return int(value)
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return default
+        try:
+            return int(stripped)
+        except ValueError as exc:
+            raise ValueError(f"token count must be integral, got {value!r}") from exc
+    return default
 
 
 def _read_transcript(path: Path) -> tuple[dict[str, Any], list[Any]]:

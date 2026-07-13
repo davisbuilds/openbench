@@ -148,6 +148,14 @@ class ATIFTests(unittest.TestCase):
         self.assertTrue(any("observation" in e and "unknown" in e for e in errors), errors)
         self.assertTrue(any("results[0]" in e and "unknown" in e for e in errors), errors)
 
+    def test_validator_rejects_invalid_timestamp(self):
+        errors = validate_trajectory({
+            "schema_version": "ATIF-v1.7",
+            "agent": {"name": "x", "version": "1"},
+            "steps": [{"step_id": 1, "source": "agent", "message": "hi", "timestamp": "yesterday"}],
+        })
+        self.assertTrue(any("timestamp" in e for e in errors), errors)
+
     def test_malformed_transcript_json_is_rejected(self):
         path = self._write("codex_terminal-bench_task_model_trial1.txt", "\n".join([
             "# transcript codex:terminal-bench/task:model:trial1",
@@ -177,6 +185,18 @@ class ATIFTests(unittest.TestCase):
         self.assertEqual(traj["final_metrics"]["total_prompt_tokens"], 15)
         self.assertEqual(traj["final_metrics"]["total_cached_tokens"], 4)
         self.assertEqual(traj["final_metrics"]["total_completion_tokens"], 3)
+
+    def test_fractional_token_counts_are_rejected(self):
+        path = self._write("codex_terminal-bench_task_model_trial1.txt", "\n".join([
+            "# transcript codex:terminal-bench/task:model:trial1",
+            "# harness=codex model=model task=terminal-bench/task trial=1 ts=2026-01-01T00:00:00",
+            "# LOCAL-ONLY -- unscrubbed. Review with bench/scrub.py --check before sharing.",
+            "",
+            json.dumps({"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": "hello"}}),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1.9, "cached_input_tokens": 0, "output_tokens": 1, "reasoning_output_tokens": 0}}),
+        ]))
+        with self.assertRaises(ValueError):
+            convert_file(path)
 
     def test_codex_cumulative_multi_turn_usage_uses_deltas(self):
         path = self._write("codex_terminal-bench_task_model_trial1.txt", "\n".join([
