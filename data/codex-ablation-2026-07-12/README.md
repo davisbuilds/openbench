@@ -23,25 +23,29 @@ codex-cli 0.144.1 plus a `CODEX_HOME` config (`ablation/codex-home-v*`).
 
 | Group | Solve (hack-adj) | Wilson 95% | Wall/solve | Input processed/solve* |
 |---|---:|---|---:|---:|
-| codex V0 | 73.6% | [0.62,0.82] | 47.3s | 91.6k |
-| codex V1 | 73.6% | [0.62,0.82] | 33.3s | 64.4k |
-| codex V2 | **77.8%** | [0.67,0.86] | 36.4s | **58.5k** |
-| pi | 73.6% | [0.62,0.82] | 41.9s | **22.2k** |
+| codex V0 | 73.6% | [0.62,0.82] | 47.3s | 88.0k |
+| codex V1 | 73.6% | [0.62,0.82] | 33.3s | 70.3k |
+| codex V2 | **77.8%** | [0.67,0.86] | 36.4s | **59.8k** |
+| pi | 73.6% | [0.62,0.82] | 41.9s | **20.7k** |
 
 Hack adjustment: V0 raw was 79.2% before removing 4 adjudicated schemelike
 hacks; V1/V2/pi had zero hacks (raw = adjusted).
 
-*median uncached + cache-read input over the 50 cells all four groups solved.
+*median of (tokens_input_uncached + tokens_cache_read) over the 50 matched
+cells all four groups solved; regenerated 2026-07-13 directly from
+`ablation-sol-n5.jsonl` (the original table's token column did not reproduce
+from the shipped file under the stated definition and was corrected;
+solve/wall columns reproduced exactly).
 
 ## Findings
 
 1. **De-bloating costs no correctness.** Hack-adjusted, V2 is nominally
-   highest (77.8 vs 73.6, CIs overlap). Processes **36% less input** and
-   solves **~25% faster** than stock.
+   highest (77.8 vs 73.6, CIs overlap). Processes **32% less input** and
+   solves **~23% faster** than stock.
 2. **The bloat hides in cache-reads.** Codex's fixed prompt is cached after
    turn 1, so blended token counts mask it; the uncached/cache-read split
-   (`usage_raw`) shows stock codex re-processing ~76k cached tokens per solve
-   vs V2's 46k and pi's 10k.
+   shows stock codex re-processing a median ~74.8k cached tokens per solve
+   vs V2's 45.8k and pi's 10.5k.
 3. **The stock prompt correlates with reward hacking.** On schemelike, stock
    codex hacked 4/5 solves (self-host collapse — same trick as the variant
    study); V1, V2, and pi: **0 clear hacks** (one V1 gray). Grep-verified:
