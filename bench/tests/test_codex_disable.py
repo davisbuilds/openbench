@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests that codex disables server-driven feature tools on every command path."""
+"""Tests that Codex disables variance tools and isolates personal config."""
 
 import importlib.util
 import json
@@ -35,14 +35,14 @@ class EnvPatch:
         os.environ.update(self.saved)
 
 
-def assert_feature_tools_disabled(testcase, cmd):
+def assert_isolated_with_feature_disables(testcase, cmd, kwargs):
     disabled = [cmd[i + 1] for i, arg in enumerate(cmd[:-1]) if arg == "--disable"]
-    testcase.assertIn("apps", disabled)
-    testcase.assertIn("plugins", disabled)
-    testcase.assertIn("multi_agent", disabled)
+    testcase.assertEqual(disabled, ["apps", "plugins", "multi_agent"])
+    testcase.assertNotEqual(kwargs["env"]["CODEX_HOME"],
+                            os.path.expanduser("~/.codex"))
 
 
-class TestCodexFeatureToolDisable(unittest.TestCase):
+class TestCodexConfigIsolation(unittest.TestCase):
     def setUp(self):
         self.codex = load_codex()
 
@@ -63,17 +63,16 @@ class TestCodexFeatureToolDisable(unittest.TestCase):
         self.codex.subprocess.run = fake_run
         return old_run, calls
 
-    def test_first_party_command_disables_feature_tools(self):
+    def test_first_party_command_uses_isolated_factory_config(self):
         old_run, calls = self._capture_run()
         try:
             res = self.codex.run("hi", "/tmp", "gpt-5.5-medium", 5)
         finally:
             self.codex.subprocess.run = old_run
-
         self.assertTrue(res["completed"])
-        assert_feature_tools_disabled(self, calls[0][0])
+        assert_isolated_with_feature_disables(self, calls[0][0], calls[0][1])
 
-    def test_open_model_command_disables_feature_tools(self):
+    def test_open_model_command_uses_isolated_factory_config(self):
         old_run, calls = self._capture_run()
         old_reach = self.codex._bridge_reachable
         self.codex._bridge_reachable = lambda: True
@@ -84,9 +83,8 @@ class TestCodexFeatureToolDisable(unittest.TestCase):
             finally:
                 self.codex.subprocess.run = old_run
                 self.codex._bridge_reachable = old_reach
-
         self.assertTrue(res["completed"])
-        assert_feature_tools_disabled(self, calls[0][0])
+        assert_isolated_with_feature_disables(self, calls[0][0], calls[0][1])
 
 
 if __name__ == "__main__":

@@ -194,9 +194,9 @@ class TestBuildDockerCmd(unittest.TestCase):
             finally:
                 os.path.expanduser = orig
             self.assertTrue(
-                any(a.endswith(".opencode/data:/bench/auth/.opencode/data:ro")
+                any(a.endswith(".opencode/data/auth.json:/bench/auth/.opencode/data/auth.json:ro")
                     for a in args),
-                f"expected opencode data auth mount, got {args}")
+                f"expected opencode auth-only mount, got {args}")
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)
@@ -218,13 +218,11 @@ class TestBuildDockerCmd(unittest.TestCase):
             finally:
                 os.path.expanduser = orig
             self.assertTrue(
-                any(a.endswith(".openbench/cursor-container-auth/.config/cursor:/bench/auth/.config/cursor:ro")
+                any(a.endswith(".openbench/cursor-container-auth/.config/cursor/auth.json:/bench/auth/.config/cursor/auth.json:ro")
                     for a in args),
-                f"expected Linux cursor auth mount, got {args}")
-            self.assertTrue(
-                any(a.endswith(".openbench/cursor-container-auth/.cursor:/bench/auth/.cursor:ro")
-                    for a in args),
-                f"expected Linux cursor CLI config mount, got {args}")
+                f"expected Linux cursor auth-only mount, got {args}")
+            self.assertFalse(any("/.cursor:" in a for a in args),
+                             f"personal Cursor CLI config must not be mounted: {args}")
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)

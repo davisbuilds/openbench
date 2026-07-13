@@ -2,7 +2,7 @@
 
 Headless invocation:
     HOME=<isolated tmp with only .pi/agent/auth.json>
-    pi -p --no-extensions --provider openai-codex --model gpt-5.5 \
+    pi -p --provider openai-codex --model gpt-5.5 \
        --thinking medium <instruction>
 
 Notes / quirks:
@@ -10,8 +10,7 @@ Notes / quirks:
   (pi-goal) crashes `-p` non-interactive mode. To avoid this WITHOUT touching
   the user's config, we run pi under an ISOLATED HOME: a fresh temp dir that
   contains ONLY `.pi/agent/auth.json` copied from the real one. No settings.json
-  means no extensions are registered. `--no-extensions` is added as a belt-and-
-  suspenders guard against any project-local extension discovery in workdir.
+  means no personal extensions are registered; built-in factory behavior remains.
 - Subscription route: provider `openai-codex` exposes `gpt-5.5`
   (verified via `pi --list-models`). The API-key `openai` provider also has
   gpt-5.5 but we prefer the subscription credential.
@@ -314,6 +313,11 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     try:
         env = dict(os.environ)
         env["HOME"] = iso_home
+        # PI_CODING_AGENT_DIR overrides HOME; always replace an inherited owner
+        # value so settings/resources/auth cannot escape the isolated tree.
+        env["PI_CODING_AGENT_DIR"] = os.path.join(iso_home, ".pi", "agent")
+        env.pop("PI_CODING_AGENT_SESSION_DIR", None)
+        env.pop("PI_PACKAGE_DIR", None)
 
         if model in MODELS:
             # Subscription route: isolate HOME with only the copied auth.json.
@@ -323,7 +327,10 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             shutil.copy2(_REAL_AUTH, os.path.join(agent_dir, "auth.json"))
             cmd = [
                 "pi", "-p",
-                "--no-extensions",
+                # Benchmark workspaces are data, not executable configuration.
+                # This preserves Pi's built-in factory tools while preventing a
+                # task's .pi extensions/packages from running in the harness.
+                "--no-approve",
                 "--provider", spec["provider"],
                 "--model", spec["model_id"],
                 "--thinking", spec["thinking"],
@@ -339,7 +346,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 fh.write(_pi_provider_ext(spec))
             cmd = [
                 "pi", "-p",
-                "--no-extensions",
+                "--no-approve",
                 "-e", ext_path,
                 "--provider", spec["provider"],
                 "--model", spec["model_id"],
