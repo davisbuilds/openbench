@@ -8,6 +8,7 @@ sharing them outside the local machine.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, is_dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 import json
@@ -193,6 +194,15 @@ def validate_trajectory(trajectory: dict[str, Any] | str | Path) -> list[str]:
         source = step.get("source")
         if source not in SOURCES:
             errors.append(f"{loc}.source: expected one of {sorted(SOURCES)}, got {source!r}")
+        timestamp = step.get("timestamp")
+        if timestamp is not None:
+            if not isinstance(timestamp, str):
+                errors.append(f"{loc}.timestamp: must be an ISO 8601 string")
+            else:
+                try:
+                    datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                except ValueError:
+                    errors.append(f"{loc}.timestamp: must be a valid ISO 8601 datetime")
         if "message" not in step:
             errors.append(f"{loc}.message: required field is missing")
         elif not isinstance(step.get("message"), (str, list)):
@@ -251,8 +261,11 @@ def validate_trajectory(trajectory: dict[str, Any] | str | Path) -> list[str]:
                     if unknown:
                         errors.append(f"{rloc}: unknown field(s): {sorted(unknown)}")
                     source_call_id = result.get("source_call_id")
-                    if source_call_id is not None and source_call_id not in call_ids:
-                        errors.append(f"{rloc}.source_call_id: unknown tool_call_id {source_call_id!r}")
+                    if source_call_id is not None:
+                        if not isinstance(source_call_id, str) or not source_call_id:
+                            errors.append(f"{rloc}.source_call_id: must be a non-empty string or null")
+                        elif source_call_id not in call_ids:
+                            errors.append(f"{rloc}.source_call_id: unknown tool_call_id {source_call_id!r}")
                     _validate_content_parts(result.get("content"), f"{rloc}.content", errors)
                     extra = result.get("extra")
                     if extra is not None and not isinstance(extra, dict):
