@@ -168,6 +168,8 @@ def _clean_env(spec, key, iso_home):
     # codex's BENCH_IN_CONTAINER handling), so opt in with IS_SANDBOX=1.
     if os.environ.get("BENCH_IN_CONTAINER"):
         env["IS_SANDBOX"] = "1"
+    # Dataset provenance pins the CLI version; never permit a mid-run update.
+    env["DISABLE_AUTOUPDATER"] = "1"
     return env
 
 
@@ -351,6 +353,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         env = _clean_env(spec, key, iso_home)
         cmd = [
             _resolve_exe(), "-p",
+            # Billing boundary: every supported lane is API-key routed. Bare
+            # mode prevents OAuth/keychain reads and Anthropic-billed side calls.
+            "--bare",
             "--output-format", "json",
             "--model", spec["model_id"],
             "--effort", spec["effort"],

@@ -232,8 +232,9 @@ class TestClaudeOpus(unittest.TestCase):
                 self.claude._resolve_exe = old_resolve
         self.assertTrue(res["completed"])
         cmd, kwargs = calls[0]
-        self.assertNotIn("--bare", cmd)
+        self.assertIn("--bare", cmd)
         self.assertNotEqual(kwargs["env"]["HOME"], os.path.expanduser("~"))
+        self.assertEqual(kwargs["env"]["DISABLE_AUTOUPDATER"], "1")
         self.assertEqual(cmd[cmd.index("--model") + 1], "claude-opus-4-8")
         self.assertEqual(cmd[cmd.index("--effort") + 1], "medium")
         self.assertEqual(kwargs["env"]["ANTHROPIC_API_KEY"], "test-key")
