@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Terminal-Bench-2 'polyglot-c-py' checker shim for OpenBench.
-# Runs upstream tests/test.sh inside the pinned TB-2 Docker image and reads
+# Runs upstream tests/test.sh inside a local derived TB-2 Docker image and reads
 # /logs/verifier/reward.txt from a host-mounted verifier log directory.
 set -euo pipefail
 
 TASK_DIR="${TASK_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 WORKDIR="/app"
-IMAGE="alexgshaw/polyglot-c-py@sha256:0f1c3b7816d70cf5551573fd6aeef76893f2ae3000be2419997b6871b5d987ed"
+IMAGE="openbench-tb2-polyglot-c-py:pinned"
 PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
 LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tb2-polyglot-c-py-logs.XXXXXX")"
 CIDFILE="$(mktemp "${TMPDIR:-/tmp}/tb2-polyglot-c-py-cid.XXXXXX")"
@@ -23,7 +23,7 @@ mkdir -p "$LOG_DIR"
 # Mount the staged OpenBench workspace at the original TB-2 task workdir.
 # Mount checker-owned upstream tests read-only at /tests and verifier logs at /logs/verifier.
 set +e
-docker run --rm   --platform "$PLATFORM"   --cidfile "$CIDFILE"   -v "$PWD:$WORKDIR"   -v "$TASK_DIR/checker_data/tests:/tests:ro"   -v "$LOG_DIR:/logs/verifier"   -w "$WORKDIR"   "$IMAGE"   bash /tests/test.sh
+docker run --rm   --network none   --platform "$PLATFORM"   --cidfile "$CIDFILE"   -v "$PWD:$WORKDIR"   -v "$TASK_DIR/checker_data/tests:/tests:ro"   -v "$LOG_DIR:/logs/verifier"   -w "$WORKDIR"   "$IMAGE"   bash /tests/test.sh
 container_status=$?
 set -e
 
