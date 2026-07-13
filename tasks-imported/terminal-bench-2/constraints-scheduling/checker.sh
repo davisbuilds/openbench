@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Terminal-Bench-2 'constraints-scheduling' checker shim for OpenBench.
-# Runs upstream tests/test.sh inside the pinned TB-2 Docker image and reads
+# Runs upstream tests/test.sh inside a local derived TB-2 Docker image and reads
 # /logs/verifier/reward.txt from a host-mounted verifier log directory.
 set -euo pipefail
 
 TASK_DIR="${TASK_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 WORKDIR="/app"
-IMAGE="alexgshaw/constraints-scheduling@sha256:567ce5a189f8d11ac461790876e934cc7af38391baf89a78f95f4dafc1fec3b0"
+IMAGE="openbench-tb2-constraints-scheduling:pinned"
 PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
 LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tb2-constraints-scheduling-logs.XXXXXX")"
 CIDFILE="$(mktemp "${TMPDIR:-/tmp}/tb2-constraints-scheduling-cid.XXXXXX")"
@@ -23,7 +23,7 @@ mkdir -p "$LOG_DIR"
 # Mount the staged OpenBench workspace at the original TB-2 task workdir.
 # Mount checker-owned upstream tests read-only at /tests and verifier logs at /logs/verifier.
 set +e
-docker run --rm   --platform "$PLATFORM"   --cidfile "$CIDFILE"   -v "$PWD:$WORKDIR"   -v "$TASK_DIR/checker_data/tests:/tests:ro"   -v "$TASK_DIR/checker_data/inputs:/inputs:ro"   -v "$LOG_DIR:/logs/verifier"   -w "$WORKDIR"   "$IMAGE"   bash /tests/test.sh
+docker run --rm   --network none   --platform "$PLATFORM"   --cidfile "$CIDFILE"   -v "$PWD:$WORKDIR"   -v "$TASK_DIR/checker_data/tests:/tests:ro"   -v "$TASK_DIR/checker_data/inputs:/inputs:ro"   -v "$LOG_DIR:/logs/verifier"   -w "$WORKDIR"   "$IMAGE"   bash /tests/test.sh
 container_status=$?
 set -e
 
