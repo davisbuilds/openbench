@@ -21,31 +21,34 @@ codex-cli 0.144.1 plus a `CODEX_HOME` config (`ablation/codex-home-v*`).
 
 ## Results (matched cells, n=72/group)
 
-| Group | Solve (hack-adj) | Wilson 95% | Wall/solve | Input processed/solve* |
-|---|---:|---|---:|---:|
-| codex V0 | 73.6% | [0.62,0.82] | 47.3s | 88.0k |
-| codex V1 | 73.6% | [0.62,0.82] | 33.3s | 70.3k |
-| codex V2 | **77.8%** | [0.67,0.86] | 36.4s | **59.8k** |
-| pi | 73.6% | [0.62,0.82] | 41.9s | **20.7k** |
+| Group | Solve (hack-adj) | Wilson 95% | Wall/solve | Uncached in* | Cache read* | Output* |
+|---|---:|---|---:|---:|---:|---:|
+| codex V0 | 73.6% | [0.62,0.82] | 47.3s | 15.0k | 74.8k | 1.1k |
+| codex V1 | 73.6% | [0.62,0.82] | 33.3s | 14.2k | 50.2k | 0.9k |
+| codex V2 | **77.8%** | [0.67,0.86] | 36.4s | 12.7k | **45.8k** | 0.8k |
+| pi | 73.6% | [0.62,0.82] | 41.9s | 11.7k | **10.5k** | 0.8k |
+
+Cache write is 0 across all rows (OpenAI usage objects do not report it);
+output is reasoning-inclusive (median reasoning ~0.1k in every group).
 
 Hack adjustment: V0 raw was 79.2% before removing 4 adjudicated schemelike
 hacks; V1/V2/pi had zero hacks (raw = adjusted).
 
-*median of (tokens_input_uncached + tokens_cache_read) over the 50 matched
-cells all four groups solved; regenerated 2026-07-13 directly from
-`ablation-sol-n5.jsonl` (the original table's token column did not reproduce
-from the shipped file under the stated definition and was corrected;
-solve/wall columns reproduced exactly).
+*per-column medians over the 50 matched cells all four groups solved;
+regenerated 2026-07-13 directly from `ablation-sol-n5.jsonl` (the original
+table's token column did not reproduce from the shipped file under the stated
+definition and was corrected; solve/wall columns reproduced exactly).
 
 ## Findings
 
 1. **De-bloating costs no correctness.** Hack-adjusted, V2 is nominally
-   highest (77.8 vs 73.6, CIs overlap). Processes **32% less input** and
-   solves **~23% faster** than stock.
-2. **The bloat hides in cache-reads.** Codex's fixed prompt is cached after
-   turn 1, so blended token counts mask it; the uncached/cache-read split
-   shows stock codex re-processing a median ~74.8k cached tokens per solve
-   vs V2's 45.8k and pi's 10.5k.
+   highest (77.8 vs 73.6, CIs overlap). Processes **32% less total input**
+   (unc+cache 59.8k vs 88.0k) and solves **~23% faster** than stock.
+2. **The bloat lives almost entirely in cache-reads.** Output (~1k) and
+   uncached input (12.7-15.0k) barely differ across arms; the arms separate
+   on cached prefix re-read per solve: 74.8k stock vs 45.8k V2 vs 10.5k pi.
+   The cost of harness bloat is therefore cache-priced tokens + latency, not
+   full-priced input.
 3. **The stock prompt correlates with reward hacking.** On schemelike, stock
    codex hacked 4/5 solves (self-host collapse — same trick as the variant
    study); V1, V2, and pi: **0 clear hacks** (one V1 gray). Grep-verified:
