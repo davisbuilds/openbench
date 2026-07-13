@@ -327,6 +327,10 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             shutil.copy2(_REAL_AUTH, os.path.join(agent_dir, "auth.json"))
             cmd = [
                 "pi", "-p",
+                # Benchmark workspaces are data, not executable configuration.
+                # This preserves Pi's built-in factory tools while preventing a
+                # task's .pi extensions/packages from running in the harness.
+                "--no-approve",
                 "--provider", spec["provider"],
                 "--model", spec["model_id"],
                 "--thinking", spec["thinking"],
@@ -342,6 +346,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 fh.write(_pi_provider_ext(spec))
             cmd = [
                 "pi", "-p",
+                "--no-approve",
                 "-e", ext_path,
                 "--provider", spec["provider"],
                 "--model", spec["model_id"],
