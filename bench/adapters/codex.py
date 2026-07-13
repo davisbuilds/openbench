@@ -155,6 +155,15 @@ _BRIDGE_DEFAULT_PORT = 4141
 _KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")
 
 
+def _proxy_cell_url(*parts):
+    base = os.environ.get("OPENBENCH_PROXY_BASE_URL")
+    token = os.environ.get("OPENBENCH_PROXY_CELL_TOKEN")
+    if not os.environ.get("OPENBENCH_PROXY") or not base or not token:
+        return None
+    path = "/".join(str(p).strip("/") for p in ("cell", token, *parts) if str(p).strip("/"))
+    return base.rstrip("/") + "/" + path
+
+
 def _bridge_host():
     """Hostname the bridge is reachable at from the current lane.
 
@@ -378,6 +387,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
         ]
         if model in _SERVICE_TIER:
             cmd += ["-c", f'service_tier="{_SERVICE_TIER[model]}"']
+        proxy_url = _proxy_cell_url("codex", "backend-api", "codex")
+        if proxy_url:
+            cmd += ["-c", f'openai_base_url="{proxy_url}"']
         cmd += [instruction]
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
