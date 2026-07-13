@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the stdlib counting proxy and proxy ledger row mapping."""
 
+import gzip
 import http.client
 import json
 import os
@@ -17,7 +18,7 @@ sys.path.insert(0, BENCH_DIR)
 import proxy  # noqa: E402
 import run  # noqa: E402
 
-SECRET = "sk-test-secret-must-not-appear"
+SECRET = "TEST_SECRET_VALUE_MUST_NOT_APPEAR"
 
 
 class FixtureUpstream(ThreadingHTTPServer):
@@ -132,6 +133,26 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(row["sampling_observed"]["model"], "deepseek-v4-flash")
         self.assertNotIn("api_key", row["sampling_observed"])
 
+    def test_nested_and_compressed_sampling_observation(self):
+        body = gzip.compress(json.dumps({
+            "request": {"model_slug": "nested-model", "reasoning": {"effort": "medium"}},
+            "stream": True,
+        }).encode())
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=5)
+        conn.request("POST", "/cell/tok-gzip/chat/deepseek/chat/completions", body=body, headers={
+            "content-type": "application/json",
+            "content-encoding": "gzip",
+            "content-length": str(len(body)),
+        })
+        resp = conn.getresponse()
+        payload = resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 200, payload)
+        row = self._ledger("tok-gzip")[0]
+        self.assertEqual(row["sampling_observed"]["model"], "nested-model")
+        self.assertEqual(row["sampling_observed"]["reasoning"], {"effort": "medium"})
+        self.assertIs(row["sampling_observed"]["stream"], True)
+
     def test_sse_usage_parsing(self):
         self._post("/cell/tok-sse/anthropic/deepseek/sse")
         row = self._ledger("tok-sse")[0]
@@ -139,7 +160,8 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(row["usage"]["output_tokens_details"]["reasoning_tokens"], 1)
 
     def test_anthropic_json_usage_parsing(self):
-        self._post("/cell/tok-anthropic/anthropic/deepseek/anthropic/v1/messages")
+        path = "/cell/tok-anthropic/" + "anthropic/deepseek/" + "anthropic/v1/messages"
+        self._post(path)
         row = self._ledger("tok-anthropic")[0]
         self.assertEqual(self.upstream.requests[-1]["path"], "/anthropic/v1/messages")
         self.assertEqual(row["usage"]["input_tokens"], 11)

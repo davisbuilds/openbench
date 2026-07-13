@@ -177,18 +177,37 @@ def parse_sse_usage(body: bytes) -> Any:
     return found
 
 
-def observed_sampling(body: bytes, content_type: str = "") -> dict[str, Any]:
+def _collect_sampling(obj: Any, out: dict[str, Any], depth: int = 0) -> None:
+    """Collect request sampling hints without recording prompts/tool payloads."""
+    if depth > 8:
+        return
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in SAMPLING_KEYS and key not in out:
+                out[key] = value
+            elif key in {"model_slug", "modelSlug"} and "model" not in out:
+                out["model"] = value
+        for value in obj.values():
+            _collect_sampling(value, out, depth + 1)
+    elif isinstance(obj, list):
+        for value in obj:
+            _collect_sampling(value, out, depth + 1)
+
+
+def observed_sampling(body: bytes, content_type: str = "", content_encoding: str = "") -> dict[str, Any]:
     if not body:
         return {}
-    if content_type and "json" not in content_type.lower():
+    parse_body = decode_for_parsing(body, content_encoding)
+    stripped = parse_body.lstrip()
+    if content_type and "json" not in content_type.lower() and not stripped.startswith((b"{", b"[")):
         return {}
     try:
-        obj = json.loads(body.decode("utf-8", "replace"))
+        obj = json.loads(parse_body.decode("utf-8", "replace"))
     except json.JSONDecodeError:
         return {}
-    if not isinstance(obj, dict):
-        return {}
-    return scrub({key: obj[key] for key in SAMPLING_KEYS if key in obj})
+    sampling: dict[str, Any] = {}
+    _collect_sampling(obj, sampling)
+    return scrub(sampling)
 
 
 def _urlsplit_map(values: dict[str, str]) -> dict[str, Any]:
@@ -237,7 +256,11 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         try:
             route = self._route_request()
             body = self._read_body()
-            sampling = observed_sampling(body, self.headers.get("content-type", ""))
+            sampling = observed_sampling(
+                body,
+                self.headers.get("content-type", ""),
+                self.headers.get("content-encoding", ""),
+            )
             headers = self._forward_headers()
             conn_cls = http.client.HTTPSConnection if route.upstream.scheme == "https" else http.client.HTTPConnection
             if not route.upstream.hostname:
@@ -294,14 +317,18 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 self.close_connection = True
         finally:
             token = route.token if route is not None else self._token_from_header_or_path()
+            meta = self._read_metadata(token)
+            configured_sampling = meta.get("sampling") if isinstance(meta.get("sampling"), dict) else {}
+            recorded_sampling = sampling or configured_sampling
             rec = {
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "method": self.command,
                 "path": self._scrub_cell_path(self.path),
                 "status": status,
                 "usage": scrub(usage),
-                "model": sampling.get("model"),
-                "sampling_observed": sampling,
+                "model": sampling.get("model") or configured_sampling.get("model"),
+                "sampling_observed": recorded_sampling,
+                "sampling_source": "http_request" if sampling else (meta.get("source") if recorded_sampling else None),
                 "duration_ms": round((time.time() - started) * 1000),
             }
             if route is not None:
@@ -366,6 +393,16 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             return token
         match = TOKEN_RE.search(self.path)
         return match.group(1) if match else "unknown"
+
+    def _read_metadata(self, token: str) -> dict[str, Any]:
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", token or "unknown")
+        path = Path(self.server.ledger_dir) / f"{safe}.meta.json"  # type: ignore[attr-defined]
+        try:
+            with path.open(encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
 
     @staticmethod
     def _scrub_cell_path(path: str) -> str:

@@ -486,6 +486,46 @@ def proxy_supported_for_cell(harness, model):
     return False
 
 
+def _proxy_sampling_for_cell(harness, model):
+    """Non-secret sampling metadata requested by the adapter, for ledger context."""
+    subscription_models = {
+        "gpt-5.5-medium": "gpt-5.5",
+        "gpt-5.6-sol": "gpt-5.6-sol",
+        "gpt-5.6-terra": "gpt-5.6-terra",
+        "gpt-5.6-luna": "gpt-5.6-luna",
+    }
+    if harness == "codex" and model in subscription_models:
+        return {"model": subscription_models[model], "reasoning_effort": "medium"}
+    if harness == "pi" and model in subscription_models:
+        return {"provider": "openai-codex", "model": subscription_models[model], "thinking": "medium"}
+    if harness == "opencode" and model in PROXY_CHAT_MODELS:
+        return {"model": model, "variant": "medium"}
+    if harness == "claude" and model in PROXY_CLAUDE_MODELS:
+        return {"model": model, "effort": "medium"}
+    return {}
+
+
+def _write_proxy_cell_metadata(proxy_ctx, cell_token, harness, model):
+    if not proxy_ctx or not cell_token:
+        return
+    ledger_dir = proxy_ctx.get("ledger_dir")
+    if not ledger_dir:
+        return
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", cell_token)
+    meta = {
+        "source": "runner_configured",
+        "harness": harness,
+        "model": model,
+        "sampling": _proxy_sampling_for_cell(harness, model),
+    }
+    try:
+        os.makedirs(str(ledger_dir), exist_ok=True)
+        with open(os.path.join(str(ledger_dir), safe + ".meta.json"), "w", encoding="utf-8") as fh:
+            json.dump(meta, fh, sort_keys=True)
+    except OSError:
+        pass
+
+
 def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                    adapters_dir, docker_image, docker_fallback,
                    proxy_ctx=None, cell_token=None):
@@ -980,7 +1020,7 @@ def proxy_split_from_usage(usage):
     if not isinstance(usage, dict):
         return out
 
-    # pi-normalized shape: input/cacheRead/cacheWrite/output/reasoning.
+    # pi-normalized shape: input, cacheRead, cacheWrite, output, reasoning.
     if {"input", "output"} & set(usage) and "totalTokens" in usage:
         inp = _num(usage.get("input"))
         out_tok = _num(usage.get("output"))
@@ -1163,6 +1203,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     if active_proxy_ctx:
         import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
         cell_token = counting_proxy.new_cell_token()
+        _write_proxy_cell_metadata(active_proxy_ctx, cell_token, harness, model)
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
     # correctly regardless of the caller's cwd or a relative --tasks-dir.
     task_dir = os.path.abspath(os.path.join(tasks_dir, task))
