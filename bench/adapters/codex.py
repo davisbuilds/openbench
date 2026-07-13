@@ -1,7 +1,7 @@
 """Adapter for the `codex` CLI (OpenAI Codex, ChatGPT-subscription login).
 
 Headless invocation:
-    codex exec --json --disable apps --disable plugins --disable multi_agent \
+    CODEX_HOME=<isolated tmp with auth.json only> codex exec --json \
         --skip-git-repo-check -C <workdir> -s workspace-write \
         -m gpt-5.5 -c model_reasoning_effort="medium" <instruction>
 
@@ -16,7 +16,8 @@ Notes / quirks:
   so `--skip-git-repo-check` is required or codex refuses to start.
 - Reasoning effort is set via a config override, not the model string. The
   canonical "-medium" suffix is mapped to model_reasoning_effort.
-- Uses the user's existing `~/.codex` login as-is (read-only).
+- Copies only runtime `auth.json` into a fresh `CODEX_HOME`; personal config,
+  instructions, skills, plugins, MCPs, rules, memories, and sessions are absent.
 - `--json` emits a JSONL event stream. The final `turn.completed` event carries
   `usage={input_tokens,cached_input_tokens,output_tokens,reasoning_output_tokens}`.
   Token accounting emits TOKEN_PARITY.md split fields from the final aggregate:
@@ -49,14 +50,10 @@ import shlex
 import shutil
 import socket
 import subprocess
+import tempfile
 
 NAME = "codex"
 _EXE = "codex"
-_FEATURE_DISABLE_FLAGS = [
-    "--disable", "apps",
-    "--disable", "plugins",
-    "--disable", "multi_agent",
-]
 
 
 def _empty_token_usage():
@@ -367,7 +364,6 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
     base = [
         "codex", "exec",
         "--json",
-    ] + _FEATURE_DISABLE_FLAGS + [
         "--skip-git-repo-check",
         "-C", workdir,
     ] + sandbox
@@ -403,34 +399,49 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
     else:
         return _unsupported(model)
 
-    child_env = _codex_env_for_bridge(spec["env_key"]) if model in OPEN_MODELS else None
+    child_env = _codex_env_for_bridge(spec["env_key"]) if model in OPEN_MODELS else os.environ.copy()
     if env_override:
-        if child_env is None:
-            child_env = os.environ.copy()
         child_env.update(env_override)
 
+    # Stock runs get a fresh CODEX_HOME containing authentication only.  In
+    # particular, never copy config.toml, AGENTS.md, skills, MCP definitions,
+    # rules, memories, sessions, or plugins from the machine owner. Ablation
+    # adapters supply their own already-composed CODEX_HOME via env_override.
+    isolated_home = None
+    if not (env_override and "CODEX_HOME" in env_override):
+        isolated_home = tempfile.mkdtemp(prefix="codex_home_")
+        auth_root = os.path.expanduser(os.environ.get("CODEX_HOME") or "~/.codex")
+        auth_src = os.path.join(auth_root, "auth.json")
+        if os.path.isfile(auth_src):
+            shutil.copy2(auth_src, os.path.join(isolated_home, "auth.json"))
+        child_env["CODEX_HOME"] = isolated_home
+
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=workdir,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            stdin=subprocess.DEVNULL,
-            env=child_env,
-        )
-    except subprocess.TimeoutExpired as e:
-        full_output = _err_tail(e, limit=None)
-        return {
-            "completed": False,
-            "error": f"timeout after {timeout_s}s",
-            "output_tail": full_output[-2000:],
-            "full_output": full_output,
-            "tokens": None,
-            "turns": None,
-            "cmd": cmd,
-            **_empty_token_usage(),
-        }
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                stdin=subprocess.DEVNULL,
+                env=child_env,
+            )
+        except subprocess.TimeoutExpired as e:
+            full_output = _err_tail(e, limit=None)
+            return {
+                "completed": False,
+                "error": f"timeout after {timeout_s}s",
+                "output_tail": full_output[-2000:],
+                "full_output": full_output,
+                "tokens": None,
+                "turns": None,
+                "cmd": cmd,
+                **_empty_token_usage(),
+            }
+    finally:
+        if isolated_home:
+            shutil.rmtree(isolated_home, ignore_errors=True)
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     try:

@@ -36,6 +36,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 
 NAME = "cursor"
 _EXE = "cursor-agent"
@@ -70,7 +71,13 @@ MODELS = {
 # Linux cursor-agent stores subscription auth in FILES, not a keychain. The
 # docker lane stages the host-persistent login dir into this path; CURSOR_API_KEY
 # remains the documented env fallback.
-_CURSOR_AUTH = os.path.expanduser("~/.config/cursor/auth.json")
+_CURSOR_AUTH_CANDIDATES = (
+    os.path.expanduser("~/.config/cursor/auth.json"),
+    os.path.expanduser("~/.openbench/cursor-container-auth/.config/cursor/auth.json"),
+)
+_CURSOR_AUTH = next((path for path in _CURSOR_AUTH_CANDIDATES if os.path.isfile(path)),
+                    _CURSOR_AUTH_CANDIDATES[0])
+_CURSOR_CLI_CONFIG = os.path.expanduser("~/.cursor/cli-config.json")
 
 
 def version():
@@ -179,6 +186,34 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             and not (os.environ.get("CURSOR_API_KEY") or os.path.exists(_CURSOR_AUTH))):
         return _setup_needed(model)
 
+    iso_home = tempfile.mkdtemp(prefix="cursor_home_")
+    env = dict(os.environ)
+    env["HOME"] = iso_home
+    env["XDG_CONFIG_HOME"] = os.path.join(iso_home, ".config")
+    env["XDG_DATA_HOME"] = os.path.join(iso_home, ".local", "share")
+    env["XDG_STATE_HOME"] = os.path.join(iso_home, ".local", "state")
+    env["XDG_CACHE_HOME"] = os.path.join(iso_home, ".cache")
+    # Preserve only file-based subscription auth. Do not copy ~/.cursor
+    # cli-config.json, rules, MCPs, extensions, or any adjacent Cursor config.
+    if os.path.isfile(_CURSOR_AUTH):
+        auth_dest = os.path.join(env["XDG_CONFIG_HOME"], "cursor", "auth.json")
+        os.makedirs(os.path.dirname(auth_dest), exist_ok=True)
+        shutil.copy2(_CURSOR_AUTH, auth_dest)
+    elif os.path.isfile(_CURSOR_CLI_CONFIG):
+        # macOS cursor-agent stores auth and preferences in one JSON file.
+        # Re-serialize only authInfo into the isolated config; copying the file
+        # wholesale would import model, permissions, network, and UI choices.
+        try:
+            with open(_CURSOR_CLI_CONFIG, encoding="utf-8") as fh:
+                auth_info = json.load(fh).get("authInfo")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            auth_info = None
+        if auth_info is not None:
+            config_dest = os.path.join(iso_home, ".cursor", "cli-config.json")
+            os.makedirs(os.path.dirname(config_dest), exist_ok=True)
+            with open(config_dest, "w", encoding="utf-8") as fh:
+                json.dump({"authInfo": auth_info}, fh)
+
     cmd = [
         "cursor-agent", "-p",
         "--force",
@@ -190,26 +225,30 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     ]
 
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=workdir,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            stdin=subprocess.DEVNULL,
-        )
-    except subprocess.TimeoutExpired as e:
-        full_output = _err_tail(e, limit=None)
-        return {
-            "completed": False,
-            "error": f"timeout after {timeout_s}s",
-            "output_tail": full_output[-2000:],
-            "full_output": full_output,
-            "tokens": None,
-            "turns": None,
-            "cmd": cmd,
-            **_empty_token_usage(),
-        }
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                stdin=subprocess.DEVNULL,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as e:
+            full_output = _err_tail(e, limit=None)
+            return {
+                "completed": False,
+                "error": f"timeout after {timeout_s}s",
+                "output_tail": full_output[-2000:],
+                "full_output": full_output,
+                "tokens": None,
+                "turns": None,
+                "cmd": cmd,
+                **_empty_token_usage(),
+            }
+    finally:
+        shutil.rmtree(iso_home, ignore_errors=True)
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     try:
