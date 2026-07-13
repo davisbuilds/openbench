@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""Tests for the stdlib counting proxy and proxy ledger row mapping."""
+
+import http.client
+import json
+import os
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BENCH_DIR)
+
+import proxy  # noqa: E402
+import run  # noqa: E402
+
+SECRET = "sk-test-secret-must-not-appear"
+
+
+class FixtureUpstream(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+class FixtureHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def do_POST(self):  # noqa: N802
+        length = int(self.headers.get("content-length") or 0)
+        self.server.requests.append({
+            "path": self.path,
+            "auth": self.headers.get("authorization"),
+            "body": self.rfile.read(length).decode("utf-8", "replace"),
+        })
+        if self.path.endswith("/sse"):
+            payload = (
+                "event: response.completed\n"
+                "data: {\"response\":{\"usage\":{\"input_tokens\":10,"
+                "\"input_tokens_details\":{\"cached_tokens\":3},"
+                "\"output_tokens\":4,\"output_tokens_details\":{\"reasoning_tokens\":1}}}}\n\n"
+            ).encode()
+            ctype = "text/event-stream"
+        elif self.path.endswith("/messages"):
+            payload = json.dumps({
+                "usage": {
+                    "input_tokens": 11,
+                    "cache_creation_input_tokens": 2,
+                    "cache_read_input_tokens": 3,
+                    "output_tokens": 7,
+                },
+            }).encode()
+            ctype = "application/json"
+        else:
+            payload = json.dumps({
+                "model": "fixture-model",
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 5,
+                    "prompt_tokens_details": {"cached_tokens": 2},
+                    "completion_tokens_details": {"reasoning_tokens": 1},
+                },
+            }).encode()
+            ctype = "application/json"
+        self.send_response(200)
+        self.send_header("content-type", ctype)
+        self.send_header("content-length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+class ProxyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="proxy_test_")
+        self.upstream = FixtureUpstream(("127.0.0.1", 0), FixtureHandler)
+        self.upstream.requests = []
+        self.up_thread = threading.Thread(target=self.upstream.serve_forever, daemon=True)
+        self.up_thread.start()
+        upstream_url = f"http://127.0.0.1:{self.upstream.server_address[1]}"
+        self.proxy = proxy.make_server(
+            "127.0.0.1", 0, self.tmp.name,
+            chat_upstreams={"deepseek": upstream_url},
+            anthropic_upstreams={"deepseek": upstream_url},
+        )
+        self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
+        self.proxy_thread.start()
+        self.host, self.port = self.proxy.server_address[:2]
+
+    def tearDown(self):
+        self.proxy.shutdown(); self.proxy.server_close()
+        self.upstream.shutdown(); self.upstream.server_close()
+        self.tmp.cleanup()
+
+    def _post(self, path, body=None):
+        body = body or {"model": "deepseek-v4-flash", "temperature": 0.2, "api_key": SECRET}
+        data = json.dumps(body).encode()
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=5)
+        conn.request("POST", path, body=data, headers={
+            "content-type": "application/json",
+            "content-length": str(len(data)),
+            "authorization": f"Bearer {SECRET}",
+        })
+        resp = conn.getresponse()
+        payload = resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 200, payload)
+        return payload
+
+    def _ledger(self, token):
+        path = os.path.join(self.tmp.name, token + ".jsonl")
+        deadline = time.time() + 2
+        while (not os.path.exists(path) or os.path.getsize(path) == 0) and time.time() < deadline:
+            time.sleep(0.01)
+        with open(path, encoding="utf-8") as fh:
+            return [json.loads(line) for line in fh]
+
+    def test_json_usage_sampling_observation_and_auth_scrubbing(self):
+        self._post("/cell/tok-json/chat/deepseek/chat/completions")
+        self.assertEqual(self.upstream.requests[-1]["path"], "/chat/completions")
+        self.assertEqual(self.upstream.requests[-1]["auth"], f"Bearer {SECRET}")
+        self._ledger("tok-json")
+        with open(os.path.join(self.tmp.name, "tok-json.jsonl"), encoding="utf-8") as fh:
+            ledger_text = fh.read()
+        self.assertNotIn(SECRET, ledger_text)
+        row = json.loads(ledger_text)
+        self.assertEqual(row["usage"]["prompt_tokens"], 20)
+        self.assertEqual(row["sampling_observed"]["model"], "deepseek-v4-flash")
+        self.assertNotIn("api_key", row["sampling_observed"])
+
+    def test_sse_usage_parsing(self):
+        self._post("/cell/tok-sse/anthropic/deepseek/sse")
+        row = self._ledger("tok-sse")[0]
+        self.assertEqual(row["usage"]["input_tokens"], 10)
+        self.assertEqual(row["usage"]["output_tokens_details"]["reasoning_tokens"], 1)
+
+    def test_anthropic_json_usage_parsing(self):
+        self._post("/cell/tok-anthropic/anthropic/deepseek/anthropic/v1/messages")
+        row = self._ledger("tok-anthropic")[0]
+        self.assertEqual(self.upstream.requests[-1]["path"], "/anthropic/v1/messages")
+        self.assertEqual(row["usage"]["input_tokens"], 11)
+        mapped = run.proxy_split_from_usage(row["usage"])
+        self.assertEqual(mapped["tokens_proxy_input_uncached"], 11)
+        self.assertEqual(mapped["tokens_proxy_cache_read"], 3)
+        self.assertEqual(mapped["tokens_proxy_cache_write"], 2)
+        self.assertEqual(mapped["tokens_proxy_output"], 7)
+
+    def test_cell_token_routing_isolation(self):
+        self._post("/cell/tok-a/chat/deepseek/chat/completions")
+        self._post("/cell/tok-b/chat/deepseek/chat/completions")
+        self._ledger("tok-a")
+        self._ledger("tok-b")
+        self.assertTrue(os.path.exists(os.path.join(self.tmp.name, "tok-a.jsonl")))
+        self.assertTrue(os.path.exists(os.path.join(self.tmp.name, "tok-b.jsonl")))
+        self.assertEqual(len(self._ledger("tok-a")), 1)
+        self.assertEqual(len(self._ledger("tok-b")), 1)
+
+    def test_ledger_to_row_mapping(self):
+        row = {}
+        run.apply_proxy_ledger(row, [
+            {"usage": {"prompt_tokens": 20, "completion_tokens": 5,
+                       "prompt_tokens_details": {"cached_tokens": 2},
+                       "completion_tokens_details": {"reasoning_tokens": 1}},
+             "sampling_observed": {"model": "m", "temperature": 0.1}},
+            {"usage": {"input_tokens": 10, "input_tokens_details": {"cached_tokens": 3},
+                       "output_tokens": 4, "output_tokens_details": {"reasoning_tokens": 1}}},
+        ])
+        self.assertEqual(row["tokens_proxy_input_uncached"], 25)
+        self.assertEqual(row["tokens_proxy_cache_read"], 5)
+        self.assertEqual(row["tokens_proxy_output"], 9)
+        self.assertEqual(row["tokens_proxy_reasoning"], 2)
+        self.assertEqual(row["tokens_proxy_calls"], 2)
+        self.assertEqual(row["token_basis_proxy"], "proxy_measured")
+        self.assertEqual(row["sampling_observed"], [{"model": "m", "temperature": 0.1}])
+
+
+if __name__ == "__main__":
+    unittest.main()
