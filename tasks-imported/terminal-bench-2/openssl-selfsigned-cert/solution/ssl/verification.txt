@@ -1,4 +1,0 @@
-subject=O = DevOps Team, CN = dev-internal.company.local
-notBefore=Jul 13 19:56:33 2026 GMT
-notAfter=Jul 13 19:56:33 2027 GMT
-sha256 Fingerprint=A0:80:F7:D9:08:EF:96:10:4D:2B:7C:4F:EC:5C:A3:4A:02:D5:4B:9E:D0:D4:A4:57:A7:D9:25:82:A2:F8:9F:38
