@@ -2,6 +2,7 @@
 
 Headless invocation:
     CODEX_HOME=<isolated tmp with auth.json only> codex exec --json \
+        --disable apps --disable plugins --disable multi_agent \
         --skip-git-repo-check -C <workdir> -s workspace-write \
         -m gpt-5.5 -c model_reasoning_effort="medium" <instruction>
 
@@ -54,6 +55,11 @@ import tempfile
 
 NAME = "codex"
 _EXE = "codex"
+_FEATURE_DISABLE_FLAGS = [
+    "--disable", "apps",
+    "--disable", "plugins",
+    "--disable", "multi_agent",
+]
 
 
 def _empty_token_usage():
@@ -364,6 +370,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
     base = [
         "codex", "exec",
         "--json",
+    ] + _FEATURE_DISABLE_FLAGS + [
         "--skip-git-repo-check",
         "-C", workdir,
     ] + sandbox
