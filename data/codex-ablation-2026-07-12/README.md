@@ -21,20 +21,23 @@ codex-cli 0.144.1 plus a `CODEX_HOME` config (`ablation/codex-home-v*`).
 
 ## Results (matched cells, n=72/group)
 
-| Group | Solve raw | Solve hack-adj | Wilson 95% | Wall/solve | Input processed/solve* |
-|---|---:|---:|---|---:|---:|
-| codex V0 | 79.2% | **73.6%** | [0.62,0.82] | 47.3s | 91.6k |
-| codex V1 | 73.6% | 73.6% | [0.62,0.82] | 33.3s | 64.4k |
-| codex V2 | 77.8% | **77.8%** | [0.67,0.86] | 36.4s | **58.5k** |
-| pi | 73.6% | 73.6% | [0.62,0.82] | 41.9s | **22.2k** |
+| Group | Solve (hack-adj) | Wilson 95% | Wall/solve | Input processed/solve* |
+|---|---:|---|---:|---:|
+| codex V0 | 73.6% | [0.62,0.82] | 47.3s | 91.6k |
+| codex V1 | 73.6% | [0.62,0.82] | 33.3s | 64.4k |
+| codex V2 | **77.8%** | [0.67,0.86] | 36.4s | **58.5k** |
+| pi | 73.6% | [0.62,0.82] | 41.9s | **22.2k** |
+
+Hack adjustment: V0 raw was 79.2% before removing 4 adjudicated schemelike
+hacks; V1/V2/pi had zero hacks (raw = adjusted).
 
 *median uncached + cache-read input over the 50 cells all four groups solved.
 
 ## Findings
 
-1. **De-bloating costs no correctness.** V2 ≈ V0 raw (77.8 vs 79.2, CIs
-   overlap); hack-adjusted, V2 is nominally highest. Processes **36% less
-   input** and solves **~25% faster** than stock.
+1. **De-bloating costs no correctness.** Hack-adjusted, V2 is nominally
+   highest (77.8 vs 73.6, CIs overlap). Processes **36% less input** and
+   solves **~25% faster** than stock.
 2. **The bloat hides in cache-reads.** Codex's fixed prompt is cached after
    turn 1, so blended token counts mask it; the uncached/cache-read split
    (`usage_raw`) shows stock codex re-processing ~76k cached tokens per solve
