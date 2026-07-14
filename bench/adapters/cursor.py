@@ -19,10 +19,17 @@ Notes / quirks:
 - Uses Cursor auth from Linux file storage (`~/.config/cursor/auth.json`) or the
   documented `CURSOR_API_KEY` fallback. Docker auth should be minted with
   `bench/cursor_container_login.sh` and mounted read-only per run.
-- Counting-proxy mode sets Cursor's hidden-but-supported `CURSOR_API_ENDPOINT`
-  override to the per-cell proxy URL. The CLI speaks Cursor's private
-  HTTP/Connect-RPC agent protocol there (not OpenAI or Anthropic); the proxy
-  therefore forwards that endpoint byte-for-byte to `api2.cursor.sh`.
+- COUNTING PROXY UNSUPPORTED for benchmark inference. Cursor's hidden
+  `CURSOR_API_ENDPOINT` / `--agent-endpoint` overrides can route control-plane
+  Connect-RPC calls through `bench/proxy.py`, and this adapter contains the
+  unit-tested endpoint wiring for future CLI compatibility. However the shipped
+  CLI's model stream uses Cursor's private HTTP/2 agent protocol and protobuf
+  usage, while the stdlib counting proxy is HTTP/1.1 JSON/SSE. Leaving the
+  server-selected agent URL in place bypasses the proxy; forcing the proxy URL
+  fails with `RetriableError: [internal] Protocol error`. Thus the runner marks
+  Cursor unsupported rather than breaking otherwise valid cells or claiming
+  independently measured tokens. This is distinct from local macOS auth; a
+  Docker-authenticated live probe reproduced the protocol boundary.
 - M4 OPEN MODELS (glm-*/deepseek-*/kimi-*) are NOT supported here: cursor-agent
   exposes a closed, account-bound model menu with no custom-provider/base-URL
   override, so open canonicals fall through to the unsupported-model dict.
@@ -231,6 +238,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
 
     cmd = [
         "cursor-agent", "-p",
+        *(["--endpoint", proxy_endpoint,
+           "--agent-endpoint", proxy_endpoint,
+           "--http-version", "1.1"] if proxy_endpoint else []),
         "--force",
         "--trust",
         "--model", MODELS[model],

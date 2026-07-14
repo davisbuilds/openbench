@@ -483,12 +483,11 @@ def proxy_supported_for_cell(harness, model):
         return model in PROXY_CLAUDE_MODELS
     if harness == "opencode":
         return model in PROXY_CHAT_MODELS
-    if harness == "cursor":
-        return model in PROXY_CODEX_SUBSCRIPTION_MODELS or model == "claude-opus-4-8"
     if harness == "grokbuild":
         return model in {"glm-5.2", "deepseek-v4-flash", "kimi-k2.7-code"}
-    # Devin performs inference behind Cognition's cloud boundary and exposes no
-    # model-provider endpoint override; see the adapter docstring.
+    # Cursor's model stream requires its private HTTP/2 agent protocol, which
+    # the stdlib HTTP/1.1 proxy cannot meter; Devin performs inference behind
+    # Cognition's cloud boundary. See both adapter docstrings.
     return False
 
 
@@ -507,8 +506,6 @@ def _proxy_sampling_for_cell(harness, model):
     if harness == "opencode" and model in PROXY_CHAT_MODELS:
         return {"model": model, "variant": "medium"}
     if harness == "claude" and model in PROXY_CLAUDE_MODELS:
-        return {"model": model, "effort": "medium"}
-    if harness == "cursor" and proxy_supported_for_cell(harness, model):
         return {"model": model, "effort": "medium"}
     if harness == "grokbuild" and proxy_supported_for_cell(harness, model):
         return {"model": model, "reasoning_effort": "medium"}
@@ -1438,7 +1435,7 @@ def main(argv=None):
                              "local when the daemon/image is unavailable")
     parser.add_argument("--proxy", action="store_true",
                         help="start one owned counting proxy and inject it into "
-                             "supported harness/model cells (Devin is unsupported)")
+                             "supported harness/model cells (Cursor and Devin are unsupported)")
     args = parser.parse_args(argv)
 
     tasks = [t.strip() for t in args.task.split(",") if t.strip()]

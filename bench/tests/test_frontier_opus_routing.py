@@ -347,10 +347,12 @@ class TestCursorOpus(unittest.TestCase):
         finally:
             self.cursor.subprocess.run = old_run
         self.assertTrue(res["completed"])
-        self.assertEqual(
-            calls[0][1]["env"]["CURSOR_API_ENDPOINT"],
-            "http://proxy.test:4321/cell/cell-token/cursor",
-        )
+        endpoint = "http://proxy.test:4321/cell/cell-token/cursor"
+        self.assertEqual(calls[0][1]["env"]["CURSOR_API_ENDPOINT"], endpoint)
+        cmd = calls[0][0]
+        self.assertEqual(cmd[cmd.index("--endpoint") + 1], endpoint)
+        self.assertEqual(cmd[cmd.index("--agent-endpoint") + 1], endpoint)
+        self.assertEqual(cmd[cmd.index("--http-version") + 1], "1.1")
 
     def test_constructs_gpt56_medium_models(self):
         variants = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")

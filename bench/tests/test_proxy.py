@@ -207,7 +207,7 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(row["sampling_observed"], [{"model": "m", "temperature": 0.1}])
 
     def test_remaining_lane_support_matrix(self):
-        self.assertTrue(run.proxy_supported_for_cell("cursor", "gpt-5.5-medium"))
+        self.assertFalse(run.proxy_supported_for_cell("cursor", "gpt-5.5-medium"))
         self.assertTrue(run.proxy_supported_for_cell("grokbuild", "deepseek-v4-flash"))
         self.assertFalse(run.proxy_supported_for_cell("devin", "gpt-5.5-medium"))
 
