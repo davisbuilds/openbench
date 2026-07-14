@@ -1,3 +1,0 @@
-{"part": {"tokens": {"cache": {"read": 7168, "write": 0}, "input": 74, "output": 84, "reasoning": 33, "total": 7359}}, "type": "step_finish"}
-{"part": {"tokens": {"cache": {"read": 7296, "write": 0}, "input": 79, "output": 68, "reasoning": 8, "total": 7451}}, "type": "step_finish"}
-{"part": {"tokens": {"cache": {"read": 7424, "write": 0}, "input": 94, "output": 2, "reasoning": 2, "total": 7522}}, "type": "step_finish"}

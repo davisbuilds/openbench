@@ -1,3 +1,0 @@
-{"message": {"usage": {"cacheRead": 1408, "cacheWrite": 0, "cost": {"cacheRead": 0, "cacheWrite": 0, "input": 0, "output": 0, "total": 0}, "input": 124, "output": 96, "reasoning": 36, "totalTokens": 1628}}, "type": "turn_end"}
-{"message": {"usage": {"cacheRead": 1536, "cacheWrite": 0, "cost": {"cacheRead": 0, "cacheWrite": 0, "input": 0, "output": 0, "total": 0}, "input": 113, "output": 49, "reasoning": 5, "totalTokens": 1698}}, "type": "turn_end"}
-{"message": {"usage": {"cacheRead": 1664, "cacheWrite": 0, "cost": {"cacheRead": 0, "cacheWrite": 0, "input": 0, "output": 0, "total": 0}, "input": 47, "output": 5, "reasoning": 2, "totalTokens": 1716}}, "type": "turn_end"}
