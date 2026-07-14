@@ -327,6 +327,33 @@ class TestCursorOpus(unittest.TestCase):
         self.assertIn("SETUP-NEEDED", res["error"])
         self.assertIn("CURSOR_API_KEY", res["error"])
 
+    def test_counting_proxy_sets_private_cursor_api_endpoint(self):
+        old_run = self.cursor.subprocess.run
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return FakeProc(stdout='{"result":"ok","usage":{"inputTokens":1,"outputTokens":2}}')
+
+        self.cursor.subprocess.run = fake_run
+        try:
+            with EnvPatch() as env:
+                env.update({
+                    "OPENBENCH_PROXY": "1",
+                    "OPENBENCH_PROXY_BASE_URL": "http://proxy.test:4321",
+                    "OPENBENCH_PROXY_CELL_TOKEN": "cell-token",
+                })
+                res = self.cursor.run("hi", "/tmp", "gpt-5.5-medium", 5)
+        finally:
+            self.cursor.subprocess.run = old_run
+        self.assertTrue(res["completed"])
+        endpoint = "http://proxy.test:4321/cell/cell-token/cursor"
+        self.assertEqual(calls[0][1]["env"]["CURSOR_API_ENDPOINT"], endpoint)
+        cmd = calls[0][0]
+        self.assertEqual(cmd[cmd.index("--endpoint") + 1], endpoint)
+        self.assertEqual(cmd[cmd.index("--agent-endpoint") + 1], endpoint)
+        self.assertEqual(cmd[cmd.index("--http-version") + 1], "1.1")
+
     def test_constructs_gpt56_medium_models(self):
         variants = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
         old_run = self.cursor.subprocess.run

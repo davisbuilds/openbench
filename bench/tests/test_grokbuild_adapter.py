@@ -137,6 +137,23 @@ class TestConfigAndGating(unittest.TestCase):
         self.assertNotIn('[compat.cursor]', cfg)
         self.assertNotIn('enabled = false', cfg)
 
+    def test_proxy_rewrites_custom_provider_base_url_and_preserves_vendor_path(self):
+        spec = grokbuild.OPEN_MODELS["glm-5.2"]
+        with EnvPatch() as env:
+            env.update({
+                "OPENBENCH_PROXY": "1",
+                "OPENBENCH_PROXY_BASE_URL": "http://proxy.test:1234",
+                "OPENBENCH_PROXY_CELL_TOKEN": "cell-token",
+            })
+            proxied = grokbuild._proxied_spec(spec)
+        self.assertEqual(
+            proxied["base_url"],
+            "http://proxy.test:1234/cell/cell-token/chat/zai/api/paas/v4",
+        )
+        self.assertEqual(proxied["model_id"], spec["model_id"])
+        self.assertEqual(proxied["env_key"], spec["env_key"])
+        self.assertEqual(spec["base_url"], "https://api.z.ai/api/paas/v4")
+
     def test_dotted_model_aliases_are_quoted_toml_keys(self):
         for model, spec in grokbuild.OPEN_MODELS.items():
             parsed = tomllib.loads(grokbuild._config_toml(model, spec))

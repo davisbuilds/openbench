@@ -24,6 +24,14 @@ Notes / quirks:
   valid CLI value — passing it errors "Unknown model". A dashed id briefly
   appeared to work under an older devin build but no longer does; reverted.)
 - Uses the user's existing devin login as-is (read-only).
+- COUNTING PROXY UNSUPPORTED: the terminal CLI exposes no model-provider base
+  URL or custom-provider mechanism. It authenticates to Cognition and receives
+  a service-selected inference endpoint; model inference and usage accounting
+  happen behind Devin's cloud boundary. `--config`, `DEVIN_MODEL`, and the
+  config's generic network `proxy` setting do not redirect the model endpoint
+  to an OpenAI/Anthropic-compatible URL. An HTTP(S) forward proxy would only
+  see an encrypted CONNECT tunnel and cannot provide the response usage needed
+  by `bench/proxy.py`, so `--proxy` deliberately leaves this lane unwired.
 - M4 OPEN MODELS (glm-*/deepseek-*/kimi-*) are NOT wired here: devin's `--model`
   is a closed, account-bound menu with no custom-provider/base-URL override, so
   the open canonicals fall through to the unsupported-model dict. (devin's menu

@@ -19,6 +19,17 @@ Notes / quirks:
 - Uses Cursor auth from Linux file storage (`~/.config/cursor/auth.json`) or the
   documented `CURSOR_API_KEY` fallback. Docker auth should be minted with
   `bench/cursor_container_login.sh` and mounted read-only per run.
+- COUNTING PROXY UNSUPPORTED for benchmark inference. Cursor's hidden
+  `CURSOR_API_ENDPOINT` / `--agent-endpoint` overrides can route control-plane
+  Connect-RPC calls through `bench/proxy.py`, and this adapter contains the
+  unit-tested endpoint wiring for future CLI compatibility. However the shipped
+  CLI's model stream uses Cursor's private HTTP/2 agent protocol and protobuf
+  usage, while the stdlib counting proxy is HTTP/1.1 JSON/SSE. Leaving the
+  server-selected agent URL in place bypasses the proxy; forcing the proxy URL
+  fails with `RetriableError: [internal] Protocol error`. Thus the runner marks
+  Cursor unsupported rather than breaking otherwise valid cells or claiming
+  independently measured tokens. This is distinct from local macOS auth; a
+  Docker-authenticated live probe reproduced the protocol boundary.
 - M4 OPEN MODELS (glm-*/deepseek-*/kimi-*) are NOT supported here: cursor-agent
   exposes a closed, account-bound model menu with no custom-provider/base-URL
   override, so open canonicals fall through to the unsupported-model dict.
@@ -78,6 +89,14 @@ _CURSOR_AUTH_CANDIDATES = (
 _CURSOR_AUTH = next((path for path in _CURSOR_AUTH_CANDIDATES if os.path.isfile(path)),
                     _CURSOR_AUTH_CANDIDATES[0])
 _CURSOR_CLI_CONFIG = os.path.expanduser("~/.cursor/cli-config.json")
+
+
+def _proxy_cell_url():
+    base = os.environ.get("OPENBENCH_PROXY_BASE_URL")
+    token = os.environ.get("OPENBENCH_PROXY_CELL_TOKEN")
+    if not os.environ.get("OPENBENCH_PROXY") or not base or not token:
+        return None
+    return f"{base.rstrip('/')}/cell/{token}/cursor"
 
 
 def version():
@@ -193,6 +212,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     env["XDG_DATA_HOME"] = os.path.join(iso_home, ".local", "share")
     env["XDG_STATE_HOME"] = os.path.join(iso_home, ".local", "state")
     env["XDG_CACHE_HOME"] = os.path.join(iso_home, ".cache")
+    proxy_endpoint = _proxy_cell_url()
+    if proxy_endpoint:
+        env["CURSOR_API_ENDPOINT"] = proxy_endpoint
     # Preserve only file-based subscription auth. Do not copy ~/.cursor
     # cli-config.json, rules, MCPs, extensions, or any adjacent Cursor config.
     if os.path.isfile(_CURSOR_AUTH):
@@ -216,6 +238,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
 
     cmd = [
         "cursor-agent", "-p",
+        *(["--endpoint", proxy_endpoint,
+           "--agent-endpoint", proxy_endpoint,
+           "--http-version", "1.1"] if proxy_endpoint else []),
         "--force",
         "--trust",
         "--model", MODELS[model],

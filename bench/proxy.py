@@ -45,6 +45,7 @@ SAMPLING_KEYS = {
 }
 TOKEN_RE = re.compile(r"/cell/([^/?#]+)")
 
+DEFAULT_CURSOR_UPSTREAM = "https://api2.cursor.sh"
 DEFAULT_CHAT_UPSTREAMS = {
     "deepseek": "https://api.deepseek.com",
     "zai": "https://api.z.ai",
@@ -365,6 +366,12 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         elif prefix == "openai":
             upstream = self.server.upstreams["openai"]  # type: ignore[attr-defined]
             route_name = "openai"
+        elif prefix == "cursor":
+            # Cursor Agent's endpoint speaks Cursor's private HTTP/Connect-RPC
+            # protocol rather than a public model-provider dialect. Forward it
+            # byte-for-byte; usage extraction remains best-effort for JSON/SSE.
+            upstream = self.server.upstreams["cursor"]  # type: ignore[attr-defined]
+            route_name = "cursor"
         elif prefix == "anthropic":
             name = tail[0] if tail and tail[0] in self.server.anthropic_upstreams else "default"  # type: ignore[attr-defined]
             if name != "default":
@@ -479,6 +486,7 @@ class CountingProxyServer(ThreadingHTTPServer):
 def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
                 chat_upstreams: dict[str, str] | None = None,
                 anthropic_upstreams: dict[str, str] | None = None,
+                cursor_upstream: str = DEFAULT_CURSOR_UPSTREAM,
                 timeout_s: float = 300.0, capture_limit: int = 8 * 1024 * 1024,
                 max_request_bytes: int = 64 * 1024 * 1024,
                 verbose: bool = False) -> CountingProxyServer:
@@ -492,6 +500,7 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     httpd.upstreams = _urlsplit_map({
         "codex": "https://chatgpt.com",
         "openai": "https://api.openai.com",
+        "cursor": cursor_upstream,
     })
     httpd.chat_upstreams = _urlsplit_map(chat)
     httpd.anthropic_upstreams = _urlsplit_map(anthropic)
@@ -526,6 +535,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--ledger-dir", required=True)
     parser.add_argument("--chat-upstream", action="append", default=[], help="name=url")
+    parser.add_argument("--cursor-upstream", default=DEFAULT_CURSOR_UPSTREAM)
     parser.add_argument("--anthropic-upstream", action="append", default=[], help="name=url")
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--verbose", action="store_true")
@@ -534,6 +544,7 @@ def main(argv: list[str] | None = None) -> int:
         args.listen_host, args.port, args.ledger_dir,
         chat_upstreams=_parse_upstream_args(args.chat_upstream),
         anthropic_upstreams=_parse_upstream_args(args.anthropic_upstream),
+        cursor_upstream=args.cursor_upstream,
         timeout_s=args.timeout, verbose=args.verbose,
     )
     host, port = httpd.server_address[:2]

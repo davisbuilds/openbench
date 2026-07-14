@@ -87,6 +87,7 @@ class ProxyTests(unittest.TestCase):
             "127.0.0.1", 0, self.tmp.name,
             chat_upstreams={"deepseek": upstream_url},
             anthropic_upstreams={"deepseek": upstream_url},
+            cursor_upstream=upstream_url,
         )
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
         self.proxy_thread.start()
@@ -171,6 +172,12 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(mapped["tokens_proxy_cache_write"], 2)
         self.assertEqual(mapped["tokens_proxy_output"], 7)
 
+    def test_cursor_private_protocol_route_is_forwarded(self):
+        self._post("/cell/tok-cursor/cursor/agent/v1/run")
+        row = self._ledger("tok-cursor")[0]
+        self.assertEqual(self.upstream.requests[-1]["path"], "/agent/v1/run")
+        self.assertEqual(row["route"], "cursor")
+
     def test_cell_token_routing_isolation(self):
         self._post("/cell/tok-a/chat/deepseek/chat/completions")
         self._post("/cell/tok-b/chat/deepseek/chat/completions")
@@ -198,6 +205,11 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(row["tokens_proxy_calls"], 2)
         self.assertEqual(row["token_basis_proxy"], "proxy_measured")
         self.assertEqual(row["sampling_observed"], [{"model": "m", "temperature": 0.1}])
+
+    def test_remaining_lane_support_matrix(self):
+        self.assertFalse(run.proxy_supported_for_cell("cursor", "gpt-5.5-medium"))
+        self.assertTrue(run.proxy_supported_for_cell("grokbuild", "deepseek-v4-flash"))
+        self.assertFalse(run.proxy_supported_for_cell("devin", "gpt-5.5-medium"))
 
 
 if __name__ == "__main__":

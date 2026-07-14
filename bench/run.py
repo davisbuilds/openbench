@@ -43,7 +43,7 @@ DEFAULT_RESULTS_PATH = os.path.join(REPO, "results", "results.jsonl")
 DEFAULT_ADAPTERS_DIR = os.path.join(HERE, "adapters")
 DEFAULT_TASKS_DIR = os.path.join(REPO, "tasks")
 DEFAULT_MODEL = "gpt-5.5-medium"
-PROXY_HARNESSES = {"codex", "pi", "claude", "opencode"}
+PROXY_HARNESSES = {"codex", "pi", "claude", "opencode", "cursor", "devin", "grokbuild"}
 PROXY_CODEX_SUBSCRIPTION_MODELS = {
     "gpt-5.5-medium", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 }
@@ -483,6 +483,11 @@ def proxy_supported_for_cell(harness, model):
         return model in PROXY_CLAUDE_MODELS
     if harness == "opencode":
         return model in PROXY_CHAT_MODELS
+    if harness == "grokbuild":
+        return model in {"glm-5.2", "deepseek-v4-flash", "kimi-k2.7-code"}
+    # Cursor's model stream requires its private HTTP/2 agent protocol, which
+    # the stdlib HTTP/1.1 proxy cannot meter; Devin performs inference behind
+    # Cognition's cloud boundary. See both adapter docstrings.
     return False
 
 
@@ -502,6 +507,8 @@ def _proxy_sampling_for_cell(harness, model):
         return {"model": model, "variant": "medium"}
     if harness == "claude" and model in PROXY_CLAUDE_MODELS:
         return {"model": model, "effort": "medium"}
+    if harness == "grokbuild" and proxy_supported_for_cell(harness, model):
+        return {"model": model, "reasoning_effort": "medium"}
     return {}
 
 
@@ -1428,7 +1435,7 @@ def main(argv=None):
                              "local when the daemon/image is unavailable")
     parser.add_argument("--proxy", action="store_true",
                         help="start one owned counting proxy and inject it into "
-                             "supported harnesses (codex, pi, claude, opencode)")
+                             "supported harness/model cells (Cursor and Devin are unsupported)")
     args = parser.parse_args(argv)
 
     tasks = [t.strip() for t in args.task.split(",") if t.strip()]
