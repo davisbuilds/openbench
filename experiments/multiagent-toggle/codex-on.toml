@@ -1,0 +1,13 @@
+kind = "config-variant"
+name = "codex-multiagent-on"
+base_adapter = "codex"
+config_dir = "codex-home"
+config_files = ["config.toml"]
+
+[env]
+CODEX_HOME = "{config_dir}"
+OPENBENCH_CODEX_MULTI_AGENT = "enabled"
+
+[[auth_files]]
+source = "~/.codex/auth.json"
+destination = "auth.json"

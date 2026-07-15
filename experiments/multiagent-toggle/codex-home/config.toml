@@ -1,0 +1,2 @@
+# Deliberately empty of behavioral settings. The candidate uses the stock
+# adapter pins and changes only the explicit multi_agent feature flag.
