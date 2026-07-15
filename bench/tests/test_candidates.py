@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -24,6 +25,24 @@ class Proc:
     returncode = 0
     stdout = ""
     stderr = ""
+
+
+def fixed_temporary_directory(path):
+    class FixedTemporaryDirectory:
+        def __init__(self, *args, **kwargs):
+            self.name = path
+            os.makedirs(path, exist_ok=True)
+
+        def __enter__(self):
+            return self.name
+
+        def __exit__(self, *args):
+            self.cleanup()
+
+        def cleanup(self):
+            shutil.rmtree(self.name, ignore_errors=True)
+
+    return FixedTemporaryDirectory
 
 
 class CandidateTests(unittest.TestCase):
@@ -59,15 +78,16 @@ class CandidateTests(unittest.TestCase):
                 with open(os.path.join(config_home, "config.toml"), encoding="utf-8") as fh:
                     configs.append(fh.read().replace(config_home, "<CONFIG_DIR>"))
                 return Proc()
+            fixed_home = os.path.join(td, "fixed-codex-home")
             with mock.patch.object(helper, "_source_codex_home", return_value=td), \
                  mock.patch.object(candidates, "_auth_source", return_value=auth), \
-                 mock.patch("subprocess.run", side_effect=run):
+                 mock.patch("subprocess.run", side_effect=run), \
+                 mock.patch.object(tempfile, "TemporaryDirectory",
+                                   fixed_temporary_directory(fixed_home)):
                 helper.run_variant("codex-v2", "v2", "prompt", td, "gpt-5.6-sol", 9)
                 variant.run("prompt", td, "gpt-5.6-sol", 9)
             self.assertEqual(captures[0][0], captures[1][0])
-            def normalized(env):
-                out = dict(env); out["CODEX_HOME"] = "<CONFIG_DIR>"; return out
-            self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
+            self.assertEqual(captures[0][1], captures[1][1])
             self.assertEqual(configs[0], configs[1])
 
     def test_pi_manifest_matches_native_argv_and_environment(self):
@@ -82,18 +102,17 @@ class CandidateTests(unittest.TestCase):
             manifest.auth_files[0]["source"] = auth
             captures = []
             def run(cmd, **kw): captures.append((cmd, kw["env"])); return Proc()
+            fixed_home = os.path.join(td, "fixed-pi-home")
             with mock.patch("subprocess.run", side_effect=run), \
                  mock.patch.object(candidates, "_auth_source", return_value=auth), \
-                 mock.patch.object(candidates, "_run_process", side_effect=run):
+                 mock.patch.object(candidates, "_run_process", side_effect=run), \
+                 mock.patch.object(pi.tempfile, "mkdtemp", return_value=fixed_home), \
+                 mock.patch.object(tempfile, "TemporaryDirectory",
+                                   fixed_temporary_directory(fixed_home)):
                 pi.run("prompt", td, "gpt-5.5-medium", 9)
                 manifest.run("prompt", td, "gpt-5.5-medium", 9)
             self.assertEqual(captures[0][0], captures[1][0])
-            def normalized(env):
-                out = dict(env)
-                home = out["HOME"]
-                return {k: v.replace(home, "<HOME>") if isinstance(v, str) else v
-                        for k, v in out.items()}
-            self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
+            self.assertEqual(captures[0][1], captures[1][1])
 
     def test_candidate_name_must_be_portable_identifier(self):
         with tempfile.TemporaryDirectory() as td:
