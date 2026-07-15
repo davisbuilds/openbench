@@ -34,6 +34,25 @@ proxy behavior. The checked-in V2 declaration is
 `ablation/codex-home-v2/candidate.toml`; its staged config is byte-equivalent to
 the former `env_override` composer.
 
+A config variant may also select an adapter-supported experimental toggle. The
+Codex multi-agent ON arm is checked in at
+`experiments/multiagent-toggle/codex-on.toml`:
+
+```toml
+kind = "config-variant"
+name = "codex-multiagent-on"
+base_adapter = "codex"
+config_dir = "codex-home"
+config_files = ["config.toml"]
+[env]
+CODEX_HOME = "{config_dir}"
+OPENBENCH_CODEX_MULTI_AGENT = "enabled"
+```
+
+That marker is consumed by the Codex adapter and changes only its explicit
+`multi_agent` feature pin from `--disable` to `--enable`; an inherited host
+environment variable cannot turn on the stock arm.
+
 ## Generic manifest
 
 ```toml
