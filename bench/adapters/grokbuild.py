@@ -1,27 +1,21 @@
-"""Adapter for xAI's `grok` (Grok Build CLI) running OPEN models via BYOK.
+"""Adapter for xAI's `grok` (Grok Build CLI) using BYOK model routes.
 
-Headless invocation:
-    HOME=<isolated tmp with generated ~/.grok/config.toml>
-    grok --no-auto-update -p <instruction> --model <canonical-open-model> \
-         --output-format streaming-json --always-approve --no-plan \
-         --no-subagents --disable-web-search --no-memory --cwd <workdir>
+Headless invocation (benchmark policy is pinned here, like Codex's flags):
+    HOME=<isolated tmp with generated ~/.grok/config.toml> GROK_SUBAGENTS=0
+    grok --no-auto-update -p <instruction> --model <canonical-model> \
+         --output-format streaming-json --always-approve --cwd <workdir>
 
 Custom models are declared in the isolated HOME only; the user's real ~/.grok is
-never read, copied, or mounted.  The config uses Grok's documented user config
-shape:
+never read, copied, or mounted. The current Grok source parses model catalog
+entries from `[model.<catalog-key>]` (``ModelEntryConfig``), while `[models]` is
+the separate defaults/role-pin table. Each route explicitly sets ``base_url``,
+``api_backend``, ``env_key``, and ``auth_scheme``. Subagents are disabled twice:
+``GROK_SUBAGENTS=0`` in the child environment and ``[subagents] enabled=false``
+in generated config, so every invocation has a stable parity guard.
 
-    [model.<name>]
-    model = "vendor-model-id"
-    base_url = "https://vendor.example/v1"
-    name = "Display Name"
-    env_key = "VENDOR_API_KEY"
-
-    [models]
-    default = "<name>"
-
-In counting-proxy mode the same custom-provider config replaces `base_url` with
-its per-cell `/chat/<vendor>/<upstream-path>` URL. Grok speaks OpenAI-compatible
-Chat Completions on this path; the proxy forwards to the unchanged vendor URL.
+In counting-proxy mode the same model entry replaces `base_url` with its
+per-cell proxy URL. Open vendors use `/chat/<vendor>/<upstream-path>`; OpenAI
+uses `/openai/<upstream-path>`. The proxy then forwards to the vendor unchanged.
 
 Probe result (2026-07-07): this BYOK custom-model path works without xAI login.
 `--output-format streaming-json` emits JSONL events like
@@ -40,7 +34,8 @@ import tempfile
 NAME = "grokbuild"
 _EXE = "grok"
 
-# Required by ADAPTER_SPEC / doctor.py. This adapter is open-model-only for now.
+# Required by ADAPTER_SPEC / doctor.py. All lanes use the same custom catalog
+# mechanism, including gpt-5.6 (API-key routing, not subscription OAuth).
 MODELS = {}
 
 # Grok has built-in auxiliary roles (session summaries/titles/image descriptions)
@@ -61,9 +56,12 @@ _MAX_COMPLETION_TOKENS = 65536
 _EFFORT = "medium"
 # Exact OpenAI-compatible endpoint data copied from bench/adapters/pi.py.
 OPEN_MODELS = {
-    "glm-5.2":           {"model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM"},
-    "deepseek-v4-flash": {"model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek"},
-    "kimi-k2.7-code":    {"model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi"},
+    "glm-5.2":           {"model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM", "proxy_route": "chat/zai"},
+    "deepseek-v4-flash": {"model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek", "proxy_route": "chat/deepseek"},
+    "kimi-k2.7-code":    {"model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "proxy_route": "chat/moonshot"},
+    # OPENAI_BASE_URL permits an OpenAI-compatible router; the official API is
+    # the safe default. The later subscription bridge is intentionally absent.
+    "gpt-5.6":           {"model_id": "gpt-5.6",           "base_url": "https://api.openai.com/v1",    "base_url_env": "OPENAI_BASE_URL", "env_key": "OPENAI_API_KEY", "display": "OpenAI GPT-5.6", "proxy_route": "openai"},
 }
 
 
@@ -118,17 +116,21 @@ def _proxy_cell_url(*parts):
     return base.rstrip("/") + "/" + path
 
 
+def _resolved_spec(spec):
+    """Resolve only the route URL; API-key values never enter generated config."""
+    resolved = dict(spec)
+    if spec.get("base_url_env") and os.environ.get(spec["base_url_env"]):
+        resolved["base_url"] = os.environ[spec["base_url_env"]]
+    return resolved
+
+
 def _proxied_spec(spec):
+    spec = _resolved_spec(spec)
     if not os.environ.get("OPENBENCH_PROXY"):
         return spec
     from urllib.parse import urlsplit
-    vendor = {
-        "DEEPSEEK_API_KEY": "deepseek",
-        "ZAI_API_KEY": "zai",
-        "MOONSHOT_API_KEY": "moonshot",
-    }[spec["env_key"]]
     tail = (urlsplit(spec["base_url"]).path or "").strip("/")
-    url = _proxy_cell_url("chat", vendor, tail)
+    url = _proxy_cell_url(*spec["proxy_route"].split("/"), tail)
     return dict(spec, base_url=url) if url else spec
 
 
@@ -145,6 +147,7 @@ def _model_section(alias, spec):
         f"name = {_toml_str(spec['display'])}\n"
         f"env_key = {_toml_str(spec['env_key'])}\n"
         'api_backend = "chat_completions"\n'
+        'auth_scheme = "bearer"\n'
         "stream_tool_calls = false\n"
         "context_window = 128000\n"
         f"max_completion_tokens = {_MAX_COMPLETION_TOKENS}\n\n"
@@ -170,6 +173,8 @@ def _config_toml(model, spec):
         f"planner_model = {_toml_str(model)}\n"
         f"strategist_model = {_toml_str(model)}\n"
         f"skeptic_models = [{_toml_str(model)}]\n\n"
+        "[subagents]\n"
+        "enabled = false\n\n"
         "[subagents.models]\n"
         f"explore = {_toml_str(model)}\n"
         f"plan = {_toml_str(model)}\n\n"
@@ -316,6 +321,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         grok_dir = os.path.dirname(_write_config(iso_home, model, _proxied_spec(spec)))
         env = dict(os.environ)
         env["HOME"] = iso_home
+        env["GROK_SUBAGENTS"] = "0"
         # Keep Grok's generated state within the disposable home and suppress
         # non-essential network work where the CLI exposes a switch.
         cmd = [
