@@ -394,7 +394,10 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         cmd += ["--cpus", cell_cpus]
     if container_name:
         cmd += ["--name", container_name]
-    effective_harness = base_harness or harness
+    # Candidate names are display labels, never authority to inherit a stock
+    # adapter's credentials. Config variants pass their trusted base explicitly;
+    # generic manifests intentionally resolve to no stock harness here.
+    effective_harness = base_harness if candidate_path else harness
     cmd += [
         "-v", f"{os.path.abspath(workdir)}:/work",
         "-v", f"{os.path.abspath(adapters_dir)}:/bench/adapters:ro",

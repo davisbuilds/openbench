@@ -259,6 +259,16 @@ class TestBuildDockerCmd(unittest.TestCase):
             self.assertIn(f"{auth}:/bench/auth/.cli/auth.json:ro", joined)
             self.assertEqual(cmd[-1], "/bench/candidate/harness.toml")
 
+    def test_manifest_stock_like_label_grants_no_stock_credentials(self):
+        with mock.patch.object(docker_exec, "_auth_mount_args", return_value=[]) as auth_mounts:
+            docker_exec.build_docker_cmd(
+                harness="codex", workdir="/tmp/wd", model="gpt-5.5-medium", timeout_s=9,
+                adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instruction",
+                candidate_path="/tmp/harness.toml", base_harness=None,
+            )
+        auth_mounts.assert_called_once_with(None)
+
     def test_candidate_pass_env_is_name_only(self):
         with mock.patch.dict(os.environ, {"BYO_API_KEY": "secret-value"}):
             cmd = docker_exec.build_docker_cmd(
