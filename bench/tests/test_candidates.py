@@ -77,6 +77,21 @@ class CandidateTests(unittest.TestCase):
                         for k, v in out.items()}
             self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
 
+    def test_manifest_does_not_inherit_host_secrets_by_default(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="safe"\ncommand=["cli"]\n')
+            manifest = candidates.load_candidate(path, ADAPTERS)
+            captured = {}
+            def run(cmd, **kw):
+                captured.update(kw["env"])
+                return Proc()
+            with mock.patch.dict(os.environ, {"UNRELATED_API_SECRET": "do-not-forward"}), \
+                 mock.patch.object(candidates, "_run_process", side_effect=run):
+                manifest.run("prompt", td, "model", 9)
+            self.assertNotIn("UNRELATED_API_SECRET", captured)
+
     def test_manifest_proxy_base_url_override(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "harness.toml")

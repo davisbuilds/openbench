@@ -1,5 +1,8 @@
 kind = "manifest"
 name = "pi-manifest"
+# Required only for byte-identical parity with the stock Pi adapter. New
+# manifests should prefer the safe default and declare pass_env explicitly.
+inherit_env = true
 isolate_home = true
 command = [
   "pi", "-p", "--no-approve",

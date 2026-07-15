@@ -562,8 +562,10 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 extra_env=_proxy_env(proxy_ctx, cell_token, for_docker=True),
                 candidate_path=candidate.path if candidate is not None else None,
                 candidate_auth_files=candidate.auth_files if candidate is not None else None,
-                base_harness=((candidate.base_adapter or candidate.proxy_adapter)
-                              if candidate is not None else None),
+                candidate_pass_env=candidate.pass_env if (candidate is not None and candidate.kind == "manifest") else None,
+                # A manifest's proxy_adapter is accounting metadata only; it
+                # must never grant that stock adapter's credentials.
+                base_harness=candidate.base_adapter if candidate is not None else None,
             )
             return result, "docker"
         except docker_exec.DockerUnavailable as exc:

@@ -64,8 +64,10 @@ configuration. Prefer a fresh temporary HOME/config directory containing only
 required auth files. Config variants stage declared config files in a fresh
 directory and overlay declared environment variables for the base adapter.
 Manifest auth mappings similarly copy only explicitly listed source files to a
-disposable home. Specs contain paths and environment variable names, never
-credential contents.
+disposable home. Generic manifests receive a minimal environment by default;
+`pass_env` explicitly forwards named host variables, while `inherit_env=true`
+is a compatibility escape hatch that should be avoided for untrusted harnesses.
+Specs contain paths and environment variable names, never credential contents.
 
 ## Token and output fields
 
