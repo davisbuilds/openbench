@@ -14,8 +14,8 @@ Date: 2026-07-13. Scope: `bench/run.py` adapters, local and disposable-container
 | opencode | docker | entire auth/data and config directories mounted/staged | yes | `.config/opencode` and adjacent data. **Fixed:** auth.json files only; adapter re-isolates HOME/XDG. |
 | cursor | local | `~/.cursor/cli-config.json` plus owner Cursor hooks/rules/skills/extensions; macOS desktop auth is coupled to owner state | yes | Model, permissions, network, hooks/rules/skills. **Fixed fail-closed:** fresh HOME/XDG; only Linux auth.json or authInfo projection copied, or CURSOR_API_KEY env. Current macOS desktop OAuth cannot authenticate after isolation (see blocker). |
 | cursor | docker | dedicated container-auth `.config/cursor` and `.cursor` trees, plus legacy host `.cursor` fallback | yes | Mixed cli-config/customizations could enter container. **Fixed:** only dedicated `.config/cursor/auth.json` mounted. |
-| grok | local | none; generated `~/.grok/config.toml` in fresh HOME, vendor API-key env | no | No owner `~/.grok`. Removed no-plan/no-subagents/no-web/no-memory and compat-disable policy overrides; generated config only pins benchmark model/routing. |
-| grok | docker | none; no host Grok mount, fresh container and adapter HOME | no | Vendor API-key env only. |
+| grok | local | none; generated `~/.grok/config.toml` in fresh HOME, selected provider API-key env | no | No owner `~/.grok`. Generated `[model.<id>]` entries pin `base_url`, `api_backend`, `env_key`, and bearer auth. Benchmark parity deliberately disables subagents in every cell with both `GROK_SUBAGENTS=0` and `[subagents] enabled=false`; unrelated no-plan/web/memory policy overrides remain absent. |
+| grok | docker | none; no host Grok mount, fresh container and adapter HOME | no | Only the selected provider key (and optional non-secret `OPENAI_BASE_URL` for gpt-5.6) is passed. The same generated routing/subagent guards apply. |
 
 ## Verification
 
