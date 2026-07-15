@@ -75,9 +75,10 @@ ROW_FIELDS = (
 )
 
 
-def make_run_id(harness, task, model, trial):
-    """Deterministic identity for a single benchmark cell."""
-    return f"{harness}:{task}:{model}:trial{trial}"
+def make_run_id(harness, task, model, trial, candidate_digest=None):
+    """Deterministic identity for a cell, including declarative candidate content."""
+    group = f"{harness}@{candidate_digest[:12]}" if candidate_digest else harness
+    return f"{group}:{task}:{model}:trial{trial}"
 
 
 def truncate_checker_output(text, limit=CHECKER_CAPTURE_LIMIT):
@@ -1220,7 +1221,10 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     LOCAL-ONLY to ``<transcripts_dir>/<results_stem>/<run_id>.txt``. See
     ``write_transcript`` for the local-only handling rule.
     """
-    run_id = make_run_id(harness, task, model, trial)
+    run_id = make_run_id(
+        harness, task, model, trial,
+        candidate.identity_digest if candidate is not None else None,
+    )
     cell_token = None
     proxy_harness = (candidate.base_adapter or candidate.proxy_adapter) if candidate is not None else harness
     # Manifests must explicitly route traffic; only config variants inherit the
@@ -1541,7 +1545,11 @@ def main(argv=None):
         for harness in harnesses:
             for task in tasks:
                 for trial in trial_numbers:
-                    run_id = make_run_id(harness, task, args.model, trial)
+                    candidate = candidates.get(harness)
+                    run_id = make_run_id(
+                        harness, task, args.model, trial,
+                        candidate.identity_digest if candidate is not None else None,
+                    )
                     if run_id in existing:
                         skipped += 1
                         print(f"SKIP {run_id}")
@@ -1554,7 +1562,7 @@ def main(argv=None):
                         harness_version=versions.get(harness),
                         transcripts_dir=transcripts_dir, results_stem=results_stem,
                         proxy_ctx=proxy_ctx,
-                        candidate=candidates.get(harness),
+                        candidate=candidate,
                     )
                     append_row(args.results_path, row)
                     existing.add(run_id)

@@ -417,7 +417,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                 "-v", f"{os.path.abspath(candidate_config_dir)}:/bench/candidate-config:ro",
                 "-e", "OPENBENCH_CANDIDATE_CONFIG_DIR=/bench/candidate-config",
             ]
-    if harness in {"codex_v1", "codex_v2"}:
+    if candidate_path is None and harness in {"codex_v1", "codex_v2"}:
         variant = harness.replace("codex_", "")
         host_variant = os.path.join(REPO_ROOT, "ablation", f"codex-home-{variant}")
         container_variant = f"/bench/ablation/codex-home-{variant}"

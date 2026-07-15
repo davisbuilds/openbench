@@ -1,7 +1,9 @@
 # Bring your own harness
 
 Pass one or more candidate files with `--candidate`; each file's `name` becomes
-the independent results group label (and therefore part of `run_id`). Candidates
+the independent results group label. Candidate `run_id` values add a short
+content digest (`name@digest:...`) so editing a spec/config cannot silently reuse
+stale rows. Candidates
 may be mixed with stock `--harness` names.
 
 ## Config variant
@@ -80,5 +82,5 @@ container's disposable home.
 
 Both kinds record their spec digest, configuration digests, command/model data,
 auth paths, environment policy, and environment variable names in
-`candidate_provenance`. Values of
+`candidate_provenance`, including the full candidate identity digest. Values of
 environment variables and auth contents are deliberately excluded.

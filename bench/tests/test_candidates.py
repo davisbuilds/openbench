@@ -78,6 +78,14 @@ class CandidateTests(unittest.TestCase):
                         for k, v in out.items()}
             self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
 
+    def test_candidate_run_id_includes_content_identity(self):
+        manifest = candidates.load_candidate(
+            os.path.join(BENCH, "examples", "pi-harness.toml"), ADAPTERS)
+        run_id = bench_run.make_run_id(
+            manifest.name, "task", "model", 1, manifest.identity_digest)
+        self.assertTrue(run_id.startswith("pi-manifest@" + manifest.identity_digest[:12]))
+        self.assertEqual(manifest.provenance["candidate_digest"], manifest.identity_digest)
+
     def test_candidate_name_cannot_replace_requested_stock_harness(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "harness.toml")
