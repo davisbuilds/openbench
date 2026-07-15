@@ -113,9 +113,9 @@ configuration and environment overlays. Its base adapter owns CLI behavior,
 auth, parsing, model mapping, and proxy support.
 
 A generic manifest describes an arbitrary CLI without Python: argv template,
-environment, auth-file mappings, version command, model mapping, optional
-base-URL proxy routing, and output mode. Placeholders are expanded per cell:
-`{prompt}`, `{workspace}`, and `{model}`. Templates are arrays, not shell
+environment, auth-file mappings, version command, model mapping, and optional
+base-URL proxy routing. Placeholders are expanded per cell:
+`{prompt}`, `{workspace}`, `{model}`, and `{home}`. Templates are arrays, not shell
 strings, so no shell parsing or interpolation occurs.
 
 See `bench/ADAPTER_SPEC.md` for the legacy Python API and the examples in

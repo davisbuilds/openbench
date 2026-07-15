@@ -1220,7 +1220,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     # Manifest candidates opt in with a proxy_route; config variants inherit
     # the stock adapter's proven proxy support.
     proxy_capable = (candidate is not None and candidate.kind == "manifest"
-                     and bool(candidate.proxy_route)) or proxy_supported_for_cell(proxy_harness, model)
+                     and bool(candidate.base_url_env and candidate.proxy_route)) or proxy_supported_for_cell(proxy_harness, model)
     active_proxy_ctx = proxy_ctx if proxy_capable else None
     if active_proxy_ctx:
         import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
@@ -1504,9 +1504,19 @@ def main(argv=None):
         }
         proxy_names = {h: (candidates[h].proxy_adapter if h in candidates else h)
                        for h in harnesses}
-        unsupported = sorted(h for h, base in proxy_names.items() if base not in PROXY_HARNESSES)
-        unsupported_cells = [h for h, base in proxy_names.items()
-                             if base in PROXY_HARNESSES and not proxy_supported_for_cell(base, args.model)]
+        manifest_proxy = {
+            h for h, candidate in candidates.items()
+            if candidate.kind == "manifest" and candidate.base_url_env and candidate.proxy_route
+        }
+        unsupported = sorted(
+            h for h, base in proxy_names.items()
+            if h not in manifest_proxy and base not in PROXY_HARNESSES
+        )
+        unsupported_cells = [
+            h for h, base in proxy_names.items()
+            if h not in manifest_proxy and base in PROXY_HARNESSES
+            and not proxy_supported_for_cell(base, args.model)
+        ]
         if unsupported:
             print("WARN --proxy does not wire these harnesses yet: " + ",".join(unsupported))
         if unsupported_cells:

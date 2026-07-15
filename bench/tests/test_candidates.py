@@ -116,6 +116,14 @@ class CandidateTests(unittest.TestCase):
             time.sleep(0.5)
             self.assertFalse(os.path.exists(marker))
 
+    def test_manifest_requires_complete_proxy_pair(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="bad"\ncommand=["cli"]\nproxy_route="chat/zai/v1"\n')
+            with self.assertRaisesRegex(ValueError, "base_url_env and proxy_route"):
+                candidates.load_candidate(path, ADAPTERS)
+
     def test_manifest_rejects_auth_destination_escape(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "harness.toml")
