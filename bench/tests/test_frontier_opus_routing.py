@@ -237,6 +237,8 @@ class TestClaudeOpus(unittest.TestCase):
         self.assertEqual(kwargs["env"]["DISABLE_AUTOUPDATER"], "1")
         self.assertEqual(cmd[cmd.index("--model") + 1], "claude-opus-4-8")
         self.assertEqual(cmd[cmd.index("--effort") + 1], "medium")
+        tools_index = cmd.index("--disallowedTools")
+        self.assertEqual(cmd[tools_index + 1:tools_index + 3], ["Agent", "Task"])
         self.assertEqual(kwargs["env"]["ANTHROPIC_API_KEY"], "test-key")
         self.assertNotIn("ANTHROPIC_BASE_URL", kwargs["env"])
 
