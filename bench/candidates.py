@@ -35,7 +35,11 @@ def _resolve(spec_path, value):
 
 
 def _expand(value, values):
-    return str(value).format_map(values)
+    """Replace only documented placeholders; preserve unrelated JSON/TOML braces."""
+    text = str(value)
+    for name, replacement in values.items():
+        text = text.replace("{" + name + "}", str(replacement))
+    return text
 
 
 def _safe_destination(root, relative):

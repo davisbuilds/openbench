@@ -77,6 +77,20 @@ class CandidateTests(unittest.TestCase):
                         for k, v in out.items()}
             self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
 
+    def test_manifest_preserves_unrelated_json_braces(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="json"\ncommand=["cli", "{prompt}", "{\\\"type\\\":\\\"json\\\"}"]\n')
+            manifest = candidates.load_candidate(path, ADAPTERS)
+            captured = []
+            def run(cmd, **kw):
+                captured.extend(cmd)
+                return Proc()
+            with mock.patch.object(candidates, "_run_process", side_effect=run):
+                manifest.run("prompt {kept}", td, "model", 9)
+            self.assertEqual(captured, ["cli", "prompt {kept}", '{"type":"json"}'])
+
     def test_manifest_does_not_inherit_host_secrets_by_default(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "harness.toml")
