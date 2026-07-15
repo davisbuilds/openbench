@@ -278,6 +278,8 @@ class TestBuildDockerCmd(unittest.TestCase):
             )
         self.assertIn("INHERITED_SETTING", inherited)
         self.assertFalse(any("private-value" in part for part in inherited))
+        self.assertIn("HOME=/root", inherited)
+        self.assertNotIn("HOME", inherited)
 
 
 class TestParseResult(unittest.TestCase):

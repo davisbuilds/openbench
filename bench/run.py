@@ -1477,6 +1477,9 @@ def main(argv=None):
         candidates = load_candidates(args.candidate, args.adapters_dir)
     except (OSError, ValueError, KeyError) as exc:
         parser.error(str(exc))
+    collisions = sorted(set(harnesses) & set(candidates))
+    if collisions:
+        parser.error("candidate name collides with --harness: " + ",".join(collisions))
     for name in candidates:
         if name not in harnesses:
             harnesses.append(name)

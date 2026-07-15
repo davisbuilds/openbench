@@ -12,6 +12,7 @@ ADAPTERS = os.path.join(BENCH, "adapters")
 import sys
 sys.path.insert(0, BENCH)
 import candidates
+import run as bench_run
 
 
 def load(name):
@@ -76,6 +77,17 @@ class CandidateTests(unittest.TestCase):
                 return {k: v.replace(home, "<HOME>") if isinstance(v, str) else v
                         for k, v in out.items()}
             self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
+
+    def test_candidate_name_cannot_replace_requested_stock_harness(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="pi"\ncommand=["cli"]\n')
+            with self.assertRaises(SystemExit):
+                bench_run.main([
+                    "--task", "unused", "--harness", "pi", "--candidate", path,
+                    "--results-path", os.path.join(td, "results.jsonl"),
+                ])
 
     def test_manifest_preserves_unrelated_json_braces(self):
         with tempfile.TemporaryDirectory() as td:
