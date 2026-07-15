@@ -84,16 +84,16 @@ AUTH_MOUNTS = {
     "null": [],
 }
 
-# Open-model API keys forwarded into the container when set on the host.
-# Passed as bare ``-e VAR`` (no value) so docker reads them from the client's
-# environment and the secret never appears in argv or logged commands.
-API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "ANTHROPIC_API_KEY", "CURSOR_API_KEY")
+# Model API keys forwarded into the container when set on the host. Passed as
+# bare ``-e VAR`` (no value), so secrets never appear in argv/logged commands.
+API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CURSOR_API_KEY")
 
 _MODEL_API_KEY = {
     "glm-5.2": "ZAI_API_KEY",
     "glm-4.7-flash": "ZAI_API_KEY",
     "deepseek-v4-flash": "DEEPSEEK_API_KEY",
     "kimi-k2.7-code": "MOONSHOT_API_KEY",
+    "gpt-5.6": "OPENAI_API_KEY",
 }
 _KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")
 
@@ -431,6 +431,8 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
     for var in _api_key_passthrough(effective_harness, model):
         if os.environ.get(var):
             cmd += ["-e", var]
+    if effective_harness == "grokbuild" and model == "gpt-5.6" and os.environ.get("OPENAI_BASE_URL"):
+        cmd += ["-e", "OPENAI_BASE_URL"]
     for key, value in (extra_env or {}).items():
         cmd += ["-e", f"{key}={value}"]
     pass_names = os.environ if candidate_inherit_env else (candidate_pass_env or [])
