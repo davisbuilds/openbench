@@ -103,6 +103,23 @@ class CandidateTests(unittest.TestCase):
                 manifest.run("prompt {kept}", td, "model", 9)
             self.assertEqual(captured, ["cli", "prompt {kept}", '{"type":"json"}'])
 
+    def test_manifest_version_uses_isolated_home(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="versioned"\ncommand=["cli"]\n'
+                         'version_command=["cli", "--version"]\ninherit_env=true\n')
+            manifest = candidates.load_candidate(path, ADAPTERS)
+            captured = {}
+            def run(cmd, **kw):
+                captured.update(kw)
+                return type("VersionProc", (), {"stdout": "1.0", "stderr": ""})()
+            with mock.patch("subprocess.run", side_effect=run):
+                self.assertEqual(manifest.version(), "1.0")
+            self.assertNotEqual(captured["env"]["HOME"], os.path.expanduser("~"))
+            self.assertEqual(captured["cwd"], captured["env"]["HOME"])
+            self.assertFalse(os.path.exists(captured["cwd"]))
+
     def test_manifest_does_not_inherit_host_secrets_by_default(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "harness.toml")

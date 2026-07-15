@@ -228,14 +228,23 @@ class ManifestHarness:
     def version(self):
         if not self.version_command:
             return None
+        home_ctx = (tempfile.TemporaryDirectory(prefix=f"{self.name}_version_home_")
+                    if self.isolate_home else None)
         try:
+            env = _manifest_environ(self.inherit_env, self.pass_env)
+            cwd = None
+            if home_ctx:
+                env["HOME"] = home_ctx.name
+                cwd = home_ctx.name
             proc = subprocess.run(
-                self.version_command, capture_output=True, text=True, timeout=5,
-                stdin=subprocess.DEVNULL,
-                env=_manifest_environ(self.inherit_env, self.pass_env),
+                self.version_command, cwd=cwd, capture_output=True, text=True,
+                timeout=5, stdin=subprocess.DEVNULL, env=env,
             )
         except Exception:
             return None
+        finally:
+            if home_ctx:
+                home_ctx.cleanup()
         out = (proc.stdout or proc.stderr or "").strip()
         return out or None
 
