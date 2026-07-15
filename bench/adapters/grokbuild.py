@@ -314,6 +314,10 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model not in OPEN_MODELS:
         return _unsupported(model)
     spec = OPEN_MODELS[model]
+    try:
+        route_spec = _proxied_spec(spec)
+    except ValueError as exc:
+        return _setup_needed(str(exc))
     if not os.environ.get(spec["env_key"]):
         return _setup_needed(f"export {spec['env_key']} to use {model}")
     exe = _resolve_exe()
@@ -322,7 +326,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
 
     iso_home = tempfile.mkdtemp(prefix="grokbuild_home_")
     try:
-        grok_dir = os.path.dirname(_write_config(iso_home, model, _proxied_spec(spec)))
+        grok_dir = os.path.dirname(_write_config(iso_home, model, route_spec))
         env = dict(os.environ)
         env["HOME"] = iso_home
         env["GROK_SUBAGENTS"] = "0"

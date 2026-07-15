@@ -161,6 +161,15 @@ class TestConfigAndGating(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "must not contain"):
                 grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
 
+    def test_invalid_gpt_base_url_returns_structured_setup_error(self):
+        with EnvPatch() as env:
+            env["OPENAI_BASE_URL"] = "https://user:secret" + "@router.example/v1"
+            env["OPENAI_API_KEY"] = "test-key"
+            result = grokbuild.run("hi", "/tmp", "gpt-5.6", 5)
+        self.assertFalse(result["completed"])
+        self.assertIn("SETUP-NEEDED", result["error"])
+        self.assertIsNone(result["cmd"])
+
     def test_gpt_route_accepts_configurable_openai_compatible_base_url(self):
         with EnvPatch() as env:
             env["OPENAI_BASE_URL"] = "https://router.example/v1"
