@@ -252,12 +252,13 @@ class TestBuildDockerCmd(unittest.TestCase):
             finally:
                 os.path.expanduser = original
             joined = " ".join(cmd)
-            self.assertIn(f"{os.path.dirname(spec)}:/bench/candidate:ro", joined)
+            self.assertIn(f"{spec}:/bench/candidate.toml:ro", joined)
+            self.assertNotIn(f"{os.path.dirname(spec)}:/bench/candidate:ro", joined)
             self.assertIn("candidates.py:/bench/candidates.py:ro", joined)
             self.assertIn(f"{home}/external-config:/bench/candidate-config:ro", joined)
             self.assertIn("OPENBENCH_CANDIDATE_CONFIG_DIR=/bench/candidate-config", cmd)
             self.assertIn(f"{auth}:/bench/auth/.cli/auth.json:ro", joined)
-            self.assertEqual(cmd[-1], "/bench/candidate/harness.toml")
+            self.assertEqual(cmd[-1], "/bench/candidate.toml")
 
     def test_manifest_stock_like_label_grants_no_stock_credentials(self):
         with mock.patch.object(docker_exec, "_auth_mount_args", return_value=[]) as auth_mounts:

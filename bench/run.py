@@ -566,6 +566,8 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 candidate_pass_env=candidate.pass_env if (candidate is not None and candidate.kind == "manifest") else None,
                 candidate_config_dir=(candidate.config_dir if candidate is not None
                                       and candidate.kind == "config-variant" else None),
+                candidate_config_files=(candidate.config_files if candidate is not None
+                                        and candidate.kind == "config-variant" else None),
                 candidate_inherit_env=(candidate.inherit_env if candidate is not None
                                        and candidate.kind == "manifest" else False),
                 # A manifest's proxy_adapter is accounting metadata only; it
