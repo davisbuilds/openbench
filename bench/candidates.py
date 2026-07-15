@@ -62,15 +62,16 @@ class ConfigVariant:
         self.proxy_adapter = self.base_adapter
 
     def _provenance(self):
-        names = self.config_files or [
+        entries = self.config_files or [
             p for p in sorted(os.listdir(self.config_dir))
             if os.path.isfile(os.path.join(self.config_dir, p))
         ]
-        files = {name: _sha256(os.path.join(self.config_dir, name)) for name in names}
+        sources = [entry if isinstance(entry, str) else entry["source"] for entry in entries]
+        files = {name: _sha256(os.path.join(self.config_dir, name)) for name in sources}
         return {"kind": self.kind, "name": self.name, "base_adapter": self.base_adapter,
                 "spec": self.path, "spec_sha256": _sha256(self.path),
                 "config_dir": self.config_dir, "config_files_sha256": files,
-                "env_names": sorted(self.env),
+                "config_files": entries, "env_names": sorted(self.env),
                 "auth_files": [{"source": a["source"], "destination": a["destination"]}
                                for a in self.auth_files]}
 
@@ -80,14 +81,22 @@ class ConfigVariant:
 
     def run(self, instruction, workdir, model, timeout_s):
         with tempfile.TemporaryDirectory(prefix=f"{self.name}_config_") as staged:
+            values = {"config_dir": staged, "workspace": workdir, "model": model}
             if self.config_files:
-                for rel in self.config_files:
-                    src, dst = os.path.join(self.config_dir, rel), os.path.join(staged, rel)
+                for entry in self.config_files:
+                    item = {"source": entry, "destination": entry} if isinstance(entry, str) else entry
+                    src = os.path.join(self.config_dir, item["source"])
+                    dst = os.path.join(staged, item.get("destination", item["source"]))
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    shutil.copy2(src, dst)
+                    if item.get("template"):
+                        with open(src, encoding="utf-8") as fh:
+                            text = _expand(fh.read(), values)
+                        with open(dst, "w", encoding="utf-8") as fh:
+                            fh.write(text)
+                    else:
+                        shutil.copy2(src, dst)
             else:
                 shutil.copytree(self.config_dir, staged, dirs_exist_ok=True)
-            values = {"config_dir": staged, "workspace": workdir, "model": model}
             for auth in self.auth_files:
                 src = os.path.expanduser(auth["source"])
                 dst = _expand(auth["destination"], values)

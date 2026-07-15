@@ -93,10 +93,10 @@ def _emit(result):
 
 
 def main(argv):
-    if len(argv) != 4:
+    if len(argv) not in (4, 5):
         _emit({
             "completed": False,
-            "error": f"entry.py: expected 3 args, got {len(argv) - 1}",
+            "error": f"entry.py: expected 3 or 4 args, got {len(argv) - 1}",
             "output_tail": "", "tokens": None, "turns": None, "cmd": None,
         })
         return 2
@@ -122,7 +122,16 @@ def main(argv):
 
     try:
         _stage_auth()
-        if harness == "null":
+        if len(argv) == 5:
+            candidates_path = os.path.dirname(argv[4])
+            if candidates_path not in sys.path:
+                sys.path.insert(0, "/bench")
+            from candidates import load_candidate
+            adapter = load_candidate(argv[4], ADAPTERS_DIR)
+            if adapter.name != harness:
+                raise ValueError(f"candidate name {adapter.name!r} does not match {harness!r}")
+            result = adapter.run(instruction, WORKDIR, model, timeout_s)
+        elif harness == "null":
             result = _null_run(instruction, WORKDIR, model, timeout_s)
         else:
             adapter = _load_adapter(harness)

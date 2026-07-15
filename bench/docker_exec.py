@@ -36,6 +36,7 @@ from types import SimpleNamespace
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 ENTRY_PATH = os.path.join(HERE, "entry.py")
+CANDIDATES_PATH = os.path.join(HERE, "candidates.py")
 DOCKERFILE_DIR = os.path.join(HERE, "docker")
 RESULT_SENTINEL = "__BENCH_RESULT__"
 DEFAULT_IMAGE = "openbench-harness:latest"
@@ -380,7 +381,8 @@ def _auth_mount_args(harness):
 
 def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                      instruction_path, container_name=None,
-                     extra_docker_args=None, extra_env=None):
+                     extra_docker_args=None, extra_env=None,
+                     candidate_path=None, base_harness=None):
     """Assemble the ``docker run`` argv for one cell (pure; unit-testable)."""
     cmd = ["docker", "run", "--rm"]
     # Bound each cell's CPU quota so co-tenant host load cannot starve a cell
@@ -390,12 +392,21 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         cmd += ["--cpus", cell_cpus]
     if container_name:
         cmd += ["--name", container_name]
+    effective_harness = base_harness or harness
     cmd += [
         "-v", f"{os.path.abspath(workdir)}:/work",
         "-v", f"{os.path.abspath(adapters_dir)}:/bench/adapters:ro",
         "-v", f"{ENTRY_PATH}:/bench/entry.py:ro",
         "-v", f"{os.path.abspath(instruction_path)}:/bench/instruction.txt:ro",
     ]
+    candidate_arg = None
+    if candidate_path:
+        candidate_dir = os.path.dirname(os.path.abspath(candidate_path))
+        candidate_arg = f"/bench/candidate/{os.path.basename(candidate_path)}"
+        cmd += [
+            "-v", f"{candidate_dir}:/bench/candidate:ro",
+            "-v", f"{CANDIDATES_PATH}:/bench/candidates.py:ro",
+        ]
     if harness in {"codex_v1", "codex_v2"}:
         variant = harness.replace("codex_", "")
         host_variant = os.path.join(REPO_ROOT, "ablation", f"codex-home-{variant}")
@@ -405,20 +416,19 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-w", "/work",
         "-e", f"HOME={CONTAINER_HOME}",
     ]
-    for assignment in _placeholder_env(harness, model):
+    for assignment in _placeholder_env(effective_harness, model):
         cmd += ["-e", assignment]
-    for var in _api_key_passthrough(harness, model):
+    for var in _api_key_passthrough(effective_harness, model):
         if os.environ.get(var):
             cmd += ["-e", var]
     for key, value in (extra_env or {}).items():
         cmd += ["-e", f"{key}={value}"]
-    cmd += _auth_mount_args(harness)
+    cmd += _auth_mount_args(effective_harness)
     if extra_docker_args:
         cmd += list(extra_docker_args)
-    cmd += [
-        image,
-        "python3", "/bench/entry.py", harness, model, str(timeout_s),
-    ]
+    cmd += [image, "python3", "/bench/entry.py", harness, model, str(timeout_s)]
+    if candidate_arg:
+        cmd.append(candidate_arg)
     return cmd
 
 
@@ -452,7 +462,7 @@ def image_digest(image):
 
 def run_in_container(harness, instruction, workdir, model, timeout_s,
                      adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None,
-                     extra_env=None):
+                     extra_env=None, candidate_path=None, base_harness=None):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -488,6 +498,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             harness, workdir, model, timeout_s, adapters_dir, image_for_run,
             instruction_path, container_name=container_name,
             extra_docker_args=extra_docker_args, extra_env=extra_env,
+            candidate_path=candidate_path, base_harness=base_harness,
         )
         host_env_setup_s = round(time.monotonic() - env_setup_start, 3)
 

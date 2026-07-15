@@ -561,7 +561,8 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 extra_docker_args=_proxy_docker_args(proxy_ctx),
                 extra_env=_proxy_env(proxy_ctx, cell_token, for_docker=True),
                 candidate_path=candidate.path if candidate is not None else None,
-                base_harness=candidate.base_adapter if candidate is not None else None,
+                base_harness=((candidate.base_adapter or candidate.proxy_adapter)
+                              if candidate is not None else None),
             )
             return result, "docker"
         except docker_exec.DockerUnavailable as exc:
@@ -1214,7 +1215,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     """
     run_id = make_run_id(harness, task, model, trial)
     cell_token = None
-    proxy_harness = candidate.base_adapter if candidate is not None else harness
+    proxy_harness = (candidate.base_adapter or candidate.proxy_adapter) if candidate is not None else harness
     # Manifest candidates opt in with a proxy_route; config variants inherit
     # the stock adapter's proven proxy support.
     proxy_capable = (candidate is not None and candidate.kind == "manifest"
@@ -1410,8 +1411,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Agent-harness comparison runner.")
     parser.add_argument("--task", required=True,
                         help="comma-separated task name(s)")
-    parser.add_argument("--harness", required=True,
-                        help="comma-separated harness name(s), e.g. null,codex")
+    parser.add_argument("--harness", default="",
+                        help="comma-separated stock harness or candidate names")
     parser.add_argument("--model", default=DEFAULT_MODEL,
                         help=f"canonical model name (default: {DEFAULT_MODEL})")
     parser.add_argument("--trials", type=int, default=1,
@@ -1462,9 +1463,11 @@ def main(argv=None):
         candidates = load_candidates(args.candidate, args.adapters_dir)
     except (OSError, ValueError, KeyError) as exc:
         parser.error(str(exc))
-    unknown_candidates = sorted(set(candidates) - set(harnesses))
-    if unknown_candidates:
-        parser.error("candidate name(s) missing from --harness: " + ",".join(unknown_candidates))
+    for name in candidates:
+        if name not in harnesses:
+            harnesses.append(name)
+    if not harnesses:
+        parser.error("at least one --harness or --candidate is required")
 
     transcripts_dir = args.transcripts_dir or default_transcripts_dir(args.results_path)
     results_stem = os.path.splitext(os.path.basename(args.results_path))[0]
@@ -1493,8 +1496,11 @@ def main(argv=None):
             "local_base_url": f"http://127.0.0.1:{port}",
             "docker_base_url": f"http://host.docker.internal:{port}",
         }
-        unsupported = sorted(set(harnesses) - PROXY_HARNESSES)
-        unsupported_cells = [h for h in harnesses if h in PROXY_HARNESSES and not proxy_supported_for_cell(h, args.model)]
+        proxy_names = {h: (candidates[h].proxy_adapter if h in candidates else h)
+                       for h in harnesses}
+        unsupported = sorted(h for h, base in proxy_names.items() if base not in PROXY_HARNESSES)
+        unsupported_cells = [h for h, base in proxy_names.items()
+                             if base in PROXY_HARNESSES and not proxy_supported_for_cell(base, args.model)]
         if unsupported:
             print("WARN --proxy does not wire these harnesses yet: " + ",".join(unsupported))
         if unsupported_cells:

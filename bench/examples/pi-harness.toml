@@ -1,0 +1,29 @@
+kind = "manifest"
+name = "pi-manifest"
+isolate_home = true
+command = [
+  "pi", "-p", "--no-approve",
+  "--provider", "openai-codex",
+  "--model", "{model}",
+  "--thinking", "medium",
+  "--mode", "json",
+  "{prompt}",
+]
+version_command = ["pi", "--version"]
+unset_env = ["PI_CODING_AGENT_SESSION_DIR", "PI_PACKAGE_DIR"]
+base_url_env = "OPENAI_BASE_URL"
+proxy_route = "codex/backend-api"
+proxy_adapter = "pi"
+
+[models]
+"gpt-5.5-medium" = "gpt-5.5"
+"gpt-5.6-sol" = "gpt-5.6-sol"
+"gpt-5.6-terra" = "gpt-5.6-terra"
+"gpt-5.6-luna" = "gpt-5.6-luna"
+
+[env]
+PI_CODING_AGENT_DIR = "{home}/.pi/agent"
+
+[[auth_files]]
+source = "~/.pi/agent/auth.json"
+destination = ".pi/agent/auth.json"
