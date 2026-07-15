@@ -535,7 +535,10 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 prefix="bench_candidate_config_", dir=instr_dir)
             for entry in candidate_config_files:
                 source = entry if isinstance(entry, str) else entry["source"]
-                src = os.path.join(candidate_config_dir, source)
+                config_root = os.path.realpath(candidate_config_dir)
+                src = os.path.realpath(os.path.join(config_root, source))
+                if os.path.commonpath((config_root, src)) != config_root:
+                    raise ValueError(f"candidate config source escapes config_dir: {source!r}")
                 dst = os.path.join(candidate_config_stage, source)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(src, dst)

@@ -42,6 +42,15 @@ def _expand(value, values):
     return text
 
 
+def _contained_source(root, relative):
+    """Resolve an existing source without following a symlink outside root."""
+    root_real = os.path.realpath(root)
+    source = os.path.realpath(os.path.join(root_real, relative))
+    if os.path.commonpath((root_real, source)) != root_real:
+        raise ValueError(f"config source escapes config_dir: {relative!r}")
+    return source
+
+
 def _safe_destination(root, relative):
     """Resolve a candidate-owned destination without escaping its temp root."""
     if os.path.isabs(relative):
@@ -133,6 +142,7 @@ class ConfigVariant:
             source = item.get("source", "")
             if os.path.isabs(source) or ".." in source.split(os.sep):
                 raise ValueError(f"config source must stay within config_dir: {source!r}")
+            _contained_source(self.config_dir, source)
         self.env = {str(k): str(v) for k, v in data.get("env", {}).items()}
         self.auth_files = data.get("auth_files", [])
         _validate_auth_files(self.auth_files)
@@ -148,7 +158,7 @@ class ConfigVariant:
             if os.path.isfile(os.path.join(self.config_dir, p))
         ]
         sources = [entry if isinstance(entry, str) else entry["source"] for entry in entries]
-        files = {name: _sha256(os.path.join(self.config_dir, name)) for name in sources}
+        files = {name: _sha256(_contained_source(self.config_dir, name)) for name in sources}
         return {"kind": self.kind, "name": self.name, "base_adapter": self.base_adapter,
                 "spec": self.path, "spec_sha256": _sha256(self.path),
                 "config_dir": self.config_dir, "config_files_sha256": files,
@@ -166,7 +176,7 @@ class ConfigVariant:
             if self.config_files:
                 for entry in self.config_files:
                     item = {"source": entry, "destination": entry} if isinstance(entry, str) else entry
-                    src = os.path.join(self.config_dir, item["source"])
+                    src = _contained_source(self.config_dir, item["source"])
                     dst = _safe_destination(staged, item.get("destination", item["source"]))
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     if item.get("template"):
@@ -218,6 +228,12 @@ class ManifestHarness:
         if not isinstance(self.pass_env, list) or not all(isinstance(x, str) for x in self.pass_env):
             raise ValueError("manifest pass_env must be an array of names")
         self.unset_env = data.get("unset_env", [])
+        if not isinstance(self.unset_env, list) or not all(isinstance(x, str) for x in self.unset_env):
+            raise ValueError("manifest unset_env must be an array of names")
+        reserved = _PROXY_ENV_NAMES & (set(self.env) | set(self.pass_env) | set(self.unset_env))
+        if reserved:
+            raise ValueError("manifest cannot override runner proxy variables: "
+                             + ",".join(sorted(reserved)))
         self.isolate_home = bool(data.get("isolate_home", True))
         if self.isolate_home and "HOME" in self.env:
             raise ValueError("manifest env cannot override HOME when isolate_home=true")

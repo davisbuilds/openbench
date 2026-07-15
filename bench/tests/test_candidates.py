@@ -27,6 +27,21 @@ class Proc:
 
 
 class CandidateTests(unittest.TestCase):
+    def test_config_variant_rejects_source_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as td:
+            config_dir = os.path.join(td, "config")
+            os.makedirs(config_dir)
+            outside = os.path.join(td, "outside")
+            with open(outside, "w", encoding="utf-8") as fh:
+                fh.write("private")
+            os.symlink(outside, os.path.join(config_dir, "linked.toml"))
+            spec_path = os.path.join(td, "candidate.toml")
+            with open(spec_path, "w", encoding="utf-8") as fh:
+                fh.write('kind="config-variant"\nname="bad"\nbase_adapter="pi"\n'
+                         'config_dir="config"\nconfig_files=["linked.toml"]\n')
+            with self.assertRaisesRegex(ValueError, "escapes config_dir"):
+                candidates.load_candidate(spec_path, ADAPTERS)
+
     def test_v2_variant_matches_ad_hoc_command_and_environment(self):
         helper = load("_codex_ablation")
         spec_path = os.path.join(os.path.dirname(BENCH), "ablation", "codex-home-v2", "candidate.toml")
@@ -218,6 +233,15 @@ class CandidateTests(unittest.TestCase):
                 fh.write('kind="manifest"\nname="bad"\ncommand=["cli"]\n'
                          '[[auth_files]]\nsource="/tmp/auth"\ndestination="auth"\n')
             with self.assertRaisesRegex(ValueError, "home-relative"):
+                candidates.load_candidate(path, ADAPTERS)
+
+    def test_manifest_rejects_runner_owned_proxy_environment(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="bad"\ncommand=["cli"]\n'
+                         '[env]\nOPENBENCH_PROXY_CELL_TOKEN="other"\n')
+            with self.assertRaisesRegex(ValueError, "runner proxy variables"):
                 candidates.load_candidate(path, ADAPTERS)
 
     def test_manifest_requires_complete_proxy_pair(self):
