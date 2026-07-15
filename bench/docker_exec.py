@@ -384,7 +384,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                      extra_docker_args=None, extra_env=None,
                      candidate_path=None, base_harness=None,
                      candidate_auth_files=None, candidate_pass_env=None,
-                     candidate_config_dir=None):
+                     candidate_config_dir=None, candidate_inherit_env=False):
     """Assemble the ``docker run`` argv for one cell (pure; unit-testable)."""
     cmd = ["docker", "run", "--rm"]
     # Bound each cell's CPU quota so co-tenant host load cannot starve a cell
@@ -430,8 +430,11 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
             cmd += ["-e", var]
     for key, value in (extra_env or {}).items():
         cmd += ["-e", f"{key}={value}"]
-    for name in candidate_pass_env or []:
-        if os.environ.get(name):
+    pass_names = os.environ if candidate_inherit_env else (candidate_pass_env or [])
+    for name in pass_names:
+        # HOME remains the container's writable isolated home even when the
+        # manifest explicitly opts into inheriting the rest of the host env.
+        if name != "HOME" and os.environ.get(name):
             cmd += ["-e", name]
     stock_auth_args = _auth_mount_args(effective_harness)
     cmd += stock_auth_args
@@ -495,7 +498,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                      adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None,
                      extra_env=None, candidate_path=None, base_harness=None,
                      candidate_auth_files=None, candidate_pass_env=None,
-                     candidate_config_dir=None):
+                     candidate_config_dir=None, candidate_inherit_env=False):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -535,6 +538,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             candidate_auth_files=candidate_auth_files,
             candidate_pass_env=candidate_pass_env,
             candidate_config_dir=candidate_config_dir,
+            candidate_inherit_env=candidate_inherit_env,
         )
         host_env_setup_s = round(time.monotonic() - env_setup_start, 3)
 

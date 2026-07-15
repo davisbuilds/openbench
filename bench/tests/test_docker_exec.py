@@ -270,6 +270,15 @@ class TestBuildDockerCmd(unittest.TestCase):
         self.assertIn("BYO_API_KEY", cmd)
         self.assertFalse(any("secret-value" in part for part in cmd))
 
+        with mock.patch.dict(os.environ, {"INHERITED_SETTING": "private-value"}):
+            inherited = docker_exec.build_docker_cmd(
+                harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
+                adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instruction", candidate_inherit_env=True,
+            )
+        self.assertIn("INHERITED_SETTING", inherited)
+        self.assertFalse(any("private-value" in part for part in inherited))
+
 
 class TestParseResult(unittest.TestCase):
     def test_extracts_last_sentinel_line(self):
@@ -523,7 +532,7 @@ class TestInvokeAdapterFallback(unittest.TestCase):
     def test_manifest_proxy_metadata_does_not_select_stock_auth(self):
         candidate = SimpleNamespace(
             path="/tmp/harness.toml", kind="manifest", base_adapter=None,
-            proxy_adapter="codex", auth_files=[], pass_env=[],
+            proxy_adapter="codex", auth_files=[], pass_env=[], inherit_env=False,
         )
         result = {"completed": True}
         with mock.patch.object(docker_exec, "run_in_container", return_value=result) as run_container:

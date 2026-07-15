@@ -565,6 +565,8 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 candidate_pass_env=candidate.pass_env if (candidate is not None and candidate.kind == "manifest") else None,
                 candidate_config_dir=(candidate.config_dir if candidate is not None
                                       and candidate.kind == "config-variant" else None),
+                candidate_inherit_env=(candidate.inherit_env if candidate is not None
+                                       and candidate.kind == "manifest" else False),
                 # A manifest's proxy_adapter is accounting metadata only; it
                 # must never grant that stock adapter's credentials.
                 base_harness=candidate.base_adapter if candidate is not None else None,
@@ -1221,10 +1223,12 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     run_id = make_run_id(harness, task, model, trial)
     cell_token = None
     proxy_harness = (candidate.base_adapter or candidate.proxy_adapter) if candidate is not None else harness
-    # Manifest candidates opt in with a proxy_route; config variants inherit
-    # the stock adapter's proven proxy support.
-    proxy_capable = (candidate is not None and candidate.kind == "manifest"
-                     and bool(candidate.base_url_env and candidate.proxy_route)) or proxy_supported_for_cell(proxy_harness, model)
+    # Manifests must explicitly route traffic; only config variants inherit the
+    # base adapter's proven proxy support.
+    if candidate is not None and candidate.kind == "manifest":
+        proxy_capable = bool(candidate.base_url_env and candidate.proxy_route)
+    else:
+        proxy_capable = proxy_supported_for_cell(proxy_harness, model)
     active_proxy_ctx = proxy_ctx if proxy_capable else None
     if active_proxy_ctx:
         import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
