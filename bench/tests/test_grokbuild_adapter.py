@@ -170,6 +170,12 @@ class TestConfigAndGating(unittest.TestCase):
         self.assertIn("SETUP-NEEDED", result["error"])
         self.assertIsNone(result["cmd"])
 
+    def test_gpt_route_rejects_query_bearing_base_url(self):
+        with EnvPatch() as env:
+            env["OPENAI_BASE_URL"] = "https://router.example/v1?api-version=test"
+            with self.assertRaisesRegex(ValueError, "query or fragment"):
+                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+
     def test_gpt_route_accepts_configurable_openai_compatible_base_url(self):
         with EnvPatch() as env:
             env["OPENAI_BASE_URL"] = "https://router.example/v1"

@@ -125,6 +125,8 @@ def _resolved_spec(spec):
     parsed = urlsplit(resolved["base_url"])
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("model base URL must not contain URL-embedded credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("model base URL must not contain a query or fragment")
     return resolved
 
 

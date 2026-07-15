@@ -1512,12 +1512,16 @@ def main(argv=None):
         ledger_parent = os.environ.get("OPENBENCH_PROXY_LEDGER_DIR") or tempfile.mkdtemp(
             prefix="openbench_proxy_", dir=os.environ.get("OPENBENCH_DOCKER_TMPDIR") or None)
         listen_host = "0.0.0.0" if args.exec_mode == "docker" else "127.0.0.1"
-        openai_base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
-        from urllib.parse import urlsplit, urlunsplit
-        parsed_openai = urlsplit(openai_base)
-        if parsed_openai.username is not None or parsed_openai.password is not None:
-            parser.error("OPENAI_BASE_URL must not contain URL-embedded credentials")
-        openai_origin = urlunsplit((parsed_openai.scheme, parsed_openai.netloc, "", "", ""))
+        openai_origin = "https://api.openai.com"
+        if "grokbuild" in harnesses and args.model == "gpt-5.6":
+            openai_base = os.environ.get("OPENAI_BASE_URL", openai_origin)
+            from urllib.parse import urlsplit, urlunsplit
+            parsed_openai = urlsplit(openai_base)
+            if parsed_openai.username is not None or parsed_openai.password is not None:
+                parser.error("OPENAI_BASE_URL must not contain URL-embedded credentials")
+            if parsed_openai.query or parsed_openai.fragment:
+                parser.error("OPENAI_BASE_URL must not contain a query or fragment")
+            openai_origin = urlunsplit((parsed_openai.scheme, parsed_openai.netloc, "", "", ""))
         proxy_server, _thread = counting_proxy.start_in_thread(
             listen_host, 0, ledger_parent, openai_upstream=openai_origin)
         port = proxy_server.server_address[1]
