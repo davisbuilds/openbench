@@ -227,6 +227,33 @@ class TestBuildDockerCmd(unittest.TestCase):
             import shutil
             shutil.rmtree(home, ignore_errors=True)
 
+    def test_declarative_candidate_mounts_spec_runtime_and_auth(self):
+        with tempfile.TemporaryDirectory() as home:
+            auth = os.path.join(home, ".cli", "auth.json")
+            os.makedirs(os.path.dirname(auth))
+            with open(auth, "w", encoding="utf-8") as fh:
+                fh.write("{}")
+            spec = os.path.join(home, "candidate", "harness.toml")
+            os.makedirs(os.path.dirname(spec))
+            with open(spec, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="mine"\ncommand=["cli", "{prompt}"]\n')
+            original = os.path.expanduser
+            os.path.expanduser = lambda value: value.replace("~", home, 1) if value.startswith("~") else value
+            try:
+                cmd = docker_exec.build_docker_cmd(
+                    harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
+                    adapters_dir="/repo/bench/adapters", image="image",
+                    instruction_path="/tmp/instruction", candidate_path=spec,
+                    candidate_auth_files=[{"source": "~/.cli/auth.json", "destination": ".cli/auth.json"}],
+                )
+            finally:
+                os.path.expanduser = original
+            joined = " ".join(cmd)
+            self.assertIn(f"{os.path.dirname(spec)}:/bench/candidate:ro", joined)
+            self.assertIn("candidates.py:/bench/candidates.py:ro", joined)
+            self.assertIn(f"{auth}:/bench/auth/.cli/auth.json:ro", joined)
+            self.assertEqual(cmd[-1], "/bench/candidate/harness.toml")
+
 
 class TestParseResult(unittest.TestCase):
     def test_extracts_last_sentinel_line(self):

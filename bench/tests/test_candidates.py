@@ -76,6 +76,32 @@ class CandidateTests(unittest.TestCase):
                         for k, v in out.items()}
             self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
 
+    def test_manifest_proxy_base_url_override(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(
+                    'kind="manifest"\nname="proxy-cli"\ncommand=["cli", "{prompt}"]\n'
+                    'base_url_env="CLI_BASE_URL"\nproxy_route="chat/zai/api/paas/v4"\n'
+                )
+            manifest = candidates.load_candidate(path, ADAPTERS)
+            captured = {}
+            def run(cmd, **kw):
+                captured.update(kw["env"])
+                return Proc()
+            proxy_env = {
+                "OPENBENCH_PROXY": "1",
+                "OPENBENCH_PROXY_BASE_URL": "http://127.0.0.1:1234",
+                "OPENBENCH_PROXY_CELL_TOKEN": "cell-token",
+            }
+            with mock.patch.dict(os.environ, proxy_env, clear=False), \
+                 mock.patch("subprocess.run", side_effect=run):
+                manifest.run("prompt", td, "model", 9)
+            self.assertEqual(
+                captured["CLI_BASE_URL"],
+                "http://127.0.0.1:1234/cell/cell-token/chat/zai/api/paas/v4",
+            )
+
     def test_manifest_rejects_auth_destination_escape(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "harness.toml")

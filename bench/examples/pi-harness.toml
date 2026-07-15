@@ -11,10 +11,6 @@ command = [
 ]
 version_command = ["pi", "--version"]
 unset_env = ["PI_CODING_AGENT_SESSION_DIR", "PI_PACKAGE_DIR"]
-base_url_env = "OPENAI_BASE_URL"
-proxy_route = "codex/backend-api"
-proxy_adapter = "pi"
-
 [models]
 "gpt-5.5-medium" = "gpt-5.5"
 "gpt-5.6-sol" = "gpt-5.6-sol"
