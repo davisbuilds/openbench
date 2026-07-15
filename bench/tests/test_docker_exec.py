@@ -268,6 +268,12 @@ class TestBuildDockerCmd(unittest.TestCase):
                 candidate_path="/tmp/harness.toml", base_harness=None,
             )
         auth_mounts.assert_called_once_with(None)
+        legacy_label = docker_exec.build_docker_cmd(
+            harness="codex_v1", workdir="/tmp/wd", model="model", timeout_s=9,
+            adapters_dir="/repo/bench/adapters", image="image",
+            instruction_path="/tmp/instruction", candidate_path="/tmp/harness.toml",
+        )
+        self.assertNotIn("/bench/ablation/codex-home-v1", " ".join(legacy_label))
 
     def test_candidate_pass_env_is_name_only(self):
         with mock.patch.dict(os.environ, {"BYO_API_KEY": "secret-value"}):
