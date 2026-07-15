@@ -1515,6 +1515,8 @@ def main(argv=None):
         openai_base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
         from urllib.parse import urlsplit, urlunsplit
         parsed_openai = urlsplit(openai_base)
+        if parsed_openai.username is not None or parsed_openai.password is not None:
+            parser.error("OPENAI_BASE_URL must not contain URL-embedded credentials")
         openai_origin = urlunsplit((parsed_openai.scheme, parsed_openai.netloc, "", "", ""))
         proxy_server, _thread = counting_proxy.start_in_thread(
             listen_host, 0, ledger_parent, openai_upstream=openai_origin)

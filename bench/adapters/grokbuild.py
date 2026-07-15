@@ -121,6 +121,10 @@ def _resolved_spec(spec):
     resolved = dict(spec)
     if spec.get("base_url_env") and os.environ.get(spec["base_url_env"]):
         resolved["base_url"] = os.environ[spec["base_url_env"]]
+    from urllib.parse import urlsplit
+    parsed = urlsplit(resolved["base_url"])
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("model base URL must not contain URL-embedded credentials")
     return resolved
 
 

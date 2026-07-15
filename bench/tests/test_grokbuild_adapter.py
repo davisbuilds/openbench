@@ -155,6 +155,12 @@ class TestConfigAndGating(unittest.TestCase):
                 proxied = grokbuild._proxied_spec(grokbuild.OPEN_MODELS[model])
                 self.assertEqual(proxied["base_url"], f"http://proxy.test:1234/cell/cell-token/{suffix}")
 
+    def test_gpt_route_rejects_url_embedded_credentials(self):
+        with EnvPatch() as env:
+            env["OPENAI_BASE_URL"] = "https://user:secret" + "@router.example/v1"
+            with self.assertRaisesRegex(ValueError, "must not contain"):
+                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+
     def test_gpt_route_accepts_configurable_openai_compatible_base_url(self):
         with EnvPatch() as env:
             env["OPENAI_BASE_URL"] = "https://router.example/v1"
