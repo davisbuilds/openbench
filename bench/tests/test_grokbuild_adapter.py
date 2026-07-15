@@ -229,6 +229,7 @@ class TestRunConstruction(unittest.TestCase):
         grokbuild._resolve_exe = lambda: "/usr/local/bin/grok"
         try:
             with EnvPatch() as env:
+                env.pop("OPENAI_BASE_URL", None)
                 env.update({
                     "DEEPSEEK_API_KEY": "deepseek-test",
                     "ZAI_API_KEY": "zai-test",
