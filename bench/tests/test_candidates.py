@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+import importlib.util
+import json
+import os
+import tempfile
+import unittest
+from unittest import mock
+
+BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ADAPTERS = os.path.join(BENCH, "adapters")
+
+import sys
+sys.path.insert(0, BENCH)
+import candidates
+
+
+def load(name):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(ADAPTERS, name + ".py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); return mod
+
+
+class Proc:
+    returncode = 0
+    stdout = ""
+    stderr = ""
+
+
+class CandidateTests(unittest.TestCase):
+    def test_v2_variant_matches_ad_hoc_command_and_environment(self):
+        helper = load("_codex_ablation")
+        spec_path = os.path.join(os.path.dirname(BENCH), "ablation", "codex-home-v2", "candidate.toml")
+        with tempfile.TemporaryDirectory() as td:
+            auth = os.path.join(td, "auth.json")
+            with open(auth, "w", encoding="utf-8") as fh:
+                fh.write("{}")
+            variant = candidates.load_candidate(spec_path, ADAPTERS)
+            variant.auth_files[0]["source"] = auth
+            captures = []
+            def run(cmd, **kw): captures.append((cmd, kw["env"])); return Proc()
+            with mock.patch.object(helper, "_source_codex_home", return_value=td), \
+                 mock.patch("subprocess.run", side_effect=run):
+                helper.run_variant("codex-v2", "v2", "prompt", td, "gpt-5.6-sol", 9)
+                variant.run("prompt", td, "gpt-5.6-sol", 9)
+            self.assertEqual(captures[0][0], captures[1][0])
+            def normalized(env):
+                out = dict(env); out["CODEX_HOME"] = "<CONFIG_DIR>"; return out
+            self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
+
+    def test_pi_manifest_matches_native_argv_and_environment(self):
+        pi = load("pi")
+        manifest_path = os.path.join(BENCH, "examples", "pi-harness.toml")
+        manifest = candidates.load_candidate(manifest_path, ADAPTERS)
+        with tempfile.TemporaryDirectory() as td:
+            auth = os.path.join(td, "auth.json")
+            with open(auth, "w", encoding="utf-8") as fh:
+                fh.write('{"openai-codex":{}}')
+            pi._REAL_AUTH = auth
+            manifest.auth_files[0]["source"] = auth
+            captures = []
+            def run(cmd, **kw): captures.append((cmd, kw["env"])); return Proc()
+            with mock.patch("subprocess.run", side_effect=run):
+                pi.run("prompt", td, "gpt-5.5-medium", 9)
+                manifest.run("prompt", td, "gpt-5.5-medium", 9)
+            self.assertEqual(captures[0][0], captures[1][0])
+            def normalized(env):
+                out = dict(env)
+                home = out["HOME"]
+                return {k: v.replace(home, "<HOME>") if isinstance(v, str) else v
+                        for k, v in out.items()}
+            self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
+
+    def test_provenance_omits_environment_values(self):
+        manifest = candidates.load_candidate(os.path.join(BENCH, "examples", "pi-harness.toml"), ADAPTERS)
+        text = json.dumps(manifest.provenance)
+        self.assertIn("env_names", text)
+        self.assertNotIn("{home}/.pi/agent", text)
+
+
+if __name__ == "__main__": unittest.main()
