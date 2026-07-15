@@ -419,8 +419,10 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         connection_tokens = set()
         if self.headers.get("Connection"):
             connection_tokens = {x.strip().lower() for x in self.headers.get("Connection", "").split(",")}
-        blocked = HOP_BY_HOP | connection_tokens
-        return {k: v for k, v in self.headers.items() if k.lower() not in blocked and k.lower() != "x-openbench-cell-token"}
+        # Host identifies this proxy on ingress; let http.client generate the
+        # selected upstream's Host header instead of forwarding the proxy host.
+        blocked = HOP_BY_HOP | connection_tokens | {"host", "x-openbench-cell-token"}
+        return {k: v for k, v in self.headers.items() if k.lower() not in blocked}
 
     def _read_body(self) -> bytes:
         max_bytes = self.server.max_request_bytes  # type: ignore[attr-defined]
