@@ -1,0 +1,2 @@
+{"response_hash":"response-a","usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":5}}
+{"previous_response_hash":"response-a","response_hash":"response-b","usage":{"input_tokens":150,"cached_input_tokens":80,"output_tokens":5}}
