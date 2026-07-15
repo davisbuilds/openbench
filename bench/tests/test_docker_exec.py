@@ -247,12 +247,15 @@ class TestBuildDockerCmd(unittest.TestCase):
                     adapters_dir="/repo/bench/adapters", image="image",
                     instruction_path="/tmp/instruction", candidate_path=spec,
                     candidate_auth_files=[{"source": "~/.cli/auth.json", "destination": ".cli/auth.json"}],
+                    candidate_config_dir=os.path.join(home, "external-config"),
                 )
             finally:
                 os.path.expanduser = original
             joined = " ".join(cmd)
             self.assertIn(f"{os.path.dirname(spec)}:/bench/candidate:ro", joined)
             self.assertIn("candidates.py:/bench/candidates.py:ro", joined)
+            self.assertIn(f"{home}/external-config:/bench/candidate-config:ro", joined)
+            self.assertIn("OPENBENCH_CANDIDATE_CONFIG_DIR=/bench/candidate-config", cmd)
             self.assertIn(f"{auth}:/bench/auth/.cli/auth.json:ro", joined)
             self.assertEqual(cmd[-1], "/bench/candidate/harness.toml")
 

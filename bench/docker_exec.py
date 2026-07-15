@@ -383,7 +383,8 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                      instruction_path, container_name=None,
                      extra_docker_args=None, extra_env=None,
                      candidate_path=None, base_harness=None,
-                     candidate_auth_files=None, candidate_pass_env=None):
+                     candidate_auth_files=None, candidate_pass_env=None,
+                     candidate_config_dir=None):
     """Assemble the ``docker run`` argv for one cell (pure; unit-testable)."""
     cmd = ["docker", "run", "--rm"]
     # Bound each cell's CPU quota so co-tenant host load cannot starve a cell
@@ -408,6 +409,11 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
             "-v", f"{candidate_dir}:/bench/candidate:ro",
             "-v", f"{CANDIDATES_PATH}:/bench/candidates.py:ro",
         ]
+        if candidate_config_dir:
+            cmd += [
+                "-v", f"{os.path.abspath(candidate_config_dir)}:/bench/candidate-config:ro",
+                "-e", "OPENBENCH_CANDIDATE_CONFIG_DIR=/bench/candidate-config",
+            ]
     if harness in {"codex_v1", "codex_v2"}:
         variant = harness.replace("codex_", "")
         host_variant = os.path.join(REPO_ROOT, "ablation", f"codex-home-{variant}")
@@ -488,7 +494,8 @@ def image_digest(image):
 def run_in_container(harness, instruction, workdir, model, timeout_s,
                      adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None,
                      extra_env=None, candidate_path=None, base_harness=None,
-                     candidate_auth_files=None, candidate_pass_env=None):
+                     candidate_auth_files=None, candidate_pass_env=None,
+                     candidate_config_dir=None):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -527,6 +534,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             candidate_path=candidate_path, base_harness=base_harness,
             candidate_auth_files=candidate_auth_files,
             candidate_pass_env=candidate_pass_env,
+            candidate_config_dir=candidate_config_dir,
         )
         host_env_setup_s = round(time.monotonic() - env_setup_start, 3)
 

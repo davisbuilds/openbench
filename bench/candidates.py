@@ -108,7 +108,9 @@ class ConfigVariant:
         self.path = os.path.abspath(path)
         self.name = data["name"]
         self.base_adapter = data["base_adapter"]
-        self.config_dir = _resolve(self.path, data["config_dir"])
+        self.config_dir = os.environ.get("OPENBENCH_CANDIDATE_CONFIG_DIR") or _resolve(
+            self.path, data["config_dir"])
+        self.config_dir = os.path.abspath(self.config_dir)
         self.config_files = data.get("config_files")
         self.env = {str(k): str(v) for k, v in data.get("env", {}).items()}
         self.auth_files = data.get("auth_files", [])

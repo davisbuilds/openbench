@@ -563,6 +563,8 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 candidate_path=candidate.path if candidate is not None else None,
                 candidate_auth_files=candidate.auth_files if candidate is not None else None,
                 candidate_pass_env=candidate.pass_env if (candidate is not None and candidate.kind == "manifest") else None,
+                candidate_config_dir=(candidate.config_dir if candidate is not None
+                                      and candidate.kind == "config-variant" else None),
                 # A manifest's proxy_adapter is accounting metadata only; it
                 # must never grant that stock adapter's credentials.
                 base_harness=candidate.base_adapter if candidate is not None else None,
