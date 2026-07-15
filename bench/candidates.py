@@ -2,8 +2,10 @@
 
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
+import signal
 import shutil
 import subprocess
 import tempfile
@@ -45,6 +47,25 @@ def _safe_destination(root, relative):
     if os.path.commonpath((root, destination)) != root:
         raise ValueError(f"destination escapes candidate directory: {relative!r}")
     return destination
+
+
+def _run_process(cmd, *, cwd, timeout, env):
+    """Run a manifest command and contain its complete process group."""
+    proc = subprocess.Popen(
+        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, stdin=subprocess.DEVNULL, env=env, start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (AttributeError, OSError):
+            proc.kill()
+        stdout, stderr = proc.communicate()
+        exc.stdout, exc.stderr = stdout, stderr
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 def _base_result(completed, error, output, cmd):
@@ -116,22 +137,19 @@ class ConfigVariant:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(src, dst)
             env = {key: _expand(value, values) for key, value in self.env.items()}
-            try:
+            if "env_override" in inspect.signature(self.module.run).parameters:
                 return self.module.run(instruction, workdir, model, timeout_s,
                                        env_override=env)
-            except TypeError as exc:
-                if "env_override" not in str(exc):
-                    raise
-                old = {key: os.environ.get(key) for key in env}
-                try:
-                    os.environ.update(env)
-                    return self.module.run(instruction, workdir, model, timeout_s)
-                finally:
-                    for key, value in old.items():
-                        if value is None:
-                            os.environ.pop(key, None)
-                        else:
-                            os.environ[key] = value
+            old = {key: os.environ.get(key) for key in env}
+            try:
+                os.environ.update(env)
+                return self.module.run(instruction, workdir, model, timeout_s)
+            finally:
+                for key, value in old.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
 
 
 class ManifestHarness:
@@ -147,7 +165,7 @@ class ManifestHarness:
         self.models = data.get("models", {})
         self.env = {str(k): str(v) for k, v in data.get("env", {}).items()}
         self.unset_env = data.get("unset_env", [])
-        self.isolate_home = bool(data.get("isolate_home", False))
+        self.isolate_home = bool(data.get("isolate_home", True))
         self.auth_files = data.get("auth_files", [])
         if self.auth_files and not self.isolate_home:
             raise ValueError("manifest auth_files require isolate_home=true")
@@ -158,6 +176,8 @@ class ManifestHarness:
             raise ValueError("manifest version_command must be an array of strings")
         self.base_url_env = data.get("base_url_env")
         self.proxy_route = data.get("proxy_route")
+        if bool(self.base_url_env) != bool(self.proxy_route):
+            raise ValueError("manifest proxy routing requires both base_url_env and proxy_route")
         self.proxy_adapter = data.get("proxy_adapter")
         self.provenance = {"kind": self.kind, "name": self.name, "spec": self.path,
                            "spec_sha256": _sha256(self.path), "command": list(self.command),
@@ -205,8 +225,7 @@ class ManifestHarness:
                         [base.rstrip("/"), "cell", token, self.proxy_route.strip("/")])
             cmd = [_expand(part, values) for part in self.command]
             try:
-                proc = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True,
-                                      timeout=timeout_s, stdin=subprocess.DEVNULL, env=env)
+                proc = _run_process(cmd, cwd=workdir, timeout=timeout_s, env=env)
             except subprocess.TimeoutExpired as exc:
                 out = ((exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or ""))
                 err = ((exc.stderr or b"").decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or ""))

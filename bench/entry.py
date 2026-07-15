@@ -130,7 +130,13 @@ def main(argv):
             adapter = load_candidate(argv[4], ADAPTERS_DIR)
             if adapter.name != harness:
                 raise ValueError(f"candidate name {adapter.name!r} does not match {harness!r}")
+            try:
+                candidate_version = adapter.version()
+            except Exception:  # noqa: BLE001 - version failure must not fail a cell
+                candidate_version = None
             result = adapter.run(instruction, WORKDIR, model, timeout_s)
+            if isinstance(result, dict):
+                result["candidate_version"] = candidate_version
         elif harness == "null":
             result = _null_run(instruction, WORKDIR, model, timeout_s)
         else:

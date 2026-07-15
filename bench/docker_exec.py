@@ -424,7 +424,12 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
             cmd += ["-e", var]
     for key, value in (extra_env or {}).items():
         cmd += ["-e", f"{key}={value}"]
-    cmd += _auth_mount_args(effective_harness)
+    stock_auth_args = _auth_mount_args(effective_harness)
+    cmd += stock_auth_args
+    mounted_auth_targets = {
+        stock_auth_args[i + 1].rsplit(":ro", 1)[0].rsplit(":", 1)[-1]
+        for i, item in enumerate(stock_auth_args[:-1]) if item == "-v"
+    }
     # Arbitrary manifests can declare auth paths that have no stock adapter
     # registry entry. Mount home-relative sources read-only at the same staged
     # path; entry.py copies them into the writable container HOME.
@@ -437,8 +442,10 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
             continue
         if relative == ".." or relative.startswith(".." + os.sep):
             raise ValueError("Docker candidate auth sources must be under the user's home")
-        if os.path.isfile(source):
-            cmd += ["-v", f"{source}:{AUTH_STAGING}/{relative}:ro"]
+        target = f"{AUTH_STAGING}/{relative}"
+        if os.path.isfile(source) and target not in mounted_auth_targets:
+            cmd += ["-v", f"{source}:{target}:ro"]
+            mounted_auth_targets.add(target)
     if extra_docker_args:
         cmd += list(extra_docker_args)
     cmd += [image, "python3", "/bench/entry.py", harness, model, str(timeout_s)]

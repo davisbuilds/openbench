@@ -65,7 +65,8 @@ class CandidateTests(unittest.TestCase):
             manifest.auth_files[0]["source"] = auth
             captures = []
             def run(cmd, **kw): captures.append((cmd, kw["env"])); return Proc()
-            with mock.patch("subprocess.run", side_effect=run):
+            with mock.patch("subprocess.run", side_effect=run), \
+                 mock.patch.object(candidates, "_run_process", side_effect=run):
                 pi.run("prompt", td, "gpt-5.5-medium", 9)
                 manifest.run("prompt", td, "gpt-5.5-medium", 9)
             self.assertEqual(captures[0][0], captures[1][0])
@@ -95,12 +96,25 @@ class CandidateTests(unittest.TestCase):
                 "OPENBENCH_PROXY_CELL_TOKEN": "cell-token",
             }
             with mock.patch.dict(os.environ, proxy_env, clear=False), \
-                 mock.patch("subprocess.run", side_effect=run):
+                 mock.patch.object(candidates, "_run_process", side_effect=run):
                 manifest.run("prompt", td, "model", 9)
             self.assertEqual(
                 captured["CLI_BASE_URL"],
                 "http://127.0.0.1:1234/cell/cell-token/chat/zai/api/paas/v4",
             )
+
+    def test_manifest_timeout_kills_descendants(self):
+        import time
+        with tempfile.TemporaryDirectory() as td:
+            marker = os.path.join(td, "survived")
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="timeout"\n'
+                         f'command=["/bin/sh", "-c", "(sleep 0.4; touch {marker}) & wait"]\n')
+            result = candidates.load_candidate(path, ADAPTERS).run("prompt", td, "model", 0.1)
+            self.assertIn("timeout", result["error"])
+            time.sleep(0.5)
+            self.assertFalse(os.path.exists(marker))
 
     def test_manifest_rejects_auth_destination_escape(self):
         with tempfile.TemporaryDirectory() as td:
