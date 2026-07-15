@@ -36,7 +36,13 @@ class CandidateTests(unittest.TestCase):
             variant = candidates.load_candidate(spec_path, ADAPTERS)
             variant.auth_files[0]["source"] = auth
             captures = []
-            def run(cmd, **kw): captures.append((cmd, kw["env"])); return Proc()
+            configs = []
+            def run(cmd, **kw):
+                captures.append((cmd, kw["env"]))
+                config_home = kw["env"]["CODEX_HOME"]
+                with open(os.path.join(config_home, "config.toml"), encoding="utf-8") as fh:
+                    configs.append(fh.read().replace(config_home, "<CONFIG_DIR>"))
+                return Proc()
             with mock.patch.object(helper, "_source_codex_home", return_value=td), \
                  mock.patch("subprocess.run", side_effect=run):
                 helper.run_variant("codex-v2", "v2", "prompt", td, "gpt-5.6-sol", 9)
@@ -45,6 +51,7 @@ class CandidateTests(unittest.TestCase):
             def normalized(env):
                 out = dict(env); out["CODEX_HOME"] = "<CONFIG_DIR>"; return out
             self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
+            self.assertEqual(configs[0], configs[1])
 
     def test_pi_manifest_matches_native_argv_and_environment(self):
         pi = load("pi")
@@ -68,6 +75,17 @@ class CandidateTests(unittest.TestCase):
                 return {k: v.replace(home, "<HOME>") if isinstance(v, str) else v
                         for k, v in out.items()}
             self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
+
+    def test_manifest_rejects_auth_destination_escape(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="bad"\nisolate_home=true\n'
+                         'command=["cli", "{prompt}"]\n'
+                         '[[auth_files]]\nsource="~/auth"\ndestination="../auth"\n')
+            manifest = candidates.load_candidate(path, ADAPTERS)
+            with self.assertRaises(ValueError):
+                manifest.run("prompt", td, "model", 1)
 
     def test_provenance_omits_environment_values(self):
         manifest = candidates.load_candidate(os.path.join(BENCH, "examples", "pi-harness.toml"), ADAPTERS)

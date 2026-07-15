@@ -561,6 +561,7 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 extra_docker_args=_proxy_docker_args(proxy_ctx),
                 extra_env=_proxy_env(proxy_ctx, cell_token, for_docker=True),
                 candidate_path=candidate.path if candidate is not None else None,
+                candidate_auth_files=candidate.auth_files if candidate is not None else None,
                 base_harness=((candidate.base_adapter or candidate.proxy_adapter)
                               if candidate is not None else None),
             )
@@ -1224,7 +1225,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     if active_proxy_ctx:
         import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
         cell_token = counting_proxy.new_cell_token()
-        _write_proxy_cell_metadata(active_proxy_ctx, cell_token, harness, model)
+        _write_proxy_cell_metadata(active_proxy_ctx, cell_token, proxy_harness, model)
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
     # correctly regardless of the caller's cwd or a relative --tasks-dir.
     task_dir = os.path.abspath(os.path.join(tasks_dir, task))
@@ -1320,8 +1321,9 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             row["t_agent_s"] = round(agent_elapsed, 3)
             row["wall_time_s"] = round(time.monotonic() - start, 3)
             row["exec_mode"] = exec_used
+            version_harness = proxy_harness or harness
             row["harness_version"], row["harness_version_source"] = harness_version_for_source(
-                harness, exec_used, harness_version, docker_image, None,
+                version_harness, exec_used, harness_version, docker_image, None,
                 container_versions_reader,
             )
             row["failure_class"] = classify_failure(row, "", timeout_s)
@@ -1332,10 +1334,14 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["exec_mode"] = exec_used
         if exec_used == "docker":
             row["image_digest"] = result.get("image_digest")
+        version_harness = proxy_harness or harness
         row["harness_version"], row["harness_version_source"] = harness_version_for_source(
-            harness, exec_used, harness_version, docker_image, row["image_digest"],
+            version_harness, exec_used, harness_version, docker_image, row["image_digest"],
             container_versions_reader,
         )
+        if exec_used == "docker" and result.get("candidate_version"):
+            row["harness_version"] = result["candidate_version"]
+            row["harness_version_source"] = "container"
 
         # Fold the adapter's self-reported fields into the row.
         row["completed"] = bool(result.get("completed", False))

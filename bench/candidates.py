@@ -36,6 +36,17 @@ def _expand(value, values):
     return str(value).format_map(values)
 
 
+def _safe_destination(root, relative):
+    """Resolve a candidate-owned destination without escaping its temp root."""
+    if os.path.isabs(relative):
+        raise ValueError(f"destination must be relative: {relative!r}")
+    root = os.path.abspath(root)
+    destination = os.path.abspath(os.path.join(root, relative))
+    if os.path.commonpath((root, destination)) != root:
+        raise ValueError(f"destination escapes candidate directory: {relative!r}")
+    return destination
+
+
 def _base_result(completed, error, output, cmd):
     return {
         "completed": completed, "error": error, "output_tail": output[-2000:],
@@ -86,7 +97,7 @@ class ConfigVariant:
                 for entry in self.config_files:
                     item = {"source": entry, "destination": entry} if isinstance(entry, str) else entry
                     src = os.path.join(self.config_dir, item["source"])
-                    dst = os.path.join(staged, item.get("destination", item["source"]))
+                    dst = _safe_destination(staged, item.get("destination", item["source"]))
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     if item.get("template"):
                         with open(src, encoding="utf-8") as fh:
@@ -99,8 +110,7 @@ class ConfigVariant:
                 shutil.copytree(self.config_dir, staged, dirs_exist_ok=True)
             for auth in self.auth_files:
                 src = os.path.expanduser(auth["source"])
-                dst = _expand(auth["destination"], values)
-                dst = dst if os.path.isabs(dst) else os.path.join(staged, dst)
+                dst = _safe_destination(staged, _expand(auth["destination"], values))
                 if not os.path.isfile(src):
                     return _base_result(False, f"SETUP-NEEDED: missing auth file {src}", "", None)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -139,7 +149,13 @@ class ManifestHarness:
         self.unset_env = data.get("unset_env", [])
         self.isolate_home = bool(data.get("isolate_home", False))
         self.auth_files = data.get("auth_files", [])
+        if self.auth_files and not self.isolate_home:
+            raise ValueError("manifest auth_files require isolate_home=true")
         self.version_command = data.get("version_command")
+        if (self.version_command is not None
+                and (not isinstance(self.version_command, list)
+                     or not all(isinstance(x, str) for x in self.version_command))):
+            raise ValueError("manifest version_command must be an array of strings")
         self.base_url_env = data.get("base_url_env")
         self.proxy_route = data.get("proxy_route")
         self.proxy_adapter = data.get("proxy_adapter")
@@ -177,8 +193,7 @@ class ManifestHarness:
             env.update({key: _expand(value, values) for key, value in self.env.items()})
             for auth in self.auth_files:
                 src = os.path.expanduser(auth["source"])
-                dst = _expand(auth["destination"], values)
-                dst = dst if os.path.isabs(dst) else os.path.join(home, dst)
+                dst = _safe_destination(home, _expand(auth["destination"], values))
                 if not os.path.isfile(src):
                     return _base_result(False, f"SETUP-NEEDED: missing auth file {src}", "", None)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
