@@ -116,23 +116,36 @@ class CandidateTests(unittest.TestCase):
             path = os.path.join(td, "harness.toml")
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write('kind="manifest"\nname="versioned"\ncommand=["cli"]\n'
-                         'version_command=["cli", "--version"]\ninherit_env=true\n')
+                         'version_command=["cli", "--home", "{home}"]\ninherit_env=true\n'
+                         '[env]\nTOOL_HOME="{home}/tool"\n')
             manifest = candidates.load_candidate(path, ADAPTERS)
             captured = {}
             def run(cmd, **kw):
                 captured.update(kw)
+                captured["cmd"] = cmd
                 return type("VersionProc", (), {"returncode": 0, "stdout": "1.0", "stderr": ""})()
-            with mock.patch("subprocess.run", side_effect=run):
+            with mock.patch.object(candidates, "_run_process", side_effect=run):
                 self.assertEqual(manifest.version(), "1.0")
             self.assertNotEqual(captured["env"]["HOME"], os.path.expanduser("~"))
             self.assertEqual(captured["cwd"], captured["env"]["HOME"])
+            self.assertEqual(captured["env"]["TOOL_HOME"], captured["cwd"] + "/tool")
+            self.assertEqual(captured["cmd"][-1], captured["cwd"])
             self.assertFalse(os.path.exists(captured["cwd"]))
 
             failed = type("VersionProc", (), {
                 "returncode": 2, "stdout": "", "stderr": "bad flag",
             })()
-            with mock.patch("subprocess.run", return_value=failed):
+            with mock.patch.object(candidates, "_run_process", return_value=failed):
                 self.assertIsNone(manifest.version())
+
+    def test_manifest_cannot_override_isolated_home(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="bad"\ncommand=["cli"]\n'
+                         '[env]\nHOME="/tmp/not-isolated"\n')
+            with self.assertRaisesRegex(ValueError, "cannot override HOME"):
+                candidates.load_candidate(path, ADAPTERS)
 
     def test_manifest_does_not_inherit_host_secrets_by_default(self):
         with tempfile.TemporaryDirectory() as td:

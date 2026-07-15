@@ -212,6 +212,8 @@ class ManifestHarness:
             raise ValueError("manifest pass_env must be an array of names")
         self.unset_env = data.get("unset_env", [])
         self.isolate_home = bool(data.get("isolate_home", True))
+        if self.isolate_home and "HOME" in self.env:
+            raise ValueError("manifest env cannot override HOME when isolate_home=true")
         self.auth_files = data.get("auth_files", [])
         _validate_auth_files(self.auth_files)
         if self.auth_files and not self.isolate_home:
@@ -246,14 +248,16 @@ class ManifestHarness:
                     if self.isolate_home else None)
         try:
             env = _manifest_environ(self.inherit_env, self.pass_env)
-            cwd = None
+            home = home_ctx.name if home_ctx else os.path.expanduser("~")
+            cwd = home_ctx.name if home_ctx else None
             if home_ctx:
-                env["HOME"] = home_ctx.name
-                cwd = home_ctx.name
-            proc = subprocess.run(
-                self.version_command, cwd=cwd, capture_output=True, text=True,
-                timeout=5, stdin=subprocess.DEVNULL, env=env,
-            )
+                env["HOME"] = home
+            values = {"prompt": "", "workspace": home, "model": "", "home": home}
+            for key in self.unset_env:
+                env.pop(key, None)
+            env.update({key: _expand(value, values) for key, value in self.env.items()})
+            command = [_expand(part, values) for part in self.version_command]
+            proc = _run_process(command, cwd=cwd, timeout=5, env=env)
         except Exception:
             return None
         finally:
