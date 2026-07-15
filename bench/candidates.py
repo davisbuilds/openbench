@@ -95,6 +95,16 @@ def _validate_auth_files(auth_files):
             raise ValueError("auth file sources must be home-relative paths beginning with '~/'.")
 
 
+def _candidate_identity(provenance):
+    """Portable identity from content digests, independent of checkout paths."""
+    material = {
+        "spec_sha256": provenance["spec_sha256"],
+        "config_files_sha256": provenance.get("config_files_sha256", {}),
+    }
+    encoded = json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _base_result(completed, error, output, cmd):
     return {
         "completed": completed, "error": error, "output_tail": output[-2000:],
@@ -121,6 +131,8 @@ class ConfigVariant:
         _validate_auth_files(self.auth_files)
         self.module = _load_adapter(adapters_dir, self.base_adapter)
         self.provenance = self._provenance()
+        self.identity_digest = _candidate_identity(self.provenance)
+        self.provenance["candidate_digest"] = self.identity_digest
         self.proxy_adapter = self.base_adapter
 
     def _provenance(self):
@@ -224,6 +236,8 @@ class ManifestHarness:
                            "version_command": list(self.version_command or []),
                            "base_url_env": self.base_url_env,
                            "proxy_route": self.proxy_route}
+        self.identity_digest = _candidate_identity(self.provenance)
+        self.provenance["candidate_digest"] = self.identity_digest
 
     def version(self):
         if not self.version_command:
@@ -245,6 +259,8 @@ class ManifestHarness:
         finally:
             if home_ctx:
                 home_ctx.cleanup()
+        if proc.returncode != 0:
+            return None
         out = (proc.stdout or proc.stderr or "").strip()
         return out or None
 

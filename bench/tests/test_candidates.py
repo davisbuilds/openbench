@@ -113,12 +113,18 @@ class CandidateTests(unittest.TestCase):
             captured = {}
             def run(cmd, **kw):
                 captured.update(kw)
-                return type("VersionProc", (), {"stdout": "1.0", "stderr": ""})()
+                return type("VersionProc", (), {"returncode": 0, "stdout": "1.0", "stderr": ""})()
             with mock.patch("subprocess.run", side_effect=run):
                 self.assertEqual(manifest.version(), "1.0")
             self.assertNotEqual(captured["env"]["HOME"], os.path.expanduser("~"))
             self.assertEqual(captured["cwd"], captured["env"]["HOME"])
             self.assertFalse(os.path.exists(captured["cwd"]))
+
+            failed = type("VersionProc", (), {
+                "returncode": 2, "stdout": "", "stderr": "bad flag",
+            })()
+            with mock.patch("subprocess.run", return_value=failed):
+                self.assertIsNone(manifest.version())
 
     def test_manifest_does_not_inherit_host_secrets_by_default(self):
         with tempfile.TemporaryDirectory() as td:
