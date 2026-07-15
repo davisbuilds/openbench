@@ -21,6 +21,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(BENCH_DIR, "tests", "fixtures")
@@ -226,6 +228,102 @@ class TestBuildDockerCmd(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(home, ignore_errors=True)
+
+    def test_declarative_candidate_mounts_spec_runtime_and_auth(self):
+        with tempfile.TemporaryDirectory() as home:
+            auth = os.path.join(home, ".cli", "auth.json")
+            os.makedirs(os.path.dirname(auth))
+            with open(auth, "w", encoding="utf-8") as fh:
+                fh.write("{}")
+            spec = os.path.join(home, "candidate", "harness.toml")
+            os.makedirs(os.path.dirname(spec))
+            with open(spec, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="mine"\ncommand=["cli", "{prompt}"]\n')
+            original = os.path.expanduser
+            os.path.expanduser = lambda value: value.replace("~", home, 1) if value.startswith("~") else value
+            try:
+                cmd = docker_exec.build_docker_cmd(
+                    harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
+                    adapters_dir="/repo/bench/adapters", image="image",
+                    instruction_path="/tmp/instruction", candidate_path=spec,
+                    candidate_auth_files=[{"source": "~/.cli/auth.json", "destination": ".cli/auth.json"}],
+                    candidate_config_dir=os.path.join(home, "external-config"),
+                )
+            finally:
+                os.path.expanduser = original
+            joined = " ".join(cmd)
+            self.assertIn(f"{spec}:/bench/candidate.toml:ro", joined)
+            self.assertNotIn(f"{os.path.dirname(spec)}:/bench/candidate:ro", joined)
+            self.assertIn("candidates.py:/bench/candidates.py:ro", joined)
+            self.assertIn(f"{home}/external-config:/bench/candidate-config:ro", joined)
+            self.assertIn("OPENBENCH_CANDIDATE_CONFIG_DIR=/bench/candidate-config", cmd)
+            self.assertIn(f"{auth}:/bench/auth/.cli/auth.json:ro", joined)
+            self.assertEqual(cmd[-1], "/bench/candidate.toml")
+
+    def test_manifest_stock_like_label_grants_no_stock_credentials(self):
+        with mock.patch.object(docker_exec, "_auth_mount_args", return_value=[]) as auth_mounts:
+            docker_exec.build_docker_cmd(
+                harness="codex", workdir="/tmp/wd", model="gpt-5.5-medium", timeout_s=9,
+                adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instruction",
+                candidate_path="/tmp/harness.toml", base_harness=None,
+            )
+        auth_mounts.assert_called_once_with(None)
+        legacy_label = docker_exec.build_docker_cmd(
+            harness="codex_v1", workdir="/tmp/wd", model="model", timeout_s=9,
+            adapters_dir="/repo/bench/adapters", image="image",
+            instruction_path="/tmp/instruction", candidate_path="/tmp/harness.toml",
+        )
+        self.assertNotIn("/bench/ablation/codex-home-v1", " ".join(legacy_label))
+
+    def test_candidate_pass_env_is_name_only(self):
+        with mock.patch.dict(os.environ, {"BYO_API_KEY": "secret-value"}):
+            cmd = docker_exec.build_docker_cmd(
+                harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
+                adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instruction",
+                candidate_pass_env=["BYO_API_KEY"],
+            )
+        self.assertIn("BYO_API_KEY", cmd)
+        self.assertFalse(any("secret-value" in part for part in cmd))
+        with mock.patch.dict(os.environ, {"EMPTY_SETTING": ""}):
+            empty = docker_exec.build_docker_cmd(
+                harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
+                adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instruction",
+                candidate_pass_env=["EMPTY_SETTING"],
+            )
+        self.assertIn("EMPTY_SETTING", empty)
+
+        with mock.patch.dict(os.environ, {"INHERITED_SETTING": "private-value"}):
+            inherited = docker_exec.build_docker_cmd(
+                harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
+                adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instruction", candidate_inherit_env=True,
+            )
+        self.assertIn("INHERITED_SETTING", inherited)
+        self.assertFalse(any("private-value" in part for part in inherited))
+        self.assertIn("HOME=/root", inherited)
+        self.assertNotIn("HOME", inherited)
+
+        proxy = {
+            "OPENBENCH_PROXY_BASE_URL": "http://host-value",
+            "OPENBENCH_PROXY_CELL_TOKEN": "host-token",
+        }
+        explicit = {
+            "OPENBENCH_PROXY_BASE_URL": "http://per-cell",
+            "OPENBENCH_PROXY_CELL_TOKEN": "cell-token",
+        }
+        with mock.patch.dict(os.environ, proxy):
+            routed = docker_exec.build_docker_cmd(
+                harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
+                adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instruction", candidate_inherit_env=True,
+                extra_env=explicit,
+            )
+        self.assertIn("OPENBENCH_PROXY_BASE_URL=http://per-cell", routed)
+        self.assertNotIn("OPENBENCH_PROXY_BASE_URL", routed)
+        self.assertNotIn("OPENBENCH_PROXY_CELL_TOKEN", routed)
 
 
 class TestParseResult(unittest.TestCase):
@@ -477,6 +575,23 @@ class TestContainerCleanup(unittest.TestCase):
 
 
 class TestInvokeAdapterFallback(unittest.TestCase):
+    def test_manifest_proxy_metadata_does_not_select_stock_auth(self):
+        candidate = SimpleNamespace(
+            path="/tmp/harness.toml", kind="manifest", base_adapter=None,
+            proxy_adapter="codex", auth_files=[], pass_env=[], inherit_env=False,
+            spec_bytes=b'kind="manifest"\nname="mine"\ncommand=["cli"]\n',
+        )
+        result = {"completed": True}
+        with mock.patch.object(docker_exec, "run_in_container", return_value=result) as run_container:
+            actual, lane = run.invoke_adapter(
+                "docker", "mine", "prompt", "/tmp/work", "model", 9,
+                "/tmp/adapters", "image", False, candidate=candidate,
+            )
+        self.assertIs(actual, result)
+        self.assertEqual(lane, "docker")
+        self.assertIsNone(run_container.call_args.kwargs["base_harness"])
+
+
     def test_docker_unavailable_falls_back_to_local(self):
         # Force the docker backend to report unavailable; invoke_adapter should
         # transparently run the fixture adapter locally and report exec="local".
