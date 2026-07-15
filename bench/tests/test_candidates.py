@@ -116,6 +116,25 @@ class CandidateTests(unittest.TestCase):
             time.sleep(0.5)
             self.assertFalse(os.path.exists(marker))
 
+    def test_manifest_model_map_rejects_unknown_canonical(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="pinned"\ncommand=["cli", "{model}"]\n'
+                         '[models]\n"known"="cli-known"\n')
+            result = candidates.load_candidate(path, ADAPTERS).run("prompt", td, "other", 1)
+            self.assertIn("unsupported-model", result["error"])
+            self.assertIsNone(result["cmd"])
+
+    def test_manifest_rejects_absolute_auth_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="bad"\ncommand=["cli"]\n'
+                         '[[auth_files]]\nsource="/tmp/auth"\ndestination="auth"\n')
+            with self.assertRaisesRegex(ValueError, "home-relative"):
+                candidates.load_candidate(path, ADAPTERS)
+
     def test_manifest_requires_complete_proxy_pair(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "harness.toml")

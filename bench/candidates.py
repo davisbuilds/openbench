@@ -68,6 +68,29 @@ def _run_process(cmd, *, cwd, timeout, env):
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
+_SAFE_ENV_NAMES = {
+    "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "TEMP", "TMP",
+    "SystemRoot", "WINDIR", "PATHEXT",
+}
+_PROXY_ENV_NAMES = {
+    "OPENBENCH_PROXY", "OPENBENCH_PROXY_BASE_URL", "OPENBENCH_PROXY_CELL_TOKEN",
+}
+
+
+def _manifest_environ(inherit_env, pass_env):
+    if inherit_env:
+        return dict(os.environ)
+    names = _SAFE_ENV_NAMES | _PROXY_ENV_NAMES | set(pass_env)
+    return {name: os.environ[name] for name in names if name in os.environ}
+
+
+def _validate_auth_files(auth_files):
+    for auth in auth_files:
+        source = auth.get("source", "")
+        if not source.startswith("~/") or ".." in source.split("/"):
+            raise ValueError("auth file sources must be home-relative paths beginning with '~/'.")
+
+
 def _base_result(completed, error, output, cmd):
     return {
         "completed": completed, "error": error, "output_tail": output[-2000:],
@@ -89,6 +112,7 @@ class ConfigVariant:
         self.config_files = data.get("config_files")
         self.env = {str(k): str(v) for k, v in data.get("env", {}).items()}
         self.auth_files = data.get("auth_files", [])
+        _validate_auth_files(self.auth_files)
         self.module = _load_adapter(adapters_dir, self.base_adapter)
         self.provenance = self._provenance()
         self.proxy_adapter = self.base_adapter
@@ -164,9 +188,14 @@ class ManifestHarness:
             raise ValueError("manifest command must be an array of strings")
         self.models = data.get("models", {})
         self.env = {str(k): str(v) for k, v in data.get("env", {}).items()}
+        self.inherit_env = bool(data.get("inherit_env", False))
+        self.pass_env = data.get("pass_env", [])
+        if not isinstance(self.pass_env, list) or not all(isinstance(x, str) for x in self.pass_env):
+            raise ValueError("manifest pass_env must be an array of names")
         self.unset_env = data.get("unset_env", [])
         self.isolate_home = bool(data.get("isolate_home", True))
         self.auth_files = data.get("auth_files", [])
+        _validate_auth_files(self.auth_files)
         if self.auth_files and not self.isolate_home:
             raise ValueError("manifest auth_files require isolate_home=true")
         self.version_command = data.get("version_command")
@@ -182,6 +211,8 @@ class ManifestHarness:
         self.provenance = {"kind": self.kind, "name": self.name, "spec": self.path,
                            "spec_sha256": _sha256(self.path), "command": list(self.command),
                            "models": dict(self.models), "env_names": sorted(self.env),
+                           "inherit_env": self.inherit_env,
+                           "pass_env": sorted(self.pass_env),
                            "auth_files": [{"source": a["source"], "destination": a["destination"]}
                                           for a in self.auth_files],
                            "version_command": list(self.version_command or []),
@@ -192,19 +223,25 @@ class ManifestHarness:
         if not self.version_command:
             return None
         try:
-            proc = subprocess.run(self.version_command, capture_output=True, text=True,
-                                  timeout=5, stdin=subprocess.DEVNULL)
+            proc = subprocess.run(
+                self.version_command, capture_output=True, text=True, timeout=5,
+                stdin=subprocess.DEVNULL,
+                env=_manifest_environ(self.inherit_env, self.pass_env),
+            )
         except Exception:
             return None
         out = (proc.stdout or proc.stderr or "").strip()
         return out or None
 
     def run(self, instruction, workdir, model, timeout_s):
+        if self.models and model not in self.models:
+            return _base_result(
+                False, f"unsupported-model: {model!r} (have {list(self.models)})", "", None)
         model_id = self.models.get(model, model)
         home_ctx = tempfile.TemporaryDirectory(prefix=f"{self.name}_home_") if self.isolate_home else None
         home = home_ctx.name if home_ctx else os.path.expanduser("~")
         try:
-            env = dict(os.environ)
+            env = _manifest_environ(self.inherit_env, self.pass_env)
             if self.isolate_home:
                 env["HOME"] = home
             values = {"prompt": instruction, "workspace": workdir, "model": model_id, "home": home}

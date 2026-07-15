@@ -40,6 +40,9 @@ name = "my-cli"
 isolate_home = true
 command = ["my-cli", "run", "--model", "{model}", "--workspace", "{workspace}", "{prompt}"]
 version_command = ["my-cli", "--version"]
+# The safe default does not inherit arbitrary host variables. Name only the
+# credentials/settings this CLI needs; Docker forwards these without values in argv.
+pass_env = ["VENDOR_API_KEY"]
 unset_env = ["MY_CLI_CONFIG"]
 base_url_env = "MY_CLI_BASE_URL"
 proxy_route = "chat/vendor/v1"
@@ -53,9 +56,15 @@ source = "~/.my-cli/auth.json"
 destination = ".my-cli/auth.json"
 ```
 
-Commands are argv arrays and never run through a shell. Supported placeholders
+Commands are argv arrays and never run through a shell. By default the child
+environment contains only basic process variables, declared `pass_env` names,
+manifest `[env]` values, and runner proxy variables. `inherit_env = true` is an
+explicit compatibility escape hatch for stock-equivalence cases; it may expose
+unrelated host credentials and should not be used for new manifests.
+Supported placeholders
 are `{prompt}`, `{workspace}`, `{model}`, and `{home}`. Auth files are copied to
-the disposable home; missing files return `SETUP-NEEDED`. `base_url_env` and
+the disposable home; sources must use home-relative `~/...` paths and missing
+files return `SETUP-NEEDED`. `base_url_env` and
 `proxy_route` opt the CLI into the counting proxy. `proxy_route` is the path
 after `/cell/<token>/` (for example `chat/zai/api/paas/v4`); the CLI must honor
 the declared base-URL environment variable. Generic output is retained as a
@@ -70,5 +79,6 @@ the user's home directory; they are mounted read-only and copied into the
 container's disposable home.
 
 Both kinds record their spec digest, configuration digests, command/model data,
-auth paths, and environment variable names in `candidate_provenance`. Values of
+auth paths, environment policy, and environment variable names in
+`candidate_provenance`. Values of
 environment variables and auth contents are deliberately excluded.
