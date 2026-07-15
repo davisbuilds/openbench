@@ -2,7 +2,10 @@ kind = "config-variant"
 name = "codex-v2"
 base_adapter = "codex"
 config_dir = "."
-config_files = ["config.toml", "pi-style-instructions.md"]
+config_files = [
+  { source = "candidate-config.toml", destination = "config.toml", template = true },
+  "pi-style-instructions.md",
+]
 
 [env]
 CODEX_HOME = "{config_dir}"
