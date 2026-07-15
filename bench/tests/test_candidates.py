@@ -61,6 +61,15 @@ class CandidateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "escapes config_dir"):
                 candidates.load_candidate(spec_path, ADAPTERS)
 
+    def test_checked_in_codex_multiagent_candidate_loads_explicit_opt_in(self):
+        path = os.path.join(
+            os.path.dirname(BENCH), "experiments", "multiagent-toggle", "codex-on.toml")
+        variant = candidates.load_candidate(path, ADAPTERS)
+        self.assertEqual(variant.name, "codex-multiagent-on")
+        self.assertEqual(variant.base_adapter, "codex")
+        self.assertEqual(variant.env["OPENBENCH_CODEX_MULTI_AGENT"], "enabled")
+        self.assertEqual(variant.env["CODEX_HOME"], "{config_dir}")
+
     def test_v2_variant_matches_ad_hoc_command_and_environment(self):
         helper = load("_codex_ablation")
         spec_path = os.path.join(os.path.dirname(BENCH), "ablation", "codex-home-v2", "candidate.toml")

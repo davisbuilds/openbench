@@ -13,51 +13,18 @@ import json
 from pathlib import Path
 from typing import Any
 
-
-def _number(value: Any) -> int | None:
-    return int(value) if isinstance(value, (int, float)) and value >= 0 else None
+from run import proxy_split_from_usage
 
 
 def input_split(usage: Any) -> tuple[int, int, int] | None:
-    """Return (uncached, cache-read, cache-write) for known ledger schemas."""
-    if not isinstance(usage, dict):
-        return None
-    if "totalTokens" in usage and ("input" in usage or "output" in usage):
-        uncached = _number(usage.get("input"))
-        if uncached is None:
-            return None
-        return uncached, _number(usage.get("cacheRead")) or 0, _number(usage.get("cacheWrite")) or 0
-    if "input_tokens" in usage:
-        total = _number(usage.get("input_tokens"))
-        if total is None:
-            return None
-        details = usage.get("input_tokens_details") or {}
-        read = _number(usage.get("cache_read_input_tokens"))
-        if read is None:
-            read = _number(usage.get("cached_input_tokens"))
-        if read is None and isinstance(details, dict):
-            read = _number(details.get("cached_tokens"))
-        read = read or 0
-        write = (_number(usage.get("cache_creation_input_tokens"))
-                 or _number(usage.get("cache_write_tokens"))
-                 or (_number(details.get("cache_write_tokens")) if isinstance(details, dict) else None)
-                 or 0)
-        # Anthropic's input field excludes cache lanes; OpenAI's includes them.
-        anthropic = "cache_read_input_tokens" in usage or "cache_creation_input_tokens" in usage
-        return (total, read, write) if anthropic else (max(0, total - read - write), read, write)
-    if "prompt_tokens" in usage:
-        total = _number(usage.get("prompt_tokens"))
-        if total is None:
-            return None
-        details = usage.get("prompt_tokens_details") or {}
-        read = _number(usage.get("prompt_cache_hit_tokens"))
-        if read is None and isinstance(details, dict):
-            read = _number(details.get("cached_tokens"))
-        read = read or 0
-        uncached = _number(usage.get("prompt_cache_miss_tokens"))
-        return (max(0, total - read) if uncached is None else uncached,
-                read, _number(usage.get("prompt_cache_write_tokens")) or 0)
-    return None
+    """Return (uncached, cache-read, cache-write) via runner normalization."""
+    split = proxy_split_from_usage(usage)
+    values = (
+        split.get("tokens_proxy_input_uncached"),
+        split.get("tokens_proxy_cache_read"),
+        split.get("tokens_proxy_cache_write"),
+    )
+    return values if all(isinstance(value, int) and value >= 0 for value in values) else None
 
 
 def _session_components(rows: list[dict[str, Any]]) -> tuple[list[list[int]], int]:
@@ -151,7 +118,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("ledger", help="one cell's proxy JSONL ledger")
     args = parser.parse_args(argv)
-    print(json.dumps(analyze(read_ledger(args.ledger)), indent=2, sort_keys=True))
+    result = analyze(read_ledger(args.ledger))
+    result["ledger"] = str(Path(args.ledger))
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 
