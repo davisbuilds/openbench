@@ -212,7 +212,7 @@ class TestClaudeOpus(unittest.TestCase):
         self.assertIn("SETUP-NEEDED", res["error"])
         self.assertIn("ANTHROPIC_API_KEY", res["error"])
 
-    def test_constructs_bare_first_party_medium_command(self):
+    def test_constructs_isolated_first_party_medium_command(self):
         old_run = self.claude.subprocess.run
         old_resolve = self.claude._resolve_exe
         calls = []
@@ -233,6 +233,8 @@ class TestClaudeOpus(unittest.TestCase):
         self.assertTrue(res["completed"])
         cmd, kwargs = calls[0]
         self.assertIn("--bare", cmd)
+        self.assertNotEqual(kwargs["env"]["HOME"], os.path.expanduser("~"))
+        self.assertEqual(kwargs["env"]["DISABLE_AUTOUPDATER"], "1")
         self.assertEqual(cmd[cmd.index("--model") + 1], "claude-opus-4-8")
         self.assertEqual(cmd[cmd.index("--effort") + 1], "medium")
         self.assertEqual(kwargs["env"]["ANTHROPIC_API_KEY"], "test-key")
@@ -271,7 +273,8 @@ class TestCodexOpus(unittest.TestCase):
                     self.assertIn('model_reasoning_effort="medium"', cmd)
                     self.assertIn('service_tier="default"', cmd)
                     self.assertEqual(cmd[cmd.index("-m") + 1], model)
-                    self.assertIsNone(kwargs["env"])
+                    self.assertIn("CODEX_HOME", kwargs["env"])
+                    self.assertNotEqual(kwargs["env"]["CODEX_HOME"], os.path.expanduser("~/.codex"))
                     self.assertEqual(res["token_basis"], "estimated")
                     self.assertIsNone(res["tokens_cache_write"])
         finally:
@@ -323,6 +326,33 @@ class TestCursorOpus(unittest.TestCase):
         self.assertFalse(res["completed"])
         self.assertIn("SETUP-NEEDED", res["error"])
         self.assertIn("CURSOR_API_KEY", res["error"])
+
+    def test_counting_proxy_sets_private_cursor_api_endpoint(self):
+        old_run = self.cursor.subprocess.run
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return FakeProc(stdout='{"result":"ok","usage":{"inputTokens":1,"outputTokens":2}}')
+
+        self.cursor.subprocess.run = fake_run
+        try:
+            with EnvPatch() as env:
+                env.update({
+                    "OPENBENCH_PROXY": "1",
+                    "OPENBENCH_PROXY_BASE_URL": "http://proxy.test:4321",
+                    "OPENBENCH_PROXY_CELL_TOKEN": "cell-token",
+                })
+                res = self.cursor.run("hi", "/tmp", "gpt-5.5-medium", 5)
+        finally:
+            self.cursor.subprocess.run = old_run
+        self.assertTrue(res["completed"])
+        endpoint = "http://proxy.test:4321/cell/cell-token/cursor"
+        self.assertEqual(calls[0][1]["env"]["CURSOR_API_ENDPOINT"], endpoint)
+        cmd = calls[0][0]
+        self.assertEqual(cmd[cmd.index("--endpoint") + 1], endpoint)
+        self.assertEqual(cmd[cmd.index("--agent-endpoint") + 1], endpoint)
+        self.assertEqual(cmd[cmd.index("--http-version") + 1], "1.1")
 
     def test_constructs_gpt56_medium_models(self):
         variants = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")

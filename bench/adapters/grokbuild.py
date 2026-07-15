@@ -19,6 +19,10 @@ shape:
     [models]
     default = "<name>"
 
+In counting-proxy mode the same custom-provider config replaces `base_url` with
+its per-cell `/chat/<vendor>/<upstream-path>` URL. Grok speaks OpenAI-compatible
+Chat Completions on this path; the proxy forwards to the unchanged vendor URL.
+
 Probe result (2026-07-07): this BYOK custom-model path works without xAI login.
 `--output-format streaming-json` emits JSONL events like
 ``thought``/``text``/``end``.  Those events carried no token-usage fields in the
@@ -105,6 +109,29 @@ def version():
     return f"{out} ({exe})" if out else None
 
 
+def _proxy_cell_url(*parts):
+    base = os.environ.get("OPENBENCH_PROXY_BASE_URL")
+    token = os.environ.get("OPENBENCH_PROXY_CELL_TOKEN")
+    if not os.environ.get("OPENBENCH_PROXY") or not base or not token:
+        return None
+    path = "/".join(str(p).strip("/") for p in ("cell", token, *parts) if str(p).strip("/"))
+    return base.rstrip("/") + "/" + path
+
+
+def _proxied_spec(spec):
+    if not os.environ.get("OPENBENCH_PROXY"):
+        return spec
+    from urllib.parse import urlsplit
+    vendor = {
+        "DEEPSEEK_API_KEY": "deepseek",
+        "ZAI_API_KEY": "zai",
+        "MOONSHOT_API_KEY": "moonshot",
+    }[spec["env_key"]]
+    tail = (urlsplit(spec["base_url"]).path or "").strip("/")
+    url = _proxy_cell_url("chat", vendor, tail)
+    return dict(spec, base_url=url) if url else spec
+
+
 def _toml_str(value):
     # JSON string syntax is valid TOML basic-string syntax for these values.
     return json.dumps(str(value))
@@ -143,34 +170,12 @@ def _config_toml(model, spec):
         f"planner_model = {_toml_str(model)}\n"
         f"strategist_model = {_toml_str(model)}\n"
         f"skeptic_models = [{_toml_str(model)}]\n\n"
-        "[subagents]\n"
-        "enabled = false\n\n"
         "[subagents.models]\n"
         f"explore = {_toml_str(model)}\n"
         f"plan = {_toml_str(model)}\n\n"
     ]
     for alias in (model, *_AUX_MODEL_ALIASES):
         sections.append(_model_section(alias, spec))
-    sections.append(
-        "[session]\n"
-        "save_on_end = false\n\n"
-        "[memory]\n"
-        "enabled = false\n\n"
-        "[memory.session]\n"
-        "save_on_end = false\n\n"
-        "[compat.cursor]\n"
-        "skills = false\n"
-        "rules = false\n"
-        "agents = false\n"
-        "mcps = false\n"
-        "hooks = false\n\n"
-        "[compat.claude]\n"
-        "skills = false\n"
-        "rules = false\n"
-        "agents = false\n"
-        "mcps = false\n"
-        "hooks = false\n"
-    )
     return "".join(sections)
 
 
@@ -308,7 +313,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
 
     iso_home = tempfile.mkdtemp(prefix="grokbuild_home_")
     try:
-        grok_dir = os.path.dirname(_write_config(iso_home, model, spec))
+        grok_dir = os.path.dirname(_write_config(iso_home, model, _proxied_spec(spec)))
         env = dict(os.environ)
         env["HOME"] = iso_home
         # Keep Grok's generated state within the disposable home and suppress
@@ -322,10 +327,6 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "--effort", _EFFORT,
             "--reasoning-effort", _EFFORT,
             "--always-approve",
-            "--no-plan",
-            "--no-subagents",
-            "--disable-web-search",
-            "--no-memory",
             "--cwd", workdir,
         ]
         try:

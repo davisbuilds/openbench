@@ -2,7 +2,7 @@
 
 Headless invocation:
     HOME=<isolated tmp with only .pi/agent/auth.json>
-    pi -p --no-extensions --provider openai-codex --model gpt-5.5 \
+    pi -p --provider openai-codex --model gpt-5.5 \
        --thinking medium <instruction>
 
 Notes / quirks:
@@ -10,8 +10,7 @@ Notes / quirks:
   (pi-goal) crashes `-p` non-interactive mode. To avoid this WITHOUT touching
   the user's config, we run pi under an ISOLATED HOME: a fresh temp dir that
   contains ONLY `.pi/agent/auth.json` copied from the real one. No settings.json
-  means no extensions are registered. `--no-extensions` is added as a belt-and-
-  suspenders guard against any project-local extension discovery in workdir.
+  means no personal extensions are registered; built-in factory behavior remains.
 - Subscription route: provider `openai-codex` exposes `gpt-5.5`
   (verified via `pi --list-models`). The API-key `openai` provider also has
   gpt-5.5 but we prefer the subscription credential.
@@ -32,6 +31,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from urllib.parse import urlsplit
 
 NAME = "pi"
 
@@ -76,6 +76,26 @@ def _legacy_tokens(token_usage):
 
 def _num(value):
     return int(value) if isinstance(value, (int, float)) else None
+
+
+def _proxy_cell_url(*parts):
+    base = os.environ.get("OPENBENCH_PROXY_BASE_URL")
+    token = os.environ.get("OPENBENCH_PROXY_CELL_TOKEN")
+    if not os.environ.get("OPENBENCH_PROXY") or not base or not token:
+        return None
+    path = "/".join(str(p).strip("/") for p in ("cell", token, *parts) if str(p).strip("/"))
+    return base.rstrip("/") + "/" + path
+
+
+def _proxied_base_url(route, original_url=None):
+    if not os.environ.get("OPENBENCH_PROXY"):
+        return original_url
+    if route == "codex":
+        return _proxy_cell_url("codex", "backend-api")
+    parsed = urlsplit(original_url or "")
+    tail = (parsed.path or "").strip("/")
+    vendor = route
+    return _proxy_cell_url("chat", vendor, tail)
 
 
 def version():
@@ -164,6 +184,10 @@ def _has_subscription_auth(provider):
     return isinstance(data, dict) and provider in data
 
 
+def _pi_models_override(base_url):
+    return json.dumps({"providers": {"openai-codex": {"baseUrl": base_url}}}, indent=2)
+
+
 def _pi_provider_ext(spec):
     """JS extension source registering the open provider (loaded via -e).
 
@@ -176,7 +200,7 @@ def _pi_provider_ext(spec):
         "export default function (pi) {\n"
         f'  pi.registerProvider("{spec["provider"]}", {{\n'
         f'    name: "{spec["display"]}",\n'
-        f'    baseUrl: "{spec["base_url"]}",\n'
+        f'    baseUrl: "{_proxied_base_url(spec["provider"], spec["base_url"])}",\n'
         f'    apiKey: "${spec["env_key"]}",\n'
         '    api: "openai-completions",\n'
         "    models: [{\n"
@@ -314,6 +338,11 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     try:
         env = dict(os.environ)
         env["HOME"] = iso_home
+        # PI_CODING_AGENT_DIR overrides HOME; always replace an inherited owner
+        # value so settings/resources/auth cannot escape the isolated tree.
+        env["PI_CODING_AGENT_DIR"] = os.path.join(iso_home, ".pi", "agent")
+        env.pop("PI_CODING_AGENT_SESSION_DIR", None)
+        env.pop("PI_PACKAGE_DIR", None)
 
         if model in MODELS:
             # Subscription route: isolate HOME with only the copied auth.json.
@@ -321,9 +350,16 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             agent_dir = os.path.join(iso_home, ".pi", "agent")
             os.makedirs(agent_dir, exist_ok=True)
             shutil.copy2(_REAL_AUTH, os.path.join(agent_dir, "auth.json"))
+            proxy_url = _proxied_base_url("codex")
+            if proxy_url:
+                with open(os.path.join(agent_dir, "models.json"), "w", encoding="utf-8") as fh:
+                    fh.write(_pi_models_override(proxy_url))
             cmd = [
                 "pi", "-p",
-                "--no-extensions",
+                # Benchmark workspaces are data, not executable configuration.
+                # This preserves Pi's built-in factory tools while preventing a
+                # task's .pi extensions/packages from running in the harness.
+                "--no-approve",
                 "--provider", spec["provider"],
                 "--model", spec["model_id"],
                 "--thinking", spec["thinking"],
@@ -339,7 +375,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 fh.write(_pi_provider_ext(spec))
             cmd = [
                 "pi", "-p",
-                "--no-extensions",
+                "--no-approve",
                 "-e", ext_path,
                 "--provider", spec["provider"],
                 "--model", spec["model_id"],

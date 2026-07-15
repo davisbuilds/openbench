@@ -27,6 +27,7 @@ stdlib only.
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 import time
@@ -36,6 +37,7 @@ from types import SimpleNamespace
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 ENTRY_PATH = os.path.join(HERE, "entry.py")
+CANDIDATES_PATH = os.path.join(HERE, "candidates.py")
 DOCKERFILE_DIR = os.path.join(HERE, "docker")
 RESULT_SENTINEL = "__BENCH_RESULT__"
 DEFAULT_IMAGE = "openbench-harness:latest"
@@ -59,19 +61,17 @@ AUTH_MOUNTS = {
     # entry.py's staging copy run for 13+ minutes and crash on transient
     # session tmp files vanishing mid-copy. codex_v1/v2 compose a fresh runtime
     # CODEX_HOME in the adapter and reuse this same staged auth surface.
-    "codex": [".codex/auth.json", ".codex/config.toml"],
-    "codex_v1": [".codex/auth.json", ".codex/config.toml"],
-    "codex_v2": [".codex/auth.json", ".codex/config.toml"],
-    "pi": [".pi"],
-    "opencode": [".local/share/opencode", ".config/opencode", ".opencode/data"],
+    "codex": [".codex/auth.json"],
+    "codex_v1": [".codex/auth.json"],
+    "codex_v2": [".codex/auth.json"],
+    "pi": [".pi/agent/auth.json"],
+    "opencode": [".local/share/opencode/auth.json", ".opencode/data/auth.json"],
     # Cursor Linux/container auth: `bench/cursor_container_login.sh` mints auth
     # under ~/.openbench/cursor-container-auth, laid out as a HOME subtree. Map
     # those host paths back to Linux cursor-agent's HOME paths in the container;
     # legacy ~/.cursor remains a fallback if no container-auth .cursor exists.
     "cursor": [
-        (".openbench/cursor-container-auth/.config/cursor", ".config/cursor"),
-        (".openbench/cursor-container-auth/.cursor", ".cursor"),
-        ".cursor",
+        (".openbench/cursor-container-auth/.config/cursor/auth.json", ".config/cursor/auth.json"),
     ],
     "devin": [".config/devin"],
     # claude uses API keys only (open-model vendor keys or first-party
@@ -382,7 +382,10 @@ def _auth_mount_args(harness):
 
 def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                      instruction_path, container_name=None,
-                     extra_docker_args=None):
+                     extra_docker_args=None, extra_env=None,
+                     candidate_path=None, base_harness=None,
+                     candidate_auth_files=None, candidate_pass_env=None,
+                     candidate_config_dir=None, candidate_inherit_env=False):
     """Assemble the ``docker run`` argv for one cell (pure; unit-testable)."""
     cmd = ["docker", "run", "--rm"]
     # Bound each cell's CPU quota so co-tenant host load cannot starve a cell
@@ -392,13 +395,29 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         cmd += ["--cpus", cell_cpus]
     if container_name:
         cmd += ["--name", container_name]
+    # Candidate names are display labels, never authority to inherit a stock
+    # adapter's credentials. Config variants pass their trusted base explicitly;
+    # generic manifests intentionally resolve to no stock harness here.
+    effective_harness = base_harness if candidate_path else harness
     cmd += [
         "-v", f"{os.path.abspath(workdir)}:/work",
         "-v", f"{os.path.abspath(adapters_dir)}:/bench/adapters:ro",
         "-v", f"{ENTRY_PATH}:/bench/entry.py:ro",
         "-v", f"{os.path.abspath(instruction_path)}:/bench/instruction.txt:ro",
     ]
-    if harness in {"codex_v1", "codex_v2"}:
+    candidate_arg = None
+    if candidate_path:
+        candidate_arg = "/bench/candidate.toml"
+        cmd += [
+            "-v", f"{os.path.abspath(candidate_path)}:{candidate_arg}:ro",
+            "-v", f"{CANDIDATES_PATH}:/bench/candidates.py:ro",
+        ]
+        if candidate_config_dir:
+            cmd += [
+                "-v", f"{os.path.abspath(candidate_config_dir)}:/bench/candidate-config:ro",
+                "-e", "OPENBENCH_CANDIDATE_CONFIG_DIR=/bench/candidate-config",
+            ]
+    if candidate_path is None and harness in {"codex_v1", "codex_v2"}:
         variant = harness.replace("codex_", "")
         host_variant = os.path.join(REPO_ROOT, "ablation", f"codex-home-{variant}")
         container_variant = f"/bench/ablation/codex-home-{variant}"
@@ -407,18 +426,47 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-w", "/work",
         "-e", f"HOME={CONTAINER_HOME}",
     ]
-    for assignment in _placeholder_env(harness, model):
+    for assignment in _placeholder_env(effective_harness, model):
         cmd += ["-e", assignment]
-    for var in _api_key_passthrough(harness, model):
+    for var in _api_key_passthrough(effective_harness, model):
         if os.environ.get(var):
             cmd += ["-e", var]
-    cmd += _auth_mount_args(harness)
+    for key, value in (extra_env or {}).items():
+        cmd += ["-e", f"{key}={value}"]
+    pass_names = os.environ if candidate_inherit_env else (candidate_pass_env or [])
+    runner_owned = {"HOME", *(extra_env or {}).keys()}
+    for name in pass_names:
+        # The container HOME and per-cell proxy values are runner-owned. A host
+        # variable with the same name must not override their explicit values.
+        if name not in runner_owned and name in os.environ:
+            cmd += ["-e", name]
+    stock_auth_args = _auth_mount_args(effective_harness)
+    cmd += stock_auth_args
+    mounted_auth_targets = {
+        stock_auth_args[i + 1].rsplit(":ro", 1)[0].rsplit(":", 1)[-1]
+        for i, item in enumerate(stock_auth_args[:-1]) if item == "-v"
+    }
+    # Arbitrary manifests can declare auth paths that have no stock adapter
+    # registry entry. Mount home-relative sources read-only at the same staged
+    # path; entry.py copies them into the writable container HOME.
+    home = os.path.realpath(os.path.expanduser("~"))
+    for auth in candidate_auth_files or []:
+        source = os.path.realpath(os.path.expanduser(auth["source"]))
+        try:
+            relative = os.path.relpath(source, home)
+        except ValueError:
+            continue
+        if relative == ".." or relative.startswith(".." + os.sep):
+            raise ValueError("Docker candidate auth sources must be under the user's home")
+        target = f"{AUTH_STAGING}/{relative}"
+        if os.path.isfile(source) and target not in mounted_auth_targets:
+            cmd += ["-v", f"{source}:{target}:ro"]
+            mounted_auth_targets.add(target)
     if extra_docker_args:
         cmd += list(extra_docker_args)
-    cmd += [
-        image,
-        "python3", "/bench/entry.py", harness, model, str(timeout_s),
-    ]
+    cmd += [image, "python3", "/bench/entry.py", harness, model, str(timeout_s)]
+    if candidate_arg:
+        cmd.append(candidate_arg)
     return cmd
 
 
@@ -451,7 +499,11 @@ def image_digest(image):
 
 
 def run_in_container(harness, instruction, workdir, model, timeout_s,
-                     adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None):
+                     adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None,
+                     extra_env=None, candidate_path=None, base_harness=None,
+                     candidate_auth_files=None, candidate_pass_env=None,
+                     candidate_config_dir=None, candidate_inherit_env=False,
+                     candidate_spec_bytes=None, candidate_config_contents=None):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -459,20 +511,38 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     failed result dict (``completed=False``), never raised, so the runner loop
     keeps going.
     """
-    preflight(image)
-    resolved_image = image_digest(image)
-    image_for_run = resolved_image or image
-
-    # Instruction goes through a mounted temp file (avoids env/arg size and
-    # quoting issues with multi-line task instructions). The file must live in
-    # a directory the docker VM can bind-mount: on colima the default macOS
-    # /var/folders temp path is NOT shared into the VM, so default to a
-    # repo-local dir (override with OPENBENCH_DOCKER_TMPDIR).
-    instr_dir = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".bench-tmp")
-    os.makedirs(instr_dir, exist_ok=True)
-    fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt", dir=instr_dir)
+    env_setup_start = time.monotonic()
+    instruction_path = None
+    candidate_spec_path = None
+    candidate_config_stage = None
+    agent_started = False
     try:
+        preflight(image)
+        resolved_image = image_digest(image)
+        image_for_run = resolved_image or image
+
+        # Instruction goes through a mounted temp file (avoids env/arg size and
+        # quoting issues with multi-line task instructions). The file must live in
+        # a directory the docker VM can bind-mount: on colima the default macOS
+        # /var/folders temp path is NOT shared into the VM, so default to a
+        # repo-local dir (override with OPENBENCH_DOCKER_TMPDIR).
+        instr_dir = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".bench-tmp")
+        os.makedirs(instr_dir, exist_ok=True)
+        if candidate_spec_bytes is not None:
+            fd, candidate_spec_path = tempfile.mkstemp(
+                prefix="bench_candidate_", suffix=".toml", dir=instr_dir)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(candidate_spec_bytes)
+        if candidate_config_contents is not None:
+            candidate_config_stage = tempfile.mkdtemp(
+                prefix="bench_candidate_config_", dir=instr_dir)
+            for source, content in candidate_config_contents.items():
+                dst = os.path.join(candidate_config_stage, source)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with open(dst, "wb") as fh:
+                    fh.write(content)
+        fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt", dir=instr_dir)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(instruction)
 
@@ -483,8 +553,14 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         cmd = build_docker_cmd(
             harness, workdir, model, timeout_s, adapters_dir, image_for_run,
             instruction_path, container_name=container_name,
-            extra_docker_args=extra_docker_args,
+            extra_docker_args=extra_docker_args, extra_env=extra_env,
+            candidate_path=candidate_spec_path or candidate_path, base_harness=base_harness,
+            candidate_auth_files=candidate_auth_files,
+            candidate_pass_env=candidate_pass_env,
+            candidate_config_dir=candidate_config_stage,
+            candidate_inherit_env=candidate_inherit_env,
         )
+        host_env_setup_s = round(time.monotonic() - env_setup_start, 3)
 
         # The container must not outlive this call on ANY exit path — timeout,
         # crash, Ctrl-C, or a clean return where `--rm` glitched. Killing the
@@ -493,6 +569,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         # cleaned up).
         cleanup_ok = True
         try:
+            agent_started = True
             proc = _run_docker_client_with_deadline(
                 cmd, container_name, timeout_s + _TIMEOUT_GRACE_S,
             )
@@ -502,6 +579,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         # can fail transiently and still be recovered here.
         if not cleanup_ok:
             full_output = (proc.stdout or "") + (proc.stderr or "") if "proc" in locals() else ""
+            agent_wall = proc.host_wall_time_s if "proc" in locals() else None
             return {
                 "completed": False,
                 "error": f"container cleanup failed for {container_name}; "
@@ -509,7 +587,9 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "output_tail": full_output[-2000:],
                 "full_output": full_output,
                 "tokens": None, "turns": None, "cmd": cmd,
-                "host_wall_time_s": proc.host_wall_time_s if "proc" in locals() else None,
+                "host_wall_time_s": agent_wall,
+                "host_env_setup_s": host_env_setup_s,
+                "host_agent_wall_time_s": agent_wall,
                 "image_digest": resolved_image,
             }
         if proc.timed_out:
@@ -521,6 +601,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "full_output": full_output,
                 "tokens": None, "turns": None, "cmd": cmd,
                 "host_wall_time_s": proc.host_wall_time_s,
+                "host_env_setup_s": host_env_setup_s,
+                "host_agent_wall_time_s": proc.host_wall_time_s,
                 "image_digest": resolved_image,
             }
 
@@ -535,13 +617,27 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                 "full_output": combined,
                 "tokens": None, "turns": None, "cmd": cmd,
                 "host_wall_time_s": proc.host_wall_time_s,
+                "host_env_setup_s": host_env_setup_s,
+                "host_agent_wall_time_s": proc.host_wall_time_s,
                 "image_digest": resolved_image,
             }
         # Record the docker invocation for the results log (adapters record the
         # inner CLI cmd; we prepend the container wrapper for provenance).
         result["cmd"] = {"docker": cmd, "adapter_cmd": result.get("cmd")}
         result["host_wall_time_s"] = proc.host_wall_time_s
+        result["host_env_setup_s"] = host_env_setup_s
+        result["host_agent_wall_time_s"] = proc.host_wall_time_s
         result["image_digest"] = resolved_image
         return result
+    except BaseException as exc:
+        if not agent_started:
+            setattr(exc, "bench_env_setup_s", round(time.monotonic() - env_setup_start, 3))
+            setattr(exc, "bench_agent_wall_time_s", 0.0)
+        raise
     finally:
-        os.unlink(instruction_path)
+        if instruction_path is not None:
+            os.unlink(instruction_path)
+        if candidate_spec_path is not None:
+            os.unlink(candidate_spec_path)
+        if candidate_config_stage:
+            shutil.rmtree(candidate_config_stage, ignore_errors=True)

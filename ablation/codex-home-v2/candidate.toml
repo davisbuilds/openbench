@@ -1,0 +1,15 @@
+kind = "config-variant"
+name = "codex-v2"
+base_adapter = "codex"
+config_dir = "."
+config_files = [
+  { source = "candidate-config.toml", destination = "config.toml", template = true },
+  "pi-style-instructions.md",
+]
+
+[env]
+CODEX_HOME = "{config_dir}"
+
+[[auth_files]]
+source = "~/.codex/auth.json"
+destination = "auth.json"

@@ -133,7 +133,26 @@ class TestConfigAndGating(unittest.TestCase):
         self.assertEqual(parsed["goal"]["planner_model"], "deepseek-v4-flash")
         self.assertEqual(parsed["goal"]["strategist_model"], "deepseek-v4-flash")
         self.assertEqual(parsed["goal"]["skeptic_models"], ["deepseek-v4-flash"])
-        self.assertIn('[compat.claude]', cfg)
+        self.assertNotIn('[compat.claude]', cfg)
+        self.assertNotIn('[compat.cursor]', cfg)
+        self.assertNotIn('enabled = false', cfg)
+
+    def test_proxy_rewrites_custom_provider_base_url_and_preserves_vendor_path(self):
+        spec = grokbuild.OPEN_MODELS["glm-5.2"]
+        with EnvPatch() as env:
+            env.update({
+                "OPENBENCH_PROXY": "1",
+                "OPENBENCH_PROXY_BASE_URL": "http://proxy.test:1234",
+                "OPENBENCH_PROXY_CELL_TOKEN": "cell-token",
+            })
+            proxied = grokbuild._proxied_spec(spec)
+        self.assertEqual(
+            proxied["base_url"],
+            "http://proxy.test:1234/cell/cell-token/chat/zai/api/paas/v4",
+        )
+        self.assertEqual(proxied["model_id"], spec["model_id"])
+        self.assertEqual(proxied["env_key"], spec["env_key"])
+        self.assertEqual(spec["base_url"], "https://api.z.ai/api/paas/v4")
 
     def test_dotted_model_aliases_are_quoted_toml_keys(self):
         for model, spec in grokbuild.OPEN_MODELS.items():
@@ -231,9 +250,10 @@ class TestRunConstruction(unittest.TestCase):
             self.assertEqual(cmd[cmd.index("--reasoning-effort") + 1], "medium")
             self.assertNotIn("--rules", cmd)
             self.assertIn("--always-approve", cmd)
-            self.assertIn("--no-plan", cmd)
-            self.assertIn("--no-subagents", cmd)
-            self.assertIn("--disable-web-search", cmd)
+            self.assertNotIn("--no-plan", cmd)
+            self.assertNotIn("--no-subagents", cmd)
+            self.assertNotIn("--disable-web-search", cmd)
+            self.assertNotIn("--no-memory", cmd)
             self.assertEqual(cmd[cmd.index("--cwd") + 1], "/tmp")
             self.assertEqual(kwargs["cwd"], "/tmp")
             self.assertNotEqual(kwargs["env"]["HOME"], os.path.expanduser("~"))

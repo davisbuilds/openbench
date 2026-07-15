@@ -60,9 +60,19 @@ import os
 import shutil
 import subprocess
 import tempfile
+from urllib.parse import urlsplit
 
 NAME = "claude"
 _EXE = "claude"
+
+
+def _proxy_cell_url(*parts):
+    base = os.environ.get("OPENBENCH_PROXY_BASE_URL")
+    token = os.environ.get("OPENBENCH_PROXY_CELL_TOKEN")
+    if not os.environ.get("OPENBENCH_PROXY") or not base or not token:
+        return None
+    path = "/".join(str(p).strip("/") for p in ("cell", token, *parts) if str(p).strip("/"))
+    return base.rstrip("/") + "/" + path
 
 
 def _empty_token_usage():
@@ -159,7 +169,19 @@ def _clean_env(spec, key, iso_home):
     # Route open-model requests at the vendor host; first-party Anthropic uses
     # Claude Code's default Anthropic endpoint by leaving ANTHROPIC_BASE_URL
     # unset. Authenticate with the chosen API key ONLY.
-    if spec.get("base_url"):
+    proxy_base = None
+    if os.environ.get("OPENBENCH_PROXY"):
+        vendor = spec.get("env_key", "").replace("_API_KEY", "").lower()
+        if spec.get("base_url"):
+            # Preserve vendor-specific Anthropic endpoint prefixes, e.g.
+            # DeepSeek's /anthropic, while routing by a non-secret vendor name.
+            tail = (urlsplit(spec["base_url"]).path or "").strip("/")
+            proxy_base = _proxy_cell_url("anthropic", vendor, tail)
+        else:
+            proxy_base = _proxy_cell_url("anthropic")
+    if proxy_base:
+        env["ANTHROPIC_BASE_URL"] = proxy_base
+    elif spec.get("base_url"):
         env["ANTHROPIC_BASE_URL"] = spec["base_url"]
     env["ANTHROPIC_API_KEY"] = key
     # In the docker lane the container runs as root, and claude refuses
@@ -168,12 +190,8 @@ def _clean_env(spec, key, iso_home):
     # codex's BENCH_IN_CONTAINER handling), so opt in with IS_SANDBOX=1.
     if os.environ.get("BENCH_IN_CONTAINER"):
         env["IS_SANDBOX"] = "1"
-    # Hygiene: no auto-update / telemetry / non-essential calls to Anthropic.
+    # Dataset provenance pins the CLI version; never permit a mid-run update.
     env["DISABLE_AUTOUPDATER"] = "1"
-    env["DISABLE_TELEMETRY"] = "1"
-    env["DISABLE_ERROR_REPORTING"] = "1"
-    env["DISABLE_BUG_COMMAND"] = "1"
-    env["DISABLE_NON_ESSENTIAL_MODEL_CALLS"] = "1"
     return env
 
 
@@ -357,6 +375,8 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         env = _clean_env(spec, key, iso_home)
         cmd = [
             _resolve_exe(), "-p",
+            # Billing boundary: every supported lane is API-key routed. Bare
+            # mode prevents OAuth/keychain reads and Anthropic-billed side calls.
             "--bare",
             "--output-format", "json",
             "--model", spec["model_id"],
