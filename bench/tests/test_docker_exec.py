@@ -21,6 +21,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(BENCH_DIR, "tests", "fixtures")
@@ -253,6 +255,17 @@ class TestBuildDockerCmd(unittest.TestCase):
             self.assertIn("candidates.py:/bench/candidates.py:ro", joined)
             self.assertIn(f"{auth}:/bench/auth/.cli/auth.json:ro", joined)
             self.assertEqual(cmd[-1], "/bench/candidate/harness.toml")
+
+    def test_candidate_pass_env_is_name_only(self):
+        with mock.patch.dict(os.environ, {"BYO_API_KEY": "secret-value"}):
+            cmd = docker_exec.build_docker_cmd(
+                harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
+                adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instruction",
+                candidate_pass_env=["BYO_API_KEY"],
+            )
+        self.assertIn("BYO_API_KEY", cmd)
+        self.assertFalse(any("secret-value" in part for part in cmd))
 
 
 class TestParseResult(unittest.TestCase):
@@ -504,6 +517,22 @@ class TestContainerCleanup(unittest.TestCase):
 
 
 class TestInvokeAdapterFallback(unittest.TestCase):
+    def test_manifest_proxy_metadata_does_not_select_stock_auth(self):
+        candidate = SimpleNamespace(
+            path="/tmp/harness.toml", kind="manifest", base_adapter=None,
+            proxy_adapter="codex", auth_files=[], pass_env=[],
+        )
+        result = {"completed": True}
+        with mock.patch.object(docker_exec, "run_in_container", return_value=result) as run_container:
+            actual, lane = run.invoke_adapter(
+                "docker", "mine", "prompt", "/tmp/work", "model", 9,
+                "/tmp/adapters", "image", False, candidate=candidate,
+            )
+        self.assertIs(actual, result)
+        self.assertEqual(lane, "docker")
+        self.assertIsNone(run_container.call_args.kwargs["base_harness"])
+
+
     def test_docker_unavailable_falls_back_to_local(self):
         # Force the docker backend to report unavailable; invoke_adapter should
         # transparently run the fixture adapter locally and report exec="local".
