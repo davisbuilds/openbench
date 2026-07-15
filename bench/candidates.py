@@ -115,6 +115,15 @@ def _validate_auth_files(auth_files):
             raise ValueError("auth file sources must be home-relative paths beginning with '~/'.")
 
 
+def _auth_source(path):
+    """Resolve a declared auth file and reject symlink escapes from HOME."""
+    home = os.path.realpath(os.path.expanduser("~"))
+    source = os.path.realpath(os.path.expanduser(path))
+    if os.path.commonpath((home, source)) != home:
+        raise ValueError(f"auth source escapes user home: {path!r}")
+    return source
+
+
 def _candidate_identity(provenance):
     """Portable identity from content digests, independent of checkout paths."""
     material = {
@@ -200,7 +209,7 @@ class ConfigVariant:
             else:
                 shutil.copytree(self.config_dir, staged, dirs_exist_ok=True)
             for auth in self.auth_files:
-                src = os.path.expanduser(auth["source"])
+                src = _auth_source(auth["source"])
                 dst = _safe_destination(staged, _expand(auth["destination"], values))
                 if not os.path.isfile(src):
                     return _base_result(False, f"SETUP-NEEDED: missing auth file {src}", "", None)
@@ -319,7 +328,7 @@ class ManifestHarness:
                 env.pop(key, None)
             env.update({key: _expand(value, values) for key, value in self.env.items()})
             for auth in self.auth_files:
-                src = os.path.expanduser(auth["source"])
+                src = _auth_source(auth["source"])
                 dst = _safe_destination(home, _expand(auth["destination"], values))
                 if not os.path.isfile(src):
                     return _base_result(False, f"SETUP-NEEDED: missing auth file {src}", "", None)

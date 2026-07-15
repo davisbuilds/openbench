@@ -60,6 +60,7 @@ class CandidateTests(unittest.TestCase):
                     configs.append(fh.read().replace(config_home, "<CONFIG_DIR>"))
                 return Proc()
             with mock.patch.object(helper, "_source_codex_home", return_value=td), \
+                 mock.patch.object(candidates, "_auth_source", return_value=auth), \
                  mock.patch("subprocess.run", side_effect=run):
                 helper.run_variant("codex-v2", "v2", "prompt", td, "gpt-5.6-sol", 9)
                 variant.run("prompt", td, "gpt-5.6-sol", 9)
@@ -82,6 +83,7 @@ class CandidateTests(unittest.TestCase):
             captures = []
             def run(cmd, **kw): captures.append((cmd, kw["env"])); return Proc()
             with mock.patch("subprocess.run", side_effect=run), \
+                 mock.patch.object(candidates, "_auth_source", return_value=auth), \
                  mock.patch.object(candidates, "_run_process", side_effect=run):
                 pi.run("prompt", td, "gpt-5.5-medium", 9)
                 manifest.run("prompt", td, "gpt-5.5-medium", 9)
@@ -241,6 +243,26 @@ class CandidateTests(unittest.TestCase):
             result = candidates.load_candidate(path, ADAPTERS).run("prompt", td, "other", 1)
             self.assertIn("unsupported-model", result["error"])
             self.assertIsNone(result["cmd"])
+
+    def test_auth_source_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = os.path.join(td, "home")
+            os.makedirs(os.path.join(home, ".cli"))
+            outside = os.path.join(td, "outside")
+            with open(outside, "w", encoding="utf-8") as fh:
+                fh.write("not auth")
+            link = os.path.join(home, ".cli", "auth.json")
+            os.symlink(outside, link)
+            original = os.path.expanduser
+            def expand(value):
+                if value == "~":
+                    return home
+                if value.startswith("~/"):
+                    return os.path.join(home, value[2:])
+                return original(value)
+            with mock.patch.object(candidates.os.path, "expanduser", side_effect=expand):
+                with self.assertRaisesRegex(ValueError, "escapes user home"):
+                    candidates._auth_source("~/.cli/auth.json")
 
     def test_manifest_rejects_absolute_auth_source(self):
         with tempfile.TemporaryDirectory() as td:

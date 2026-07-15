@@ -449,9 +449,9 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
     # Arbitrary manifests can declare auth paths that have no stock adapter
     # registry entry. Mount home-relative sources read-only at the same staged
     # path; entry.py copies them into the writable container HOME.
-    home = os.path.abspath(os.path.expanduser("~"))
+    home = os.path.realpath(os.path.expanduser("~"))
     for auth in candidate_auth_files or []:
-        source = os.path.abspath(os.path.expanduser(auth["source"]))
+        source = os.path.realpath(os.path.expanduser(auth["source"]))
         try:
             relative = os.path.relpath(source, home)
         except ValueError:
