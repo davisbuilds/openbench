@@ -27,6 +27,7 @@ stdlib only.
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 import time
@@ -406,10 +407,9 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
     ]
     candidate_arg = None
     if candidate_path:
-        candidate_dir = os.path.dirname(os.path.abspath(candidate_path))
-        candidate_arg = f"/bench/candidate/{os.path.basename(candidate_path)}"
+        candidate_arg = "/bench/candidate.toml"
         cmd += [
-            "-v", f"{candidate_dir}:/bench/candidate:ro",
+            "-v", f"{os.path.abspath(candidate_path)}:{candidate_arg}:ro",
             "-v", f"{CANDIDATES_PATH}:/bench/candidates.py:ro",
         ]
         if candidate_config_dir:
@@ -438,7 +438,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
     for name in pass_names:
         # The container HOME and per-cell proxy values are runner-owned. A host
         # variable with the same name must not override their explicit values.
-        if name not in runner_owned and os.environ.get(name):
+        if name not in runner_owned and name in os.environ:
             cmd += ["-e", name]
     stock_auth_args = _auth_mount_args(effective_harness)
     cmd += stock_auth_args
@@ -502,7 +502,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                      adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None,
                      extra_env=None, candidate_path=None, base_harness=None,
                      candidate_auth_files=None, candidate_pass_env=None,
-                     candidate_config_dir=None, candidate_inherit_env=False):
+                     candidate_config_dir=None, candidate_inherit_env=False,
+                     candidate_config_files=None):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -512,6 +513,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     """
     env_setup_start = time.monotonic()
     instruction_path = None
+    candidate_config_stage = None
     agent_started = False
     try:
         preflight(image)
@@ -526,6 +528,17 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         instr_dir = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".bench-tmp")
         os.makedirs(instr_dir, exist_ok=True)
+        if candidate_config_dir:
+            if not candidate_config_files:
+                raise ValueError("Docker config variants require declared config_files")
+            candidate_config_stage = tempfile.mkdtemp(
+                prefix="bench_candidate_config_", dir=instr_dir)
+            for entry in candidate_config_files:
+                source = entry if isinstance(entry, str) else entry["source"]
+                src = os.path.join(candidate_config_dir, source)
+                dst = os.path.join(candidate_config_stage, source)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
         fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt", dir=instr_dir)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(instruction)
@@ -541,7 +554,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             candidate_path=candidate_path, base_harness=base_harness,
             candidate_auth_files=candidate_auth_files,
             candidate_pass_env=candidate_pass_env,
-            candidate_config_dir=candidate_config_dir,
+            candidate_config_dir=candidate_config_stage,
             candidate_inherit_env=candidate_inherit_env,
         )
         host_env_setup_s = round(time.monotonic() - env_setup_start, 3)
@@ -621,3 +634,5 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     finally:
         if instruction_path is not None:
             os.unlink(instruction_path)
+        if candidate_config_stage:
+            shutil.rmtree(candidate_config_stage, ignore_errors=True)

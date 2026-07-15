@@ -285,6 +285,14 @@ class TestBuildDockerCmd(unittest.TestCase):
             )
         self.assertIn("BYO_API_KEY", cmd)
         self.assertFalse(any("secret-value" in part for part in cmd))
+        with mock.patch.dict(os.environ, {"EMPTY_SETTING": ""}):
+            empty = docker_exec.build_docker_cmd(
+                harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
+                adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instruction",
+                candidate_pass_env=["EMPTY_SETTING"],
+            )
+        self.assertIn("EMPTY_SETTING", empty)
 
         with mock.patch.dict(os.environ, {"INHERITED_SETTING": "private-value"}):
             inherited = docker_exec.build_docker_cmd(

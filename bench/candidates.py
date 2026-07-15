@@ -126,6 +126,13 @@ class ConfigVariant:
             self.path, data["config_dir"])
         self.config_dir = os.path.abspath(self.config_dir)
         self.config_files = data.get("config_files")
+        if not isinstance(self.config_files, list) or not self.config_files:
+            raise ValueError("config-variant config_files must be a non-empty array")
+        for entry in self.config_files:
+            item = {"source": entry, "destination": entry} if isinstance(entry, str) else entry
+            source = item.get("source", "")
+            if os.path.isabs(source) or ".." in source.split(os.sep):
+                raise ValueError(f"config source must stay within config_dir: {source!r}")
         self.env = {str(k): str(v) for k, v in data.get("env", {}).items()}
         self.auth_files = data.get("auth_files", [])
         _validate_auth_files(self.auth_files)
