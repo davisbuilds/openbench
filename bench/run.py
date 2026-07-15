@@ -71,7 +71,7 @@ ROW_FIELDS = (
     "sampling_observed", "token_basis_proxy",
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
     "harness_version_source", "failure_class", "checker_stdout", "checker_stderr", "checker_workspace_files",
-    "image_digest",
+    "image_digest", "candidate_provenance",
 )
 
 
@@ -301,7 +301,7 @@ def _extract_version(module):
     return v if isinstance(v, str) else None
 
 
-def probe_version(harness, adapters_dir):
+def probe_version(harness, adapters_dir, candidate=None):
     """Best-effort host harness version string for local-mode row stamping.
 
     The built-in ``null`` control reports ``"builtin"``. Real harnesses import
@@ -310,6 +310,11 @@ def probe_version(harness, adapters_dir):
     """
     if harness == "null":
         return "builtin"
+    if candidate is not None:
+        try:
+            return candidate.version()
+        except Exception:  # noqa: BLE001
+            return None
     try:
         module = load_adapter(adapters_dir, harness)
     except Exception:  # noqa: BLE001
@@ -535,7 +540,7 @@ def _write_proxy_cell_metadata(proxy_ctx, cell_token, harness, model):
 
 def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                    adapters_dir, docker_image, docker_fallback,
-                   proxy_ctx=None, cell_token=None):
+                   proxy_ctx=None, cell_token=None, candidate=None):
     """Run the harness for one cell, honoring the execution mode.
 
     Returns ``(result_dict, exec_used)`` where ``exec_used`` is ``"local"`` or
@@ -555,6 +560,8 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 adapters_dir, docker_image,
                 extra_docker_args=_proxy_docker_args(proxy_ctx),
                 extra_env=_proxy_env(proxy_ctx, cell_token, for_docker=True),
+                candidate_path=candidate.path if candidate is not None else None,
+                base_harness=candidate.base_adapter if candidate is not None else None,
             )
             return result, "docker"
         except docker_exec.DockerUnavailable as exc:
@@ -581,7 +588,7 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
             if harness == "null":
                 result = null_run(instruction, workdir, model, timeout_s)
             else:
-                adapter = load_adapter(adapters_dir, harness)
+                adapter = candidate or load_adapter(adapters_dir, harness)
                 result = adapter.run(instruction, workdir, model, timeout_s)
         if fallback_env_setup_s is not None:
             result = _with_phase_timings(
@@ -1184,7 +1191,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              checker_timeout_s, exec_mode="local",
              docker_image=None, docker_fallback=True, harness_version=None,
              container_versions_reader=read_container_cli_versions,
-             transcripts_dir=None, results_stem="", proxy_ctx=None):
+             transcripts_dir=None, results_stem="", proxy_ctx=None,
+             candidate=None):
     """Execute one (task, harness, trial) cell and return its results row.
 
     Copies the task workspace to a temp dir, invokes the adapter (or the
@@ -1206,7 +1214,12 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     """
     run_id = make_run_id(harness, task, model, trial)
     cell_token = None
-    active_proxy_ctx = proxy_ctx if proxy_supported_for_cell(harness, model) else None
+    proxy_harness = candidate.base_adapter if candidate is not None else harness
+    # Manifest candidates opt in with a proxy_route; config variants inherit
+    # the stock adapter's proven proxy support.
+    proxy_capable = (candidate is not None and candidate.kind == "manifest"
+                     and bool(candidate.proxy_route)) or proxy_supported_for_cell(proxy_harness, model)
+    active_proxy_ctx = proxy_ctx if proxy_capable else None
     if active_proxy_ctx:
         import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
         cell_token = counting_proxy.new_cell_token()
@@ -1262,6 +1275,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "checker_stderr": None,
         "checker_workspace_files": None,
         "image_digest": None,
+        "candidate_provenance": candidate.provenance if candidate is not None else None,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
@@ -1291,6 +1305,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 exec_mode, harness, instruction, workdir, model, timeout_s,
                 adapters_dir, docker_image, docker_fallback,
                 proxy_ctx=active_proxy_ctx, cell_token=cell_token,
+                candidate=candidate,
             )
         except Exception as exc:  # noqa: BLE001 - never crash the loop on an adapter
             exec_used = getattr(exc, "bench_exec_used", exec_mode)
@@ -1415,6 +1430,8 @@ def main(argv=None):
                         help="override the results.jsonl path")
     parser.add_argument("--adapters-dir", default=DEFAULT_ADAPTERS_DIR,
                         help="override the adapters directory")
+    parser.add_argument("--candidate", action="append", default=[], metavar="SPEC.toml",
+                        help="declarative config-variant or harness.toml candidate (repeatable)")
     parser.add_argument("--tasks-dir", default=DEFAULT_TASKS_DIR,
                         help="override the tasks directory")
     parser.add_argument("--transcripts-dir", default=None,
@@ -1440,6 +1457,14 @@ def main(argv=None):
 
     tasks = [t.strip() for t in args.task.split(",") if t.strip()]
     harnesses = [h.strip() for h in args.harness.split(",") if h.strip()]
+    from candidates import load_candidates
+    try:
+        candidates = load_candidates(args.candidate, args.adapters_dir)
+    except (OSError, ValueError, KeyError) as exc:
+        parser.error(str(exc))
+    unknown_candidates = sorted(set(candidates) - set(harnesses))
+    if unknown_candidates:
+        parser.error("candidate name(s) missing from --harness: " + ",".join(unknown_candidates))
 
     transcripts_dir = args.transcripts_dir or default_transcripts_dir(args.results_path)
     results_stem = os.path.splitext(os.path.basename(args.results_path))[0]
@@ -1448,7 +1473,7 @@ def main(argv=None):
 
     # Probe each harness's version at most once per invocation (a version()
     # probe may spawn a subprocess), then stamp the cached value into every row.
-    versions = {h: probe_version(h, args.adapters_dir) for h in harnesses}
+    versions = {h: probe_version(h, args.adapters_dir, candidates.get(h)) for h in harnesses}
 
     if args.trial is not None and args.trial < 1:
         parser.error("--trial must be >= 1")
@@ -1496,6 +1521,7 @@ def main(argv=None):
                         harness_version=versions.get(harness),
                         transcripts_dir=transcripts_dir, results_stem=results_stem,
                         proxy_ctx=proxy_ctx,
+                        candidate=candidates.get(harness),
                     )
                     append_row(args.results_path, row)
                     existing.add(run_id)
