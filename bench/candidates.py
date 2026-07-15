@@ -219,8 +219,9 @@ class ManifestHarness:
         self.name = data["name"]
         self.base_adapter = None
         self.command = data["command"]
-        if not isinstance(self.command, list) or not all(isinstance(x, str) for x in self.command):
-            raise ValueError("manifest command must be an array of strings")
+        if (not isinstance(self.command, list) or not self.command
+                or not all(isinstance(x, str) for x in self.command)):
+            raise ValueError("manifest command must be a non-empty array of strings")
         self.models = data.get("models", {})
         self.env = {str(k): str(v) for k, v in data.get("env", {}).items()}
         self.inherit_env = bool(data.get("inherit_env", False))

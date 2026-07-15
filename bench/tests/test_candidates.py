@@ -216,6 +216,14 @@ class CandidateTests(unittest.TestCase):
             time.sleep(0.5)
             self.assertFalse(os.path.exists(marker))
 
+    def test_manifest_rejects_empty_command(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="empty"\ncommand=[]\n')
+            with self.assertRaisesRegex(ValueError, "non-empty"):
+                candidates.load_candidate(path, ADAPTERS)
+
     def test_manifest_model_map_rejects_unknown_canonical(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "harness.toml")
