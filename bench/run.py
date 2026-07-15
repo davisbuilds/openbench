@@ -1512,7 +1512,12 @@ def main(argv=None):
         ledger_parent = os.environ.get("OPENBENCH_PROXY_LEDGER_DIR") or tempfile.mkdtemp(
             prefix="openbench_proxy_", dir=os.environ.get("OPENBENCH_DOCKER_TMPDIR") or None)
         listen_host = "0.0.0.0" if args.exec_mode == "docker" else "127.0.0.1"
-        proxy_server, _thread = counting_proxy.start_in_thread(listen_host, 0, ledger_parent)
+        openai_base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
+        from urllib.parse import urlsplit, urlunsplit
+        parsed_openai = urlsplit(openai_base)
+        openai_origin = urlunsplit((parsed_openai.scheme, parsed_openai.netloc, "", "", ""))
+        proxy_server, _thread = counting_proxy.start_in_thread(
+            listen_host, 0, ledger_parent, openai_upstream=openai_origin)
         port = proxy_server.server_address[1]
         proxy_ctx = {
             "ledger_dir": ledger_parent,
