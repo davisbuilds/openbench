@@ -579,6 +579,7 @@ class TestInvokeAdapterFallback(unittest.TestCase):
         candidate = SimpleNamespace(
             path="/tmp/harness.toml", kind="manifest", base_adapter=None,
             proxy_adapter="codex", auth_files=[], pass_env=[], inherit_env=False,
+            spec_bytes=b'kind="manifest"\nname="mine"\ncommand=["cli"]\n',
         )
         result = {"completed": True}
         with mock.patch.object(docker_exec, "run_in_container", return_value=result) as run_container:

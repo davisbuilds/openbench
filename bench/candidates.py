@@ -149,6 +149,8 @@ class ConfigVariant:
 
     def __init__(self, path, data, adapters_dir):
         self.path = os.path.abspath(path)
+        with open(self.path, "rb") as fh:
+            self.spec_bytes = fh.read()
         self.name = _candidate_name(data)
         self.base_adapter = data["base_adapter"]
         self.config_dir = os.environ.get("OPENBENCH_CANDIDATE_CONFIG_DIR") or _resolve(
@@ -163,6 +165,12 @@ class ConfigVariant:
             if os.path.isabs(source) or ".." in source.split(os.sep):
                 raise ValueError(f"config source must stay within config_dir: {source!r}")
             _contained_source(self.config_dir, source)
+        sources = [entry if isinstance(entry, str) else entry["source"]
+                   for entry in self.config_files]
+        self.config_contents = {}
+        for source in sources:
+            with open(_contained_source(self.config_dir, source), "rb") as fh:
+                self.config_contents[source] = fh.read()
         self.env = {str(k): str(v) for k, v in data.get("env", {}).items()}
         self.auth_files = data.get("auth_files", [])
         _validate_auth_files(self.auth_files)
@@ -178,9 +186,10 @@ class ConfigVariant:
             if os.path.isfile(os.path.join(self.config_dir, p))
         ]
         sources = [entry if isinstance(entry, str) else entry["source"] for entry in entries]
-        files = {name: _sha256(_contained_source(self.config_dir, name)) for name in sources}
+        files = {name: hashlib.sha256(self.config_contents[name]).hexdigest()
+                 for name in sources}
         return {"kind": self.kind, "name": self.name, "base_adapter": self.base_adapter,
-                "spec": self.path, "spec_sha256": _sha256(self.path),
+                "spec": self.path, "spec_sha256": hashlib.sha256(self.spec_bytes).hexdigest(),
                 "config_dir": self.config_dir, "config_files_sha256": files,
                 "config_files": entries, "env_names": sorted(self.env),
                 "auth_files": [{"source": a["source"], "destination": a["destination"]}
@@ -196,16 +205,16 @@ class ConfigVariant:
             if self.config_files:
                 for entry in self.config_files:
                     item = {"source": entry, "destination": entry} if isinstance(entry, str) else entry
-                    src = _contained_source(self.config_dir, item["source"])
+                    content = self.config_contents[item["source"]]
                     dst = _safe_destination(staged, item.get("destination", item["source"]))
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     if item.get("template"):
-                        with open(src, encoding="utf-8") as fh:
-                            text = _expand(fh.read(), values)
+                        text = _expand(content.decode("utf-8"), values)
                         with open(dst, "w", encoding="utf-8") as fh:
                             fh.write(text)
                     else:
-                        shutil.copy2(src, dst)
+                        with open(dst, "wb") as fh:
+                            fh.write(content)
             else:
                 shutil.copytree(self.config_dir, staged, dirs_exist_ok=True)
             for auth in self.auth_files:
@@ -236,6 +245,8 @@ class ManifestHarness:
 
     def __init__(self, path, data):
         self.path = os.path.abspath(path)
+        with open(self.path, "rb") as fh:
+            self.spec_bytes = fh.read()
         self.name = _candidate_name(data)
         self.base_adapter = None
         self.command = data["command"]
@@ -273,7 +284,7 @@ class ManifestHarness:
             raise ValueError("manifest proxy routing requires both base_url_env and proxy_route")
         self.proxy_adapter = data.get("proxy_adapter")
         self.provenance = {"kind": self.kind, "name": self.name, "spec": self.path,
-                           "spec_sha256": _sha256(self.path), "command": list(self.command),
+                           "spec_sha256": hashlib.sha256(self.spec_bytes).hexdigest(), "command": list(self.command),
                            "models": dict(self.models), "env_names": sorted(self.env),
                            "inherit_env": self.inherit_env,
                            "pass_env": sorted(self.pass_env),

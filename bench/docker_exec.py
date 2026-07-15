@@ -503,7 +503,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                      extra_env=None, candidate_path=None, base_harness=None,
                      candidate_auth_files=None, candidate_pass_env=None,
                      candidate_config_dir=None, candidate_inherit_env=False,
-                     candidate_config_files=None):
+                     candidate_spec_bytes=None, candidate_config_contents=None):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -513,6 +513,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     """
     env_setup_start = time.monotonic()
     instruction_path = None
+    candidate_spec_path = None
     candidate_config_stage = None
     agent_started = False
     try:
@@ -528,20 +529,19 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         instr_dir = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".bench-tmp")
         os.makedirs(instr_dir, exist_ok=True)
-        if candidate_config_dir:
-            if not candidate_config_files:
-                raise ValueError("Docker config variants require declared config_files")
+        if candidate_spec_bytes is not None:
+            fd, candidate_spec_path = tempfile.mkstemp(
+                prefix="bench_candidate_", suffix=".toml", dir=instr_dir)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(candidate_spec_bytes)
+        if candidate_config_contents is not None:
             candidate_config_stage = tempfile.mkdtemp(
                 prefix="bench_candidate_config_", dir=instr_dir)
-            for entry in candidate_config_files:
-                source = entry if isinstance(entry, str) else entry["source"]
-                config_root = os.path.realpath(candidate_config_dir)
-                src = os.path.realpath(os.path.join(config_root, source))
-                if os.path.commonpath((config_root, src)) != config_root:
-                    raise ValueError(f"candidate config source escapes config_dir: {source!r}")
+            for source, content in candidate_config_contents.items():
                 dst = os.path.join(candidate_config_stage, source)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy2(src, dst)
+                with open(dst, "wb") as fh:
+                    fh.write(content)
         fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt", dir=instr_dir)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(instruction)
@@ -554,7 +554,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             harness, workdir, model, timeout_s, adapters_dir, image_for_run,
             instruction_path, container_name=container_name,
             extra_docker_args=extra_docker_args, extra_env=extra_env,
-            candidate_path=candidate_path, base_harness=base_harness,
+            candidate_path=candidate_spec_path or candidate_path, base_harness=base_harness,
             candidate_auth_files=candidate_auth_files,
             candidate_pass_env=candidate_pass_env,
             candidate_config_dir=candidate_config_stage,
@@ -637,5 +637,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     finally:
         if instruction_path is not None:
             os.unlink(instruction_path)
+        if candidate_spec_path is not None:
+            os.unlink(candidate_spec_path)
         if candidate_config_stage:
             shutil.rmtree(candidate_config_stage, ignore_errors=True)

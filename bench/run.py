@@ -561,13 +561,13 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 adapters_dir, docker_image,
                 extra_docker_args=_proxy_docker_args(proxy_ctx),
                 extra_env=_proxy_env(proxy_ctx, cell_token, for_docker=True),
-                candidate_path=candidate.path if candidate is not None else None,
+                candidate_spec_bytes=(candidate.spec_bytes if candidate is not None else None),
                 candidate_auth_files=candidate.auth_files if candidate is not None else None,
                 candidate_pass_env=candidate.pass_env if (candidate is not None and candidate.kind == "manifest") else None,
                 candidate_config_dir=(candidate.config_dir if candidate is not None
                                       and candidate.kind == "config-variant" else None),
-                candidate_config_files=(candidate.config_files if candidate is not None
-                                        and candidate.kind == "config-variant" else None),
+                candidate_config_contents=(candidate.config_contents if candidate is not None
+                                           and candidate.kind == "config-variant" else None),
                 candidate_inherit_env=(candidate.inherit_env if candidate is not None
                                        and candidate.kind == "manifest" else False),
                 # A manifest's proxy_adapter is accounting metadata only; it
