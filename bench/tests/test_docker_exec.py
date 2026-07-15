@@ -281,6 +281,25 @@ class TestBuildDockerCmd(unittest.TestCase):
         self.assertIn("HOME=/root", inherited)
         self.assertNotIn("HOME", inherited)
 
+        proxy = {
+            "OPENBENCH_PROXY_BASE_URL": "http://host-value",
+            "OPENBENCH_PROXY_CELL_TOKEN": "host-token",
+        }
+        explicit = {
+            "OPENBENCH_PROXY_BASE_URL": "http://per-cell",
+            "OPENBENCH_PROXY_CELL_TOKEN": "cell-token",
+        }
+        with mock.patch.dict(os.environ, proxy):
+            routed = docker_exec.build_docker_cmd(
+                harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
+                adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instruction", candidate_inherit_env=True,
+                extra_env=explicit,
+            )
+        self.assertIn("OPENBENCH_PROXY_BASE_URL=http://per-cell", routed)
+        self.assertNotIn("OPENBENCH_PROXY_BASE_URL", routed)
+        self.assertNotIn("OPENBENCH_PROXY_CELL_TOKEN", routed)
+
 
 class TestParseResult(unittest.TestCase):
     def test_extracts_last_sentinel_line(self):

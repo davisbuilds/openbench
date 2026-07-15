@@ -431,10 +431,11 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
     for key, value in (extra_env or {}).items():
         cmd += ["-e", f"{key}={value}"]
     pass_names = os.environ if candidate_inherit_env else (candidate_pass_env or [])
+    runner_owned = {"HOME", *(extra_env or {}).keys()}
     for name in pass_names:
-        # HOME remains the container's writable isolated home even when the
-        # manifest explicitly opts into inheriting the rest of the host env.
-        if name != "HOME" and os.environ.get(name):
+        # The container HOME and per-cell proxy values are runner-owned. A host
+        # variable with the same name must not override their explicit values.
+        if name not in runner_owned and os.environ.get(name):
             cmd += ["-e", name]
     stock_auth_args = _auth_mount_args(effective_harness)
     cmd += stock_auth_args
