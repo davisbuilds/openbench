@@ -5,11 +5,22 @@ import importlib.util
 import inspect
 import json
 import os
+import re
 import signal
 import shutil
 import subprocess
 import tempfile
 import tomllib
+
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+def _candidate_name(data):
+    name = data["name"]
+    if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
+        raise ValueError("candidate name must match [A-Za-z0-9][A-Za-z0-9_.-]*")
+    return name
 
 
 def _load_adapter(adapters_dir, name):
@@ -129,7 +140,7 @@ class ConfigVariant:
 
     def __init__(self, path, data, adapters_dir):
         self.path = os.path.abspath(path)
-        self.name = data["name"]
+        self.name = _candidate_name(data)
         self.base_adapter = data["base_adapter"]
         self.config_dir = os.environ.get("OPENBENCH_CANDIDATE_CONFIG_DIR") or _resolve(
             self.path, data["config_dir"])
@@ -216,7 +227,7 @@ class ManifestHarness:
 
     def __init__(self, path, data):
         self.path = os.path.abspath(path)
-        self.name = data["name"]
+        self.name = _candidate_name(data)
         self.base_adapter = None
         self.command = data["command"]
         if (not isinstance(self.command, list) or not self.command

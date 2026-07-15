@@ -93,6 +93,14 @@ class CandidateTests(unittest.TestCase):
                         for k, v in out.items()}
             self.assertEqual(normalized(captures[0][1]), normalized(captures[1][1]))
 
+    def test_candidate_name_must_be_portable_identifier(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="bad/name"\ncommand=["cli"]\n')
+            with self.assertRaisesRegex(ValueError, "candidate name must match"):
+                candidates.load_candidate(path, ADAPTERS)
+
     def test_candidate_run_id_includes_content_identity(self):
         manifest = candidates.load_candidate(
             os.path.join(BENCH, "examples", "pi-harness.toml"), ADAPTERS)
