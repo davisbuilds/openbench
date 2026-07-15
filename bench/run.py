@@ -1514,9 +1514,11 @@ def main(argv=None):
         listen_host = "0.0.0.0" if args.exec_mode == "docker" else "127.0.0.1"
         openai_origin = "https://api.openai.com"
         if "grokbuild" in harnesses and args.model == "gpt-5.6":
-            openai_base = os.environ.get("OPENAI_BASE_URL", openai_origin)
+            openai_base = os.environ.get("OPENAI_BASE_URL") or openai_origin
             from urllib.parse import urlsplit, urlunsplit
             parsed_openai = urlsplit(openai_base)
+            if parsed_openai.scheme not in {"http", "https"} or not parsed_openai.netloc:
+                parser.error("OPENAI_BASE_URL must be an absolute HTTP(S) URL")
             if parsed_openai.username is not None or parsed_openai.password is not None:
                 parser.error("OPENAI_BASE_URL must not contain URL-embedded credentials")
             if parsed_openai.query or parsed_openai.fragment:
