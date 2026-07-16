@@ -286,6 +286,7 @@ def sync_host(dockerfile=DOCKERFILE, *, command_runner=run_cmd):
             status = "already matches" if before == expected else "manual sync required"
             print(f"{pin.key}: {status}; install cursor-agent {expected}, then run: "
                   f"{pin.cli} --version")
+            print(f"{pin.key}: after={before or before_raw or 'unavailable'} pin={expected}")
             continue
         if before != expected:
             cmd = ["npm", "install", "-g", f"{pin.package}@{expected}"]

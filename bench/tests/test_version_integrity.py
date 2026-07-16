@@ -125,7 +125,7 @@ class TestHostSync(unittest.TestCase):
         self.assertIn("codex: before=0.144.0 pin=0.144.1", output.getvalue())
         self.assertIn("codex: after=0.144.1 pin=0.144.1", output.getvalue())
         self.assertIn("cursor: manual sync required", output.getvalue())
-        self.assertIn("2026.07.09-a3815c0", output.getvalue())
+        self.assertIn("cursor: after=2026.07.08-old pin=2026.07.09-a3815c0", output.getvalue())
 
     def test_reported_version_does_not_accept_prefix_matches(self):
         self.assertEqual(bump_clis.reported_version("grok 0.2.93 (hash)"), "0.2.93")
