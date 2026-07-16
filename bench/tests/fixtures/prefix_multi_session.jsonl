@@ -1,0 +1,4 @@
+{"response_hash":"response-a","usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":5}}
+{"previous_response_hash":"response-a","response_hash":"response-b","usage":{"input_tokens":150,"cached_input_tokens":80,"output_tokens":5}}
+{"response_hash":"response-x","usage":{"input_tokens":90,"cached_input_tokens":0,"output_tokens":5}}
+{"previous_response_hash":"response-x","response_hash":"response-y","usage":{"input_tokens":120,"cached_input_tokens":70,"output_tokens":5}}

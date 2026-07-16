@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import http.client
 import json
 import os
@@ -195,6 +196,68 @@ def _collect_sampling(obj: Any, out: dict[str, Any], depth: int = 0) -> None:
             _collect_sampling(value, out, depth + 1)
 
 
+def _json_objects(body: bytes) -> list[Any]:
+    """Decode a JSON body or JSON objects carried in SSE data lines."""
+    text = body.decode("utf-8", "replace")
+    try:
+        return [json.loads(text)]
+    except json.JSONDecodeError:
+        objects = []
+        for line in text.splitlines():
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if not data or data == "[DONE]":
+                continue
+            try:
+                objects.append(json.loads(data))
+            except json.JSONDecodeError:
+                continue
+        return objects
+
+
+def _walk_dicts(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_dicts(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_dicts(child)
+
+
+def protocol_links(body: bytes, *, response: bool = False) -> dict[str, str]:
+    """Extract opaque conversation links; callers hash them before persistence."""
+    found = {}
+    for obj in _json_objects(body):
+        for item in _walk_dicts(obj):
+            if not response:
+                previous = item.get("previous_response_id")
+                if isinstance(previous, str):
+                    found.setdefault("previous_response", previous)
+                for key in ("session_id", "conversation_id"):
+                    value = item.get(key)
+                    if isinstance(value, str):
+                        found.setdefault("session", value)
+                conversation = item.get("conversation")
+                if isinstance(conversation, str):
+                    found.setdefault("session", conversation)
+                elif isinstance(conversation, dict) and isinstance(conversation.get("id"), str):
+                    found.setdefault("session", conversation["id"])
+            candidate = item.get("response")
+            if response and isinstance(candidate, dict) and isinstance(candidate.get("id"), str):
+                found["response"] = candidate["id"]
+            if response and isinstance(item.get("id"), str):
+                kind = str(item.get("object") or item.get("type") or "")
+                if kind == "response" or kind.startswith("response."):
+                    found["response"] = item["id"]
+    return found
+
+
+def _identifier_hash(value: str, salt: bytes) -> str:
+    return hashlib.sha256(salt + value.encode("utf-8", "replace")).hexdigest()
+
+
 def observed_sampling(body: bytes, content_type: str = "", content_encoding: str = "") -> dict[str, Any]:
     if not body:
         return {}
@@ -250,6 +313,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         usage = None
         body = b""
         sampling: dict[str, Any] = {}
+        links: dict[str, str] = {}
         route = None
         capture_truncated = False
         headers_sent = False
@@ -257,11 +321,13 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         try:
             route = self._route_request()
             body = self._read_body()
+            request_body = decode_for_parsing(body, self.headers.get("content-encoding", ""))
             sampling = observed_sampling(
                 body,
                 self.headers.get("content-type", ""),
                 self.headers.get("content-encoding", ""),
             )
+            links.update(protocol_links(request_body))
             headers = self._forward_headers()
             conn_cls = http.client.HTTPSConnection if route.upstream.scheme == "https" else http.client.HTTPConnection
             if not route.upstream.hostname:
@@ -301,6 +367,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             usage = parse_json_usage(parse_body)
             if usage is None:
                 usage = parse_sse_usage(parse_body)
+            links.update(protocol_links(parse_body, response=True))
             conn.close()
         except Exception as exc:  # noqa: BLE001
             error = f"{type(exc).__name__}: {exc}"
@@ -335,6 +402,13 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             if route is not None:
                 rec["route"] = route.route
                 rec["upstream"] = f"{route.upstream.scheme}://{route.upstream.netloc}{route.upstream.path.rstrip('/')}"
+            if "session" in links:
+                rec["session_hash"] = _identifier_hash(links["session"], self.server.identifier_salt)
+            if "previous_response" in links:
+                rec["previous_response_hash"] = _identifier_hash(
+                    links["previous_response"], self.server.identifier_salt)
+            if "response" in links:
+                rec["response_hash"] = _identifier_hash(links["response"], self.server.identifier_salt)
             if capture_truncated:
                 rec["capture_truncated"] = True
             if error:
@@ -511,6 +585,9 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     httpd.timeout_s = timeout_s
     httpd.capture_limit = max(capture_limit, 4096)
     httpd.max_request_bytes = max(max_request_bytes, 0)
+    # Per-process salt prevents opaque provider IDs from being correlated across
+    # proxy runs while preserving links inside one experiment ledger directory.
+    httpd.identifier_salt = secrets.token_bytes(32)
     httpd.verbose = verbose
     return httpd
 

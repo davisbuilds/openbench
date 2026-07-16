@@ -11,7 +11,7 @@ Headless invocation (per open model):
     ANTHROPIC_API_KEY=<vendor key>            # sent as the x-api-key header
     claude -p --bare --output-format json --model <vendor model id> \
            --effort medium --dangerously-skip-permissions \
-           --no-session-persistence <instruction>
+           --disallowedTools Agent Task --no-session-persistence <instruction>
 
 Billing-safety (why open models can never touch the Anthropic subscription):
 - ``ANTHROPIC_BASE_URL`` physically points every request at the vendor host, so
@@ -37,7 +37,9 @@ Non-interactive:
 - ``--dangerously-skip-permissions`` suppresses every tool-permission prompt.
   Safe here: the runner hands us a disposable workspace copy (docker lane) or a
   throwaway temp dir (local lane); the agent's edits are meant to be transient.
-- ``--no-session-persistence`` avoids writing session logs to disk.
+- ``--disallowedTools Agent Task`` pins benchmark runs to one agent by removing
+  both Claude Code subagent tool names, matching Codex's default multi_agent-off
+  policy. ``--no-session-persistence`` avoids writing session logs to disk.
 
 Output / token accounting:
 - ``--output-format json`` prints a SINGLE result object with ``num_turns``,
@@ -382,6 +384,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "--model", spec["model_id"],
             "--effort", spec["effort"],
             "--dangerously-skip-permissions",
+            "--disallowedTools", "Agent", "Task",
             "--no-session-persistence",
             instruction,
         ]

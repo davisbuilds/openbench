@@ -156,6 +156,20 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(row["sampling_observed"]["reasoning"], {"effort": "medium"})
         self.assertIs(row["sampling_observed"]["stream"], True)
 
+    def test_protocol_links_extract_opaque_conversation_chain(self):
+        request = json.dumps({
+            "conversation": {"id": "conversation-secret"},
+            "previous_response_id": "response-secret",
+        }).encode()
+        self.assertEqual(proxy.protocol_links(request), {
+            "session": "conversation-secret",
+            "previous_response": "response-secret",
+        })
+        response = b'data: {"type":"response.completed","response":{"id":"next-secret"}}\n\n'
+        self.assertEqual(proxy.protocol_links(response, response=True), {
+            "response": "next-secret",
+        })
+
     def test_sse_usage_parsing(self):
         self._post("/cell/tok-sse/anthropic/deepseek/sse")
         row = self._ledger("tok-sse")[0]

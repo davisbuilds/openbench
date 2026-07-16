@@ -72,6 +72,27 @@ class TestCodexConfigIsolation(unittest.TestCase):
         self.assertTrue(res["completed"])
         assert_isolated_with_feature_disables(self, calls[0][0], calls[0][1])
 
+    def test_multiagent_candidate_is_the_only_explicit_on_path(self):
+        old_run, calls = self._capture_run()
+        try:
+            res = self.codex.run(
+                "hi", "/tmp", "gpt-5.5-medium", 5,
+                env_override={
+                    "CODEX_HOME": "/tmp/codex-multiagent-test",
+                    "OPENBENCH_CODEX_MULTI_AGENT": "enabled",
+                },
+            )
+        finally:
+            self.codex.subprocess.run = old_run
+        self.assertTrue(res["completed"])
+        cmd, kwargs = calls[0]
+        self.assertNotIn("multi_agent", [
+            cmd[i + 1] for i, arg in enumerate(cmd[:-1]) if arg == "--disable"
+        ])
+        self.assertIn("--enable", cmd)
+        self.assertEqual(cmd[cmd.index("--enable") + 1], "multi_agent")
+        self.assertNotIn("OPENBENCH_CODEX_MULTI_AGENT", kwargs["env"])
+
     def test_open_model_command_uses_isolated_factory_config(self):
         old_run, calls = self._capture_run()
         old_reach = self.codex._bridge_reachable

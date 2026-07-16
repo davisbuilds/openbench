@@ -55,11 +55,17 @@ import tempfile
 
 NAME = "codex"
 _EXE = "codex"
-_FEATURE_DISABLE_FLAGS = [
-    "--disable", "apps",
-    "--disable", "plugins",
-    "--disable", "multi_agent",
-]
+_MULTI_AGENT_ENV = "OPENBENCH_CODEX_MULTI_AGENT"
+
+
+def _feature_flags(env_override=None):
+    """Keep stock runs OFF; only the checked-in candidate explicitly opts ON."""
+    flags = ["--disable", "apps", "--disable", "plugins"]
+    if env_override and env_override.get(_MULTI_AGENT_ENV) == "enabled":
+        flags += ["--enable", "multi_agent"]
+    else:
+        flags += ["--disable", "multi_agent"]
+    return flags
 
 
 def _empty_token_usage():
@@ -379,7 +385,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
     base = [
         "codex", "exec",
         "--json",
-    ] + _FEATURE_DISABLE_FLAGS + [
+    ] + _feature_flags(env_override) + [
         "--skip-git-repo-check",
         "-C", workdir,
     ] + sandbox
@@ -421,6 +427,8 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
     child_env = _codex_env_for_bridge(spec["env_key"]) if model in OPEN_MODELS else os.environ.copy()
     if env_override:
         child_env.update(env_override)
+        # This is an adapter control, not child-process configuration.
+        child_env.pop(_MULTI_AGENT_ENV, None)
 
     # Stock runs get a fresh CODEX_HOME containing authentication only.  In
     # particular, never copy config.toml, AGENTS.md, skills, MCP definitions,
