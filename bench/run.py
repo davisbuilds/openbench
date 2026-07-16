@@ -85,7 +85,9 @@ class VersionDriftError(RuntimeError):
 def _pin_key_for_harness(harness, candidate=None):
     base = harness
     if candidate is not None:
-        base = getattr(candidate, "base_adapter", None) or getattr(candidate, "proxy_adapter", None)
+        # Manifest proxy_adapter is accounting metadata; only config variants
+        # actually execute their base_adapter CLI.
+        base = getattr(candidate, "base_adapter", None)
     if base and base.startswith("codex_"):
         base = "codex"
     try:

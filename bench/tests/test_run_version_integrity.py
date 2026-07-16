@@ -45,6 +45,15 @@ class TestVersionPreflight(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(fh.name) and os.unlink(fh.name))
         return fh.name
 
+    def test_manifest_proxy_metadata_does_not_select_a_cli_pin(self):
+        manifest = SimpleNamespace(base_adapter=None, proxy_adapter="codex", kind="manifest")
+        self.assertIsNone(run._pin_key_for_harness("custom", manifest))
+
+    def test_config_variant_uses_its_executed_base_adapter_pin(self):
+        variant = SimpleNamespace(base_adapter="codex", proxy_adapter="codex",
+                                  kind="config-variant")
+        self.assertEqual(run._pin_key_for_harness("custom", variant), "codex")
+
     def test_matching_mocked_cli_version_passes(self):
         calls = []
 
