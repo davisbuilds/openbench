@@ -40,11 +40,13 @@ import re
 import shlex
 import subprocess
 
+from bump_clis import pinned_versions, reported_version, resolve_pin_key
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ADAPTERS_DIR = os.path.join(HERE, "adapters")
 DEFAULT_MODEL = "gpt-5.5-medium"
 
-CHECKS = ("CLI", "AUTH", "MODEL")
+CHECKS = ("CLI", "VERSION", "AUTH", "MODEL")
 
 # M4 open canonical model -> the env key its provider needs. When --model is one
 # of these, the AUTH check becomes "is this key exported?" instead of the
@@ -215,6 +217,23 @@ def check_cli(p, cli):
     return True, f"{path} ({ver})" if ver else path
 
 
+def check_version(p, harness, cli, pins):
+    """Compare a host CLI's reported version with its Dockerfile pin."""
+    base = "codex" if harness.startswith("codex_") else harness
+    try:
+        key = resolve_pin_key(base)
+    except ValueError:
+        return None, "no Dockerfile pin (n/a)"
+    expected = pins.get(key)
+    if expected is None:
+        return False, f"host=unavailable pin=missing ({key}) [drift]"
+    code, out = p.run([cli, "--version"])
+    actual = reported_version(out) if code == 0 else None
+    ok = actual == expected
+    label = "ok" if ok else "drift"
+    return ok, f"host={actual or 'unavailable'} pin={expected} [{label}]"
+
+
 def check_model(p, harness, model):
     try:
         mod = p.import_adapter(harness)
@@ -302,7 +321,7 @@ def check_docker(p):
 # --------------------------------------------------------------------------- #
 # Evaluation + rendering
 # --------------------------------------------------------------------------- #
-def evaluate(harnesses, model, probes):
+def evaluate(harnesses, model, probes, pins=None):
     """Return ``(rows, ok)`` for the requested harnesses.
 
     ``rows`` is a list of dicts ``{harness, check, ok, detail}`` covering the
@@ -311,6 +330,7 @@ def evaluate(harnesses, model, probes):
     """
     rows = []
     all_ok = True
+    pins = pinned_versions() if pins is None else pins
     for name in harnesses:
         spec = HARNESSES.get(name)
         if spec is None:
@@ -320,6 +340,7 @@ def evaluate(harnesses, model, probes):
             continue
 
         cli_ok, cli_detail = check_cli(probes, spec["cli"])
+        version_ok, version_detail = check_version(probes, name, spec["cli"], pins)
         if model in FRONTIER_MODEL_ENV:
             auth_ok, auth_detail = _auth_frontier(probes, name, model)
         elif model in OPEN_MODEL_ENV:
@@ -333,19 +354,22 @@ def evaluate(harnesses, model, probes):
 
         for check, ok, detail in (
             ("CLI", cli_ok, cli_detail),
+            ("VERSION", version_ok, version_detail),
             ("AUTH", auth_ok, auth_detail),
             ("MODEL", model_ok, model_detail),
         ):
             rows.append({"harness": name, "check": check, "ok": ok,
                          "detail": detail})
-            if not ok:
+            if ok is False:
                 all_ok = False
     return rows, all_ok
 
 
-def _status(ok):
+def _status(ok, check=None):
     if ok is None:
         return "INFO"
+    if not ok and check == "VERSION":
+        return "DRIFT"
     return "OK" if ok else "FAIL"
 
 
@@ -366,7 +390,7 @@ def format_report(rows, harnesses, docker_row):
         if "KNOWN" in checks:  # unknown harness -> collapse across columns
             cells += ["FAIL"] * len(CHECKS)
         else:
-            cells += [_status(checks.get(c)) for c in CHECKS]
+            cells += [_status(checks.get(c), c) for c in CHECKS]
         table.append(cells)
 
     widths = [len(h) for h in headers]
@@ -385,7 +409,7 @@ def format_report(rows, harnesses, docker_row):
     lines.append("")
     lines.append("Details:")
     for row in rows:
-        lines.append(f"  [{_status(row['ok']):>4}] {row['harness']:<9} "
+        lines.append(f"  [{_status(row['ok'], row['check']):>5}] {row['harness']:<9} "
                      f"{row['check']:<6} {row['detail']}")
 
     # Docker (informational).
