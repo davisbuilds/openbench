@@ -96,6 +96,26 @@ def dockerfile_pins(text):
     return pins
 
 
+def pinned_versions(path=DOCKERFILE):
+    """Read the authoritative CLI versions from Dockerfile ARG pins."""
+    return dockerfile_pins(read_dockerfile(path))
+
+
+def reported_version(output):
+    """Extract the first version token from a CLI's ``--version`` output."""
+    match = re.search(r"(?<![A-Za-z0-9])(\d+(?:\.\d+)+(?:-[A-Za-z0-9.-]+)?)", output or "")
+    return match.group(1) if match else None
+
+
+def host_cli_version(pin, *, command_runner=run_cmd):
+    """Return ``(parsed_version, raw_output)`` for one host CLI."""
+    proc = command_runner([pin.cli, "--version"], check=False)
+    raw = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if proc.returncode != 0:
+        return None, raw
+    return reported_version(raw), raw
+
+
 def rewrite_dockerfile_pins(text, updates):
     """Return Dockerfile text with selected ARG pin values replaced."""
     normalized = {resolve_pin_key(key): value for key, value in updates.items()}
@@ -251,6 +271,34 @@ def git_commit_dockerfile(path=DOCKERFILE):
     run_cmd(["git", "commit", "-m", "Bump OpenBench Docker CLI pins", "--", relpath])
 
 
+def sync_host(dockerfile=DOCKERFILE, *, command_runner=run_cmd):
+    """Install npm CLIs at Dockerfile pins; leave Cursor for manual install."""
+    current = pinned_versions(dockerfile)
+    missing = [pin.key for pin in PINS if pin.key not in current]
+    if missing:
+        raise CommandError("Dockerfile missing pin ARG(s): " + ", ".join(missing))
+
+    for pin in PINS:
+        expected = current[pin.key]
+        before, before_raw = host_cli_version(pin, command_runner=command_runner)
+        print(f"{pin.key}: before={before or before_raw or 'unavailable'} pin={expected}")
+        if pin.package is None:
+            status = "already matches" if before == expected else "manual sync required"
+            print(f"{pin.key}: {status}; install cursor-agent {expected}, then run: "
+                  f"{pin.cli} --version")
+            continue
+        if before != expected:
+            cmd = ["npm", "install", "-g", f"{pin.package}@{expected}"]
+            print("+ " + " ".join(cmd))
+            command_runner(cmd)
+        after, after_raw = host_cli_version(pin, command_runner=command_runner)
+        print(f"{pin.key}: after={after or after_raw or 'unavailable'} pin={expected}")
+        if after != expected:
+            raise CommandError(
+                f"{pin.key}: host version {after or 'unavailable'} does not match pin {expected}"
+            )
+
+
 def refresh_baselines(image):
     print("# Rebuild/verify the standing Terminal-Bench frontier baseline on the refreshed Docker image:")
     print(
@@ -304,6 +352,8 @@ def main(argv=None):
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--check", action="store_true", help="print current vs npm latest pins; always exits 0")
     group.add_argument("--apply", action="store_true", help="rewrite pins, build/verify image, and commit Dockerfile")
+    group.add_argument("--sync-host", action="store_true",
+                       help="install host npm CLIs at Dockerfile pins; never build the image")
     group.add_argument("--refresh-baselines", action="store_true", help="print baseline rerun commands only")
     parser.add_argument("--json", action="store_true", help="emit JSON for --check")
     parser.add_argument("--set", action="append", default=[], metavar="PKG=VERSION", help="override a pin during --apply")
@@ -325,7 +375,10 @@ def main(argv=None):
         refresh_baselines(args.image)
         return 0
     try:
-        apply(args)
+        if args.sync_host:
+            sync_host(args.dockerfile)
+        else:
+            apply(args)
     except (CommandError, ValueError) as exc:
         print(f"bump_clis: {exc}", file=sys.stderr)
         return 1
