@@ -27,12 +27,15 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import traceback
 from contextlib import contextmanager
 
+from bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
+                       pinned_versions, reported_version, resolve_pin_key)
 from failure_class import classify_failure
 from scrub import build_context as build_scrub_context, scrub_text
 
@@ -71,8 +74,76 @@ ROW_FIELDS = (
     "sampling_observed", "token_basis_proxy",
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
     "harness_version_source", "failure_class", "checker_stdout", "checker_stderr", "checker_workspace_files",
-    "image_digest", "candidate_provenance",
+    "image_digest", "candidate_provenance", "version_drift",
 )
+
+
+class VersionDriftError(RuntimeError):
+    """Raised when a local execution lane does not match Dockerfile CLI pins."""
+
+
+def _pin_key_for_harness(harness, candidate=None):
+    base = harness
+    if candidate is not None:
+        base = getattr(candidate, "base_adapter", None) or getattr(candidate, "proxy_adapter", None)
+    if base and base.startswith("codex_"):
+        base = "codex"
+    try:
+        return resolve_pin_key(base)
+    except (TypeError, ValueError):
+        return None
+
+
+def host_version_drift(harnesses, candidates=None, dockerfile=CLI_PINS_DOCKERFILE,
+                       subprocess_runner=subprocess.run):
+    """Return host-vs-pin mismatches for harnesses with Dockerfile CLI pins."""
+    candidates = candidates or {}
+    pins = pinned_versions(dockerfile)
+    drift = []
+    checked = set()
+    for harness in harnesses:
+        key = _pin_key_for_harness(harness, candidates.get(harness))
+        if key is None or key in checked:
+            continue
+        checked.add(key)
+        pin = PIN_BY_KEY[key]
+        expected = pins.get(key)
+        if expected is None:
+            raise VersionDriftError(f"Dockerfile has no {pin.arg} pin for {harness}")
+        try:
+            proc = subprocess_runner(
+                [pin.cli, "--version"], capture_output=True, text=True,
+                timeout=15, stdin=subprocess.DEVNULL,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            actual = None
+            raw = exc.__class__.__name__
+        else:
+            raw = ((proc.stdout or "") + (proc.stderr or "")).strip()
+            actual = reported_version(raw) if proc.returncode == 0 else None
+        if actual != expected:
+            drift.append({
+                "harness": harness, "key": key, "package": pin.package,
+                "cli": pin.cli, "expected": expected,
+                "actual": actual or "unavailable", "raw": raw,
+            })
+    return drift
+
+
+def version_drift_refusal(drift):
+    lines = ["Refusing to start: host CLI versions do not match Dockerfile pins."]
+    for item in drift:
+        lines.append(
+            f"  {item['harness']}: host={item['actual']} pin={item['expected']} "
+            f"({item['cli']} --version)"
+        )
+    lines.extend([
+        "Fix host CLIs: python3 bench/bump_clis.py --sync-host",
+        "Or intentionally change a pin/image: python3 bench/bump_clis.py --apply "
+        "--set <cli>=<version>",
+        "To waive once (all rows will record version_drift=true): --allow-version-drift",
+    ])
+    return "\n".join(lines)
 
 
 def make_run_id(harness, task, model, trial, candidate_digest=None):
@@ -1203,7 +1274,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              docker_image=None, docker_fallback=True, harness_version=None,
              container_versions_reader=read_container_cli_versions,
              transcripts_dir=None, results_stem="", proxy_ctx=None,
-             candidate=None):
+             candidate=None, version_drift=False):
     """Execute one (task, harness, trial) cell and return its results row.
 
     Copies the task workspace to a temp dir, invokes the adapter (or the
@@ -1292,6 +1363,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "checker_workspace_files": None,
         "image_digest": None,
         "candidate_provenance": candidate.provenance if candidate is not None else None,
+        "version_drift": bool(version_drift),
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
@@ -1471,6 +1543,8 @@ def main(argv=None):
                         action="store_false",
                         help="in --exec docker, fail instead of falling back to "
                              "local when the daemon/image is unavailable")
+    parser.add_argument("--allow-version-drift", action="store_true",
+                        help="run despite host/Dockerfile CLI mismatch and mark every row")
     parser.add_argument("--proxy", action="store_true",
                         help="start one owned counting proxy and inject it into "
                              "supported harness/model cells (Cursor and Devin are unsupported)")
@@ -1491,6 +1565,22 @@ def main(argv=None):
             harnesses.append(name)
     if not harnesses:
         parser.error("at least one --harness or --candidate is required")
+
+    # Docker fallback can turn a nominal Docker invocation into a mixed run, so
+    # it must satisfy the same host gate. Pure --no-docker-fallback runs never
+    # execute a host CLI and therefore do not depend on host versions.
+    drift = []
+    if args.exec_mode == "local" or args.docker_fallback:
+        try:
+            drift = host_version_drift(harnesses, candidates)
+        except (OSError, VersionDriftError) as exc:
+            print(f"Version preflight failed: {exc}", file=sys.stderr)
+            return 2
+        if drift and not args.allow_version_drift:
+            print(version_drift_refusal(drift), file=sys.stderr)
+            return 2
+        if drift:
+            print("WARN: version drift allowed; every emitted row will be marked", file=sys.stderr)
 
     transcripts_dir = args.transcripts_dir or default_transcripts_dir(args.results_path)
     results_stem = os.path.splitext(os.path.basename(args.results_path))[0]
@@ -1578,6 +1668,7 @@ def main(argv=None):
                         transcripts_dir=transcripts_dir, results_stem=results_stem,
                         proxy_ctx=proxy_ctx,
                         candidate=candidate,
+                        version_drift=bool(drift),
                     )
                     append_row(args.results_path, row)
                     existing.add(run_id)
