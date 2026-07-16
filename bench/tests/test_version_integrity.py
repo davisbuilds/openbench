@@ -128,8 +128,17 @@ class TestHostSync(unittest.TestCase):
         self.assertIn("cursor: after=2026.07.08-old pin=2026.07.09-a3815c0", output.getvalue())
 
     def test_reported_version_does_not_accept_prefix_matches(self):
-        self.assertEqual(bump_clis.reported_version("grok 0.2.93 (hash)"), "0.2.93")
+        self.assertEqual(bump_clis.reported_version("grok v0.2.93 (hash)"), "0.2.93")
         self.assertNotEqual(bump_clis.reported_version("grok 0.2.93"), "0.2.9")
+
+    def test_missing_cli_is_treated_as_unavailable_for_sync(self):
+        def missing(_cmd, **_kwargs):
+            raise FileNotFoundError("missing")
+
+        version, raw = bump_clis.host_cli_version(
+            bump_clis.PIN_BY_KEY["codex"], command_runner=missing)
+        self.assertIsNone(version)
+        self.assertIn("missing", raw)
 
 
 class TestDockerfilePinRewrite(unittest.TestCase):

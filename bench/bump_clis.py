@@ -103,13 +103,19 @@ def pinned_versions(path=DOCKERFILE):
 
 def reported_version(output):
     """Extract the first version token from a CLI's ``--version`` output."""
-    match = re.search(r"(?<![A-Za-z0-9])(\d+(?:\.\d+)+(?:-[A-Za-z0-9.-]+)?)", output or "")
+    match = re.search(
+        r"(?<![A-Za-z0-9])v?(\d+(?:\.\d+)+(?:-[A-Za-z0-9.-]+)?)",
+        output or "",
+    )
     return match.group(1) if match else None
 
 
 def host_cli_version(pin, *, command_runner=run_cmd):
     """Return ``(parsed_version, raw_output)`` for one host CLI."""
-    proc = command_runner([pin.cli, "--version"], check=False)
+    try:
+        proc = command_runner([pin.cli, "--version"], check=False)
+    except OSError as exc:
+        return None, str(exc)
     raw = ((proc.stdout or "") + (proc.stderr or "")).strip()
     if proc.returncode != 0:
         return None, raw
