@@ -419,8 +419,10 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         connection_tokens = set()
         if self.headers.get("Connection"):
             connection_tokens = {x.strip().lower() for x in self.headers.get("Connection", "").split(",")}
-        blocked = HOP_BY_HOP | connection_tokens
-        return {k: v for k, v in self.headers.items() if k.lower() not in blocked and k.lower() != "x-openbench-cell-token"}
+        # Host identifies this proxy on ingress; let http.client generate the
+        # selected upstream's Host header instead of forwarding the proxy host.
+        blocked = HOP_BY_HOP | connection_tokens | {"host", "x-openbench-cell-token"}
+        return {k: v for k, v in self.headers.items() if k.lower() not in blocked}
 
     def _read_body(self) -> bytes:
         max_bytes = self.server.max_request_bytes  # type: ignore[attr-defined]
@@ -486,6 +488,7 @@ class CountingProxyServer(ThreadingHTTPServer):
 def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
                 chat_upstreams: dict[str, str] | None = None,
                 anthropic_upstreams: dict[str, str] | None = None,
+                openai_upstream: str = "https://api.openai.com",
                 cursor_upstream: str = DEFAULT_CURSOR_UPSTREAM,
                 timeout_s: float = 300.0, capture_limit: int = 8 * 1024 * 1024,
                 max_request_bytes: int = 64 * 1024 * 1024,
@@ -499,7 +502,7 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     httpd = CountingProxyServer((listen_host, port), CountingProxyHandler)
     httpd.upstreams = _urlsplit_map({
         "codex": "https://chatgpt.com",
-        "openai": "https://api.openai.com",
+        "openai": openai_upstream,
         "cursor": cursor_upstream,
     })
     httpd.chat_upstreams = _urlsplit_map(chat)
@@ -535,6 +538,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--ledger-dir", required=True)
     parser.add_argument("--chat-upstream", action="append", default=[], help="name=url")
+    parser.add_argument("--openai-upstream", default="https://api.openai.com")
     parser.add_argument("--cursor-upstream", default=DEFAULT_CURSOR_UPSTREAM)
     parser.add_argument("--anthropic-upstream", action="append", default=[], help="name=url")
     parser.add_argument("--timeout", type=float, default=300.0)
@@ -544,6 +548,7 @@ def main(argv: list[str] | None = None) -> int:
         args.listen_host, args.port, args.ledger_dir,
         chat_upstreams=_parse_upstream_args(args.chat_upstream),
         anthropic_upstreams=_parse_upstream_args(args.anthropic_upstream),
+        openai_upstream=args.openai_upstream,
         cursor_upstream=args.cursor_upstream,
         timeout_s=args.timeout, verbose=args.verbose,
     )

@@ -490,7 +490,7 @@ def proxy_supported_for_cell(harness, model):
     if harness == "opencode":
         return model in PROXY_CHAT_MODELS
     if harness == "grokbuild":
-        return model in {"glm-5.2", "deepseek-v4-flash", "kimi-k2.7-code"}
+        return model in {"glm-5.2", "deepseek-v4-flash", "kimi-k2.7-code", "gpt-5.6"}
     # Cursor's model stream requires its private HTTP/2 agent protocol, which
     # the stdlib HTTP/1.1 proxy cannot meter; Devin performs inference behind
     # Cognition's cloud boundary. See both adapter docstrings.
@@ -1512,7 +1512,20 @@ def main(argv=None):
         ledger_parent = os.environ.get("OPENBENCH_PROXY_LEDGER_DIR") or tempfile.mkdtemp(
             prefix="openbench_proxy_", dir=os.environ.get("OPENBENCH_DOCKER_TMPDIR") or None)
         listen_host = "0.0.0.0" if args.exec_mode == "docker" else "127.0.0.1"
-        proxy_server, _thread = counting_proxy.start_in_thread(listen_host, 0, ledger_parent)
+        openai_origin = "https://api.openai.com"
+        if "grokbuild" in harnesses and args.model == "gpt-5.6":
+            openai_base = os.environ.get("OPENAI_BASE_URL") or openai_origin
+            from urllib.parse import urlsplit, urlunsplit
+            parsed_openai = urlsplit(openai_base)
+            if parsed_openai.scheme not in {"http", "https"} or not parsed_openai.netloc:
+                parser.error("OPENAI_BASE_URL must be an absolute HTTP(S) URL")
+            if parsed_openai.username is not None or parsed_openai.password is not None:
+                parser.error("OPENAI_BASE_URL must not contain URL-embedded credentials")
+            if parsed_openai.query or parsed_openai.fragment:
+                parser.error("OPENAI_BASE_URL must not contain a query or fragment")
+            openai_origin = urlunsplit((parsed_openai.scheme, parsed_openai.netloc, "", "", ""))
+        proxy_server, _thread = counting_proxy.start_in_thread(
+            listen_host, 0, ledger_parent, openai_upstream=openai_origin)
         port = proxy_server.server_address[1]
         proxy_ctx = {
             "ledger_dir": ledger_parent,

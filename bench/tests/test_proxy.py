@@ -37,6 +37,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
         self.server.requests.append({
             "path": self.path,
             "auth": self.headers.get("authorization"),
+            "host": self.headers.get("host"),
             "body": self.rfile.read(length).decode("utf-8", "replace"),
         })
         if self.path.endswith("/sse"):
@@ -87,6 +88,7 @@ class ProxyTests(unittest.TestCase):
             "127.0.0.1", 0, self.tmp.name,
             chat_upstreams={"deepseek": upstream_url},
             anthropic_upstreams={"deepseek": upstream_url},
+            openai_upstream=upstream_url,
             cursor_upstream=upstream_url,
         )
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
@@ -171,6 +173,13 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(mapped["tokens_proxy_cache_read"], 3)
         self.assertEqual(mapped["tokens_proxy_cache_write"], 2)
         self.assertEqual(mapped["tokens_proxy_output"], 7)
+
+    def test_configured_openai_upstream_is_proxy_metered(self):
+        self._post("/cell/tok-openai/" + "openai/router/v1/chat/completions")
+        row = self._ledger("tok-openai")[0]
+        self.assertEqual(self.upstream.requests[-1]["path"], "/router/v1/chat/completions")
+        self.assertEqual(self.upstream.requests[-1]["host"], f"127.0.0.1:{self.upstream.server_address[1]}")
+        self.assertEqual(row["route"], "openai")
 
     def test_cursor_private_protocol_route_is_forwarded(self):
         self._post("/cell/tok-cursor/cursor/agent/v1/run")

@@ -119,6 +119,7 @@ class TestConfigAndGating(unittest.TestCase):
         self.assertIn('env_key = "DEEPSEEK_API_KEY"', cfg)
         self.assertIn('[models]\ndefault = "deepseek-v4-flash"', cfg)
         self.assertIn('api_backend = "chat_completions"', cfg)
+        self.assertIn('auth_scheme = "bearer"', cfg)
         self.assertIn('stream_tool_calls = false', cfg)
         self.assertIn('max_completion_tokens = 65536', cfg)
         self.assertNotIn('temperature =', cfg)
@@ -135,24 +136,53 @@ class TestConfigAndGating(unittest.TestCase):
         self.assertEqual(parsed["goal"]["skeptic_models"], ["deepseek-v4-flash"])
         self.assertNotIn('[compat.claude]', cfg)
         self.assertNotIn('[compat.cursor]', cfg)
-        self.assertNotIn('enabled = false', cfg)
+        self.assertFalse(parsed["subagents"]["enabled"])
 
-    def test_proxy_rewrites_custom_provider_base_url_and_preserves_vendor_path(self):
-        spec = grokbuild.OPEN_MODELS["glm-5.2"]
+    def test_proxy_rewrites_every_route_to_per_cell_proxy_url(self):
+        expected = {
+            "glm-5.2": "chat/zai/api/paas/v4",
+            "deepseek-v4-flash": "chat/deepseek",
+            "kimi-k2.7-code": "chat/moonshot/v1",
+            "gpt-5.6": "openai/v1",
+        }
         with EnvPatch() as env:
             env.update({
                 "OPENBENCH_PROXY": "1",
                 "OPENBENCH_PROXY_BASE_URL": "http://proxy.test:1234",
                 "OPENBENCH_PROXY_CELL_TOKEN": "cell-token",
             })
-            proxied = grokbuild._proxied_spec(spec)
-        self.assertEqual(
-            proxied["base_url"],
-            "http://proxy.test:1234/cell/cell-token/chat/zai/api/paas/v4",
-        )
-        self.assertEqual(proxied["model_id"], spec["model_id"])
-        self.assertEqual(proxied["env_key"], spec["env_key"])
-        self.assertEqual(spec["base_url"], "https://api.z.ai/api/paas/v4")
+            for model, suffix in expected.items():
+                proxied = grokbuild._proxied_spec(grokbuild.OPEN_MODELS[model])
+                self.assertEqual(proxied["base_url"], f"http://proxy.test:1234/cell/cell-token/{suffix}")
+
+    def test_gpt_route_rejects_url_embedded_credentials(self):
+        with EnvPatch() as env:
+            env["OPENAI_BASE_URL"] = "https://user:secret" + "@router.example/v1"
+            with self.assertRaisesRegex(ValueError, "must not contain"):
+                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+
+    def test_invalid_gpt_base_url_returns_structured_setup_error(self):
+        with EnvPatch() as env:
+            env["OPENAI_BASE_URL"] = "https://user:secret" + "@router.example/v1"
+            env["OPENAI_API_KEY"] = "test-key"
+            result = grokbuild.run("hi", "/tmp", "gpt-5.6", 5)
+        self.assertFalse(result["completed"])
+        self.assertIn("SETUP-NEEDED", result["error"])
+        self.assertIsNone(result["cmd"])
+
+    def test_gpt_route_rejects_query_bearing_base_url(self):
+        with EnvPatch() as env:
+            env["OPENAI_BASE_URL"] = "https://router.example/v1?api-version=test"
+            with self.assertRaisesRegex(ValueError, "query or fragment"):
+                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+
+    def test_gpt_route_accepts_configurable_openai_compatible_base_url(self):
+        with EnvPatch() as env:
+            env["OPENAI_BASE_URL"] = "https://router.example/v1"
+            cfg = grokbuild._config_toml("gpt-5.6", grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"]))
+        entry = tomllib.loads(cfg)["model"]["gpt-5.6"]
+        self.assertEqual(entry["base_url"], "https://router.example/v1")
+        self.assertEqual(entry["env_key"], "OPENAI_API_KEY")
 
     def test_dotted_model_aliases_are_quoted_toml_keys(self):
         for model, spec in grokbuild.OPEN_MODELS.items():
@@ -220,12 +250,14 @@ class TestRunConstruction(unittest.TestCase):
         grokbuild._resolve_exe = lambda: "/usr/local/bin/grok"
         try:
             with EnvPatch() as env:
+                env.pop("OPENAI_BASE_URL", None)
                 env.update({
                     "DEEPSEEK_API_KEY": "deepseek-test",
                     "ZAI_API_KEY": "zai-test",
                     "MOONSHOT_API_KEY": "moonshot-test",
+                    "OPENAI_API_KEY": "openai-test",
                 })
-                for model in ("deepseek-v4-flash", "glm-5.2", "kimi-k2.7-code"):
+                for model in ("deepseek-v4-flash", "glm-5.2", "kimi-k2.7-code", "gpt-5.6"):
                     res = grokbuild.run("do it", "/tmp", model, 10)
                     self.assertTrue(res["completed"])
                     self.assertEqual(res["output_tail"], "OK")
@@ -239,8 +271,8 @@ class TestRunConstruction(unittest.TestCase):
             grokbuild.subprocess.run = old_run
             grokbuild._resolve_exe = old_resolve
 
-        self.assertEqual(len(calls), 3)
-        for (cmd, kwargs, cfg), model in zip(calls, ("deepseek-v4-flash", "glm-5.2", "kimi-k2.7-code")):
+        self.assertEqual(len(calls), 4)
+        for (cmd, kwargs, cfg), model in zip(calls, ("deepseek-v4-flash", "glm-5.2", "kimi-k2.7-code", "gpt-5.6")):
             spec = grokbuild.OPEN_MODELS[model]
             self.assertEqual(cmd[:4], ["/usr/local/bin/grok", "--no-auto-update", "-p", "do it"])
             self.assertEqual(cmd[cmd.index("--model") + 1], model)
@@ -257,6 +289,7 @@ class TestRunConstruction(unittest.TestCase):
             self.assertEqual(cmd[cmd.index("--cwd") + 1], "/tmp")
             self.assertEqual(kwargs["cwd"], "/tmp")
             self.assertNotEqual(kwargs["env"]["HOME"], os.path.expanduser("~"))
+            self.assertEqual(kwargs["env"]["GROK_SUBAGENTS"], "0")
             self.assertIn(f'model = "{spec["model_id"]}"', cfg)
             self.assertIn(f'base_url = "{spec["base_url"]}"', cfg)
             self.assertIn(f'env_key = "{spec["env_key"]}"', cfg)
@@ -264,6 +297,9 @@ class TestRunConstruction(unittest.TestCase):
             self.assertEqual(parsed["model"]["grok-build"]["model"], spec["model_id"])
             self.assertEqual(parsed["model"]["grok-build"]["base_url"], spec["base_url"])
             self.assertEqual(parsed["model"][model]["max_completion_tokens"], 65536)
+            self.assertFalse(parsed["subagents"]["enabled"])
+            self.assertEqual(parsed["model"][model]["api_backend"], "chat_completions")
+            self.assertEqual(parsed["model"][model]["auth_scheme"], "bearer")
             self.assertNotIn("temperature", parsed["model"][model])
             self.assertNotIn("top_p", parsed["model"][model])
 

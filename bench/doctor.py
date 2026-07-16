@@ -54,6 +54,7 @@ OPEN_MODEL_ENV = {
     "glm-4.7-flash": "ZAI_API_KEY",
     "deepseek-v4-flash": "DEEPSEEK_API_KEY",
     "kimi-k2.7-code": "MOONSHOT_API_KEY",
+    "gpt-5.6": "OPENAI_API_KEY",
 }
 FRONTIER_MODEL_ENV = {
     "claude-opus-4-8": "ANTHROPIC_API_KEY",
