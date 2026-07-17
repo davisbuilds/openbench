@@ -77,6 +77,7 @@ MODELS = {
     # Thinking parity for the opus frontier lane: Cursor exposes a concrete
     # medium-thinking model id, so no separate effort flag is needed.
     "claude-opus-4-8": "claude-opus-4-8-thinking-medium",
+    "grok-4.5": "cursor-grok-4.5-medium",
 }
 
 # Linux cursor-agent stores subscription auth in FILES, not a keychain. The

@@ -92,6 +92,7 @@ MODELS = {
     # Thinking parity for the opus frontier lane: Anthropic's opencode provider
     # gets the same medium-equivalent request via `--variant medium`.
     "claude-opus-4-8": "anthropic/claude-opus-4-8",
+    "grok-4.5": "xai/grok-4.5",
 }
 
 # canonical model name -> `--variant` reasoning effort
@@ -101,6 +102,7 @@ _VARIANT = {
     "gpt-5.6-terra": "medium",
     "gpt-5.6-luna": "medium",
     "claude-opus-4-8": "medium",
+    "grok-4.5": "medium",
 }
 
 # opencode's Anthropic OAuth login (`opencode auth login -p anthropic`) writes

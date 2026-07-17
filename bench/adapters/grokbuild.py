@@ -34,9 +34,14 @@ import tempfile
 NAME = "grokbuild"
 _EXE = "grok"
 
-# Required by ADAPTER_SPEC / doctor.py. All lanes use the same custom catalog
-# mechanism, including gpt-5.6 (API-key routing, not subscription OAuth).
-MODELS = {}
+# Subscription lane: native xAI models billed to the user's Grok subscription.
+# Auth is the host login at ~/.grok/auth.json, staged into the disposable HOME.
+# No custom catalog is written, so Grok routes to xAI's own endpoint; the
+# counting proxy cannot meter this lane (CLI-reported tokens only).
+MODELS = {
+    "grok-4.5": {"model_id": "grok-4.5"},
+}
+_REAL_GROK_AUTH = os.path.expanduser("~/.grok/auth.json")
 
 # Grok has built-in auxiliary roles (session summaries/titles/image descriptions)
 # that can otherwise fall back to the built-in `grok-build` model id. Override
@@ -314,22 +319,33 @@ def _parse_stream(stdout):
 
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
-    if model not in OPEN_MODELS:
+    subscription = model in MODELS
+    if not subscription and model not in OPEN_MODELS:
         return _unsupported(model)
-    spec = OPEN_MODELS[model]
-    try:
-        route_spec = _proxied_spec(spec)
-    except ValueError as exc:
-        return _setup_needed(str(exc))
-    if not os.environ.get(spec["env_key"]):
-        return _setup_needed(f"export {spec['env_key']} to use {model}")
+    route_spec = None
+    if not subscription:
+        spec = OPEN_MODELS[model]
+        try:
+            route_spec = _proxied_spec(spec)
+        except ValueError as exc:
+            return _setup_needed(str(exc))
+        if not os.environ.get(spec["env_key"]):
+            return _setup_needed(f"export {spec['env_key']} to use {model}")
+    elif not os.path.isfile(_REAL_GROK_AUTH):
+        return _setup_needed(f"log in to Grok (`grok` interactive) so {_REAL_GROK_AUTH} exists")
     exe = _resolve_exe()
     if not exe:
         return _setup_needed("install Grok Build CLI (`npm install -g @xai-official/grok`) and ensure `grok` is on PATH")
 
     iso_home = tempfile.mkdtemp(prefix="grokbuild_home_")
     try:
-        grok_dir = os.path.dirname(_write_config(iso_home, model, route_spec))
+        if subscription:
+            grok_dir = os.path.join(iso_home, ".grok")
+            os.makedirs(grok_dir, exist_ok=True)
+            shutil.copy2(_REAL_GROK_AUTH, os.path.join(grok_dir, "auth.json"))
+            model = MODELS[model]["model_id"]
+        else:
+            grok_dir = os.path.dirname(_write_config(iso_home, model, route_spec))
         env = dict(os.environ)
         env["HOME"] = iso_home
         env["GROK_SUBAGENTS"] = "0"
