@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Tests for Docker/local harness version provenance in bench/run.py."""
 
+import contextlib
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BENCH_DIR)
@@ -31,6 +35,79 @@ class TestContainerVersionFileParsing(unittest.TestCase):
     def test_parse_container_cli_versions_rejects_malformed_or_non_object(self):
         self.assertEqual(run.parse_container_cli_versions("not json"), {})
         self.assertEqual(run.parse_container_cli_versions("[]"), {})
+
+
+class TestVersionPreflight(unittest.TestCase):
+    def _dockerfile(self, version="0.144.1"):
+        fh = tempfile.NamedTemporaryFile("w", delete=False)
+        fh.write(f"ARG CODEX_VERSION={version}\n")
+        fh.close()
+        self.addCleanup(lambda: os.path.exists(fh.name) and os.unlink(fh.name))
+        return fh.name
+
+    def test_manifest_proxy_metadata_does_not_select_a_cli_pin(self):
+        manifest = SimpleNamespace(base_adapter=None, proxy_adapter="codex", kind="manifest")
+        self.assertIsNone(run._pin_key_for_harness("custom", manifest))
+
+    def test_config_variant_uses_its_executed_base_adapter_pin(self):
+        variant = SimpleNamespace(base_adapter="codex", proxy_adapter="codex",
+                                  kind="config-variant")
+        self.assertEqual(run._pin_key_for_harness("custom", variant), "codex")
+
+    def test_matching_mocked_cli_version_passes(self):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return SimpleNamespace(returncode=0, stdout="codex-cli 0.144.1\n", stderr="")
+
+        drift = run.host_version_drift(
+            ["codex"], dockerfile=self._dockerfile(), subprocess_runner=fake_run)
+        self.assertEqual(drift, [])
+        self.assertEqual(calls[0][0], ["codex", "--version"])
+
+    def _run_main(self, drift, extra_args=None):
+        emitted = []
+
+        def fake_run_cell(*args, **kwargs):
+            emitted.append(kwargs["version_drift"])
+            return {
+                "success": False, "score": 0.0, "completed": True,
+                "checker_exit": 1, "exec_mode": "local",
+            }
+
+        argv = ["--harness", "codex", "--task", "fake-task",
+                "--results-path", os.path.join(tempfile.gettempdir(), "version-gate.jsonl")]
+        argv.extend(extra_args or [])
+        with mock.patch.object(run, "host_version_drift", return_value=drift), \
+                mock.patch.object(run, "probe_version", return_value="codex-cli 0.144.0"), \
+                mock.patch.object(run, "load_existing_run_ids", return_value=set()), \
+                mock.patch.object(run, "run_cell", side_effect=fake_run_cell) as run_cell_mock, \
+                mock.patch.object(run, "append_row"):
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = run.main(argv)
+        return code, emitted, run_cell_mock.call_count, stderr.getvalue()
+
+    def test_mismatch_refuses_before_any_cell(self):
+        drift = [{"harness": "codex", "actual": "0.144.0", "expected": "0.144.1",
+                  "cli": "codex"}]
+        code, emitted, call_count, stderr = self._run_main(drift)
+        self.assertEqual(code, 2)
+        self.assertEqual(emitted, [])
+        self.assertEqual(call_count, 0)
+        self.assertIn("host=0.144.0 pin=0.144.1", stderr)
+        self.assertIn("bench/bump_clis.py --sync-host", stderr)
+
+    def test_mismatch_with_flag_marks_every_row(self):
+        drift = [{"harness": "codex", "actual": "0.144.0", "expected": "0.144.1",
+                  "cli": "codex"}]
+        code, emitted, call_count, _stderr = self._run_main(
+            drift, ["--allow-version-drift"])
+        self.assertEqual(code, 0)
+        self.assertEqual(call_count, 1)
+        self.assertEqual(emitted, [True])
 
 
 class TestHarnessVersionSource(unittest.TestCase):

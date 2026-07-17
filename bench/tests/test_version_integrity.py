@@ -86,6 +86,61 @@ class TestBumpClisCheck(unittest.TestCase):
         self.assertEqual(next(row for row in rows if row["key"] == "cursor")["latest"], "n/a")
 
 
+class TestHostSync(unittest.TestCase):
+    def test_sync_host_installs_only_drifted_npm_pins_and_never_uses_docker(self):
+        dockerfile_text = TestBumpClisCheck()._fixture_dockerfile()
+        versions = {
+            "codex": "0.144.0",
+            "pi": "0.80.6",
+            "claude": "2.1.206",
+            "grok": "0.2.93",
+            "opencode": "1.17.18",
+            "cursor-agent": "2026.07.08-old",
+        }
+        calls = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:3] == ["npm", "install", "-g"]:
+                self.assertEqual(cmd[3], "@openai/codex@0.144.1")
+                versions["codex"] = "0.144.1"
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            self.assertEqual(cmd[1:], ["--version"])
+            version = versions[cmd[0]]
+            return SimpleNamespace(returncode=0, stdout=f"{cmd[0]} {version}\n", stderr="")
+
+        with tempfile.NamedTemporaryFile("w", delete=False) as fh:
+            fh.write(dockerfile_text)
+            dockerfile = fh.name
+        try:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                bump_clis.sync_host(dockerfile, command_runner=fake_run_cmd)
+        finally:
+            os.unlink(dockerfile)
+
+        installs = [cmd for cmd in calls if cmd[:3] == ["npm", "install", "-g"]]
+        self.assertEqual(installs, [["npm", "install", "-g", "@openai/codex@0.144.1"]])
+        self.assertFalse(any(cmd[0] == "docker" for cmd in calls))
+        self.assertIn("codex: before=0.144.0 pin=0.144.1", output.getvalue())
+        self.assertIn("codex: after=0.144.1 pin=0.144.1", output.getvalue())
+        self.assertIn("cursor: manual sync required", output.getvalue())
+        self.assertIn("cursor: after=2026.07.08-old pin=2026.07.09-a3815c0", output.getvalue())
+
+    def test_reported_version_does_not_accept_prefix_matches(self):
+        self.assertEqual(bump_clis.reported_version("grok v0.2.93 (hash)"), "0.2.93")
+        self.assertNotEqual(bump_clis.reported_version("grok 0.2.93"), "0.2.9")
+
+    def test_missing_cli_is_treated_as_unavailable_for_sync(self):
+        def missing(_cmd, **_kwargs):
+            raise FileNotFoundError("missing")
+
+        version, raw = bump_clis.host_cli_version(
+            bump_clis.PIN_BY_KEY["codex"], command_runner=missing)
+        self.assertIsNone(version)
+        self.assertIn("missing", raw)
+
+
 class TestDockerfilePinRewrite(unittest.TestCase):
     def test_rewrite_dockerfile_pins_updates_only_selected_args(self):
         original = "\n".join([
