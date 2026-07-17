@@ -440,6 +440,12 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         elif prefix == "openai":
             upstream = self.server.upstreams["openai"]  # type: ignore[attr-defined]
             route_name = "openai"
+        elif prefix == "bridge":
+            # Local LiteLLM open-model bridge (bench/openmodel_bridge.sh):
+            # codex speaks Responses to it; usage extraction is the same
+            # SSE/JSON parsing used on every other route.
+            upstream = self.server.upstreams["bridge"]  # type: ignore[attr-defined]
+            route_name = "bridge"
         elif prefix == "cursor":
             # Cursor Agent's endpoint speaks Cursor's private HTTP/Connect-RPC
             # protocol rather than a public model-provider dialect. Forward it
@@ -578,6 +584,7 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
         "codex": "https://chatgpt.com",
         "openai": openai_upstream,
         "cursor": cursor_upstream,
+        "bridge": "http://127.0.0.1:" + os.environ.get("BENCH_BRIDGE_PORT", "4141"),
     })
     httpd.chat_upstreams = _urlsplit_map(chat)
     httpd.anthropic_upstreams = _urlsplit_map(anthropic)

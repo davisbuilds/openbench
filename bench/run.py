@@ -482,7 +482,10 @@ def _proxy_docker_args(proxy_ctx):
 def proxy_supported_for_cell(harness, model):
     """True when --proxy has proven adapter wiring for this harness/model."""
     if harness == "codex":
-        return model in PROXY_CODEX_SUBSCRIPTION_MODELS
+        # Open models reach the LiteLLM bridge through the proxy's ``bridge``
+        # route (adapters/codex.py _bridge_base_url), so they meter too.
+        return (model in PROXY_CODEX_SUBSCRIPTION_MODELS
+                or model in PROXY_CHAT_MODELS)
     if harness == "pi":
         # Open models route via the provider extension's proxied baseUrl
         # (adapters/pi.py _pi_provider_ext), same mechanism as opencode.

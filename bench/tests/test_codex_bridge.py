@@ -78,6 +78,19 @@ class TestBridgeUrl(unittest.TestCase):
         self.assertEqual(self.codex._bridge_base_url(),
                          "http://localhost:9000/v1")
 
+
+    def test_proxy_env_routes_bridge_through_counting_proxy(self):
+        os.environ["OPENBENCH_PROXY"] = "1"
+        os.environ["OPENBENCH_PROXY_BASE_URL"] = "http://127.0.0.1:5555"
+        os.environ["OPENBENCH_PROXY_CELL_TOKEN"] = "tok123"
+        try:
+            self.assertEqual(self.codex._bridge_base_url(),
+                             "http://127.0.0.1:5555/cell/tok123/bridge/v1")
+        finally:
+            for k in ("OPENBENCH_PROXY", "OPENBENCH_PROXY_BASE_URL",
+                      "OPENBENCH_PROXY_CELL_TOKEN"):
+                os.environ.pop(k, None)
+
     def test_base_url_ends_in_v1_for_responses_suffix(self):
         # codex appends /responses to base_url; /v1 tail yields /v1/responses.
         self.assertTrue(self.codex._bridge_base_url().endswith("/v1"))

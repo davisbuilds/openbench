@@ -189,7 +189,14 @@ def _bridge_port():
 
 
 def _bridge_base_url():
-    """codex ``base_url`` for the bridge; codex appends ``/responses`` to it."""
+    """codex ``base_url`` for the bridge; codex appends ``/responses`` to it.
+
+    When the counting proxy is active, route through its ``bridge`` prefix
+    (proxy -> LiteLLM -> vendor) so open-model cells get proxy-metered usage.
+    """
+    proxied = _proxy_cell_url("bridge", "v1")
+    if proxied:
+        return proxied
     return f"http://{_bridge_host()}:{_bridge_port()}/v1"
 
 
