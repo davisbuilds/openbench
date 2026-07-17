@@ -143,7 +143,7 @@ class TestConfigAndGating(unittest.TestCase):
             "glm-5.2": "chat/zai/api/paas/v4",
             "deepseek-v4-flash": "chat/deepseek",
             "kimi-k2.7-code": "chat/moonshot/v1",
-            "gpt-5.6": "openai/v1",
+            "gpt-5.6": "subbridge/v1",
         }
         with EnvPatch() as env:
             env.update({

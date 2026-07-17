@@ -89,6 +89,7 @@ class ProxyTests(unittest.TestCase):
             chat_upstreams={"deepseek": upstream_url},
             anthropic_upstreams={"deepseek": upstream_url},
             openai_upstream=upstream_url,
+            subbridge_upstream=upstream_url,
             cursor_upstream=upstream_url,
         )
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
@@ -190,7 +191,7 @@ class ProxyTests(unittest.TestCase):
 
     def test_cliproxyapi_upstream_is_metered_with_mock_http(self):
         self._post(
-            "/cell/tok-subbridge/openai/v1/chat/completions",
+            "/cell/tok-subbridge/subbridge/v1/chat/completions",
             {"model": "gpt-5.6", "stream": False},
         )
         row = self._ledger("tok-subbridge")[0]
@@ -198,7 +199,7 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(request["path"], "/v1/chat/completions")
         self.assertEqual(request["host"], f"127.0.0.1:{self.upstream.server_address[1]}")
         self.assertEqual(request["auth"], f"Bearer {SECRET}")
-        self.assertEqual(row["route"], "openai")
+        self.assertEqual(row["route"], "subbridge")
         self.assertEqual(row["usage"]["prompt_tokens"], 20)
         self.assertEqual(row["sampling_observed"]["model"], "gpt-5.6")
 
@@ -212,7 +213,7 @@ class ProxyTests(unittest.TestCase):
         self.proxy.require_registered_tokens = True
         data = b'{"model":"gpt-5.6"}'
         conn = http.client.HTTPConnection(self.host, self.port, timeout=5)
-        conn.request("POST", "/cell/guessed/openai/v1/chat/completions", body=data, headers={
+        conn.request("POST", "/cell/guessed/" + "subbridge/v1/chat/completions", body=data, headers={
             "content-type": "application/json",
             "content-length": str(len(data)),
         })
@@ -224,7 +225,7 @@ class ProxyTests(unittest.TestCase):
 
         with open(os.path.join(self.tmp.name, "registered.meta.json"), "w", encoding="utf-8") as fh:
             json.dump({"model": "gpt-5.6"}, fh)
-        self._post("/cell/registered/" + "openai/v1/chat/completions", {"model": "gpt-5.6"})
+        self._post("/cell/registered/" + "subbridge/v1/chat/completions", {"model": "gpt-5.6"})
         self.assertEqual(self.upstream.requests[-1]["path"], "/v1/chat/completions")
 
     def test_cell_token_routing_isolation(self):

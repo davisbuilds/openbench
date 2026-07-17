@@ -446,6 +446,9 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         elif prefix == "openai":
             upstream = self.server.upstreams["openai"]  # type: ignore[attr-defined]
             route_name = "openai"
+        elif prefix == "subbridge":
+            upstream = self.server.upstreams["subbridge"]  # type: ignore[attr-defined]
+            route_name = "subbridge"
         elif prefix == "cursor":
             # Cursor Agent's endpoint speaks Cursor's private HTTP/Connect-RPC
             # protocol rather than a public model-provider dialect. Forward it
@@ -569,6 +572,7 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
                 chat_upstreams: dict[str, str] | None = None,
                 anthropic_upstreams: dict[str, str] | None = None,
                 openai_upstream: str = "https://api.openai.com",
+                subbridge_upstream: str = "http://127.0.0.1:8317",
                 cursor_upstream: str = DEFAULT_CURSOR_UPSTREAM,
                 timeout_s: float = 300.0, capture_limit: int = 8 * 1024 * 1024,
                 max_request_bytes: int = 64 * 1024 * 1024,
@@ -584,6 +588,7 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     httpd.upstreams = _urlsplit_map({
         "codex": "https://chatgpt.com",
         "openai": openai_upstream,
+        "subbridge": subbridge_upstream,
         "cursor": cursor_upstream,
     })
     httpd.chat_upstreams = _urlsplit_map(chat)
@@ -626,6 +631,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ledger-dir", required=True)
     parser.add_argument("--chat-upstream", action="append", default=[], help="name=url")
     parser.add_argument("--openai-upstream", default="https://api.openai.com")
+    parser.add_argument("--subbridge-upstream", default="http://127.0.0.1:8317")
     parser.add_argument("--cursor-upstream", default=DEFAULT_CURSOR_UPSTREAM)
     parser.add_argument("--anthropic-upstream", action="append", default=[], help="name=url")
     parser.add_argument("--timeout", type=float, default=300.0)
@@ -636,6 +642,7 @@ def main(argv: list[str] | None = None) -> int:
         chat_upstreams=_parse_upstream_args(args.chat_upstream),
         anthropic_upstreams=_parse_upstream_args(args.anthropic_upstream),
         openai_upstream=args.openai_upstream,
+        subbridge_upstream=args.subbridge_upstream,
         cursor_upstream=args.cursor_upstream,
         timeout_s=args.timeout, verbose=args.verbose,
     )

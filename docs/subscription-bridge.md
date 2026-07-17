@@ -21,7 +21,7 @@ The counting proxy sits **in front of** CLIProxyAPI:
 
 ```text
 Grok Build
-  -> OpenBench counting proxy /cell/<opaque>/openai/v1/chat/completions
+  -> OpenBench counting proxy /cell/<opaque>/subbridge/v1/chat/completions
   -> CLIProxyAPI http://127.0.0.1:8317/v1/chat/completions
   -> Codex/ChatGPT subscription upstream
 ```

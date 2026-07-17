@@ -39,7 +39,7 @@ import json
 import os
 import re
 import shlex
-import socket
+import http.client
 import subprocess
 from urllib.parse import urlsplit
 
@@ -94,13 +94,19 @@ class Probes:
         """True if ``path`` (file or dir) exists, expanding ``~``."""
         return os.path.exists(os.path.expanduser(path))
 
-    def tcp_connect(self, host, port, timeout=1.0):
-        """True when a local service accepts a TCP connection."""
+    def http_get(self, url, headers=None, timeout=2.0):
+        """Return (status, body) for a small readiness GET, or (None, '')."""
+        parsed = urlsplit(url)
+        cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
         try:
-            with socket.create_connection((host, port), timeout=timeout):
-                return True
-        except OSError:
-            return False
+            conn = cls(parsed.hostname, parsed.port, timeout=timeout)
+            conn.request("GET", parsed.path or "/", headers=headers or {})
+            response = conn.getresponse()
+            body = response.read(1024 * 1024).decode("utf-8", "replace")
+            conn.close()
+            return response.status, body
+        except (OSError, http.client.HTTPException, ValueError):
+            return None, ""
 
     def getenv(self, name):
         """Return the environment variable ``name`` (or None)."""
@@ -284,9 +290,17 @@ def check_subbridge(p):
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
     except ValueError:
         return False, "SETUP-NEEDED: CLIPROXYAPI_BASE_URL has an invalid port"
-    if not p.tcp_connect(parsed.hostname, port):
-        return False, f"SETUP-NEEDED: CLIProxyAPI unreachable at {parsed.hostname}:{port}"
-    return True, f"CLIProxyAPI reachable at {parsed.hostname}:{port}"
+    models_url = base.rstrip("/") + "/models"
+    ingress_key = p.getenv("CLIPROXYAPI_API_KEY") or "openbench-local-ingress"
+    status, body = p.http_get(models_url, {"Authorization": f"Bearer {ingress_key}"})
+    try:
+        payload = json.loads(body)
+        model_ids = {item.get("id") for item in payload.get("data", []) if isinstance(item, dict)}
+    except (ValueError, AttributeError):
+        model_ids = set()
+    if status != 200 or "gpt-5.6" not in model_ids:
+        return False, f"SETUP-NEEDED: CLIProxyAPI gpt-5.6 subscription route unavailable at {parsed.hostname}:{port}"
+    return True, f"CLIProxyAPI gpt-5.6 route ready at {parsed.hostname}:{port}"
 
 
 def _auth_cursor_container(p):

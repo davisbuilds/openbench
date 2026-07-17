@@ -77,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix="openbench_subbridge_smoke_") as tmp:
     work = Path(tmp) / "work"
     work.mkdir()
     server, thread = proxy.start_in_thread(
-        "127.0.0.1", 0, ledger, openai_upstream=bridge_origin, timeout_s=120)
+        "127.0.0.1", 0, ledger, subbridge_upstream=bridge_origin, timeout_s=120)
     try:
         host, port = server.server_address[:2]
         os.environ["OPENBENCH_PROXY"] = "1"
@@ -99,7 +99,7 @@ with tempfile.TemporaryDirectory(prefix="openbench_subbridge_smoke_") as tmp:
         raise SystemExit(f"SMOKE FAILED: {result.get('error') or 'unknown harness error'}")
     if len(rows) != 1:
         raise SystemExit(f"SMOKE FAILED: expected one metered model call, observed {len(rows)}")
-    if rows[0].get("status") != 200 or rows[0].get("route") != "openai":
+    if rows[0].get("status") != 200 or rows[0].get("route") != "subbridge":
         raise SystemExit("SMOKE FAILED: metered CLIProxyAPI request was not successful")
     print("SMOKE OK: grokbuild -> counting proxy -> CLIProxyAPI -> Codex subscription (1 call)")
 PY
