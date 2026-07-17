@@ -280,9 +280,10 @@ def check_open_key(p, env_key, *, keys_env_ok=False):
 
 def check_subbridge(p):
     """Verify CLIProxyAPI is installed and its configured ingress is reachable."""
-    if not p.which("cliproxyapi"):
+    configured_base = p.getenv("CLIPROXYAPI_BASE_URL")
+    if not configured_base and not p.which("cliproxyapi"):
         return False, "SETUP-NEEDED: brew install cliproxyapi"
-    base = p.getenv("CLIPROXYAPI_BASE_URL") or "http://127.0.0.1:8317/v1"
+    base = configured_base or "http://127.0.0.1:8317/v1"
     parsed = urlsplit(base)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return False, "SETUP-NEEDED: CLIPROXYAPI_BASE_URL must be an absolute HTTP(S) URL"

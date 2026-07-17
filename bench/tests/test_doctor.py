@@ -122,6 +122,12 @@ class TestEvaluate(unittest.TestCase):
         auth = next(r for r in rows if r["check"] == "AUTH")
         self.assertIn("brew install cliproxyapi", auth["detail"])
 
+        p.env_map["CLIPROXYAPI_BASE_URL"] = "https://bridge.example/v1"
+        p.http_map["https://bridge.example/v1/models"] = (200, '{"data":[{"id":"gpt-5.6"}]}')
+        rows, ok = doctor.evaluate(["grokbuild"], "gpt-5.6", p)
+        self.assertTrue(ok)  # configured remote ingress needs no local binary
+        p.env_map.pop("CLIPROXYAPI_BASE_URL")
+
         p.which_map["cliproxyapi"] = "/b/cliproxyapi"
         rows, ok = doctor.evaluate(["grokbuild"], "gpt-5.6", p)
         self.assertTrue(ok)
