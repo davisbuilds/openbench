@@ -58,9 +58,15 @@ def load_arms(paths):
             arms[label].extend(stats.load_rows([path]))
         return dict(arms)
 
+    rows = stats.load_rows(paths)
+    baseline_labels = {_row_arm(row) for row in rows
+                       if not isinstance(row.get("candidate_provenance"), dict)}
     arms = defaultdict(list)
-    for row in stats.load_rows(paths):
-        arms[_row_arm(row)].append(row)
+    for row in rows:
+        label = _row_arm(row)
+        if isinstance(row.get("candidate_provenance"), dict) and label in baseline_labels:
+            label += " (candidate)"
+        arms[label].append(row)
     return dict(arms)
 
 

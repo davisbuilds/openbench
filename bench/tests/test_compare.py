@@ -112,6 +112,16 @@ class TestMatchedComparison(CompareTestCase):
         self.assertEqual(result["arms"], ["codex", "codex-on"])
         self.assertEqual(result["matched_n"], 1)
 
+    def test_candidate_name_cannot_collapse_into_baseline_harness(self):
+        candidate = {"name": "codex", "candidate_digest": "short"}
+        path = self.write("combined.jsonl", [
+            self.row("codex", "t1", 1, True),
+            self.row("codex", "t1", 1, False, candidate_provenance=candidate),
+        ])
+        result = compare.build_comparison([path], tasks_dirs=[self.tasks])
+        self.assertEqual(result["arms"], ["codex", "codex (candidate)"])
+        self.assertEqual(result["matched_n"], 1)
+
     def test_version_mix_is_flagged_in_human_and_markdown_tables(self):
         a = self.write("a.jsonl", [
             self.row("h", "t1", 1, True, harness_version="1.0"),
