@@ -280,7 +280,10 @@ def check_subbridge(p):
     parsed = urlsplit(base)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return False, "SETUP-NEEDED: CLIPROXYAPI_BASE_URL must be an absolute HTTP(S) URL"
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return False, "SETUP-NEEDED: CLIPROXYAPI_BASE_URL has an invalid port"
     if not p.tcp_connect(parsed.hostname, port):
         return False, f"SETUP-NEEDED: CLIProxyAPI unreachable at {parsed.hostname}:{port}"
     return True, f"CLIProxyAPI reachable at {parsed.hostname}:{port}"

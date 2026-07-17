@@ -126,12 +126,21 @@ def _resolved_spec(spec):
         resolved["base_url"] = "http://host.docker.internal:8317/v1"
     if spec.get("base_url_env") and os.environ.get(spec["base_url_env"]):
         resolved["base_url"] = os.environ[spec["base_url_env"]]
-    from urllib.parse import urlsplit
+    from urllib.parse import urlsplit, urlunsplit
     parsed = urlsplit(resolved["base_url"])
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("model base URL must not contain URL-embedded credentials")
     if parsed.query or parsed.fragment:
         raise ValueError("model base URL must not contain a query or fragment")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("model base URL has an invalid port") from exc
+    if (spec.get("subscription_bridge") and os.environ.get("BENCH_IN_CONTAINER")
+            and parsed.hostname in {"127.0.0.1", "localhost", "::1"}):
+        netloc = "host.docker.internal" + (f":{port}" if port is not None else "")
+        resolved["base_url"] = urlunsplit(
+            (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
     return resolved
 
 

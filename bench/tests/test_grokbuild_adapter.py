@@ -184,11 +184,15 @@ class TestConfigAndGating(unittest.TestCase):
         self.assertEqual(entry["env_key"], "CLIPROXYAPI_API_KEY")
 
     def test_subbridge_uses_docker_host_address_in_container(self):
-        with EnvPatch() as env:
-            env["BENCH_IN_CONTAINER"] = "1"
-            env.pop("CLIPROXYAPI_BASE_URL", None)
-            resolved = grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
-        self.assertEqual(resolved["base_url"], "http://host.docker.internal:8317/v1")
+        for configured in (None, "http://127.0.0.1:8317/v1", "http://localhost:8317/v1"):
+            with self.subTest(configured=configured), EnvPatch() as env:
+                env["BENCH_IN_CONTAINER"] = "1"
+                if configured is None:
+                    env.pop("CLIPROXYAPI_BASE_URL", None)
+                else:
+                    env["CLIPROXYAPI_BASE_URL"] = configured
+                resolved = grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+            self.assertEqual(resolved["base_url"], "http://host.docker.internal:8317/v1")
 
     def test_dotted_model_aliases_are_quoted_toml_keys(self):
         for model, spec in grokbuild.OPEN_MODELS.items():

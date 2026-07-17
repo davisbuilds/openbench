@@ -126,6 +126,11 @@ class TestEvaluate(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("reachable", next(r for r in rows if r["check"] == "AUTH")["detail"])
 
+        p.env_map["CLIPROXYAPI_BASE_URL"] = "http://127.0.0.1:notaport/v1"
+        rows, ok = doctor.evaluate(["grokbuild"], "gpt-5.6", p)
+        self.assertFalse(ok)
+        self.assertIn("invalid port", next(r for r in rows if r["check"] == "AUTH")["detail"])
+
     def test_missing_cli_fails(self):
         p = all_green_probes()
         del p.which_map["codex"]
