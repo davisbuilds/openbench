@@ -1,41 +1,34 @@
 Status: COMPLETE
 
-Topology:
-  Grok Build (isolated HOME; OPENAI_API_KEY excluded)
-    -> OpenBench counting proxy /cell/<opaque>/subbridge/v1/chat/completions
-    -> CLIProxyAPI http://127.0.0.1:8317/v1/chat/completions
-    -> Codex/ChatGPT subscription upstream (OAuth injection + refresh)
+Result:
+  OpenBench now checks npm’s latest CLI dist-tags weekly and on manual dispatch, reports every pin versus latest, and opens or updates one automation-owned issue when pins are behind. No automated bump or pull request is created.
+
+Automation chain:
+  1. `.github/workflows/version-check.yml` runs `python3 bench/bump_clis.py --check-upstream` every Tuesday at 03:17 UTC or on manual dispatch.
+  2. The command queries only registry.npmjs.org, reports codex/pi/claude/grok/opencode pin versus latest, marks Cursor manual, and exits 1 for any behind pin. Individual registry errors warn and skip without failing the whole check.
+  3. A behind result creates or updates the marker-owned `CLI version bumps available` issue with the table and exact apply, host-sync, and image-rebuild commands.
+  4. A human reviews releases and runs `--apply`, `--sync-host`, and the image rebuild; `bench/run.py` then refuses local-capable runs with host-versus-pin drift.
 
 Files changed:
-  .worker/DECISIONS.md
-  .worker/last.txt
-  bench/adapters/grokbuild.py
-  bench/docker_exec.py
-  bench/doctor.py
-  bench/proxy.py
-  bench/run.py
-  bench/smoke_subbridge.sh
-  bench/tests/test_doctor.py
-  bench/tests/test_grokbuild_adapter.py
-  bench/tests/test_proxy.py
-  docs/config-isolation-audit.md
-  docs/subscription-bridge.md
+  - `.github/workflows/version-check.yml`
+  - `.worker/DECISIONS.md`
+  - `.worker/last.txt`
+  - `bench/bump_clis.py`
+  - `bench/tests/test_version_integrity.py`
+  - `docs/version-pinning.md`
 
 Verification:
-  - python3 -m unittest discover bench/tests: 381 tests, OK (23.385s)
-  - Focused mock-HTTP and wiring tests: green
-  - bash -n bench/smoke_subbridge.sh: green
-  - python3 bench/scrub.py --check <each changed implementation/test/doc file>: clean
-  - Structured autoreview (Codex, branch against HEAD~9): clean, no accepted/actionable findings
-  - Live smoke not run: CLIProxyAPI was not installed/running on this host; the script detects this before any model request and prints setup instructions. This follows the no-live-call constraint.
+  - `python3 -m unittest discover bench/tests`: 406 tests, OK (24.719s final run).
+  - Focused `bench.tests.test_version_integrity`: 9 tests, OK; mocked HTTP covers behind, current, and registry-error paths and asserts no install command runs.
+  - Live `python3 bench/bump_clis.py --check-upstream`: reached npm registry, printed all six rows, and exited 1 because all five npm pins are currently behind; Cursor printed manual.
+  - YAML syntax parse, Python compile, `git diff --check`, and scrub checks for every changed file: clean.
+  - Structured autoreview against `origin/main` with web search disabled: clean after fixing its one accepted finding (automation now matches its issue marker before updating).
 
 Decisions:
-  - Primary lane only: grokbuild x gpt-5.6. Claude stretch was not enabled because its existing --bare API-key boundary should not be weakened.
-  - Counting proxy is in front of CLIProxyAPI on a dedicated subbridge route, avoiding mixed-harness upstream collisions.
-  - CLIProxyAPI owns all subscription OAuth and refresh. CLIPROXYAPI_API_KEY is optional ingress access control; OPENAI_API_KEY is filtered without retrieving its value.
-  - Docker-exposed proxy requests require registered cell tokens, and only a grokbuild/gpt-5.6 cell can use the subscription route.
-  - Remote bridge ingress requires HTTPS; local and host.docker.internal HTTP remain supported.
+  - npm’s `latest` dist-tag is authoritative; direct stdlib HTTP keeps the check install-free.
+  - Cursor remains manual because no npm package/registry source exists in the pin metadata.
+  - The workflow updates only an open issue carrying its marker; clean runs do not auto-close the issue.
 
 Residual risk:
-  - Actual subscription behavior depends on the operator's CLIProxyAPI configuration and the availability of model id gpt-5.6. The manual one-prompt smoke is the final live validation once the daemon is configured.
-  - Docker reachability depends on host.docker.internal and daemon binding in the operator environment.
+  - GitHub issue creation/update cannot be executed locally; workflow YAML and script logic were statically validated but require the first Actions run for platform-level confirmation.
+  - A transient registry error can delay detection for that package until the next run, by design. Cursor updates remain manually detected.
