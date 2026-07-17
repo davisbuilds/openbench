@@ -162,6 +162,8 @@ class TestMatchedComparison(CompareTestCase):
         result = compare.build_comparison([path], tasks_dirs=[self.tasks])
         self.assertEqual(result["arms"], ["a", "b"])
         self.assertEqual(result["matched_n"], 1)
+        self.assertEqual(result["unassigned_excluded"], {"invalid_json": 1})
+        self.assertIn("Unassigned exclusions: invalid_json=1", compare.render_text(result))
 
     def test_duplicate_rows_are_counted_as_unmatched(self):
         a = self.write("a.jsonl", [

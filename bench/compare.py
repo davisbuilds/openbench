@@ -52,12 +52,12 @@ def _row_arm(row):
 
 
 def load_arms(paths):
-    """Load paths and return ``{arm: rows}`` according to CLI arm semantics."""
+    """Load paths and return ``({arm: rows}, unassigned_invalid_rows)``."""
     if len(paths) > 1:
         arms = defaultdict(list)
         for path, label in zip(paths, _path_labels(paths)):
             arms[label].extend(stats.load_rows([path]))
-        return dict(arms)
+        return dict(arms), []
 
     rows = stats.load_rows(paths)
     valid_rows = [row for row in rows if stats.is_valid_result_row(row)]
@@ -83,12 +83,15 @@ def load_arms(paths):
         labels[(kind, name)] = label
 
     arms = defaultdict(list)
+    unassigned = []
     for row in rows:
         kind = "candidate" if isinstance(row.get("candidate_provenance"), dict) else "baseline"
         identity = (kind, _row_arm(row))
         if identity in labels:
             arms[labels[identity]].append(row)
-    return dict(arms)
+        else:
+            unassigned.append(row)
+    return dict(arms), unassigned
 
 
 def _filter_arm(rows, tasks_dirs):
@@ -115,11 +118,12 @@ def _sum_per_solve(rows, field, solved):
 
 def build_comparison(paths, tasks_dirs=None):
     """Return a report object for matched arms in ``paths``."""
-    arms = load_arms(paths)
+    arms, unassigned_rows = load_arms(paths)
     if len(arms) < 2:
         raise ValueError("comparison requires at least two arms")
 
     task_roots = stats.parse_tasks_dirs(tasks_dirs)
+    _, unassigned_excluded = _filter_arm(unassigned_rows, task_roots)
     eligible = {}
     exclusions = {}
     duplicate_counts = {}
@@ -177,6 +181,7 @@ def build_comparison(paths, tasks_dirs=None):
         "summaries": summaries,
         "provenance_ok": provenance["ok"],
         "provenance": provenance,
+        "unassigned_excluded": unassigned_excluded,
     }
 
 
@@ -245,11 +250,19 @@ def _provenance_status(report):
     return "NON-COMPARABLE PROVENANCE: " + messages
 
 
+def _unassigned_status(report):
+    excluded = report["unassigned_excluded"]
+    if not excluded:
+        return "Unassigned exclusions: none"
+    return "Unassigned exclusions: " + ", ".join(
+        f"{key}={value}" for key, value in sorted(excluded.items()))
+
+
 def render_text(report):
     rows = [[metric] + values for metric, values in scorecard_rows(report)]
     return ("OpenBench matched comparison\n"
             f"Matched n: {report['matched_n']} (task, trial cells present in all arms)\n"
-            f"{_provenance_status(report)}\n\n" +
+            f"{_provenance_status(report)}\n{_unassigned_status(report)}\n\n" +
             _plain_table(["Metric"] + report["arms"], rows))
 
 
@@ -266,6 +279,7 @@ def render_markdown(report):
         f"**Matched n: {report['matched_n']}** `(task, trial)` cells present in every arm.",
         "",
         "> " + _markdown_cell(_provenance_status(report)),
+        "> " + _markdown_cell(_unassigned_status(report)),
         "",
         "| Metric | " + " | ".join(arms) + " |",
         "| --- | " + " | ".join("---:" for _ in arms) + " |",

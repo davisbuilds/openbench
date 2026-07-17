@@ -26,7 +26,8 @@ the table and reports unmatched rows per arm.
 
 Rows classified as `infra` or `rate_limited` are excluded before matching and
 from solve-rate denominators. Their counts are shown separately for every arm,
-along with invalid-row and dropped-task quarantine counts. Canonical filtering,
+along with invalid-row and dropped-task quarantine counts. Invalid rows that
+cannot be attributed to an arm are reported as unassigned exclusions. Canonical filtering,
 Wilson intervals, hack-adjusted scoring, and provenance checks are reused from
 `bench/stats.py`. A prominent warning identifies provenance differences; add
 `--strict-provenance` to exit with status 2 when they occur.
