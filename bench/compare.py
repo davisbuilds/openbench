@@ -61,12 +61,29 @@ def load_arms(paths):
     rows = stats.load_rows(paths)
     baseline_labels = {_row_arm(row) for row in rows
                        if not isinstance(row.get("candidate_provenance"), dict)}
+    identities = []
+    for row in rows:
+        kind = "candidate" if isinstance(row.get("candidate_provenance"), dict) else "baseline"
+        identity = (kind, _row_arm(row))
+        if identity not in identities:
+            identities.append(identity)
+
+    labels = {}
+    emitted = set()
+    for kind, name in identities:
+        base = name + " (candidate)" if kind == "candidate" and name in baseline_labels else name
+        label = base
+        suffix = 2
+        while label in emitted:
+            label = f"{base}-{suffix}"
+            suffix += 1
+        emitted.add(label)
+        labels[(kind, name)] = label
+
     arms = defaultdict(list)
     for row in rows:
-        label = _row_arm(row)
-        if isinstance(row.get("candidate_provenance"), dict) and label in baseline_labels:
-            label += " (candidate)"
-        arms[label].append(row)
+        kind = "candidate" if isinstance(row.get("candidate_provenance"), dict) else "baseline"
+        arms[labels[(kind, _row_arm(row))]].append(row)
     return dict(arms)
 
 
