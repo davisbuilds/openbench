@@ -155,34 +155,40 @@ class TestConfigAndGating(unittest.TestCase):
                 proxied = grokbuild._proxied_spec(grokbuild.OPEN_MODELS[model])
                 self.assertEqual(proxied["base_url"], f"http://proxy.test:1234/cell/cell-token/{suffix}")
 
-    def test_gpt_route_rejects_url_embedded_credentials(self):
+    def test_subbridge_route_rejects_url_embedded_credentials(self):
         with EnvPatch() as env:
-            env["OPENAI_BASE_URL"] = "https://user:secret" + "@router.example/v1"
+            env["CLIPROXYAPI_BASE_URL"] = "http://user:secret" + "@127.0.0.1:8317/v1"
             with self.assertRaisesRegex(ValueError, "must not contain"):
                 grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
 
-    def test_invalid_gpt_base_url_returns_structured_setup_error(self):
+    def test_invalid_subbridge_url_returns_structured_setup_error(self):
         with EnvPatch() as env:
-            env["OPENAI_BASE_URL"] = "https://user:secret" + "@router.example/v1"
-            env["OPENAI_API_KEY"] = "test-key"
+            env["CLIPROXYAPI_BASE_URL"] = "http://127.0.0.1:8317/v1?secret=value"
             result = grokbuild.run("hi", "/tmp", "gpt-5.6", 5)
         self.assertFalse(result["completed"])
         self.assertIn("SETUP-NEEDED", result["error"])
         self.assertIsNone(result["cmd"])
 
-    def test_gpt_route_rejects_query_bearing_base_url(self):
+    def test_subbridge_route_rejects_query_bearing_base_url(self):
         with EnvPatch() as env:
-            env["OPENAI_BASE_URL"] = "https://router.example/v1?api-version=test"
+            env["CLIPROXYAPI_BASE_URL"] = "http://127.0.0.1:8317/v1?api-version=test"
             with self.assertRaisesRegex(ValueError, "query or fragment"):
                 grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
 
-    def test_gpt_route_accepts_configurable_openai_compatible_base_url(self):
+    def test_subbridge_route_defaults_to_local_cliproxyapi(self):
         with EnvPatch() as env:
-            env["OPENAI_BASE_URL"] = "https://router.example/v1"
+            env.pop("CLIPROXYAPI_BASE_URL", None)
             cfg = grokbuild._config_toml("gpt-5.6", grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"]))
         entry = tomllib.loads(cfg)["model"]["gpt-5.6"]
-        self.assertEqual(entry["base_url"], "https://router.example/v1")
-        self.assertEqual(entry["env_key"], "OPENAI_API_KEY")
+        self.assertEqual(entry["base_url"], "http://127.0.0.1:8317/v1")
+        self.assertEqual(entry["env_key"], "CLIPROXYAPI_API_KEY")
+
+    def test_subbridge_uses_docker_host_address_in_container(self):
+        with EnvPatch() as env:
+            env["BENCH_IN_CONTAINER"] = "1"
+            env.pop("CLIPROXYAPI_BASE_URL", None)
+            resolved = grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+        self.assertEqual(resolved["base_url"], "http://host.docker.internal:8317/v1")
 
     def test_dotted_model_aliases_are_quoted_toml_keys(self):
         for model, spec in grokbuild.OPEN_MODELS.items():
@@ -250,12 +256,13 @@ class TestRunConstruction(unittest.TestCase):
         grokbuild._resolve_exe = lambda: "/usr/local/bin/grok"
         try:
             with EnvPatch() as env:
-                env.pop("OPENAI_BASE_URL", None)
+                env.pop("CLIPROXYAPI_BASE_URL", None)
                 env.update({
                     "DEEPSEEK_API_KEY": "deepseek-test",
                     "ZAI_API_KEY": "zai-test",
                     "MOONSHOT_API_KEY": "moonshot-test",
-                    "OPENAI_API_KEY": "openai-test",
+                    # This sentinel must be stripped from the gpt-5.6 child.
+                    "OPENAI_API_KEY": "must-not-reach-subbridge",
                 })
                 for model in ("deepseek-v4-flash", "glm-5.2", "kimi-k2.7-code", "gpt-5.6"):
                     res = grokbuild.run("do it", "/tmp", model, 10)
@@ -290,6 +297,9 @@ class TestRunConstruction(unittest.TestCase):
             self.assertEqual(kwargs["cwd"], "/tmp")
             self.assertNotEqual(kwargs["env"]["HOME"], os.path.expanduser("~"))
             self.assertEqual(kwargs["env"]["GROK_SUBAGENTS"], "0")
+            if model == "gpt-5.6":
+                self.assertNotIn("OPENAI_API_KEY", kwargs["env"])
+                self.assertEqual(kwargs["env"]["CLIPROXYAPI_API_KEY"], "openbench-local-ingress")
             self.assertIn(f'model = "{spec["model_id"]}"', cfg)
             self.assertIn(f'base_url = "{spec["base_url"]}"', cfg)
             self.assertIn(f'env_key = "{spec["env_key"]}"', cfg)

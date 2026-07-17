@@ -26,7 +26,8 @@ Auth expectations are mirrored from the adapters (read them, don't invent):
             strips OPENAI_API_KEY to force the subscription OAuth route)
   cursor    `cursor-agent status` exits 0 (existing Cursor login)
   claude    no ~/.claude mount; API-key routes require provider env keys
-  grokbuild no ~/.grok mount; BYOK open-model routes require provider env keys
+  grokbuild no ~/.grok mount; open routes need vendor keys, while gpt-5.6
+            uses host-side CLIProxyAPI subscription OAuth
   devin     ~/.config/devin exists (existing devin login)
 
 Python3 stdlib only.
@@ -54,7 +55,6 @@ OPEN_MODEL_ENV = {
     "glm-4.7-flash": "ZAI_API_KEY",
     "deepseek-v4-flash": "DEEPSEEK_API_KEY",
     "kimi-k2.7-code": "MOONSHOT_API_KEY",
-    "gpt-5.6": "OPENAI_API_KEY",
 }
 FRONTIER_MODEL_ENV = {
     "claude-opus-4-8": "ANTHROPIC_API_KEY",

@@ -1514,15 +1514,18 @@ def main(argv=None):
         listen_host = "0.0.0.0" if args.exec_mode == "docker" else "127.0.0.1"
         openai_origin = "https://api.openai.com"
         if "grokbuild" in harnesses and args.model == "gpt-5.6":
-            openai_base = os.environ.get("OPENAI_BASE_URL") or openai_origin
+            # Meter before CLIProxyAPI: Grok -> counting proxy -> CLIProxyAPI.
+            # The adapter preserves the /v1 tail in its per-cell URL, so this
+            # upstream is intentionally reduced to the bridge origin.
+            bridge_base = os.environ.get("CLIPROXYAPI_BASE_URL") or "http://127.0.0.1:8317/v1"
             from urllib.parse import urlsplit, urlunsplit
-            parsed_openai = urlsplit(openai_base)
+            parsed_openai = urlsplit(bridge_base)
             if parsed_openai.scheme not in {"http", "https"} or not parsed_openai.netloc:
-                parser.error("OPENAI_BASE_URL must be an absolute HTTP(S) URL")
+                parser.error("CLIPROXYAPI_BASE_URL must be an absolute HTTP(S) URL")
             if parsed_openai.username is not None or parsed_openai.password is not None:
-                parser.error("OPENAI_BASE_URL must not contain URL-embedded credentials")
+                parser.error("CLIPROXYAPI_BASE_URL must not contain URL-embedded credentials")
             if parsed_openai.query or parsed_openai.fragment:
-                parser.error("OPENAI_BASE_URL must not contain a query or fragment")
+                parser.error("CLIPROXYAPI_BASE_URL must not contain a query or fragment")
             openai_origin = urlunsplit((parsed_openai.scheme, parsed_openai.netloc, "", "", ""))
         proxy_server, _thread = counting_proxy.start_in_thread(
             listen_host, 0, ledger_parent, openai_upstream=openai_origin)

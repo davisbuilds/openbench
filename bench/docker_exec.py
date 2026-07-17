@@ -78,22 +78,22 @@ AUTH_MOUNTS = {
     # ANTHROPIC_API_KEY, forwarded below). Mount NOTHING: never expose ~/.claude
     # so a container run can't touch the user's Claude Code OAuth subscription.
     "claude": [],
-    # grokbuild uses BYOK custom models with vendor env keys only. Probe showed
-    # no ~/.grok/auth.json is needed for BYOK; do not mount user Grok OAuth.
+    # grokbuild uses BYOK custom models plus the host-side CLIProxyAPI bridge.
+    # No ~/.grok auth is needed; subscription OAuth remains owned by CLIProxyAPI.
     "grokbuild": [],
     "null": [],
 }
 
 # Model API keys forwarded into the container when set on the host. Passed as
 # bare ``-e VAR`` (no value), so secrets never appear in argv/logged commands.
-API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CURSOR_API_KEY")
+API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "ANTHROPIC_API_KEY", "CURSOR_API_KEY", "CLIPROXYAPI_API_KEY")
 
 _MODEL_API_KEY = {
     "glm-5.2": "ZAI_API_KEY",
     "glm-4.7-flash": "ZAI_API_KEY",
     "deepseek-v4-flash": "DEEPSEEK_API_KEY",
     "kimi-k2.7-code": "MOONSHOT_API_KEY",
-    "gpt-5.6": "OPENAI_API_KEY",
+    "gpt-5.6": "CLIPROXYAPI_API_KEY",
 }
 _KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")
 
@@ -138,6 +138,8 @@ def _api_key_passthrough(harness, model):
         needed.add("ANTHROPIC_API_KEY")
     vendor_key = _MODEL_API_KEY.get(model)
     if vendor_key and harness in {"pi", "opencode", "claude", "grokbuild"}:
+        # CLIProxyAPI ingress auth is optional; grokbuild supplies a local
+        # placeholder when this variable is absent.
         needed.add(vendor_key)
     return tuple(var for var in API_KEY_PASSTHROUGH if var in needed)
 
@@ -431,8 +433,8 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
     for var in _api_key_passthrough(effective_harness, model):
         if os.environ.get(var):
             cmd += ["-e", var]
-    if effective_harness == "grokbuild" and model == "gpt-5.6" and os.environ.get("OPENAI_BASE_URL"):
-        cmd += ["-e", "OPENAI_BASE_URL"]
+    if effective_harness == "grokbuild" and model == "gpt-5.6" and os.environ.get("CLIPROXYAPI_BASE_URL"):
+        cmd += ["-e", "CLIPROXYAPI_BASE_URL"]
     for key, value in (extra_env or {}).items():
         cmd += ["-e", f"{key}={value}"]
     pass_names = os.environ if candidate_inherit_env else (candidate_pass_env or [])

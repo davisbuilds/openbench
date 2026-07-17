@@ -35,7 +35,7 @@ NAME = "grokbuild"
 _EXE = "grok"
 
 # Required by ADAPTER_SPEC / doctor.py. All lanes use the same custom catalog
-# mechanism, including gpt-5.6 (API-key routing, not subscription OAuth).
+# mechanism. GPT-5.6 is routed through the local CLIProxyAPI subscription bridge.
 MODELS = {}
 
 # Grok has built-in auxiliary roles (session summaries/titles/image descriptions)
@@ -59,10 +59,13 @@ OPEN_MODELS = {
     "glm-5.2":           {"model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM", "proxy_route": "chat/zai"},
     "deepseek-v4-flash": {"model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek", "proxy_route": "chat/deepseek"},
     "kimi-k2.7-code":    {"model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "proxy_route": "chat/moonshot"},
-    # OPENAI_BASE_URL permits an OpenAI-compatible router; the official API is
-    # the safe default. The later subscription bridge is intentionally absent.
-    "gpt-5.6":           {"model_id": "gpt-5.6",           "base_url": "https://api.openai.com/v1",    "base_url_env": "OPENAI_BASE_URL", "env_key": "OPENAI_API_KEY", "display": "OpenAI GPT-5.6", "proxy_route": "openai"},
+    # CLIProxyAPI owns Codex/ChatGPT subscription OAuth and refresh. The value
+    # sent to its local ingress is either its optional ingress key or a harmless
+    # placeholder; it is never an OpenAI API key.
+    "gpt-5.6":           {"model_id": "gpt-5.6",           "base_url": "http://127.0.0.1:8317/v1",     "base_url_env": "CLIPROXYAPI_BASE_URL", "env_key": "CLIPROXYAPI_API_KEY", "display": "GPT-5.6 via CLIProxyAPI", "proxy_route": "openai", "subscription_bridge": True},
 }
+
+_SUBBRIDGE_PLACEHOLDER = "openbench-local-ingress"
 
 
 def _token_fields_none():
@@ -117,8 +120,10 @@ def _proxy_cell_url(*parts):
 
 
 def _resolved_spec(spec):
-    """Resolve only the route URL; API-key values never enter generated config."""
+    """Resolve only the route URL; credential values never enter generated config."""
     resolved = dict(spec)
+    if spec.get("subscription_bridge") and os.environ.get("BENCH_IN_CONTAINER"):
+        resolved["base_url"] = "http://host.docker.internal:8317/v1"
     if spec.get("base_url_env") and os.environ.get(spec["base_url_env"]):
         resolved["base_url"] = os.environ[spec["base_url_env"]]
     from urllib.parse import urlsplit
@@ -320,7 +325,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         route_spec = _proxied_spec(spec)
     except ValueError as exc:
         return _setup_needed(str(exc))
-    if not os.environ.get(spec["env_key"]):
+    if not spec.get("subscription_bridge") and not os.environ.get(spec["env_key"]):
         return _setup_needed(f"export {spec['env_key']} to use {model}")
     exe = _resolve_exe()
     if not exe:
@@ -332,6 +337,12 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         env = dict(os.environ)
         env["HOME"] = iso_home
         env["GROK_SUBAGENTS"] = "0"
+        if spec.get("subscription_bridge"):
+            # Enforce the subscription-only boundary even if the parent shell
+            # has a pay-per-token credential. Grok sees only CLIProxyAPI ingress
+            # auth (or a local non-secret placeholder when ingress auth is off).
+            env.pop("OPENAI_API_KEY", None)
+            env[spec["env_key"]] = os.environ.get(spec["env_key"], _SUBBRIDGE_PLACEHOLDER)
         # Keep Grok's generated state within the disposable home and suppress
         # non-essential network work where the CLI exposes a switch.
         cmd = [
