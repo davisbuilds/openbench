@@ -169,6 +169,12 @@ class TestConfigAndGating(unittest.TestCase):
         self.assertIn("SETUP-NEEDED", result["error"])
         self.assertIsNone(result["cmd"])
 
+    def test_subbridge_route_rejects_plaintext_remote_host(self):
+        with EnvPatch() as env:
+            env["CLIPROXYAPI_BASE_URL"] = "http://bridge.example/v1"
+            with self.assertRaisesRegex(ValueError, "must use HTTPS"):
+                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+
     def test_subbridge_route_rejects_query_bearing_base_url(self):
         with EnvPatch() as env:
             env["CLIPROXYAPI_BASE_URL"] = "http://127.0.0.1:8317/v1?api-version=test"

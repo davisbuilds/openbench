@@ -132,6 +132,9 @@ def _resolved_spec(spec):
         raise ValueError("model base URL must not contain URL-embedded credentials")
     if parsed.query or parsed.fragment:
         raise ValueError("model base URL must not contain a query or fragment")
+    local_hosts = {"127.0.0.1", "localhost", "::1", "host.docker.internal"}
+    if parsed.scheme == "http" and parsed.hostname not in local_hosts:
+        raise ValueError("remote model base URL must use HTTPS")
     try:
         port = parsed.port
     except ValueError as exc:

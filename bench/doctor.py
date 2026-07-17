@@ -287,6 +287,9 @@ def check_subbridge(p):
     parsed = urlsplit(base)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return False, "SETUP-NEEDED: CLIPROXYAPI_BASE_URL must be an absolute HTTP(S) URL"
+    local_hosts = {"127.0.0.1", "localhost", "::1", "host.docker.internal"}
+    if parsed.scheme == "http" and parsed.hostname not in local_hosts:
+        return False, "SETUP-NEEDED: remote CLIPROXYAPI_BASE_URL must use HTTPS"
     try:
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
     except ValueError:
