@@ -26,14 +26,20 @@ TOKEN_METRICS = (
 
 
 def _path_labels(paths):
-    """Return stable, unique labels derived from input filenames."""
-    used = Counter()
+    """Return stable, globally unique labels derived from input filenames."""
+    counts = Counter()
+    emitted = set()
     labels = []
     for path in paths:
         base = os.path.basename(path)
-        label = os.path.splitext(base)[0] or base
-        used[label] += 1
-        labels.append(label if used[label] == 1 else f"{label}-{used[label]}")
+        stem = os.path.splitext(base)[0] or base
+        counts[stem] += 1
+        label = stem if counts[stem] == 1 else f"{stem}-{counts[stem]}"
+        while label in emitted:
+            counts[stem] += 1
+            label = f"{stem}-{counts[stem]}"
+        emitted.add(label)
+        labels.append(label)
     return labels
 
 
@@ -210,17 +216,23 @@ def render_text(report):
             _plain_table(["Metric"] + report["arms"], rows))
 
 
+def _markdown_cell(value):
+    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\r", "").replace("\n", "<br>")
+
+
 def render_markdown(report):
+    arms = [_markdown_cell(arm) for arm in report["arms"]]
     lines = [
         "# OpenBench comparison scorecard",
         "",
         f"**Matched n: {report['matched_n']}** `(task, trial)` cells present in every arm.",
         "",
-        "| Metric | " + " | ".join(report["arms"]) + " |",
-        "| --- | " + " | ".join("---:" for _ in report["arms"]) + " |",
+        "| Metric | " + " | ".join(arms) + " |",
+        "| --- | " + " | ".join("---:" for _ in arms) + " |",
     ]
     for metric, values in scorecard_rows(report):
-        lines.append("| " + metric + " | " + " | ".join(values) + " |")
+        cells = [_markdown_cell(metric)] + [_markdown_cell(value) for value in values]
+        lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
     return "\n".join(lines)
 

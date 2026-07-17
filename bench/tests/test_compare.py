@@ -51,6 +51,10 @@ class CompareTestCase(unittest.TestCase):
 
 
 class TestMatchedComparison(CompareTestCase):
+    def test_path_labels_cannot_collide_with_generated_suffixes(self):
+        labels = compare._path_labels(["a.jsonl", "a.jsonl", "a-2.jsonl"])
+        self.assertEqual(len(labels), len(set(labels)))
+
     def test_multiple_files_use_intersection_and_per_solve_totals(self):
         a = self.write("alpha.jsonl", [
             self.row("h", "t1", 1, True, wall_time_s=10, tokens_input_uncached=100),
@@ -123,6 +127,16 @@ class TestMatchedComparison(CompareTestCase):
         markdown = compare.render_markdown(result)
         self.assertIn("**Matched n: 2**", markdown)
         self.assertIn("| Harness version | 1.0, 1.1, 1.2 [MIXED] | 2.0 |", markdown)
+
+    def test_markdown_escapes_input_derived_table_content(self):
+        a = self.write("a|arm.jsonl", [
+            self.row("h", "t", 1, True, harness_version="one|two\\three\nfour"),
+        ])
+        b = self.write("b.jsonl", [self.row("h", "t", 1, True)])
+        markdown = compare.render_markdown(
+            compare.build_comparison([a, b], tasks_dirs=[self.tasks]))
+        self.assertIn("a\\|arm", markdown)
+        self.assertIn("one\\|two\\\\three<br>four", markdown)
 
     def test_no_shared_cells_renders_zero_denominator(self):
         a = self.write("a.jsonl", [self.row("h", "a", 1, True)])
