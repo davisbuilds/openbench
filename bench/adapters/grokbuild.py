@@ -334,15 +334,17 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     iso_home = tempfile.mkdtemp(prefix="grokbuild_home_")
     try:
         grok_dir = os.path.dirname(_write_config(iso_home, model, route_spec))
-        env = dict(os.environ)
+        if spec.get("subscription_bridge"):
+            # Filter by name before retrieving values, so a pay-per-token key is
+            # neither read nor copied on this path. Grok sees only CLIProxyAPI
+            # ingress auth (or a local placeholder when ingress auth is off).
+            env = {name: os.environ[name] for name in os.environ
+                   if name != "OPENAI_API_KEY"}
+            env[spec["env_key"]] = os.environ.get(spec["env_key"], _SUBBRIDGE_PLACEHOLDER)
+        else:
+            env = dict(os.environ)
         env["HOME"] = iso_home
         env["GROK_SUBAGENTS"] = "0"
-        if spec.get("subscription_bridge"):
-            # Enforce the subscription-only boundary even if the parent shell
-            # has a pay-per-token credential. Grok sees only CLIProxyAPI ingress
-            # auth (or a local non-secret placeholder when ingress auth is off).
-            env.pop("OPENAI_API_KEY", None)
-            env[spec["env_key"]] = os.environ.get(spec["env_key"], _SUBBRIDGE_PLACEHOLDER)
         # Keep Grok's generated state within the disposable home and suppress
         # non-essential network work where the CLI exposes a switch.
         cmd = [

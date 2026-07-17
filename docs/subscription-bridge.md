@@ -13,7 +13,7 @@ brew install cliproxyapi
 
 The primary supported cell is `grokbuild` × `gpt-5.6`. Its isolated Grok config declares a `[model."gpt-5.6"]` chat-completions provider at `http://127.0.0.1:8317/v1`. Override that non-secret address with `CLIPROXYAPI_BASE_URL`. If CLIProxyAPI ingress authentication is enabled, export `CLIPROXYAPI_API_KEY`; otherwise the adapter supplies a harmless local placeholder required by Grok's provider schema.
 
-`OPENAI_API_KEY` is not a dependency of this route. The adapter removes it from the Grok child environment even if the parent shell has one. Subscription OAuth remains in CLIProxyAPI's auth store and is never copied into the benchmark workspace or harness environment.
+`OPENAI_API_KEY` is not a dependency of this route. The adapter filters it by name without retrieving its value and excludes it from the Grok child environment even if the parent shell has one. Subscription OAuth remains in CLIProxyAPI's auth store and is never copied into the benchmark workspace or harness environment.
 
 ## Metering topology
 
