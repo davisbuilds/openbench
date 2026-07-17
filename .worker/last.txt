@@ -1,0 +1,41 @@
+Status: COMPLETE
+
+Topology:
+  Grok Build (isolated HOME; OPENAI_API_KEY excluded)
+    -> OpenBench counting proxy /cell/<opaque>/subbridge/v1/chat/completions
+    -> CLIProxyAPI http://127.0.0.1:8317/v1/chat/completions
+    -> Codex/ChatGPT subscription upstream (OAuth injection + refresh)
+
+Files changed:
+  .worker/DECISIONS.md
+  .worker/last.txt
+  bench/adapters/grokbuild.py
+  bench/docker_exec.py
+  bench/doctor.py
+  bench/proxy.py
+  bench/run.py
+  bench/smoke_subbridge.sh
+  bench/tests/test_doctor.py
+  bench/tests/test_grokbuild_adapter.py
+  bench/tests/test_proxy.py
+  docs/config-isolation-audit.md
+  docs/subscription-bridge.md
+
+Verification:
+  - python3 -m unittest discover bench/tests: 381 tests, OK (23.385s)
+  - Focused mock-HTTP and wiring tests: green
+  - bash -n bench/smoke_subbridge.sh: green
+  - python3 bench/scrub.py --check <each changed implementation/test/doc file>: clean
+  - Structured autoreview (Codex, branch against HEAD~9): clean, no accepted/actionable findings
+  - Live smoke not run: CLIProxyAPI was not installed/running on this host; the script detects this before any model request and prints setup instructions. This follows the no-live-call constraint.
+
+Decisions:
+  - Primary lane only: grokbuild x gpt-5.6. Claude stretch was not enabled because its existing --bare API-key boundary should not be weakened.
+  - Counting proxy is in front of CLIProxyAPI on a dedicated subbridge route, avoiding mixed-harness upstream collisions.
+  - CLIProxyAPI owns all subscription OAuth and refresh. CLIPROXYAPI_API_KEY is optional ingress access control; OPENAI_API_KEY is filtered without retrieving its value.
+  - Docker-exposed proxy requests require registered cell tokens, and only a grokbuild/gpt-5.6 cell can use the subscription route.
+  - Remote bridge ingress requires HTTPS; local and host.docker.internal HTTP remain supported.
+
+Residual risk:
+  - Actual subscription behavior depends on the operator's CLIProxyAPI configuration and the availability of model id gpt-5.6. The manual one-prompt smoke is the final live validation once the daemon is configured.
+  - Docker reachability depends on host.docker.internal and daemon binding in the operator environment.
