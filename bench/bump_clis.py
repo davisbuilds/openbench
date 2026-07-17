@@ -11,6 +11,8 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -166,6 +168,56 @@ def latest_versions():
     return latest
 
 
+def registry_latest(package, *, opener=None):
+    """Return npm's ``latest`` dist-tag without invoking or installing npm."""
+    opener = opener or urllib.request.urlopen
+    encoded_package = urllib.parse.quote(package, safe="")
+    request = urllib.request.Request(
+        f"https://registry.npmjs.org/{encoded_package}",
+        headers={"Accept": "application/vnd.npm.install-v1+json"},
+    )
+    with opener(request, timeout=10) as response:
+        metadata = json.load(response)
+    latest = metadata.get("dist-tags", {}).get("latest")
+    if not isinstance(latest, str) or not latest.strip():
+        raise ValueError("registry response has no latest dist-tag")
+    return latest.strip()
+
+
+def upstream_rows(current, *, latest_lookup=registry_latest):
+    """Compare Dockerfile pins with npm, skipping failed registry lookups."""
+    rows = []
+    for pin in PINS:
+        if not pin.package:
+            rows.append({
+                "key": pin.key,
+                "package": "(manual)",
+                "current": current.get(pin.key),
+                "latest": "n/a",
+                "up_to_date": None,
+                "warning": None,
+            })
+            continue
+        try:
+            latest = latest_lookup(pin.package)
+            warning = None
+            up_to_date = current.get(pin.key) == latest
+        except Exception as exc:  # noqa: BLE001 - one registry failure must not mask other packages
+            latest = "unknown"
+            warning = str(exc)
+            up_to_date = None
+            print(f"WARN: {pin.key}: npm registry lookup failed; skipped: {exc}", file=sys.stderr)
+        rows.append({
+            "key": pin.key,
+            "package": pin.package,
+            "current": current.get(pin.key),
+            "latest": latest,
+            "up_to_date": up_to_date,
+            "warning": warning,
+        })
+    return rows
+
+
 def check_rows(current):
     rows = []
     for pin in PINS:
@@ -194,16 +246,18 @@ def check_rows(current):
     return rows
 
 
-def print_check_table(rows):
-    headers = ("key", "package", "current", "latest", "status")
+def print_check_table(rows, *, pin_header="current", upstream=False):
+    headers = ("key", "package", pin_header, "latest", "status")
     data = []
     for row in rows:
-        if row["up_to_date"] is None:
+        if row.get("warning"):
+            status = "skipped"
+        elif row["up_to_date"] is None:
             status = "manual"
         elif row["up_to_date"]:
-            status = "ok"
+            status = "current" if upstream else "ok"
         else:
-            status = "update"
+            status = "behind" if upstream else "update"
         data.append((row["key"], row["package"], row["current"] or "", row["latest"] or "", status))
     widths = [len(h) for h in headers]
     for item in data:
@@ -358,11 +412,13 @@ def main(argv=None):
     parser.add_argument("--image", default=DEFAULT_IMAGE, help=f"Docker image tag (default: {DEFAULT_IMAGE})")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--check", action="store_true", help="print current vs npm latest pins; always exits 0")
+    group.add_argument("--check-upstream", action="store_true",
+                       help="query npm registry latest tags; exit 1 when a pin is behind")
     group.add_argument("--apply", action="store_true", help="rewrite pins, build/verify image, and commit Dockerfile")
     group.add_argument("--sync-host", action="store_true",
                        help="install host npm CLIs at Dockerfile pins; never build the image")
     group.add_argument("--refresh-baselines", action="store_true", help="print baseline rerun commands only")
-    parser.add_argument("--json", action="store_true", help="emit JSON for --check")
+    parser.add_argument("--json", action="store_true", help="emit JSON for --check or --check-upstream")
     parser.add_argument("--set", action="append", default=[], metavar="PKG=VERSION", help="override a pin during --apply")
     args = parser.parse_args(argv)
 
@@ -378,6 +434,18 @@ def main(argv=None):
         else:
             print_check_table(rows)
         return 0
+    if args.check_upstream:
+        try:
+            current = dockerfile_pins(read_dockerfile(args.dockerfile))
+        except Exception as exc:  # noqa: BLE001 - keep the report useful when a path is temporarily unavailable
+            print(f"WARN: could not read Dockerfile pins: {exc}", file=sys.stderr)
+            current = {}
+        rows = upstream_rows(current)
+        if args.json:
+            print(json.dumps(rows, sort_keys=True))
+        else:
+            print_check_table(rows, pin_header="pin", upstream=True)
+        return 1 if any(row["up_to_date"] is False for row in rows) else 0
     if args.refresh_baselines:
         refresh_baselines(args.image)
         return 0
