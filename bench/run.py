@@ -484,7 +484,10 @@ def proxy_supported_for_cell(harness, model):
     if harness == "codex":
         return model in PROXY_CODEX_SUBSCRIPTION_MODELS
     if harness == "pi":
-        return model in PROXY_CODEX_SUBSCRIPTION_MODELS
+        # Open models route via the provider extension's proxied baseUrl
+        # (adapters/pi.py _pi_provider_ext), same mechanism as opencode.
+        return (model in PROXY_CODEX_SUBSCRIPTION_MODELS
+                or model in PROXY_CHAT_MODELS)
     if harness == "claude":
         return model in PROXY_CLAUDE_MODELS
     if harness == "opencode":
