@@ -59,6 +59,7 @@ OPEN_MODELS = {
     "glm-5.2":           {"model_id": "glm-5.2",           "base_url": "https://api.z.ai/api/paas/v4", "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM", "proxy_route": "chat/zai"},
     "deepseek-v4-flash": {"model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek", "proxy_route": "chat/deepseek"},
     "kimi-k2.7-code":    {"model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "proxy_route": "chat/moonshot"},
+    "kimi-k3":    {"model_id": "kimi-k3",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi K3", "proxy_route": "chat/moonshot"},
     # OPENAI_BASE_URL permits an OpenAI-compatible router; the official API is
     # the safe default. The later subscription bridge is intentionally absent.
     "gpt-5.6":           {"model_id": "gpt-5.6",           "base_url": "https://api.openai.com/v1",    "base_url_env": "OPENAI_BASE_URL", "env_key": "OPENAI_API_KEY", "display": "OpenAI GPT-5.6", "proxy_route": "openai"},

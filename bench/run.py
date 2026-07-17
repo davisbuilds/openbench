@@ -47,7 +47,7 @@ PROXY_HARNESSES = {"codex", "pi", "claude", "opencode", "cursor", "devin", "grok
 PROXY_CODEX_SUBSCRIPTION_MODELS = {
     "gpt-5.5-medium", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 }
-PROXY_CHAT_MODELS = {"glm-5.2", "glm-4.7-flash", "deepseek-v4-flash", "kimi-k2.7-code"}
+PROXY_CHAT_MODELS = {"glm-5.2", "glm-4.7-flash", "deepseek-v4-flash", "kimi-k2.7-code", "kimi-k3"}
 PROXY_CLAUDE_MODELS = PROXY_CHAT_MODELS | {"claude-opus-4-8"}
 CHECKER_CAPTURE_LIMIT = 8000
 CHECKER_CAPTURE_TRUNCATED_PREFIX = "[truncated to last 8000 chars]\n"
@@ -490,7 +490,7 @@ def proxy_supported_for_cell(harness, model):
     if harness == "opencode":
         return model in PROXY_CHAT_MODELS
     if harness == "grokbuild":
-        return model in {"glm-5.2", "deepseek-v4-flash", "kimi-k2.7-code", "gpt-5.6"}
+        return model in {"glm-5.2", "deepseek-v4-flash", "kimi-k2.7-code", "kimi-k3", "gpt-5.6"}
     # Cursor's model stream requires its private HTTP/2 agent protocol, which
     # the stdlib HTTP/1.1 proxy cannot meter; Devin performs inference behind
     # Cognition's cloud boundary. See both adapter docstrings.

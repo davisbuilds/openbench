@@ -93,6 +93,7 @@ _MODEL_API_KEY = {
     "glm-4.7-flash": "ZAI_API_KEY",
     "deepseek-v4-flash": "DEEPSEEK_API_KEY",
     "kimi-k2.7-code": "MOONSHOT_API_KEY",
+    "kimi-k3": "MOONSHOT_API_KEY",
     "gpt-5.6": "OPENAI_API_KEY",
 }
 _KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")

@@ -129,6 +129,7 @@ OPEN_MODELS = {
     "glm-4.7-flash":     {"model_id": "glm-4.7-flash",     "base_url": "https://api.z.ai/api/anthropic",     "env_key": "ZAI_API_KEY",      "display": "Z.ai GLM",      "effort": "medium"},
     "deepseek-v4-flash": {"model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com/anthropic", "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek",      "effort": "medium"},
     "kimi-k2.7-code":    {"model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/anthropic",  "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "effort": "medium"},
+    "kimi-k3":    {"model_id": "kimi-k3",    "base_url": "https://api.moonshot.ai/anthropic",  "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi K3", "effort": "medium"},
 }
 
 
