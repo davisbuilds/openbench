@@ -188,12 +188,19 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(mapped["tokens_proxy_cache_write"], 2)
         self.assertEqual(mapped["tokens_proxy_output"], 7)
 
-    def test_configured_openai_upstream_is_proxy_metered(self):
-        self._post("/cell/tok-openai/" + "openai/router/v1/chat/completions")
-        row = self._ledger("tok-openai")[0]
-        self.assertEqual(self.upstream.requests[-1]["path"], "/router/v1/chat/completions")
-        self.assertEqual(self.upstream.requests[-1]["host"], f"127.0.0.1:{self.upstream.server_address[1]}")
+    def test_cliproxyapi_upstream_is_metered_with_mock_http(self):
+        self._post(
+            "/cell/tok-subbridge/openai/v1/chat/completions",
+            {"model": "gpt-5.6", "stream": False},
+        )
+        row = self._ledger("tok-subbridge")[0]
+        request = self.upstream.requests[-1]
+        self.assertEqual(request["path"], "/v1/chat/completions")
+        self.assertEqual(request["host"], f"127.0.0.1:{self.upstream.server_address[1]}")
+        self.assertEqual(request["auth"], f"Bearer {SECRET}")
         self.assertEqual(row["route"], "openai")
+        self.assertEqual(row["usage"]["prompt_tokens"], 20)
+        self.assertEqual(row["sampling_observed"]["model"], "gpt-5.6")
 
     def test_cursor_private_protocol_route_is_forwarded(self):
         self._post("/cell/tok-cursor/cursor/agent/v1/run")
