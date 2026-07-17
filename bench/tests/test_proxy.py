@@ -224,7 +224,7 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(self.upstream.requests, [])
 
         with open(os.path.join(self.tmp.name, "registered.meta.json"), "w", encoding="utf-8") as fh:
-            json.dump({"model": "gpt-5.6"}, fh)
+            json.dump({"harness": "grokbuild", "model": "gpt-5.6"}, fh)
         self._post("/cell/registered/" + "subbridge/v1/chat/completions", {"model": "gpt-5.6"})
         self.assertEqual(self.upstream.requests[-1]["path"], "/v1/chat/completions")
 

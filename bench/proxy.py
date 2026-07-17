@@ -430,16 +430,22 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             raise RuntimeError("missing /cell/<token>/ route or x-openbench-cell-token")
         if not token:
             raise RuntimeError("empty cell token")
+        registration_meta = None
         if getattr(self.server, "require_registered_tokens", False):
             if not re.fullmatch(r"[A-Za-z0-9_.-]+", token):
                 raise RuntimeError("unregistered cell token")
             registration = Path(self.server.ledger_dir) / f"{token}.meta.json"
-            if not registration.is_file():
-                raise RuntimeError("unregistered cell token")
+            try:
+                registration_meta = json.loads(registration.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                raise RuntimeError("unregistered cell token") from None
         if not route_parts:
             raise RuntimeError("missing route prefix")
         prefix = route_parts[0]
         tail = route_parts[1:]
+        if prefix == "subbridge" and registration_meta is not None:
+            if (registration_meta.get("harness"), registration_meta.get("model")) != ("grokbuild", "gpt-5.6"):
+                raise RuntimeError("cell token is not authorized for subscription bridge")
         if prefix == "codex":
             upstream = self.server.upstreams["codex"]  # type: ignore[attr-defined]
             route_name = "codex"
