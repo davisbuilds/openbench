@@ -89,6 +89,7 @@ class ProxyTests(unittest.TestCase):
             chat_upstreams={"deepseek": upstream_url},
             anthropic_upstreams={"deepseek": upstream_url},
             openai_upstream=upstream_url,
+            subbridge_upstream=upstream_url,
             cursor_upstream=upstream_url,
         )
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
@@ -188,18 +189,44 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(mapped["tokens_proxy_cache_write"], 2)
         self.assertEqual(mapped["tokens_proxy_output"], 7)
 
-    def test_configured_openai_upstream_is_proxy_metered(self):
-        self._post("/cell/tok-openai/" + "openai/router/v1/chat/completions")
-        row = self._ledger("tok-openai")[0]
-        self.assertEqual(self.upstream.requests[-1]["path"], "/router/v1/chat/completions")
-        self.assertEqual(self.upstream.requests[-1]["host"], f"127.0.0.1:{self.upstream.server_address[1]}")
-        self.assertEqual(row["route"], "openai")
+    def test_cliproxyapi_upstream_is_metered_with_mock_http(self):
+        self._post(
+            "/cell/tok-subbridge/subbridge/v1/chat/completions",
+            {"model": "gpt-5.6", "stream": False},
+        )
+        row = self._ledger("tok-subbridge")[0]
+        request = self.upstream.requests[-1]
+        self.assertEqual(request["path"], "/v1/chat/completions")
+        self.assertEqual(request["host"], f"127.0.0.1:{self.upstream.server_address[1]}")
+        self.assertEqual(request["auth"], f"Bearer {SECRET}")
+        self.assertEqual(row["route"], "subbridge")
+        self.assertEqual(row["usage"]["prompt_tokens"], 20)
+        self.assertEqual(row["sampling_observed"]["model"], "gpt-5.6")
 
     def test_cursor_private_protocol_route_is_forwarded(self):
         self._post("/cell/tok-cursor/cursor/agent/v1/run")
         row = self._ledger("tok-cursor")[0]
         self.assertEqual(self.upstream.requests[-1]["path"], "/agent/v1/run")
         self.assertEqual(row["route"], "cursor")
+
+    def test_registered_token_gate_rejects_arbitrary_docker_client(self):
+        self.proxy.require_registered_tokens = True
+        data = b'{"model":"gpt-5.6"}'
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=5)
+        conn.request("POST", "/cell/guessed/" + "subbridge/v1/chat/completions", body=data, headers={
+            "content-type": "application/json",
+            "content-length": str(len(data)),
+        })
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 502)
+        self.assertEqual(self.upstream.requests, [])
+
+        with open(os.path.join(self.tmp.name, "registered.meta.json"), "w", encoding="utf-8") as fh:
+            json.dump({"harness": "grokbuild", "model": "gpt-5.6"}, fh)
+        self._post("/cell/registered/" + "subbridge/v1/chat/completions", {"model": "gpt-5.6"})
+        self.assertEqual(self.upstream.requests[-1]["path"], "/v1/chat/completions")
 
     def test_cell_token_routing_isolation(self):
         self._post("/cell/tok-a/chat/deepseek/chat/completions")

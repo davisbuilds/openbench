@@ -26,10 +26,12 @@ class FakeProbes:
     ``models_map``  : harness -> MODELS dict (None => import raises)
     ``env_map``     : environment variable -> value
     ``text_map``    : path (expanded) -> file text
+    ``http_map``    : URL -> (status, body)
     """
 
     def __init__(self, which_map=None, run_map=None, exists_set=None,
-                 json_map=None, models_map=None, env_map=None, text_map=None):
+                 json_map=None, models_map=None, env_map=None, text_map=None,
+                 http_map=None):
         self.which_map = which_map or {}
         self.run_map = run_map or {}
         self.exists_set = set(exists_set or [])
@@ -37,6 +39,7 @@ class FakeProbes:
         self.models_map = models_map or {}
         self.env_map = env_map or {}
         self.text_map = text_map or {}
+        self.http_map = http_map or {}
 
     def which(self, cli):
         return self.which_map.get(cli)
@@ -56,6 +59,9 @@ class FakeProbes:
     def getenv(self, name):
         return self.env_map.get(name)
 
+    def http_get(self, url, headers=None, timeout=2.0):
+        return self.http_map.get(url, (None, ""))
+
     def import_adapter(self, name):
         models = self.models_map.get(name)
         if models is None:
@@ -74,7 +80,8 @@ def all_green_probes():
     return FakeProbes(
         which_map={"codex": "/b/codex", "pi": "/b/pi", "opencode": "/b/opencode",
                    "cursor-agent": "/b/cursor-agent", "claude": "/b/claude",
-                   "grok": "/b/grok", "devin": "/b/devin", "docker": "/b/docker"},
+                   "grok": "/b/grok", "devin": "/b/devin", "docker": "/b/docker",
+                   "cliproxyapi": "/b/cliproxyapi"},
         run_map={
             ("codex", "--version"): (0, "codex-cli 0.144.1"),
             ("pi", "--version"): (0, "0.80.6"),
@@ -92,6 +99,8 @@ def all_green_probes():
         json_map={os.path.join(home, ".pi", "agent", "auth.json"):
                   {"openai-codex": {}, "anthropic": {}}},
         models_map={h: {"gpt-5.5-medium": "x"} for h in doctor.ALL_HARNESSES},
+        http_map={"http://127.0.0.1:8317/v1/models":
+                  (200, '{"data":[{"id":"gpt-5.6"}]}')},
     )
 
 
@@ -103,6 +112,31 @@ class TestEvaluate(unittest.TestCase):
         # Pinned harnesses have four passing checks; unpinned Devin is INFO.
         self.assertEqual(len(rows), len(doctor.ALL_HARNESSES) * 4)
         self.assertTrue(all(r["ok"] is not False for r in rows))
+
+    def test_grok_gpt56_requires_reachable_cliproxyapi(self):
+        p = all_green_probes()
+        p.models_map["grokbuild"] = ({}, {"gpt-5.6": {"model_id": "gpt-5.6"}})
+        del p.which_map["cliproxyapi"]
+        rows, ok = doctor.evaluate(["grokbuild"], "gpt-5.6", p)
+        self.assertFalse(ok)
+        auth = next(r for r in rows if r["check"] == "AUTH")
+        self.assertIn("brew install cliproxyapi", auth["detail"])
+
+        p.env_map["CLIPROXYAPI_BASE_URL"] = "https://bridge.example/v1"
+        p.http_map["https://bridge.example/v1/models"] = (200, '{"data":[{"id":"gpt-5.6"}]}')
+        rows, ok = doctor.evaluate(["grokbuild"], "gpt-5.6", p)
+        self.assertTrue(ok)  # configured remote ingress needs no local binary
+        p.env_map.pop("CLIPROXYAPI_BASE_URL")
+
+        p.which_map["cliproxyapi"] = "/b/cliproxyapi"
+        rows, ok = doctor.evaluate(["grokbuild"], "gpt-5.6", p)
+        self.assertTrue(ok)
+        self.assertIn("route ready", next(r for r in rows if r["check"] == "AUTH")["detail"])
+
+        p.env_map["CLIPROXYAPI_BASE_URL"] = "http://127.0.0.1:notaport/v1"
+        rows, ok = doctor.evaluate(["grokbuild"], "gpt-5.6", p)
+        self.assertFalse(ok)
+        self.assertIn("invalid port", next(r for r in rows if r["check"] == "AUTH")["detail"])
 
     def test_missing_cli_fails(self):
         p = all_green_probes()

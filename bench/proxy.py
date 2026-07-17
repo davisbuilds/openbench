@@ -430,10 +430,22 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             raise RuntimeError("missing /cell/<token>/ route or x-openbench-cell-token")
         if not token:
             raise RuntimeError("empty cell token")
+        registration_meta = None
+        if getattr(self.server, "require_registered_tokens", False):
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+", token):
+                raise RuntimeError("unregistered cell token")
+            registration = Path(self.server.ledger_dir) / f"{token}.meta.json"
+            try:
+                registration_meta = json.loads(registration.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                raise RuntimeError("unregistered cell token") from None
         if not route_parts:
             raise RuntimeError("missing route prefix")
         prefix = route_parts[0]
         tail = route_parts[1:]
+        if prefix == "subbridge" and registration_meta is not None:
+            if (registration_meta.get("harness"), registration_meta.get("model")) != ("grokbuild", "gpt-5.6"):
+                raise RuntimeError("cell token is not authorized for subscription bridge")
         if prefix == "codex":
             upstream = self.server.upstreams["codex"]  # type: ignore[attr-defined]
             route_name = "codex"
@@ -446,6 +458,10 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             # SSE/JSON parsing used on every other route.
             upstream = self.server.upstreams["bridge"]  # type: ignore[attr-defined]
             route_name = "bridge"
+        elif prefix == "subbridge":
+            # Local CLIProxyAPI subscription bridge (Codex/ChatGPT OAuth).
+            upstream = self.server.upstreams["subbridge"]  # type: ignore[attr-defined]
+            route_name = "subbridge"
         elif prefix == "cursor":
             # Cursor Agent's endpoint speaks Cursor's private HTTP/Connect-RPC
             # protocol rather than a public model-provider dialect. Forward it
@@ -569,10 +585,12 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
                 chat_upstreams: dict[str, str] | None = None,
                 anthropic_upstreams: dict[str, str] | None = None,
                 openai_upstream: str = "https://api.openai.com",
+                subbridge_upstream: str = "http://127.0.0.1:8317",
                 cursor_upstream: str = DEFAULT_CURSOR_UPSTREAM,
                 timeout_s: float = 300.0, capture_limit: int = 8 * 1024 * 1024,
                 max_request_bytes: int = 64 * 1024 * 1024,
-                verbose: bool = False) -> CountingProxyServer:
+                verbose: bool = False,
+                require_registered_tokens: bool = False) -> CountingProxyServer:
     chat = dict(DEFAULT_CHAT_UPSTREAMS)
     if chat_upstreams:
         chat.update({k: v for k, v in chat_upstreams.items() if v})
@@ -583,6 +601,7 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     httpd.upstreams = _urlsplit_map({
         "codex": "https://chatgpt.com",
         "openai": openai_upstream,
+        "subbridge": subbridge_upstream,
         "cursor": cursor_upstream,
         "bridge": "http://127.0.0.1:" + os.environ.get("BENCH_BRIDGE_PORT", "4141"),
     })
@@ -592,6 +611,9 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     httpd.timeout_s = timeout_s
     httpd.capture_limit = max(capture_limit, 4096)
     httpd.max_request_bytes = max(max_request_bytes, 0)
+    # Docker requires a non-loopback bind. In that mode the runner enables this
+    # gate so arbitrary LAN clients cannot spend through a subscription route.
+    httpd.require_registered_tokens = require_registered_tokens
     # Per-process salt prevents opaque provider IDs from being correlated across
     # proxy runs while preserving links inside one experiment ledger directory.
     httpd.identifier_salt = secrets.token_bytes(32)
@@ -623,6 +645,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ledger-dir", required=True)
     parser.add_argument("--chat-upstream", action="append", default=[], help="name=url")
     parser.add_argument("--openai-upstream", default="https://api.openai.com")
+    parser.add_argument("--subbridge-upstream", default="http://127.0.0.1:8317")
     parser.add_argument("--cursor-upstream", default=DEFAULT_CURSOR_UPSTREAM)
     parser.add_argument("--anthropic-upstream", action="append", default=[], help="name=url")
     parser.add_argument("--timeout", type=float, default=300.0)
@@ -633,6 +656,7 @@ def main(argv: list[str] | None = None) -> int:
         chat_upstreams=_parse_upstream_args(args.chat_upstream),
         anthropic_upstreams=_parse_upstream_args(args.anthropic_upstream),
         openai_upstream=args.openai_upstream,
+        subbridge_upstream=args.subbridge_upstream,
         cursor_upstream=args.cursor_upstream,
         timeout_s=args.timeout, verbose=args.verbose,
     )

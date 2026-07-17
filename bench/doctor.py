@@ -26,7 +26,8 @@ Auth expectations are mirrored from the adapters (read them, don't invent):
             strips OPENAI_API_KEY to force the subscription OAuth route)
   cursor    `cursor-agent status` exits 0 (existing Cursor login)
   claude    no ~/.claude mount; API-key routes require provider env keys
-  grokbuild no ~/.grok mount; BYOK open-model routes require provider env keys
+  grokbuild no ~/.grok mount; open routes need vendor keys, while gpt-5.6
+            uses host-side CLIProxyAPI subscription OAuth
   devin     ~/.config/devin exists (existing devin login)
 
 Python3 stdlib only.
@@ -38,7 +39,9 @@ import json
 import os
 import re
 import shlex
+import http.client
 import subprocess
+from urllib.parse import urlsplit
 
 from bump_clis import pinned_versions, reported_version, resolve_pin_key
 
@@ -56,7 +59,6 @@ OPEN_MODEL_ENV = {
     "glm-4.7-flash": "ZAI_API_KEY",
     "deepseek-v4-flash": "DEEPSEEK_API_KEY",
     "kimi-k2.7-code": "MOONSHOT_API_KEY",
-    "gpt-5.6": "OPENAI_API_KEY",
 }
 FRONTIER_MODEL_ENV = {
     "claude-opus-4-8": "ANTHROPIC_API_KEY",
@@ -93,6 +95,20 @@ class Probes:
     def exists(self, path):
         """True if ``path`` (file or dir) exists, expanding ``~``."""
         return os.path.exists(os.path.expanduser(path))
+
+    def http_get(self, url, headers=None, timeout=2.0):
+        """Return (status, body) for a small readiness GET, or (None, '')."""
+        parsed = urlsplit(url)
+        cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+        try:
+            conn = cls(parsed.hostname, parsed.port, timeout=timeout)
+            conn.request("GET", parsed.path or "/", headers=headers or {})
+            response = conn.getresponse()
+            body = response.read(1024 * 1024).decode("utf-8", "replace")
+            conn.close()
+            return response.status, body
+        except (OSError, http.client.HTTPException, ValueError):
+            return None, ""
 
     def getenv(self, name):
         """Return the environment variable ``name`` (or None)."""
@@ -281,6 +297,35 @@ def check_open_key(p, env_key, *, keys_env_ok=False):
     return False, f"SETUP-NEEDED: export {env_key}"
 
 
+def check_subbridge(p):
+    """Verify CLIProxyAPI is installed and its configured ingress is reachable."""
+    configured_base = p.getenv("CLIPROXYAPI_BASE_URL")
+    if not configured_base and not p.which("cliproxyapi"):
+        return False, "SETUP-NEEDED: brew install cliproxyapi"
+    base = configured_base or "http://127.0.0.1:8317/v1"
+    parsed = urlsplit(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False, "SETUP-NEEDED: CLIPROXYAPI_BASE_URL must be an absolute HTTP(S) URL"
+    local_hosts = {"127.0.0.1", "localhost", "::1", "host.docker.internal"}
+    if parsed.scheme == "http" and parsed.hostname not in local_hosts:
+        return False, "SETUP-NEEDED: remote CLIPROXYAPI_BASE_URL must use HTTPS"
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return False, "SETUP-NEEDED: CLIPROXYAPI_BASE_URL has an invalid port"
+    models_url = base.rstrip("/") + "/models"
+    ingress_key = p.getenv("CLIPROXYAPI_API_KEY") or "openbench-local-ingress"
+    status, body = p.http_get(models_url, {"Authorization": f"Bearer {ingress_key}"})
+    try:
+        payload = json.loads(body)
+        model_ids = {item.get("id") for item in payload.get("data", []) if isinstance(item, dict)}
+    except (ValueError, AttributeError):
+        model_ids = set()
+    if status != 200 or "gpt-5.6" not in model_ids:
+        return False, f"SETUP-NEEDED: CLIProxyAPI gpt-5.6 subscription route unavailable at {parsed.hostname}:{port}"
+    return True, f"CLIProxyAPI gpt-5.6 route ready at {parsed.hostname}:{port}"
+
+
 def _auth_cursor_container(p):
     path = "~/.openbench/cursor-container-auth/.config/cursor/auth.json"
     if p.getenv("CURSOR_API_KEY"):
@@ -341,7 +386,9 @@ def evaluate(harnesses, model, probes, pins=None):
 
         cli_ok, cli_detail = check_cli(probes, spec["cli"])
         version_ok, version_detail = check_version(probes, name, spec["cli"], pins)
-        if model in FRONTIER_MODEL_ENV:
+        if name == "grokbuild" and model == "gpt-5.6":
+            auth_ok, auth_detail = check_subbridge(probes)
+        elif model in FRONTIER_MODEL_ENV:
             auth_ok, auth_detail = _auth_frontier(probes, name, model)
         elif model in OPEN_MODEL_ENV:
             # Open model: AUTH = provider env key present (harness login is moot).

@@ -38,6 +38,8 @@ _EXE = "grok"
 # Auth is the host login at ~/.grok/auth.json, staged into the disposable HOME.
 # No custom catalog is written, so Grok routes to xAI's own endpoint; the
 # counting proxy cannot meter this lane (CLI-reported tokens only).
+# GPT-5.6 is instead routed through the local CLIProxyAPI subscription bridge
+# (see OPEN_MODELS below).
 MODELS = {
     "grok-4.5": {"model_id": "grok-4.5"},
 }
@@ -65,10 +67,13 @@ OPEN_MODELS = {
     "deepseek-v4-flash": {"model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek", "proxy_route": "chat/deepseek"},
     "kimi-k2.7-code":    {"model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "proxy_route": "chat/moonshot"},
     "kimi-k3":    {"model_id": "kimi-k3",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi K3", "proxy_route": "chat/moonshot"},
-    # OPENAI_BASE_URL permits an OpenAI-compatible router; the official API is
-    # the safe default. The later subscription bridge is intentionally absent.
-    "gpt-5.6":           {"model_id": "gpt-5.6",           "base_url": "https://api.openai.com/v1",    "base_url_env": "OPENAI_BASE_URL", "env_key": "OPENAI_API_KEY", "display": "OpenAI GPT-5.6", "proxy_route": "openai"},
+    # CLIProxyAPI owns Codex/ChatGPT subscription OAuth and refresh. The value
+    # sent to its local ingress is either its optional ingress key or a harmless
+    # placeholder; it is never an OpenAI API key.
+    "gpt-5.6":           {"model_id": "gpt-5.6",           "base_url": "http://127.0.0.1:8317/v1",     "base_url_env": "CLIPROXYAPI_BASE_URL", "env_key": "CLIPROXYAPI_API_KEY", "display": "GPT-5.6 via CLIProxyAPI", "proxy_route": "subbridge", "subscription_bridge": True},
 }
+
+_SUBBRIDGE_PLACEHOLDER = "openbench-local-ingress"
 
 
 def _token_fields_none():
@@ -123,16 +128,30 @@ def _proxy_cell_url(*parts):
 
 
 def _resolved_spec(spec):
-    """Resolve only the route URL; API-key values never enter generated config."""
+    """Resolve only the route URL; credential values never enter generated config."""
     resolved = dict(spec)
+    if spec.get("subscription_bridge") and os.environ.get("BENCH_IN_CONTAINER"):
+        resolved["base_url"] = "http://host.docker.internal:8317/v1"
     if spec.get("base_url_env") and os.environ.get(spec["base_url_env"]):
         resolved["base_url"] = os.environ[spec["base_url_env"]]
-    from urllib.parse import urlsplit
+    from urllib.parse import urlsplit, urlunsplit
     parsed = urlsplit(resolved["base_url"])
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("model base URL must not contain URL-embedded credentials")
     if parsed.query or parsed.fragment:
         raise ValueError("model base URL must not contain a query or fragment")
+    local_hosts = {"127.0.0.1", "localhost", "::1", "host.docker.internal"}
+    if parsed.scheme == "http" and parsed.hostname not in local_hosts:
+        raise ValueError("remote model base URL must use HTTPS")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("model base URL has an invalid port") from exc
+    if (spec.get("subscription_bridge") and os.environ.get("BENCH_IN_CONTAINER")
+            and parsed.hostname in {"127.0.0.1", "localhost", "::1"}):
+        netloc = "host.docker.internal" + (f":{port}" if port is not None else "")
+        resolved["base_url"] = urlunsplit(
+            (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
     return resolved
 
 
@@ -323,13 +342,14 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if not subscription and model not in OPEN_MODELS:
         return _unsupported(model)
     route_spec = None
+    spec = None
     if not subscription:
         spec = OPEN_MODELS[model]
         try:
             route_spec = _proxied_spec(spec)
         except ValueError as exc:
             return _setup_needed(str(exc))
-        if not os.environ.get(spec["env_key"]):
+        if not spec.get("subscription_bridge") and not os.environ.get(spec["env_key"]):
             return _setup_needed(f"export {spec['env_key']} to use {model}")
     elif not os.path.isfile(_REAL_GROK_AUTH):
         return _setup_needed(f"log in to Grok (`grok` interactive) so {_REAL_GROK_AUTH} exists")
@@ -344,9 +364,19 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             os.makedirs(grok_dir, exist_ok=True)
             shutil.copy2(_REAL_GROK_AUTH, os.path.join(grok_dir, "auth.json"))
             model = MODELS[model]["model_id"]
+            env = dict(os.environ)
         else:
             grok_dir = os.path.dirname(_write_config(iso_home, model, route_spec))
-        env = dict(os.environ)
+            if spec.get("subscription_bridge"):
+                # Filter by name before retrieving values, so a pay-per-token key
+                # is neither read nor copied on this path. Grok sees only
+                # CLIProxyAPI ingress auth (or a local placeholder when ingress
+                # auth is off).
+                env = {name: os.environ[name] for name in os.environ
+                       if name != "OPENAI_API_KEY"}
+                env[spec["env_key"]] = os.environ.get(spec["env_key"], _SUBBRIDGE_PLACEHOLDER)
+            else:
+                env = dict(os.environ)
         env["HOME"] = iso_home
         env["GROK_SUBAGENTS"] = "0"
         # Keep Grok's generated state within the disposable home and suppress

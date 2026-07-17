@@ -1610,20 +1610,23 @@ def main(argv=None):
         ledger_parent = os.environ.get("OPENBENCH_PROXY_LEDGER_DIR") or tempfile.mkdtemp(
             prefix="openbench_proxy_", dir=os.environ.get("OPENBENCH_DOCKER_TMPDIR") or None)
         listen_host = "0.0.0.0" if args.exec_mode == "docker" else "127.0.0.1"
-        openai_origin = "https://api.openai.com"
+        subbridge_origin = "http://127.0.0.1:8317"
         if "grokbuild" in harnesses and args.model == "gpt-5.6":
-            openai_base = os.environ.get("OPENAI_BASE_URL") or openai_origin
+            # Meter before CLIProxyAPI on a dedicated route, so mixed-harness
+            # runs cannot redirect unrelated OpenAI-compatible cells.
+            bridge_base = os.environ.get("CLIPROXYAPI_BASE_URL") or "http://127.0.0.1:8317/v1"
             from urllib.parse import urlsplit, urlunsplit
-            parsed_openai = urlsplit(openai_base)
-            if parsed_openai.scheme not in {"http", "https"} or not parsed_openai.netloc:
-                parser.error("OPENAI_BASE_URL must be an absolute HTTP(S) URL")
-            if parsed_openai.username is not None or parsed_openai.password is not None:
-                parser.error("OPENAI_BASE_URL must not contain URL-embedded credentials")
-            if parsed_openai.query or parsed_openai.fragment:
-                parser.error("OPENAI_BASE_URL must not contain a query or fragment")
-            openai_origin = urlunsplit((parsed_openai.scheme, parsed_openai.netloc, "", "", ""))
+            parsed_bridge = urlsplit(bridge_base)
+            if parsed_bridge.scheme not in {"http", "https"} or not parsed_bridge.netloc:
+                parser.error("CLIPROXYAPI_BASE_URL must be an absolute HTTP(S) URL")
+            if parsed_bridge.username is not None or parsed_bridge.password is not None:
+                parser.error("CLIPROXYAPI_BASE_URL must not contain URL-embedded credentials")
+            if parsed_bridge.query or parsed_bridge.fragment:
+                parser.error("CLIPROXYAPI_BASE_URL must not contain a query or fragment")
+            subbridge_origin = urlunsplit((parsed_bridge.scheme, parsed_bridge.netloc, "", "", ""))
         proxy_server, _thread = counting_proxy.start_in_thread(
-            listen_host, 0, ledger_parent, openai_upstream=openai_origin)
+            listen_host, 0, ledger_parent, subbridge_upstream=subbridge_origin,
+            require_registered_tokens=args.exec_mode == "docker")
         port = proxy_server.server_address[1]
         proxy_ctx = {
             "ledger_dir": ledger_parent,
