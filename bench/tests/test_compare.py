@@ -73,10 +73,15 @@ class TestMatchedComparison(CompareTestCase):
         self.assertEqual(alpha["unmatched_countable_rows"], 1)
 
     def test_failure_exclusions_are_per_arm_and_remove_cell_from_intersection(self):
+        dropped = os.path.join(self.tasks, "dropped")
+        os.mkdir(dropped)
+        with open(os.path.join(dropped, "DROPPED.md"), "w", encoding="utf-8") as fh:
+            fh.write("quarantined\n")
         a = self.write("a.jsonl", [
             self.row("h", "common", 1, True),
             self.row("h", "infra", 1, False, failure_class="infra"),
             self.row("h", "limited", 1, False, failure_class="rate_limited"),
+            self.row("h", "dropped", 1, False, failure_class="infra"),
         ])
         b = self.write("b.jsonl", [
             self.row("h", "common", 1, False),
@@ -106,6 +111,7 @@ class TestMatchedComparison(CompareTestCase):
         a = self.write("a.jsonl", [
             self.row("h", "t1", 1, True, harness_version="1.0"),
             self.row("h", "t2", 1, True, harness_version="1.1"),
+            self.row("h", "only-a", 1, True, harness_version="1.2"),
         ])
         b = self.write("b.jsonl", [
             self.row("h", "t1", 1, False, harness_version="2.0"),
@@ -113,10 +119,10 @@ class TestMatchedComparison(CompareTestCase):
         ])
         result = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
         self.assertTrue(result["summaries"]["a"]["version_mixed"])
-        self.assertIn("1.0, 1.1 [MIXED]", compare.render_text(result))
+        self.assertIn("1.0, 1.1, 1.2 [MIXED]", compare.render_text(result))
         markdown = compare.render_markdown(result)
         self.assertIn("**Matched n: 2**", markdown)
-        self.assertIn("| Harness version | 1.0, 1.1 [MIXED] | 2.0 |", markdown)
+        self.assertIn("| Harness version | 1.0, 1.1, 1.2 [MIXED] | 2.0 |", markdown)
 
     def test_no_shared_cells_renders_zero_denominator(self):
         a = self.write("a.jsonl", [self.row("h", "a", 1, True)])

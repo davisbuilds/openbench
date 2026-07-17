@@ -37,10 +37,10 @@ The scorecard contains:
 - hack-adjusted rate (mean canonical `score`, with legacy success fallback);
 - total wall time divided by solves;
 - uncached-input, cache-read, and output tokens divided by solves; and
-- harness versions observed in matched rows.
+- harness versions observed in all countable rows for each arm.
 
-A version cell is marked `[MIXED]` when an arm's matched rows contain multiple
-`harness_version` values. Missing efficiency measurements render as `-` rather
+A version cell is marked `[MIXED]` when an arm contains multiple
+`harness_version` values, including in unmatched countable rows. Missing efficiency measurements render as `-` rather
 than being counted as zero; a per-solve metric is unavailable if any matched
 row lacks that measurement.
 

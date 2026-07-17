@@ -60,13 +60,12 @@ def load_arms(paths):
 
 def _filter_arm(rows, tasks_dirs):
     filtered = stats.filter_rows(rows, tasks_dirs)
-    excluded = Counter()
-    for row in rows:
-        if isinstance(row, dict) and "_invalid_json" not in row and stats.is_valid_result_row(row):
-            failure_class = stats.class_for_report(row)
-            if failure_class in stats.EXCLUDED_FAILURE_CLASSES:
-                excluded[failure_class] += 1
-    return filtered["countable_rows"], dict(sorted(excluded.items()))
+    excluded = {
+        failure_class: filtered["excluded_counts"][failure_class]
+        for failure_class in sorted(stats.EXCLUDED_FAILURE_CLASSES)
+        if failure_class in filtered["excluded_counts"]
+    }
+    return filtered["countable_rows"], excluded
 
 
 def _unique_cells(rows):
@@ -96,9 +95,12 @@ def build_comparison(paths, tasks_dirs=None):
     eligible = {}
     exclusions = {}
     duplicate_counts = {}
+    versions_by_arm = {}
     for arm, rows in arms.items():
         countable, exclusions[arm] = _filter_arm(rows, task_roots)
         eligible[arm], duplicate_counts[arm] = _unique_cells(countable)
+        versions_by_arm[arm] = sorted({str(row["harness_version"]) for row in countable
+                                       if row.get("harness_version") not in (None, "")})
 
     common = set.intersection(*(set(cells) for cells in eligible.values()))
     matched = {arm: [eligible[arm][cell] for cell in sorted(common)] for arm in sorted(arms)}
@@ -116,8 +118,7 @@ def build_comparison(paths, tasks_dirs=None):
                 "mean_score": None,
             }
         solved = canonical["solved"]
-        versions = sorted({str(row["harness_version"]) for row in rows
-                           if row.get("harness_version") not in (None, "")})
+        versions = versions_by_arm[arm]
         summaries[arm] = {
             "solved": solved,
             "n": canonical["n"],
