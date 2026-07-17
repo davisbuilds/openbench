@@ -40,9 +40,10 @@ jobs:
           script: |
             const fs = require('fs');
             const title = 'CLI version bumps available';
+            const marker = '<!-- openbench-cli-version-check -->';
             const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8').trim();
             const body = [
-              '<!-- openbench-cli-version-check -->',
+              marker,
               'The weekly upstream check found Dockerfile CLI pins behind npm’s latest published tags.',
               '',
               '```text',
@@ -66,7 +67,9 @@ jobs:
               state: 'open',
               per_page: 100,
             });
-            const existing = issues.find(issue => !issue.pull_request && issue.title === title);
+            const existing = issues.find(issue =>
+              !issue.pull_request && issue.title === title && issue.body?.includes(marker)
+            );
             if (existing) {
               await github.rest.issues.update({
                 owner: context.repo.owner,
