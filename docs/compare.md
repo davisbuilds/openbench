@@ -25,9 +25,11 @@ removed from matching and reported. The scorecard states the matched `n` before
 the table and reports unmatched rows per arm.
 
 Rows classified as `infra` or `rate_limited` are excluded before matching and
-from solve-rate denominators. Their counts are shown separately for every arm.
-Canonical failure derivation, Wilson intervals, and hack-adjusted scoring are
-reused from `bench/stats.py`.
+from solve-rate denominators. Their counts are shown separately for every arm,
+along with invalid-row and dropped-task quarantine counts. Canonical filtering,
+Wilson intervals, hack-adjusted scoring, and provenance checks are reused from
+`bench/stats.py`. A prominent warning identifies provenance differences; add
+`--strict-provenance` to exit with status 2 when they occur.
 
 ## Metrics
 

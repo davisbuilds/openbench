@@ -96,7 +96,8 @@ class TestMatchedComparison(CompareTestCase):
         result = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
         self.assertEqual(result["matched_n"], 1)
         self.assertEqual(result["summaries"]["a"]["excluded"],
-                         {"infra": 1, "rate_limited": 1})
+                         {"infra": 1, "quarantined_dropped_task": 1,
+                          "rate_limited": 1})
         self.assertEqual(result["summaries"]["a"]["n"], 1)
         self.assertEqual(result["summaries"]["b"]["unmatched_countable_rows"], 2)
 
@@ -123,6 +124,8 @@ class TestMatchedComparison(CompareTestCase):
         ])
         result = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
         self.assertTrue(result["summaries"]["a"]["version_mixed"])
+        self.assertFalse(result["provenance_ok"])
+        self.assertIn("NON-COMPARABLE PROVENANCE", compare.render_text(result))
         self.assertIn("1.0, 1.1, 1.2 [MIXED]", compare.render_text(result))
         markdown = compare.render_markdown(result)
         self.assertIn("**Matched n: 2**", markdown)
@@ -164,6 +167,18 @@ class TestCompareCli(CompareTestCase):
             scorecard = fh.read()
         self.assertIn("# OpenBench comparison scorecard", scorecard)
         self.assertIn("| Solve rate | 100.0% | 0.0% |", scorecard)
+
+    def test_strict_provenance_exits_two_on_version_drift(self):
+        a = self.write("a.jsonl", [self.row("h", "t", 1, True, harness_version="1")])
+        b = self.write("b.jsonl", [self.row("h", "t", 1, True, harness_version="2")])
+        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "compare.py")
+        proc = subprocess.run(
+            [sys.executable, script, a, b, "--tasks-dir", self.tasks,
+             "--strict-provenance"],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("NON-COMPARABLE PROVENANCE", proc.stdout)
 
 
 if __name__ == "__main__":

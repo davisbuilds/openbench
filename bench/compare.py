@@ -66,12 +66,7 @@ def load_arms(paths):
 
 def _filter_arm(rows, tasks_dirs):
     filtered = stats.filter_rows(rows, tasks_dirs)
-    excluded = {
-        failure_class: filtered["excluded_counts"][failure_class]
-        for failure_class in sorted(stats.EXCLUDED_FAILURE_CLASSES)
-        if failure_class in filtered["excluded_counts"]
-    }
-    return filtered["countable_rows"], excluded
+    return filtered["countable_rows"], filtered["excluded_counts"]
 
 
 def _unique_cells(rows):
@@ -102,12 +97,15 @@ def build_comparison(paths, tasks_dirs=None):
     exclusions = {}
     duplicate_counts = {}
     versions_by_arm = {}
+    provenance_rows = []
     for arm, rows in arms.items():
         countable, exclusions[arm] = _filter_arm(rows, task_roots)
         eligible[arm], duplicate_counts[arm] = _unique_cells(countable)
         versions_by_arm[arm] = sorted({str(row["harness_version"]) for row in countable
                                        if row.get("harness_version") not in (None, "")})
+        provenance_rows.extend(dict(row, _compare_arm=arm) for row in countable)
 
+    provenance = stats.build_provenance(provenance_rows, ("_compare_arm",))
     common = set.intersection(*(set(cells) for cells in eligible.values()))
     matched = {arm: [eligible[arm][cell] for cell in sorted(common)] for arm in sorted(arms)}
     summaries = {}
@@ -148,6 +146,8 @@ def build_comparison(paths, tasks_dirs=None):
         "arms": sorted(arms),
         "matched_n": len(common),
         "summaries": summaries,
+        "provenance_ok": provenance["ok"],
+        "provenance": provenance,
     }
 
 
@@ -183,11 +183,11 @@ def scorecard_rows(report):
     for label, field in TOKEN_METRICS:
         key = field + "_per_solve"
         rows.append((label, [_number(summaries[arm][key]) for arm in report["arms"]]))
+    for category in ("infra", "rate_limited", "invalid_json", "invalid_row",
+                     "quarantined_dropped_task"):
+        rows.append((f"Excluded: {category}", [str(summaries[arm]["excluded"].get(category, 0))
+                                               for arm in report["arms"]]))
     rows.extend([
-        ("Excluded: infra", [str(summaries[arm]["excluded"].get("infra", 0))
-                             for arm in report["arms"]]),
-        ("Excluded: rate_limited", [str(summaries[arm]["excluded"].get("rate_limited", 0))
-                                    for arm in report["arms"]]),
         ("Unmatched countable rows", [str(summaries[arm]["unmatched_countable_rows"])
                                       for arm in report["arms"]]),
         ("Duplicate cells excluded", [str(summaries[arm]["duplicate_cells_excluded"])
@@ -209,10 +209,18 @@ def _plain_table(headers, rows):
                      [line(row) for row in rows])
 
 
+def _provenance_status(report):
+    if report["provenance_ok"]:
+        return "COMPARABILITY: OK"
+    messages = "; ".join(flag["message"] for flag in report["provenance"]["flags"])
+    return "NON-COMPARABLE PROVENANCE: " + messages
+
+
 def render_text(report):
     rows = [[metric] + values for metric, values in scorecard_rows(report)]
     return ("OpenBench matched comparison\n"
-            f"Matched n: {report['matched_n']} (task, trial cells present in all arms)\n\n" +
+            f"Matched n: {report['matched_n']} (task, trial cells present in all arms)\n"
+            f"{_provenance_status(report)}\n\n" +
             _plain_table(["Metric"] + report["arms"], rows))
 
 
@@ -226,6 +234,8 @@ def render_markdown(report):
         "# OpenBench comparison scorecard",
         "",
         f"**Matched n: {report['matched_n']}** `(task, trial)` cells present in every arm.",
+        "",
+        "> " + _markdown_cell(_provenance_status(report)),
         "",
         "| Metric | " + " | ".join(arms) + " |",
         "| --- | " + " | ".join("---:" for _ in arms) + " |",
@@ -243,6 +253,8 @@ def parse_args(argv):
     parser.add_argument("--markdown", help="write a Markdown scorecard to this path")
     parser.add_argument("--tasks-dir", action="append",
                         help="task root for DROPPED.md checks; repeatable or comma-separated")
+    parser.add_argument("--strict-provenance", action="store_true",
+                        help="exit 2 when canonical comparison provenance differs")
     return parser.parse_args(argv)
 
 
@@ -259,6 +271,8 @@ def main(argv=None):
         os.makedirs(parent, exist_ok=True)
         with open(args.markdown, "w", encoding="utf-8") as fh:
             fh.write(render_markdown(report))
+    if args.strict_provenance and not report["provenance_ok"]:
+        return 2
     return 0
 
 
