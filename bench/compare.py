@@ -60,10 +60,11 @@ def load_arms(paths):
         return dict(arms)
 
     rows = stats.load_rows(paths)
-    baseline_labels = {_row_arm(row) for row in rows
+    valid_rows = [row for row in rows if stats.is_valid_result_row(row)]
+    baseline_labels = {_row_arm(row) for row in valid_rows
                        if not isinstance(row.get("candidate_provenance"), dict)}
     identities = []
-    for row in rows:
+    for row in valid_rows:
         kind = "candidate" if isinstance(row.get("candidate_provenance"), dict) else "baseline"
         identity = (kind, _row_arm(row))
         if identity not in identities:
@@ -84,7 +85,9 @@ def load_arms(paths):
     arms = defaultdict(list)
     for row in rows:
         kind = "candidate" if isinstance(row.get("candidate_provenance"), dict) else "baseline"
-        arms[labels[(kind, _row_arm(row))]].append(row)
+        identity = (kind, _row_arm(row))
+        if identity in labels:
+            arms[labels[identity]].append(row)
     return dict(arms)
 
 
@@ -120,11 +123,13 @@ def build_comparison(paths, tasks_dirs=None):
     eligible = {}
     exclusions = {}
     duplicate_counts = {}
+    countable_counts = {}
     versions_by_arm = {}
     provenance_rows = []
     for arm, rows in arms.items():
         countable, exclusions[arm] = _filter_arm(rows, task_roots)
         eligible[arm], duplicate_counts[arm] = _unique_cells(countable)
+        countable_counts[arm] = len(countable)
         versions_by_arm[arm] = sorted({str(row["harness_version"]) for row in countable
                                        if row.get("harness_version") not in (None, "")})
         provenance_rows.extend(dict(row, _compare_arm=arm) for row in countable)
@@ -162,7 +167,7 @@ def build_comparison(paths, tasks_dirs=None):
             "version_mixed": len(versions) > 1,
             "excluded": exclusions[arm],
             "duplicate_cells_excluded": duplicate_counts[arm],
-            "unmatched_countable_rows": len(eligible[arm]) - len(common),
+            "unmatched_countable_rows": countable_counts[arm] - len(common),
         }
 
     return {

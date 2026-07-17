@@ -153,6 +153,26 @@ class TestMatchedComparison(CompareTestCase):
         self.assertIn("a\\|arm", markdown)
         self.assertIn("one\\|two\\\\three<br>four&lt;img&gt;", markdown)
 
+    def test_invalid_json_does_not_become_a_single_file_arm(self):
+        path = self.write("combined.jsonl", [
+            self.row("a", "t", 1, True), self.row("b", "t", 1, True),
+        ])
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("not-json\n")
+        result = compare.build_comparison([path], tasks_dirs=[self.tasks])
+        self.assertEqual(result["arms"], ["a", "b"])
+        self.assertEqual(result["matched_n"], 1)
+
+    def test_duplicate_rows_are_counted_as_unmatched(self):
+        a = self.write("a.jsonl", [
+            self.row("h", "t", 1, True), self.row("h", "dup", 1, True),
+            self.row("h", "dup", 1, False),
+        ])
+        b = self.write("b.jsonl", [self.row("h", "t", 1, True)])
+        result = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
+        self.assertEqual(result["summaries"]["a"]["unmatched_countable_rows"], 2)
+        self.assertEqual(result["summaries"]["a"]["duplicate_cells_excluded"], 1)
+
     def test_no_shared_cells_renders_zero_denominator(self):
         a = self.write("a.jsonl", [self.row("h", "a", 1, True)])
         b = self.write("b.jsonl", [self.row("h", "b", 1, True)])
