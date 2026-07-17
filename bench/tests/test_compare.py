@@ -145,13 +145,13 @@ class TestMatchedComparison(CompareTestCase):
 
     def test_markdown_escapes_input_derived_table_content(self):
         a = self.write("a|arm.jsonl", [
-            self.row("h", "t", 1, True, harness_version="one|two\\three\nfour"),
+            self.row("h", "t", 1, True, harness_version="one|two\\three\nfour<img>"),
         ])
         b = self.write("b.jsonl", [self.row("h", "t", 1, True)])
         markdown = compare.render_markdown(
             compare.build_comparison([a, b], tasks_dirs=[self.tasks]))
         self.assertIn("a\\|arm", markdown)
-        self.assertIn("one\\|two\\\\three<br>four", markdown)
+        self.assertIn("one\\|two\\\\three<br>four&lt;img&gt;", markdown)
 
     def test_no_shared_cells_renders_zero_denominator(self):
         a = self.write("a.jsonl", [self.row("h", "a", 1, True)])

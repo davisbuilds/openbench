@@ -7,6 +7,7 @@ rows are split by candidate name (when present) or harness.  Only unique
 """
 
 import argparse
+import html
 import json
 import os
 import sys
@@ -248,7 +249,8 @@ def render_text(report):
 
 
 def _markdown_cell(value):
-    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\r", "").replace("\n", "<br>")
+    escaped = html.escape(str(value), quote=False)
+    return escaped.replace("\\", "\\\\").replace("|", "\\|").replace("\r", "").replace("\n", "<br>")
 
 
 def render_markdown(report):
