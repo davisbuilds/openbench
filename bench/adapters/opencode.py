@@ -102,7 +102,7 @@ _VARIANT = {
     "gpt-5.6-terra": "medium",
     "gpt-5.6-luna": "medium",
     "claude-opus-4-8": "medium",
-    "grok-4.5": "medium",
+    "grok-4.5": None,  # xai serves grok-4.5 without an effort selector
 }
 
 # opencode's Anthropic OAuth login (`opencode auth login -p anthropic`) writes
@@ -329,7 +329,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "opencode", "run",
             "--dir", workdir,
             "-m", MODELS[model],
-            "--variant", _VARIANT[model],
+            # xai rejects --variant with a server error (grok-4.5 has no
+            # selectable effort); omit the flag when the map holds None.
+            *(["--variant", _VARIANT[model]] if _VARIANT.get(model) else []),
             "--auto",
             "--format", "json",
             "--title", "openbench",
