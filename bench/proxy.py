@@ -430,6 +430,12 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             raise RuntimeError("missing /cell/<token>/ route or x-openbench-cell-token")
         if not token:
             raise RuntimeError("empty cell token")
+        if getattr(self.server, "require_registered_tokens", False):
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+", token):
+                raise RuntimeError("unregistered cell token")
+            registration = Path(self.server.ledger_dir) / f"{token}.meta.json"
+            if not registration.is_file():
+                raise RuntimeError("unregistered cell token")
         if not route_parts:
             raise RuntimeError("missing route prefix")
         prefix = route_parts[0]
@@ -566,7 +572,8 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
                 cursor_upstream: str = DEFAULT_CURSOR_UPSTREAM,
                 timeout_s: float = 300.0, capture_limit: int = 8 * 1024 * 1024,
                 max_request_bytes: int = 64 * 1024 * 1024,
-                verbose: bool = False) -> CountingProxyServer:
+                verbose: bool = False,
+                require_registered_tokens: bool = False) -> CountingProxyServer:
     chat = dict(DEFAULT_CHAT_UPSTREAMS)
     if chat_upstreams:
         chat.update({k: v for k, v in chat_upstreams.items() if v})
@@ -585,6 +592,9 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     httpd.timeout_s = timeout_s
     httpd.capture_limit = max(capture_limit, 4096)
     httpd.max_request_bytes = max(max_request_bytes, 0)
+    # Docker requires a non-loopback bind. In that mode the runner enables this
+    # gate so arbitrary LAN clients cannot spend through a subscription route.
+    httpd.require_registered_tokens = require_registered_tokens
     # Per-process salt prevents opaque provider IDs from being correlated across
     # proxy runs while preserving links inside one experiment ledger directory.
     httpd.identifier_salt = secrets.token_bytes(32)

@@ -1528,7 +1528,8 @@ def main(argv=None):
                 parser.error("CLIPROXYAPI_BASE_URL must not contain a query or fragment")
             openai_origin = urlunsplit((parsed_openai.scheme, parsed_openai.netloc, "", "", ""))
         proxy_server, _thread = counting_proxy.start_in_thread(
-            listen_host, 0, ledger_parent, openai_upstream=openai_origin)
+            listen_host, 0, ledger_parent, openai_upstream=openai_origin,
+            require_registered_tokens=args.exec_mode == "docker")
         port = proxy_server.server_address[1]
         proxy_ctx = {
             "ledger_dir": ledger_parent,

@@ -39,7 +39,9 @@ import json
 import os
 import re
 import shlex
+import socket
 import subprocess
+from urllib.parse import urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ADAPTERS_DIR = os.path.join(HERE, "adapters")
@@ -91,6 +93,14 @@ class Probes:
     def exists(self, path):
         """True if ``path`` (file or dir) exists, expanding ``~``."""
         return os.path.exists(os.path.expanduser(path))
+
+    def tcp_connect(self, host, port, timeout=1.0):
+        """True when a local service accepts a TCP connection."""
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            return False
 
     def getenv(self, name):
         """Return the environment variable ``name`` (or None)."""
@@ -262,6 +272,20 @@ def check_open_key(p, env_key, *, keys_env_ok=False):
     return False, f"SETUP-NEEDED: export {env_key}"
 
 
+def check_subbridge(p):
+    """Verify CLIProxyAPI is installed and its configured ingress is reachable."""
+    if not p.which("cliproxyapi"):
+        return False, "SETUP-NEEDED: brew install cliproxyapi"
+    base = p.getenv("CLIPROXYAPI_BASE_URL") or "http://127.0.0.1:8317/v1"
+    parsed = urlsplit(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False, "SETUP-NEEDED: CLIPROXYAPI_BASE_URL must be an absolute HTTP(S) URL"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if not p.tcp_connect(parsed.hostname, port):
+        return False, f"SETUP-NEEDED: CLIProxyAPI unreachable at {parsed.hostname}:{port}"
+    return True, f"CLIProxyAPI reachable at {parsed.hostname}:{port}"
+
+
 def _auth_cursor_container(p):
     path = "~/.openbench/cursor-container-auth/.config/cursor/auth.json"
     if p.getenv("CURSOR_API_KEY"):
@@ -320,7 +344,9 @@ def evaluate(harnesses, model, probes):
             continue
 
         cli_ok, cli_detail = check_cli(probes, spec["cli"])
-        if model in FRONTIER_MODEL_ENV:
+        if name == "grokbuild" and model == "gpt-5.6":
+            auth_ok, auth_detail = check_subbridge(probes)
+        elif model in FRONTIER_MODEL_ENV:
             auth_ok, auth_detail = _auth_frontier(probes, name, model)
         elif model in OPEN_MODEL_ENV:
             # Open model: AUTH = provider env key present (harness login is moot).

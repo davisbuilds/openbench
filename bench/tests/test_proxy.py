@@ -208,6 +208,25 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(self.upstream.requests[-1]["path"], "/agent/v1/run")
         self.assertEqual(row["route"], "cursor")
 
+    def test_registered_token_gate_rejects_arbitrary_docker_client(self):
+        self.proxy.require_registered_tokens = True
+        data = b'{"model":"gpt-5.6"}'
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=5)
+        conn.request("POST", "/cell/guessed/openai/v1/chat/completions", body=data, headers={
+            "content-type": "application/json",
+            "content-length": str(len(data)),
+        })
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 502)
+        self.assertEqual(self.upstream.requests, [])
+
+        with open(os.path.join(self.tmp.name, "registered.meta.json"), "w", encoding="utf-8") as fh:
+            json.dump({"model": "gpt-5.6"}, fh)
+        self._post("/cell/registered/" + "openai/v1/chat/completions", {"model": "gpt-5.6"})
+        self.assertEqual(self.upstream.requests[-1]["path"], "/v1/chat/completions")
+
     def test_cell_token_routing_isolation(self):
         self._post("/cell/tok-a/chat/deepseek/chat/completions")
         self._post("/cell/tok-b/chat/deepseek/chat/completions")
