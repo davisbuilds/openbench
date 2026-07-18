@@ -12,3 +12,10 @@
 - Treat npm’s `latest` dist-tag as the authoritative upstream version and query package metadata directly with Python’s standard-library HTTP client; `--check-upstream` never invokes npm or installs anything.
 - Keep Cursor explicitly manual because it is not npm-distributed and no authoritative registry endpoint is part of the existing pin metadata.
 - Maintain at most one open issue with the exact requested title. A clean run does not auto-close it, preserving human ownership of review and remediation.
+
+# Solved-intersection comparison decisions
+
+- Keep `--solved-intersection` opt-in so existing reports retain their historical matched-attempt totals-per-solve efficiency calculation; solve-rate and confidence rows never change denominator.
+- Define the efficiency intersection as sorted matched `(task, trial)` cells whose canonical `success` is true in every arm. Report mean and median across those cells, and make all efficiency values unavailable when the intersection is empty.
+- Fall back field-by-field to `tokens_proxy_*` whenever the corresponding canonical token value is unavailable. A populated nonnegative proxy measurement is usable without requiring `token_basis`, because proxy capture has its separate `token_basis_proxy` provenance and the affected result shape intentionally leaves canonical fields null.
+- If any selected cell lacks a given efficiency measurement, show `-` for that arm and metric rather than silently using a smaller denominator.
