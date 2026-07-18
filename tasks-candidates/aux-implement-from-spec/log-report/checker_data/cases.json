@@ -1,0 +1,55 @@
+[
+  {
+    "name": "top-paths-3",
+    "args": [
+      "top-paths",
+      "3"
+    ],
+    "expected": "/home 5\n/products 5\n/search 3\n"
+  },
+  {
+    "name": "top-paths-1",
+    "args": [
+      "top-paths",
+      "1"
+    ],
+    "expected": "/home 5\n"
+  },
+  {
+    "name": "status-counts",
+    "args": [
+      "status-counts"
+    ],
+    "expected": "200 14\n304 1\n400 1\n404 2\n500 1\n503 1\n"
+  },
+  {
+    "name": "error-rate",
+    "args": [
+      "error-rate"
+    ],
+    "expected": "25.0%\n"
+  },
+  {
+    "name": "bytes-total",
+    "args": [
+      "bytes-total"
+    ],
+    "expected": "19464\n"
+  },
+  {
+    "name": "slowest-3",
+    "args": [
+      "slowest",
+      "3"
+    ],
+    "expected": "/checkout 300\n/search 260\n/products 210\n"
+  },
+  {
+    "name": "slowest-1",
+    "args": [
+      "slowest",
+      "1"
+    ],
+    "expected": "/checkout 300\n"
+  }
+]

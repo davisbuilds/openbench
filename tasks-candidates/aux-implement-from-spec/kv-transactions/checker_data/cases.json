@@ -1,0 +1,52 @@
+[
+  {
+    "name": "basic-set-get",
+    "input": "SET a 10\nGET a\nGET missing\nDELETE a\nGET a\n",
+    "expected": "10\nNULL\nNULL\n"
+  },
+  {
+    "name": "count",
+    "input": "SET a x\nSET b x\nSET c y\nCOUNT x\nCOUNT y\nCOUNT z\nDELETE b\nCOUNT x\n",
+    "expected": "2\n1\n0\n1\n"
+  },
+  {
+    "name": "rollback-basic",
+    "input": "SET a 1\nBEGIN\nSET a 2\nGET a\nROLLBACK\nGET a\n",
+    "expected": "2\n1\n"
+  },
+  {
+    "name": "commit-basic",
+    "input": "SET a 1\nBEGIN\nSET a 2\nCOMMIT\nGET a\nROLLBACK\n",
+    "expected": "2\nNO TRANSACTION\n"
+  },
+  {
+    "name": "nested-rollback",
+    "input": "SET a 1\nBEGIN\nSET a 2\nBEGIN\nSET a 3\nGET a\nROLLBACK\nGET a\nROLLBACK\nGET a\n",
+    "expected": "3\n2\n1\n"
+  },
+  {
+    "name": "nested-commit-all",
+    "input": "BEGIN\nSET a 1\nBEGIN\nSET b 2\nCOMMIT\nGET a\nGET b\nROLLBACK\n",
+    "expected": "1\n2\nNO TRANSACTION\n"
+  },
+  {
+    "name": "delete-in-txn",
+    "input": "SET a 1\nBEGIN\nDELETE a\nGET a\nCOUNT 1\nROLLBACK\nGET a\nCOUNT 1\n",
+    "expected": "NULL\n0\n1\n1\n"
+  },
+  {
+    "name": "no-transaction",
+    "input": "ROLLBACK\nCOMMIT\nSET a 1\nGET a\n",
+    "expected": "NO TRANSACTION\nNO TRANSACTION\n1\n"
+  },
+  {
+    "name": "count-across-txn",
+    "input": "SET a x\nBEGIN\nSET b x\nCOUNT x\nDELETE a\nCOUNT x\nROLLBACK\nCOUNT x\n",
+    "expected": "2\n1\n1\n"
+  },
+  {
+    "name": "reset-value-then-count",
+    "input": "SET a foo\nSET b foo\nBEGIN\nSET a bar\nCOUNT foo\nCOUNT bar\nCOMMIT\nCOUNT foo\n",
+    "expected": "1\n1\n1\n"
+  }
+]

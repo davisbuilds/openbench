@@ -1,0 +1,154 @@
+[
+  {
+    "name": "literals-and-sum",
+    "cells": {
+      "A1": "5",
+      "B1": "3",
+      "C1": "=A1+B1"
+    },
+    "expected": {
+      "A1": 5,
+      "B1": 3,
+      "C1": 8
+    }
+  },
+  {
+    "name": "precedence",
+    "cells": {
+      "A1": "=2+3*4",
+      "B1": "=(2+3)*4",
+      "C1": "=2*3+4*5"
+    },
+    "expected": {
+      "A1": 14,
+      "B1": 20,
+      "C1": 26
+    }
+  },
+  {
+    "name": "ref-chain",
+    "cells": {
+      "A1": "2",
+      "B1": "=A1*3",
+      "C1": "=B1+A1"
+    },
+    "expected": {
+      "A1": 2,
+      "B1": 6,
+      "C1": 8
+    }
+  },
+  {
+    "name": "division-floats",
+    "cells": {
+      "A1": "=10/4",
+      "B1": "=6/2",
+      "C1": "=7/2+1"
+    },
+    "expected": {
+      "A1": 2.5,
+      "B1": 3.0,
+      "C1": 4.5
+    }
+  },
+  {
+    "name": "div-by-zero-propagates",
+    "cells": {
+      "A1": "=1/0",
+      "B1": "=A1+1",
+      "C1": "=B1*2"
+    },
+    "expected": {
+      "A1": "#DIV/0",
+      "B1": "#DIV/0",
+      "C1": "#DIV/0"
+    }
+  },
+  {
+    "name": "two-cell-cycle",
+    "cells": {
+      "A1": "=B1",
+      "B1": "=A1"
+    },
+    "expected": {
+      "A1": "#CYCLE",
+      "B1": "#CYCLE"
+    }
+  },
+  {
+    "name": "self-cycle",
+    "cells": {
+      "A1": "=A1+1"
+    },
+    "expected": {
+      "A1": "#CYCLE"
+    }
+  },
+  {
+    "name": "empty-cell-is-zero",
+    "cells": {
+      "A1": "=B1+5",
+      "B1": "",
+      "C1": "=A1+B1"
+    },
+    "expected": {
+      "A1": 5,
+      "B1": 0,
+      "C1": 5
+    }
+  },
+  {
+    "name": "unary-minus",
+    "cells": {
+      "A1": "=-3+5",
+      "B1": "=-(2+3)",
+      "C1": "=-A1"
+    },
+    "expected": {
+      "A1": 2,
+      "B1": -5,
+      "C1": -2
+    }
+  },
+  {
+    "name": "mixed-grid",
+    "cells": {
+      "A1": "10",
+      "A2": "20",
+      "B1": "=A1+A2",
+      "B2": "=B1/2",
+      "C1": "=(A1+A2)*B2-5"
+    },
+    "expected": {
+      "A1": 10,
+      "A2": 20,
+      "B1": 30,
+      "B2": 15.0,
+      "C1": 445.0
+    }
+  },
+  {
+    "name": "nested-parens",
+    "cells": {
+      "A1": "=((1+2)*(3+4))",
+      "B1": "=2*(3+(4-1))"
+    },
+    "expected": {
+      "A1": 21,
+      "B1": 12
+    }
+  },
+  {
+    "name": "float-literal-and-ref",
+    "cells": {
+      "A1": "1.5",
+      "B1": "=A1*2",
+      "C1": "=A1+B1"
+    },
+    "expected": {
+      "A1": 1.5,
+      "B1": 3.0,
+      "C1": 4.5
+    }
+  }
+]

@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenBench — Architecture &amp; Fundamentals</title>
+<style>
+  :root{
+    --bg:#faf9f6; --surface:#ffffff; --surface-2:#f4f2ec;
+    --ink:#14130f; --ink-2:#4a4740; --muted:#8a867c;
+    --border:#e5e2d8; --border-strong:#d3cfc2;
+    --accent:#b4531f; --accent-soft:#f3e5da;
+    --good:#2f7d32; --bad:#b23a2e; --info:#2a6bb0; --warn:#b8860b;
+    --code-bg:#f6f4ee; --mono:"SF Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --shadow:0 1px 2px rgba(20,19,15,.04),0 6px 20px rgba(20,19,15,.06);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#101010; --surface:#171716; --surface-2:#1e1e1c;
+      --ink:#eceae3; --ink-2:#b7b3a8; --muted:#84807695;
+      --border:#2b2a27; --border-strong:#3a3833;
+      --accent:#e07b45; --accent-soft:#2a1c12;
+      --good:#6fbf73; --bad:#e0776a; --info:#6aa9e0; --warn:#d8b24a;
+      --code-bg:#1c1b19; --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 24px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased}
+  .wrap{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1220px;margin:0 auto;gap:0}
+  /* ---- sidebar ---- */
+  nav{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;
+    padding:28px 20px 40px;border-right:1px solid var(--border);background:var(--surface)}
+  nav .brand{font-weight:700;font-size:18px;letter-spacing:-.02em;margin-bottom:2px}
+  nav .brand span{color:var(--accent)}
+  nav .tag{font-size:12px;color:var(--muted);margin-bottom:22px}
+  nav a{display:block;color:var(--ink-2);text-decoration:none;font-size:13.5px;
+    padding:5px 10px;border-radius:7px;margin:1px 0;border-left:2px solid transparent}
+  nav a:hover{background:var(--surface-2);color:var(--ink)}
+  nav a.sub{padding-left:20px;font-size:12.5px;color:var(--muted)}
+  nav .grp{font-size:11px;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--muted);margin:18px 0 6px 10px;font-weight:600}
+  /* ---- main ---- */
+  main{padding:44px 52px 120px;min-width:0}
+  section{margin-bottom:52px;scroll-margin-top:20px}
+  h1{font-size:34px;letter-spacing:-.03em;margin:0 0 6px;line-height:1.15}
+  h2{font-size:24px;letter-spacing:-.02em;margin:0 0 16px;padding-bottom:8px;
+    border-bottom:2px solid var(--border)}
+  h3{font-size:17px;margin:26px 0 8px;letter-spacing:-.01em}
+  p{margin:0 0 14px;color:var(--ink-2)}
+  .lede{font-size:19px;color:var(--ink);line-height:1.5;margin-bottom:22px}
+  code{font-family:var(--mono);font-size:.88em;background:var(--code-bg);
+    padding:1.5px 5px;border-radius:4px;border:1px solid var(--border);color:var(--ink)}
+  pre{background:var(--code-bg);border:1px solid var(--border);border-radius:10px;
+    padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.55;
+    color:var(--ink);margin:0 0 16px}
+  pre code{background:none;border:none;padding:0}
+  a.link{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-soft)}
+  a.link:hover{border-bottom-color:var(--accent)}
+  strong{color:var(--ink);font-weight:650}
+  /* callouts */
+  .note{border:1px solid var(--border);border-left:3px solid var(--accent);
+    background:var(--surface);border-radius:10px;padding:14px 18px;margin:0 0 18px;box-shadow:var(--shadow)}
+  .note .k{font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--accent);display:block;margin-bottom:4px}
+  .note.info{border-left-color:var(--info)} .note.info .k{color:var(--info)}
+  .note.good{border-left-color:var(--good)} .note.good .k{color:var(--good)}
+  .note.warn{border-left-color:var(--warn)} .note.warn .k{color:var(--warn)}
+  /* cards / grid */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:6px 0 18px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)}
+  .card h4{margin:0 0 6px;font-size:15px;letter-spacing:-.01em}
+  .card p{margin:0;font-size:13.5px;color:var(--muted)}
+  .card .file{font-family:var(--mono);font-size:12px;color:var(--accent);display:block;margin-bottom:8px}
+  /* tables */
+  table{border-collapse:collapse;width:100%;font-size:13.5px;margin:0 0 18px;
+    background:var(--surface);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+  th,td{text-align:left;padding:9px 13px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{background:var(--surface-2);font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-2)}
+  tr:last-child td{border-bottom:none}
+  td code{font-size:12px}
+  .mono{font-family:var(--mono)}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;
+    background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+  .pill.g{background:color-mix(in srgb,var(--good) 15%,transparent);color:var(--good)}
+  .pill.b{background:color-mix(in srgb,var(--bad) 15%,transparent);color:var(--bad)}
+  .pill.i{background:color-mix(in srgb,var(--info) 15%,transparent);color:var(--info)}
+  /* pipeline diagram */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;margin:8px 0 20px}
+  .flow .step{flex:1;min-width:130px;background:var(--surface);border:1px solid var(--border-strong);
+    border-radius:12px;padding:13px 14px;position:relative;box-shadow:var(--shadow)}
+  .flow .step .n{font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700}
+  .flow .step h4{margin:3px 0 4px;font-size:14px}
+  .flow .step p{margin:0;font-size:12px;color:var(--muted);line-height:1.4}
+  .flow .arrow{align-self:center;color:var(--accent);font-size:20px;flex:0 0 auto}
+  .step.judge{border-color:var(--good);border-width:2px}
+  /* misc */
+  ul.tight{margin:0 0 16px;padding-left:22px}
+  ul.tight li{margin-bottom:6px;color:var(--ink-2)}
+  .kbd{font-family:var(--mono);font-size:12px;background:var(--surface-2);border:1px solid var(--border-strong);
+    border-radius:5px;padding:1px 6px}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){
+    .wrap{grid-template-columns:1fr} nav{display:none}
+    main{padding:28px 20px 80px} .split{grid-template-columns:1fr}
+  }
+  .toc-foot{font-size:12px;color:var(--muted);margin-top:30px;border-top:1px solid var(--border);padding-top:14px}
+  .hl{background:var(--accent-soft);padding:0 3px;border-radius:3px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <div class="brand">Open<span>Bench</span></div>
+  <div class="tag">Architecture &amp; Fundamentals</div>
+  <a href="#thesis">The core question</a>
+  <a href="#glance">At a glance</a>
+
+  <div class="grp">Fundamentals</div>
+  <a href="#pipeline">The run pipeline</a>
+  <a href="#principles">5 load-bearing ideas</a>
+  <a href="#framings">Two result framings</a>
+
+  <div class="grp">Anatomy</div>
+  <a href="#tasks">Anatomy of a task</a>
+  <a href="#adapters">Adapters &amp; the contract</a>
+  <a href="#exec">Local vs Docker</a>
+  <a href="#scoring">Scoring &amp; partial credit</a>
+  <a href="#report">Reporting &amp; Wilson CIs</a>
+  <a href="#taxonomy">Self-auditing taxonomy</a>
+  <a href="#transcripts">Transcripts &amp; scrubbing</a>
+
+  <div class="grp">The Story</div>
+  <a href="#arc">The findings arc</a>
+  <a href="#incidents">Why it's trustworthy</a>
+
+  <div class="grp">Reference</div>
+  <a href="#map">Repo map</a>
+  <a href="#glossary">Glossary</a>
+</nav>
+
+<main>
+
+<section id="thesis">
+  <h1>OpenBench</h1>
+  <p class="lede">A from-scratch benchmark that asks one question and tries to answer it honestly:
+  <em>given the same underlying model, how much does the <span class="hl">harness</span> around it change the result?</em></p>
+
+  <p>A coding agent is two things bolted together: a <strong>model</strong> that predicts tokens, and a
+  <strong>harness</strong> — the CLI that wraps it in a run loop, a tool set, a permission policy, and the
+  context it feeds back in (<code>codex</code>, <code>pi</code>, <code>opencode</code>, <code>cursor</code>,
+  <code>devin</code>, and open-model <code>claude</code>). We talk endlessly about the model and rarely measure
+  the harness. OpenBench measures the harness.</p>
+
+  <div class="note">
+    <span class="k">The thesis in one line</span>
+    On <strong>correctness</strong>, frontier harnesses on a frontier model are indistinguishable — they all just
+    solve the task. Where they separate is <strong>efficiency</strong>: wall-clock time (up to ~4×) and, more
+    sharply, <strong>tokens spent per solved task (up to ~8×)</strong>. Saturation is the <em>premise</em>, not a
+    failure — it's what pushes the measurement onto the axis that actually varies: cost-per-solve and speed-per-solve.
+  </div>
+
+  <p>Everything is Python&nbsp;3 <strong>standard library only</strong>, runs locally, and every run appends one
+  JSON line so results are auditable after the fact. No Harbor, no <code>inspect_ai</code> — building the
+  measurement apparatus by hand was the point, because a benchmark is only worth its verification discipline.</p>
+</section>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="cards">
+    <div class="card"><h4>What it grades</h4><p>Self-contained coding tasks run headlessly by real agent CLIs.</p></div>
+    <div class="card"><h4>Who decides success</h4><p>A <strong>checker script</strong> — exit&nbsp;0 = solved. Never the harness's own claim.</p></div>
+    <div class="card"><h4>What separates harnesses</h4><p>Not correctness (it saturates). <strong>Wall-time and tokens-per-solve.</strong></p></div>
+    <div class="card"><h4>How results are stored</h4><p>Append-only JSONL, one row per <span class="mono">task × harness × trial</span> cell. Resumable.</p></div>
+    <div class="card"><h4>Statistical honesty</h4><p><strong>Wilson 95% intervals</strong>, not point estimates. Overlap = not yet resolved.</p></div>
+    <div class="card"><h4>Negative control</h4><p>A <code>null</code> harness that does nothing — every checker must fail it.</p></div>
+  </div>
+</section>
+
+<section id="pipeline">
+  <h2>The run pipeline</h2>
+  <p>Everything flows through <code>bench/run.py</code>. For each <strong>cell</strong> — one
+  <span class="mono">(task, harness, trial)</span> triple — the runner executes this exact sequence.
+  The green box is the only authority on success.</p>
+
+  <div class="flow">
+    <div class="step"><div class="n">01</div><h4>Copy workspace</h4><p>Pristine <code>workspace/</code> → disposable temp dir. Source is never touched.</p></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">02</div><h4>Invoke adapter</h4><p>Import <code>adapters/&lt;h&gt;.py</code>, call <code>run()</code> headlessly with cwd = temp dir.</p></div>
+    <div class="arrow">→</div>
+    <div class="step judge"><div class="n">03</div><h4>Run checker.sh</h4><p><strong>The judge.</strong> cwd = temp dir, <code>TASK_DIR</code> set. Exit&nbsp;0 = solved.</p></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">04</div><h4>Classify + append</h4><p>Failure class computed, one JSON row appended to <code>results.jsonl</code>.</p></div>
+  </div>
+
+  <p>Then <code>bench/report.py</code> reads that log and aggregates it into per-harness tables. Two more tools
+  bracket the loop: <code>validate_tasks.py</code> proves every checker is honest <em>before</em> a run, and
+  <code>bench/doctor.py</code> preflights each harness's CLI/auth <em>without spending tokens</em>.</p>
+
+  <div class="note info">
+    <span class="k">The key invariant</span>
+    The adapter reports <code>completed</code> (the CLI exited cleanly). That is <strong>not</strong> task success.
+    Success is decided <em>only</em> by re-running the world through <code>checker.sh</code> afterward. This
+    separation is what lets the benchmark catch a harness that <em>claims</em> victory but didn't actually fix the code.
+  </div>
+</section>
+
+<section id="principles">
+  <h2>Five load-bearing ideas</h2>
+  <p>If you understand these five, you understand why the numbers can be trusted. Each one closes a specific way a
+  benchmark can silently lie.</p>
+
+  <h3>1. The checker is the sole judge — and it's validated</h3>
+  <p>Success is <code>checker.sh</code> exit&nbsp;0, full stop. But who checks the checker? <code>validate_tasks.py</code>
+  proves each one is <strong>correctly polarized</strong> by running it twice:</p>
+  <ul class="tight">
+    <li>Against a <strong>fresh untouched workspace</strong> → it <span class="pill b">must FAIL</span> (else the task is scored solved before the agent does anything).</li>
+    <li>Against the workspace with <code>solution/</code> overlaid → it <span class="pill g">must PASS</span> (else a correct answer would be rejected).</li>
+  </ul>
+  <p>This catches the two ways a grader lies about difficulty. It's also why expected outputs for data-driven tasks
+  are <em>generated from the golden solution</em>, not hand-written — the checker owns its oracle.</p>
+
+  <h3>2. The null control</h3>
+  <p>A built-in <code>null</code> "harness" does nothing and reports <code>completed=True</code>. Because it never
+  edits the workspace, every checker <em>must</em> fail it. A nonzero <code>null</code> score would mean a broken,
+  too-lenient checker. It uses zero tokens and is the benchmark's smoke test for the whole grading apparatus.</p>
+
+  <h3>3. Fresh workspace per run</h3>
+  <p>Every cell gets an untouched copy of the task workspace in a temp dir that's deleted afterward. Runs cannot
+  contaminate each other or the source tree — a <code>finally: shutil.rmtree(workdir)</code> guarantees it even on crash.</p>
+
+  <h3>4. Wilson intervals, not point estimates</h3>
+  <p>With a handful of trials, "2/3 = 67%" is noise. Every success rate is reported with a <strong>Wilson 95%
+  confidence interval</strong>, and two harnesses are treated as different <em>only when their intervals separate</em>.
+  Overlap means "not yet resolved." (Wilson over the naïve formula because it stays inside [0,1] and behaves sensibly
+  at 0/n and n/n.)</p>
+
+  <h3>5. Resumability &amp; auditability</h3>
+  <p>Each cell's identity is a deterministic <code>run_id</code> = <code class="mono">harness:task:model:trialN</code>.
+  A cell whose <code>run_id</code> already appears in the log is skipped, so you can stop and re-run freely
+  (<code>--force</code> overrides). Every row records the exact <code>cmd</code> executed. One line, one cell, forever appendable.</p>
+</section>
+
+<section id="framings">
+  <h2>Two result framings</h2>
+  <div class="split">
+    <div class="card">
+      <h4>Track A — same model, harness varies</h4>
+      <p style="color:var(--ink-2)">Every compatible harness is pinned to the <strong>same canonical model</strong>,
+      <code>gpt-5.5-medium</code>, so any difference comes from the harness — scaffolding, tools, prompting, permissions —
+      not the model. This is the controlled experiment. Uses subscription/OAuth logins.</p>
+    </div>
+    <div class="card">
+      <h4>Open-model panels</h4>
+      <p style="color:var(--ink-2)">Open models (<code>glm-5.2</code>, <code>deepseek-v4-flash</code>,
+      <code>kimi-k2.7-code</code>, <code>glm-4.7-flash</code>) run through adapters that reach the providers directly
+      via first-party API keys. Answers "how close are open models to frontier, and at what cost?"</p>
+    </div>
+  </div>
+  <div class="note warn">
+    <span class="k">Honest caveats baked into the framing</span>
+    <code>devin</code> is flaky in the latest analysis and excluded from M4.5 rankings. <code>cursor</code>/<code>devin</code>
+    have closed model menus (no open models). <code>claude</code> is <strong>open-model-only by design</strong> — a run
+    can never accidentally bill an Anthropic subscription. <code>codex</code> can only reach open models through the
+    local Responses↔Chat bridge (<code>bench/openmodel_bridge.sh</code>).
+  </div>
+</section>
+
+<section id="tasks">
+  <h2>Anatomy of a task</h2>
+  <p>A core task is a directory under <code>tasks/&lt;name&gt;/</code>. Imported tiers live under
+  <code>tasks-imported/&lt;collection&gt;/</code> and run with <code>--tasks-dir tasks-imported</code>.</p>
+  <pre><code>tasks/make-ci-green/
+├── instruction.md   what the harness is told (reads as a normal engineering request)
+├── workspace/       starting files; copied fresh into a temp dir every run
+├── checker.sh       grades the result; exit 0 = solved, may print SCORE: for partial credit
+├── solution/        golden files — used ONLY by validate_tasks.py, never shown to the agent
+└── checker_data/    optional: inputs/expected outputs the checker owns (kept out of workspace/)</code></pre>
+
+  <p>Three rules the runner honors for every cell:</p>
+  <ul class="tight">
+    <li><strong>The source is sacred.</strong> <code>workspace/</code> is copied to a disposable temp dir; the source under <code>tasks/</code> is never modified.</li>
+    <li><strong>Checkers reference their own data absolutely.</strong> <code>checker.sh</code> runs with <span class="mono">cwd = temp workspace copy</span> and env <code>TASK_DIR</code> = absolute task dir, so it reads <code>$TASK_DIR/checker_data/...</code> regardless of cwd.</li>
+    <li><strong>No leakage.</strong> Instructions never mention the checker, the solution, or that this is a benchmark. They read like a real ticket.</li>
+  </ul>
+
+  <p>There are three tiers, each <strong>reported and scored separately</strong>:</p>
+  <table>
+    <tr><th>Tier</th><th>Location</th><th>What it is</th></tr>
+    <tr><td><strong>Core synthetic</strong></td><td><code>tasks/</code></td><td>8 repo-authored tasks incl. partial-credit hard ones (<code>make-ci-green</code>, <code>add-feature</code>, <code>misleading-error</code>).</td></tr>
+    <tr><td><strong>Exercism</strong></td><td><code>tasks-imported/exercism/</code></td><td>11 MIT-licensed spec tasks with per-task provenance.</td></tr>
+    <tr><td><strong>Terminal-Bench</strong></td><td><code>tasks-imported/terminal-bench/</code></td><td>5 Apache-2.0 TB tasks — the new <em>frontier</em> tier, run through the Docker lane.</td></tr>
+  </table>
+</section>
+
+<section id="adapters">
+  <h2>Adapters &amp; the contract</h2>
+  <p>Each harness is one module <code>bench/adapters/&lt;name&gt;.py</code>. The runner imports it dynamically and
+  calls a single function. The full contract is <code>bench/ADAPTER_SPEC.md</code>; the essence:</p>
+  <pre><code>NAME: str                # canonical harness name, matches filename
+MODELS: dict[str, str]   # canonical model name -> harness-specific model string
+
+def run(instruction, workdir, model, timeout_s) -> dict:
+    # - map canonical `model` -> harness flags via MODELS
+    # - run the CLI HEADLESSLY, cwd=workdir, never prompt interactively
+    # - enforce timeout via subprocess (macOS has no `timeout` command)
+    # - the agent's edits must land in workdir
+    return {
+      "completed": bool,       # CLI exited 0 within timeout — NOT task success
+      "error": str | None,     # timeout / crash / unsupported-model reason
+      "output_tail": str,      # last ~2000 chars of stdout+stderr
+      "tokens": int | None,    # if the harness reports usage
+      "turns": int | None,     # model rounds, if reported
+      "cmd": list | str,       # what ran (for the audit log)
+      "full_output": str,      # OPTIONAL: untruncated — becomes the local transcript
+    }</code></pre>
+
+  <div class="note">
+    <span class="k">Auth quirks live inside the adapter</span>
+    The user's real config files are <strong>never modified</strong> — read-only use only. Each adapter isolates
+    itself so the benchmark's needs never leak into your personal setup.
+  </div>
+
+  <table>
+    <tr><th>Harness</th><th>Frontier pin</th><th>Auth isolation</th></tr>
+    <tr><td><code>codex</code></td><td><code>gpt-5.5</code>, <code>reasoning_effort=medium</code></td><td>Existing login; open models via the foreground bridge.</td></tr>
+    <tr><td><code>pi</code></td><td><code>gpt-5.5</code> <code>--thinking medium</code></td><td>Isolated temp <code>HOME</code> with only <code>.pi/agent/auth.json</code> copied in + <code>--no-extensions</code>, so personal extensions never load (one of them crashes headless mode).</td></tr>
+    <tr><td><code>opencode</code></td><td><code>openai/gpt-5.5 --variant medium</code></td><td>Strips <code>OPENAI_API_KEY</code> from the child env to force subscription OAuth.</td></tr>
+    <tr><td><code>cursor</code></td><td><code>gpt-5.5-medium</code></td><td>Existing <code>cursor-agent</code> login. Closed model menu (no open models).</td></tr>
+    <tr><td><code>devin</code></td><td>configured pin</td><td>Existing login. Flaky &amp; excluded where noted.</td></tr>
+    <tr><td><code>claude</code></td><td><span class="pill b">by design: none</span></td><td>Open-model-only; Anthropic-compatible vendor endpoints, never the subscription.</td></tr>
+    <tr><td><code>null</code></td><td>—</td><td>Built-in control. Does nothing, uses zero tokens, must fail every checker.</td></tr>
+  </table>
+
+  <p><strong>Worked example — how <code>pi</code> counts tokens.</strong> pi's <code>--mode json</code> emits a JSONL
+  event stream; the adapter parses the final <code>agent_end</code> message list and sums <code>input+output</code>
+  over <em>assistant</em> messages only (cache re-reads excluded, so it's fresh tokens — matching the other adapters).
+  Turns = the count of <code>turn_end</code> events. Parsing is defensive: any shape drift yields
+  <code>tokens=None</code> rather than a wrong number. Open models are wired in by writing a tiny JS provider
+  extension into the isolated <code>HOME</code> and loading it with <code>-e</code>.</p>
+</section>
+
+<section id="exec">
+  <h2>Local vs Docker execution</h2>
+  <p>The same adapter module runs unchanged in both modes — the container only adds isolation.</p>
+  <div class="split">
+    <div class="card">
+      <h4><code>--exec local</code> <span class="pill">default</span></h4>
+      <p style="color:var(--ink-2)">Runs on the host. Fast, fine for core &amp; Exercism tasks on a laptop. No GPU needed.</p>
+    </div>
+    <div class="card">
+      <h4><code>--exec docker</code></h4>
+      <p style="color:var(--ink-2)">Each cell runs in a fresh disposable <code>docker run --rm</code> container built
+      from <code>bench/docker/</code>. Used for Terminal-Bench (agent shell commands need isolation).</p>
+    </div>
+  </div>
+  <p>Key design points of the Docker lane (<code>bench/docker_exec.py</code> + <code>bench/entry.py</code>):</p>
+  <ul class="tight">
+    <li><strong>Auth is mounted read-only at runtime</strong>, never baked into the image — so the image is safe to share/rebuild. <code>entry.py</code> copies mounted auth into a writable <code>$HOME</code> for CLIs that must write their config home.</li>
+    <li><strong>Graceful fallback.</strong> If the daemon or image is unavailable, the runner falls back to local and records the actual <code>exec_mode</code> — unless <code>--no-docker-fallback</code> is set.</li>
+    <li><strong>Partial image.</strong> <code>codex</code>, <code>pi</code>, and open-model <code>claude</code> are installed and version-checked; <code>opencode</code>/<code>cursor</code>/<code>devin</code> are behind <code>--build-arg INSTALL_UNVERIFIED=true</code> — use <code>--exec local</code> for those.</li>
+    <li><strong>Container cleanup is guaranteed on every exit path</strong> (a recent hardening — a hung container is hard-killed after <code>timeout_s + grace</code>).</li>
+  </ul>
+</section>
+
+<section id="scoring">
+  <h2>Scoring &amp; partial credit</h2>
+  <p>A checker exit code is binary, but a checker <em>may</em> also print a <code>SCORE:</code> line to grade partial
+  progress — essential for hard tasks where "did it get 4 of 6 bugs?" is the interesting signal.</p>
+  <table>
+    <tr><th>Checker outcome</th><th><code>success</code></th><th><code>score</code></th></tr>
+    <tr><td>Exit 0</td><td><span class="pill g">true</span></td><td><strong>1.0</strong> — a full pass; a <code>SCORE:</code> line can't lower it.</td></tr>
+    <tr><td>Nonzero exit, with <code>SCORE: 0.47</code></td><td><span class="pill b">false</span></td><td><strong>0.47</strong> — partial credit (last parseable line wins, clamped to [0,1]).</td></tr>
+    <tr><td>Nonzero exit, no <code>SCORE:</code></td><td><span class="pill b">false</span></td><td><strong>0.0</strong></td></tr>
+    <tr><td>Checker timeout</td><td><span class="pill b">false</span></td><td><strong>0.0</strong></td></tr>
+  </table>
+  <p><code>SCORE:</code> is optional and backward compatible: a checker that never prints one behaves exactly as before.
+  The <strong>mean score</strong> (averaged over all trials, including failures) is the discriminating number for
+  partial-credit tasks — that's what separates a 0.47 model from a 1.0 model when raw pass/fail can't.</p>
+</section>
+
+<section id="report">
+  <h2>Reporting &amp; Wilson intervals</h2>
+  <p><code>bench/report.py</code> reads the JSONL log and prints, per harness: per-task success <span class="mono">(x/n)</span>,
+  overall success + Wilson 95% CI, <strong>mean score</strong>, mean wall-clock, <strong>tokens-per-solve</strong>, and mean turns.
+  <code>--efficiency</code> prints the harness-tax view alone.</p>
+  <div class="note info">
+    <span class="k">Why "per solve", not "total"</span>
+    Efficiency metrics are normalized <em>per solved task</em>, so they measure the cost of getting a result rather than
+    a running total that just scales with the trial count. Token/turn data is <strong>optional per adapter</strong>: a
+    harness that reports none shows <code>-</code>, never silently counted as zero.
+  </div>
+  <pre><code>harness  fix-failing-test  make-it-run  overall   wilson95        mean_s  tok/slv
+-------  ----------------  -----------  --------  --------------  ------  -------
+null     0/1               0/1          0/2 (0%)  [0.000, 0.658]  0.00    -</code></pre>
+  <p><strong>Reading the interval:</strong> with few trials it's <em>wide</em> (3 trials can span most of 0–100%), so
+  overlapping intervals mean the harnesses are not distinguishable yet; it shrinks as trials grow.</p>
+</section>
+
+<section id="taxonomy">
+  <h2>The self-auditing failure taxonomy</h2>
+  <p>This is the piece that makes OpenBench <em>trustworthy</em> rather than merely functional. Every non-solved cell is
+  classified at write time (<code>bench/failure_class.py</code>) into one of five classes, using the adapter's full
+  untruncated output:</p>
+  <table>
+    <tr><th>Class</th><th>Meaning</th><th>Counts toward solve rate?</th></tr>
+    <tr><td><code>solved</code></td><td>Checker exit 0.</td><td><span class="pill g">yes</span></td></tr>
+    <tr><td><code>wrong_answer</code></td><td>Genuine capability miss — agent tried, checker rejected.</td><td><span class="pill g">yes</span></td></tr>
+    <tr><td><code>timeout</code></td><td>Checker timeout, or wall-clock rode the cap (≥98%).</td><td><span class="pill g">yes</span></td></tr>
+    <tr><td><code>rate_limited</code></td><td>Provider 429 / daily-token exhaustion (needs API-error context, not just the digits "429").</td><td><span class="pill b">EXCLUDED</span></td></tr>
+    <tr><td><code>infra</code></td><td>Docker unavailable, missing auth, no result sentinel, image not found…</td><td><span class="pill b">EXCLUDED</span></td></tr>
+  </table>
+  <div class="note good">
+    <span class="k">Why this matters</span>
+    A <code>rate_limited</code> or <code>infra</code> failure is <strong>not</strong> a capability failure — counting it
+    as one would make a fully-capable model look broken. Excluding those classes from the denominator is what separates a
+    <em>model</em> claim from an <em>infrastructure</em> artifact. The rate-limit detector deliberately requires
+    provider/API-error context so a task that merely <em>mentions</em> "HTTP 429" isn't misclassified.
+    A <code>backfill_failure_class.py</code> tool re-classifies old rows (weaker, since it only has saved fields).
+  </div>
+</section>
+
+<section id="transcripts">
+  <h2>Transcripts &amp; the scrubber</h2>
+  <p>Alongside each results row, the runner writes that cell's full agent transcript to
+  <code>transcripts/&lt;results-stem&gt;/&lt;run_id&gt;.txt</code>. These are <strong>raw, unscrubbed</strong> harness
+  output and can contain home paths, usernames, hostnames, email, or secrets the agent echoed.</p>
+  <div class="note warn">
+    <span class="k">Hard rule</span>
+    Transcripts are <strong>never published as-is</strong>. <code>transcripts/</code> is gitignored and there is
+    <em>deliberately no publishing path</em> in the repo. Before sharing, run <code>bench/scrub.py --check</code> (reports
+    potential PII), then <code>bench/scrub.py --out scrubbed/</code> (writes scrubbed copies, originals untouched), then
+    re-check. It over-redacts on purpose — a false positive is cheap, a leaked secret is not.
+  </div>
+</section>
+
+<section id="arc">
+  <h2>The findings arc</h2>
+  <p>The milestones tell a single story: correctness saturates, so the interesting signal moves to efficiency and to
+  the open-model frontier. Committed datasets live under <code>data/</code>; analyses in <code>RESULTS.md</code>.</p>
+
+  <h3>M3 — correctness saturates; speed separates ~4×</h3>
+  <p>3 easy tasks × 5 harnesses × 5 trials. Every harness solved every task: <strong>15/15</strong>, identical Wilson
+  intervals. Only <code>null</code> separated (confirming the checkers discriminate). But mean wall-time per solve ran
+  <code>pi</code> 16.4s → <code>opencode</code> 62.7s — <strong>~3.8×</strong>. A saturated correctness table isn't a null
+  result; it's a baseline that points at the axis that varies.</p>
+
+  <h3>M3.5 — the token tax spans ~8×</h3>
+  <p>Token accounting wired into every adapter. Tokens-per-solve: <code>pi</code> 5.3k → <code>codex</code> 42.5k.
+  Crucially, <strong>the token ranking is not the time ranking</strong> — <code>opencode</code> and <code>codex</code> finish
+  in about the same wall-clock but codex spends ~2× the tokens. Wall-clock and token-tax are genuinely different axes.</p>
+
+  <h3>M4.5 — even a 6-bug task can't separate frontier harnesses</h3>
+  <p>Three genuinely harder partial-credit tasks (6-bug CI fix, config parser with <code>@include</code>, misleading
+  traceback). Four clean harnesses each scored <strong>9/9, mean-score 1.0</strong>. Calibrating difficulty <em>for the
+  frontier</em> is hard. Efficiency separated again. These saturated tasks became the frontier baseline for the next step.</p>
+
+  <h3>M4 — three of four open models reach frontier parity, for ~$1.02</h3>
+  <p>The tasks that couldn't crack the frontier were the perfect probe for weaker models. Mean score via <code>pi</code>:
+  glm-5.2 = 1.00, deepseek-v4-flash = 1.00, kimi-k2.7-code = 1.00, glm-4.7-flash = 0.47. <strong>Three of four match
+  GPT-5.5-medium</strong> on real coding tasks; only the free small model drops — with <em>genuine</em> partial credit,
+  exactly where the design was built to bite. The whole <strong>72-cell matrix cost ~$1.02</strong>. And <code>pi</code>
+  won or tied every model column — a model-agnostic harness-quality effect.</p>
+
+  <h3>Terminal-Bench — the new frontier tier</h3>
+  <p>The task factory got <em>swept</em>: synthetic bug-fix/spec tasks at 7–8k lines still scored ~1.0 for
+  frontier-parity agents — <strong>"bigger codebase is harder" is false</strong>. So the roadmap forked to importing
+  proven-hard Terminal-Bench tasks (45 cells: 3 harnesses × 5 tasks × 3 trials, landing at 12/15, mean 0.80 — finally
+  below the synthetic ceiling) plus performance/complexity-budget tasks with partial credit designed in.</p>
+</section>
+
+<section id="incidents">
+  <h2>Why it's trustworthy: the incidents were the methodology</h2>
+  <p>The most durable finding is a <em>process</em> one. <strong>Twice, a per-cell look at the raw data overturned a
+  headline the summary numbers implied.</strong> Both saves came from the failure taxonomy above — not from cleverness.</p>
+  <div class="split">
+    <div class="card">
+      <h4>devin's "8/9"</h4>
+      <p style="color:var(--ink-2)">A summary said devin scored 8/9 with one "genuine miss." The per-cell taxonomy said:
+      two <strong>900s hangs</strong>, one nonzero-exit-that-passed, and the "miss" was an instant 0.99s crash (an adapter
+      regression, not a model attempt). Token counts were internally inconsistent by ~20×. devin wasn't 8/9 — it was
+      <strong>flaky</strong>, and was pulled from every ranking.</p>
+    </div>
+    <div class="card">
+      <h4>opencode's "2× harness gap"</h4>
+      <p style="color:var(--ink-2)">glm-4.7-flash scored 0.47 via pi but 0.22 via opencode — a dramatic harness×model
+      interaction? No: <strong>8 of 72 cells were the same adapter bug</strong> (a <code>bytes + str</code> crash on every
+      900s timeout), and opencode was 5–8× slower so it hit the wall constantly. The gap was <strong>infrastructure, not
+      capability</strong> (kimi:pi = 1.00 proves the model is capable). Excluded the 8 cells, reported both ways, filed the bug.</p>
+    </div>
+  </div>
+  <div class="note good">
+    <span class="k">The rule that caught both</span>
+    Classify every cell — pass / partial / timeout / adapter-exception / rate-limited — <strong>before</strong> you trust a
+    block-level average. For a benchmark whose whole value is trustworthiness, that per-cell discipline isn't a chore
+    around the science. It <em>is</em> the science.
+  </div>
+</section>
+
+<section id="map">
+  <h2>Repo map — where to look next</h2>
+  <table>
+    <tr><th>Path</th><th>What it is</th></tr>
+    <tr><td class="mono">bench/run.py</td><td>The runner. Start here — the whole pipeline is one file, ~480 lines.</td></tr>
+    <tr><td class="mono">bench/report.py</td><td>Aggregation, Wilson CIs, efficiency &amp; taxonomy tables.</td></tr>
+    <tr><td class="mono">bench/failure_class.py</td><td>The 5-class taxonomy shared by runner, report, and backfill.</td></tr>
+    <tr><td class="mono">bench/adapters/*.py</td><td>One per harness. Read <code>pi.py</code> first — cleanest. Plus the <code>null</code> control (in run.py).</td></tr>
+    <tr><td class="mono">bench/ADAPTER_SPEC.md</td><td>The adapter contract, verbatim.</td></tr>
+    <tr><td class="mono">bench/docker_exec.py &middot; entry.py &middot; docker/</td><td>The container-per-cell isolation lane.</td></tr>
+    <tr><td class="mono">bench/doctor.py</td><td>Token-free preflight: CLI installed? auth present? model pin resolves?</td></tr>
+    <tr><td class="mono">bench/scrub.py</td><td>PII scrubber for transcripts (local-only).</td></tr>
+    <tr><td class="mono">bench/openmodel_bridge.sh &middot; bridge/</td><td>Codex Responses↔Chat bridge for open models.</td></tr>
+    <tr><td class="mono">validate_tasks.py</td><td>Proves every checker is correctly polarized (fail-on-empty, pass-on-solution).</td></tr>
+    <tr><td class="mono">tasks/ &middot; tasks-imported/</td><td>The benchmark tasks (3 separately-scored tiers).</td></tr>
+    <tr><td class="mono">tasks-candidates/</td><td>Work-in-progress tasks (incl. the perf-budget prototype) not yet promoted.</td></tr>
+    <tr><td class="mono">data/&lt;milestone&gt;/</td><td>Committed, citable datasets. <code>results/</code> is gitignored scratch.</td></tr>
+    <tr><td class="mono">bench/tests/</td><td>Unit tests — good executable spec for scoring, Wilson, taxonomy, adapters.</td></tr>
+  </table>
+  <p style="color:var(--ink-2)">Prose entry points: <a class="link" href="WRITEUP.md">WRITEUP.md</a> (the story arc),
+  <a class="link" href="RESULTS.md">RESULTS.md</a> (per-milestone analyses),
+  <a class="link" href="SETUP.md">SETUP.md</a> (the runbook),
+  <a class="link" href="README.md">README.md</a> (reference).</p>
+</section>
+
+<section id="glossary">
+  <h2>Glossary</h2>
+  <table>
+    <tr><td><strong>Harness</strong></td><td>The CLI wrapping a model: run loop, tools, permissions, context management. The thing under test.</td></tr>
+    <tr><td><strong>Cell</strong></td><td>One <span class="mono">(task, harness, trial)</span> run. Identity = <code>run_id</code>. One JSONL row.</td></tr>
+    <tr><td><strong>Checker</strong></td><td><code>checker.sh</code> — the sole judge of success. Exit 0 = solved; optional <code>SCORE:</code> for partial credit.</td></tr>
+    <tr><td><strong><code>completed</code> vs <code>success</code></strong></td><td>completed = the CLI exited cleanly (self-reported). success = the checker said so. They are different on purpose.</td></tr>
+    <tr><td><strong>null control</strong></td><td>A harness that does nothing; must fail every checker. Guards against too-lenient graders.</td></tr>
+    <tr><td><strong>Wilson interval</strong></td><td>95% CI on a success rate that behaves well for small n and at 0/n, n/n. Overlap = not distinguishable.</td></tr>
+    <tr><td><strong>tokens-per-solve</strong></td><td>Total reported tokens ÷ solves. The "harness tax" in the currency that costs money.</td></tr>
+    <tr><td><strong>Track A</strong></td><td>Same-model framing (all harnesses on <code>gpt-5.5-medium</code>) — isolates the harness variable.</td></tr>
+    <tr><td><strong>Failure class</strong></td><td>One of solved / wrong_answer / timeout / rate_limited / infra. The last two are excluded from solve rate.</td></tr>
+    <tr><td><strong>Saturation</strong></td><td>When frontier harnesses all score 1.0 — the premise, not a failure. Pushes measurement onto efficiency.</td></tr>
+  </table>
+  <p class="toc-foot">Generated as a reading companion for the OpenBench repo (branch <span class="kbd">milestone-1-harness-bench</span>).
+  Everything here is sourced from the repo's own README, WRITEUP, ADAPTER_SPEC, and the <code>bench/</code> source.
+  Ask about any section and we'll dive into the code.</p>
+</section>
+
+</main>
+</div>
+</body>
+</html>

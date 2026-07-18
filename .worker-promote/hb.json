@@ -1,0 +1,9 @@
+{
+  "timestamp": "2026-07-09T23:53:52.590Z",
+  "lastEvent": "agent_end",
+  "tokenTotals": {
+    "tokens": 64318,
+    "contextWindow": 272000,
+    "percent": 23.646323529411763
+  }
+}

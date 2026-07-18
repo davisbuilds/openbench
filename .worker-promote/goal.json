@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "goal": {
+    "goalId": "f011b17a-44ee-4d95-b2dc-b26c7115585b",
+    "objective": "Promote TB open-model n=3 benchmark dataset into data/tb-open-n3-2026-07-09 with scrubbed artifacts, RESULTS.md summary, staged commit, and verified zero scrub hits; do not modify results originals, bench, or push.",
+    "status": "complete",
+    "tokenBudget": null,
+    "tokensUsed": 1148807,
+    "timeUsedSeconds": 240,
+    "createdAt": 1783640991747,
+    "updatedAt": 1783641232589
+  },
+  "noProgressStreak": 3,
+  "updatedAt": 1783641232589
+}

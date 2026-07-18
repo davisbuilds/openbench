@@ -1,0 +1,37 @@
+Done. No push performed.
+
+Staged/committed files:
+```text
+RESULTS.md
+data/tb-open-n3-2026-07-09/README.md
+data/tb-open-n3-2026-07-09/charts/chart1_scatter.png
+data/tb-open-n3-2026-07-09/charts/chart2_heatmap.png
+data/tb-open-n3-2026-07-09/charts/chart3_permodel.png
+data/tb-open-n3-2026-07-09/charts/chart4_taxonomy.png
+data/tb-open-n3-2026-07-09/charts/chart5_solvebars.png
+data/tb-open-n3-2026-07-09/charts/index.html
+data/tb-open-n3-2026-07-09/tb-open-n3-deepseek-v4-flash.jsonl
+data/tb-open-n3-2026-07-09/tb-open-n3-glm-5.2.jsonl
+data/tb-open-n3-2026-07-09/tb-open-n3-kimi-k2.7-code.jsonl
+data/tb-open-n3-2026-07-09/tb-open-n3-methodology-notes.md
+data/tb-open-n3-2026-07-09/tb-open-n3-stats.md
+```
+
+Scrub verification output:
+```text
+files_scanned 13
+hit_count 0
+SCRUB PASS
+```
+
+Commit:
+```text
+9cfc7b19b0fb222133ff373620a802aeed623343
+```
+
+Post-commit status only has pre-existing untracked files:
+```text
+?? .worker-promote/
+?? openbench-architecture.html
+?? tasks-candidates/
+```
