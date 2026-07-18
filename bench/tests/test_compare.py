@@ -76,6 +76,33 @@ class TestMatchedComparison(CompareTestCase):
         self.assertEqual(alpha["tokens_input_uncached_per_solve"], 300)
         self.assertEqual(alpha["unmatched_countable_rows"], 1)
 
+    def test_proxy_token_columns_render_when_canonical_tokens_are_null(self):
+        proxy_tokens = {
+            "tokens_input_uncached": None,
+            "tokens_cache_read": None,
+            "tokens_cache_write": None,
+            "tokens_output": None,
+            "token_basis": None,
+            "tokens_proxy_input_uncached": 111,
+            "tokens_proxy_cache_read": 22,
+            "tokens_proxy_cache_write": 3,
+            "tokens_proxy_output": 44,
+            "token_basis_proxy": "proxy_measured",
+        }
+        a = self.write("pi.jsonl", [
+            self.row("pi", "t", 1, True, **proxy_tokens),
+        ])
+        b = self.write("opencode.jsonl", [
+            self.row("opencode", "t", 1, True, **proxy_tokens),
+        ])
+
+        report = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
+        rendered_rows = dict(compare.scorecard_rows(report))
+        self.assertEqual(rendered_rows["Uncached input tokens / solve"], ["111.0", "111.0"])
+        self.assertEqual(rendered_rows["Cache-read tokens / solve"], ["22.0", "22.0"])
+        self.assertEqual(rendered_rows["Cache-write tokens / solve"], ["3.0", "3.0"])
+        self.assertEqual(rendered_rows["Output tokens / solve"], ["44.0", "44.0"])
+
     def test_failure_exclusions_are_per_arm_and_remove_cell_from_intersection(self):
         dropped = os.path.join(self.tasks, "dropped")
         os.mkdir(dropped)

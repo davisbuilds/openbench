@@ -22,6 +22,7 @@ except ImportError:  # Script path (`python3 bench/compare.py`).
 TOKEN_METRICS = (
     ("Uncached input tokens / solve", "tokens_input_uncached"),
     ("Cache-read tokens / solve", "tokens_cache_read"),
+    ("Cache-write tokens / solve", "tokens_cache_write"),
     ("Output tokens / solve", "tokens_output"),
 )
 
@@ -107,11 +108,22 @@ def _unique_cells(rows):
     return {cell: values[0] for cell, values in cells.items() if len(values) == 1}, duplicates
 
 
+def _measurement(row, field):
+    value = row.get(field)
+    if stats.is_nonnegative_number(value):
+        return value
+    if field.startswith("tokens_"):
+        proxy_value = row.get("tokens_proxy_" + field.removeprefix("tokens_"))
+        if stats.is_nonnegative_number(proxy_value):
+            return proxy_value
+    return None
+
+
 def _sum_per_solve(rows, field, solved):
     if not solved:
         return None
-    values = [row.get(field) for row in rows]
-    if not values or any(not stats.is_nonnegative_number(value) for value in values):
+    values = [_measurement(row, field) for row in rows]
+    if not values or any(value is None for value in values):
         return None
     return sum(values) / solved
 
@@ -166,6 +178,7 @@ def build_comparison(paths, tasks_dirs=None):
             "tokens_input_uncached_per_solve": _sum_per_solve(
                 rows, "tokens_input_uncached", solved),
             "tokens_cache_read_per_solve": _sum_per_solve(rows, "tokens_cache_read", solved),
+            "tokens_cache_write_per_solve": _sum_per_solve(rows, "tokens_cache_write", solved),
             "tokens_output_per_solve": _sum_per_solve(rows, "tokens_output", solved),
             "versions": versions,
             "version_mixed": len(versions) > 1,
