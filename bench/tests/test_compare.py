@@ -103,6 +103,71 @@ class TestMatchedComparison(CompareTestCase):
         self.assertEqual(rendered_rows["Cache-write tokens / solve"], ["3.0", "3.0"])
         self.assertEqual(rendered_rows["Output tokens / solve"], ["44.0", "44.0"])
 
+    def test_solved_intersection_uses_only_cells_every_arm_solved_for_efficiency(self):
+        a = self.write("a.jsonl", [
+            self.row("h", "only-a-solve", 1, True, wall_time_s=100),
+            self.row("h", "only-b-solve", 1, False, wall_time_s=200),
+            self.row("h", "both-1", 1, True, wall_time_s=10,
+                     tokens_input_uncached=10),
+            self.row("h", "both-2", 1, True, wall_time_s=30,
+                     tokens_input_uncached=30),
+        ])
+        b = self.write("b.jsonl", [
+            self.row("h", "only-a-solve", 1, False, wall_time_s=300),
+            self.row("h", "only-b-solve", 1, True, wall_time_s=400),
+            self.row("h", "both-1", 1, True, wall_time_s=40,
+                     tokens_input_uncached=40),
+            self.row("h", "both-2", 1, True, wall_time_s=80,
+                     tokens_input_uncached=80),
+        ])
+
+        report = compare.build_comparison(
+            [a, b], tasks_dirs=[self.tasks], solved_intersection=True)
+        self.assertEqual(report["matched_n"], 4)
+        self.assertEqual(report["all_solved_n"], 2)
+        self.assertEqual(report["summaries"]["a"]["solved"], 3)
+        self.assertEqual(report["summaries"]["b"]["solved"], 3)
+        self.assertEqual(report["summaries"]["a"]["wall_time_per_cell_mean"], 20)
+        self.assertEqual(report["summaries"]["a"]["wall_time_per_cell_median"], 20)
+        self.assertEqual(report["summaries"]["b"]["tokens_input_uncached_per_cell_mean"], 60)
+        self.assertIn("All-solved n: 2 of 4 matched", compare.render_text(report))
+
+    def test_empty_solved_intersection_has_clear_message_and_unavailable_metrics(self):
+        a = self.write("a.jsonl", [self.row("h", "t", 1, True)])
+        b = self.write("b.jsonl", [self.row("h", "t", 1, False)])
+        report = compare.build_comparison(
+            [a, b], tasks_dirs=[self.tasks], solved_intersection=True)
+
+        self.assertEqual(report["all_solved_n"], 0)
+        message = ("All-solved n: 0 of 1 matched "
+                   "(no efficiency cells; efficiency metrics unavailable)")
+        self.assertIn(message, compare.render_text(report))
+        self.assertIn(f"**{message}**", compare.render_markdown(report))
+        rows = dict(compare.scorecard_rows(report))
+        self.assertEqual(rows["Wall time / cell mean (s)"], ["-", "-"])
+        self.assertEqual(rows["Output tokens / cell median"], ["-", "-"])
+
+    def test_solved_intersection_markdown_snapshot(self):
+        a = self.write("a.jsonl", [
+            self.row("h", "both", 1, True, wall_time_s=10,
+                     tokens_cache_write=5),
+            self.row("h", "split", 1, True, wall_time_s=99,
+                     tokens_cache_write=99),
+        ])
+        b = self.write("b.jsonl", [
+            self.row("h", "both", 1, True, wall_time_s=20,
+                     tokens_cache_write=7),
+            self.row("h", "split", 1, False, wall_time_s=88,
+                     tokens_cache_write=88),
+        ])
+        report = compare.build_comparison(
+            [a, b], tasks_dirs=[self.tasks], solved_intersection=True)
+        fixture = os.path.join(os.path.dirname(__file__), "fixtures",
+                               "compare_solved_intersection.md")
+        with open(fixture, encoding="utf-8") as fh:
+            expected = fh.read()
+        self.assertEqual(compare.render_markdown(report), expected)
+
     def test_failure_exclusions_are_per_arm_and_remove_cell_from_intersection(self):
         dropped = os.path.join(self.tasks, "dropped")
         os.mkdir(dropped)
@@ -228,6 +293,22 @@ class TestCompareCli(CompareTestCase):
             scorecard = fh.read()
         self.assertIn("# OpenBench comparison scorecard", scorecard)
         self.assertIn("| Solve rate | 100.0% | 0.0% |", scorecard)
+
+    def test_cli_solved_intersection_prints_and_writes_efficiency_denominator(self):
+        a = self.write("a.jsonl", [self.row("h", "t", 1, True)])
+        b = self.write("b.jsonl", [self.row("h", "t", 1, True)])
+        markdown = self.path("scorecard.md")
+        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "compare.py")
+        proc = subprocess.run(
+            [sys.executable, script, a, b, "--tasks-dir", self.tasks,
+             "--solved-intersection", "--markdown", markdown],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("All-solved n: 1 of 1 matched", proc.stdout)
+        self.assertIn("Wall time / cell median (s)", proc.stdout)
+        with open(markdown, encoding="utf-8") as fh:
+            self.assertIn("**All-solved n: 1 of 1 matched**", fh.read())
 
     def test_strict_provenance_exits_two_on_version_drift(self):
         a = self.write("a.jsonl", [self.row("h", "t", 1, True, harness_version="1")])

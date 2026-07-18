@@ -10,6 +10,7 @@ import argparse
 import html
 import json
 import os
+import statistics
 import sys
 from collections import Counter, defaultdict
 
@@ -20,10 +21,10 @@ except ImportError:  # Script path (`python3 bench/compare.py`).
 
 
 TOKEN_METRICS = (
-    ("Uncached input tokens / solve", "tokens_input_uncached"),
-    ("Cache-read tokens / solve", "tokens_cache_read"),
-    ("Cache-write tokens / solve", "tokens_cache_write"),
-    ("Output tokens / solve", "tokens_output"),
+    ("Uncached input tokens", "tokens_input_uncached"),
+    ("Cache-read tokens", "tokens_cache_read"),
+    ("Cache-write tokens", "tokens_cache_write"),
+    ("Output tokens", "tokens_output"),
 )
 
 
@@ -128,7 +129,14 @@ def _sum_per_solve(rows, field, solved):
     return sum(values) / solved
 
 
-def build_comparison(paths, tasks_dirs=None):
+def _mean_median(rows, field):
+    values = [_measurement(row, field) for row in rows]
+    if not values or any(value is None for value in values):
+        return None, None
+    return sum(values) / len(values), statistics.median(values)
+
+
+def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
     """Return a report object for matched arms in ``paths``."""
     arms, unassigned_rows = load_arms(paths)
     if len(arms) < 2:
@@ -152,7 +160,17 @@ def build_comparison(paths, tasks_dirs=None):
 
     provenance = stats.build_provenance(provenance_rows, ("_compare_arm",))
     common = set.intersection(*(set(cells) for cells in eligible.values()))
-    matched = {arm: [eligible[arm][cell] for cell in sorted(common)] for arm in sorted(arms)}
+    common_cells = sorted(common)
+    arm_names = sorted(arms)
+    all_solved_cells = [
+        cell for cell in common_cells
+        if all(eligible[arm][cell]["success"] for arm in arm_names)
+    ]
+    matched = {arm: [eligible[arm][cell] for cell in common_cells] for arm in arm_names}
+    all_solved = {
+        arm: [eligible[arm][cell] for cell in all_solved_cells]
+        for arm in arm_names
+    }
     summaries = {}
     for arm, rows in matched.items():
         # Canonical aggregation owns both Wilson and hack-adjusted score math.
@@ -168,6 +186,12 @@ def build_comparison(paths, tasks_dirs=None):
             }
         solved = canonical["solved"]
         versions = versions_by_arm[arm]
+        efficiency_rows = all_solved[arm]
+        wall_mean, wall_median = _mean_median(efficiency_rows, "wall_time_s")
+        token_stats = {
+            field: _mean_median(efficiency_rows, field)
+            for _, field in TOKEN_METRICS
+        }
         summaries[arm] = {
             "solved": solved,
             "n": canonical["n"],
@@ -180,6 +204,13 @@ def build_comparison(paths, tasks_dirs=None):
             "tokens_cache_read_per_solve": _sum_per_solve(rows, "tokens_cache_read", solved),
             "tokens_cache_write_per_solve": _sum_per_solve(rows, "tokens_cache_write", solved),
             "tokens_output_per_solve": _sum_per_solve(rows, "tokens_output", solved),
+            "wall_time_per_cell_mean": wall_mean,
+            "wall_time_per_cell_median": wall_median,
+            **{
+                field + "_per_cell_" + statistic: values[index]
+                for field, values in token_stats.items()
+                for index, statistic in enumerate(("mean", "median"))
+            },
             "versions": versions,
             "version_mixed": len(versions) > 1,
             "excluded": exclusions[arm],
@@ -189,8 +220,10 @@ def build_comparison(paths, tasks_dirs=None):
 
     return {
         "inputs": list(paths),
-        "arms": sorted(arms),
-        "matched_n": len(common),
+        "arms": arm_names,
+        "matched_n": len(common_cells),
+        "solved_intersection": solved_intersection,
+        "all_solved_n": len(all_solved_cells),
         "summaries": summaries,
         "provenance_ok": provenance["ok"],
         "provenance": provenance,
@@ -224,12 +257,29 @@ def scorecard_rows(report):
                            f"{summaries[arm]['wilson95'][1]:.3f}]" for arm in report["arms"]]),
         ("Hack-adjusted rate", [_pct(summaries[arm]["hack_adjusted_rate"])
                                 for arm in report["arms"]]),
-        ("Wall time / solve (s)", [_number(summaries[arm]["wall_time_per_solve"], 2)
-                                   for arm in report["arms"]]),
     ]
-    for label, field in TOKEN_METRICS:
-        key = field + "_per_solve"
-        rows.append((label, [_number(summaries[arm][key]) for arm in report["arms"]]))
+    if report["solved_intersection"]:
+        rows.extend([
+            ("Wall time / cell mean (s)",
+             [_number(summaries[arm]["wall_time_per_cell_mean"], 2)
+              for arm in report["arms"]]),
+            ("Wall time / cell median (s)",
+             [_number(summaries[arm]["wall_time_per_cell_median"], 2)
+              for arm in report["arms"]]),
+        ])
+        for label, field in TOKEN_METRICS:
+            for statistic in ("mean", "median"):
+                key = f"{field}_per_cell_{statistic}"
+                rows.append((f"{label} / cell {statistic}",
+                             [_number(summaries[arm][key]) for arm in report["arms"]]))
+    else:
+        rows.append(("Wall time / solve (s)",
+                     [_number(summaries[arm]["wall_time_per_solve"], 2)
+                      for arm in report["arms"]]))
+        for label, field in TOKEN_METRICS:
+            key = field + "_per_solve"
+            rows.append((f"{label} / solve",
+                         [_number(summaries[arm][key]) for arm in report["arms"]]))
     for category in ("infra", "rate_limited", "invalid_json", "invalid_row",
                      "quarantined_dropped_task"):
         rows.append((f"Excluded: {category}", [str(summaries[arm]["excluded"].get(category, 0))
@@ -271,12 +321,24 @@ def _unassigned_status(report):
         f"{key}={value}" for key, value in sorted(excluded.items()))
 
 
+def _solved_intersection_status(report):
+    if not report["solved_intersection"]:
+        return None
+    status = f"All-solved n: {report['all_solved_n']} of {report['matched_n']} matched"
+    if report["all_solved_n"] == 0:
+        status += " (no efficiency cells; efficiency metrics unavailable)"
+    return status
+
+
 def render_text(report):
     rows = [[metric] + values for metric, values in scorecard_rows(report)]
-    return ("OpenBench matched comparison\n"
-            f"Matched n: {report['matched_n']} (task, trial cells present in all arms)\n"
-            f"{_provenance_status(report)}\n{_unassigned_status(report)}\n\n" +
-            _plain_table(["Metric"] + report["arms"], rows))
+    solved_status = _solved_intersection_status(report)
+    headline = f"Matched n: {report['matched_n']} (task, trial cells present in all arms)\n"
+    if solved_status:
+        headline += solved_status + "\n"
+    return ("OpenBench matched comparison\n" + headline
+            + f"{_provenance_status(report)}\n{_unassigned_status(report)}\n\n"
+            + _plain_table(["Metric"] + report["arms"], rows))
 
 
 def _markdown_cell(value):
@@ -291,12 +353,17 @@ def render_markdown(report):
         "",
         f"**Matched n: {report['matched_n']}** `(task, trial)` cells present in every arm.",
         "",
+    ]
+    solved_status = _solved_intersection_status(report)
+    if solved_status:
+        lines.extend([f"**{_markdown_cell(solved_status)}**", ""])
+    lines.extend([
         "> " + _markdown_cell(_provenance_status(report)),
         "> " + _markdown_cell(_unassigned_status(report)),
         "",
         "| Metric | " + " | ".join(arms) + " |",
         "| --- | " + " | ".join("---:" for _ in arms) + " |",
-    ]
+    ])
     for metric, values in scorecard_rows(report):
         cells = [_markdown_cell(metric)] + [_markdown_cell(value) for value in values]
         lines.append("| " + " | ".join(cells) + " |")
@@ -312,13 +379,19 @@ def parse_args(argv):
                         help="task root for DROPPED.md checks; repeatable or comma-separated")
     parser.add_argument("--strict-provenance", action="store_true",
                         help="exit 2 when canonical comparison provenance differs")
+    parser.add_argument("--solved-intersection", action="store_true",
+                        help="compute efficiency only on cells every arm solved")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv or sys.argv[1:])
     try:
-        report = build_comparison(args.results, tasks_dirs=args.tasks_dir)
+        report = build_comparison(
+            args.results,
+            tasks_dirs=args.tasks_dir,
+            solved_intersection=args.solved_intersection,
+        )
     except ValueError as exc:
         print(f"compare: error: {exc}", file=sys.stderr)
         return 2
