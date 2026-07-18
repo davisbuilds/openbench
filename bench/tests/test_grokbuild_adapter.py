@@ -143,7 +143,7 @@ class TestConfigAndGating(unittest.TestCase):
             "glm-5.2": "chat/zai/api/paas/v4",
             "deepseek-v4-flash": "chat/deepseek",
             "kimi-k2.7-code": "chat/moonshot/v1",
-            "gpt-5.6": "subbridge/v1",
+            "gpt-5.6-sol": "subbridge/v1",
         }
         with EnvPatch() as env:
             env.update({
@@ -159,12 +159,12 @@ class TestConfigAndGating(unittest.TestCase):
         with EnvPatch() as env:
             env["CLIPROXYAPI_BASE_URL"] = "http://user:secret" + "@127.0.0.1:8317/v1"
             with self.assertRaisesRegex(ValueError, "must not contain"):
-                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6-sol"])
 
     def test_invalid_subbridge_url_returns_structured_setup_error(self):
         with EnvPatch() as env:
             env["CLIPROXYAPI_BASE_URL"] = "http://127.0.0.1:8317/v1?secret=value"
-            result = grokbuild.run("hi", "/tmp", "gpt-5.6", 5)
+            result = grokbuild.run("hi", "/tmp", "gpt-5.6-sol", 5)
         self.assertFalse(result["completed"])
         self.assertIn("SETUP-NEEDED", result["error"])
         self.assertIsNone(result["cmd"])
@@ -173,19 +173,19 @@ class TestConfigAndGating(unittest.TestCase):
         with EnvPatch() as env:
             env["CLIPROXYAPI_BASE_URL"] = "http://bridge.example/v1"
             with self.assertRaisesRegex(ValueError, "must use HTTPS"):
-                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6-sol"])
 
     def test_subbridge_route_rejects_query_bearing_base_url(self):
         with EnvPatch() as env:
             env["CLIPROXYAPI_BASE_URL"] = "http://127.0.0.1:8317/v1?api-version=test"
             with self.assertRaisesRegex(ValueError, "query or fragment"):
-                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+                grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6-sol"])
 
     def test_subbridge_route_defaults_to_local_cliproxyapi(self):
         with EnvPatch() as env:
             env.pop("CLIPROXYAPI_BASE_URL", None)
-            cfg = grokbuild._config_toml("gpt-5.6", grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"]))
-        entry = tomllib.loads(cfg)["model"]["gpt-5.6"]
+            cfg = grokbuild._config_toml("gpt-5.6-sol", grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6-sol"]))
+        entry = tomllib.loads(cfg)["model"]["gpt-5.6-sol"]
         self.assertEqual(entry["base_url"], "http://127.0.0.1:8317/v1")
         self.assertEqual(entry["env_key"], "CLIPROXYAPI_API_KEY")
 
@@ -197,7 +197,7 @@ class TestConfigAndGating(unittest.TestCase):
                     env.pop("CLIPROXYAPI_BASE_URL", None)
                 else:
                     env["CLIPROXYAPI_BASE_URL"] = configured
-                resolved = grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6"])
+                resolved = grokbuild._resolved_spec(grokbuild.OPEN_MODELS["gpt-5.6-sol"])
             self.assertEqual(resolved["base_url"], "http://host.docker.internal:8317/v1")
 
     def test_dotted_model_aliases_are_quoted_toml_keys(self):
@@ -274,7 +274,7 @@ class TestRunConstruction(unittest.TestCase):
                     # This sentinel must be stripped from the gpt-5.6 child.
                     "OPENAI_API_KEY": "must-not-reach-subbridge",
                 })
-                for model in ("deepseek-v4-flash", "glm-5.2", "kimi-k2.7-code", "gpt-5.6"):
+                for model in ("deepseek-v4-flash", "glm-5.2", "kimi-k2.7-code", "gpt-5.6-sol"):
                     res = grokbuild.run("do it", "/tmp", model, 10)
                     self.assertTrue(res["completed"])
                     self.assertEqual(res["output_tail"], "OK")
@@ -289,7 +289,7 @@ class TestRunConstruction(unittest.TestCase):
             grokbuild._resolve_exe = old_resolve
 
         self.assertEqual(len(calls), 4)
-        for (cmd, kwargs, cfg), model in zip(calls, ("deepseek-v4-flash", "glm-5.2", "kimi-k2.7-code", "gpt-5.6")):
+        for (cmd, kwargs, cfg), model in zip(calls, ("deepseek-v4-flash", "glm-5.2", "kimi-k2.7-code", "gpt-5.6-sol")):
             spec = grokbuild.OPEN_MODELS[model]
             self.assertEqual(cmd[:4], ["/usr/local/bin/grok", "--no-auto-update", "-p", "do it"])
             self.assertEqual(cmd[cmd.index("--model") + 1], model)
@@ -307,7 +307,7 @@ class TestRunConstruction(unittest.TestCase):
             self.assertEqual(kwargs["cwd"], "/tmp")
             self.assertNotEqual(kwargs["env"]["HOME"], os.path.expanduser("~"))
             self.assertEqual(kwargs["env"]["GROK_SUBAGENTS"], "0")
-            if model == "gpt-5.6":
+            if model == "gpt-5.6-sol":
                 self.assertNotIn("OPENAI_API_KEY", kwargs["env"])
                 self.assertEqual(kwargs["env"]["CLIPROXYAPI_API_KEY"], "openbench-local-ingress")
             self.assertIn(f'model = "{spec["model_id"]}"', cfg)

@@ -70,7 +70,7 @@ OPEN_MODELS = {
     # CLIProxyAPI owns Codex/ChatGPT subscription OAuth and refresh. The value
     # sent to its local ingress is either its optional ingress key or a harmless
     # placeholder; it is never an OpenAI API key.
-    "gpt-5.6":           {"model_id": "gpt-5.6",           "base_url": "http://127.0.0.1:8317/v1",     "base_url_env": "CLIPROXYAPI_BASE_URL", "env_key": "CLIPROXYAPI_API_KEY", "display": "GPT-5.6 via CLIProxyAPI", "proxy_route": "subbridge", "subscription_bridge": True},
+    "gpt-5.6-sol":       {"model_id": "gpt-5.6-sol",       "base_url": "http://127.0.0.1:8317/v1",     "base_url_env": "CLIPROXYAPI_BASE_URL", "env_key": "CLIPROXYAPI_API_KEY", "display": "GPT-5.6 Sol via CLIProxyAPI", "proxy_route": "subbridge", "subscription_bridge": True},
 }
 
 _SUBBRIDGE_PLACEHOLDER = "openbench-local-ingress"

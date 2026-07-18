@@ -130,6 +130,7 @@ OPEN_MODELS = {
     "deepseek-v4-flash": {"model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com/anthropic", "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek",      "effort": "medium"},
     "kimi-k2.7-code":    {"model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/anthropic",  "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "effort": "medium"},
     "kimi-k3":    {"model_id": "kimi-k3",    "base_url": "https://api.moonshot.ai/anthropic",  "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi K3", "effort": "medium"},
+    "gpt-5.6-sol":       {"model_id": "gpt-5.6-sol",       "base_url": "http://127.0.0.1:8317",              "env_key": "CLIPROXYAPI_API_KEY", "display": "GPT-5.6 Sol via CLIProxyAPI", "effort": "medium"},
 }
 
 

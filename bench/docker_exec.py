@@ -98,6 +98,7 @@ _MODEL_API_KEY = {
     "kimi-k2.7-code": "MOONSHOT_API_KEY",
     "kimi-k3": "MOONSHOT_API_KEY",
     "gpt-5.6": "CLIPROXYAPI_API_KEY",
+    "gpt-5.6-sol": "CLIPROXYAPI_API_KEY",
 }
 _KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")
 

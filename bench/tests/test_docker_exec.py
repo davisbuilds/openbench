@@ -167,16 +167,24 @@ class TestBuildDockerCmd(unittest.TestCase):
                 self.assertIn("DEEPSEEK_API_KEY=openbench-bridge-placeholder", cmd)
                 self.assertNotIn("DEEPSEEK_API_KEY", cmd)
 
-    def test_grokbuild_mounts_no_user_auth(self):
+    def test_grokbuild_mounts_only_grok_auth_file(self):
+        # The native xAI subscription lane (grok-4.5) needs ~/.grok/auth.json in
+        # the container; nothing else from ~/.grok may be mounted.
         home = tempfile.mkdtemp(prefix="fake_home_")
         try:
             os.makedirs(os.path.join(home, ".grok"))
             with open(os.path.join(home, ".grok", "auth.json"), "w") as fh:
                 fh.write("{}")
+            with open(os.path.join(home, ".grok", "config.toml"), "w") as fh:
+                fh.write("")
             orig = os.path.expanduser
             os.path.expanduser = lambda p: home if p == "~" else orig(p)
             try:
-                self.assertEqual(docker_exec._auth_mount_args("grokbuild"), [])
+                args = docker_exec._auth_mount_args("grokbuild")
+                self.assertEqual(len(args), 2)
+                self.assertIn(".grok/auth.json", args[1])
+                self.assertTrue(args[1].endswith(":ro"))
+                self.assertNotIn("config.toml", " ".join(args))
             finally:
                 os.path.expanduser = orig
         finally:
