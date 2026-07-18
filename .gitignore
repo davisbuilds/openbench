@@ -30,3 +30,4 @@ results/
 transcripts/
 scrubbed/
 .bench-tmp/
+.worker/
