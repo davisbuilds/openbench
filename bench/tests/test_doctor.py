@@ -83,12 +83,12 @@ def all_green_probes():
                    "grok": "/b/grok", "devin": "/b/devin", "docker": "/b/docker",
                    "cliproxyapi": "/b/cliproxyapi"},
         run_map={
-            ("codex", "--version"): (0, "codex-cli 0.144.1"),
-            ("pi", "--version"): (0, "0.80.6"),
-            ("opencode", "--version"): (0, "1.17.18"),
+            ("codex", "--version"): (0, "codex-cli 0.144.5"),
+            ("pi", "--version"): (0, "0.80.10"),
+            ("opencode", "--version"): (0, "1.18.3"),
             ("cursor-agent", "--version"): (0, "2026.07.09-a3815c0"),
-            ("claude", "--version"): (0, "2.1.206 (Claude Code)"),
-            ("grok", "--version"): (0, "grok 0.2.93 (hash)"),
+            ("claude", "--version"): (0, "2.1.214 (Claude Code)"),
+            ("grok", "--version"): (0, "grok 0.2.103 (hash)"),
             ("devin", "--version"): (0, "devin 1"),
             ("opencode", "auth", "list"): (0, "OpenAI oauth\n"),
             ("cursor-agent", "status"): (0, "Logged in as x\n"),
@@ -154,7 +154,7 @@ class TestEvaluate(unittest.TestCase):
         self.assertFalse(ok)
         version = next(r for r in rows if r["check"] == "VERSION")
         self.assertFalse(version["ok"])
-        self.assertIn("host=0.144.0 pin=0.144.1 [drift]", version["detail"])
+        self.assertIn("host=0.144.0 pin=0.144.5 [drift]", version["detail"])
 
     def test_missing_auth_fails(self):
         p = all_green_probes()
@@ -332,7 +332,7 @@ class TestRendering(unittest.TestCase):
         self.assertIn("harness", text)
         self.assertIn("CLI", text)
         self.assertIn("VERSION", text)
-        self.assertIn("host=0.144.1 pin=0.144.1 [ok]", text)
+        self.assertIn("host=0.144.5 pin=0.144.5 [ok]", text)
         self.assertIn("Details:", text)
         self.assertIn("Docker (informational)", text)
         self.assertIn("OK", text)
