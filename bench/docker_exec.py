@@ -78,9 +78,12 @@ AUTH_MOUNTS = {
     # ANTHROPIC_API_KEY, forwarded below). Mount NOTHING: never expose ~/.claude
     # so a container run can't touch the user's Claude Code OAuth subscription.
     "claude": [],
-    # grokbuild uses BYOK custom models plus the host-side CLIProxyAPI bridge.
-    # No ~/.grok auth is needed; subscription OAuth remains owned by CLIProxyAPI.
-    "grokbuild": [],
+    # grokbuild's BYOK/CLIProxyAPI lanes need no ~/.grok auth, but the native
+    # xAI subscription lane (grok-4.5) stages ~/.grok/auth.json into its
+    # disposable HOME, so the container needs the login file present.
+    "grokbuild": [
+        (".grok/auth.json", ".grok/auth.json"),
+    ],
     "null": [],
 }
 
