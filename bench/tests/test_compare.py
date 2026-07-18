@@ -109,28 +109,33 @@ class TestMatchedComparison(CompareTestCase):
             self.row("h", "only-b-solve", 1, False, wall_time_s=200),
             self.row("h", "both-1", 1, True, wall_time_s=10,
                      tokens_input_uncached=10),
-            self.row("h", "both-2", 1, True, wall_time_s=30,
-                     tokens_input_uncached=30),
+            self.row("h", "both-2", 1, True, wall_time_s=20,
+                     tokens_input_uncached=20),
+            self.row("h", "both-3", 1, True, wall_time_s=60,
+                     tokens_input_uncached=60),
         ])
         b = self.write("b.jsonl", [
             self.row("h", "only-a-solve", 1, False, wall_time_s=300),
             self.row("h", "only-b-solve", 1, True, wall_time_s=400),
             self.row("h", "both-1", 1, True, wall_time_s=40,
                      tokens_input_uncached=40),
-            self.row("h", "both-2", 1, True, wall_time_s=80,
-                     tokens_input_uncached=80),
+            self.row("h", "both-2", 1, True, wall_time_s=50,
+                     tokens_input_uncached=50),
+            self.row("h", "both-3", 1, True, wall_time_s=120,
+                     tokens_input_uncached=120),
         ])
 
         report = compare.build_comparison(
             [a, b], tasks_dirs=[self.tasks], solved_intersection=True)
-        self.assertEqual(report["matched_n"], 4)
-        self.assertEqual(report["all_solved_n"], 2)
-        self.assertEqual(report["summaries"]["a"]["solved"], 3)
-        self.assertEqual(report["summaries"]["b"]["solved"], 3)
-        self.assertEqual(report["summaries"]["a"]["wall_time_per_cell_mean"], 20)
+        self.assertEqual(report["matched_n"], 5)
+        self.assertEqual(report["all_solved_n"], 3)
+        self.assertEqual(report["summaries"]["a"]["solved"], 4)
+        self.assertEqual(report["summaries"]["b"]["solved"], 4)
+        self.assertEqual(report["summaries"]["a"]["wall_time_per_cell_mean"], 30)
         self.assertEqual(report["summaries"]["a"]["wall_time_per_cell_median"], 20)
-        self.assertEqual(report["summaries"]["b"]["tokens_input_uncached_per_cell_mean"], 60)
-        self.assertIn("All-solved n: 2 of 4 matched", compare.render_text(report))
+        self.assertEqual(report["summaries"]["b"]["tokens_input_uncached_per_cell_mean"], 70)
+        self.assertEqual(report["summaries"]["b"]["tokens_input_uncached_per_cell_median"], 50)
+        self.assertIn("All-solved n: 3 of 5 matched", compare.render_text(report))
 
     def test_empty_solved_intersection_has_clear_message_and_unavailable_metrics(self):
         a = self.write("a.jsonl", [self.row("h", "t", 1, True)])
