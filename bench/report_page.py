@@ -143,8 +143,11 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                                  r["med_wall"] if r["med_wall"] is not None else float("inf"),
                                  r["total_tokens"] if r["total_tokens"] is not None else float("inf"),
                                  r["arm"]))
-        provenance_rows = [dict(row, _report_arm=arm_labels[_arm_identity(row)])
-                           for row in model_rows]
+        provenance_rows = [
+            dict(row, _report_arm=arm_label)
+            for arm_label, (eligible, _, _, _) in prepared.items()
+            for row in eligible
+        ]
         provenance = stats.build_provenance(provenance_rows, ("_report_arm",))
         models.append({
             "model": model,
