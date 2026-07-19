@@ -20,6 +20,7 @@ REPO = os.path.dirname(HERE)
 DOCKERFILE = os.path.join(HERE, "docker", "Dockerfile")
 DEFAULT_IMAGE = "openbench-harness:latest"
 VERSION_FILE = "/etc/openbench-cli-versions.json"
+IMAGE_LABEL_PREFIX = "org.openbench.cli."
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,22 @@ def dockerfile_pins(text):
 def pinned_versions(path=DOCKERFILE):
     """Read the authoritative CLI versions from Dockerfile ARG pins."""
     return dockerfile_pins(read_dockerfile(path))
+
+
+def parse_image_pin_labels(output):
+    """Parse Docker inspect's JSON label object into ``{pin_key: version}``."""
+    try:
+        labels = json.loads(output or "")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(labels, dict):
+        return {}
+    versions = {}
+    for pin in PINS:
+        value = labels.get(IMAGE_LABEL_PREFIX + pin.key)
+        if isinstance(value, str) and value.strip():
+            versions[pin.key] = value.strip()
+    return versions
 
 
 def reported_version(output):

@@ -66,7 +66,7 @@ class TestVersionPreflight(unittest.TestCase):
         self.assertEqual(drift, [])
         self.assertEqual(calls[0][0], ["codex", "--version"])
 
-    def _run_main(self, drift, extra_args=None):
+    def _run_main(self, drift, extra_args=None, image_result=None):
         emitted = []
 
         def fake_run_cell(*args, **kwargs):
@@ -79,16 +79,57 @@ class TestVersionPreflight(unittest.TestCase):
         argv = ["--harness", "codex", "--task", "fake-task",
                 "--results-path", os.path.join(tempfile.gettempdir(), "version-gate.jsonl")]
         argv.extend(extra_args or [])
-        with mock.patch.object(run, "host_version_drift", return_value=drift), \
-                mock.patch.object(run, "probe_version", return_value="codex-cli 0.144.0"), \
-                mock.patch.object(run, "load_existing_run_ids", return_value=set()), \
-                mock.patch.object(run, "run_cell", side_effect=fake_run_cell) as run_cell_mock, \
-                mock.patch.object(run, "append_row"):
+        patches = [
+            mock.patch.object(run, "host_version_drift", return_value=drift),
+            mock.patch.object(run, "probe_version", return_value="codex-cli 0.144.0"),
+            mock.patch.object(run, "load_existing_run_ids", return_value=set()),
+            mock.patch.object(run, "run_cell", side_effect=fake_run_cell),
+            mock.patch.object(run, "append_row"),
+        ]
+        if image_result is not None:
+            patches.append(mock.patch.object(
+                run, "image_version_drift", return_value=image_result))
+        with contextlib.ExitStack() as stack:
+            mocks = [stack.enter_context(patch) for patch in patches]
+            run_cell_mock = mocks[3]
             stdout = io.StringIO()
             stderr = io.StringIO()
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 code = run.main(argv)
         return code, emitted, run_cell_mock.call_count, stderr.getvalue()
+
+    def test_matching_image_labels_pass(self):
+        labels = json.dumps({"org.openbench.cli.codex": "0.144.1"})
+        proc = SimpleNamespace(returncode=0, stdout=labels, stderr="")
+        drift, available = run.image_version_drift(
+            "image:tag", ["codex"], dockerfile=self._dockerfile(),
+            subprocess_runner=lambda *args, **kwargs: proc)
+        self.assertTrue(available)
+        self.assertEqual(drift, [])
+
+    def test_image_mismatch_refuses_before_any_cell(self):
+        drift = [{"harness": "codex", "actual": "0.144.0",
+                  "expected": "0.144.1", "cli": "codex"}]
+        code, emitted, call_count, stderr = self._run_main(
+            [], ["--exec", "docker"], (drift, True))
+        self.assertEqual((code, emitted, call_count), (2, [], 0))
+        self.assertIn("codex: image=0.144.0 pin=0.144.1", stderr)
+        self.assertIn("docker build -t openbench-harness:latest bench/docker", stderr)
+
+    def test_image_mismatch_with_flag_marks_every_row(self):
+        drift = [{"harness": "codex", "actual": "0.144.0",
+                  "expected": "0.144.1", "cli": "codex"}]
+        code, emitted, call_count, stderr = self._run_main(
+            [], ["--exec", "docker", "--allow-version-drift"], (drift, True))
+        self.assertEqual((code, emitted, call_count), (0, [True], 1))
+        self.assertIn("version drift allowed", stderr)
+
+    def test_missing_image_defers_to_existing_fallback_with_build_hint(self):
+        code, emitted, call_count, stderr = self._run_main(
+            [], ["--exec", "docker"], ([], False))
+        self.assertEqual((code, emitted, call_count), (0, [False], 1))
+        self.assertIn("continuing to existing Docker fallback/error handling", stderr)
+        self.assertIn("docker build -t openbench-harness:latest bench/docker", stderr)
 
     def test_mismatch_refuses_before_any_cell(self):
         drift = [{"harness": "codex", "actual": "0.144.0", "expected": "0.144.1",
