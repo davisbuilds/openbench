@@ -443,7 +443,12 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
     for var in _api_key_passthrough(effective_harness, model):
         if os.environ.get(var):
             cmd += ["-e", var]
-    if effective_harness == "grokbuild" and model == "gpt-5.6" and os.environ.get("CLIPROXYAPI_BASE_URL"):
+    # Preserve an operator-selected bridge address inside Grok containers.  The
+    # adapter rewrites loopback values to host.docker.internal; non-loopback
+    # HTTPS endpoints pass through unchanged.  Keep the value out of argv.
+    if (effective_harness == "grokbuild"
+            and model in {"gpt-5.6", "gpt-5.6-sol"}
+            and os.environ.get("CLIPROXYAPI_BASE_URL")):
         cmd += ["-e", "CLIPROXYAPI_BASE_URL"]
     for key, value in (extra_env or {}).items():
         cmd += ["-e", f"{key}={value}"]
