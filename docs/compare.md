@@ -32,13 +32,33 @@ Wilson intervals, hack-adjusted scoring, and provenance checks are reused from
 `bench/stats.py`. A prominent warning identifies provenance differences; add
 `--strict-provenance` to exit with status 2 when they occur.
 
+## Timeout policy
+
+The standard per-cell adapter cap is **2400 seconds**. Every new result row
+records the effective cap as `timeout_s`. Never mix timeout caps within a result
+dataset or between comparison arms: `bench/compare.py` treats either case as
+non-comparable provenance. Older rows without `timeout_s` display `unknown` and
+produce one non-fatal provenance warning.
+
+The scorecard reports two complementary correctness views, each with its own
+Wilson 95% confidence interval:
+
+- **Solve rate @cap** uses the matched-attempted denominator and counts timeouts
+  as failures. The historical **Solve rate** row is retained as a compatible
+  alias for this metric.
+- **Solve rate (finished)** removes timeout-classified attempts from the
+  denominator, just as infrastructure failures are excluded, so correctness is
+  robust to the chosen cap. Timeout counts appear as `Excluded: timeout`; this
+  exclusion applies only to the finished view.
+
 ## Denominators and efficiency
 
 The default scorecard uses the matched-attempted, countable denominator: every
 unique `(task, trial)` cell present in every arm after canonical exclusions.
-Solve counts, rates, Wilson intervals, and hack-adjusted rates always use this
-basis. Default efficiency rows retain the historical calculation of total wall
-time or tokens across those matched attempts divided by solves.
+The historical solve count/rate, its Wilson interval, and hack-adjusted rate use
+this basis. The finished solve-rate rows use the same matched cells after
+removing timeouts. Default efficiency rows retain the historical calculation of
+total wall time or tokens across those matched attempts divided by solves.
 
 Add `--solved-intersection` when comparing the efficiency of successful runs:
 
@@ -56,9 +76,9 @@ across different solve sets; treat a small all-solved `n` as weak efficiency
 evidence. If the intersection is empty, the report says so and renders its
 efficiency values as `-`.
 
-A version cell is marked `[MIXED]` when an arm contains multiple
-`harness_version` values, including in unmatched countable rows. Missing
-efficiency measurements render as `-` rather than being counted as zero. A
+A version or timeout-cap cell is marked `[MIXED]` when an arm contains multiple
+`harness_version` or `timeout_s` values, including in unmatched countable rows.
+Missing efficiency measurements render as `-` rather than being counted as zero. A
 metric is unavailable if any cell in its efficiency basis lacks that
 measurement. When canonical token fields are unavailable, comparison uses the
 corresponding measured counting-proxy fields.

@@ -266,7 +266,8 @@ def main(argv=None):
     parser.add_argument("--trials", type=int, required=True, help="trials per (harness, model, task)")
     parser.add_argument("--out", default=DEFAULT_OUT, help=f"output JSONL path (default: {DEFAULT_OUT})")
     parser.add_argument("--docker", action="store_true", help="run cells through bench/run.py --exec docker")
-    parser.add_argument("--timeout", type=int, default=600, help="per-cell adapter timeout in seconds")
+    parser.add_argument("--timeout", type=int, default=2400,
+                        help="per-cell adapter timeout in seconds (default: 2400)")
     parser.add_argument("--tasks-dir", default=DEFAULT_TASKS_DIR, help="task root directory")
     parser.add_argument("--skip-gate", action="store_true", help="skip admission-gate PASS record warning")
     parser.add_argument("--dry-run", action="store_true", help="print expanded cells and exit without launching run.py")

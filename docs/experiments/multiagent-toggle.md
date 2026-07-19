@@ -57,20 +57,20 @@ TB='terminal-bench/db-wal-recovery,terminal-bench/extract-elf,terminal-bench/fea
 # OFF, stock adapter (40 core + 35 imported cells)
 OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/off-core" python3 bench/run.py \
   --harness codex --model gpt-5.6-sol --task "$CORE" --trials 5 \
-  --timeout 1200 --proxy --results-path "$ROOT/codex-off.jsonl"
+  --timeout 2400 --proxy --results-path "$ROOT/codex-off.jsonl"
 OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/off-tb" python3 bench/run.py \
   --harness codex --model gpt-5.6-sol --task "$TB" --tasks-dir tasks-imported \
-  --trials 5 --timeout 1200 --proxy --results-path "$ROOT/codex-off.jsonl"
+  --trials 5 --timeout 2400 --proxy --results-path "$ROOT/codex-off.jsonl"
 
 # ON, declarative candidate (40 core + 35 imported cells)
 OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/on-core" python3 bench/run.py \
   --candidate experiments/multiagent-toggle/codex-on.toml \
-  --model gpt-5.6-sol --task "$CORE" --trials 5 --timeout 1200 --proxy \
+  --model gpt-5.6-sol --task "$CORE" --trials 5 --timeout 2400 --proxy \
   --results-path "$ROOT/codex-on.jsonl"
 OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/on-tb" python3 bench/run.py \
   --candidate experiments/multiagent-toggle/codex-on.toml \
   --model gpt-5.6-sol --task "$TB" --tasks-dir tasks-imported \
-  --trials 5 --timeout 1200 --proxy --results-path "$ROOT/codex-on.jsonl"
+  --trials 5 --timeout 2400 --proxy --results-path "$ROOT/codex-on.jsonl"
 
 # Canonical solve/hack-adjusted and efficiency summaries.
 python3 bench/stats.py --strict-provenance --min-n 75 \

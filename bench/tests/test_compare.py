@@ -45,6 +45,7 @@ class CompareTestCase(unittest.TestCase):
             "tokens_cache_read": 20,
             "tokens_output": 30,
             "harness_version": "1.0",
+            "timeout_s": 2400,
         }
         row.update(extra)
         return row
@@ -220,6 +221,72 @@ class TestMatchedComparison(CompareTestCase):
         self.assertEqual(result["arms"], ["codex", "codex (candidate)",
                                           "codex (candidate)-2"])
         self.assertEqual(result["matched_n"], 1)
+
+    def test_timeout_caps_mixed_within_or_across_arms_are_non_comparable(self):
+        a = self.write("a.jsonl", [
+            self.row("h", "t1", 1, True, timeout_s=1200),
+            self.row("h", "t2", 1, False, timeout_s=2400),
+        ])
+        b = self.write("b.jsonl", [
+            self.row("h", "t1", 1, True, timeout_s=2400),
+            self.row("h", "t2", 1, True, timeout_s=2400),
+        ])
+
+        report = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
+        self.assertFalse(report["provenance_ok"])
+        rendered = compare.render_text(report)
+        self.assertIn("NON-COMPARABLE PROVENANCE", rendered)
+        self.assertIn("timeout_s has mixed values within group a", rendered)
+        self.assertIn("1200, 2400 [MIXED]", rendered)
+
+        across = self.write("across.jsonl", [
+            self.row("h", "t1", 1, True, timeout_s=600),
+            self.row("h", "t2", 1, True, timeout_s=600),
+        ])
+        report = compare.build_comparison([b, across], tasks_dirs=[self.tasks])
+        self.assertFalse(report["provenance_ok"])
+        self.assertIn("timeout_s differs across groups", compare.render_text(report))
+
+    def test_missing_timeout_is_unknown_and_warned_once_but_not_fatal(self):
+        a = self.write("a.jsonl", [self.row("h", "t", 1, True, timeout_s=None)])
+        b = self.write("b.jsonl", [self.row("h", "t", 1, True)])
+        report = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
+
+        self.assertTrue(report["provenance_ok"])
+        rendered = compare.render_text(report)
+        self.assertEqual(rendered.count("timeout_s unknown"), 1)
+        self.assertEqual(dict(compare.scorecard_rows(report))["Timeout cap (s)"],
+                         ["unknown", "2400"])
+
+    def test_finished_solve_rate_excludes_timeouts_with_its_own_wilson_ci(self):
+        a = self.write("a.jsonl", [
+            self.row("h", "solved", 1, True),
+            self.row("h", "wrong", 1, False),
+            self.row("h", "timed", 1, False, failure_class="timeout"),
+        ])
+        b = self.write("b.jsonl", [
+            self.row("h", "solved", 1, True),
+            self.row("h", "wrong", 1, False),
+            self.row("h", "timed", 1, True),
+        ])
+        report = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
+        a_summary = report["summaries"]["a"]
+        b_summary = report["summaries"]["b"]
+
+        self.assertEqual((a_summary["solved"], a_summary["n"]), (1, 3))
+        self.assertEqual((a_summary["finished_solved"], a_summary["finished_n"]), (1, 2))
+        self.assertEqual(a_summary["finished_solve_rate"], 0.5)
+        self.assertEqual((b_summary["finished_solved"], b_summary["finished_n"]), (2, 3))
+        rows = dict(compare.scorecard_rows(report))
+        self.assertEqual(rows["Solve rate"], ["33.3%", "66.7%"])
+        self.assertEqual(rows["Solve rate @cap"], ["33.3%", "66.7%"])
+        self.assertEqual(rows["Wilson 95% CI @cap"], rows["Wilson 95% CI"])
+        self.assertEqual(rows["Solve rate (finished)"], ["50.0%", "66.7%"])
+        self.assertEqual(rows["Excluded: timeout"], ["1", "0"])
+        self.assertNotEqual(rows["Wilson 95% CI"], rows["Wilson 95% CI (finished)"])
+        self.assertIn("Solve rate (finished)", compare.render_text(report))
+        markdown = compare.render_markdown(report)
+        self.assertIn("| Solve rate (finished) | 50.0% | 66.7% |", markdown)
 
     def test_version_mix_is_flagged_in_human_and_markdown_tables(self):
         a = self.write("a.jsonl", [
