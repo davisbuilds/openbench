@@ -1785,7 +1785,7 @@ def main(argv=None):
             smoke_candidate = candidates.get(smoke_harness)
             smoke_row = run_cell(
                 smoke_harness, PREFLIGHT_TASK, args.model, 0, args.timeout,
-                args.tasks_dir, args.adapters_dir, args.checker_timeout,
+                DEFAULT_TASKS_DIR, args.adapters_dir, args.checker_timeout,
                 exec_mode=args.exec_mode, docker_image=args.docker_image,
                 docker_fallback=args.docker_fallback,
                 harness_version=versions.get(smoke_harness),

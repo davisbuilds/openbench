@@ -118,14 +118,18 @@ class RunnerReliabilityGateTests(unittest.TestCase):
     def test_preflight_wrong_answer_passes_and_uses_sidecar(self):
         smoke = result_row("wrong_answer", 25)
         main = result_row("wrong_answer", 500)
+        custom_tasks_dir = os.path.join(self.tmp.name, "custom-tasks")
         code, run_cell, emitted, stdout, stderr = self.invoke(
-            [smoke, main], "--preflight-smoke", tasks="main-task")
+            [smoke, main], "--preflight-smoke", "--tasks-dir", custom_tasks_dir,
+            tasks="main-task")
 
         self.assertEqual(code, 0)
         self.assertEqual(run_cell.call_count, 2)
         smoke_call, main_call = run_cell.call_args_list
         self.assertEqual(smoke_call.args[1:4], ("make-it-run", run.DEFAULT_MODEL, 0))
+        self.assertEqual(smoke_call.args[5], run.DEFAULT_TASKS_DIR)
         self.assertEqual(main_call.args[1:4], ("main-task", run.DEFAULT_MODEL, 1))
+        self.assertEqual(main_call.args[5], custom_tasks_dir)
         self.assertEqual(emitted[0][0], os.path.join(self.tmp.name, "results.preflight.jsonl"))
         self.assertEqual(emitted[1][0], self.results_path)
         self.assertIn("PREFLIGHT", stdout)
