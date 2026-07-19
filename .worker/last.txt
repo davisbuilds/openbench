@@ -1,30 +1,68 @@
-Status: COMPLETE — both runner reliability mechanisms are implemented, documented, committed, scrub-clean, and verified without live API calls or pushing.
+Status: done. AIDER is onboarded using only `kind="manifest"`; no `bench/adapters/` changes.
 
-Abort message sample:
-ABORT: infra circuit breaker tripped after 3 consecutive near-zero-token infra/rate_limited cells; last_error=stale image
+### Manifest
 
-Files changed:
-- bench/run.py — default-on configurable infra circuit breaker; opt-in preflight smoke and override; sidecar/error helpers.
-- bench/tests/test_run_reliability_gates.py — 8 mocked control-flow tests covering trip, non-trip/reset, thresholds/disable, smoke pass/fail/override, sidecar, and custom task directories.
-- docs/version-pinning.md — five-gate reliability overview.
-- .worker/DECISIONS.md — ambiguity decisions.
-- .worker/last.txt — final evidence report.
+```toml
+kind = "manifest"
+name = "aider"
+isolate_home = true
+command = [
+  "aider",
+  "--message", "{prompt}",
+  "--model", "{model}",
+  "--yes-always",
+  "--no-git",
+  "--no-auto-commits",
+  "--no-check-update",
+  "--no-analytics",
+  "{workspace_files}",
+]
+workspace_file_globs = ["**/*"]
+version_command = ["aider", "--version"]
+pass_env = ["DEEPSEEK_API_KEY"]
+base_url_env = "DEEPSEEK_API_BASE"
+proxy_route = "chat/deepseek"
 
-Tests and checks:
-- `python3 -m unittest discover bench/tests`: 433 tests, OK (27.048s final run).
-- `python3 -m unittest bench.tests.test_run_reliability_gates`: 8 tests, OK.
-- `python3 bench/scrub.py --check <file>`: CLEAN for every changed implementation, test, documentation, and worker-report file.
-- `git diff --check origin/main...HEAD`: clean.
-- AutoReview: final branch review clean, no accepted/actionable findings. One earlier finding (custom `--tasks-dir` lacked `make-it-run`) was accepted and fixed by sourcing the canonical repository smoke task; focused and full tests were rerun.
-- Commits: 2cfe7d8, f5cba50, 6084a8f (plus the final report commit).
+[models]
+"deepseek-v4-flash" = "deepseek/deepseek-v4-flash"
+```
 
-Decisions:
-- One smoke per invocation uses the first selected harness/candidate, as the requirement says one smoke despite multi-harness CLI support.
-- Smoke always uses canonical repository `tasks/make-it-run`; custom `--tasks-dir` remains exclusive to main cells.
-- `results.jsonl` maps to sibling `results.preflight.jsonl`.
-- `--max-consecutive-infra 0` disables the breaker; negative thresholds are rejected.
-- Near-zero means aggregate `tokens` is `None` or numeric `< 100`; non-numeric values do not trip.
+### Smoke result
 
-Residual risk:
-- In a multi-harness invocation, the single required smoke validates only the first harness; later harness-specific auth/routes rely on the default circuit breaker.
-- Adapter behavior is covered with mocks as required; no live provider smoke was run because live API calls were prohibited.
+- AIDER version: `0.86.2`
+- Run: `aider@effa28f8de7b:make-it-run:deepseek-v4-flash:trial1`
+- Result: **solved**, score `1.0`, checker exit `0`
+- Completed without harness error in `6.367s`
+- Transcript evidence: `776` tokens sent, `466` received; edits applied to `greeter.py` and `main.py`
+- Scrubbed transcript: `/tmp/aider-final-scrubbed/aider_effa28f8de7b_make-it-run_deepseek-v4-flash_trial1.txt`
+
+The result row’s generic token fields are null because the required command omitted `--proxy`; native AIDER token evidence is present in the transcript.
+
+### Ease-of-add gap
+
+One generic framework gap was found and fixed: manifests could not expand workspace files into positional argv. Added:
+
+- `workspace_file_globs`
+- Whole-argument `{workspace_files}` expansion
+- Path containment, sorting/de-duplication, provenance, docs, and tests
+
+### Files changed
+
+- `experiments/candidates/aider.toml`
+- `bench/candidates.py`
+- `bench/tests/test_candidates.py`
+- `docs/byo-harnesses.md`
+- `docs/adapter-contract.md`
+- `.worker/DECISIONS.md`
+- `.worker/last.txt`
+
+### Verification
+
+- Focused: **23 tests**, OK
+- Full suite: **446 tests**, OK
+- Scrub checks: clean
+- `git diff --check`: clean
+- AutoReview: clean, no actionable findings
+- Worktree clean; no push
+
+Commits: `4339d7c`, `04ec6ef`, plus the final evidence commit at `HEAD`.
