@@ -43,11 +43,13 @@ import http.client
 import subprocess
 from urllib.parse import urlsplit
 
-from bump_clis import pinned_versions, reported_version, resolve_pin_key
+from bump_clis import (PIN_BY_KEY, parse_image_pin_labels, pinned_versions,
+                       reported_version, resolve_pin_key)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ADAPTERS_DIR = os.path.join(HERE, "adapters")
 DEFAULT_MODEL = "gpt-5.5-medium"
+DEFAULT_IMAGE = "openbench-harness:latest"
 
 CHECKS = ("CLI", "VERSION", "AUTH", "MODEL")
 
@@ -363,6 +365,37 @@ def check_docker(p):
     return False, "docker installed but daemon not responding"
 
 
+def check_image_versions(p, harnesses, pins, image=DEFAULT_IMAGE):
+    """Informational image-label comparison against requested harness pins."""
+    code, out = p.run([
+        "docker", "inspect", "--format", "{{json .Config.Labels}}", image,
+    ])
+    if code != 0:
+        return None, (f"{image} unavailable; build with: "
+                      f"docker build -t {image} bench/docker")
+    labels = parse_image_pin_labels(out)
+    mismatches = []
+    checked = set()
+    for harness in harnesses:
+        base = "codex" if harness.startswith("codex_") else harness
+        try:
+            key = resolve_pin_key(base)
+        except ValueError:
+            continue
+        if key in checked:
+            continue
+        checked.add(key)
+        expected = pins.get(key)
+        actual = labels.get(key)
+        if actual != expected:
+            mismatches.append(
+                f"{PIN_BY_KEY[key].harness}: image={actual or 'missing label'} "
+                f"pin={expected or 'missing'}")
+    if mismatches:
+        return False, "drift: " + "; ".join(mismatches)
+    return True, f"{image} matches Dockerfile pins"
+
+
 # --------------------------------------------------------------------------- #
 # Evaluation + rendering
 # --------------------------------------------------------------------------- #
@@ -420,8 +453,8 @@ def _status(ok, check=None):
     return "OK" if ok else "FAIL"
 
 
-def format_report(rows, harnesses, docker_row):
-    """Render the status matrix + a details block + the Docker line."""
+def format_report(rows, harnesses, docker_row, image_row=None):
+    """Render the status matrix + details + Docker/image status lines."""
     lines = []
 
     # Status matrix: one row per harness, one column per check.
@@ -463,6 +496,10 @@ def format_report(rows, harnesses, docker_row):
     ok, detail = docker_row
     lines.append("")
     lines.append(f"Docker (informational): [{_status(ok)}] {detail}")
+    if image_row is not None:
+        image_ok, image_detail = image_row
+        image_status = "DRIFT" if image_ok is False else _status(image_ok)
+        lines.append(f"Image pins: [{image_status}] {image_detail}")
     return "\n".join(lines)
 
 
@@ -473,14 +510,19 @@ def main(argv=None):
                              f"(default: all {ALL_HARNESSES})")
     parser.add_argument("--model", default=DEFAULT_MODEL,
                         help=f"canonical model to resolve (default: {DEFAULT_MODEL})")
+    parser.add_argument("--docker-image", default=DEFAULT_IMAGE,
+                        help=f"image to compare with pins (default: {DEFAULT_IMAGE})")
     args = parser.parse_args(argv)
 
     harnesses = [h.strip() for h in args.harness.split(",") if h.strip()]
     probes = Probes()
 
-    rows, ok = evaluate(harnesses, args.model, probes)
+    pins = pinned_versions()
+    rows, ok = evaluate(harnesses, args.model, probes, pins=pins)
     docker_row = check_docker(probes)
-    print(format_report(rows, harnesses, docker_row))
+    image_row = check_image_versions(probes, harnesses, pins, args.docker_image)
+    ok = ok and image_row[0] is not False
+    print(format_report(rows, harnesses, docker_row, image_row))
     print()
     print(f"Preflight: {'PASS' if ok else 'FAIL'} "
           f"({len(harnesses)} harness(es), model={args.model})")
