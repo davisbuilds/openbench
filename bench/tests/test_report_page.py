@@ -41,6 +41,11 @@ class ReportPageTest(unittest.TestCase):
         self.assertEqual(fast["tokens_input_uncached"], 200)
         self.assertEqual(fast["finished_rate"], 1.0)
 
+    def test_unmatched_table_keeps_duplicate_countable_rows(self):
+        path = self.write([self.row("pi", 1, True), self.row("pi", 1, False)])
+        model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
+        self.assertEqual((model["arms"][0]["solved"], model["arms"][0]["n"]), (1, 2))
+
     def test_harness_rates_use_matched_task_trial_cells(self):
         path = self.write([
             self.row("pi", 1, True), self.row("pi", 2, True),

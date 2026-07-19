@@ -47,6 +47,29 @@ def _cost_per_solve(rows, solved, pricing):
     return None if any(value is None for value in values) else sum(values) / solved
 
 
+def _arm_identity(row):
+    kind = "candidate" if isinstance(row.get("candidate_provenance"), dict) else "baseline"
+    return kind, compare._row_arm(row)
+
+
+def _arm_labels(rows):
+    """Give baseline and candidate arms distinct, stable labels."""
+    identities = sorted({_arm_identity(row) for row in rows})
+    baseline_names = {name for kind, name in identities if kind == "baseline"}
+    labels = {}
+    used = set()
+    for kind, name in identities:
+        base = name + " (candidate)" if kind == "candidate" and name in baseline_names else name
+        label = base
+        suffix = 2
+        while label in used:
+            label = f"{base}-{suffix}"
+            suffix += 1
+        labels[(kind, name)] = label
+        used.add(label)
+    return labels
+
+
 def assemble_tables(datasets, pricing=None, tasks_dirs=None):
     """Return model tables assembled with canonical compare/stat helpers."""
     roots = stats.parse_tasks_dirs(tasks_dirs)
@@ -73,16 +96,17 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
     for model, model_rows in grouped.items():
         arms = []
         prepared = {}
-        for harness in sorted({str(row["harness"]) for row in model_rows}):
+        arm_labels = _arm_labels(model_rows)
+        for identity, arm_label in arm_labels.items():
             eligible, excluded = compare._filter_arm(
-                [row for row in model_rows if str(row["harness"]) == harness], roots)
+                [row for row in model_rows if _arm_identity(row) == identity], roots)
             unique, duplicates = compare._unique_cells(eligible)
-            prepared[harness] = (unique, excluded, duplicates)
-        common_cells = set.intersection(*(set(values[0]) for values in prepared.values()))
+            prepared[arm_label] = (eligible, unique, excluded, duplicates)
+        common_cells = set.intersection(*(set(values[1]) for values in prepared.values()))
         matched = model in matched_models
-        for harness, (unique, excluded, duplicates) in prepared.items():
+        for harness, (eligible, unique, excluded, duplicates) in prepared.items():
             rows = ([unique[cell] for cell in sorted(common_cells)]
-                    if matched else list(unique.values()))
+                    if matched else eligible)
             if rows:
                 canonical = stats.aggregate_table(rows, (), min_n=0, pricing=pricing)[0]
             else:
@@ -119,12 +143,16 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                                  r["med_wall"] if r["med_wall"] is not None else float("inf"),
                                  r["total_tokens"] if r["total_tokens"] is not None else float("inf"),
                                  r["arm"]))
+        provenance_rows = [dict(row, _report_arm=arm_labels[_arm_identity(row)])
+                           for row in model_rows]
+        provenance = stats.build_provenance(provenance_rows, ("_report_arm",))
         models.append({
             "model": model,
             "title": titles.get(model, model),
             "arms": arms,
             "has_timeouts": any(a["has_timeout"] for a in arms),
             "has_pricing": bool(pricing and model in pricing),
+            "provenance": provenance,
         })
     models.sort(key=lambda m: m["title"].lower())
     return models
@@ -175,6 +203,11 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
         if model["has_pricing"]:
             heads.append("$/solve")
         heads.extend(["Token basis", "Excluded / unmatched / duplicates"])
+        warning = ""
+        if not model["provenance"]["ok"]:
+            messages = "; ".join(flag["message"] for flag in model["provenance"]["flags"])
+            warning = ('<p class="warning"><strong>Non-comparable provenance:</strong> '
+                       + html.escape(messages) + "</p>")
         body = []
         for a in model["arms"]:
             values = [f"{a['arm']} × {model['model']}", f"{a['solved']}/{a['n']}"]
@@ -190,7 +223,7 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
             values.extend([a["token_basis"],
                            f"{sum(a['excluded'].values())} / {a['unmatched']} / {a['duplicates']}"])
             body.append("<tr>" + "".join(f"<td>{html.escape(str(v))}</td>" for v in values) + "</tr>")
-        sections.append(f'<section><h2>{html.escape(model["title"])}</h2><div class="scroll"><table class="results"><thead><tr>' +
+        sections.append(f'<section><h2>{html.escape(model["title"])}</h2>{warning}<div class="scroll"><table class="results"><thead><tr>' +
                         "".join(f"<th>{html.escape(h)}</th>" for h in heads) +
                         "</tr></thead><tbody>" + "".join(body) + "</tbody></table></div></section>")
     model_names = [m["model"] for m in models]
@@ -199,7 +232,7 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
         f"<td>{html.escape(lookup.get((h, model), '—'))}</td>" for model in model_names) + "</tr>" for h in harnesses)
     grid = '<section><h2>Harness × model correctness</h2><div class="scroll"><table><thead><tr><th>Harness</th>' + "".join(
         f"<th>{html.escape(m)}</th>" for m in model_names) + "</tr></thead><tbody>" + grid_rows + "</tbody></table></div></section>"
-    css = """body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:1200px;margin:auto;padding:2rem;background:#f7f8fa}header{padding:2rem;background:#18253b;color:white;border-radius:12px}section{margin:2rem 0;background:white;padding:1.4rem;border-radius:10px;box-shadow:0 1px 4px #ccd}h1{margin:.1rem 0}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{padding:.65rem;border-bottom:1px solid #dde2e8;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}thead th{background:#edf2f7}.tag{font-size:.85rem;color:#52606d}footer{color:#52606d;text-align:center}@media(max-width:600px){body{padding:.6rem}section,header{padding:1rem}}"""
+    css = """body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:1200px;margin:auto;padding:2rem;background:#f7f8fa}header{padding:2rem;background:#18253b;color:white;border-radius:12px}section{margin:2rem 0;background:white;padding:1.4rem;border-radius:10px;box-shadow:0 1px 4px #ccd}h1{margin:.1rem 0}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{padding:.65rem;border-bottom:1px solid #dde2e8;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}thead th{background:#edf2f7}.warning{background:#fff1d6;border-left:4px solid #b45309;padding:.75rem}.tag{font-size:.85rem;color:#52606d}footer{color:#52606d;text-align:center}@media(max-width:600px){body{padding:.6rem}section,header{padding:1rem}}"""
     return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + html.escape(title) + "</title><style>" + css + "</style></head><body><header><div class=\"tag\">OPENBENCH</div><h1>" + html.escape(title) + "</h1><p>" + html.escape(headline) + "</p></header>" + "".join(sections) + grid + '<section id="methodology"><h2>Methodology &amp; limitations</h2>' + _markdown(methodology) + "</section><footer>Generated by OpenBench · static, self-contained HTML</footer></body></html>\n"
 
 
