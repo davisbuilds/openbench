@@ -75,7 +75,7 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
     roots = stats.parse_tasks_dirs(tasks_dirs)
     grouped = defaultdict(list)
     titles = {}
-    matched_models = set()
+    matching_policy = {}
     for dataset in datasets:
         loaded_rows = stats.load_rows([dataset["path"]])
         invalid_count = sum(not stats.is_valid_result_row(row) for row in loaded_rows)
@@ -89,8 +89,13 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
         dataset_models = {str(row["model"]) for row in valid_rows}
         if dataset.get("title") and len(dataset_models) == 1:
             titles[next(iter(dataset_models))] = str(dataset["title"])
-        if dataset.get("matched"):
-            matched_models.update(dataset_models)
+        policy = bool(dataset.get("matched"))
+        for dataset_model in dataset_models:
+            if dataset_model in matching_policy and matching_policy[dataset_model] != policy:
+                raise ValueError(
+                    f"model {dataset_model!r} has conflicting matched policies across datasets"
+                )
+            matching_policy[dataset_model] = policy
 
     models = []
     for model, model_rows in grouped.items():
@@ -101,12 +106,18 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
             eligible, excluded = compare._filter_arm(
                 [row for row in model_rows if _arm_identity(row) == identity], roots)
             unique, duplicates = compare._unique_cells(eligible)
+            if duplicates:
+                raise ValueError(
+                    f"{model} × {arm_label}: {duplicates} duplicate (task, trial) cell(s)"
+                )
             prepared[arm_label] = (eligible, unique, excluded, duplicates)
         common_cells = set.intersection(*(set(values[1]) for values in prepared.values()))
-        matched = model in matched_models
+        matched = matching_policy.get(model, False)
+        provenance_rows = []
         for harness, (eligible, unique, excluded, duplicates) in prepared.items():
             rows = ([unique[cell] for cell in sorted(common_cells)]
                     if matched else eligible)
+            provenance_rows.extend(dict(row, _report_arm=harness) for row in rows)
             if rows:
                 canonical = stats.aggregate_table(rows, (), min_n=0, pricing=pricing)[0]
             else:
@@ -143,11 +154,6 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                                  r["med_wall"] if r["med_wall"] is not None else float("inf"),
                                  r["total_tokens"] if r["total_tokens"] is not None else float("inf"),
                                  r["arm"]))
-        provenance_rows = [
-            dict(row, _report_arm=arm_label)
-            for arm_label, (eligible, _, _, _) in prepared.items()
-            for row in eligible
-        ]
         provenance = stats.build_provenance(provenance_rows, ("_report_arm",))
         models.append({
             "model": model,

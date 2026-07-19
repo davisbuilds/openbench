@@ -41,10 +41,10 @@ class ReportPageTest(unittest.TestCase):
         self.assertEqual(fast["tokens_input_uncached"], 200)
         self.assertEqual(fast["finished_rate"], 1.0)
 
-    def test_unmatched_table_keeps_duplicate_countable_rows(self):
+    def test_duplicate_cells_are_rejected(self):
         path = self.write([self.row("pi", 1, True), self.row("pi", 1, False)])
-        model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
-        self.assertEqual((model["arms"][0]["solved"], model["arms"][0]["n"]), (1, 2))
+        with self.assertRaisesRegex(ValueError, "duplicate .* cell"):
+            report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])
 
     def test_harness_rates_use_matched_task_trial_cells(self):
         path = self.write([
@@ -57,6 +57,13 @@ class ReportPageTest(unittest.TestCase):
         arms = {arm["arm"]: arm for arm in model["arms"]}
         self.assertEqual((arms["pi"]["solved"], arms["pi"]["n"]), (1, 1))
         self.assertEqual(arms["pi"]["unmatched"], 1)
+
+    def test_conflicting_matching_policy_for_same_model_is_rejected(self):
+        path = self.write([self.row("pi", 1, True)])
+        with self.assertRaisesRegex(ValueError, "conflicting matched policies"):
+            report_page.assemble_tables([
+                {"path": path, "matched": True}, {"path": path, "matched": False}
+            ], tasks_dirs=[self.tmp.name])
 
     def test_candidate_and_baseline_with_same_harness_are_distinct_arms(self):
         path = self.write([
@@ -87,6 +94,15 @@ class ReportPageTest(unittest.TestCase):
         page = report_page.render_page(priced, "Method")
         self.assertIn("$/solve", page)
         self.assertIn("$0.000", page)
+
+    def test_excluded_rows_do_not_trigger_provenance_warning(self):
+        path = self.write([
+            self.row("pi", 1, True, timeout_s=60),
+            self.row("codex", 1, True, timeout_s=60),
+            self.row("pi", 2, False, timeout_s=120, failure_class="infra"),
+        ])
+        model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
+        self.assertTrue(model["provenance"]["ok"])
 
     def test_mixed_timeout_provenance_is_prominently_flagged(self):
         path = self.write([
