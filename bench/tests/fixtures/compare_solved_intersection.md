@@ -15,6 +15,7 @@
 | Solve rate | 100.0% | 50.0% |
 | Solve rate @cap | 100.0% | 50.0% |
 | Wilson 95% CI | [0.342, 1.000] | [0.095, 0.905] |
+| Wilson 95% CI @cap | [0.342, 1.000] | [0.095, 0.905] |
 | Solved (finished) | 2/2 | 1/2 |
 | Solve rate (finished) | 100.0% | 50.0% |
 | Wilson 95% CI (finished) | [0.342, 1.000] | [0.095, 0.905] |

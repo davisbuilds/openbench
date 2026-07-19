@@ -292,6 +292,8 @@ def scorecard_rows(report):
         ("Solve rate", [_pct(summaries[arm]["solve_rate"]) for arm in report["arms"]]),
         ("Solve rate @cap", [_pct(summaries[arm]["solve_rate"]) for arm in report["arms"]]),
         ("Wilson 95% CI", [_ci(summaries[arm], "wilson95") for arm in report["arms"]]),
+        ("Wilson 95% CI @cap", [_ci(summaries[arm], "wilson95")
+                                for arm in report["arms"]]),
         ("Solved (finished)",
          [f"{summaries[arm]['finished_solved']}/{summaries[arm]['finished_n']}"
           for arm in report["arms"]]),

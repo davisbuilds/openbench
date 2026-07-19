@@ -280,9 +280,11 @@ class TestMatchedComparison(CompareTestCase):
         rows = dict(compare.scorecard_rows(report))
         self.assertEqual(rows["Solve rate"], ["33.3%", "66.7%"])
         self.assertEqual(rows["Solve rate @cap"], ["33.3%", "66.7%"])
+        self.assertEqual(rows["Wilson 95% CI @cap"], rows["Wilson 95% CI"])
         self.assertEqual(rows["Solve rate (finished)"], ["50.0%", "66.7%"])
         self.assertEqual(rows["Excluded: timeout"], ["1", "0"])
         self.assertNotEqual(rows["Wilson 95% CI"], rows["Wilson 95% CI (finished)"])
+        self.assertIn("Solve rate (finished)", compare.render_text(report))
         markdown = compare.render_markdown(report)
         self.assertIn("| Solve rate (finished) | 50.0% | 66.7% |", markdown)
 
