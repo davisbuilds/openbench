@@ -339,6 +339,45 @@ class TestMatchedComparison(CompareTestCase):
         self.assertEqual(result["summaries"]["a"]["unmatched_countable_rows"], 2)
         self.assertEqual(result["summaries"]["a"]["duplicate_cells_excluded"], 1)
 
+    def test_warns_on_three_near_zero_wrong_answers(self):
+        a = self.write("a.jsonl", [
+            self.row("h", f"t{i}", 1, False, tokens_input_uncached=None,
+                     tokens_cache_read=None, tokens_output=0, wall_time_s=10 + i * 10)
+            for i in range(3)
+        ])
+        b = self.write("b.jsonl", [
+            self.row("h", f"t{i}", 1, True) for i in range(3)
+        ])
+        report = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
+        self.assertTrue(any("near-zero agent tokens" in item
+                            for item in report["anomalies"]))
+        self.assertIn("ANOMALY [a]", compare.render_text(report))
+        self.assertIn("> ANOMALY [a]", compare.render_markdown(report))
+
+    def test_warns_on_three_uniform_failure_wall_times(self):
+        a = self.write("a.jsonl", [
+            self.row("h", f"t{i}", 1, False, wall_time_s=wall,
+                     tokens_input_uncached=1000)
+            for i, wall in enumerate((342.0, 343.0, 344.0))
+        ])
+        b = self.write("b.jsonl", [
+            self.row("h", f"t{i}", 1, True) for i in range(3)
+        ])
+        report = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
+        self.assertTrue(any("uniform wall times" in item
+                            for item in report["anomalies"]))
+
+    def test_no_anomaly_below_tripwire_threshold(self):
+        a = self.write("a.jsonl", [
+            self.row("h", f"t{i}", 1, False, tokens_output=0,
+                     tokens_input_uncached=None, wall_time_s=100 + i * 100)
+            for i in range(2)
+        ])
+        b = self.write("b.jsonl", [self.row("h", f"t{i}", 1, True)
+                                    for i in range(2)])
+        report = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
+        self.assertEqual(report["anomalies"], [])
+
     def test_no_shared_cells_renders_zero_denominator(self):
         a = self.write("a.jsonl", [self.row("h", "a", 1, True)])
         b = self.write("b.jsonl", [self.row("h", "b", 1, True)])
