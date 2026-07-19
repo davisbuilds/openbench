@@ -161,7 +161,7 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
                   "Cache-read/solve"]
         if model["has_pricing"]:
             heads.append("$/solve")
-        heads.append("Token basis")
+        heads.extend(["Token basis", "Excluded / unmatched / duplicates"])
         body = []
         for a in model["arms"]:
             values = [f"{a['arm']} × {model['model']}", f"{a['solved']}/{a['n']}"]
@@ -174,7 +174,8 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
                 values.append(
                     "—" if a["cost_per_solve"] is None else f"${a['cost_per_solve']:.3f}"
                 )
-            values.append(a["token_basis"])
+            values.extend([a["token_basis"],
+                           f"{sum(a['excluded'].values())} / {a['unmatched']} / {a['duplicates']}"])
             body.append("<tr>" + "".join(f"<td>{html.escape(str(v))}</td>" for v in values) + "</tr>")
         sections.append(f'<section><h2>{html.escape(model["title"])}</h2><div class="scroll"><table class="results"><thead><tr>' +
                         "".join(f"<th>{html.escape(h)}</th>" for h in heads) +
