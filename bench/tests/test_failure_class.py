@@ -132,9 +132,44 @@ class TestClassifyFailure(unittest.TestCase):
         row = {"success": False, "completed": True, "checker_exit": 1, "error": None}
         self.assertEqual(failure_class.classify_failure(row, "normal transcript"), "wrong_answer")
 
-    def test_completed_run_near_cap_is_wrong_answer_not_timeout(self):
-        row = {"success": False, "completed": True, "checker_exit": 1, "wall_time_s": 1185.0}
-        self.assertEqual(failure_class.classify_failure(row, "", timeout_s=1200), "wrong_answer")
+    def test_completed_silent_run_is_infra_not_wrong_answer(self):
+        row = {"success": False, "completed": True, "checker_exit": 1,
+               "wall_time_s": 343.0, "tokens": None, "tokens_output": 0}
+        self.assertEqual(failure_class.classify_failure(row, "", timeout_s=1200), "infra")
+        self.assertEqual(failure_class.classify_failure_reason(row, ""),
+                         "silent-no-model-call")
+
+    def test_real_wrong_answer_with_tokens_stays_wrong_answer(self):
+        row = {"success": False, "completed": True, "checker_exit": 1,
+               "tokens": 100, "tokens_output": 25}
+        self.assertEqual(failure_class.classify_failure(row, ""), "wrong_answer")
+
+    def test_token_parse_failure_with_long_output_stays_wrong_answer(self):
+        row = {"success": False, "completed": True, "checker_exit": 1,
+               "tokens": None, "tokens_output": None}
+        output = "Model inspected the repository and attempted a repair. " * 6
+        self.assertEqual(failure_class.classify_failure(row, output), "wrong_answer")
+
+    def test_explicit_workspace_change_prevents_silent_reclassification(self):
+        row = {"success": False, "completed": True, "checker_exit": 1,
+               "tokens": None, "workspace_changed": True}
+        self.assertEqual(failure_class.classify_failure(row, ""), "wrong_answer")
+
+    def test_intentional_null_negative_control_stays_wrong_answer(self):
+        row = {"harness": "null", "success": False, "completed": True,
+               "checker_exit": 1, "tokens": None, "turns": None}
+        self.assertEqual(failure_class.classify_failure(row, ""), "wrong_answer")
+
+    def test_proxy_upstream_failure_is_infra_even_with_long_error(self):
+        row = {"success": False, "completed": False, "checker_exit": 1}
+        self.assertEqual(failure_class.classify_failure(
+            row, "API error (status 502): proxy_upstream_failed"), "infra")
+
+    def test_stronger_marker_does_not_get_silent_failure_reason(self):
+        row = {"success": False, "completed": True, "checker_exit": 1,
+               "tokens": None, "error": "proxy_upstream_failed"}
+        self.assertEqual(failure_class.classify_failure(row, ""), "infra")
+        self.assertIsNone(failure_class.classify_failure_reason(row, ""))
 
     def test_instant_bare_cli_exit_without_tokens_is_infra(self):
         row = {
@@ -211,6 +246,27 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
         self.assertNotIn("output_tail", run.ROW_FIELDS)
         self.assertEqual(row["output_tail"], "tail without marker")  # internal only, not persisted
         self.assertEqual(row["failure_class"], "rate_limited")
+
+    def test_runner_workspace_change_is_real_model_work_evidence(self):
+        orig_invoke, orig_checker = run.invoke_adapter, run.run_checker
+
+        def fake_invoke(_mode, _harness, _instruction, workdir, *_args, **_kwargs):
+            with open(os.path.join(workdir, "model-edit.txt"), "w", encoding="utf-8") as fh:
+                fh.write("changed")
+            return ({"completed": True, "error": None, "output_tail": "",
+                     "full_output": "", "tokens": None, "turns": None,
+                     "cmd": ["fake"]}, "local")
+
+        try:
+            run.invoke_adapter = fake_invoke
+            run.run_checker = lambda *a, **k: (1, None, "", "")
+            row = run.run_cell("fake", self.task, "model", 1, 600,
+                               self.tasks_dir, self.tmp, 30)
+        finally:
+            run.invoke_adapter, run.run_checker = orig_invoke, orig_checker
+
+        self.assertTrue(row["workspace_changed"])
+        self.assertEqual(row["failure_class"], "wrong_answer")
 
     def test_runner_uses_docker_host_wall_time_when_larger(self):
         orig_invoke, orig_checker = run.invoke_adapter, run.run_checker

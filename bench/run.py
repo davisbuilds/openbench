@@ -37,7 +37,7 @@ from contextlib import contextmanager
 from bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
                        image_pin_mismatches, parse_image_pin_labels,
                        pinned_versions, reported_version, resolve_pin_key)
-from failure_class import classify_failure
+from failure_class import classify_failure, classify_failure_reason
 from scrub import build_context as build_scrub_context, scrub_text
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -78,7 +78,7 @@ ROW_FIELDS = (
     "tokens_proxy_output", "tokens_proxy_reasoning", "tokens_proxy_calls",
     "sampling_observed", "token_basis_proxy",
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
-    "harness_version_source", "failure_class", "checker_stdout", "checker_stderr", "checker_workspace_files",
+    "harness_version_source", "failure_class", "failure_reason", "workspace_changed", "checker_stdout", "checker_stderr", "checker_workspace_files",
     "image_digest", "candidate_provenance", "version_drift", "timeout_s",
 )
 
@@ -1451,6 +1451,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "harness_version": None,
         "harness_version_source": None,
         "failure_class": None,
+        "failure_reason": None,
+        "workspace_changed": None,
         "checker_stdout": None,
         "checker_stderr": None,
         "checker_workspace_files": None,
@@ -1477,6 +1479,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         # the source workspace under tasks/.
         shutil.rmtree(workdir)
         shutil.copytree(os.path.join(task_dir, "workspace"), workdir)
+        initial_workspace_files = capture_workspace_files(workdir)
 
         instruction = read_instruction(task_dir)
         row["t_env_setup_s"] = round(time.monotonic() - env_setup_start, 3)
@@ -1565,8 +1568,10 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         # The checker is the sole authority on task success (and score). Capture
         # the workspace just before it runs so unauditable rows can be replayed.
         try:
+            current_workspace_files = capture_workspace_files(workdir)
+            row["workspace_changed"] = current_workspace_files != initial_workspace_files
             row["checker_workspace_files"] = scrub_workspace_evidence_paths(
-                capture_workspace_files(workdir))
+                current_workspace_files)
             checker_start = time.monotonic()
             try:
                 checker_exit, raw_score, checker_stdout, checker_stderr = run_checker(
@@ -1588,6 +1593,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["score"] = 1.0 if checker_exit == 0 else (
             raw_score if raw_score is not None else 0.0)
         row["failure_class"] = classify_failure(row, classifier_output, timeout_s)
+        row["failure_reason"] = classify_failure_reason(row, classifier_output)
         return _populate_proxy_row(row, active_proxy_ctx, cell_token)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

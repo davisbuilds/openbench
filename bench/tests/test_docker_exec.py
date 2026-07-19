@@ -121,6 +121,20 @@ class TestBuildDockerCmd(unittest.TestCase):
                 self.assertFalse(any(secret in a for a in argv),
                                  "secret value must not appear in argv")
 
+    def test_grokbuild_sol_forwards_cliproxy_route_and_ingress_key_by_name(self):
+        env = {
+            "CLIPROXYAPI_BASE_URL": "http://127.0.0.1:8317/v1",
+            "CLIPROXYAPI_API_KEY": "secret-ingress-key",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            cmd = docker_exec.build_docker_cmd(
+                harness="grokbuild", workdir="/tmp/wd", model="gpt-5.6-sol",
+                timeout_s=240, adapters_dir="/repo/bench/adapters", image="image",
+                instruction_path="/tmp/instr.txt")
+        self.assertIn("CLIPROXYAPI_BASE_URL", cmd)
+        self.assertIn("CLIPROXYAPI_API_KEY", cmd)
+        self.assertFalse(any("secret-ingress-key" in arg for arg in cmd))
+
     def test_auth_mount_readonly_when_present(self):
         # Use a fake HOME so the test is deterministic regardless of the host.
         home = tempfile.mkdtemp(prefix="fake_home_")

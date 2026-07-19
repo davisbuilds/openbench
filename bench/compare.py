@@ -16,8 +16,10 @@ from collections import Counter, defaultdict
 
 try:  # Package import path.
     from . import stats
+    from .failure_class import has_near_zero_agent_tokens
 except ImportError:  # Script path (`python3 bench/compare.py`).
     import stats
+    from failure_class import has_near_zero_agent_tokens
 
 
 TOKEN_METRICS = (
@@ -136,6 +138,38 @@ def _mean_median(rows, field):
     return sum(values) / len(values), statistics.median(values)
 
 
+def _uniform_wall_cluster(rows):
+    """Return the largest failure cluster whose wall times are within 5%."""
+    values = sorted(float(row["wall_time_s"]) for row in rows
+                    if not bool(row.get("success"))
+                    and stats.is_nonnegative_number(row.get("wall_time_s")))
+    best = []
+    for start, low in enumerate(values):
+        cluster = [value for value in values[start:] if value <= low * 1.05]
+        if len(cluster) > len(best):
+            best = cluster
+    return best
+
+
+def _arm_anomalies(arm, rows):
+    """Detect signatures that commonly mean an arm failed before model work."""
+    valid = [row for row in rows if stats.is_valid_result_row(row)]
+    anomalies = []
+    silent_wrong = [row for row in valid
+                    if stats.class_for_report(row) == "wrong_answer"
+                    and has_near_zero_agent_tokens(row)]
+    if len(silent_wrong) >= 3:
+        anomalies.append(
+            f"ANOMALY [{arm}]: {len(silent_wrong)} wrong_answer cells have "
+            "near-zero agent tokens")
+    cluster = _uniform_wall_cluster(valid)
+    if len(cluster) >= 3:
+        anomalies.append(
+            f"ANOMALY [{arm}]: {len(cluster)} failures have uniform wall times "
+            f"within 5% ({min(cluster):.1f}-{max(cluster):.1f}s)")
+    return anomalies
+
+
 def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
     """Return a report object for matched arms in ``paths``."""
     arms, unassigned_rows = load_arms(paths)
@@ -153,7 +187,9 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
     unknown_timeouts_by_arm = {}
     unknown_timeout_rows = 0
     provenance_rows = []
+    anomalies = []
     for arm, rows in arms.items():
+        anomalies.extend(_arm_anomalies(arm, rows))
         countable, exclusions[arm] = _filter_arm(rows, task_roots)
         eligible[arm], duplicate_counts[arm] = _unique_cells(countable)
         countable_counts[arm] = len(countable)
@@ -252,6 +288,7 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
         "provenance": provenance,
         "unknown_timeout_rows": unknown_timeout_rows,
         "unassigned_excluded": unassigned_excluded,
+        "anomalies": anomalies,
     }
 
 
@@ -390,8 +427,8 @@ def render_text(report):
     headline = f"Matched n: {report['matched_n']} (task, trial cells present in all arms)\n"
     if solved_status:
         headline += solved_status + "\n"
-    statuses = [_provenance_status(report), _timeout_status(report),
-                _unassigned_status(report)]
+    statuses = [*report.get("anomalies", []), _provenance_status(report),
+                _timeout_status(report), _unassigned_status(report)]
     return ("OpenBench matched comparison\n" + headline
             + "\n".join(status for status in statuses if status) + "\n\n"
             + _plain_table(["Metric"] + report["arms"], rows))
@@ -413,8 +450,8 @@ def render_markdown(report):
     solved_status = _solved_intersection_status(report)
     if solved_status:
         lines.extend([f"**{_markdown_cell(solved_status)}**", ""])
-    statuses = [_provenance_status(report), _timeout_status(report),
-                _unassigned_status(report)]
+    statuses = [*report.get("anomalies", []), _provenance_status(report),
+                _timeout_status(report), _unassigned_status(report)]
     lines.extend([
         *("> " + _markdown_cell(status) for status in statuses if status),
         "",
