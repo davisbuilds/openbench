@@ -1,0 +1,4 @@
+{
+  "deepseek-v4-flash": {"input_per_mtok": 0.30, "output_per_mtok": 2.50},
+  "kimi-k3": {"input_per_mtok": 4.00, "output_per_mtok": 16.00}
+}
