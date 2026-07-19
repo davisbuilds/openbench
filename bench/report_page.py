@@ -15,6 +15,11 @@ except ImportError:
     import stats
 
 TOKEN_FIELDS = ("tokens_input_uncached", "tokens_output", "tokens_cache_read")
+DEFAULT_METHODOLOGY = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "docs",
+    "report-methodology.md",
+)
 
 
 def _pct(value):
@@ -28,11 +33,10 @@ def _num(value, digits=0):
 
 
 def _token_basis(rows):
-    values = set()
-    for row in rows:
-        canonical = all(stats.is_nonnegative_number(row.get(field)) for field in TOKEN_FIELDS)
-        value = row.get("token_basis") if canonical else row.get("token_basis_proxy")
-        values.add(str(value or ("reported" if canonical else "unknown")))
+    values = {
+        str(row.get("token_basis") or row.get("token_basis_proxy") or "unknown")
+        for row in rows
+    }
     return ", ".join(sorted(values))
 
 
@@ -61,11 +65,15 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
     models = []
     for model, model_rows in grouped.items():
         arms = []
+        prepared = {}
         for harness in sorted({str(row["harness"]) for row in model_rows}):
             eligible, excluded = compare._filter_arm(
                 [row for row in model_rows if str(row["harness"]) == harness], roots)
             unique, duplicates = compare._unique_cells(eligible)
-            rows = list(unique.values())
+            prepared[harness] = (unique, excluded, duplicates)
+        common_cells = set.intersection(*(set(values[0]) for values in prepared.values()))
+        for harness, (unique, excluded, duplicates) in prepared.items():
+            rows = [unique[cell] for cell in sorted(common_cells)]
             canonical = stats.aggregate_table(rows, (), min_n=0, pricing=pricing)[0]
             solved = canonical["solved"]
             finished = [r for r in rows if stats.class_for_report(r) != "timeout"]
@@ -92,13 +100,19 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                 "token_basis": _token_basis(rows),
                 "excluded": dict(excluded),
                 "duplicates": duplicates,
+                "unmatched": len(unique) - len(common_cells),
             })
         arms.sort(key=lambda r: (-(r["rate"] if r["rate"] is not None else -1),
                                  r["med_wall"] if r["med_wall"] is not None else float("inf"),
                                  r["total_tokens"] if r["total_tokens"] is not None else float("inf"),
                                  r["arm"]))
-        models.append({"model": model, "title": titles.get(model, model), "arms": arms,
-                       "has_timeouts": any(a["has_timeout"] for a in arms)})
+        models.append({
+            "model": model,
+            "title": titles.get(model, model),
+            "arms": arms,
+            "has_timeouts": any(a["has_timeout"] for a in arms),
+            "has_pricing": bool(pricing and model in pricing),
+        })
     models.sort(key=lambda m: m["title"].lower())
     return models
 
@@ -144,7 +158,10 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
         heads = ["Arm (harness × model)", "Solved/countable"]
         heads += ["Rate @cap", "Rate finished"] if dual else ["Rate"]
         heads += ["Wilson 95% CI", "Med wall", "Uncached in/solve", "Output/solve",
-                  "Cache-read/solve", "$/solve", "Token basis"]
+                  "Cache-read/solve"]
+        if model["has_pricing"]:
+            heads.append("$/solve")
+        heads.append("Token basis")
         body = []
         for a in model["arms"]:
             values = [f"{a['arm']} × {model['model']}", f"{a['solved']}/{a['n']}"]
@@ -152,9 +169,12 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
             values += [f"{a['wilson'][0] * 100:.1f}–{a['wilson'][1] * 100:.1f}%",
                        _num(a["med_wall"], 1) + ("s" if a["med_wall"] is not None else ""),
                        _num(a["tokens_input_uncached"]), _num(a["tokens_output"]),
-                       _num(a["tokens_cache_read"]),
-                       "—" if a["cost_per_solve"] is None else f"${a['cost_per_solve']:.3f}",
-                       a["token_basis"]]
+                       _num(a["tokens_cache_read"])]
+            if model["has_pricing"]:
+                values.append(
+                    "—" if a["cost_per_solve"] is None else f"${a['cost_per_solve']:.3f}"
+                )
+            values.append(a["token_basis"])
             body.append("<tr>" + "".join(f"<td>{html.escape(str(v))}</td>" for v in values) + "</tr>")
         sections.append(f'<section><h2>{html.escape(model["title"])}</h2><div class="scroll"><table class="results"><thead><tr>' +
                         "".join(f"<th>{html.escape(h)}</th>" for h in heads) +
@@ -192,9 +212,11 @@ def main(argv=None):
         datasets.append(item)
     datasets += [{"path": path} for path in args.results]
     if not datasets: raise SystemExit("report_page: at least one dataset is required")
-    methodology_path = args.methodology or config.get("methodology")
-    if methodology_path and not os.path.isabs(methodology_path): methodology_path = os.path.join(base, methodology_path)
-    methodology = open(methodology_path, encoding="utf-8").read() if methodology_path else "Results are observational; inspect source data and provenance before drawing conclusions."
+    methodology_path = args.methodology or config.get("methodology") or DEFAULT_METHODOLOGY
+    if not os.path.isabs(methodology_path):
+        methodology_path = os.path.join(base, methodology_path)
+    with open(methodology_path, encoding="utf-8") as fh:
+        methodology = fh.read()
     pricing_path = args.pricing or config.get("pricing")
     if pricing_path and not os.path.isabs(pricing_path): pricing_path = os.path.join(base, pricing_path)
     pricing = stats.load_pricing(pricing_path)
