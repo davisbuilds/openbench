@@ -58,6 +58,8 @@ DEFAULT_ANTHROPIC_UPSTREAMS = {
     "deepseek": "https://api.deepseek.com",
     "zai": "https://api.z.ai",
     "moonshot": "https://api.moonshot.ai",
+    # Local CLIProxyAPI Anthropic-compatible ingress (claude x gpt-5.6-sol).
+    "cliproxyapi": "http://127.0.0.1:8317",
 }
 
 
