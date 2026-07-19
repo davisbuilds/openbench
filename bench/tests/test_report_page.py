@@ -58,6 +58,17 @@ class ReportPageTest(unittest.TestCase):
         self.assertEqual((arms["pi"]["solved"], arms["pi"]["n"]), (1, 1))
         self.assertEqual(arms["pi"]["unmatched"], 1)
 
+    def test_candidate_and_baseline_with_same_harness_are_distinct_arms(self):
+        path = self.write([
+            self.row("codex", 1, True),
+            self.row("codex", 1, False,
+                     candidate_provenance={"name": "codex", "candidate_digest": "abc"}),
+        ])
+        model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
+        self.assertEqual({arm["arm"] for arm in model["arms"]},
+                         {"codex", "codex (candidate)"})
+        self.assertEqual({arm["n"] for arm in model["arms"]}, {1})
+
     def test_disjoint_harness_cells_render_zero_denominators(self):
         path = self.write([self.row("pi", 1, True),
                            self.row("codex", 2, True)])
@@ -76,6 +87,17 @@ class ReportPageTest(unittest.TestCase):
         page = report_page.render_page(priced, "Method")
         self.assertIn("$/solve", page)
         self.assertIn("$0.000", page)
+
+    def test_mixed_timeout_provenance_is_prominently_flagged(self):
+        path = self.write([
+            self.row("pi", 1, True, timeout_s=60),
+            self.row("pi", 2, True, timeout_s=120),
+            self.row("codex", 1, True, timeout_s=60),
+        ])
+        models = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])
+        page = report_page.render_page(models, "Method")
+        self.assertIn("Non-comparable provenance", page)
+        self.assertIn("timeout_s mixed within group", page)
 
     def test_html_snapshot_smoke_contains_expected_arms_values_and_no_external_assets(self):
         rows = [

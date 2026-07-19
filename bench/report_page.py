@@ -205,9 +205,12 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
         heads.extend(["Token basis", "Excluded / unmatched / duplicates"])
         warning = ""
         if not model["provenance"]["ok"]:
-            messages = "; ".join(flag["message"] for flag in model["provenance"]["flags"])
+            messages = "; ".join(
+                f"{flag['field']} {flag['type'].replace('_', ' ')}"
+                for flag in model["provenance"]["flags"]
+            )
             warning = ('<p class="warning"><strong>Non-comparable provenance:</strong> '
-                       + html.escape(messages) + "</p>")
+                       + html.escape(messages) + ". Inspect source rows before publishing.</p>")
         body = []
         for a in model["arms"]:
             values = [f"{a['arm']} × {model['model']}", f"{a['solved']}/{a['n']}"]
