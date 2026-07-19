@@ -167,16 +167,19 @@ class TestBuildDockerCmd(unittest.TestCase):
                 self.assertIn("DEEPSEEK_API_KEY=openbench-bridge-placeholder", cmd)
                 self.assertNotIn("DEEPSEEK_API_KEY", cmd)
 
-    def test_grokbuild_mounts_no_user_auth(self):
+    def test_grokbuild_mounts_only_auth_file_read_only(self):
         home = tempfile.mkdtemp(prefix="fake_home_")
         try:
             os.makedirs(os.path.join(home, ".grok"))
-            with open(os.path.join(home, ".grok", "auth.json"), "w") as fh:
+            auth_path = os.path.join(home, ".grok", "auth.json")
+            with open(auth_path, "w") as fh:
                 fh.write("{}")
             orig = os.path.expanduser
             os.path.expanduser = lambda p: home if p == "~" else orig(p)
             try:
-                self.assertEqual(docker_exec._auth_mount_args("grokbuild"), [])
+                self.assertEqual(docker_exec._auth_mount_args("grokbuild"), [
+                    "-v", f"{auth_path}:/bench/auth/.grok/auth.json:ro",
+                ])
             finally:
                 os.path.expanduser = orig
         finally:
