@@ -1,4 +1,16 @@
-# CLI version pinning
+# Reliability gates
+
+OpenBench uses five complementary gates to prevent invalid or wasteful benchmark arms:
+
+1. **Host version gate** compares locally executable harness CLIs with the Dockerfile pins. It catches an outdated or prematurely upgraded host CLI before any cell runs.
+2. **Image-label gate** compares the selected harnesses' `org.openbench.cli.*` image labels with the same pins. It catches stale or incorrectly built benchmark images without launching a container.
+3. **Upstream version check** is a weekly/manual GitHub Action that reports newer published CLI releases. It catches pins that need human review and an intentional dataset upgrade.
+4. **Infra circuit breaker** is on by default in `bench/run.py`. Three consecutive `infra` or `rate_limited` cells with fewer than 100 reported agent tokens abort the remaining invocation after preserving rows already written. `--max-consecutive-infra N` changes the streak threshold; `0` disables it. Wrong answers, timeouts, and infra failures with real token spend reset the streak, so capability failures do not stop an arm.
+5. **Preflight smoke** is enabled with `--preflight-smoke`. Before main cells it runs `make-it-run` trial 0 once with the invocation's harness/model/execution settings and writes only to a sibling `<results-stem>.preflight.jsonl` sidecar. Near-zero-token infra/rate-limit failure refuses the arm; a wrong answer is allowed because it proves the live route worked. `--allow-preflight-failure` is the explicit emergency override.
+
+The first three gates preserve version integrity. The final two catch expired authentication, broken proxy routes, stale runtime images, and similar fast infrastructure failures before they can produce a garbage arm.
+
+## CLI version pinning
 
 OpenBench uses one CLI version set per dataset. The authoritative versions are the `ARG *_VERSION` pins in `bench/docker/Dockerfile`; both local and Docker execution must correspond to those pins.
 

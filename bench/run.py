@@ -47,6 +47,10 @@ DEFAULT_RESULTS_PATH = os.path.join(REPO, "results", "results.jsonl")
 DEFAULT_ADAPTERS_DIR = os.path.join(HERE, "adapters")
 DEFAULT_TASKS_DIR = os.path.join(REPO, "tasks")
 DEFAULT_MODEL = "gpt-5.5-medium"
+DEFAULT_MAX_CONSECUTIVE_INFRA = 3
+NEAR_ZERO_TOKEN_LIMIT = 100
+INFRA_FAILURE_CLASSES = frozenset({"infra", "rate_limited"})
+PREFLIGHT_TASK = "make-it-run"
 PROXY_HARNESSES = {"codex", "pi", "claude", "opencode", "cursor", "devin", "grokbuild"}
 PROXY_CODEX_SUBSCRIPTION_MODELS = {
     "gpt-5.5-medium", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
@@ -1067,6 +1071,51 @@ def append_row(results_path, row):
         fh.write(json.dumps(ordered) + "\n")
 
 
+def preflight_results_path(results_path):
+    """Return the sidecar path for an invocation's smoke-test row."""
+    stem, _extension = os.path.splitext(results_path)
+    return stem + ".preflight.jsonl"
+
+
+def is_near_zero_infra(row):
+    """True for infra/rate-limit failures with absent or sub-100 token spend."""
+    if row.get("failure_class") not in INFRA_FAILURE_CLASSES:
+        return False
+    tokens = row.get("tokens")
+    return tokens is None or (
+        isinstance(tokens, (int, float)) and not isinstance(tokens, bool)
+        and tokens < NEAR_ZERO_TOKEN_LIMIT
+    )
+
+
+def row_error_summary(row):
+    """Return a compact diagnostic for a reliability-gate refusal."""
+    for key in ("error", "output_tail", "checker_stderr", "checker_stdout"):
+        value = row.get(key)
+        if value:
+            lines = [line.strip() for line in str(value).splitlines() if line.strip()]
+            if lines:
+                return lines[-1][-500:]
+    return "no error detail reported"
+
+
+def circuit_breaker_message(streak, row):
+    return (
+        f"ABORT: infra circuit breaker tripped after {streak} consecutive "
+        "near-zero-token infra/rate_limited cells; "
+        f"last_error={row_error_summary(row)}"
+    )
+
+
+def preflight_refusal_message(row):
+    return (
+        "Refusing to start: preflight smoke ended with "
+        f"failure_class={row.get('failure_class')} tokens={row.get('tokens')}; "
+        f"last_error={row_error_summary(row)}. "
+        "Use --allow-preflight-failure to override."
+    )
+
+
 def default_transcripts_dir(results_path):
     """Base dir for transcripts: a ``transcripts/`` sibling of the results log.
 
@@ -1590,10 +1639,20 @@ def main(argv=None):
                              "local when the daemon/image is unavailable")
     parser.add_argument("--allow-version-drift", action="store_true",
                         help="run despite host/image CLI pin mismatch and mark every row")
+    parser.add_argument("--max-consecutive-infra", type=int,
+                        default=DEFAULT_MAX_CONSECUTIVE_INFRA, metavar="N",
+                        help="abort after N consecutive near-zero-token infra/rate-limit "
+                             "cells (default: 3; 0 disables)")
+    parser.add_argument("--preflight-smoke", action="store_true",
+                        help="run one make-it-run smoke cell into a sidecar before main cells")
+    parser.add_argument("--allow-preflight-failure", action="store_true",
+                        help="start main cells even if the requested preflight smoke fails")
     parser.add_argument("--proxy", action="store_true",
                         help="start one owned counting proxy and inject it into "
                              "supported harness/model cells (Cursor and Devin are unsupported)")
     args = parser.parse_args(argv)
+    if args.max_consecutive_infra < 0:
+        parser.error("--max-consecutive-infra must be >= 0")
 
     tasks = [t.strip() for t in args.task.split(",") if t.strip()]
     harnesses = [h.strip() for h in args.harness.split(",") if h.strip()]
@@ -1719,7 +1778,36 @@ def main(argv=None):
 
     ran = 0
     skipped = 0
+    infra_streak = 0
     try:
+        if args.preflight_smoke:
+            smoke_harness = harnesses[0]
+            smoke_candidate = candidates.get(smoke_harness)
+            smoke_row = run_cell(
+                smoke_harness, PREFLIGHT_TASK, args.model, 0, args.timeout,
+                DEFAULT_TASKS_DIR, args.adapters_dir, args.checker_timeout,
+                exec_mode=args.exec_mode, docker_image=args.docker_image,
+                docker_fallback=args.docker_fallback,
+                harness_version=versions.get(smoke_harness),
+                transcripts_dir=transcripts_dir, results_stem=results_stem,
+                proxy_ctx=proxy_ctx,
+                candidate=smoke_candidate,
+                version_drift=bool(drift),
+            )
+            smoke_path = preflight_results_path(args.results_path)
+            append_row(smoke_path, smoke_row)
+            print(
+                f"PREFLIGHT {smoke_row['run_id']} failure_class="
+                f"{smoke_row.get('failure_class')} tokens={smoke_row.get('tokens')} "
+                f"results={smoke_path}"
+            )
+            if is_near_zero_infra(smoke_row):
+                message = preflight_refusal_message(smoke_row)
+                if not args.allow_preflight_failure:
+                    print(message, file=sys.stderr)
+                    return 2
+                print("WARN: " + message, file=sys.stderr)
+
         for harness in harnesses:
             for task in tasks:
                 for trial in trial_numbers:
@@ -1750,6 +1838,14 @@ def main(argv=None):
                     print(f"RUN  {run_id} success={row['success']} score={row['score']} "
                           f"completed={row['completed']} checker_exit={row['checker_exit']} "
                           f"exec={row['exec_mode']} [{status}]")
+                    if is_near_zero_infra(row):
+                        infra_streak += 1
+                        if (args.max_consecutive_infra
+                                and infra_streak >= args.max_consecutive_infra):
+                            print(circuit_breaker_message(infra_streak, row), file=sys.stderr)
+                            return 2
+                    else:
+                        infra_streak = 0
     finally:
         if proxy_server is not None:
             proxy_server.shutdown()
