@@ -123,7 +123,7 @@ def parse_image_pin_labels(output):
 def image_pin_mismatches(expected, actual, keys=None):
     """Return exact image-label mismatches against authoritative pin values."""
     mismatches = []
-    for key in keys or expected:
+    for key in expected if keys is None else keys:
         pin = PIN_BY_KEY.get(key)
         wanted = expected.get(key)
         if pin is None or wanted is None:
