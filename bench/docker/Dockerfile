@@ -20,6 +20,15 @@ ARG GROK_VERSION=0.2.103
 ARG OPENCODE_VERSION=1.18.3
 ARG CURSOR_AGENT_VERSION=2026.07.09-a3815c0
 
+# Cheap runtime integrity stamp: one `docker inspect` can compare the image's
+# baked pins with this Dockerfile without starting a container or probing CLIs.
+LABEL org.openbench.cli.codex="${CODEX_VERSION}" \
+      org.openbench.cli.pi="${PI_VERSION}" \
+      org.openbench.cli.claude="${CLAUDE_VERSION}" \
+      org.openbench.cli.grok="${GROK_VERSION}" \
+      org.openbench.cli.opencode="${OPENCODE_VERSION}" \
+      org.openbench.cli.cursor="${CURSOR_AGENT_VERSION}"
+
 ENV PATH="/root/.local/bin:${PATH}"
 ENV CURSOR_AGENT_VERSION=${CURSOR_AGENT_VERSION}
 

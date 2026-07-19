@@ -20,6 +20,7 @@ REPO = os.path.dirname(HERE)
 DOCKERFILE = os.path.join(HERE, "docker", "Dockerfile")
 DEFAULT_IMAGE = "openbench-harness:latest"
 VERSION_FILE = "/etc/openbench-cli-versions.json"
+IMAGE_LABEL_PREFIX = "org.openbench.cli."
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,42 @@ def dockerfile_pins(text):
 def pinned_versions(path=DOCKERFILE):
     """Read the authoritative CLI versions from Dockerfile ARG pins."""
     return dockerfile_pins(read_dockerfile(path))
+
+
+def parse_image_pin_labels(output):
+    """Parse Docker inspect's JSON label object into ``{pin_key: version}``."""
+    try:
+        labels = json.loads(output or "")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(labels, dict):
+        return {}
+    versions = {}
+    for pin in PINS:
+        value = labels.get(IMAGE_LABEL_PREFIX + pin.key)
+        if isinstance(value, str) and value.strip():
+            versions[pin.key] = value.strip()
+    return versions
+
+
+def image_pin_mismatches(expected, actual, keys=None):
+    """Return exact image-label mismatches against authoritative pin values."""
+    mismatches = []
+    for key in expected if keys is None else keys:
+        pin = PIN_BY_KEY.get(key)
+        wanted = expected.get(key)
+        if pin is None or wanted is None:
+            continue
+        found = actual.get(key)
+        if found != wanted:
+            mismatches.append({
+                "key": key,
+                "harness": pin.harness,
+                "cli": pin.cli,
+                "expected": wanted,
+                "actual": found or "missing label",
+            })
+    return mismatches
 
 
 def reported_version(output):

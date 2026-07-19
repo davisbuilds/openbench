@@ -173,18 +173,19 @@ class TestBuildDockerCmd(unittest.TestCase):
         home = tempfile.mkdtemp(prefix="fake_home_")
         try:
             os.makedirs(os.path.join(home, ".grok"))
-            with open(os.path.join(home, ".grok", "auth.json"), "w") as fh:
+            auth_path = os.path.join(home, ".grok", "auth.json")
+            with open(auth_path, "w") as fh:
                 fh.write("{}")
             with open(os.path.join(home, ".grok", "config.toml"), "w") as fh:
                 fh.write("")
             orig = os.path.expanduser
             os.path.expanduser = lambda p: home if p == "~" else orig(p)
             try:
-                args = docker_exec._auth_mount_args("grokbuild")
-                self.assertEqual(len(args), 2)
-                self.assertIn(".grok/auth.json", args[1])
-                self.assertTrue(args[1].endswith(":ro"))
-                self.assertNotIn("config.toml", " ".join(args))
+                self.assertEqual(docker_exec._auth_mount_args("grokbuild"), [
+                    "-v", f"{auth_path}:/bench/auth/.grok/auth.json:ro",
+                ])
+                self.assertNotIn("config.toml", " ".join(
+                    docker_exec._auth_mount_args("grokbuild")))
             finally:
                 os.path.expanduser = orig
         finally:

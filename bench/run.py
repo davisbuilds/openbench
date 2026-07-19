@@ -35,6 +35,7 @@ import traceback
 from contextlib import contextmanager
 
 from bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
+                       image_pin_mismatches, parse_image_pin_labels,
                        pinned_versions, reported_version, resolve_pin_key)
 from failure_class import classify_failure
 from scrub import build_context as build_scrub_context, scrub_text
@@ -132,17 +133,52 @@ def host_version_drift(harnesses, candidates=None, dockerfile=CLI_PINS_DOCKERFIL
     return drift
 
 
-def version_drift_refusal(drift):
-    lines = ["Refusing to start: host CLI versions do not match Dockerfile pins."]
-    for item in drift:
+def image_version_drift(image, harnesses, candidates=None,
+                        dockerfile=CLI_PINS_DOCKERFILE,
+                        subprocess_runner=subprocess.run):
+    """Return ``(mismatches, available)`` from one cheap Docker inspect."""
+    try:
+        proc = subprocess_runner(
+            ["docker", "inspect", "--format", "{{json .Config.Labels}}", image],
+            capture_output=True, text=True, timeout=20,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return [], False
+    if proc.returncode != 0:
+        return [], False
+
+    labels = parse_image_pin_labels(proc.stdout)
+    pins = pinned_versions(dockerfile)
+    keys = []
+    for harness in harnesses:
+        key = _pin_key_for_harness(harness, (candidates or {}).get(harness))
+        if key is None or key in keys:
+            continue
+        if key not in pins:
+            raise VersionDriftError(f"Dockerfile has no {PIN_BY_KEY[key].arg} pin for {harness}")
+        keys.append(key)
+    return image_pin_mismatches(pins, labels, keys), True
+
+
+def version_drift_refusal(host_drift, image_drift=None,
+                          image="openbench-harness:latest"):
+    image_drift = image_drift or []
+    lines = ["Refusing to start: CLI versions do not match Dockerfile pins."]
+    for item in host_drift:
         lines.append(
             f"  {item['harness']}: host={item['actual']} pin={item['expected']} "
             f"({item['cli']} --version)"
         )
+    for item in image_drift:
+        lines.append(
+            f"  {item['harness']}: image={item['actual']} pin={item['expected']}"
+        )
+    if host_drift:
+        lines.append("Fix host CLIs: python3 bench/bump_clis.py --sync-host")
+    if image_drift:
+        lines.append(f"Fix the image: docker build -t {image} bench/docker")
     lines.extend([
-        "Fix host CLIs: python3 bench/bump_clis.py --sync-host",
-        "Or intentionally change a pin/image: python3 bench/bump_clis.py --apply "
-        "--set <cli>=<version>",
+        "Or update pins and build: python3 bench/bump_clis.py --apply",
         "To waive once (all rows will record version_drift=true): --allow-version-drift",
     ])
     return "\n".join(lines)
@@ -1552,7 +1588,7 @@ def main(argv=None):
                         help="in --exec docker, fail instead of falling back to "
                              "local when the daemon/image is unavailable")
     parser.add_argument("--allow-version-drift", action="store_true",
-                        help="run despite host/Dockerfile CLI mismatch and mark every row")
+                        help="run despite host/image CLI pin mismatch and mark every row")
     parser.add_argument("--proxy", action="store_true",
                         help="start one owned counting proxy and inject it into "
                              "supported harness/model cells (Cursor and Devin are unsupported)")
@@ -1575,20 +1611,45 @@ def main(argv=None):
         parser.error("at least one --harness or --candidate is required")
 
     # Docker fallback can turn a nominal Docker invocation into a mixed run, so
-    # it must satisfy the same host gate. Pure --no-docker-fallback runs never
-    # execute a host CLI and therefore do not depend on host versions.
-    drift = []
-    if args.exec_mode == "local" or args.docker_fallback:
-        try:
-            drift = host_version_drift(harnesses, candidates)
-        except (OSError, VersionDriftError) as exc:
-            print(f"Version preflight failed: {exc}", file=sys.stderr)
-            return 2
-        if drift and not args.allow_version_drift:
-            print(version_drift_refusal(drift), file=sys.stderr)
-            return 2
-        if drift:
-            print("WARN: version drift allowed; every emitted row will be marked", file=sys.stderr)
+    # it must satisfy the same host gate. Every Docker invocation also checks
+    # its build-time pin labels with one inspect before any cell can execute.
+    host_drift = []
+    image_drift = []
+    try:
+        if args.exec_mode == "local" or args.docker_fallback:
+            host_drift = host_version_drift(harnesses, candidates)
+        if args.exec_mode == "docker":
+            image_drift, image_available = image_version_drift(
+                args.docker_image, harnesses, candidates)
+            if not image_available:
+                hint = f"docker build -t {args.docker_image} bench/docker"
+                if not args.docker_fallback:
+                    print(
+                        f"Version preflight failed: cannot inspect Docker image "
+                        f"{args.docker_image!r}. Build it with: {hint}",
+                        file=sys.stderr,
+                    )
+                    return 2
+                print(
+                    f"WARN: cannot inspect Docker image {args.docker_image!r}; "
+                    f"falling back to the validated host lane. Build it with: {hint}",
+                    file=sys.stderr,
+                )
+                # Do not let a later per-cell Docker retry bypass an inconclusive
+                # image gate. The host lane was validated above because fallback
+                # is enabled, so force this whole invocation onto that lane.
+                args.exec_mode = "local"
+    except (OSError, VersionDriftError) as exc:
+        print(f"Version preflight failed: {exc}", file=sys.stderr)
+        return 2
+
+    drift = host_drift or image_drift
+    if (host_drift or image_drift) and not args.allow_version_drift:
+        print(version_drift_refusal(
+            host_drift, image_drift, args.docker_image), file=sys.stderr)
+        return 2
+    if host_drift or image_drift:
+        print("WARN: version drift allowed; every emitted row will be marked", file=sys.stderr)
 
     transcripts_dir = args.transcripts_dir or default_transcripts_dir(args.results_path)
     results_stem = os.path.splitext(os.path.basename(args.results_path))[0]

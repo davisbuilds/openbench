@@ -222,6 +222,13 @@ class TestHostSync(unittest.TestCase):
         self.assertIn("missing", raw)
 
 
+class TestImagePinLabels(unittest.TestCase):
+    def test_explicit_empty_key_selection_checks_nothing(self):
+        mismatches = bump_clis.image_pin_mismatches(
+            {"codex": "0.144.1"}, {}, keys=[])
+        self.assertEqual(mismatches, [])
+
+
 class TestDockerfilePinRewrite(unittest.TestCase):
     def test_rewrite_dockerfile_pins_updates_only_selected_args(self):
         original = "\n".join([

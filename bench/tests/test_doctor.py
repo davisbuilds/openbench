@@ -6,6 +6,7 @@ All probes are mocked; no live CLI/auth/network calls are made.
 
 import contextlib
 import io
+import json
 import os
 import sys
 import types
@@ -90,6 +91,16 @@ def all_green_probes():
             ("claude", "--version"): (0, "2.1.214 (Claude Code)"),
             ("grok", "--version"): (0, "grok 0.2.103 (hash)"),
             ("devin", "--version"): (0, "devin 1"),
+            ("docker", "info", "--format", "{{.ServerVersion}}"): (0, "27.0"),
+            ("docker", "inspect", "--format", "{{json .Config.Labels}}",
+             "openbench-harness:latest"): (0, json.dumps({
+                 "org.openbench.cli.codex": "0.144.5",
+                 "org.openbench.cli.pi": "0.80.10",
+                 "org.openbench.cli.opencode": "1.18.3",
+                 "org.openbench.cli.cursor": "2026.07.09-a3815c0",
+                 "org.openbench.cli.claude": "2.1.214",
+                 "org.openbench.cli.grok": "0.2.103",
+             })),
             ("opencode", "auth", "list"): (0, "OpenAI oauth\n"),
             ("cursor-agent", "status"): (0, "Logged in as x\n"),
         },
@@ -304,6 +315,48 @@ class TestExitCode(unittest.TestCase):
 
 
 class TestDockerInformational(unittest.TestCase):
+    def test_image_status_reports_match_and_drift(self):
+        p = all_green_probes()
+        pins = doctor.pinned_versions()
+        ok, detail = doctor.check_image_versions(p, ["codex", "pi"], pins)
+        self.assertTrue(ok)
+        self.assertIn("matches Dockerfile pins", detail)
+
+        inspect = ("docker", "inspect", "--format", "{{json .Config.Labels}}",
+                   "openbench-harness:latest")
+        p.run_map[inspect] = (0, json.dumps({
+            "org.openbench.cli.codex": "0.144.5",
+            "org.openbench.cli.pi": "0.80.6",
+        }))
+        ok, detail = doctor.check_image_versions(p, ["codex", "pi"], pins)
+        self.assertFalse(ok)
+        self.assertIn("pi: image=0.80.6 pin=0.80.10", detail)
+
+    def test_image_missing_reports_build_hint(self):
+        p = all_green_probes()
+        inspect = ("docker", "inspect", "--format", "{{json .Config.Labels}}",
+                   "openbench-harness:latest")
+        p.run_map[inspect] = (1, "no such image")
+        ok, detail = doctor.check_image_versions(p, ["codex"], doctor.pinned_versions())
+        self.assertIsNone(ok)
+        self.assertIn("docker build -t openbench-harness:latest bench/docker", detail)
+
+    def test_image_drift_fails_doctor(self):
+        p = all_green_probes()
+        inspect = ("docker", "inspect", "--format", "{{json .Config.Labels}}",
+                   "openbench-harness:latest")
+        p.run_map[inspect] = (0, json.dumps({
+            "org.openbench.cli.codex": "0.144.0",
+        }))
+        original = doctor.Probes
+        doctor.Probes = lambda: p
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = doctor.main(["--harness", "codex"])
+        finally:
+            doctor.Probes = original
+        self.assertEqual(rc, 1)
+
     def test_docker_down_does_not_affect_exit(self):
         p = all_green_probes()
         # docker present but daemon not responding -> INFO FAIL, exit still 0.
@@ -328,13 +381,16 @@ class TestDockerInformational(unittest.TestCase):
 class TestRendering(unittest.TestCase):
     def test_report_contains_status_and_details(self):
         rows, _ = doctor.evaluate(["codex"], "gpt-5.5-medium", all_green_probes())
-        text = doctor.format_report(rows, ["codex"], (True, "daemon up"))
+        text = doctor.format_report(
+            rows, ["codex"], (True, "daemon up"),
+            (True, "openbench-harness:latest matches Dockerfile pins"))
         self.assertIn("harness", text)
         self.assertIn("CLI", text)
         self.assertIn("VERSION", text)
         self.assertIn("host=0.144.5 pin=0.144.5 [ok]", text)
         self.assertIn("Details:", text)
         self.assertIn("Docker (informational)", text)
+        self.assertIn("Image pins: [OK]", text)
         self.assertIn("OK", text)
 
 
