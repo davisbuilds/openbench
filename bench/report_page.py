@@ -5,7 +5,6 @@ import argparse
 import html
 import json
 import os
-import re
 import sys
 from collections import defaultdict
 
@@ -50,14 +49,14 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
     grouped = defaultdict(list)
     titles = {}
     for dataset in datasets:
-        path = dataset["path"]
-        for row in stats.load_rows([path]):
-            if stats.is_valid_result_row(row):
-                grouped[str(row["model"])].append(row)
+        valid_rows = [row for row in stats.load_rows([dataset["path"]])
+                      if stats.is_valid_result_row(row)]
+        for row in valid_rows:
+            grouped[str(row["model"])].append(row)
         if dataset.get("title"):
-            models = {str(r["model"]) for r in stats.load_rows([path]) if stats.is_valid_result_row(r)}
-            if len(models) == 1:
-                titles[next(iter(models))] = str(dataset["title"])
+            dataset_models = {str(row["model"]) for row in valid_rows}
+            if len(dataset_models) == 1:
+                titles[next(iter(dataset_models))] = str(dataset["title"])
 
     models = []
     for model, model_rows in grouped.items():
