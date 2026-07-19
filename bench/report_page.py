@@ -54,8 +54,13 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
     titles = {}
     matched_models = set()
     for dataset in datasets:
-        valid_rows = [row for row in stats.load_rows([dataset["path"]])
-                      if stats.is_valid_result_row(row)]
+        loaded_rows = stats.load_rows([dataset["path"]])
+        invalid_count = sum(not stats.is_valid_result_row(row) for row in loaded_rows)
+        if invalid_count:
+            raise ValueError(
+                f"{dataset['path']}: {invalid_count} invalid result row(s); refusing to publish"
+            )
+        valid_rows = loaded_rows
         for row in valid_rows:
             grouped[str(row["model"])].append(row)
         dataset_models = {str(row["model"]) for row in valid_rows}
