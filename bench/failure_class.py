@@ -166,7 +166,8 @@ def is_silent_no_model_call(row, adapter_output=""):
     """True for a completed, unsolved cell with no evidence the model ran."""
     row = row or {}
     text = _text(adapter_output, row.get("output_tail"), row.get("error"))
-    return (bool(row.get("completed")) and not bool(row.get("success"))
+    return (row.get("harness") != "null"
+            and bool(row.get("completed")) and not bool(row.get("success"))
             and not _has_model_work_evidence(row, text))
 
 

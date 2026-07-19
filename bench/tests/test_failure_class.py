@@ -155,6 +155,11 @@ class TestClassifyFailure(unittest.TestCase):
                "tokens": None, "workspace_changed": True}
         self.assertEqual(failure_class.classify_failure(row, ""), "wrong_answer")
 
+    def test_intentional_null_negative_control_stays_wrong_answer(self):
+        row = {"harness": "null", "success": False, "completed": True,
+               "checker_exit": 1, "tokens": None, "turns": None}
+        self.assertEqual(failure_class.classify_failure(row, ""), "wrong_answer")
+
     def test_proxy_upstream_failure_is_infra_even_with_long_error(self):
         row = {"success": False, "completed": False, "checker_exit": 1}
         self.assertEqual(failure_class.classify_failure(
