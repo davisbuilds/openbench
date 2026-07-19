@@ -1,25 +1,23 @@
-Static HTML report generator complete.
+Status: complete
 
 Regenerate:
-  python3 bench/report_page.py --config bench/report-config.sample.json --out site/index.html
+python3 bench/report_page.py --config bench/report-config.sample.json --out site/index.html
 
 Files changed:
-  bench/report_page.py
-  bench/tests/test_report_page.py
-  bench/report-config.sample.json
-  bench/report-pricing.sample.json
-  docs/REPORT_PAGE.md
-  docs/report-methodology.md
-  site/index.html
-  .worker/last.txt
+- bench/report_page.py
+- bench/report-config.sample.json
+- bench/report-pricing.sample.json
+- bench/tests/test_report_page.py
+- docs/REPORT_PAGE.md
+- docs/report-methodology.md
+- site/index.html
 
 Verification:
-  python3 -m unittest discover bench/tests — 454 tests passed
-  scrub checks — clean for report code, tests, config, docs, and site
-  autoreview — clean, no accepted/actionable findings
-  rendered HTML smoke — expected sample values, model grid, and methodology present; no external assets
+- python3 -m unittest discover bench/tests: 454 tests, OK
+- positional CLI smoke with all four sample datasets: OK
+- scrub.py --check on every changed publishable file: clean
+- git diff origin/main...HEAD --check: clean
+- autoreview branch against origin/main, Codex with no web search: clean, no accepted/actionable findings
 
-Rendered sample:
-  /Users/matthewlam/dev/openbench-wt-htmlreport/site/index.html
-
-No push performed.
+Rendered sample: site/index.html
+No live benchmark/API calls were made and nothing was pushed.
