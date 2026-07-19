@@ -82,6 +82,11 @@ AUTH_MOUNTS = {
     # xAI subscription lane (grok-4.5) stages ~/.grok/auth.json into its
     # disposable HOME, so the container needs the login file present.
     "grokbuild": [
+        # Container-native login (grok's Linux build binds auth to its own OIDC
+        # client, so host macOS credentials do not port). Minted once via
+        # `grok login --device-code` in the image; falls back to host ~/.grok
+        # for hosts whose auth was minted on Linux.
+        (".openbench/grok-container-auth/auth.json", ".grok/auth.json"),
         (".grok/auth.json", ".grok/auth.json"),
     ],
     "null": [],
