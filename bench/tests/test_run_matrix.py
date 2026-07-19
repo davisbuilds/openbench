@@ -143,6 +143,7 @@ class RunMatrixTests(unittest.TestCase):
         self.assertIn("--results-path", calls[0])
         self.assertIn("--tasks-dir", calls[0])
         self.assertIn("--trial", calls[0])
+        self.assertEqual(calls[0][calls[0].index("--timeout") + 1], "2400")
         self.assertNotIn("--trials", calls[0])
 
     def test_runner_success_without_expected_row_is_error(self):
