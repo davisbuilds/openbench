@@ -71,6 +71,8 @@ class TestVersionPreflight(unittest.TestCase):
 
         def fake_run_cell(*args, **kwargs):
             emitted.append(kwargs["version_drift"])
+            if image_result == ([], False):
+                self.assertEqual(kwargs["exec_mode"], "local")
             return {
                 "success": False, "score": 0.0, "completed": True,
                 "checker_exit": 1, "exec_mode": "local",
@@ -128,7 +130,14 @@ class TestVersionPreflight(unittest.TestCase):
         code, emitted, call_count, stderr = self._run_main(
             [], ["--exec", "docker"], ([], False))
         self.assertEqual((code, emitted, call_count), (0, [False], 1))
-        self.assertIn("continuing to existing Docker fallback/error handling", stderr)
+        self.assertIn("falling back to the validated host lane", stderr)
+        self.assertIn("docker build -t openbench-harness:latest bench/docker", stderr)
+
+    def test_missing_image_without_fallback_refuses_with_build_hint(self):
+        code, emitted, call_count, stderr = self._run_main(
+            [], ["--exec", "docker", "--no-docker-fallback"], ([], False))
+        self.assertEqual((code, emitted, call_count), (2, [], 0))
+        self.assertIn("Version preflight failed: cannot inspect Docker image", stderr)
         self.assertIn("docker build -t openbench-harness:latest bench/docker", stderr)
 
     def test_mismatch_refuses_before_any_cell(self):

@@ -28,7 +28,7 @@ Use `python3 bench/bump_clis.py --sync-host` to install each npm-based CLI at it
 
 `--allow-version-drift` is an explicit emergency waiver. If used, every newly emitted result row records `version_drift=true`; normal rows record `false`. Do not combine waived and unwaived rows as one experimental dataset without treating that field as a configuration difference.
 
-A pure Docker invocation with `--no-docker-fallback` does not probe host CLIs because no host CLI can execute, but it still runs the image gate. If the image is missing or Docker cannot be inspected, the preflight prints the build hint and defers to the existing Docker fallback/error path rather than misclassifying availability as version drift. After changing a Dockerfile pin with `bench/bump_clis.py --apply`, rebuild and use the verified image before collecting rows.
+A pure Docker invocation with `--no-docker-fallback` does not probe host CLIs because no host CLI can execute, but it still runs the image gate. If the image is missing or Docker cannot be inspected, the preflight prints the build hint. With fallback enabled it forces the entire invocation onto the already-validated host lane, so a later Docker retry cannot bypass the image gate; with `--no-docker-fallback` it stops before any cell. Availability is not recorded as version drift. After changing a Dockerfile pin with `bench/bump_clis.py --apply`, rebuild and use the verified image before collecting rows.
 
 ## Upstream version automation
 

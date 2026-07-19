@@ -1622,12 +1622,23 @@ def main(argv=None):
             image_drift, image_available = image_version_drift(
                 args.docker_image, harnesses, candidates)
             if not image_available:
+                hint = f"docker build -t {args.docker_image} bench/docker"
+                if not args.docker_fallback:
+                    print(
+                        f"Version preflight failed: cannot inspect Docker image "
+                        f"{args.docker_image!r}. Build it with: {hint}",
+                        file=sys.stderr,
+                    )
+                    return 2
                 print(
                     f"WARN: cannot inspect Docker image {args.docker_image!r}; "
-                    "continuing to existing Docker fallback/error handling. "
-                    f"Build it with: docker build -t {args.docker_image} bench/docker",
+                    f"falling back to the validated host lane. Build it with: {hint}",
                     file=sys.stderr,
                 )
+                # Do not let a later per-cell Docker retry bypass an inconclusive
+                # image gate. The host lane was validated above because fallback
+                # is enabled, so force this whole invocation onto that lane.
+                args.exec_mode = "local"
     except (OSError, VersionDriftError) as exc:
         print(f"Version preflight failed: {exc}", file=sys.stderr)
         return 2
