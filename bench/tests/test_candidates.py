@@ -164,6 +164,37 @@ class CandidateTests(unittest.TestCase):
                 manifest.run("prompt {kept}", td, "model", 9)
             self.assertEqual(captured, ["cli", "prompt {kept}", '{"type":"json"}'])
 
+    def test_manifest_expands_workspace_file_globs_into_argv(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.makedirs(os.path.join(td, "src"))
+            for relative in ("main.py", "src/helper.py", "notes.txt"):
+                with open(os.path.join(td, relative), "w", encoding="utf-8") as fh:
+                    fh.write(relative)
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="files"\n'
+                         'command=["cli", "{workspace_files}", "{prompt}"]\n'
+                         'workspace_file_globs=["**/*.py"]\n')
+            manifest = candidates.load_candidate(path, ADAPTERS)
+            captured = []
+            def run(cmd, **kw):
+                captured.extend(cmd)
+                return Proc()
+            with mock.patch.object(candidates, "_run_process", side_effect=run):
+                manifest.run("fix it", td, "model", 9)
+            self.assertEqual(captured, ["cli", "main.py", "src/helper.py", "fix it"])
+            self.assertEqual(manifest.provenance["workspace_file_globs"], ["**/*.py"])
+
+    def test_manifest_rejects_workspace_file_glob_escape(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "harness.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="bad"\n'
+                         'command=["cli", "{workspace_files}"]\n'
+                         'workspace_file_globs=["../*"]\n')
+            with self.assertRaisesRegex(ValueError, "must stay within workspace"):
+                candidates.load_candidate(path, ADAPTERS)
+
     def test_manifest_version_uses_isolated_home(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "harness.toml")

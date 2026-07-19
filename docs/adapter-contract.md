@@ -116,9 +116,11 @@ auth, parsing, model mapping, and proxy support.
 
 A generic manifest describes an arbitrary CLI without Python: argv template,
 environment, auth-file mappings, version command, model mapping, and optional
-base-URL proxy routing. Placeholders are expanded per cell:
-`{prompt}`, `{workspace}`, `{model}`, and `{home}`. Templates are arrays, not shell
-strings, so no shell parsing or interpolation occurs.
+base-URL proxy routing. Scalar placeholders are expanded per cell: `{prompt}`, `{workspace}`, `{model}`,
+and `{home}`. A whole argv element equal to `{workspace_files}` expands sorted
+relative paths selected by declared `workspace_file_globs`, for CLIs that need
+editable files passed positionally. Templates are arrays, not shell strings, so
+no shell parsing or interpolation occurs.
 
 See `bench/ADAPTER_SPEC.md` for the legacy Python API and the examples in
 `docs/byo-harnesses.md` for the declarative schemas.
