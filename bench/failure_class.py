@@ -17,6 +17,13 @@ import re
 
 FAILURE_CLASSES = ("solved", "wrong_answer", "timeout", "rate_limited", "infra")
 EXCLUDED_FROM_SOLVE_RATE = ("rate_limited", "infra")
+NEAR_ZERO_TOKEN_LIMIT = 100
+_TOKEN_FIELDS = (
+    "tokens", "tokens_fresh", "tokens_input_uncached", "tokens_cache_read",
+    "tokens_cache_write", "tokens_output", "tokens_reasoning",
+    "tokens_proxy_input_uncached", "tokens_proxy_cache_read",
+    "tokens_proxy_cache_write", "tokens_proxy_output", "tokens_proxy_reasoning",
+)
 
 # Rate-limit classification excludes rows from solve-rate denominators, so the
 # detector intentionally requires provider/API-error context rather than any
@@ -41,7 +48,8 @@ _INFRA_RE = re.compile(
     r"not logged in|login required|please log in|"
     r"No such image:\s*[^\s]+|"
     r"image ['\"]?[^'\"\n]+['\"]? not found|"
-    r"Cannot connect to the Docker daemon"
+    r"Cannot connect to the Docker daemon|"
+    r"proxy_upstream_failed"
     r")",
     re.IGNORECASE,
 )
@@ -118,8 +126,55 @@ def _meaningful_work_text(text):
     return "\n".join(kept).strip()
 
 
+def has_near_zero_agent_tokens(row):
+    """True when every reported agent/proxy token field is absent or below 100."""
+    values = [row.get(field) for field in _TOKEN_FIELDS]
+    return all(value in (None, 0) or (
+        isinstance(value, (int, float)) and not isinstance(value, bool)
+        and 0 <= value < NEAR_ZERO_TOKEN_LIMIT
+    ) for value in values)
+
+
+def _has_workspace_work_evidence(row):
+    """Recognize explicit change summaries without treating pristine file lists as work."""
+    if row.get("workspace_changed") is True:
+        return True
+    changes = row.get("workspace_changes")
+    return bool(changes) if isinstance(changes, (dict, list, tuple, set, str)) else False
+
+
+def _has_model_work_evidence(row, text):
+    """Conservative evidence that a model ran despite missing token telemetry.
+
+    Token parsers can fail for otherwise healthy adapters.  Turns, meaningful
+    model/adapter output (10+ characters), or explicit workspace-change evidence
+    therefore prevent the silent-failure reclassification.  Merely listing the
+    checker workspace is not evidence because it includes pristine task files.
+    """
+    return (not has_near_zero_agent_tokens(row) or bool(row.get("turns"))
+            or len(_meaningful_work_text(text)) >= 10
+            or _has_workspace_work_evidence(row))
+
+
 def _has_no_work_evidence(row, text):
+    # Cap-rider handling predates the completed-run heuristic and intentionally
+    # treats any nonzero aggregate token report as evidence of work.
     return not row.get("tokens") and not row.get("turns") and len(_meaningful_work_text(text)) < 200
+
+
+def is_silent_no_model_call(row, adapter_output=""):
+    """True for a completed, unsolved cell with no evidence the model ran."""
+    row = row or {}
+    text = _text(adapter_output, row.get("output_tail"), row.get("error"))
+    return (bool(row.get("completed")) and not bool(row.get("success"))
+            and not _has_model_work_evidence(row, text))
+
+
+def classify_failure_reason(row, adapter_output=""):
+    """Return a stable diagnostic reason for heuristic infra classifications."""
+    if is_silent_no_model_call(row, adapter_output):
+        return "silent-no-model-call"
+    return None
 
 
 def classify_failure(row, adapter_output="", timeout_s=None):
@@ -144,6 +199,8 @@ def classify_failure(row, adapter_output="", timeout_s=None):
     if has_infra_marker(combined):
         return "infra"
     if has_instant_cli_exit_shape(row):
+        return "infra"
+    if is_silent_no_model_call(row, adapter_output):
         return "infra"
     # Wall time riding the cap only means "timeout" when the runner killed the
     # agent; a CLI that exited on its own (completed=True) just ran slow.
