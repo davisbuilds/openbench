@@ -288,20 +288,6 @@ class TestMatchedComparison(CompareTestCase):
         markdown = compare.render_markdown(report)
         self.assertIn("| Solve rate (finished) | 50.0% | 66.7% |", markdown)
 
-    def test_checker_timeout_is_not_an_adapter_cap_timeout(self):
-        a = self.write("a.jsonl", [
-            self.row("h", "t", 1, False, failure_class="timeout",
-                     checker_exit="timeout"),
-        ])
-        b = self.write("b.jsonl", [self.row("h", "t", 1, True)])
-        report = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
-        a_summary = report["summaries"]["a"]
-
-        self.assertEqual((a_summary["finished_solved"], a_summary["finished_n"]),
-                         (0, 1))
-        self.assertEqual(dict(compare.scorecard_rows(report))["Excluded: timeout"],
-                         ["0", "0"])
-
     def test_version_mix_is_flagged_in_human_and_markdown_tables(self):
         a = self.write("a.jsonl", [
             self.row("h", "t1", 1, True, harness_version="1.0"),

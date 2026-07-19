@@ -120,12 +120,6 @@ def _measurement(row, field):
     return None
 
 
-def _is_cap_timeout(row):
-    """Return whether a failure came from the per-cell adapter cap."""
-    return (stats.class_for_report(row) == "timeout"
-            and row.get("checker_exit") != "timeout")
-
-
 def _sum_per_solve(rows, field, solved):
     if not solved:
         return None
@@ -170,7 +164,7 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
                                       if value is not None})
         unknown_timeouts_by_arm[arm] = sum(value is None for value in timeout_values)
         unknown_timeout_rows += unknown_timeouts_by_arm[arm]
-        timeout_count = sum(_is_cap_timeout(row) for row in countable)
+        timeout_count = sum(stats.class_for_report(row) == "timeout" for row in countable)
         if timeout_count:
             exclusions[arm]["timeout"] = timeout_count
         provenance_rows.extend(dict(row, _compare_arm=arm) for row in countable)
@@ -202,7 +196,7 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
                 "mean_score": None,
             }
         solved = canonical["solved"]
-        finished_rows = [row for row in rows if not _is_cap_timeout(row)]
+        finished_rows = [row for row in rows if stats.class_for_report(row) != "timeout"]
         finished_n = len(finished_rows)
         finished_solved = sum(bool(row["success"]) for row in finished_rows)
         finished_rate = finished_solved / finished_n if finished_n else None
