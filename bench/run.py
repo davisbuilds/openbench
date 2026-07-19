@@ -35,8 +35,8 @@ import traceback
 from contextlib import contextmanager
 
 from bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
-                       parse_image_pin_labels, pinned_versions, reported_version,
-                       resolve_pin_key)
+                       image_pin_mismatches, parse_image_pin_labels,
+                       pinned_versions, reported_version, resolve_pin_key)
 from failure_class import classify_failure
 from scrub import build_context as build_scrub_context, scrub_text
 
@@ -149,23 +149,15 @@ def image_version_drift(image, harnesses, candidates=None,
 
     labels = parse_image_pin_labels(proc.stdout)
     pins = pinned_versions(dockerfile)
-    drift = []
-    checked = set()
+    keys = []
     for harness in harnesses:
         key = _pin_key_for_harness(harness, (candidates or {}).get(harness))
-        if key is None or key in checked:
+        if key is None or key in keys:
             continue
-        checked.add(key)
-        expected = pins.get(key)
-        if expected is None:
+        if key not in pins:
             raise VersionDriftError(f"Dockerfile has no {PIN_BY_KEY[key].arg} pin for {harness}")
-        actual = labels.get(key)
-        if actual != expected:
-            drift.append({
-                "harness": harness, "key": key, "cli": PIN_BY_KEY[key].cli,
-                "expected": expected, "actual": actual or "missing label",
-            })
-    return drift, True
+        keys.append(key)
+    return image_pin_mismatches(pins, labels, keys), True
 
 
 def version_drift_refusal(host_drift, image_drift=None,
@@ -1596,7 +1588,7 @@ def main(argv=None):
                         help="in --exec docker, fail instead of falling back to "
                              "local when the daemon/image is unavailable")
     parser.add_argument("--allow-version-drift", action="store_true",
-                        help="run despite host/Dockerfile CLI mismatch and mark every row")
+                        help="run despite host/image CLI pin mismatch and mark every row")
     parser.add_argument("--proxy", action="store_true",
                         help="start one owned counting proxy and inject it into "
                              "supported harness/model cells (Cursor and Devin are unsupported)")

@@ -120,6 +120,26 @@ def parse_image_pin_labels(output):
     return versions
 
 
+def image_pin_mismatches(expected, actual, keys=None):
+    """Return exact image-label mismatches against authoritative pin values."""
+    mismatches = []
+    for key in keys or expected:
+        pin = PIN_BY_KEY.get(key)
+        wanted = expected.get(key)
+        if pin is None or wanted is None:
+            continue
+        found = actual.get(key)
+        if found != wanted:
+            mismatches.append({
+                "key": key,
+                "harness": pin.harness,
+                "cli": pin.cli,
+                "expected": wanted,
+                "actual": found or "missing label",
+            })
+    return mismatches
+
+
 def reported_version(output):
     """Extract the first version token from a CLI's ``--version`` output."""
     match = re.search(

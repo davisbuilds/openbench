@@ -10,8 +10,8 @@ spending any tokens (no live model calls). Per requested harness it verifies:
   3. MODEL   - the adapter module imports and its MODELS maps the requested
                canonical model name
 
-Docker daemon status is also reported, but only informationally: it never
-affects the exit code.
+Docker daemon/image availability is informational. A successfully inspected
+image whose labels drift from the Dockerfile pins fails the preflight.
 
     python3 bench/doctor.py [--harness codex,pi,...] [--model gpt-5.5-medium]
 
@@ -43,8 +43,8 @@ import http.client
 import subprocess
 from urllib.parse import urlsplit
 
-from bump_clis import (PIN_BY_KEY, parse_image_pin_labels, pinned_versions,
-                       reported_version, resolve_pin_key)
+from bump_clis import (image_pin_mismatches, parse_image_pin_labels,
+                       pinned_versions, reported_version, resolve_pin_key)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ADAPTERS_DIR = os.path.join(HERE, "adapters")
@@ -366,7 +366,7 @@ def check_docker(p):
 
 
 def check_image_versions(p, harnesses, pins, image=DEFAULT_IMAGE):
-    """Informational image-label comparison against requested harness pins."""
+    """Compare requested harness pins with one Docker image-label inspect."""
     code, out = p.run([
         "docker", "inspect", "--format", "{{json .Config.Labels}}", image,
     ])
@@ -374,25 +374,21 @@ def check_image_versions(p, harnesses, pins, image=DEFAULT_IMAGE):
         return None, (f"{image} unavailable; build with: "
                       f"docker build -t {image} bench/docker")
     labels = parse_image_pin_labels(out)
-    mismatches = []
-    checked = set()
+    keys = []
     for harness in harnesses:
         base = "codex" if harness.startswith("codex_") else harness
         try:
             key = resolve_pin_key(base)
         except ValueError:
             continue
-        if key in checked:
-            continue
-        checked.add(key)
-        expected = pins.get(key)
-        actual = labels.get(key)
-        if actual != expected:
-            mismatches.append(
-                f"{PIN_BY_KEY[key].harness}: image={actual or 'missing label'} "
-                f"pin={expected or 'missing'}")
+        if key not in keys:
+            keys.append(key)
+    mismatches = image_pin_mismatches(pins, labels, keys)
     if mismatches:
-        return False, "drift: " + "; ".join(mismatches)
+        detail = "; ".join(
+            f"{item['harness']}: image={item['actual']} pin={item['expected']}"
+            for item in mismatches)
+        return False, "drift: " + detail
     return True, f"{image} matches Dockerfile pins"
 
 

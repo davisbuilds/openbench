@@ -10,7 +10,7 @@ At run start, `bench/run.py` enforces both sides of the invariant before any cel
 A mismatch in either gate stops the run before any cell executes:
 
 ```text
-Refusing to start: host CLI versions do not match Dockerfile pins.
+Refusing to start: CLI versions do not match Dockerfile pins.
   grokbuild: host=0.2.91 pin=0.2.93 (grok --version)
 Fix host CLIs: python3 bench/bump_clis.py --sync-host
 ```
