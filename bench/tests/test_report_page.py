@@ -53,6 +53,14 @@ class ReportPageTest(unittest.TestCase):
         self.assertEqual((arms["pi"]["solved"], arms["pi"]["n"]), (1, 1))
         self.assertEqual(arms["pi"]["unmatched"], 1)
 
+    def test_disjoint_harness_cells_render_zero_denominators(self):
+        path = self.write([self.row("pi", 1, True),
+                           self.row("codex", 2, True)])
+        model = report_page.assemble_tables(
+            [{"path": path, "matched": True}], tasks_dirs=[self.tmp.name])[0]
+        self.assertEqual({arm["n"] for arm in model["arms"]}, {0})
+        self.assertIn("0/0", report_page.render_page([model], "Method"))
+
     def test_price_column_only_appears_for_a_priced_model(self):
         path = self.write([self.row("pi", 1, True)])
         unpriced = report_page.assemble_tables([{"path": path}])

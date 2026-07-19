@@ -78,7 +78,11 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
         for harness, (unique, excluded, duplicates) in prepared.items():
             rows = ([unique[cell] for cell in sorted(common_cells)]
                     if matched else list(unique.values()))
-            canonical = stats.aggregate_table(rows, (), min_n=0, pricing=pricing)[0]
+            if rows:
+                canonical = stats.aggregate_table(rows, (), min_n=0, pricing=pricing)[0]
+            else:
+                canonical = {"solved": 0, "n": 0, "solve_rate": None,
+                             "wilson95": list(stats.wilson_ci(0, 0))}
             solved = canonical["solved"]
             finished = [r for r in rows if stats.class_for_report(r) != "timeout"]
             finished_solved = sum(bool(r["success"]) for r in finished)
