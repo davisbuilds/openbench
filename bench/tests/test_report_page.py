@@ -46,7 +46,9 @@ class ReportPageTest(unittest.TestCase):
             self.row("pi", 1, True), self.row("pi", 2, True),
             self.row("codex", 1, False),
         ])
-        model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
+        model = report_page.assemble_tables(
+            [{"path": path, "matched": True}], tasks_dirs=[self.tmp.name]
+        )[0]
         arms = {arm["arm"]: arm for arm in model["arms"]}
         self.assertEqual((arms["pi"]["solved"], arms["pi"]["n"]), (1, 1))
         self.assertEqual(arms["pi"]["unmatched"], 1)

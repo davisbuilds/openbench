@@ -52,15 +52,17 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
     roots = stats.parse_tasks_dirs(tasks_dirs)
     grouped = defaultdict(list)
     titles = {}
+    matched_models = set()
     for dataset in datasets:
         valid_rows = [row for row in stats.load_rows([dataset["path"]])
                       if stats.is_valid_result_row(row)]
         for row in valid_rows:
             grouped[str(row["model"])].append(row)
-        if dataset.get("title"):
-            dataset_models = {str(row["model"]) for row in valid_rows}
-            if len(dataset_models) == 1:
-                titles[next(iter(dataset_models))] = str(dataset["title"])
+        dataset_models = {str(row["model"]) for row in valid_rows}
+        if dataset.get("title") and len(dataset_models) == 1:
+            titles[next(iter(dataset_models))] = str(dataset["title"])
+        if dataset.get("matched"):
+            matched_models.update(dataset_models)
 
     models = []
     for model, model_rows in grouped.items():
@@ -72,8 +74,10 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
             unique, duplicates = compare._unique_cells(eligible)
             prepared[harness] = (unique, excluded, duplicates)
         common_cells = set.intersection(*(set(values[0]) for values in prepared.values()))
+        matched = model in matched_models
         for harness, (unique, excluded, duplicates) in prepared.items():
-            rows = [unique[cell] for cell in sorted(common_cells)]
+            rows = ([unique[cell] for cell in sorted(common_cells)]
+                    if matched else list(unique.values()))
             canonical = stats.aggregate_table(rows, (), min_n=0, pricing=pricing)[0]
             solved = canonical["solved"]
             finished = [r for r in rows if stats.class_for_report(r) != "timeout"]
@@ -100,7 +104,7 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                 "token_basis": _token_basis(rows),
                 "excluded": dict(excluded),
                 "duplicates": duplicates,
-                "unmatched": len(unique) - len(common_cells),
+                "unmatched": len(unique) - len(common_cells) if matched else 0,
             })
         arms.sort(key=lambda r: (-(r["rate"] if r["rate"] is not None else -1),
                                  r["med_wall"] if r["med_wall"] is not None else float("inf"),
