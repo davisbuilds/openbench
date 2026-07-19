@@ -59,7 +59,9 @@ environment variable cannot turn on the stock arm.
 kind = "manifest"
 name = "my-cli"
 isolate_home = true
-command = ["my-cli", "run", "--model", "{model}", "--workspace", "{workspace}", "{prompt}"]
+command = ["my-cli", "run", "--model", "{model}", "--workspace", "{workspace}",
+           "{workspace_files}", "{prompt}"]
+workspace_file_globs = ["src/**/*", "*.toml"]
 version_command = ["my-cli", "--version"]
 # The safe default does not inherit arbitrary host variables. Name only the
 # credentials/settings this CLI needs; Docker forwards these without values in argv.
@@ -82,8 +84,12 @@ environment contains only basic process variables, declared `pass_env` names,
 manifest `[env]` values, and runner proxy variables. `inherit_env = true` is an
 explicit compatibility escape hatch for stock-equivalence cases; it may expose
 unrelated host credentials and should not be used for new manifests.
-Supported placeholders
-are `{prompt}`, `{workspace}`, `{model}`, and `{home}`. Auth files are copied to
+Supported scalar placeholders are `{prompt}`, `{workspace}`, `{model}`, and
+`{home}`. The special whole-argument placeholder `{workspace_files}` expands to
+sorted, de-duplicated relative file paths matched by `workspace_file_globs`;
+the two must be declared together. Matches are contained within the disposable
+workspace. This supports CLIs that require editable files as positional argv
+instead of discovering them from their working directory. Auth files are copied to
 the disposable home; sources must use home-relative `~/...` paths and missing
 files return `SETUP-NEEDED`. `base_url_env` and
 `proxy_route` opt the CLI into the counting proxy. `proxy_route` is the path

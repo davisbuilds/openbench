@@ -4,3 +4,11 @@
 - The preflight sidecar replaces the results file's final extension with `.preflight.jsonl` (for example, `results.jsonl` becomes `results.preflight.jsonl`), keeping it next to the main results file.
 - `--max-consecutive-infra 0` disables the default-on circuit breaker; positive values set the threshold. Negative values are rejected.
 - Near-zero spend uses the requested aggregate `tokens` field only: `None` or a numeric value below 100. Non-numeric token values are treated as real/unknown spend and do not trip a safety gate.
+
+# AIDER manifest onboarding metrics
+
+- Wall-clock time spent: ~14 minutes from initial repo inspection/venv setup through live smoke and commits; final test/review closeout time recorded in `.worker/last.txt`.
+- Aider install: isolated venv at `.worker/venvs/aider`; `aider-chat==0.86.2` (`aider --version` reports `aider 0.86.2`).
+- Headless invocation verified from `aider --help`: `aider --message <prompt> --model deepseek/deepseek-v4-flash --yes-always`; manifest also disables git commits/check-update/analytics for benchmark hygiene.
+- Manifest line count: 22 lines in `experiments/candidates/aider.toml`.
+- Framework ease-of-add gap found and fixed generically: manifest argv templates had scalar placeholders only, but Aider needs editable workspace files passed as positional argv to reliably load/read them in `--message` mode. Added `workspace_file_globs` plus whole-argument `{workspace_files}` expansion in `bench/candidates.py`, with provenance, docs, and tests.

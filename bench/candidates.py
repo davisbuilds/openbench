@@ -1,5 +1,6 @@
 """Declarative candidate adapters for config variants and arbitrary CLIs."""
 
+import glob
 import hashlib
 import importlib.util
 import inspect
@@ -253,6 +254,16 @@ class ManifestHarness:
         if (not isinstance(self.command, list) or not self.command
                 or not all(isinstance(x, str) for x in self.command)):
             raise ValueError("manifest command must be a non-empty array of strings")
+        self.workspace_file_globs = data.get("workspace_file_globs", [])
+        if (not isinstance(self.workspace_file_globs, list)
+                or not all(isinstance(x, str) and x for x in self.workspace_file_globs)):
+            raise ValueError("manifest workspace_file_globs must be an array of non-empty strings")
+        for pattern in self.workspace_file_globs:
+            if os.path.isabs(pattern) or ".." in pattern.split(os.sep):
+                raise ValueError(f"workspace file glob must stay within workspace: {pattern!r}")
+        if ("{workspace_files}" in self.command) != bool(self.workspace_file_globs):
+            raise ValueError(
+                "manifest {workspace_files} requires non-empty workspace_file_globs and vice versa")
         self.models = data.get("models", {})
         self.env = {str(k): str(v) for k, v in data.get("env", {}).items()}
         self.inherit_env = bool(data.get("inherit_env", False))
@@ -285,6 +296,7 @@ class ManifestHarness:
         self.proxy_adapter = data.get("proxy_adapter")
         self.provenance = {"kind": self.kind, "name": self.name, "spec": self.path,
                            "spec_sha256": hashlib.sha256(self.spec_bytes).hexdigest(), "command": list(self.command),
+                           "workspace_file_globs": list(self.workspace_file_globs),
                            "models": dict(self.models), "env_names": sorted(self.env),
                            "inherit_env": self.inherit_env,
                            "pass_env": sorted(self.pass_env),
@@ -350,7 +362,19 @@ class ManifestHarness:
                 if base and token:
                     env[self.base_url_env] = "/".join(
                         [base.rstrip("/"), "cell", token, self.proxy_route.strip("/")])
-            cmd = [_expand(part, values) for part in self.command]
+            workspace_files = []
+            for pattern in self.workspace_file_globs:
+                for relative in glob.glob(pattern, root_dir=workdir, recursive=True):
+                    source = _contained_source(workdir, relative)
+                    if os.path.isfile(source):
+                        workspace_files.append(relative)
+            workspace_files = sorted(set(workspace_files))
+            cmd = []
+            for part in self.command:
+                if part == "{workspace_files}":
+                    cmd.extend(workspace_files)
+                else:
+                    cmd.append(_expand(part, values))
             try:
                 proc = _run_process(cmd, cwd=workdir, timeout=timeout_s, env=env)
             except subprocess.TimeoutExpired as exc:

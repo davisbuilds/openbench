@@ -1,0 +1,22 @@
+kind = "manifest"
+name = "aider"
+isolate_home = true
+command = [
+  "aider",
+  "--message", "{prompt}",
+  "--model", "{model}",
+  "--yes-always",
+  "--no-git",
+  "--no-auto-commits",
+  "--no-check-update",
+  "--no-analytics",
+  "{workspace_files}",
+]
+workspace_file_globs = ["**/*"]
+version_command = ["aider", "--version"]
+pass_env = ["DEEPSEEK_API_KEY"]
+base_url_env = "DEEPSEEK_API_BASE"
+proxy_route = "chat/deepseek"
+
+[models]
+"deepseek-v4-flash" = "deepseek/deepseek-v4-flash"
