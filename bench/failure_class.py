@@ -172,7 +172,13 @@ def is_silent_no_model_call(row, adapter_output=""):
 
 
 def classify_failure_reason(row, adapter_output=""):
-    """Return a stable diagnostic reason for heuristic infra classifications."""
+    """Return a stable diagnostic reason without overriding stronger markers."""
+    row = row or {}
+    combined = _text(adapter_output, row.get("output_tail"), row.get("error"),
+                     row.get("checker_exit"))
+    if (bool(row.get("success")) or has_rate_limit_marker(combined)
+            or has_infra_marker(combined) or has_instant_cli_exit_shape(row)):
+        return None
     if is_silent_no_model_call(row, adapter_output):
         return "silent-no-model-call"
     return None

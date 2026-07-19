@@ -165,6 +165,12 @@ class TestClassifyFailure(unittest.TestCase):
         self.assertEqual(failure_class.classify_failure(
             row, "API error (status 502): proxy_upstream_failed"), "infra")
 
+    def test_stronger_marker_does_not_get_silent_failure_reason(self):
+        row = {"success": False, "completed": True, "checker_exit": 1,
+               "tokens": None, "error": "proxy_upstream_failed"}
+        self.assertEqual(failure_class.classify_failure(row, ""), "infra")
+        self.assertIsNone(failure_class.classify_failure_reason(row, ""))
+
     def test_instant_bare_cli_exit_without_tokens_is_infra(self):
         row = {
             "run_id": "codex:terminal-bench/cancel-async-tasks:gpt-5.6-sol:trial1",
@@ -240,6 +246,27 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
         self.assertNotIn("output_tail", run.ROW_FIELDS)
         self.assertEqual(row["output_tail"], "tail without marker")  # internal only, not persisted
         self.assertEqual(row["failure_class"], "rate_limited")
+
+    def test_runner_workspace_change_is_real_model_work_evidence(self):
+        orig_invoke, orig_checker = run.invoke_adapter, run.run_checker
+
+        def fake_invoke(_mode, _harness, _instruction, workdir, *_args, **_kwargs):
+            with open(os.path.join(workdir, "model-edit.txt"), "w", encoding="utf-8") as fh:
+                fh.write("changed")
+            return ({"completed": True, "error": None, "output_tail": "",
+                     "full_output": "", "tokens": None, "turns": None,
+                     "cmd": ["fake"]}, "local")
+
+        try:
+            run.invoke_adapter = fake_invoke
+            run.run_checker = lambda *a, **k: (1, None, "", "")
+            row = run.run_cell("fake", self.task, "model", 1, 600,
+                               self.tasks_dir, self.tmp, 30)
+        finally:
+            run.invoke_adapter, run.run_checker = orig_invoke, orig_checker
+
+        self.assertTrue(row["workspace_changed"])
+        self.assertEqual(row["failure_class"], "wrong_answer")
 
     def test_runner_uses_docker_host_wall_time_when_larger(self):
         orig_invoke, orig_checker = run.invoke_adapter, run.run_checker
