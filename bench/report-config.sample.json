@@ -1,0 +1,12 @@
+{
+  "title": "OpenBench: same model, different harness",
+  "headline": "Harness choice moves correctness and efficiency; rankings depend on the model.",
+  "methodology": "../docs/report-methodology.md",
+  "pricing": "report-pricing.sample.json",
+  "datasets": [
+    {"path": "../.worker/data/deepseek-run1-pi.jsonl", "title": "DeepSeek V4 Flash"},
+    {"path": "../.worker/data/kimi.jsonl", "title": "Kimi K3"},
+    {"path": "../.worker/data/grok45-provisional.jsonl", "title": "Grok 4.5 (provisional)"},
+    {"path": "../.worker/data/gpt56-provisional.jsonl", "title": "GPT-5.6 (provisional)"}
+  ]
+}
