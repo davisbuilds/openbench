@@ -46,11 +46,10 @@ Wilson 95% confidence interval:
 - **Solve rate @cap** uses the matched-attempted denominator and counts timeouts
   as failures. The historical **Solve rate** row is retained as a compatible
   alias for this metric.
-- **Solve rate (finished)** removes attempts stopped by the per-cell adapter
-  cap from the denominator, just as infrastructure failures are excluded, so
-  correctness is robust to the chosen cap. Timeout counts appear as
-  `Excluded: timeout`; this exclusion applies only to the finished view.
-  Checker timeouts use a separate cap and remain failures in both views.
+- **Solve rate (finished)** removes timeout-classified attempts from the
+  denominator, just as infrastructure failures are excluded, so correctness is
+  robust to the chosen cap. Timeout counts appear as `Excluded: timeout`; this
+  exclusion applies only to the finished view.
 
 ## Denominators and efficiency
 
