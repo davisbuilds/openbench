@@ -61,9 +61,9 @@ WORKSPACE_EVIDENCE_META_KEY = "\0manifest"
 CONTAINER_CLI_VERSIONS_PATH = "/etc/openbench-cli-versions.json"
 _CONTAINER_CLI_VERSION_CACHE = {}
 
-# Ordered field list for each results row. ``score`` and ``harness_version`` are
-# appended last so older logs that predate them stay readable (report derives a
-# score from ``success`` when the field is absent).
+# Ordered field list for each results row. New provenance fields are appended
+# so older logs that predate them stay readable (report derives a score from
+# ``success`` when the field is absent).
 ROW_FIELDS = (
     "run_id", "ts_iso", "harness", "model", "task", "trial",
     "success", "completed", "error", "wall_time_s", "t_env_setup_s", "t_agent_s", "t_checker_s", "tokens",
@@ -74,7 +74,7 @@ ROW_FIELDS = (
     "sampling_observed", "token_basis_proxy",
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
     "harness_version_source", "failure_class", "checker_stdout", "checker_stderr", "checker_workspace_files",
-    "image_digest", "candidate_provenance", "version_drift",
+    "image_digest", "candidate_provenance", "version_drift", "timeout_s",
 )
 
 
@@ -1372,6 +1372,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "image_digest": None,
         "candidate_provenance": candidate.provenance if candidate is not None else None,
         "version_drift": bool(version_drift),
+        "timeout_s": timeout_s,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
@@ -1520,8 +1521,8 @@ def main(argv=None):
     parser.add_argument("--trial", type=int, default=None,
                         help="run only this trial number (for matrix wrappers; "
                              "default: run 1..--trials)")
-    parser.add_argument("--timeout", type=int, default=600,
-                        help="per-cell adapter timeout in seconds (default: 600)")
+    parser.add_argument("--timeout", type=int, default=2400,
+                        help="per-cell adapter timeout in seconds (default: 2400)")
     parser.add_argument("--checker-timeout", type=int, default=120,
                         help="checker.sh timeout in seconds (default: 120); "
                              "on timeout the row records checker_exit='timeout'")

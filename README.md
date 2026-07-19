@@ -293,9 +293,10 @@ fields:
 | `exec_mode`    | `local` or `docker` (what actually ran, after any fallback)             |
 | `score`        | graded score in `[0.0, 1.0]` (see the `SCORE:` contract); `1.0`/`0.0` for a plain pass/fail |
 | `harness_version` | version string from the adapter's optional `version()`, `"builtin"` for `null`, else `null` |
+| `timeout_s`    | per-cell adapter timeout cap used for this row (default `2400`)            |
 
-Rows written before `score`/`harness_version` existed simply omit them; the
-report derives a score from `success` (`1.0`/`0.0`) for those.
+Rows written before `score`, `harness_version`, or `timeout_s` existed simply
+omit them; the report derives a score from `success` (`1.0`/`0.0`) for those.
 
 `bench/report.py` reads that log and prints one row per harness: per-task
 success (`x/n`), overall success with a Wilson 95% interval, **mean score**

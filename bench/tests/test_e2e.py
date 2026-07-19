@@ -43,7 +43,7 @@ class TestEndToEnd(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _run(self, harness):
+    def _run(self, harness, *extra_args):
         proc = subprocess.run(
             [sys.executable, RUN_PY,
              "--task", "write-marker",
@@ -51,7 +51,8 @@ class TestEndToEnd(unittest.TestCase):
              "--model", "gpt-5.5-medium",
              "--results-path", self.results_path,
              "--adapters-dir", FIXTURES_DIR,
-             "--tasks-dir", FIXTURES_DIR],
+             "--tasks-dir", FIXTURES_DIR,
+             *extra_args],
             capture_output=True, text=True,
         )
         self.assertEqual(proc.returncode, 0,
@@ -81,6 +82,14 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(rows[0]["success"],
                         "relative --tasks-dir must still let the checker run")
         self.assertEqual(rows[0]["checker_exit"], 0)
+
+    def test_default_timeout_is_recorded_on_mock_adapter_row(self):
+        self._run("fake_adapter")
+        self.assertEqual(read_rows(self.results_path)[0]["timeout_s"], 2400)
+
+    def test_explicit_timeout_is_recorded_on_mock_adapter_row(self):
+        self._run("fake_adapter", "--timeout", "17")
+        self.assertEqual(read_rows(self.results_path)[0]["timeout_s"], 17)
 
     def test_null_adapter_fails_and_fake_adapter_succeeds(self):
         self._run("null")
