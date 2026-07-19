@@ -149,6 +149,9 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
     duplicate_counts = {}
     countable_counts = {}
     versions_by_arm = {}
+    timeouts_by_arm = {}
+    unknown_timeouts_by_arm = {}
+    unknown_timeout_rows = 0
     provenance_rows = []
     for arm, rows in arms.items():
         countable, exclusions[arm] = _filter_arm(rows, task_roots)
@@ -156,6 +159,14 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
         countable_counts[arm] = len(countable)
         versions_by_arm[arm] = sorted({str(row["harness_version"]) for row in countable
                                        if row.get("harness_version") not in (None, "")})
+        timeout_values = [stats.provenance_value(row, "timeout_s") for row in countable]
+        timeouts_by_arm[arm] = sorted({str(value) for value in timeout_values
+                                      if value is not None})
+        unknown_timeouts_by_arm[arm] = sum(value is None for value in timeout_values)
+        unknown_timeout_rows += unknown_timeouts_by_arm[arm]
+        timeout_count = sum(stats.class_for_report(row) == "timeout" for row in countable)
+        if timeout_count:
+            exclusions[arm]["timeout"] = timeout_count
         provenance_rows.extend(dict(row, _compare_arm=arm) for row in countable)
 
     provenance = stats.build_provenance(provenance_rows, ("_compare_arm",))
@@ -185,7 +196,12 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
                 "mean_score": None,
             }
         solved = canonical["solved"]
+        finished_rows = [row for row in rows if stats.class_for_report(row) != "timeout"]
+        finished_n = len(finished_rows)
+        finished_solved = sum(bool(row["success"]) for row in finished_rows)
+        finished_rate = finished_solved / finished_n if finished_n else None
         versions = versions_by_arm[arm]
+        timeouts = timeouts_by_arm[arm]
         efficiency_rows = all_solved[arm]
         wall_mean, wall_median = _mean_median(efficiency_rows, "wall_time_s")
         token_stats = {
@@ -197,6 +213,10 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
             "n": canonical["n"],
             "solve_rate": canonical["solve_rate"],
             "wilson95": canonical["wilson95"],
+            "finished_solved": finished_solved,
+            "finished_n": finished_n,
+            "finished_solve_rate": finished_rate,
+            "finished_wilson95": list(stats.wilson_ci(finished_solved, finished_n)),
             "hack_adjusted_rate": canonical["mean_score"],
             "wall_time_per_solve": _sum_per_solve(rows, "wall_time_s", solved),
             "tokens_input_uncached_per_solve": _sum_per_solve(
@@ -213,6 +233,9 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
             },
             "versions": versions,
             "version_mixed": len(versions) > 1,
+            "timeouts": timeouts,
+            "timeout_mixed": len(timeouts) > 1,
+            "timeout_unknown": unknown_timeouts_by_arm[arm],
             "excluded": exclusions[arm],
             "duplicate_cells_excluded": duplicate_counts[arm],
             "unmatched_countable_rows": countable_counts[arm] - len(common),
@@ -227,6 +250,7 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
         "summaries": summaries,
         "provenance_ok": provenance["ok"],
         "provenance": provenance,
+        "unknown_timeout_rows": unknown_timeout_rows,
         "unassigned_excluded": unassigned_excluded,
     }
 
@@ -246,15 +270,35 @@ def _versions(summary):
     return value + (" [MIXED]" if summary["version_mixed"] else "")
 
 
+def _timeouts(summary):
+    values = list(summary["timeouts"])
+    if summary["timeout_unknown"]:
+        values.append("unknown")
+    value = ", ".join(values) if values else "unknown"
+    return value + (" [MIXED]" if summary["timeout_mixed"] else "")
+
+
+def _ci(summary, key):
+    return f"[{summary[key][0]:.3f}, {summary[key][1]:.3f}]"
+
+
 def scorecard_rows(report):
     """Return scorecard rows as ``(metric, [arm values...])``."""
     summaries = report["summaries"]
     rows = [
         ("Harness version", [_versions(summaries[arm]) for arm in report["arms"]]),
+        ("Timeout cap (s)", [_timeouts(summaries[arm]) for arm in report["arms"]]),
         ("Solved", [f"{summaries[arm]['solved']}/{summaries[arm]['n']}" for arm in report["arms"]]),
         ("Solve rate", [_pct(summaries[arm]["solve_rate"]) for arm in report["arms"]]),
-        ("Wilson 95% CI", [f"[{summaries[arm]['wilson95'][0]:.3f}, "
-                           f"{summaries[arm]['wilson95'][1]:.3f}]" for arm in report["arms"]]),
+        ("Solve rate @cap", [_pct(summaries[arm]["solve_rate"]) for arm in report["arms"]]),
+        ("Wilson 95% CI", [_ci(summaries[arm], "wilson95") for arm in report["arms"]]),
+        ("Solved (finished)",
+         [f"{summaries[arm]['finished_solved']}/{summaries[arm]['finished_n']}"
+          for arm in report["arms"]]),
+        ("Solve rate (finished)", [_pct(summaries[arm]["finished_solve_rate"])
+                                   for arm in report["arms"]]),
+        ("Wilson 95% CI (finished)", [_ci(summaries[arm], "finished_wilson95")
+                                      for arm in report["arms"]]),
         ("Hack-adjusted rate", [_pct(summaries[arm]["hack_adjusted_rate"])
                                 for arm in report["arms"]]),
     ]
@@ -280,7 +324,7 @@ def scorecard_rows(report):
             key = field + "_per_solve"
             rows.append((f"{label} / solve",
                          [_number(summaries[arm][key]) for arm in report["arms"]]))
-    for category in ("infra", "rate_limited", "invalid_json", "invalid_row",
+    for category in ("infra", "rate_limited", "timeout", "invalid_json", "invalid_row",
                      "quarantined_dropped_task"):
         rows.append((f"Excluded: {category}", [str(summaries[arm]["excluded"].get(category, 0))
                                                for arm in report["arms"]]))
@@ -313,6 +357,14 @@ def _provenance_status(report):
     return "NON-COMPARABLE PROVENANCE: " + messages
 
 
+def _timeout_status(report):
+    count = report["unknown_timeout_rows"]
+    if not count:
+        return None
+    noun = "row" if count == 1 else "rows"
+    return f"PROVENANCE WARNING: timeout_s unknown for {count} old {noun}"
+
+
 def _unassigned_status(report):
     excluded = report["unassigned_excluded"]
     if not excluded:
@@ -336,8 +388,10 @@ def render_text(report):
     headline = f"Matched n: {report['matched_n']} (task, trial cells present in all arms)\n"
     if solved_status:
         headline += solved_status + "\n"
+    statuses = [_provenance_status(report), _timeout_status(report),
+                _unassigned_status(report)]
     return ("OpenBench matched comparison\n" + headline
-            + f"{_provenance_status(report)}\n{_unassigned_status(report)}\n\n"
+            + "\n".join(status for status in statuses if status) + "\n\n"
             + _plain_table(["Metric"] + report["arms"], rows))
 
 
@@ -357,9 +411,10 @@ def render_markdown(report):
     solved_status = _solved_intersection_status(report)
     if solved_status:
         lines.extend([f"**{_markdown_cell(solved_status)}**", ""])
+    statuses = [_provenance_status(report), _timeout_status(report),
+                _unassigned_status(report)]
     lines.extend([
-        "> " + _markdown_cell(_provenance_status(report)),
-        "> " + _markdown_cell(_unassigned_status(report)),
+        *("> " + _markdown_cell(status) for status in statuses if status),
         "",
         "| Metric | " + " | ".join(arms) + " |",
         "| --- | " + " | ".join("---:" for _ in arms) + " |",

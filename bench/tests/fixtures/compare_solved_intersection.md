@@ -10,9 +10,14 @@
 | Metric | a | b |
 | --- | ---: | ---: |
 | Harness version | 1.0 | 1.0 |
+| Timeout cap (s) | 2400 | 2400 |
 | Solved | 2/2 | 1/2 |
 | Solve rate | 100.0% | 50.0% |
+| Solve rate @cap | 100.0% | 50.0% |
 | Wilson 95% CI | [0.342, 1.000] | [0.095, 0.905] |
+| Solved (finished) | 2/2 | 1/2 |
+| Solve rate (finished) | 100.0% | 50.0% |
+| Wilson 95% CI (finished) | [0.342, 1.000] | [0.095, 0.905] |
 | Hack-adjusted rate | 100.0% | 50.0% |
 | Wall time / cell mean (s) | 10.00 | 20.00 |
 | Wall time / cell median (s) | 10.00 | 20.00 |
@@ -26,6 +31,7 @@
 | Output tokens / cell median | 30.0 | 30.0 |
 | Excluded: infra | 0 | 0 |
 | Excluded: rate_limited | 0 | 0 |
+| Excluded: timeout | 0 | 0 |
 | Excluded: invalid_json | 0 | 0 |
 | Excluded: invalid_row | 0 | 0 |
 | Excluded: quarantined_dropped_task | 0 | 0 |
