@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Umbrella CLI for the OpenBench harness benchmarking framework.
 
-    obench run | report | doctor | validate | gate | compare [args...]
+    obench run | report | doctor | validate | gate | compare | init [args...]
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ def main(argv=None):
     sub.add_parser("validate", help="check task checker polarity", add_help=False)
     sub.add_parser("gate", help="BYO candidate admission gate", add_help=False)
     sub.add_parser("compare", help="matched-denominator scorecard", add_help=False)
+    sub.add_parser("init", help="scaffold .openbench/ for private evals", add_help=False)
 
     if not argv:
         parser.print_help()
@@ -43,10 +44,11 @@ def main(argv=None):
         parser.parse_args([command])
         return 0
 
-    if command not in {"run", "report", "doctor", "validate", "gate", "compare"}:
+    known = {"run", "report", "doctor", "validate", "gate", "compare", "init"}
+    if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, report, doctor, "
-            "validate, gate, compare"
+            "validate, gate, compare, init"
         )
 
     if command == "run":
@@ -67,6 +69,9 @@ def main(argv=None):
     if command == "compare":
         from .compare import main as compare_main
         return compare_main(rest)
+    if command == "init":
+        from .init import main as init_main
+        return init_main(rest)
     return 1
 
 
