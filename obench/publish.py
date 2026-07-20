@@ -42,6 +42,8 @@ TRANSCRIPT_FIELD_KEYS = (
     "checker_stdout",
     "checker_stderr",
 )
+# Injected by stats.load_rows; absolute paths here trip the publish PII check.
+LOAD_META_FIELD_KEYS = ("_source", "_lineno")
 # High-signal PII classes for publish bundles. Hex/base64 catch-alls are omitted
 # because provenance digests and image digests are intentional 32+ hex strings.
 PUBLISH_PII_CATEGORIES = frozenset({
@@ -176,8 +178,8 @@ def resolve_highlight_names(candidate_specs):
 
 def strip_transcript_fields(row):
     """Return a shallow copy without LOCAL-ONLY transcript-bearing fields."""
-    cleaned = {key: value for key, value in row.items()
-               if key not in TRANSCRIPT_FIELD_KEYS}
+    drop = set(TRANSCRIPT_FIELD_KEYS) | set(LOAD_META_FIELD_KEYS)
+    cleaned = {key: value for key, value in row.items() if key not in drop}
     return cleaned
 
 
@@ -745,6 +747,7 @@ def create_bundle(results_path, out_dir, *, candidate_specs=None, tasks_dirs=Non
             "only after manual review (dangerous)."
         )
         if not allow_pii_override:
+            shutil.rmtree(out_dir, ignore_errors=True)
             raise PublishError(message)
         print(f"WARNING: {message}", file=sys.stderr)
         print("(proceeding because --allow-pii-override was set)", file=sys.stderr)

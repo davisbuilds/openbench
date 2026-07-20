@@ -98,6 +98,14 @@ class PublishBundleTests(unittest.TestCase):
             hostnames=["pubtest-host"],
         )
 
+    def test_sanitize_drops_load_meta_paths(self):
+        row = _row("null", "alpha", 1, False)
+        row["_source"] = "/Users/pubtestuser/dev/openbench/results.jsonl"
+        row["_lineno"] = 7
+        cleaned = publish.sanitize_row_for_publish(row)
+        self.assertNotIn("_source", cleaned)
+        self.assertNotIn("_lineno", cleaned)
+
     def test_bundle_creation_and_provenance_hash(self):
         provenance = publish.create_bundle(
             self.results,
