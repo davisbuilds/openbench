@@ -17,6 +17,8 @@ import re
 import shutil
 import tempfile
 
+from auth_persist import try_persist_auth_file
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
 _CONTAINER_ABLATION = "/bench/ablation"
@@ -138,13 +140,16 @@ def _setup_needed(exc):
 def run_variant(name, variant, instruction, workdir, model, timeout_s):
     with tempfile.TemporaryDirectory(prefix=f"{name}_codex_home_") as codex_home:
         try:
-            compose_codex_home(variant, codex_home)
+            metadata = compose_codex_home(variant, codex_home)
         except (OSError, ValueError) as exc:
             return _setup_needed(exc)
-        return _codex.run(
-            instruction,
-            workdir,
-            model,
-            timeout_s,
-            env_override={"CODEX_HOME": codex_home},
-        )
+        try:
+            return _codex.run(
+                instruction,
+                workdir,
+                model,
+                timeout_s,
+                env_override={"CODEX_HOME": codex_home},
+            )
+        finally:
+            try_persist_auth_file(metadata["auth"], metadata["auth_source"])

@@ -53,6 +53,8 @@ import socket
 import subprocess
 import tempfile
 
+from auth_persist import try_persist_auth_file
+
 NAME = "codex"
 _EXE = "codex"
 _MULTI_AGENT_ENV = "OPENBENCH_CODEX_MULTI_AGENT"
@@ -443,6 +445,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
     # rules, memories, sessions, or plugins from the machine owner. Ablation
     # adapters supply their own already-composed CODEX_HOME via env_override.
     isolated_home = None
+    auth_src = None
     if not (env_override and "CODEX_HOME" in env_override):
         isolated_home = tempfile.mkdtemp(prefix="codex_home_")
         auth_root = os.path.expanduser(os.environ.get("CODEX_HOME") or "~/.codex")
@@ -475,6 +478,8 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
                 **_empty_token_usage(),
             }
     finally:
+        if isolated_home and auth_src:
+            try_persist_auth_file(os.path.join(isolated_home, "auth.json"), auth_src)
         if isolated_home:
             shutil.rmtree(isolated_home, ignore_errors=True)
 

@@ -31,6 +31,8 @@ import shutil
 import subprocess
 import tempfile
 
+from auth_persist import try_persist_auth_file
+
 NAME = "grokbuild"
 _EXE = "grok"
 
@@ -358,11 +360,13 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         return _setup_needed("install Grok Build CLI (`npm install -g @xai-official/grok`) and ensure `grok` is on PATH")
 
     iso_home = tempfile.mkdtemp(prefix="grokbuild_home_")
+    isolated_auth = None
     try:
         if subscription:
             grok_dir = os.path.join(iso_home, ".grok")
             os.makedirs(grok_dir, exist_ok=True)
-            shutil.copy2(_REAL_GROK_AUTH, os.path.join(grok_dir, "auth.json"))
+            isolated_auth = os.path.join(grok_dir, "auth.json")
+            shutil.copy2(_REAL_GROK_AUTH, isolated_auth)
             model = MODELS[model]["model_id"]
             env = dict(os.environ)
         else:
@@ -441,4 +445,6 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 "tokens": tokens, "turns": turns, "cmd": cmd,
                 **token_fields}
     finally:
+        if isolated_auth is not None:
+            try_persist_auth_file(isolated_auth, _REAL_GROK_AUTH)
         shutil.rmtree(iso_home, ignore_errors=True)

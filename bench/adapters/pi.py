@@ -33,6 +33,8 @@ import subprocess
 import tempfile
 from urllib.parse import urlsplit
 
+from auth_persist import try_persist_auth_file
+
 NAME = "pi"
 
 # canonical model name -> pi provider/model pair. Both routes use pi's
@@ -337,6 +339,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         return _unsupported(model)
 
     iso_home = tempfile.mkdtemp(prefix="pi_home_")
+    isolated_auth = None
     try:
         env = dict(os.environ)
         env["HOME"] = iso_home
@@ -351,7 +354,8 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             spec = MODELS[model]
             agent_dir = os.path.join(iso_home, ".pi", "agent")
             os.makedirs(agent_dir, exist_ok=True)
-            shutil.copy2(_REAL_AUTH, os.path.join(agent_dir, "auth.json"))
+            isolated_auth = os.path.join(agent_dir, "auth.json")
+            shutil.copy2(_REAL_AUTH, isolated_auth)
             proxy_url = _proxied_base_url("codex")
             if proxy_url:
                 with open(os.path.join(agent_dir, "models.json"), "w", encoding="utf-8") as fh:
@@ -430,4 +434,6 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             **token_usage,
         }
     finally:
+        if isolated_auth is not None:
+            try_persist_auth_file(isolated_auth, _REAL_AUTH)
         shutil.rmtree(iso_home, ignore_errors=True)
