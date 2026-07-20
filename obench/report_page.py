@@ -134,13 +134,14 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                 canonical = stats.aggregate_table(rows, (), min_n=0, pricing=pricing)[0]
             else:
                 canonical = {"solved": 0, "n": 0, "solve_rate": None,
-                             "wilson95": list(stats.wilson_ci(0, 0))}
+                             "wilson95": list(stats.wilson_ci(0, 0)),
+                             "mean_score": None}
             solved = canonical["solved"]
             finished = [r for r in rows if stats.class_for_report(r) != "timeout"]
             timeout_count = len(rows) - len(finished)
             finished_solved = sum(bool(r["success"]) for r in finished)
             solved_rows = [r for r in rows if r["success"]]
-            _, med_wall = compare._mean_median(solved_rows, "wall_time_s")
+            mean_wall, med_wall = compare._mean_median(solved_rows, "wall_time_s")
             tokens = {field: compare._sum_per_solve(rows, field, solved) for field in TOKEN_FIELDS}
             total_tokens = sum(v for v in tokens.values() if v is not None) if all(
                 v is not None for v in tokens.values()) else None
@@ -150,12 +151,14 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                 "n": canonical["n"],
                 "rate": canonical["solve_rate"],
                 "wilson": canonical["wilson95"],
+                "mean_score": canonical.get("mean_score"),
                 "finished_solved": finished_solved,
                 "finished_n": len(finished),
                 "finished_rate": finished_solved / len(finished) if finished else None,
                 "timeout_count": timeout_count,
                 "has_timeout": timeout_count > 0,
                 "material_timeout": bool(rows and timeout_count / len(rows) > MATERIAL_TIMEOUT_RATE),
+                "mean_wall": mean_wall,
                 "med_wall": med_wall,
                 **tokens,
                 "total_tokens": total_tokens,
@@ -363,12 +366,26 @@ def _markdown(text):
     return "\n".join(blocks)
 
 
-def render_page(models, methodology, title="OpenBench report", headline=None):
+def render_page(models, methodology, title="OpenBench report", headline=None,
+                highlight_arms=None, banner_warnings=None):
+    """Render a self-contained HTML report.
+
+    Optional ``highlight_arms`` marks matching arm labels (CSS class
+    ``highlight``). Optional ``banner_warnings`` are shown above the first
+    section. Both default to off so the release-site flow is unchanged.
+    """
     total = sum(a["n"] for m in models for a in m["arms"])
     headline = headline or f"{len(models)} models, {total:,} countable harness × task × trial cells."
     harnesses = sorted({a["arm"] for m in models for a in m["arms"]})
     colors = {harness: PALETTE[index % len(PALETTE)] for index, harness in enumerate(harnesses)}
+    highlight = {str(name) for name in (highlight_arms or [])}
     sections = []
+    if banner_warnings:
+        for message in banner_warnings:
+            sections.append(
+                '<p class="warning"><strong>Comparability warning:</strong> '
+                + html.escape(str(message)) + "</p>"
+            )
     for model in models:
         dual = model.get("material_timeouts", any(
             a.get("timeout_count", int(bool(a.get("has_timeout")))) / a.get("n", 1) > MATERIAL_TIMEOUT_RATE
@@ -431,7 +448,12 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
                 css_class = f' class="{" ".join(classes)}"' if classes else ""
                 cells.append(f"<td{css_class}>{html.escape(str(value))}</td>")
             color = colors[a["arm"]]
-            body.append(f'<tr style="--arm-color:{color}">' + "".join(cells) + "</tr>")
+            row_class = " highlight" if a["arm"] in highlight else ""
+            body.append(
+                f'<tr class="arm-row{row_class}" style="--arm-color:{color}"'
+                f' data-arm="{html.escape(a["arm"], quote=True)}">'
+                + "".join(cells) + "</tr>"
+            )
         head_cells = "".join(
             f'<th class="total-tokens">{html.escape(h)}</th>' if h == "Total tokens/solve"
             else f"<th>{html.escape(h)}</th>" for h in heads)
@@ -457,7 +479,7 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
         f"<td>{html.escape(lookup.get((h, model), '—'))}</td>" for model in model_names) + "</tr>" for h in harnesses)
     grid = '<section><h2>Harness × model correctness</h2><div class="scroll"><table><thead><tr><th>Harness</th>' + "".join(
         f"<th>{html.escape(m)}</th>" for m in model_names) + "</tr></thead><tbody>" + grid_rows + "</tbody></table></div></section>"
-    css = """body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:1200px;margin:auto;padding:2rem;background:#f7f8fa}header{padding:2rem;background:#18253b;color:white;border-radius:12px}section{margin:2rem 0;background:white;padding:1.4rem;border-radius:10px;box-shadow:0 1px 4px #ccd}h1{margin:.1rem 0}.scroll{overflow:auto}table,.chart{font-variant-numeric:tabular-nums}table{border-collapse:collapse;width:100%}th,td{padding:.65rem;border-bottom:1px solid #dde2e8;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}.results tbody tr{border-left:4px solid var(--arm-color)}thead th{background:#edf2f7}.total-tokens{font-weight:800;background:#e6f2f8}.cli-split{color:#7b8794}.table-note{font-size:.82rem;color:#52606d;margin:.65rem .2rem 0;max-width:105ch}.charts{display:grid;gap:1rem;margin:1rem 0 1.5rem}.charts figure{margin:0;border:1px solid #dde2e8;border-radius:8px;padding:.8rem}.charts .hero{border-width:2px;background:#fbfdff}.charts h3{margin:.1rem 0}.chart{width:100%;height:auto}.chart text{font-family:system-ui,sans-serif;font-size:12px;fill:#17202a}.grid{stroke:#d8dee7;stroke-width:1}.whisker{stroke:#17202a;stroke-width:2;fill:none}figcaption,.empty-chart{font-size:.85rem;color:#52606d}.warning{background:#fff1d6;border-left:4px solid #b45309;padding:.75rem}.tag{font-size:.85rem;color:#52606d}footer{color:#52606d;text-align:center}@media(max-width:700px){body{padding:.6rem}section,header{padding:1rem}.charts{grid-template-columns:1fr}.charts .hero{grid-column:auto}}"""
+    css = """body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:1200px;margin:auto;padding:2rem;background:#f7f8fa}header{padding:2rem;background:#18253b;color:white;border-radius:12px}section{margin:2rem 0;background:white;padding:1.4rem;border-radius:10px;box-shadow:0 1px 4px #ccd}h1{margin:.1rem 0}.scroll{overflow:auto}table,.chart{font-variant-numeric:tabular-nums}table{border-collapse:collapse;width:100%}th,td{padding:.65rem;border-bottom:1px solid #dde2e8;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}.results tbody tr{border-left:4px solid var(--arm-color)}.results tbody tr.highlight{background:#fff8e6;box-shadow:inset 0 0 0 1px #e6b800}thead th{background:#edf2f7}.total-tokens{font-weight:800;background:#e6f2f8}.cli-split{color:#7b8794}.table-note{font-size:.82rem;color:#52606d;margin:.65rem .2rem 0;max-width:105ch}.charts{display:grid;gap:1rem;margin:1rem 0 1.5rem}.charts figure{margin:0;border:1px solid #dde2e8;border-radius:8px;padding:.8rem}.charts .hero{border-width:2px;background:#fbfdff}.charts h3{margin:.1rem 0}.chart{width:100%;height:auto}.chart text{font-family:system-ui,sans-serif;font-size:12px;fill:#17202a}.grid{stroke:#d8dee7;stroke-width:1}.whisker{stroke:#17202a;stroke-width:2;fill:none}figcaption,.empty-chart{font-size:.85rem;color:#52606d}.warning{background:#fff1d6;border-left:4px solid #b45309;padding:.75rem}.tag{font-size:.85rem;color:#52606d}footer{color:#52606d;text-align:center}@media(max-width:700px){body{padding:.6rem}section,header{padding:1rem}.charts{grid-template-columns:1fr}.charts .hero{grid-column:auto}}"""
     return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + html.escape(title) + "</title><style>" + css + "</style></head><body><header><div class=\"tag\">OPENBENCH</div><h1>" + html.escape(title) + "</h1><p>" + html.escape(headline) + "</p></header>" + "".join(sections) + grid + '<section id="methodology"><h2>Methodology &amp; limitations</h2>' + _markdown(methodology) + "</section><footer>Generated by OpenBench · static, self-contained HTML</footer></body></html>\n"
 
 

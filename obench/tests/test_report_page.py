@@ -116,7 +116,7 @@ class ReportPageTest(unittest.TestCase):
         path = self.write([self.row("cursor", 1, True), self.row("pi", 2, True)])
         model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
         page = report_page.render_page([model], "Method")
-        rows = re.findall(r'<tr style="[^"]+">.*?</tr>', page)
+        rows = re.findall(r'<tr class="arm-row[^"]*" style="[^"]+".*?</tr>', page)
         cursor_row = next(row for row in rows if "cursor × model-x" in row)
         pi_row = next(row for row in rows if "pi × model-x" in row)
         self.assertEqual(cursor_row.count('class="cli-split"'), 3)
