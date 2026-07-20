@@ -145,6 +145,12 @@ def _base_result(completed, error, output, cmd):
     }
 
 
+def _tag_unmetered(result, unmetered):
+    if unmetered:
+        result["token_basis"] = "unmetered"
+    return result
+
+
 class ConfigVariant:
     kind = "config-variant"
 
@@ -154,6 +160,11 @@ class ConfigVariant:
             self.spec_bytes = fh.read()
         self.name = _candidate_name(data)
         self.base_adapter = data["base_adapter"]
+        self.unmetered = data.get("unmetered", False)
+        if not isinstance(self.unmetered, bool):
+            raise ValueError("candidate unmetered must be a boolean")
+        if self.unmetered:
+            raise ValueError("config variants inherit native metering and cannot be unmetered")
         self.config_dir = os.environ.get("OPENBENCH_CANDIDATE_CONFIG_DIR") or _resolve(
             self.path, data["config_dir"])
         self.config_dir = os.path.abspath(self.config_dir)
@@ -193,6 +204,7 @@ class ConfigVariant:
                 "spec": self.path, "spec_sha256": hashlib.sha256(self.spec_bytes).hexdigest(),
                 "config_dir": self.config_dir, "config_files_sha256": files,
                 "config_files": entries, "env_names": sorted(self.env),
+                "unmetered": self.unmetered,
                 "auth_files": [{"source": a["source"], "destination": a["destination"]}
                                for a in self.auth_files]}
 
@@ -227,12 +239,13 @@ class ConfigVariant:
                 shutil.copy2(src, dst)
             env = {key: _expand(value, values) for key, value in self.env.items()}
             if "env_override" in inspect.signature(self.module.run).parameters:
-                return self.module.run(instruction, workdir, model, timeout_s,
-                                       env_override=env)
+                return _tag_unmetered(self.module.run(
+                    instruction, workdir, model, timeout_s, env_override=env), self.unmetered)
             old = {key: os.environ.get(key) for key in env}
             try:
                 os.environ.update(env)
-                return self.module.run(instruction, workdir, model, timeout_s)
+                return _tag_unmetered(
+                    self.module.run(instruction, workdir, model, timeout_s), self.unmetered)
             finally:
                 for key, value in old.items():
                     if value is None:
@@ -250,10 +263,21 @@ class ManifestHarness:
             self.spec_bytes = fh.read()
         self.name = _candidate_name(data)
         self.base_adapter = None
+        self.unmetered = data.get("unmetered", False)
+        if not isinstance(self.unmetered, bool):
+            raise ValueError("manifest unmetered must be a boolean")
         self.command = data["command"]
         if (not isinstance(self.command, list) or not self.command
                 or not all(isinstance(x, str) for x in self.command)):
             raise ValueError("manifest command must be a non-empty array of strings")
+        self.policy_headless_args = data.get("policy_headless_args", [])
+        self.policy_auto_approve_args = data.get("policy_auto_approve_args", [])
+        for field, values in (
+                ("policy_headless_args", self.policy_headless_args),
+                ("policy_auto_approve_args", self.policy_auto_approve_args)):
+            if (not isinstance(values, list) or
+                    not all(isinstance(value, str) and value for value in values)):
+                raise ValueError(f"manifest {field} must be an array of non-empty strings")
         self.workspace_file_globs = data.get("workspace_file_globs", [])
         if (not isinstance(self.workspace_file_globs, list)
                 or not all(isinstance(x, str) and x for x in self.workspace_file_globs)):
@@ -293,9 +317,14 @@ class ManifestHarness:
         self.proxy_route = data.get("proxy_route")
         if bool(self.base_url_env) != bool(self.proxy_route):
             raise ValueError("manifest proxy routing requires both base_url_env and proxy_route")
+        if self.unmetered and self.base_url_env:
+            raise ValueError("manifest cannot declare both unmetered and proxy routing")
         self.proxy_adapter = data.get("proxy_adapter")
         self.provenance = {"kind": self.kind, "name": self.name, "spec": self.path,
                            "spec_sha256": hashlib.sha256(self.spec_bytes).hexdigest(), "command": list(self.command),
+                           "unmetered": self.unmetered,
+                           "policy_headless_args": list(self.policy_headless_args),
+                           "policy_auto_approve_args": list(self.policy_auto_approve_args),
                            "workspace_file_globs": list(self.workspace_file_globs),
                            "models": dict(self.models), "env_names": sorted(self.env),
                            "inherit_env": self.inherit_env,
@@ -337,8 +366,9 @@ class ManifestHarness:
 
     def run(self, instruction, workdir, model, timeout_s):
         if self.models and model not in self.models:
-            return _base_result(
-                False, f"unsupported-model: {model!r} (have {list(self.models)})", "", None)
+            return _tag_unmetered(_base_result(
+                False, f"unsupported-model: {model!r} (have {list(self.models)})", "", None),
+                self.unmetered)
         model_id = self.models.get(model, model)
         home_ctx = tempfile.TemporaryDirectory(prefix=f"{self.name}_home_") if self.isolate_home else None
         home = home_ctx.name if home_ctx else os.path.expanduser("~")
@@ -354,7 +384,8 @@ class ManifestHarness:
                 src = _auth_source(auth["source"])
                 dst = _safe_destination(home, _expand(auth["destination"], values))
                 if not os.path.isfile(src):
-                    return _base_result(False, f"SETUP-NEEDED: missing auth file {src}", "", None)
+                    return _tag_unmetered(_base_result(
+                        False, f"SETUP-NEEDED: missing auth file {src}", "", None), self.unmetered)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(src, dst)
             if self.base_url_env and self.proxy_route and env.get("OPENBENCH_PROXY"):
@@ -380,9 +411,13 @@ class ManifestHarness:
             except subprocess.TimeoutExpired as exc:
                 out = ((exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or ""))
                 err = ((exc.stderr or b"").decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or ""))
-                return _base_result(False, f"timeout after {timeout_s}s", out + err, cmd)
+                return _tag_unmetered(
+                    _base_result(False, f"timeout after {timeout_s}s", out + err, cmd),
+                    self.unmetered)
             output = (proc.stdout or "") + (proc.stderr or "")
-            return _base_result(proc.returncode == 0, None if proc.returncode == 0 else f"exit {proc.returncode}", output, cmd)
+            return _tag_unmetered(_base_result(
+                proc.returncode == 0, None if proc.returncode == 0 else f"exit {proc.returncode}",
+                output, cmd), self.unmetered)
         finally:
             if home_ctx:
                 home_ctx.cleanup()

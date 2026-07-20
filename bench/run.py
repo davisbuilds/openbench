@@ -1335,7 +1335,8 @@ def read_proxy_ledger(ledger_dir, token, wait_s=0.0, stable_s=0.1):
 def apply_proxy_ledger(row, ledger_rows):
     """Populate proxy-measured token fields from scrubbed ledger rows."""
     calls = [r for r in ledger_rows if isinstance(r, dict) and isinstance(r.get("usage"), dict)]
-    row["tokens_proxy_calls"] = len(calls) or None
+    # Zero is meaningful evidence for admission checks; do not collapse it to None.
+    row["tokens_proxy_calls"] = len(calls)
     if not calls:
         return row
     totals = _empty_proxy_usage()
@@ -1367,7 +1368,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              docker_image=None, docker_fallback=True, harness_version=None,
              container_versions_reader=read_container_cli_versions,
              transcripts_dir=None, results_stem="", proxy_ctx=None,
-             candidate=None, version_drift=False):
+             candidate=None, version_drift=False, workspace_observer=None):
     """Execute one (task, harness, trial) cell and return its results row.
 
     Copies the task workspace to a temp dir, invokes the adapter (or the
@@ -1536,7 +1537,9 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["tokens_output"] = result.get("tokens_output")
         row["tokens_reasoning"] = result.get("tokens_reasoning")
         row["usage_raw"] = result.get("usage_raw")
-        row["token_basis"] = result.get("token_basis")
+        row["token_basis"] = ("unmetered" if candidate is not None
+                              and getattr(candidate, "unmetered", False)
+                              else result.get("token_basis"))
         row["tokens_fresh"] = result.get("tokens_fresh")
         if row["tokens_fresh"] is None:
             inp = row["tokens_input_uncached"]
@@ -1596,6 +1599,11 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["failure_reason"] = classify_failure_reason(row, classifier_output)
         return _populate_proxy_row(row, active_proxy_ctx, cell_token)
     finally:
+        if workspace_observer is not None:
+            try:
+                workspace_observer(workdir)
+            except Exception:  # evidence collection must not alter the cell verdict
+                pass
         shutil.rmtree(workdir, ignore_errors=True)
 
 

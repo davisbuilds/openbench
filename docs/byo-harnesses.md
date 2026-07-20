@@ -63,6 +63,11 @@ command = ["my-cli", "run", "--model", "{model}", "--workspace", "{workspace}",
            "{workspace_files}", "{prompt}"]
 workspace_file_globs = ["src/**/*", "*.toml"]
 version_command = ["my-cli", "--version"]
+# Admission policy pins must name argv entries that are present in command.
+policy_headless_args = ["run"]
+policy_auto_approve_args = ["--yes"]
+# Set only when this provider cannot be routed through the counting proxy.
+# unmetered = true
 # The safe default does not inherit arbitrary host variables. Name only the
 # credentials/settings this CLI needs; Docker forwards these without values in argv.
 pass_env = ["VENDOR_API_KEY"]
@@ -109,3 +114,65 @@ Both kinds record their spec digest, configuration digests, command/model data,
 auth paths, environment policy, and environment variable names in
 `candidate_provenance`, including the full candidate identity digest. Values of
 environment variables and auth contents are deliberately excluded.
+
+## Admission gate
+
+A candidate must pass the admission gate before its rows may enter published
+comparison tables:
+
+```bash
+# Safe schema/policy preview; launches no harness and spends no tokens.
+python3 bench/candidate_gate.py experiments/candidates/aider.toml \
+  --model deepseek-v4-flash
+
+# Paid checks (run only by an operator with the intended credentials).
+python3 bench/candidate_gate.py experiments/candidates/aider.toml \
+  --model deepseek-v4-flash --live
+
+# Optional, expensive n=1 calibration over the fixed 15-task set.
+python3 bench/candidate_gate.py experiments/candidates/aider.toml \
+  --model deepseek-v4-flash --live --calibrate
+```
+
+The command prints one `PASS`/`FAIL` line per check, a final verdict, and a JSON
+record suitable for archiving. Without `--live` it validates the schema and
+prints the expanded command that would run; it does not start a proxy, invoke a
+CLI, or probe its version. A dry `--calibrate` only previews the fixed set;
+the calibration cells run only when it is combined with `--live`.
+
+The checklist protects comparability with native arms:
+
+1. **Metering.** A smoke cell is routed through the counting proxy and must
+   produce at least one ledger call. A genuinely non-routable provider may
+   explicitly declare `unmetered = true`; every resulting benchmark row then
+   carries `token_basis = "unmetered"` so reports can badge the limitation.
+2. **Isolation.** The gate plants unique content in a canary file under a fake
+   host `HOME`, runs the manifest with `isolate_home = true`, and rejects canary
+   content found in captured transcript/workspace evidence. This is a simple
+   heuristic, not syscall tracing: a harness that reads but never reproduces
+   the bytes cannot be detected, and workspace scanning is bounded to 16 MiB.
+   Config variants inherit their native
+   adapter's isolation behavior.
+3. **Policy parity.** Generic manifests declare `policy_headless_args` and
+   `policy_auto_approve_args`; every declared argv entry must occur in
+   `command`. A deterministic blocking executable is run through the candidate's
+   own five-second timeout implementation and must return
+   `failure_class = "timeout"`, proving the timeout path does not hang without
+   depending on model compliance with a prompt.
+   Config variants inherit the native adapter's policy pins.
+4. **Version.** `version_command` must return non-empty output and that exact
+   value must be stamped as `harness_version` on the metered smoke row.
+5. **Failure honesty.** A smoke cell with declared provider-key environment
+   variables set to a bogus value must be classified `infra` or `rate_limited`,
+   never `wrong_answer`, and consume fewer than 100 tokens.
+6. **Calibration.** `--calibrate` runs one trial on each of the fixed 15 tasks,
+   prints the solve count, and fails suspicious all-zero or all-perfect
+   outcomes. It is off by default because it spends money.
+
+`experiments/candidates/aider.toml` is the worked example: it declares Aider's
+`--message` headless pin and `--yes-always` approval pin, an isolated home,
+version probe, DeepSeek proxy route, and provider-key environment name. Its
+current result should be understood conceptually as: schema/policy dry-run
+passes; live metering, timeout, version stamping, failure honesty, and optional
+calibration remain operator-run evidence. This documentation does not claim a
+live result and no live call is needed to review the manifest.
