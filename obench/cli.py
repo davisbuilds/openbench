@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Umbrella CLI for the OpenBench harness benchmarking framework.
 
-    obench run | report | doctor | validate | gate | compare | init [args...]
+    obench run | report | doctor | validate | gate | compare | init |
+         publish | verify [args...]
 """
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ def main(argv=None):
     sub.add_parser("gate", help="BYO candidate admission gate", add_help=False)
     sub.add_parser("compare", help="matched-denominator scorecard", add_help=False)
     sub.add_parser("init", help="scaffold .openbench/ for private evals", add_help=False)
+    sub.add_parser("publish", help="build a shareable comparison bundle", add_help=False)
+    sub.add_parser("verify", help="re-verify a publish bundle's digests", add_help=False)
 
     if not argv:
         parser.print_help()
@@ -44,11 +47,14 @@ def main(argv=None):
         parser.parse_args([command])
         return 0
 
-    known = {"run", "report", "doctor", "validate", "gate", "compare", "init"}
+    known = {
+        "run", "report", "doctor", "validate", "gate", "compare", "init",
+        "publish", "verify",
+    }
     if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, report, doctor, "
-            "validate, gate, compare, init"
+            "validate, gate, compare, init, publish, verify"
         )
 
     if command == "run":
@@ -72,6 +78,12 @@ def main(argv=None):
     if command == "init":
         from .init import main as init_main
         return init_main(rest)
+    if command == "publish":
+        from .publish import _publish_main
+        return _publish_main(rest)
+    if command == "verify":
+        from .publish import _verify_main
+        return _verify_main(rest)
     return 1
 
 
