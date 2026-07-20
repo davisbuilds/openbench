@@ -388,6 +388,22 @@ def _auth_persist_targets(harness):
     return targets
 
 
+def _candidate_auth_persist_targets(auth_files):
+    """Persist targets from a candidate's declared auth_files (opt-in path)."""
+    targets = []
+    staged = set()
+    for auth in auth_files or []:
+        dest_rel = auth.get("destination", "")
+        source = auth.get("source", "")
+        if not dest_rel or dest_rel in staged:
+            continue
+        host_path = os.path.expanduser(source)
+        if os.path.isfile(host_path):
+            targets.append((host_path, dest_rel))
+            staged.add(dest_rel)
+    return targets
+
+
 def _persist_returned_auth(return_dir, targets):
     for master, relative in targets:
         try_persist_auth_file(os.path.join(return_dir, relative), master)
@@ -422,7 +438,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                      candidate_path=None, base_harness=None,
                      candidate_auth_files=None, candidate_pass_env=None,
                      candidate_config_dir=None, candidate_inherit_env=False,
-                     auth_return_dir=None):
+                     auth_return_dir=None, candidate_persist_auth=False):
     """Assemble the ``docker run`` argv for one cell (pure; unit-testable)."""
     cmd = ["docker", "run", "--rm"]
     # Bound each cell's CPU quota so co-tenant host load cannot starve a cell
@@ -487,11 +503,15 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
             cmd += ["-e", name]
     stock_auth_args = _auth_mount_args(effective_harness)
     cmd += stock_auth_args
-    if auth_return_dir and effective_harness in AUTH_PERSIST:
+    stock_persist = effective_harness in AUTH_PERSIST
+    if auth_return_dir and (stock_persist or candidate_persist_auth):
         cmd += [
             "-v", f"{os.path.abspath(auth_return_dir)}:{AUTH_RETURN}:rw",
-            "-e", f"BENCH_AUTH_PERSIST_HARNESS={effective_harness}",
         ]
+        if stock_persist:
+            cmd += ["-e", f"BENCH_AUTH_PERSIST_HARNESS={effective_harness}"]
+        if candidate_persist_auth:
+            cmd += ["-e", "BENCH_AUTH_PERSIST_CANDIDATE=1"]
     mounted_auth_targets = {
         stock_auth_args[i + 1].rsplit(":ro", 1)[0].rsplit(":", 1)[-1]
         for i, item in enumerate(stock_auth_args[:-1]) if item == "-v"
@@ -553,7 +573,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                      extra_env=None, candidate_path=None, base_harness=None,
                      candidate_auth_files=None, candidate_pass_env=None,
                      candidate_config_dir=None, candidate_inherit_env=False,
-                     candidate_spec_bytes=None, candidate_config_contents=None):
+                     candidate_spec_bytes=None, candidate_config_contents=None,
+                     candidate_persist_auth=False):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -599,6 +620,12 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             fh.write(instruction)
         effective_harness = base_harness if (candidate_path or candidate_spec_bytes is not None) else harness
         auth_persist_targets = _auth_persist_targets(effective_harness)
+        if candidate_persist_auth:
+            seen = {dest for _, dest in auth_persist_targets}
+            for master, dest in _candidate_auth_persist_targets(candidate_auth_files):
+                if dest not in seen:
+                    auth_persist_targets.append((master, dest))
+                    seen.add(dest)
         if auth_persist_targets:
             auth_return_dir = tempfile.mkdtemp(prefix="bench_auth_return_", dir=instr_dir)
             os.chmod(auth_return_dir, 0o700)
@@ -617,6 +644,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             candidate_config_dir=candidate_config_stage,
             candidate_inherit_env=candidate_inherit_env,
             auth_return_dir=auth_return_dir,
+            candidate_persist_auth=candidate_persist_auth,
         )
         host_env_setup_s = round(time.monotonic() - env_setup_start, 3)
 

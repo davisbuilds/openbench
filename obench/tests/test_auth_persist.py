@@ -150,6 +150,24 @@ class TestDockerPersistPlumbing(unittest.TestCase):
             self.assertIn("auth_persist.py:/bench/auth_persist.py:ro", joined)
             self.assertIn("BENCH_AUTH_PERSIST_HARNESS=pi", cmd)
 
+    def test_candidate_persist_auth_mounts_return_dir(self):
+        with tempfile.TemporaryDirectory() as returned:
+            cmd = docker_exec.build_docker_cmd(
+                "third-party", "/tmp/work", "gpt-5.5-medium", 10, ADAPTERS_DIR,
+                "image", "/tmp/instruction",
+                candidate_path="/tmp/candidate.toml",
+                candidate_persist_auth=True,
+                auth_return_dir=returned)
+            self.assertIn(f"{returned}:{docker_exec.AUTH_RETURN}:rw", " ".join(cmd))
+            self.assertIn("BENCH_AUTH_PERSIST_CANDIDATE=1", cmd)
+            self.assertNotIn("BENCH_AUTH_PERSIST_HARNESS=", " ".join(cmd))
+
+    def test_candidate_auth_persist_targets_default_empty(self):
+        from obench.candidates import candidate_auth_persist_targets
+        fake = SimpleNamespace(persist_auth=False, auth_files=[
+            {"source": "~/.x/auth.json", "destination": ".x/auth.json"}])
+        self.assertEqual(candidate_auth_persist_targets(fake), [])
+
     def test_entry_returns_only_declared_auth_file(self):
         with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as returned:
             auth = os.path.join(home, ".pi", "agent", "auth.json")

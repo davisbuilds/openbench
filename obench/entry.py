@@ -68,13 +68,16 @@ def _stage_auth():
             shutil.copy2(src, dst)
 
 
-def _return_auth(harness):
+def _return_auth(harness, relatives=None):
     """Atomically copy declared, possibly rotated auth into the return mount."""
     if not os.path.isdir(AUTH_RETURN):
         return
     home = os.environ.get("HOME", "/root")
     returned = set()
-    for _master_relative, relative in AUTH_PERSIST.get(harness, []):
+    if relatives is None:
+        pairs = AUTH_PERSIST.get(harness, [])
+        relatives = [relative for _master, relative in pairs]
+    for relative in relatives:
         if relative in returned:
             continue
         returned.add(relative)
@@ -153,6 +156,7 @@ def main(argv):
     # here) can rely on the container as the external sandbox instead.
     os.environ["BENCH_IN_CONTAINER"] = "1"
 
+    candidate_obj = None
     try:
         _stage_auth()
         if len(argv) == 5:
@@ -166,6 +170,7 @@ def main(argv):
             adapter = load_candidate(argv[4], ADAPTERS_DIR)
             if adapter.name != harness:
                 raise ValueError(f"candidate name {adapter.name!r} does not match {harness!r}")
+            candidate_obj = adapter
             try:
                 candidate_version = adapter.version()
             except Exception:  # noqa: BLE001 - version failure must not fail a cell
@@ -187,7 +192,16 @@ def main(argv):
 
     persist_harness = os.environ.get("BENCH_AUTH_PERSIST_HARNESS", harness)
     try:
-        _return_auth(persist_harness)
+        relatives = None
+        if os.environ.get("BENCH_AUTH_PERSIST_HARNESS"):
+            relatives = [rel for _, rel in AUTH_PERSIST.get(persist_harness, [])]
+        if (os.environ.get("BENCH_AUTH_PERSIST_CANDIDATE")
+                and candidate_obj is not None
+                and getattr(candidate_obj, "persist_auth", False)):
+            cand_rels = [auth.get("destination", "") for auth in candidate_obj.auth_files
+                         if auth.get("destination")]
+            relatives = (relatives or []) + cand_rels
+        _return_auth(persist_harness, relatives=relatives)
     except OSError as exc:
         result = {
             "completed": False,
