@@ -51,7 +51,7 @@ run loop, tool set, and permission policy. Tasks are self-contained
   (`pip install obench`, `obench run ...`) — zero collision risk. The project
   is still called OpenBench; `obench` is just the install/command handle.
   Umbrella CLI with subcommands (`obench run / report / doctor / validate /
-  gate / compare / init / publish / verify`). Git-URL installs (`pip install git+https://...`)
+  gate / compare / init / publish / verify / export / import`). Git-URL installs (`pip install git+https://...`)
   work pre-PyPI. Remove repo-relative defaults (`REPO = dirname(bench)` in
   `run.py`, `report.py`, `doctor.py`, `stats.py`, ...): explicit paths/config,
   with CWD discovery (`tasks/`, then `.openbench/tasks/`) when run outside the
@@ -75,11 +75,14 @@ run loop, tool set, and permission policy. Tasks are self-contained
   proxy metering for manifests is declaration-driven (`base_url_env` +
   `proxy_route`); candidate auth persist-back defaults off with
   `persist_auth = true` opt-in. Docker image's fixed CLI set remains a follow-up.
-- **P1 — Harbor bridge. [DONE Jul 2026]** One-way exporter
-  `obench export harbor` (`docs/harbor-export.md`): OpenBench task → Harbor
-  task (`checker.sh` + `SCORE:` → `tests/test.sh` writing `reward.txt`); lets
-  companies use Harbor's cloud sandboxes while OpenBench stays the
-  comparison/stats/auth layer.
+- **P1 — Harbor bridge. [DONE Jul 2026]** Bidirectional bridge:
+  `obench export harbor` (`docs/harbor-export.md`) OpenBench → Harbor
+  (`checker.sh` + `SCORE:` → `tests/test.sh` writing `reward.txt`);
+  `obench import harbor` (`docs/harbor-import.md`) Harbor → OpenBench
+  (Dockerfile COPY staging, reward→exit/`SCORE:`, optional `solve.sh`
+  materialization, `PROVENANCE.md`). Lets companies use Harbor's cloud
+  sandboxes while OpenBench stays the comparison/stats/auth layer, and pull
+  Harbor/TB-format tasks into the harness-comparison path.
 - **P2 — Versioned task packs.** Task packs and harness manifests as
   versioned, installable-by-name artifacts (`org/pack@version`), following the
   verifiers hub packaging pattern.

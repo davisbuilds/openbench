@@ -1,8 +1,9 @@
 # Harbor export bridge
 
-One-way exporter from OpenBench tasks to [Harbor](https://www.harborframework.com/)
+Exporter from OpenBench tasks to [Harbor](https://www.harborframework.com/)
 task directories. Companies can run OpenBench suites on Harbor’s cloud sandboxes
-while OpenBench stays the comparison / stats / auth layer.
+while OpenBench stays the comparison / stats / auth layer. The reverse direction
+(`obench import harbor`) is documented in [`docs/harbor-import.md`](harbor-import.md).
 
 ```bash
 obench export harbor --task all --out /tmp/harbor-tasks
@@ -85,6 +86,9 @@ obench compare ...
 
 Private-repo tasks under `.openbench/tasks/` export the same way — pass
 `--tasks-dir .openbench/tasks`.
+
+To pull Harbor / Terminal-Bench-format tasks *into* OpenBench (adapters,
+metering, report), use [`obench import harbor`](harbor-import.md).
 
 ## Known gaps / decisions
 
