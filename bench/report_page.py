@@ -4,6 +4,7 @@
 import argparse
 import html
 import json
+import math
 import os
 import sys
 from collections import defaultdict
@@ -15,6 +16,11 @@ except ImportError:
     import stats
 
 TOKEN_FIELDS = ("tokens_input_uncached", "tokens_output", "tokens_cache_read")
+PALETTE = (
+    "#0072B2", "#E69F00", "#009E73", "#D55E00",
+    "#CC79A7", "#56B4E9", "#7A6F00", "#000000",
+)
+CLI_ARMS = {"cursor", "opencode"}
 DEFAULT_METHODOLOGY = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "docs",
@@ -146,6 +152,8 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                 "total_tokens": total_tokens,
                 "cost_per_solve": _cost_per_solve(rows, solved, pricing),
                 "token_basis": _token_basis(rows),
+                "cli_basis": any(str(row.get("harness", "")).lower() in CLI_ARMS
+                                 for row in rows),
                 "excluded": dict(excluded),
                 "duplicates": duplicates,
                 "unmatched": len(unique) - len(common_cells) if matched else 0,
@@ -165,6 +173,153 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
         })
     models.sort(key=lambda m: m["title"].lower())
     return models
+
+
+def _chart_data(model):
+    """Extract the available numeric values consumed by the three charts."""
+    return [{
+        "arm": arm["arm"],
+        "rate": arm.get("rate"),
+        "wilson": arm.get("wilson"),
+        "total_tokens": arm.get("total_tokens"),
+        "med_wall": arm.get("med_wall"),
+        "cli_basis": arm.get(
+            "cli_basis", arm["arm"].split(" (", 1)[0].lower() in CLI_ARMS),
+    } for arm in model["arms"]]
+
+
+def _svg_text(x, y, text, **attrs):
+    attributes = " ".join(f'{key.replace("_", "-")}="{html.escape(str(value))}"'
+                          for key, value in attrs.items())
+    return f'<text x="{x:.1f}" y="{y:.1f}" {attributes}>{html.escape(str(text))}</text>'
+
+
+def _empty_chart(title, message):
+    return (f'<svg class="chart" viewBox="0 0 820 180" role="img" '
+            f'aria-label="{html.escape(title)}"><title>{html.escape(title)}</title>'
+            f'{_svg_text(410, 95, message, text_anchor="middle")}</svg>')
+
+
+def _correctness_chart(data, colors):
+    rows = [row for row in data if row["rate"] is not None and row["wilson"]]
+    if not rows:
+        return _empty_chart("Correctness by harness", "Correctness data unavailable.")
+    rows.sort(key=lambda row: (-row["rate"], row["arm"]))
+    left = max(145, max(len(row["arm"]) for row in rows) * 7 + 20)
+    plot_w, right, top, row_h = 605, 70, 38, 38
+    width, height = left + plot_w + right, top + len(rows) * row_h + 38
+    parts = []
+    for index, row in enumerate(rows):
+        y = top + index * row_h
+        rate_x = left + row["rate"] * plot_w
+        low_x, high_x = (left + bound * plot_w for bound in row["wilson"])
+        color = colors[row["arm"]]
+        parts.append(
+            f'<g data-arm="{html.escape(row["arm"])}">'
+            f'<rect x="{left}" y="{y - 11}" width="{max(0, rate_x-left):.1f}" '
+            f'height="22" rx="3" fill="{color}" opacity=".78"/>'
+            f'<path d="M {low_x:.1f} {y} H {high_x:.1f} M {low_x:.1f} {y-6} V {y+6} '
+            f'M {high_x:.1f} {y-6} V {y+6}" class="whisker"/>'
+            + _svg_text(left - 10, y + 5, row["arm"], text_anchor="end")
+            + _svg_text(min(rate_x + 8, width - 48), y + 5, _pct(row["rate"]),
+                        font_weight="700")
+            + "</g>"
+        )
+    for tick in range(0, 101, 20):
+        x = left + tick / 100 * plot_w
+        parts.append(f'<path d="M {x:.1f} {top-20} V {height-30}" class="grid"/>')
+        parts.append(_svg_text(x, height - 9, f"{tick}%", text_anchor="middle"))
+    label = "Correctness by harness with Wilson 95% confidence intervals"
+    return (f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{label}">'
+            f'<title>{label}</title>' + "".join(parts) + "</svg>")
+
+
+def _scatter_chart(data, colors, field, title, log_scale=False):
+    rows = [row for row in data if row["rate"] is not None and
+            isinstance(row.get(field), (int, float)) and
+            (row[field] > 0 if log_scale else row[field] >= 0)]
+    if not rows:
+        return _empty_chart(f"{title} by correctness", f"{title} data unavailable.")
+    left, top, bottom = 92, 28, 65
+    plot_w = 573
+    right = max(155, max(len(row["arm"]) for row in rows) * 7 + 38)
+    width = left + plot_w + right
+    plot_h = max(337, (len(rows) - 1) * 30 + 24)
+    height = top + plot_h + bottom
+    values = [row[field] for row in rows]
+    transformed = [math.log10(value) if log_scale else value for value in values]
+    low, high = min(transformed), max(transformed)
+    if low == high:
+        low, high = low - .5, high + .5
+    else:
+        padding = (high - low) * .12
+        low, high = low - padding, high + padding
+    if not log_scale:
+        low = max(0, low)
+    parts = []
+    for tick in range(0, 101, 20):
+        x = left + tick / 100 * plot_w
+        parts.extend([f'<path d="M {x:.1f} {top} V {top+plot_h}" class="grid"/>',
+                      _svg_text(x, height - 31, f"{tick}%", text_anchor="middle")])
+    for index in range(5):
+        scaled = low + (high - low) * index / 4
+        value = 10 ** scaled if log_scale else scaled
+        y = top + plot_h - index / 4 * plot_h
+        label = _num(value) if log_scale else _num(value, 1) + "s"
+        parts.extend([f'<path d="M {left} {y:.1f} H {left+plot_w}" class="grid"/>',
+                      _svg_text(left - 10, y + 5, label, text_anchor="end")])
+    points = []
+    for row in rows:
+        x = left + row["rate"] * plot_w
+        scaled = math.log10(row[field]) if log_scale else row[field]
+        y = top + (high - scaled) / (high - low) * plot_h
+        points.append((row, x, y))
+    # Keep labels in a dedicated right gutter and spread clustered values apart.
+    label_positions = []
+    previous = top - 30
+    for row, x, y in sorted(points, key=lambda point: point[2]):
+        label_y = max(y, previous + 30)
+        label_positions.append([row, x, y, label_y])
+        previous = label_y
+    overflow = max(0, label_positions[-1][3] - (top + plot_h - 12))
+    for row, x, y, label_y in label_positions:
+        label_y -= overflow
+        color = colors[row["arm"]]
+        if row["cli_basis"]:
+            shape = (f'<path d="M {x:.1f} {y-8:.1f} L {x+8:.1f} {y:.1f} '
+                     f'L {x:.1f} {y+8:.1f} L {x-8:.1f} {y:.1f} Z" fill="white" '
+                     f'stroke="{color}" stroke-width="4"/>')
+        else:
+            shape = f'<circle cx="{x:.1f}" cy="{y:.1f}" r="7" fill="{color}" stroke="white" stroke-width="2"/>'
+        label_x = left + plot_w + 14
+        value_label = _num(row[field]) if log_scale else _num(row[field], 1) + "s"
+        parts.append(
+            f'<g data-arm="{html.escape(row["arm"])}" data-correctness="{row["rate"]:.4f}" '
+            f'data-value="{row[field]:.4f}"><path d="M {x+8:.1f} {y:.1f} L {label_x-5:.1f} '
+            f'{label_y:.1f}" stroke="{color}" stroke-width="1" fill="none" opacity=".65"/>'
+            + shape
+            + _svg_text(label_x, label_y - 3, row["arm"], fill=color, font_weight="700")
+            + _svg_text(label_x, label_y + 13, f'{_pct(row["rate"])} · {value_label}',
+                        fill="#52606d", font_size="11")
+            + "</g>"
+        )
+    parts.extend([_svg_text(left + plot_w / 2, height - 7, "Correctness (higher →)", text_anchor="middle", font_weight="700"),
+                  _svg_text(17, top + plot_h / 2, title, text_anchor="middle", font_weight="700", transform=f"rotate(-90 17 {top + plot_h / 2:.1f})")])
+    label = f"{title} by correctness for each harness"
+    return (f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(label)}">'
+            f'<title>{html.escape(label)}</title>' + "".join(parts) + "</svg>")
+
+
+def _charts(model, colors):
+    data = _chart_data(model)
+    correctness = _correctness_chart(data, colors)
+    efficiency = _scatter_chart(data, colors, "total_tokens", "Total tokens / solve (log scale)", True)
+    speed = _scatter_chart(data, colors, "med_wall", "Median wall time")
+    return f'''<div class="charts">
+<figure><h3>Correctness</h3>{correctness}<figcaption>Bars show solve rate; whiskers show Wilson 95% confidence intervals.</figcaption></figure>
+<figure class="hero"><h3>Efficiency</h3>{efficiency}<figcaption>Lower-right is better: more correct and leaner. Diamonds identify cursor and opencode; their token totals are self-reported.</figcaption></figure>
+<figure><h3>Speed</h3>{speed}<figcaption>Lower-right is better: more correct with a lower median wall time among solved runs.</figcaption></figure>
+</div>'''
 
 
 def _markdown(text):
@@ -202,13 +357,14 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
     total = sum(a["n"] for m in models for a in m["arms"])
     headline = headline or f"{len(models)} models, {total:,} countable harness × task × trial cells."
     harnesses = sorted({a["arm"] for m in models for a in m["arms"]})
+    colors = {harness: PALETTE[index % len(PALETTE)] for index, harness in enumerate(harnesses)}
     sections = []
     for model in models:
         dual = model["has_timeouts"]
         heads = ["Arm (harness × model)", "Solved/countable"]
-        heads += ["Rate @cap", "Rate finished"] if dual else ["Rate"]
+        heads += ["Solve rate @cap", "Solve rate finished"] if dual else ["Solve rate"]
         heads += ["Wilson 95% CI", "Med wall", "Uncached in/solve", "Output/solve",
-                  "Cache-read/solve"]
+                  "Cache-read/solve", "Total tokens/solve"]
         if model["has_pricing"]:
             heads.append("$/solve")
         heads.extend(["Token basis", "Excluded / unmatched / duplicates"])
@@ -242,16 +398,26 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
             values += [f"{a['wilson'][0] * 100:.1f}–{a['wilson'][1] * 100:.1f}%",
                        _num(a["med_wall"], 1) + ("s" if a["med_wall"] is not None else ""),
                        _num(a["tokens_input_uncached"]), _num(a["tokens_output"]),
-                       _num(a["tokens_cache_read"])]
+                       _num(a["tokens_cache_read"]), _num(a["total_tokens"])]
             if model["has_pricing"]:
                 values.append(
                     "—" if a["cost_per_solve"] is None else f"${a['cost_per_solve']:.3f}"
                 )
             values.extend([a["token_basis"],
                            f"{sum(a['excluded'].values())} / {a['unmatched']} / {a['duplicates']}"])
-            body.append("<tr>" + "".join(f"<td>{html.escape(str(v))}</td>" for v in values) + "</tr>")
-        sections.append(f'<section><h2>{html.escape(model["title"])}</h2>{warning}<div class="scroll"><table class="results"><thead><tr>' +
-                        "".join(f"<th>{html.escape(h)}</th>" for h in heads) +
+            cells = []
+            total_index = heads.index("Total tokens/solve")
+            for index, value in enumerate(values):
+                css_class = ' class="total-tokens"' if index == total_index else ""
+                cells.append(f"<td{css_class}>{html.escape(str(value))}</td>")
+            color = colors[a["arm"]]
+            body.append(f'<tr style="--arm-color:{color}">' + "".join(cells) + "</tr>")
+        head_cells = "".join(
+            f'<th class="total-tokens">{html.escape(h)}</th>' if h == "Total tokens/solve"
+            else f"<th>{html.escape(h)}</th>" for h in heads)
+        sections.append(f'<section><h2>{html.escape(model["title"])}</h2>{warning}' +
+                        _charts(model, colors) +
+                        '<div class="scroll"><table class="results"><thead><tr>' + head_cells +
                         "</tr></thead><tbody>" + "".join(body) + "</tbody></table></div></section>")
     model_names = [m["model"] for m in models]
     lookup = {(a["arm"], m["model"]): _pct(a["rate"]) for m in models for a in m["arms"]}
@@ -259,7 +425,7 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
         f"<td>{html.escape(lookup.get((h, model), '—'))}</td>" for model in model_names) + "</tr>" for h in harnesses)
     grid = '<section><h2>Harness × model correctness</h2><div class="scroll"><table><thead><tr><th>Harness</th>' + "".join(
         f"<th>{html.escape(m)}</th>" for m in model_names) + "</tr></thead><tbody>" + grid_rows + "</tbody></table></div></section>"
-    css = """body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:1200px;margin:auto;padding:2rem;background:#f7f8fa}header{padding:2rem;background:#18253b;color:white;border-radius:12px}section{margin:2rem 0;background:white;padding:1.4rem;border-radius:10px;box-shadow:0 1px 4px #ccd}h1{margin:.1rem 0}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{padding:.65rem;border-bottom:1px solid #dde2e8;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}thead th{background:#edf2f7}.warning{background:#fff1d6;border-left:4px solid #b45309;padding:.75rem}.tag{font-size:.85rem;color:#52606d}footer{color:#52606d;text-align:center}@media(max-width:600px){body{padding:.6rem}section,header{padding:1rem}}"""
+    css = """body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:1200px;margin:auto;padding:2rem;background:#f7f8fa}header{padding:2rem;background:#18253b;color:white;border-radius:12px}section{margin:2rem 0;background:white;padding:1.4rem;border-radius:10px;box-shadow:0 1px 4px #ccd}h1{margin:.1rem 0}.scroll{overflow:auto}table,.chart{font-variant-numeric:tabular-nums}table{border-collapse:collapse;width:100%}th,td{padding:.65rem;border-bottom:1px solid #dde2e8;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}.results tbody tr{border-left:4px solid var(--arm-color)}thead th{background:#edf2f7}.total-tokens{font-weight:800;background:#e6f2f8}.charts{display:grid;gap:1rem;margin:1rem 0 1.5rem}.charts figure{margin:0;border:1px solid #dde2e8;border-radius:8px;padding:.8rem}.charts .hero{border-width:2px;background:#fbfdff}.charts h3{margin:.1rem 0}.chart{width:100%;height:auto}.chart text{font-family:system-ui,sans-serif;font-size:12px;fill:#17202a}.grid{stroke:#d8dee7;stroke-width:1}.whisker{stroke:#17202a;stroke-width:2;fill:none}figcaption,.empty-chart{font-size:.85rem;color:#52606d}.warning{background:#fff1d6;border-left:4px solid #b45309;padding:.75rem}.tag{font-size:.85rem;color:#52606d}footer{color:#52606d;text-align:center}@media(max-width:700px){body{padding:.6rem}section,header{padding:1rem}.charts{grid-template-columns:1fr}.charts .hero{grid-column:auto}}"""
     return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + html.escape(title) + "</title><style>" + css + "</style></head><body><header><div class=\"tag\">OPENBENCH</div><h1>" + html.escape(title) + "</h1><p>" + html.escape(headline) + "</p></header>" + "".join(sections) + grid + '<section id="methodology"><h2>Methodology &amp; limitations</h2>' + _markdown(methodology) + "</section><footer>Generated by OpenBench · static, self-contained HTML</footer></body></html>\n"
 
 

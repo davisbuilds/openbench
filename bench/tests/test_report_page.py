@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import tempfile
 import unittest
 
@@ -39,7 +40,91 @@ class ReportPageTest(unittest.TestCase):
         fast = model["arms"][0]
         self.assertEqual((fast["solved"], fast["n"]), (1, 2))
         self.assertEqual(fast["tokens_input_uncached"], 200)
+        self.assertEqual(fast["total_tokens"], 340)
         self.assertEqual(fast["finished_rate"], 1.0)
+
+    def test_total_tokens_column_and_timeout_label_suppression(self):
+        path = self.write([
+            self.row("pi", 1, True, tokens_input_uncached=120,
+                     tokens_output=30, tokens_cache_read=50),
+            self.row("pi", 2, False, tokens_input_uncached=80,
+                     tokens_output=10, tokens_cache_read=10),
+        ])
+        model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
+        self.assertEqual(model["arms"][0]["total_tokens"], 300)
+        page = report_page.render_page([model], "Method")
+        self.assertIn("Total tokens/solve", page)
+        self.assertIn(">300</td>", page)
+        self.assertIn("Solve rate</th>", page)
+        self.assertNotIn("@cap", page)
+        self.assertNotIn("Solve rate finished", page)
+
+    def test_timeout_dataset_keeps_cap_and_finished_labels(self):
+        path = self.write([
+            self.row("pi", 1, True),
+            self.row("pi", 2, False, failure_class="timeout"),
+        ])
+        models = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])
+        page = report_page.render_page(models, "Method")
+        self.assertIn("Solve rate @cap", page)
+        self.assertIn("Solve rate finished", page)
+
+    def test_chart_data_and_svg_include_labels_points_and_cli_marker(self):
+        path = self.write([
+            self.row("cursor", 1, True, wall_time_s=8),
+            self.row("cursor", 2, False, wall_time_s=12),
+            self.row("pi", 1, True, wall_time_s=4),
+            self.row("pi", 2, True, wall_time_s=6),
+        ])
+        model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
+        chart_data = {row["arm"]: row for row in report_page._chart_data(model)}
+        self.assertTrue(chart_data["cursor"]["cli_basis"])
+        self.assertEqual(chart_data["pi"]["total_tokens"], 170)
+        page = report_page.render_page([model], "Method")
+        self.assertEqual(page.count('role="img"'), 3)
+        for expected in ("Correctness by harness", "Total tokens / solve (log scale)",
+                         "Median wall time", "cursor", "pi", "self-reported",
+                         'data-arm="cursor"', 'data-arm="pi"', "<circle", "<path d=\"M "):
+            self.assertIn(expected, page)
+
+    def test_cli_marker_uses_underlying_harness_for_named_candidate(self):
+        path = self.write([
+            self.row("cursor", 1, True,
+                     candidate_provenance={"name": "experiment-a", "candidate_digest": "abc"}),
+        ])
+        model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
+        self.assertTrue(report_page._chart_data(model)[0]["cli_basis"])
+
+    def test_scatter_gracefully_handles_missing_measurement(self):
+        model = {"arms": [{"arm": "cursor", "rate": 1.0,
+                           "wilson": [0.2, 1.0], "total_tokens": None,
+                           "med_wall": None}]}
+        colors = {"cursor": "#0072B2"}
+        svg = report_page._scatter_chart(
+            report_page._chart_data(model), colors, "total_tokens", "Efficiency", True)
+        self.assertIn("Efficiency data unavailable", svg)
+        self.assertIn('role="img"', svg)
+        self.assertIn("<title>Efficiency by correctness</title>", svg)
+
+    def test_all_charts_remain_accessible_when_metrics_are_missing(self):
+        model = {"arms": [{"arm": "cursor", "rate": None, "wilson": None,
+                           "total_tokens": None, "med_wall": None}]}
+        charts = report_page._charts(model, {"cursor": "#0072B2"})
+        self.assertEqual(charts.count('role="img"'), 3)
+        self.assertEqual(charts.count("<title>"), 3)
+        self.assertIn("data unavailable", charts)
+
+    def test_chart_viewboxes_expand_for_long_harness_labels(self):
+        arm = "a-very-long-harness-name-that-must-remain-readable (candidate)"
+        data = [{"arm": arm, "rate": .5, "wilson": [.2, .8],
+                 "total_tokens": 1000, "med_wall": 10, "cli_basis": False}]
+        colors = {arm: "#0072B2"}
+        for chart in (report_page._correctness_chart(data, colors),
+                      report_page._scatter_chart(data, colors, "total_tokens",
+                                                 "Efficiency", True)):
+            width = int(re.search(r'viewBox="0 0 (\d+)', chart).group(1))
+            self.assertGreater(width, 820)
+            self.assertIn(arm, chart)
 
     def test_duplicate_cells_are_rejected(self):
         path = self.write([self.row("pi", 1, True), self.row("pi", 1, False)])
