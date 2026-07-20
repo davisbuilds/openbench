@@ -63,6 +63,86 @@ class DockerfileParseTests(unittest.TestCase):
         self.assertTrue(a.docker_required)
         self.assertTrue(a.multi_stage)
 
+    def test_relative_copy_resolved_against_workdir_at_copy(self):
+        """TB fix-git pattern: COPY ./ then later WORKDIR change."""
+        text = (
+            "FROM python:3.13-slim-bookworm\n"
+            "WORKDIR /app\n"
+            "COPY setup.sh ./\n"
+            "COPY resources /app/resources\n"
+            "RUN bash /app/setup.sh\n"
+            "WORKDIR /app/personal-site\n"
+        )
+        a = ih.parse_dockerfile(text)
+        self.assertEqual(a.workdir, "/app/personal-site")
+        self.assertEqual(
+            a.copy_ops,
+            [("setup.sh", "/app/"), ("resources", "/app/resources")],
+        )
+        self.assertTrue(a.docker_required)
+
+    def test_backslash_continuation_joins_for_package_hints(self):
+        text = (
+            "FROM ubuntu:24.04\n"
+            "RUN apt-get update && apt-get install -y \\\n"
+            "    nginx \\\n"
+            "    git \\\n"
+            "    curl \\\n"
+            "    && rm -rf /var/lib/apt/lists/*\n"
+            "WORKDIR /app\n"
+        )
+        a = ih.parse_dockerfile(text)
+        self.assertTrue(a.docker_required)
+        self.assertIn("nginx", a.packages_hint)
+        self.assertIn("git", a.packages_hint)
+        self.assertIn("curl", a.packages_hint)
+        self.assertNotIn("&&", a.packages_hint)
+        self.assertNotIn("rm", a.packages_hint)
+        self.assertNotIn("/var/lib/apt/lists/*", a.packages_hint)
+
+    def test_empty_staging_only_not_docker_required_after_stage(self):
+        """TB cancel-async-tasks pattern: FROM+WORKDIR, no COPY — not docker-req."""
+        tmp = tempfile.mkdtemp(prefix="obench_empty_stage_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        harbor = os.path.join(tmp, "empty-task")
+        os.makedirs(os.path.join(harbor, "environment"))
+        _write(
+            os.path.join(harbor, "environment", "Dockerfile"),
+            "FROM python:3.13-slim-bookworm\nWORKDIR /app\n",
+        )
+        ws = os.path.join(tmp, "workspace")
+        a = ih.stage_workspace_from_dockerfile(harbor, ws)
+        self.assertFalse(a.docker_required)
+        self.assertTrue(any("empty agent workspace" in r for r in a.reasons))
+        self.assertEqual(os.listdir(ws), [])
+
+    def test_relative_copy_stages_into_workspace_root(self):
+        tmp = tempfile.mkdtemp(prefix="obench_rel_copy_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        harbor = os.path.join(tmp, "rel-task")
+        env = os.path.join(harbor, "environment")
+        os.makedirs(env)
+        _write(
+            os.path.join(env, "Dockerfile"),
+            "FROM python:3.13-slim\n"
+            "WORKDIR /app\n"
+            "COPY setup.sh ./\n"
+            "COPY data.txt .\n"
+            "WORKDIR /app/subdir\n",
+        )
+        _write(os.path.join(env, "setup.sh"), "#!/bin/bash\ntrue\n")
+        _write(os.path.join(env, "data.txt"), "payload\n")
+        ws = os.path.join(tmp, "workspace")
+        a = ih.stage_workspace_from_dockerfile(harbor, ws)
+        self.assertFalse(
+            any("outside WORKDIR" in r for r in a.reasons), a.reasons
+        )
+        self.assertTrue(os.path.isfile(os.path.join(ws, "setup.sh")))
+        self.assertTrue(os.path.isfile(os.path.join(ws, "data.txt")))
+        # Final WORKDIR changed but COPY targeted /app — not docker-required
+        # from COPY alone.
+        self.assertFalse(a.docker_required)
+
 
 class RewardMappingTests(unittest.TestCase):
     def test_full_reward(self):
@@ -147,6 +227,45 @@ class SolveMaterializeTests(unittest.TestCase):
         )
         self.assertFalse(ok)
         self.assertIn("network", reason)
+
+    def test_solve_sh_rewrites_absolute_app_paths(self):
+        """TB code-from-image pattern: cat > /app/code.py in solve.sh."""
+        tmp = tempfile.mkdtemp(prefix="obench_solve_app_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        harbor = os.path.join(tmp, "harbor")
+        os.makedirs(os.path.join(harbor, "solution"))
+        os.makedirs(os.path.join(harbor, "environment"))
+        _write(
+            os.path.join(harbor, "environment", "Dockerfile"),
+            "FROM python:3.13-slim\nWORKDIR /app\nCOPY code.png /app\n",
+        )
+        _write(os.path.join(harbor, "environment", "code.png"), "png\n")
+        _write(
+            os.path.join(harbor, "solution", "solve.sh"),
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "cat <<'EOF' > /app/code.py\n"
+            "print('hi')\n"
+            "EOF\n"
+            "printf 'ok\\n' > /app/output.txt\n",
+        )
+        os.chmod(os.path.join(harbor, "solution", "solve.sh"), 0o755)
+        work = os.path.join(tmp, "work")
+        os.makedirs(work)
+        _write(os.path.join(work, "code.png"), "png\n")
+        dest = os.path.join(tmp, "solution")
+        ok, notes = ih.materialize_solution_from_harbor(harbor, work, dest)
+        self.assertTrue(ok, notes)
+        self.assertTrue(os.path.isfile(os.path.join(dest, "code.py")))
+        self.assertTrue(os.path.isfile(os.path.join(dest, "output.txt")))
+        with open(os.path.join(dest, "output.txt"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "ok\n")
+
+    def test_rewrite_harbor_paths_helper(self):
+        text = 'cat > /app/foo.py <<EOF\nprint(1)\nEOF\n'
+        out = ih._rewrite_harbor_paths_for_local(text, "/tmp/ws")
+        self.assertIn("/tmp/ws/foo.py", out)
+        self.assertNotIn("/app/foo.py", out)
 
 
 class ProvenanceTests(unittest.TestCase):
