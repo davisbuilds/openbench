@@ -211,7 +211,7 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
                 # credentials into its separate child HOME.
                 for auth in getattr(candidate, "auth_files", []):
                     source = candidates._auth_source(auth["source"])
-                    mirrored = os.path.join(fake_home, auth["source"][2:])
+                    mirrored = candidates._safe_destination(fake_home, auth["source"][2:])
                     os.makedirs(os.path.dirname(mirrored), exist_ok=True)
                     shutil.copy2(source, mirrored)
                 with contextlib.ExitStack() as stack:
@@ -237,11 +237,13 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
                            if not canary_seen else "canary content escaped into row evidence")
         calls = smoke_row.get("tokens_proxy_calls") or 0
         smoke_worked = bool(smoke_row.get("completed")) and not smoke_row.get("error")
-        metered = calls > 0 or (candidate.unmetered and smoke_worked)
+        metered = smoke_worked and (calls > 0 or candidate.unmetered)
         checks.append(_check(
             "METERING", metered,
-            (f"manifest declares unmetered=true; smoke_completed={smoke_worked}"
-             if candidate.unmetered else f"counting proxy ledger calls={calls}")))
+            ("smoke cell did not complete cleanly" if not smoke_worked else
+             f"manifest declares unmetered=true; smoke_completed={smoke_worked}"
+             if candidate.unmetered else
+             f"counting proxy usage-bearing calls={calls}")))
 
         # Replace only the executable for this probe, retaining the candidate's
         # own run/timeout implementation while avoiding model-dependent behavior.
