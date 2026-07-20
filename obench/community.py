@@ -248,14 +248,22 @@ def load_releases_manifest(site_dir):
     return data
 
 
-def write_site_index(site_dir, releases=None, community=None):
-    """Regenerate ``docs/index.html`` from release + community manifests."""
+def load_packs_manifest(site_dir):
+    """Read ``packs.json`` from a site dir; missing → empty list."""
+    from .packs import load_packs_index
+    return load_packs_index(site_dir)
+
+
+def write_site_index(site_dir, releases=None, community=None, packs=None):
+    """Regenerate ``docs/index.html`` from release + community + packs manifests."""
     if releases is None:
         releases = load_releases_manifest(site_dir)
     if community is None:
         community = load_community_manifest(site_dir)
+    if packs is None:
+        packs = load_packs_manifest(site_dir)
     index_path = os.path.join(site_dir, "index.html")
-    text = report_page._site_index(releases, community=community)
+    text = report_page._site_index(releases, community=community, packs=packs)
     os.makedirs(site_dir, exist_ok=True)
     with open(index_path, "w", encoding="utf-8") as fh:
         fh.write(text)

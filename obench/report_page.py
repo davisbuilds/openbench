@@ -507,12 +507,7 @@ def render_page(models, methodology, title="OpenBench report", headline=None,
 
 
 def _site_index(releases, community=None, packs=None):
-    """Render docs/index.html from official releases + optional community list.
-
-    ``packs`` is accepted for call-site compatibility with pack index sync; the
-    pack listing itself is owned by ``obench pack publish-index`` when present.
-    """
-    _ = packs
+    """Render docs/index.html from releases + optional community/packs lists."""
     cards = []
     for release in reversed(releases):
         models = ", ".join(release["models"])
@@ -558,11 +553,43 @@ def _site_index(releases, community=None, packs=None):
         "".join(community_cards) or "<li>No community submissions yet.</li>"
     )
 
+    packs = list(packs or [])
+    pack_cards = []
+    for entry in sorted(packs, key=lambda item: (item.get("id") or "")):
+        pack_id = entry.get("id") or ""
+        latest = entry.get("latest") or ""
+        kind = entry.get("kind") or "tasks"
+        desc = entry.get("description") or ""
+        source = entry.get("source") or ""
+        sha = entry.get("content_sha256") or ""
+        title = f"{pack_id}@{latest}" if latest else pack_id
+        source_html = ""
+        if isinstance(source, str) and source.strip():
+            href = source.strip()
+            if href.startswith(("http://", "https://")):
+                source_html = (
+                    ' · <a href="' + html.escape(href, quote=True)
+                    + '">source</a>'
+                )
+            else:
+                source_html = " · <code>" + html.escape(href) + "</code>"
+        sha_html = (
+            f' · <code>{html.escape(sha[:12])}…</code>' if sha else ""
+        )
+        pack_cards.append(
+            "<li><strong>" + html.escape(title) + "</strong>"
+            " · " + html.escape(kind)
+            + (("<br>" + html.escape(desc)) if desc else "")
+            + "<br><span class=\"tag\">" + html.escape(pack_id)
+            + source_html + sha_html + "</span></li>"
+        )
+    packs_listing = "".join(pack_cards) or "<li>No packs published yet.</li>"
+
     css = ("body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:800px;margin:auto;"
            "padding:2rem;background:#f7f8fa}header,main{background:white;padding:1.5rem;"
            "border-radius:10px;margin-bottom:1rem}h1,h2{margin:.1rem 0}li{margin:1rem 0}"
            "a{color:#075985}time{color:#52606d}.tag{color:#52606d;font-size:.9rem}"
-           ".lead a{font-weight:600}")
+           ".lead a{font-weight:600}code{font-size:.85em}")
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
             'content="width=device-width,initial-scale=1"><title>OpenBench releases</title><style>'
             + css + '</style></head><body><header><div>OPENBENCH</div><h1>Benchmark releases</h1>'
@@ -574,7 +601,11 @@ def _site_index(releases, community=None, packs=None):
             '<p class="tag">Third-party publish bundles re-verified by CI '
             '(<code>obench verify</code>). Digests prove tamper-evidence, not '
             'that runs were not cherry-picked.</p><ul>' + community_listing
-            + '</ul></main></body></html>\n')
+            + '</ul></main><main id="packs"><h2>Packs</h2>'
+            '<p class="tag">Versioned task and harness packs '
+            '(<code>obench pack install org/name@version --from …</code>). '
+            'Index maintained via <code>obench pack publish-index</code>.</p><ul>'
+            + packs_listing + '</ul></main></body></html>\n')
 
 
 def _validated_date(value):
@@ -675,7 +706,15 @@ def _build_site_locked(site_dir, release_id, release_date, title, models, page):
         if not isinstance(loaded, list):
             raise ValueError("community.json must contain a JSON list")
         community = loaded
-    index_text = _site_index(releases, community=community)
+    packs_path = os.path.join(site_dir, "packs.json")
+    packs = []
+    if os.path.isfile(packs_path):
+        with open(packs_path, encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if not isinstance(loaded, list):
+            raise ValueError("packs.json must contain a JSON list")
+        packs = loaded
+    index_text = _site_index(releases, community=community, packs=packs)
     pending = []
     originals = {}
     replaced = []
