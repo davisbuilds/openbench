@@ -9,7 +9,7 @@ This directory is a self-contained static release site. To publish it:
 Example using the GPT-5.6 sample:
 
 ```sh
-python3 bench/report_page.py .worker/data/gpt56-final.jsonl --site-dir docs --release-id 2026-07-20-gpt56 --title "GPT-5.6 harness comparison"
+python3 -m obench.report_page .worker/data/gpt56-final.jsonl --site-dir docs --release-id 2026-07-20-gpt56 --title "GPT-5.6 harness comparison"
 ```
 
 The release date defaults to the leading `YYYY-MM-DD` in the release ID. For other IDs, pass `--release-date YYYY-MM-DD`. Use a fresh release ID for every publication. Repeating an identical build is safe (and repairs an interrupted publication); conflicting reuse of an ID is refused.

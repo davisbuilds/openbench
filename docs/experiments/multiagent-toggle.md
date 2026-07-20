@@ -55,37 +55,37 @@ CORE='add-feature,build-a-cli,fix-failing-test,make-ci-green,make-it-run,mislead
 TB='terminal-bench/db-wal-recovery,terminal-bench/extract-elf,terminal-bench/feal-differential-cryptanalysis,terminal-bench/gcode-to-text,terminal-bench/llm-inference-batching-scheduler,terminal-bench/raman-fitting,terminal-bench/schemelike-metacircular-eval'
 
 # OFF, stock adapter (40 core + 35 imported cells)
-OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/off-core" python3 bench/run.py \
+OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/off-core" obench run \
   --harness codex --model gpt-5.6-sol --task "$CORE" --trials 5 \
   --timeout 2400 --proxy --results-path "$ROOT/codex-off.jsonl"
-OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/off-tb" python3 bench/run.py \
+OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/off-tb" obench run \
   --harness codex --model gpt-5.6-sol --task "$TB" --tasks-dir tasks-imported \
   --trials 5 --timeout 2400 --proxy --results-path "$ROOT/codex-off.jsonl"
 
 # ON, declarative candidate (40 core + 35 imported cells)
-OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/on-core" python3 bench/run.py \
+OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/on-core" obench run \
   --candidate experiments/multiagent-toggle/codex-on.toml \
   --model gpt-5.6-sol --task "$CORE" --trials 5 --timeout 2400 --proxy \
   --results-path "$ROOT/codex-on.jsonl"
-OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/on-tb" python3 bench/run.py \
+OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/on-tb" obench run \
   --candidate experiments/multiagent-toggle/codex-on.toml \
   --model gpt-5.6-sol --task "$TB" --tasks-dir tasks-imported \
   --trials 5 --timeout 2400 --proxy --results-path "$ROOT/codex-on.jsonl"
 
 # Canonical solve/hack-adjusted and efficiency summaries.
-python3 bench/stats.py --strict-provenance --min-n 75 \
+python3 -m obench.stats --strict-provenance --min-n 75 \
   --tasks-dir tasks --tasks-dir tasks-imported \
   "$ROOT/codex-off.jsonl" "$ROOT/codex-on.jsonl" | tee "$ROOT/stats.txt"
-python3 bench/report.py --efficiency --results-path "$ROOT/codex-off.jsonl" \
+obench report --efficiency --results-path "$ROOT/codex-off.jsonl" \
   | tee "$ROOT/off-efficiency.txt"
-python3 bench/report.py --efficiency --results-path "$ROOT/codex-on.jsonl" \
+obench report --efficiency --results-path "$ROOT/codex-on.jsonl" \
   | tee "$ROOT/on-efficiency.txt"
 
 # One analysis object per cell ledger; each output file preserves the cell token.
 for arm in off-core off-tb on-core on-tb; do
   for ledger in "$ROOT/ledger/$arm"/*.jsonl; do
     cell=$(basename "$ledger" .jsonl)
-    python3 bench/analyze_prefix.py "$ledger" > "$ROOT/prefix/$arm-$cell.json"
+    python3 -m obench.analyze_prefix "$ledger" > "$ROOT/prefix/$arm-$cell.json"
   done
 done
 ```

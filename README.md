@@ -10,7 +10,11 @@ the same underlying model and task, how much does the harness around it matter?*
 
 **New here?** [`WRITEUP.md`](WRITEUP.md) tells the story arc; [`RESULTS.md`](RESULTS.md)
 has the milestone analyses; [`SETUP.md`](SETUP.md) is the practical runbook for a
-first local cell, Docker, imported tasks, and open-model keys.
+first local cell, Docker, imported tasks, and open-model keys. Evaluating
+harnesses on a **private codebase**? Start with
+[`docs/private-evals.md`](docs/private-evals.md) (`obench init`, author a task
+from a small code slice, validate polarity, run, report — transcripts stay
+local).
 
 **Live results:** https://minghinmatthewlam.github.io/openbench/
 
@@ -87,14 +91,14 @@ MOONSHOT_API_KEY=
 Preflight (no token spend):
 
 ```bash
-python3 bench/doctor.py --harness pi,opencode --model glm-4.7-flash
+obench doctor --harness pi,opencode --model glm-4.7-flash
 ```
 
 Run the resumable matrix:
 
 ```bash
 for m in glm-4.7-flash glm-5.2 deepseek-v4-flash kimi-k2.7-code; do
-  python3 bench/run.py --harness pi,opencode \
+  obench run --harness pi,opencode \
     --task make-ci-green,add-feature,misleading-error \
     --model "$m" --trials 3
 done
@@ -103,7 +107,7 @@ done
 Report:
 
 ```bash
-python3 bench/report.py --efficiency --results-path results/results.jsonl
+obench report --efficiency --results-path results/results.jsonl
 ```
 
 For a single first run, Docker, imported tasks, `claude`, or `codex` open-model
@@ -144,8 +148,8 @@ pip install "git+https://github.com/minghinmatthewlam/openbench.git"
 # future: pip install obench
 ```
 
-Then use the umbrella CLI: `obench run`, `obench report`, `obench doctor`,
-`obench validate`, `obench gate`, `obench compare`. Legacy
+Then use the umbrella CLI: `obench init`, `obench run`, `obench report`,
+`obench doctor`, `obench validate`, `obench gate`, `obench compare`. Legacy
 `python3 bench/run.py` (and friends) still forward with a deprecation note.
 
 ## Quickstart
@@ -340,9 +344,9 @@ gitignored, and there is deliberately no publishing path in this repo. Before
 sharing any transcript you must do a manual review pass:
 
 ```bash
-python3 bench/scrub.py transcripts/ --check          # REPORT potential PII (exit 1 if any)
-python3 bench/scrub.py transcripts/ --out scrubbed/   # write scrubbed copies (originals untouched)
-python3 bench/scrub.py scrubbed/ --check             # confirm the copies are clean (idempotent)
+python3 -m obench.scrub transcripts/ --check          # REPORT potential PII (exit 1 if any)
+python3 -m obench.scrub transcripts/ --out scrubbed/   # write scrubbed copies (originals untouched)
+python3 -m obench.scrub scrubbed/ --check             # confirm the copies are clean (idempotent)
 ```
 
 `scrub.py` replaces emails, home paths, the local username, hostnames, and

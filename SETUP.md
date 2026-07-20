@@ -2,6 +2,13 @@
 
 This is the shortest path for a first-time visitor to run one benchmark cell and then scale up to the imported Terminal-Bench tier or open-model runs.
 
+For evaluating harnesses on a **private company codebase**, see
+[`docs/private-evals.md`](docs/private-evals.md) (`obench init`).
+
+Legacy note: `python3 bench/run.py` (and other `bench/*.py` shims) still forward
+to the `obench` package with a deprecation warning. Prefer the `obench` CLI
+below.
+
 ## Requirements
 
 - Python 3.11+ (the benchmark code uses only the Python standard library).
@@ -27,10 +34,10 @@ OpenBench benchmarks harnesses, so the CLIs are intentionally external dependenc
 Run a no-spend preflight for installed real CLIs and model mapping:
 
 ```bash
-python3 bench/doctor.py --harness codex,pi,opencode --model gpt-5.5-medium
+obench doctor --harness codex,pi,opencode --model gpt-5.5-medium
 ```
 
-`doctor.py` checks availability/auth/model resolution only; it does not spend tokens. The built-in `null` control has no external CLI/auth and is exercised with `bench/run.py` instead.
+`obench doctor` checks availability/auth/model resolution only; it does not spend tokens. The built-in `null` control has no external CLI/auth and is exercised with `obench run` instead.
 
 ## Local provider keys (`~/.openbench/keys.env`)
 
@@ -42,14 +49,14 @@ DEEPSEEK_API_KEY=
 MOONSHOT_API_KEY=
 ```
 
-Do not commit this file. Fill the values locally or export the same names in your shell. `bench/openmodel_bridge.sh` also reads this file when present.
+Do not commit this file. Fill the values locally or export the same names in your shell. `obench/openmodel_bridge.sh` also reads this file when present.
 
 ## Validate tasks
 
 Before benchmarking, prove every checker is polarized: the untouched workspace must fail and the golden solution must pass.
 
 ```bash
-python3 validate_tasks.py
+obench validate
 ```
 
 This validates both `tasks/` and maintainer-curated imported tiers under `tasks-imported/`.
@@ -59,19 +66,19 @@ This validates both `tasks/` and maintainer-curated imported tiers under `tasks-
 Start with the zero-cost negative control:
 
 ```bash
-python3 bench/run.py \
+obench run \
   --harness null \
   --task fix-failing-test \
   --trials 1 \
   --results-path /tmp/openbench-smoke.jsonl
 
-python3 bench/report.py --efficiency --results-path /tmp/openbench-smoke.jsonl
+obench report --efficiency --results-path /tmp/openbench-smoke.jsonl
 ```
 
 A real frontier/subscription cell is the same shape, but requires that harness CLI to be logged in:
 
 ```bash
-python3 bench/run.py \
+obench run \
   --harness pi \
   --task fix-failing-test \
   --model gpt-5.5-medium \
@@ -88,7 +95,7 @@ Imported tiers are addressed as `collection/task` and are scored separately from
 Exercism example:
 
 ```bash
-python3 bench/run.py \
+obench run \
   --tasks-dir tasks-imported \
   --harness null \
   --task exercism/luhn \
@@ -98,9 +105,9 @@ python3 bench/run.py \
 Terminal-Bench frontier tier example (use Docker isolation):
 
 ```bash
-docker build -t openbench-harness:latest bench/docker
+docker build -t openbench-harness:latest obench/docker
 
-python3 bench/run.py \
+obench run \
   --tasks-dir tasks-imported \
   --exec docker \
   --harness pi \
@@ -127,13 +134,13 @@ uv pip install --python "$OPENBENCH_HOME/bridge-venv/bin/python" 'litellm[proxy]
 Then start it in the foreground before Codex open-model runs:
 
 ```bash
-bench/openmodel_bridge.sh
+obench/openmodel_bridge.sh
 ```
 
 In another terminal, run Codex against an open model:
 
 ```bash
-python3 bench/run.py \
+obench run \
   --harness codex \
   --task make-ci-green \
   --model deepseek-v4-flash \
@@ -146,13 +153,13 @@ Security caveat: the bridge injects real provider keys upstream and, by default,
 ## Reporting and transcripts
 
 ```bash
-python3 bench/report.py --efficiency --results-path /tmp/openbench-pi.jsonl
+obench report --efficiency --results-path /tmp/openbench-pi.jsonl
 ```
 
 Every real run writes a raw transcript next to the results log unless `--transcripts-dir` is overridden. Transcripts are unscrubbed and may contain paths, hostnames, emails, or echoed secrets. Before sharing any transcript:
 
 ```bash
-python3 bench/scrub.py transcripts/ --check
-python3 bench/scrub.py transcripts/ --out scrubbed/
-python3 bench/scrub.py scrubbed/ --check
+python3 -m obench.scrub transcripts/ --check
+python3 -m obench.scrub transcripts/ --out scrubbed/
+python3 -m obench.scrub scrubbed/ --check
 ```

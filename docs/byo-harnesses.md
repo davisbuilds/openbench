@@ -122,15 +122,15 @@ comparison tables:
 
 ```bash
 # Safe schema/policy preview; launches no harness and spends no tokens.
-python3 bench/candidate_gate.py experiments/candidates/aider.toml \
+obench gate experiments/candidates/aider.toml \
   --model deepseek-v4-flash
 
 # Paid checks (run only by an operator with the intended credentials).
-python3 bench/candidate_gate.py experiments/candidates/aider.toml \
+obench gate experiments/candidates/aider.toml \
   --model deepseek-v4-flash --live
 
 # Optional, expensive n=1 calibration over the fixed 15-task set.
-python3 bench/candidate_gate.py experiments/candidates/aider.toml \
+obench gate experiments/candidates/aider.toml \
   --model deepseek-v4-flash --live --calibrate
 ```
 

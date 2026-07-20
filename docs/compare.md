@@ -1,10 +1,10 @@
 # Comparing benchmark arms
 
-Use `bench/compare.py` to create a report-ready scorecard from two or more
+Use `obench compare` to create a report-ready scorecard from two or more
 OpenBench result arms:
 
 ```sh
-python3 bench/compare.py results/baseline.jsonl results/candidate.jsonl \
+obench compare results/baseline.jsonl results/candidate.jsonl \
   --markdown results/scorecard.md
 ```
 
@@ -29,14 +29,14 @@ from solve-rate denominators. Their counts are shown separately for every arm,
 along with invalid-row and dropped-task quarantine counts. Invalid rows that
 cannot be attributed to an arm are reported as unassigned exclusions. Canonical filtering,
 Wilson intervals, hack-adjusted scoring, and provenance checks are reused from
-`bench/stats.py`. A prominent warning identifies provenance differences; add
+`obench/stats.py`. A prominent warning identifies provenance differences; add
 `--strict-provenance` to exit with status 2 when they occur.
 
 ## Timeout policy
 
 The standard per-cell adapter cap is **2400 seconds**. Every new result row
 records the effective cap as `timeout_s`. Never mix timeout caps within a result
-dataset or between comparison arms: `bench/compare.py` treats either case as
+dataset or between comparison arms: `obench compare` treats either case as
 non-comparable provenance. Older rows without `timeout_s` display `unknown` and
 produce one non-fatal provenance warning.
 
@@ -63,7 +63,7 @@ total wall time or tokens across those matched attempts divided by solves.
 Add `--solved-intersection` when comparing the efficiency of successful runs:
 
 ```sh
-python3 bench/compare.py results/baseline.jsonl results/candidate.jsonl \
+obench compare results/baseline.jsonl results/candidate.jsonl \
   --solved-intersection --markdown results/scorecard.md
 ```
 

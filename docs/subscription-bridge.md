@@ -26,10 +26,10 @@ Grok Build
   -> Codex/ChatGPT subscription upstream
 ```
 
-This position lets `bench/proxy.py` observe the OpenAI-compatible response usage while CLIProxyAPI still performs auth injection and refresh downstream. Run a benchmark cell with metering using:
+This position lets `obench/proxy.py` observe the OpenAI-compatible response usage while CLIProxyAPI still performs auth injection and refresh downstream. Run a benchmark cell with metering using:
 
 ```sh
-python3 bench/run.py --harness grokbuild --model gpt-5.6 \
+obench run --harness grokbuild --model gpt-5.6 \
   --task make-it-run --trials 1 --proxy
 ```
 
