@@ -7,7 +7,7 @@ success.
 
 ## Invocation
 
-A Python adapter is `bench/adapters/<name>.py` and exposes:
+A Python adapter is `obench/adapters/<name>.py` and exposes:
 
 ```python
 NAME = "name"
@@ -54,8 +54,10 @@ environment variable names; secret values are never provenance.
 - **docker** starts one disposable container per cell. `/work` is writable;
   adapters, entrypoint, instruction, candidate spec/config, and auth staging are
   read-only mounts. The adapter still runs unchanged inside the container.
-  Host auth is never baked into the image. If Docker is unavailable, the runner
-  may fall back to local unless `--no-docker-fallback` is set.
+  Host auth is never baked into the image. Docker is fail-closed by default: if
+  the daemon or image is unavailable the run refuses. Pass `--docker-fallback`
+  to opt into whole-run local homogenization at preflight (mid-run mixed lanes
+  still abort).
 
 Both modes must return which lane actually ran. Timeouts and adapter exceptions
 become failed rows rather than terminating the matrix.
@@ -107,7 +109,7 @@ with a path under:
 /cell/<token>/anthropic/<vendor>/...
 ```
 
-`bench/proxy.py` strips that prefix, forwards to the configured upstream, and
+`obench/proxy.py` strips that prefix, forwards to the configured upstream, and
 writes scrubbed usage rows to the cell ledger. A generic manifest may declare a
 base-URL environment variable and proxy route; the runner supplies its per-cell
 URL whenever both are present (no stock-harness allowlist). A candidate that cannot redirect model traffic must be marked unsupported
@@ -129,5 +131,5 @@ relative paths selected by declared `workspace_file_globs`, for CLIs that need
 editable files passed positionally. Templates are arrays, not shell strings, so
 no shell parsing or interpolation occurs.
 
-See `bench/ADAPTER_SPEC.md` for the legacy Python API and the examples in
+See `obench/ADAPTER_SPEC.md` for the legacy Python API and the examples in
 `docs/byo-harnesses.md` for the declarative schemas.

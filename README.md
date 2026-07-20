@@ -403,9 +403,9 @@ at 0/n and n/n, which the naive formula does not.
   runs each cell in a fresh disposable container built from `obench/docker/`
   (`docker build -t openbench-harness:latest obench/docker`). The **same adapter
   module runs unchanged** in both modes — the container only adds isolation, with
-  auth bind-mounted read-only at runtime (never baked into the image). If the
-  Docker daemon or image is unavailable, the runner falls back to local unless
-  `--no-docker-fallback` is set.
+  auth bind-mounted read-only at runtime (never baked into the image). Docker is
+  fail-closed by default; pass `--docker-fallback` to opt into whole-run local
+  homogenization when the daemon/image is unavailable (mixed lanes still abort).
 - **Docker image is partial.** `codex`, `pi`, and open-model `claude` are installed
   and version-checked in the default image; `opencode`, `cursor`, and `devin` are
   behind `--build-arg INSTALL_UNVERIFIED=true` and their Linux installs are not

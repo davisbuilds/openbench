@@ -16,5 +16,32 @@
       "gpt-5.6-sol"
     ],
     "path": "releases/2026-07-20-gpt56/index.html"
+  },
+  {
+    "id": "2026-07-20-grok45",
+    "title": "OpenBench: grok-4.5 across 4 harnesses",
+    "date": "2026-07-20",
+    "models": [
+      "grok-4.5"
+    ],
+    "path": "releases/2026-07-20-grok45/index.html"
+  },
+  {
+    "id": "2026-07-20-kimi-k3",
+    "title": "OpenBench: kimi-k3 across 3 harnesses",
+    "date": "2026-07-20",
+    "models": [
+      "kimi-k3"
+    ],
+    "path": "releases/2026-07-20-kimi-k3/index.html"
+  },
+  {
+    "id": "2026-07-20-deepseek",
+    "title": "OpenBench: deepseek across 5 harnesses",
+    "date": "2026-07-20",
+    "models": [
+      "deepseek-v4-flash"
+    ],
+    "path": "releases/2026-07-20-deepseek/index.html"
   }
 ]

@@ -3,13 +3,14 @@
 Thanks for your interest in contributing to OpenBench. There are two main ways
 to contribute, each with its own contract.
 
-OpenBench is **Python 3 standard library only** — there is nothing to install.
-Before opening a PR, run the same two checks CI runs (both are offline and use no
-credentials):
+OpenBench is **Python 3 standard library only** — there is nothing to install
+beyond the local package. Before opening a PR, run the same two checks CI runs
+(both are offline and use no credentials):
 
 ```
-python3 -m unittest discover bench/tests
-python3 validate_tasks.py
+pip install -e .
+python3 -m unittest discover -s obench/tests -v
+obench validate
 ```
 
 ## 1. Contribute a task
@@ -22,16 +23,16 @@ the original-code-only rule, and how CI validates it — is in
 **[CONTRIBUTING-TASKS.md](CONTRIBUTING-TASKS.md)**.
 
 You do **not** need API keys or to run any harness to contribute a task; a clean
-`python3 validate_tasks.py` is the bar. Maintainers pilot difficulty post-merge.
+`obench validate` is the bar. Maintainers pilot difficulty post-merge.
 
 ## 2. Contribute a harness adapter
 
 To add a coding-agent harness to the comparison, write an adapter module
-`bench/adapters/<name>.py` that maps the canonical model name to that harness's
+`obench/adapters/<name>.py` that maps the canonical model name to that harness's
 CLI flags, runs it headlessly, and returns a normalized result dict. The exact
 interface (`NAME`, `MODELS`, `run(...)`, the optional `version()`, timeout and
-auth rules) is specified in **[bench/ADAPTER_SPEC.md](bench/ADAPTER_SPEC.md)**;
-the existing adapters in `bench/adapters/` are working references. Auth must be
+auth rules) is specified in **[obench/ADAPTER_SPEC.md](obench/ADAPTER_SPEC.md)**;
+the existing adapters in `obench/adapters/` are working references. Auth must be
 handled inside the adapter, read-only — never modify the user's real config
 files.
 
@@ -39,7 +40,7 @@ files.
 
 - Keep changes focused and reviewable.
 - Include tests or verification steps for behavior changes (the runner, report,
-  and adapters have unit tests under `bench/tests/`).
+  and adapters have unit tests under `obench/tests/`).
 - Update documentation when changing user-facing behavior or project workflows.
 - Both CI checks above must pass.
 

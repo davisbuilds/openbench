@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Statistical report for the agent-harness comparison benchmark.
 
-Reads ``results/results.jsonl`` and prints, per harness:
+Reads ``results/results.jsonl`` and prints, per ``(harness, model)`` arm:
 
 - a **success table**: per-task success (x/n), overall success rate with a
   Wilson 95% confidence interval, mean wall-clock time, tokens-per-solve, and
@@ -46,7 +46,7 @@ PROXY_FOOTNOTE = (
     "Matches native adapters' self-reported tokens scalar."
 )
 MIXED_BASIS_WARNING = (
-    "Warning: tok/slv bases differ across harnesses in this table "
+    "Warning: tok/slv bases differ across arms in this table "
     "(self-reported vs proxy-measured); compare with care."
 )
 
@@ -88,10 +88,20 @@ def load_rows(results_path):
     return rows
 
 
-def aggregate(rows):
-    """Aggregate rows into per-harness stats.
+def _arm_key(row):
+    """Return the ``(harness, model)`` aggregate key for a result row."""
+    harness = row.get("harness")
+    if harness is None:
+        return None
+    model = row.get("model") or "-"
+    return (harness, model)
 
-    Returns ``(harnesses, tasks, stats)`` where ``stats[harness]`` holds::
+
+def aggregate(rows):
+    """Aggregate rows into per-``(harness, model)`` stats.
+
+    Returns ``(arms, tasks, stats)`` where ``arms`` is an ordered list of
+    ``(harness, model)`` keys and ``stats[arm]`` holds::
 
         {
           "per_task":    {task: [successes, n]},
@@ -109,32 +119,26 @@ def aggregate(rows):
     value, so an empty list means "no data" (rendered ``-``) rather than zero.
     Effective tokens prefer self-reported ``tokens``, else proxy fresh totals.
     """
-    harnesses = []
+    arms = []
     tasks = []
     stats = {}
     for row in rows:
-        harness = row.get("harness")
+        key = _arm_key(row)
         task = row.get("task")
-        if harness is None or task is None:
+        if key is None or task is None:
             continue
-        if harness not in stats:
-            stats[harness] = {"per_task": {}, "succ": 0, "n": 0, "scores": [],
-                              "wall_times": [], "token_vals": [], "token_bases": set(),
-                              "turn_vals": [],
-                              "taxonomy": {fc: 0 for fc in FAILURE_CLASSES},
-                              "taxonomy_by_model": {}}
-            harnesses.append(harness)
+        if key not in stats:
+            stats[key] = {"per_task": {}, "succ": 0, "n": 0, "scores": [],
+                          "wall_times": [], "token_vals": [], "token_bases": set(),
+                          "turn_vals": [],
+                          "taxonomy": {fc: 0 for fc in FAILURE_CLASSES}}
+            arms.append(key)
         if task not in tasks:
             tasks.append(task)
 
-        st = stats[harness]
+        st = stats[key]
         fc = class_for_report(row)
         st["taxonomy"][fc] = st["taxonomy"].get(fc, 0) + 1
-        model = row.get("model") or "-"
-        key = (harness, model)
-        model_counts = st["taxonomy_by_model"].setdefault(
-            key, {klass: 0 for klass in FAILURE_CLASSES})
-        model_counts[fc] = model_counts.get(fc, 0) + 1
         if is_excluded_from_solve_rate(row):
             continue
 
@@ -164,10 +168,10 @@ def aggregate(rows):
         turn = row.get("turns")
         if isinstance(turn, (int, float)) and not isinstance(turn, bool):
             st["turn_vals"].append(turn)
-    return harnesses, tasks, stats
+    return arms, tasks, stats
 
 
-# --- derived per-harness metrics (each returns None when undefined) ---------- #
+# --- derived per-arm metrics (each returns None when undefined) -------------- #
 def mean(vals):
     """Arithmetic mean, or None for an empty list."""
     return (sum(vals) / len(vals)) if vals else None
@@ -186,7 +190,7 @@ def ci_halfwidth(vals, z=1.96):
 def tokens_per_solve(st):
     """Total effective tokens divided by number of solves; None if undefined.
 
-    ``None`` when the harness reported no token data at all, or has no solves to
+    ``None`` when the arm reported no token data at all, or has no solves to
     normalise by. Reported tokens are never treated as zero when absent.
     """
     if not st["token_vals"] or st["succ"] == 0:
@@ -202,16 +206,16 @@ def turns_per_solve(st):
 
 
 def token_basis_is_proxy(st):
-    """True when this harness's tok/slv comes only from proxy-measured rows."""
+    """True when this arm's tok/slv comes only from proxy-measured rows."""
     bases = st.get("token_bases") or set()
     return bool(bases) and bases == {TOKEN_BASIS_PROXY}
 
 
-def table_has_mixed_token_bases(stats, harnesses):
+def table_has_mixed_token_bases(stats, arms):
     """True when some arms use self-reported tok/slv and others use proxy."""
     seen = set()
-    for harness in harnesses:
-        bases = stats[harness].get("token_bases") or set()
+    for arm in arms:
+        bases = stats[arm].get("token_bases") or set()
         if TOKEN_BASIS_SELF in bases:
             seen.add(TOKEN_BASIS_SELF)
         if TOKEN_BASIS_PROXY in bases:
@@ -252,17 +256,17 @@ def _render(headers, rows_text):
     return "\n".join(lines)
 
 
-def _token_notes(stats, harnesses, used_proxy):
+def _token_notes(stats, arms, used_proxy):
     """Footnotes / warnings for tok/slv basis honesty."""
     notes = []
     if used_proxy:
         notes.append(PROXY_FOOTNOTE)
-    if table_has_mixed_token_bases(stats, harnesses):
+    if table_has_mixed_token_bases(stats, arms):
         notes.append(MIXED_BASIS_WARNING)
     return notes
 
 
-def format_table(harnesses, tasks, stats):
+def format_table(arms, tasks, stats):
     """Success table: per-task x/n, overall + Wilson CI, mean_s, tok/solve, turns.
 
     Design note: the raw total-token column was replaced by ``tok/slv``
@@ -270,12 +274,15 @@ def format_table(harnesses, tasks, stats):
     rather than describing the harness; ``turns`` (mean turns per cell) is added
     alongside. Both stay ``-`` when the adapter reports no data.
     """
-    headers = ["harness"] + tasks + ["overall", "wilson95", "mscore", "mean_s", "tok/slv", "turns"]
+    headers = ["harness", "model"] + tasks + [
+        "overall", "wilson95", "mscore", "mean_s", "tok/slv", "turns",
+    ]
     rows_text = []
     used_proxy = False
-    for harness in harnesses:
-        st = stats[harness]
-        cells = [harness]
+    for arm in arms:
+        harness, model = arm
+        st = stats[arm]
+        cells = [harness, model]
         for task in tasks:
             succ, n = st["per_task"].get(task, [0, 0])
             cells.append(f"{succ}/{n}" if n else "-")
@@ -294,23 +301,27 @@ def format_table(harnesses, tasks, stats):
         cells.append(_fmt_turns(mean(st["turn_vals"])))
         rows_text.append(cells)
     text = _render(headers, rows_text)
-    notes = _token_notes(stats, harnesses, used_proxy)
+    notes = _token_notes(stats, arms, used_proxy)
     if notes:
         text += "\n" + "\n".join(notes)
     return text
 
 
-def format_efficiency(harnesses, stats):
-    """Efficiency summary: the harness-tax view, one row per harness.
+def format_efficiency(arms, stats):
+    """Efficiency summary: the harness-tax view, one row per (harness, model).
 
     Columns: success (x/n), rate, Wilson 95% CI, mean_s with its 95% CI
     half-width, tokens-per-solve, turns-per-solve.
     """
-    headers = ["harness", "success", "rate", "wilson95", "mscore", "mean_s", "tok/slv", "turns/slv"]
+    headers = [
+        "harness", "model", "success", "rate", "wilson95", "mscore",
+        "mean_s", "tok/slv", "turns/slv",
+    ]
     rows_text = []
     used_proxy = False
-    for harness in harnesses:
-        st = stats[harness]
+    for arm in arms:
+        harness, model = arm
+        st = stats[arm]
         n, succ = st["n"], st["succ"]
         rate = (succ / n) if n else 0.0
         lo, hi = wilson_ci(succ, n)
@@ -322,6 +333,7 @@ def format_efficiency(harnesses, stats):
         used_proxy = used_proxy or proxy_mark
         rows_text.append([
             harness,
+            model,
             f"{succ}/{n}" if n else "-",
             f"{rate:.0%}" if n else "-",
             f"[{lo:.3f}, {hi:.3f}]",
@@ -331,20 +343,22 @@ def format_efficiency(harnesses, stats):
             _fmt_turns(turns_per_solve(st)),
         ])
     text = _render(headers, rows_text)
-    notes = _token_notes(stats, harnesses, used_proxy)
+    notes = _token_notes(stats, arms, used_proxy)
     if notes:
         text += "\n" + "\n".join(notes)
     return text
 
 
-def format_taxonomy(harnesses, stats):
+def format_taxonomy(arms, stats):
     """Failure taxonomy counts per harness x model, including excluded rows."""
     headers = ["harness", "model"] + list(FAILURE_CLASSES)
     rows_text = []
-    for harness in harnesses:
-        items = sorted(stats[harness]["taxonomy_by_model"].items(), key=lambda kv: kv[0][1])
-        for (_harness, model), counts in items:
-            rows_text.append([harness, model] + [str(counts.get(fc, 0)) for fc in FAILURE_CLASSES])
+    for arm in arms:
+        harness, model = arm
+        counts = stats[arm]["taxonomy"]
+        rows_text.append(
+            [harness, model] + [str(counts.get(fc, 0)) for fc in FAILURE_CLASSES]
+        )
     return _render(headers, rows_text)
 
 
@@ -353,8 +367,12 @@ def build_report(results_path):
     rows = load_rows(results_path)
     if not rows:
         return f"No results found at {results_path}"
-    harnesses, tasks, stats = aggregate(rows)
-    return format_table(harnesses, tasks, stats) + "\n\nFailure taxonomy (all rows):\n" + format_taxonomy(harnesses, stats)
+    arms, tasks, stats = aggregate(rows)
+    return (
+        format_table(arms, tasks, stats)
+        + "\n\nFailure taxonomy (all rows):\n"
+        + format_taxonomy(arms, stats)
+    )
 
 
 def build_efficiency_report(results_path):
@@ -362,8 +380,8 @@ def build_efficiency_report(results_path):
     rows = load_rows(results_path)
     if not rows:
         return f"No results found at {results_path}"
-    harnesses, _tasks, stats = aggregate(rows)
-    return format_efficiency(harnesses, stats)
+    arms, _tasks, stats = aggregate(rows)
+    return format_efficiency(arms, stats)
 
 
 def build_taxonomy_report(results_path):
@@ -371,8 +389,8 @@ def build_taxonomy_report(results_path):
     rows = load_rows(results_path)
     if not rows:
         return f"No results found at {results_path}"
-    harnesses, _tasks, stats = aggregate(rows)
-    return format_taxonomy(harnesses, stats)
+    arms, _tasks, stats = aggregate(rows)
+    return format_taxonomy(arms, stats)
 
 
 def main(argv=None):
@@ -381,7 +399,7 @@ def main(argv=None):
                         help="override the results.jsonl path "
                              "(default: from openbench.toml or <repo|cwd>/results/results.jsonl)")
     parser.add_argument("--efficiency", action="store_true",
-                        help="print only the per-harness efficiency summary")
+                        help="print only the per-(harness, model) efficiency summary")
     args = parser.parse_args(argv)
     if args.results_path is None:
         cfg = load_config()

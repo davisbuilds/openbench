@@ -73,7 +73,7 @@ class TestVersionPreflight(unittest.TestCase):
                 self.assertEqual(kwargs["exec_mode"], "local")
             return {
                 "success": False, "score": 0.0, "completed": True,
-                "checker_exit": 1, "exec_mode": "local",
+                "checker_exit": 1, "exec_mode": kwargs.get("exec_mode", "local"),
             }
 
         argv = ["--harness", "codex", "--task", "fake-task",
@@ -124,16 +124,16 @@ class TestVersionPreflight(unittest.TestCase):
         self.assertEqual((code, emitted, call_count), (0, [True], 1))
         self.assertIn("version drift allowed", stderr)
 
-    def test_missing_image_defers_to_existing_fallback_with_build_hint(self):
+    def test_missing_image_with_docker_fallback_uses_host_lane(self):
         code, emitted, call_count, stderr = self._run_main(
-            [], ["--exec", "docker"], ([], False))
+            [], ["--exec", "docker", "--docker-fallback"], ([], False))
         self.assertEqual((code, emitted, call_count), (0, [False], 1))
         self.assertIn("falling back to the validated host lane", stderr)
         self.assertIn("docker build -t openbench-harness:latest obench/docker", stderr)
 
-    def test_missing_image_without_fallback_refuses_with_build_hint(self):
+    def test_missing_image_default_fail_closed_refuses_with_build_hint(self):
         code, emitted, call_count, stderr = self._run_main(
-            [], ["--exec", "docker", "--no-docker-fallback"], ([], False))
+            [], ["--exec", "docker"], ([], False))
         self.assertEqual((code, emitted, call_count), (2, [], 0))
         self.assertIn("Version preflight failed: cannot inspect Docker image", stderr)
         self.assertIn("docker build -t openbench-harness:latest obench/docker", stderr)

@@ -89,7 +89,7 @@ ROW_FIELDS = (
     "tokens_output", "tokens_reasoning", "usage_raw", "token_basis",
     "tokens_proxy_input_uncached", "tokens_proxy_cache_read", "tokens_proxy_cache_write",
     "tokens_proxy_output", "tokens_proxy_reasoning", "tokens_proxy_calls",
-    "sampling_observed", "token_basis_proxy",
+    "sampling_observed", "token_basis_proxy", "proxy_capture_truncated",
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
     "harness_version_source", "failure_class", "failure_reason", "workspace_changed", "checker_stdout", "checker_stderr", "checker_workspace_files",
     "image_digest", "candidate_provenance", "version_drift", "timeout_s",
@@ -1060,23 +1060,43 @@ def run_checker(task_dir, workdir, timeout_s):
     return returncode, raw_score, stdout_capture.text(), stderr_capture.text()
 
 
+class ResultsLogError(RuntimeError):
+    """Raised when a results JSONL cannot be safely resumed."""
+
+
 def load_existing_run_ids(results_path):
-    """Return the set of ``run_id`` values already present in the results log."""
+    """Return the set of ``run_id`` values already present in the results log.
+
+    Corrupt (non-JSON) lines fail closed: silent skip would drop those run_ids
+    from the resume set and risk duplicate cells on the next append.
+    """
     ids = set()
     if not os.path.isfile(results_path):
         return ids
+    invalid = 0
+    line_no = 0
     with open(results_path, encoding="utf-8") as fh:
-        for line in fh:
+        for line_no, line in enumerate(fh, 1):
             line = line.strip()
             if not line:
                 continue
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
+                invalid += 1
+                continue
+            if not isinstance(row, dict):
+                invalid += 1
                 continue
             rid = row.get("run_id")
             if rid is not None:
                 ids.add(rid)
+    if invalid:
+        raise ResultsLogError(
+            f"{results_path} has {invalid} corrupt JSONL line(s) "
+            f"(last scan ended near line {line_no}); fix the file or pass "
+            "--force to ignore resume state"
+        )
     return ids
 
 
@@ -1086,6 +1106,8 @@ def append_row(results_path, row):
     ordered = {key: row.get(key) for key in ROW_FIELDS}
     with open(results_path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(ordered) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def preflight_results_path(results_path):
@@ -1386,8 +1408,16 @@ def read_proxy_ledger(ledger_dir, token, wait_s=0.0, stable_s=0.1):
 
 
 def apply_proxy_ledger(row, ledger_rows):
-    """Populate proxy-measured token fields from scrubbed ledger rows."""
-    calls = [r for r in ledger_rows if isinstance(r, dict) and isinstance(r.get("usage"), dict)]
+    """Populate proxy-measured token fields from scrubbed ledger rows.
+
+    Truncated captures are surfaced on the row and must not claim
+    ``token_basis_proxy=proxy_measured`` — partial ledgers are not a full meter.
+    """
+    records = [r for r in (ledger_rows or []) if isinstance(r, dict)]
+    truncated = any(r.get("capture_truncated") for r in records)
+    if truncated:
+        row["proxy_capture_truncated"] = True
+    calls = [r for r in records if isinstance(r.get("usage"), dict)]
     # Zero is meaningful evidence for admission checks; do not collapse it to None.
     row["tokens_proxy_calls"] = len(calls)
     if not calls:
@@ -1405,7 +1435,8 @@ def apply_proxy_ledger(row, ledger_rows):
                 samplings.append(sampling)
     row.update(totals)
     row["sampling_observed"] = samplings or None
-    row["token_basis_proxy"] = "proxy_measured"
+    if not truncated:
+        row["token_basis_proxy"] = "proxy_measured"
     return row
 
 
@@ -1418,7 +1449,7 @@ def _populate_proxy_row(row, proxy_ctx, cell_token, wait_s=0.0):
 
 def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              checker_timeout_s, exec_mode="local",
-             docker_image=None, docker_fallback=True, harness_version=None,
+             docker_image=None, docker_fallback=False, harness_version=None,
              container_versions_reader=read_container_cli_versions,
              transcripts_dir=None, results_stem="", proxy_ctx=None,
              candidate=None, version_drift=False, workspace_observer=None):
@@ -1716,10 +1747,16 @@ def main(argv=None):
     parser.add_argument("--docker-image", default="openbench-harness:latest",
                         help="image for --exec docker "
                              "(default: openbench-harness:latest)")
+    parser.set_defaults(docker_fallback=False)
+    parser.add_argument("--docker-fallback", dest="docker_fallback",
+                        action="store_true",
+                        help="in --exec docker, allow falling back to local when "
+                             "the daemon/image is unavailable (homogenizes the "
+                             "whole run to local at preflight; aborts if a "
+                             "mid-run per-cell fallback would mix exec lanes)")
     parser.add_argument("--no-docker-fallback", dest="docker_fallback",
                         action="store_false",
-                        help="in --exec docker, fail instead of falling back to "
-                             "local when the daemon/image is unavailable")
+                        help=argparse.SUPPRESS)
     parser.add_argument("--allow-version-drift", action="store_true",
                         help="run despite host/image CLI pin mismatch and mark every row")
     parser.add_argument("--max-consecutive-infra", type=int,
@@ -1816,7 +1853,11 @@ def main(argv=None):
     transcripts_dir = args.transcripts_dir or default_transcripts_dir(args.results_path)
     results_stem = os.path.splitext(os.path.basename(args.results_path))[0]
 
-    existing = set() if args.force else load_existing_run_ids(args.results_path)
+    try:
+        existing = set() if args.force else load_existing_run_ids(args.results_path)
+    except ResultsLogError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     # Probe each harness's version at most once per invocation (a version()
     # probe may spawn a subprocess), then stamp the cached value into every row.
@@ -1939,6 +1980,19 @@ def main(argv=None):
                         candidate=candidate,
                         version_drift=bool(drift),
                     )
+                    # Fail-closed on mixed lanes: a mid-run docker→local fallback
+                    # must not land in the same results file as docker cells.
+                    # (Whole-run preflight homogenization sets exec_mode=local.)
+                    if (args.exec_mode == "docker"
+                            and args.docker_fallback
+                            and row.get("exec_mode") == "local"):
+                        print(
+                            f"FATAL: docker→local fallback on {run_id}; refusing "
+                            "mixed exec_mode lanes (re-run with a working image, "
+                            "or omit --docker-fallback for fail-closed docker).",
+                            file=sys.stderr,
+                        )
+                        return 2
                     append_row(args.results_path, row)
                     existing.add(run_id)
                     ran += 1

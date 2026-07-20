@@ -107,7 +107,7 @@ disposable copies are discarded. `base_url_env` and
 after `/cell/<token>/` (for example `chat/zai/api/paas/v4`); the CLI must honor
 the declared base-URL environment variable. Generic output is retained as a
 transcript; token fields remain unknown unless independently metered by the
-proxy. See `bench/examples/pi-harness.toml` for a complete invocation-equivalent
+proxy. See `obench/examples/pi-harness.toml` for a complete invocation-equivalent
 manifest (it deliberately does not claim proxy support because Pi's native
 adapter routes its subscription endpoint through a generated config file).
 

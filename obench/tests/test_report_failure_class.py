@@ -21,15 +21,15 @@ class TestReportFailureClass(unittest.TestCase):
             {"harness": "h", "model": "m", "task": "t", "success": False,
              "failure_class": "infra", "tokens": 1},
         ]
-        harnesses, tasks, stats = report.aggregate(rows)
-        st = stats["h"]
+        arms, tasks, stats = report.aggregate(rows)
+        st = stats[("h", "m")]
         self.assertEqual(st["succ"], 1)
         self.assertEqual(st["n"], 2)
         self.assertEqual(st["per_task"]["t"], [1, 2])
         self.assertEqual(st["taxonomy"]["rate_limited"], 1)
         self.assertEqual(st["taxonomy"]["infra"], 1)
 
-        table = report.format_table(harnesses, tasks, stats)
+        table = report.format_table(arms, tasks, stats)
         self.assertIn("1/2 (50%)", table)
         self.assertEqual(report.tokens_per_solve(st), 150.0)
 
@@ -40,9 +40,11 @@ class TestReportFailureClass(unittest.TestCase):
             {"harness": "h", "model": "m2", "task": "t", "success": False,
              "failure_class": "rate_limited"},
         ]
-        harnesses, _tasks, stats = report.aggregate(rows)
-        taxonomy = report.format_taxonomy(harnesses, stats)
+        arms, _tasks, stats = report.aggregate(rows)
+        self.assertEqual(set(arms), {("h", "m1"), ("h", "m2")})
+        taxonomy = report.format_taxonomy(arms, stats)
         self.assertIn("harness", taxonomy)
+        self.assertIn("model", taxonomy)
         self.assertIn("rate_limited", taxonomy)
         self.assertTrue(any(line.startswith("h") and " m1 " in line for line in taxonomy.splitlines()))
         self.assertTrue(any(line.startswith("h") and " m2 " in line for line in taxonomy.splitlines()))

@@ -1,6 +1,6 @@
 # Adapter Spec (v1)
 
-Each harness adapter is a Python module at `bench/adapters/<name>.py`.
+Each harness adapter is a Python module at `obench/adapters/<name>.py`.
 
 ## Required module-level API
 

@@ -55,15 +55,21 @@ from .workspace import (
 
 
 def parse_score(output):
-    """Return the last ``SCORE: <float>`` value in output, or None if absent."""
+    """Return the last ``SCORE: <float>`` value in output, or None if absent.
+
+    Matches ``run.parse_score``: last parseable line wins; values clamped to
+    [0.0, 1.0]; malformed lines are ignored.
+    """
     score = None
-    for line in output.splitlines():
+    for line in (output or "").splitlines():
         stripped = line.strip()
-        if stripped.startswith("SCORE:"):
-            try:
-                score = float(stripped[len("SCORE:"):].strip())
-            except ValueError:
-                pass
+        if not stripped.startswith("SCORE:"):
+            continue
+        try:
+            val = float(stripped[len("SCORE:"):].strip())
+        except ValueError:
+            continue
+        score = max(0.0, min(1.0, val))
     return score
 
 
@@ -74,6 +80,10 @@ def effective_score(exit_code, parsed_score):
     if parsed_score is not None:
         return parsed_score
     return 0.0
+
+
+# Match ``obench run --checker-timeout`` default so validate does not hang forever.
+CHECKER_TIMEOUT_S = 120
 
 
 def run_checker(task_dir, overlay_solution_flag):
@@ -95,14 +105,22 @@ def run_checker(task_dir, overlay_solution_flag):
         env = dict(os.environ)
         env["TASK_DIR"] = task_dir
 
-        proc = subprocess.run(
-            ["bash", checker],
-            cwd=tmp,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        try:
+            proc = subprocess.run(
+                ["bash", checker],
+                cwd=tmp,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=CHECKER_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired as exc:
+            out = exc.stdout or ""
+            if isinstance(out, bytes):
+                out = out.decode("utf-8", errors="replace")
+            out = out + f"\nFAIL: checker timed out after {CHECKER_TIMEOUT_S}s\n"
+            return 124, out, parse_score(out)
         return proc.returncode, proc.stdout, parse_score(proc.stdout)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

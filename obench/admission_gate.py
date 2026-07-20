@@ -14,10 +14,17 @@ import filecmp
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 
 from . import determinism_check
-from .workspace import has_git_workspace, has_snapshot_workspace
+from .workspace import (
+    WorkspaceError,
+    has_git_workspace,
+    has_snapshot_workspace,
+    materialize_workspace,
+)
 
 EXIT_FINDINGS = 3
 REQUIRED_ENTRIES = ("instruction.md", "checker.sh", "solution", "PROVENANCE.md")
@@ -64,8 +71,8 @@ def file_differs(a, b):
     return not filecmp.cmp(a, b, shallow=False)
 
 
-def compute_deliverables(task_dir):
-    workspace = os.path.join(task_dir, "workspace")
+def compute_deliverables(task_dir, workspace_root=None):
+    workspace = workspace_root or os.path.join(task_dir, "workspace")
     solution = os.path.join(task_dir, "solution")
     deliverables = set()
     for rel in list_files(solution):
@@ -74,6 +81,27 @@ def compute_deliverables(task_dir):
         if not os.path.exists(ws) or file_differs(sol, ws):
             deliverables.add(rel)
     return deliverables
+
+
+def staged_workspace_root(task_dir):
+    """Return ``(workspace_root, temp_dir_or_None)`` for ownership scans.
+
+    Snapshot tasks use ``workspace/`` in place. Git-mode tasks are materialized
+    into a disposable temp dir so oracle/ownership heuristics see the same
+    starting tree the checker would. Caller must ``shutil.rmtree(temp_dir)``
+    when it is not ``None``.
+    """
+    if has_snapshot_workspace(task_dir):
+        return os.path.join(task_dir, "workspace"), None
+    if not has_git_workspace(task_dir):
+        return os.path.join(task_dir, "workspace"), None
+    tmp = tempfile.mkdtemp(prefix="admission-ws-")
+    try:
+        materialize_workspace(task_dir, tmp)
+    except Exception:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return tmp, tmp
 
 
 def structure_findings(task_dir):
@@ -356,69 +384,93 @@ def normalize_candidate_path(raw):
 
 def scan_ownership(task_dir):
     findings = []
-    workspace_files = list_files(os.path.join(task_dir, "workspace"))
-    deliverables = compute_deliverables(task_dir)
-    allowed = set(deliverables)
-    for path in source_files(task_dir):
-        rel = relpath(path, task_dir)
-        text = read_text(path)
-        read_refs = []
-        import_refs = []
-        time_warnings = []
-        if path.endswith(".py"):
-            try:
-                tree = ast.parse(text, filename=path)
-                visitor = PathReadVisitor()
-                visitor.visit(tree)
-                visitor.finalize()
-                read_refs = visitor.reads
-                import_refs = visitor.import_execs
-                time_warnings = visitor.time_warnings
-            except SyntaxError as exc:
-                findings.append(Finding("scan.syntax", WARN, f"could not parse {rel}: {exc}", rel))
-        else:
-            read_refs, import_refs = literal_paths_from_shell(text)
-            if re.search(r"timeout\s+[0-2]?\d(?:\D|$)", text):
-                time_warnings.append((None, "shell timeout command with bound < 30"))
+    tmp = None
+    try:
+        try:
+            workspace_root, tmp = staged_workspace_root(task_dir)
+        except WorkspaceError as exc:
+            findings.append(Finding(
+                "ownership.workspace_materialize",
+                HARD,
+                f"cannot materialize git workspace for ownership scan: {exc}",
+                "workspace.toml",
+            ))
+            return findings
+        except Exception as exc:  # noqa: BLE001 - surface staging crashes as findings
+            findings.append(Finding(
+                "ownership.workspace_materialize",
+                HARD,
+                f"cannot materialize git workspace for ownership scan: {exc}",
+                "workspace.toml",
+            ))
+            return findings
 
-        # Regex fallback catches literal workspace paths in dynamic Python too.
-        for lineno, line in enumerate(text.splitlines(), 1):
-            if "workspace/" in line or "/workspace/" in line:
-                for match in re.finditer(r"(?:workspace/|/workspace/)([A-Za-z0-9_./-]+)", line):
-                    read_refs.append((lineno, match.group(1), "literal-workspace"))
-            if re.search(r"time\.sleep\([^)]*\)", line):
-                following = "\n".join(text.splitlines()[lineno:lineno + 30])
-                if re.search(r"signal|kill|terminate|send_signal", following):
-                    time_warnings.append((lineno, "time.sleep followed by signal/kill call"))
-            if re.search(r"timeout\s*=\s*([0-9]+(?:\.[0-9]+)?)", line):
-                value = float(re.search(r"timeout\s*=\s*([0-9]+(?:\.[0-9]+)?)", line).group(1))
-                if value < 30:
-                    time_warnings.append((lineno, f"subprocess timeout={value:g} < 30"))
+        workspace_files = list_files(workspace_root)
+        deliverables = compute_deliverables(task_dir, workspace_root=workspace_root)
+        allowed = set(deliverables)
+        for path in source_files(task_dir):
+            rel = relpath(path, task_dir)
+            text = read_text(path)
+            read_refs = []
+            import_refs = []
+            time_warnings = []
+            if path.endswith(".py"):
+                try:
+                    tree = ast.parse(text, filename=path)
+                    visitor = PathReadVisitor()
+                    visitor.visit(tree)
+                    visitor.finalize()
+                    read_refs = visitor.reads
+                    import_refs = visitor.import_execs
+                    time_warnings = visitor.time_warnings
+                except SyntaxError as exc:
+                    findings.append(Finding("scan.syntax", WARN, f"could not parse {rel}: {exc}", rel))
+            else:
+                read_refs, import_refs = literal_paths_from_shell(text)
+                if re.search(r"timeout\s+[0-2]?\d(?:\D|$)", text):
+                    time_warnings.append((None, "shell timeout command with bound < 30"))
 
-        for lineno, raw, how in read_refs:
-            norm = normalize_candidate_path(raw)
-            if norm in workspace_files and norm not in allowed:
-                findings.append(Finding(
-                    "ownership.workspace_read",
-                    WARN,
-                    f"checker appears to read non-deliverable workspace file {norm!r} via {how}",
-                    rel,
-                    {"line": lineno, "path": norm},
-                ))
-        for lineno, raw, how in import_refs:
-            norm = normalize_candidate_path(raw)
-            explicit_workspace = "workspace/" in raw or "/workspace/" in raw or "workdir/" in raw
-            if norm in workspace_files and norm.endswith(".py") and norm not in allowed and (how != "shell-python" or explicit_workspace):
-                findings.append(Finding(
-                    "ownership.workspace_py_reference",
-                    HARD,
-                    f"checker imports or executes workspace Python file {norm!r} as reference via {how}",
-                    rel,
-                    {"line": lineno, "path": norm},
-                ))
-        for lineno, message in time_warnings:
-            findings.append(Finding("timing_sensitivity", HARD, message, rel, {"line": lineno}))
-    return findings
+            # Regex fallback catches literal workspace paths in dynamic Python too.
+            for lineno, line in enumerate(text.splitlines(), 1):
+                if "workspace/" in line or "/workspace/" in line:
+                    for match in re.finditer(r"(?:workspace/|/workspace/)([A-Za-z0-9_./-]+)", line):
+                        read_refs.append((lineno, match.group(1), "literal-workspace"))
+                if re.search(r"time\.sleep\([^)]*\)", line):
+                    following = "\n".join(text.splitlines()[lineno:lineno + 30])
+                    if re.search(r"signal|kill|terminate|send_signal", following):
+                        time_warnings.append((lineno, "time.sleep followed by signal/kill call"))
+                if re.search(r"timeout\s*=\s*([0-9]+(?:\.[0-9]+)?)", line):
+                    value = float(re.search(r"timeout\s*=\s*([0-9]+(?:\.[0-9]+)?)", line).group(1))
+                    if value < 30:
+                        time_warnings.append((lineno, f"subprocess timeout={value:g} < 30"))
+
+            for lineno, raw, how in read_refs:
+                norm = normalize_candidate_path(raw)
+                if norm in workspace_files and norm not in allowed:
+                    findings.append(Finding(
+                        "ownership.workspace_read",
+                        WARN,
+                        f"checker appears to read non-deliverable workspace file {norm!r} via {how}",
+                        rel,
+                        {"line": lineno, "path": norm},
+                    ))
+            for lineno, raw, how in import_refs:
+                norm = normalize_candidate_path(raw)
+                explicit_workspace = "workspace/" in raw or "/workspace/" in raw or "workdir/" in raw
+                if norm in workspace_files and norm.endswith(".py") and norm not in allowed and (how != "shell-python" or explicit_workspace):
+                    findings.append(Finding(
+                        "ownership.workspace_py_reference",
+                        HARD,
+                        f"checker imports or executes workspace Python file {norm!r} as reference via {how}",
+                        rel,
+                        {"line": lineno, "path": norm},
+                    ))
+            for lineno, message in time_warnings:
+                findings.append(Finding("timing_sensitivity", HARD, message, rel, {"line": lineno}))
+        return findings
+    finally:
+        if tmp is not None:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def run_determinism(task_dir, runs=determinism_check.DEFAULT_RUNS, stress=determinism_check.DEFAULT_STRESS):

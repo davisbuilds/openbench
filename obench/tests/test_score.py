@@ -142,7 +142,7 @@ class TestReportMeanScore(unittest.TestCase):
     def _rows(self, specs):
         out = []
         for i, (h, succ, score) in enumerate(specs, 1):
-            row = {"harness": h, "task": "t", "trial": i, "success": succ}
+            row = {"harness": h, "model": "-", "task": "t", "trial": i, "success": succ}
             if score is not None:
                 row["score"] = score
             out.append(row)
@@ -152,24 +152,24 @@ class TestReportMeanScore(unittest.TestCase):
         # A has explicit partial scores; averaged over ALL trials incl. failures.
         rows = self._rows([("A", False, 0.5), ("A", True, 1.0), ("A", False, 0.0)])
         _, _, stats = report.aggregate(rows)
-        self.assertAlmostEqual(report.mean(stats["A"]["scores"]), 0.5)  # (0.5+1+0)/3
+        self.assertAlmostEqual(report.mean(stats[("A", "-")]["scores"]), 0.5)  # (0.5+1+0)/3
 
     def test_old_rows_derive_score_from_success(self):
         # Rows lacking the field derive 1.0/0.0 from success (backward compat).
         rows = self._rows([("B", True, None), ("B", False, None)])
         _, _, stats = report.aggregate(rows)
-        self.assertEqual(stats["B"]["scores"], [1.0, 0.0])
+        self.assertEqual(stats[("B", "-")]["scores"], [1.0, 0.0])
 
     def test_mixed_old_and_new(self):
         rows = self._rows([("C", True, None), ("C", False, 0.25)])
         _, _, stats = report.aggregate(rows)
-        self.assertAlmostEqual(report.mean(stats["C"]["scores"]), 0.625)  # (1+0.25)/2
+        self.assertAlmostEqual(report.mean(stats[("C", "-")]["scores"]), 0.625)  # (1+0.25)/2
 
     def test_tables_include_mscore(self):
         rows = self._rows([("A", False, 0.5), ("A", True, 1.0)])
-        harnesses, tasks, stats = report.aggregate(rows)
-        main = report.format_table(harnesses, tasks, stats)
-        eff = report.format_efficiency(harnesses, stats)
+        arms, tasks, stats = report.aggregate(rows)
+        main = report.format_table(arms, tasks, stats)
+        eff = report.format_efficiency(arms, stats)
         self.assertIn("mscore", main)
         self.assertIn("mscore", eff)
         # mean score 0.75 shows in both

@@ -73,7 +73,8 @@ obench verify openbench-publish/my-claim
 - The bundled `results.jsonl` still matches `provenance.json`'s `results_sha256`.
 - When local task trees are available (`--tasks-dir` or CWD discovery), each
   recorded task content digest still matches
-  `hash(instruction.md + checker.sh + workspace|workspace.toml)`.
+  `hash(instruction.md + checker.sh + workspace|workspace.toml + checker_data/)`.
+  A missing `content_digest` is a FAIL (not skipped).
 
 ## What verify does NOT prove
 

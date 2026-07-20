@@ -43,29 +43,63 @@ run loop, tool set, and permission policy. Tasks are self-contained
   ultra-light stdlib-only, files-plus-shell-checker contract that non-Python
   users and private repos can adopt without learning a framework API.
 
+## Code map (where to look)
+
+| Area | Path |
+|------|------|
+| CLI entry (`obench …`) | `obench/cli.py`, `obench/__main__.py` |
+| Cell runner / resume / proxy row fill | `obench/run.py` |
+| Task workspace (snapshot + git archive) | `obench/workspace.py` |
+| Checker polarity / validate | `obench/validate_tasks.py` |
+| Task admission (structure, ownership, determinism) | `obench/admission_gate.py` |
+| Candidate / BYO harness gate | `obench/candidate_gate.py`, `obench/candidates.py` |
+| Report / stats / compare | `obench/report.py`, `obench/stats.py`, `obench/compare.py` |
+| Publish / verify digests | `obench/publish.py` |
+| Counting proxy | `obench/proxy.py` |
+| Harbor export | `obench/export_harbor.py` |
+| Stock adapters | `obench/adapters/` |
+| Unit tests | `obench/tests/` |
+| Tasks | `tasks/` (public), `.openbench/tasks/` (private-init) |
+
+## Always-run CI (offline)
+
+Match [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+
+```bash
+pip install -e .
+python3 -m unittest discover -s obench/tests -v
+obench validate
+```
+
+No live harness or model-API calls; stdlib-only.
+
+## Dangerous zones
+
+- **`obench/run.py` `ROW_FIELDS` / append / resume** — corrupt JSONL or dropped
+  fields silently skew resume and published claims; keep append fsync + fail-closed
+  corrupt-line handling.
+- **`exec_mode` / docker fallback** — never mix docker and local cells in one
+  comparable results file (`docker_fallback` defaults off).
+- **Publish digests** — `task_content_digest` must cover oracle inputs
+  (`checker_data/`); verify must FAIL on missing digests.
+- **`obench/report.py` aggregates** — key by `(harness, model)`, not harness alone.
+- **Auth / proxy / transcripts** — auth is read-only staging; transcripts are
+  LOCAL-ONLY and never published unscrubbed (`obench/scrub.py`).
+- **Legacy `bench/` tree** — shims may remain; new code and docs target `obench/`.
+
 ## Roadmap (priority order)
 
-- **P0 — Package it.** `pyproject.toml`, real package, console entry points.
-  PyPI name `openbench` is taken (Groq's eval framework); we publish as
-  **`obench`** — distribution, import name, and CLI command all `obench`
-  (`pip install obench`, `obench run ...`) — zero collision risk. The project
-  is still called OpenBench; `obench` is just the install/command handle.
-  Umbrella CLI with subcommands (`obench run / report / doctor / validate /
-  gate / compare / init / publish / verify / export / import`). Git-URL installs (`pip install git+https://...`)
-  work pre-PyPI. Remove repo-relative defaults (`REPO = dirname(bench)` in
-  `run.py`, `report.py`, `doctor.py`, `stats.py`, ...): explicit paths/config,
-  with CWD discovery (`tasks/`, then `.openbench/tasks/`) when run outside the
-  repo, else a clear error.
-- **P0 — Arbitrary task roots.** `validate_tasks.py` must accept custom task
-  directories (today it hard-codes `tasks/` + `tasks-imported/`), and
-  `--preflight-smoke` must pick a smoke task from the given root instead of
-  hard-requiring the repo's `make-it-run` (`PREFLIGHT_TASK` in `run.py`).
+- **P0 — Package it. [DONE Jul 2026]** `pyproject.toml`, console entry points,
+  PyPI name **`obench`** (`pip install obench`, `obench run ...`). Umbrella CLI
+  (`run / report / doctor / validate / gate / compare / init / publish / verify`).
+  CWD discovery (`tasks/`, then `.openbench/tasks/`) when run outside the repo.
+- **P0 — Arbitrary task roots. [DONE Jul 2026]** `validate_tasks.py` accepts
+  custom task directories; `--preflight-smoke` picks a smoke task from the given
+  root (prefers `make-it-run` when present).
 - **P0 — `obench init` for private repos. [DONE Jul 2026]** `.openbench/`
   scaffold with `openbench.toml` config defaults; git-mode workspaces
   (`workspace.toml`: repo/ref/subdir/setup, `git archive` staging, resolved
   SHA recorded as `workspace_source` provenance); `docs/private-evals.md`.
-  Packaging is also done: `pip install` (git-URL), umbrella `obench` CLI,
-  arbitrary task roots for validate/preflight.
 - **P1 — Show-off loop. [PARTIAL Jul 2026]** `obench publish` / `obench verify`
   ship a shareable HTML card + provenance digests (`docs/publish.md`). Still
   open: community submission path onto the public site with CI re-verifying
@@ -75,14 +109,11 @@ run loop, tool set, and permission policy. Tasks are self-contained
   proxy metering for manifests is declaration-driven (`base_url_env` +
   `proxy_route`); candidate auth persist-back defaults off with
   `persist_auth = true` opt-in. Docker image's fixed CLI set remains a follow-up.
-- **P1 — Harbor bridge. [DONE Jul 2026]** Bidirectional bridge:
-  `obench export harbor` (`docs/harbor-export.md`) OpenBench → Harbor
-  (`checker.sh` + `SCORE:` → `tests/test.sh` writing `reward.txt`);
-  `obench import harbor` (`docs/harbor-import.md`) Harbor → OpenBench
-  (Dockerfile COPY staging, reward→exit/`SCORE:`, optional `solve.sh`
-  materialization, `PROVENANCE.md`). Lets companies use Harbor's cloud
-  sandboxes while OpenBench stays the comparison/stats/auth layer, and pull
-  Harbor/TB-format tasks into the harness-comparison path.
+- **P1 — Harbor bridge. [DONE Jul 2026]** One-way exporter
+  `obench export harbor` (`docs/harbor-export.md`): OpenBench task → Harbor
+  task (`checker.sh` + `SCORE:` → `tests/test.sh` writing `reward.txt`); lets
+  companies use Harbor's cloud sandboxes while OpenBench stays the
+  comparison/stats/auth layer.
 - **P2 — Versioned task packs.** Task packs and harness manifests as
   versioned, installable-by-name artifacts (`org/pack@version`), following the
   verifiers hub packaging pattern.

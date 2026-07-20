@@ -16,14 +16,18 @@ import unittest
 from obench import report  # noqa: E402
 
 
-def rows_for(harness, specs, task="t"):
+def rows_for(harness, specs, task="t", model="-"):
     """Build result rows: specs = list of (success, tokens, turns, wall)."""
     out = []
     for i, (succ, tok, turn, wall) in enumerate(specs, 1):
-        out.append({"harness": harness, "task": task, "trial": i,
+        out.append({"harness": harness, "model": model, "task": task, "trial": i,
                     "success": succ, "tokens": tok, "turns": turn,
                     "wall_time_s": wall})
     return out
+
+
+def _arm(harness, model="-"):
+    return (harness, model)
 
 
 class TestAggregation(unittest.TestCase):
@@ -31,7 +35,7 @@ class TestAggregation(unittest.TestCase):
         rows = rows_for("h", [(True, 500, 2, 10.0), (True, None, None, 12.0),
                               (True, 700, 4, 14.0)])
         _, _, stats = report.aggregate(rows)
-        st = stats["h"]
+        st = stats[_arm("h")]
         # None values are dropped, not stored as 0.
         self.assertEqual(st["token_vals"], [500, 700])
         self.assertEqual(st["turn_vals"], [2, 4])
@@ -42,37 +46,48 @@ class TestAggregation(unittest.TestCase):
         # success is a bool; it must never leak into token/turn aggregation.
         rows = rows_for("h", [(True, None, None, 1.0)])
         _, _, stats = report.aggregate(rows)
-        self.assertEqual(stats["h"]["token_vals"], [])
-        self.assertEqual(stats["h"]["turn_vals"], [])
+        self.assertEqual(stats[_arm("h")]["token_vals"], [])
+        self.assertEqual(stats[_arm("h")]["turn_vals"], [])
+
+    def test_aggregate_splits_models_under_same_harness(self):
+        rows = (
+            rows_for("h", [(True, 100, None, 1.0)], model="m1")
+            + rows_for("h", [(False, 200, None, 1.0)], model="m2")
+        )
+        arms, _tasks, stats = report.aggregate(rows)
+        self.assertEqual(arms, [_arm("h", "m1"), _arm("h", "m2")])
+        self.assertEqual(stats[_arm("h", "m1")]["succ"], 1)
+        self.assertEqual(stats[_arm("h", "m2")]["succ"], 0)
+        self.assertEqual(stats[_arm("h", "m2")]["n"], 1)
 
 
 class TestPerSolveMetrics(unittest.TestCase):
     def test_tokens_per_solve_basic(self):
         _, _, stats = report.aggregate(rows_for("h", [
             (True, 100, None, 1.0), (True, 200, None, 1.0), (True, 300, None, 1.0)]))
-        self.assertEqual(report.tokens_per_solve(stats["h"]), 200.0)  # 600/3
+        self.assertEqual(report.tokens_per_solve(stats[_arm("h")]), 200.0)  # 600/3
 
     def test_tokens_per_solve_mixed_none(self):
         # Only non-null tokens summed; denominator is solves.
         _, _, stats = report.aggregate(rows_for("h", [
             (True, 500, None, 1.0), (True, None, None, 1.0), (True, 700, None, 1.0)]))
-        self.assertAlmostEqual(report.tokens_per_solve(stats["h"]), 1200 / 3)
+        self.assertAlmostEqual(report.tokens_per_solve(stats[_arm("h")]), 1200 / 3)
 
     def test_tokens_per_solve_no_data_is_none(self):
         _, _, stats = report.aggregate(rows_for("h", [
             (True, None, None, 1.0), (True, None, None, 1.0)]))
-        self.assertIsNone(report.tokens_per_solve(stats["h"]))
+        self.assertIsNone(report.tokens_per_solve(stats[_arm("h")]))
 
     def test_tokens_per_solve_zero_solves_is_none(self):
         # Tokens reported but nothing solved -> cannot normalise per solve.
         _, _, stats = report.aggregate(rows_for("h", [
             (False, 900, None, 1.0), (False, 100, None, 1.0)]))
-        self.assertIsNone(report.tokens_per_solve(stats["h"]))
+        self.assertIsNone(report.tokens_per_solve(stats[_arm("h")]))
 
     def test_turns_per_solve(self):
         _, _, stats = report.aggregate(rows_for("h", [
             (True, None, 3, 1.0), (True, None, 5, 1.0)]))
-        self.assertEqual(report.turns_per_solve(stats["h"]), 4.0)  # 8/2
+        self.assertEqual(report.turns_per_solve(stats[_arm("h")]), 4.0)  # 8/2
 
 
 class TestSummaryStats(unittest.TestCase):
@@ -106,9 +121,9 @@ class TestTables(unittest.TestCase):
         return report.aggregate(rows)
 
     def test_success_table_headers_and_data(self):
-        harnesses, tasks, stats = self._mixed()
-        text = report.format_table(harnesses, tasks, stats)
-        for h in ("harness", "wilson95", "mean_s", "tok/slv", "turns"):
+        arms, tasks, stats = self._mixed()
+        text = report.format_table(arms, tasks, stats)
+        for h in ("harness", "model", "wilson95", "mean_s", "tok/slv", "turns"):
             self.assertIn(h, text)
         lines = {ln.split()[0]: ln for ln in text.splitlines() if ln[:1] in "AB"}
         # A: tokens/solve = 3000/2 = 1500 -> "1.5k"; mean turns = 3.0
@@ -118,9 +133,10 @@ class TestTables(unittest.TestCase):
         self.assertRegex(lines["B"], r"\bB\b.*-\s+-\s*$")
 
     def test_efficiency_table_mixed_and_ci(self):
-        harnesses, _tasks, stats = self._mixed()
-        text = report.format_efficiency(harnesses, stats)
-        for h in ("success", "rate", "wilson95", "mean_s", "tok/slv", "turns/slv"):
+        arms, _tasks, stats = self._mixed()
+        text = report.format_efficiency(arms, stats)
+        for h in ("harness", "model", "success", "rate", "wilson95", "mean_s",
+                  "tok/slv", "turns/slv"):
             self.assertIn(h, text)
         rowA = next(l for l in text.splitlines() if l.startswith("A"))
         rowB = next(l for l in text.splitlines() if l.startswith("B"))
@@ -140,9 +156,9 @@ class TestProxyTokenBasis(unittest.TestCase):
             "tokens_proxy_output": 10000,
             "tokens_proxy_cache_read": 500000,
         }]
-        harnesses, _tasks, stats = report.aggregate(rows)
-        self.assertEqual(report.tokens_per_solve(stats["aider"]), 50000.0)
-        text = report.format_efficiency(harnesses, stats)
+        arms, _tasks, stats = report.aggregate(rows)
+        self.assertEqual(report.tokens_per_solve(stats[_arm("aider")]), 50000.0)
+        text = report.format_efficiency(arms, stats)
         self.assertIn("50.0k*", text)
         self.assertIn("proxy-measured", text)
         self.assertIn("cache-read", text)
@@ -157,7 +173,7 @@ class TestProxyTokenBasis(unittest.TestCase):
             "tokens_proxy_cache_read": 999999,
         }]
         _, _, stats = report.aggregate(rows)
-        self.assertEqual(report.tokens_per_solve(stats["aider"]), 150.0)
+        self.assertEqual(report.tokens_per_solve(stats[_arm("aider")]), 150.0)
 
     def test_self_reported_preferred_over_proxy(self):
         rows = [{
@@ -169,25 +185,25 @@ class TestProxyTokenBasis(unittest.TestCase):
             "tokens_proxy_output": 1000,
             "tokens_proxy_cache_read": 5000,
         }]
-        harnesses, _tasks, stats = report.aggregate(rows)
-        self.assertEqual(report.tokens_per_solve(stats["pi"]), 200.0)
-        text = report.format_efficiency(harnesses, stats)
+        arms, _tasks, stats = report.aggregate(rows)
+        self.assertEqual(report.tokens_per_solve(stats[_arm("pi")]), 200.0)
+        text = report.format_efficiency(arms, stats)
         self.assertIn("200", text)
         self.assertNotIn("200*", text)
         self.assertNotIn(report.PROXY_FOOTNOTE, text)
 
     def test_mixed_basis_table_warns(self):
         rows = [
-            {"harness": "pi", "task": "t", "trial": 1, "success": True,
+            {"harness": "pi", "model": "-", "task": "t", "trial": 1, "success": True,
              "tokens": 1000, "wall_time_s": 1.0, "token_basis": "vendor_split"},
-            {"harness": "aider", "task": "t", "trial": 1, "success": True,
+            {"harness": "aider", "model": "-", "task": "t", "trial": 1, "success": True,
              "tokens": None, "wall_time_s": 1.0,
              "token_basis_proxy": "proxy_measured",
              "tokens_proxy_input_uncached": 400, "tokens_proxy_output": 100,
              "tokens_proxy_cache_read": 9000},
         ]
-        harnesses, _tasks, stats = report.aggregate(rows)
-        text = report.format_efficiency(harnesses, stats)
+        arms, _tasks, stats = report.aggregate(rows)
+        text = report.format_efficiency(arms, stats)
         self.assertIn("1.0k", text)   # pi self-reported, no star
         self.assertIn("500*", text)   # aider proxy
         self.assertIn(report.MIXED_BASIS_WARNING, text)
@@ -197,18 +213,18 @@ class TestProxyTokenBasis(unittest.TestCase):
             "harness": "quiet", "task": "t", "trial": 1, "success": True,
             "tokens": None, "wall_time_s": 1.0, "token_basis": "unmetered",
         }]
-        harnesses, _tasks, stats = report.aggregate(rows)
-        self.assertIsNone(report.tokens_per_solve(stats["quiet"]))
-        text = report.format_efficiency(harnesses, stats)
+        arms, _tasks, stats = report.aggregate(rows)
+        self.assertIsNone(report.tokens_per_solve(stats[_arm("quiet")]))
+        text = report.format_efficiency(arms, stats)
         quiet = next(l for l in text.splitlines() if l.startswith("quiet"))
         self.assertNotIn("k", quiet)
         self.assertNotIn("*", quiet)
 
     def test_older_rows_without_proxy_unchanged(self):
         rows = rows_for("codex", [(True, 40000, None, 30.0), (True, 50000, None, 40.0)])
-        harnesses, _tasks, stats = report.aggregate(rows)
-        self.assertEqual(report.tokens_per_solve(stats["codex"]), 45000.0)
-        text = report.format_efficiency(harnesses, stats)
+        arms, _tasks, stats = report.aggregate(rows)
+        self.assertEqual(report.tokens_per_solve(stats[_arm("codex")]), 45000.0)
+        text = report.format_efficiency(arms, stats)
         self.assertIn("45.0k", text)
         self.assertNotIn("*", text)
         self.assertNotIn(report.PROXY_FOOTNOTE, text)

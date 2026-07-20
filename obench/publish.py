@@ -60,7 +60,8 @@ highlighted against stock arms on the same result rows.
 - The bundled `results.jsonl` still matches the SHA-256 recorded in
   `provenance.json` (tamper-evident).
 - When local task trees are available, per-task content digests
-  (instruction.md + checker.sh + workspace / workspace.toml) still match.
+  (instruction.md + checker.sh + workspace|workspace.toml + checker_data/)
+  still match. Missing digests FAIL verification.
 
 ## What verify does NOT prove
 
@@ -92,9 +93,29 @@ def _sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
-def task_content_digest(task_dir: str) -> str:
-    """SHA-256 over instruction.md + checker.sh + workspace tree or workspace.toml.
+def _feed_tree_into_digest(hasher, task_dir: str, tree_name: str, feed) -> None:
+    """Hash every regular file under ``task_dir/tree_name`` in stable order."""
+    root_dir = os.path.join(task_dir, tree_name)
+    if not os.path.isdir(root_dir):
+        return
+    for root, dirs, files in os.walk(root_dir):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for name in sorted(files):
+            if name.startswith("."):
+                continue
+            full = os.path.join(root, name)
+            if not os.path.isfile(full) or os.path.islink(full):
+                continue
+            rel = os.path.relpath(full, task_dir).replace(os.sep, "/")
+            with open(full, "rb") as fh:
+                feed(rel, fh.read())
 
+
+def task_content_digest(task_dir: str) -> str:
+    """SHA-256 over instruction.md + checker.sh + workspace/checker_data trees.
+
+    Includes ``workspace.toml`` for git-mode tasks and ``checker_data/`` (oracle
+    inputs) so post-publish changes to checker-owned fixtures fail verify.
     Files are hashed in a stable path-sorted order. Missing optional pieces are
     skipped; at least instruction.md or checker.sh must exist.
     """
@@ -116,19 +137,8 @@ def task_content_digest(task_dir: str) -> str:
             with open(path, "rb") as fh:
                 _feed(name, fh.read())
 
-    workspace = os.path.join(task_dir, "workspace")
-    if os.path.isdir(workspace):
-        for root, dirs, files in os.walk(workspace):
-            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
-            for name in sorted(files):
-                if name.startswith("."):
-                    continue
-                full = os.path.join(root, name)
-                if not os.path.isfile(full) or os.path.islink(full):
-                    continue
-                rel = os.path.relpath(full, task_dir).replace(os.sep, "/")
-                with open(full, "rb") as fh:
-                    _feed(rel, fh.read())
+    _feed_tree_into_digest(hasher, task_dir, "workspace", _feed)
+    _feed_tree_into_digest(hasher, task_dir, "checker_data", _feed)
 
     if not found:
         raise PublishError(f"task dir has no hashable content: {task_dir}")
@@ -799,8 +809,9 @@ def verify_bundle(bundle_dir, tasks_dirs=None):
         if not expected_digest:
             checks.append({
                 "name": name,
-                "status": "PASS",
-                "detail": "no digest recorded at publish time (skipped)",
+                "status": "FAIL",
+                "detail": "no content_digest recorded at publish time; "
+                          "cannot verify task fingerprint",
             })
             continue
         task_dir = resolve_task_dir(task, roots) if roots else None

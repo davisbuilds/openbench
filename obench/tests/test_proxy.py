@@ -254,6 +254,17 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(row["token_basis_proxy"], "proxy_measured")
         self.assertEqual(row["sampling_observed"], [{"model": "m", "temperature": 0.1}])
 
+    def test_truncated_ledger_does_not_claim_proxy_measured(self):
+        row = {}
+        run.apply_proxy_ledger(row, [
+            {"usage": {"prompt_tokens": 20, "completion_tokens": 5},
+             "capture_truncated": True},
+        ])
+        self.assertTrue(row.get("proxy_capture_truncated"))
+        self.assertEqual(row["tokens_proxy_calls"], 1)
+        self.assertEqual(row["tokens_proxy_input_uncached"], 20)
+        self.assertNotIn("token_basis_proxy", row)
+
     def test_remaining_lane_support_matrix(self):
         self.assertFalse(run.proxy_supported_for_cell("cursor", "gpt-5.5-medium"))
         self.assertTrue(run.proxy_supported_for_cell("grokbuild", "deepseek-v4-flash"))

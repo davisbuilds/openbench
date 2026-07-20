@@ -312,6 +312,42 @@ class TaskDigestTests(unittest.TestCase):
                 fh.write("\nextra\n")
             self.assertNotEqual(a, publish.task_content_digest(task))
 
+    def test_digest_includes_checker_data(self):
+        with tempfile.TemporaryDirectory() as td:
+            task = _make_task(td, "t")
+            before = publish.task_content_digest(task)
+            cd = os.path.join(task, "checker_data")
+            os.makedirs(cd)
+            with open(os.path.join(cd, "expected.txt"), "w", encoding="utf-8") as fh:
+                fh.write("oracle\n")
+            after = publish.task_content_digest(task)
+            self.assertNotEqual(before, after)
+            with open(os.path.join(cd, "expected.txt"), "a", encoding="utf-8") as fh:
+                fh.write("changed\n")
+            self.assertNotEqual(after, publish.task_content_digest(task))
+
+    def test_verify_fails_missing_content_digest(self):
+        with tempfile.TemporaryDirectory() as td:
+            tasks = os.path.join(td, "tasks")
+            os.makedirs(tasks)
+            _make_task(tasks, "alpha")
+            bundle = os.path.join(td, "bundle")
+            os.makedirs(bundle)
+            results = os.path.join(bundle, "results.jsonl")
+            _write_jsonl(results, [_row("null", "alpha", 1, False)])
+            with open(results, "rb") as fh:
+                sha = hashlib.sha256(fh.read()).hexdigest()
+            provenance = {
+                "results_sha256": sha,
+                "tasks": [{"task": "alpha", "content_digest": None}],
+            }
+            with open(os.path.join(bundle, "provenance.json"), "w", encoding="utf-8") as fh:
+                json.dump(provenance, fh)
+            checks = publish.verify_bundle(bundle, tasks_dirs=[tasks])
+            digest_check = next(c for c in checks if c["name"] == "task_digest:alpha")
+            self.assertEqual(digest_check["status"], "FAIL")
+            self.assertIn("no content_digest", digest_check["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()

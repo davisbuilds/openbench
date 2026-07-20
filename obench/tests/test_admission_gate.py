@@ -4,6 +4,7 @@
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -12,6 +13,17 @@ import unittest
 
 from obench import admission_gate  # noqa: E402
 from obench import determinism_check  # noqa: E402
+
+
+def _git(cwd, *args):
+    subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
 
 class AdmissionGateTests(unittest.TestCase):
@@ -207,6 +219,58 @@ class AdmissionGateTests(unittest.TestCase):
         result = admission_gate.gate(task, determinism_runs=2, stress=0)
         self.assertEqual(result["status"], "FAIL")
         rules = {finding["rule"] for finding in result["findings"]}
+        self.assertIn("ownership.workspace_py_reference", rules)
+
+
+    def test_git_mode_workspace_oracle_is_hard_failure(self):
+        """Ownership scan must materialize workspace.toml trees, not skip them."""
+        repo = os.path.join(self.tmp, "git-repo")
+        os.makedirs(repo)
+        _git(repo, "init")
+        _git(repo, "config", "user.email", "test@example.com")
+        _git(repo, "config", "user.name", "Test")
+        _git(repo, "checkout", "-b", "main")
+        with open(os.path.join(repo, "oracle.py"), "w", encoding="utf-8") as fh:
+            fh.write("EXPECTED = 'secret'\n")
+        with open(os.path.join(repo, "stub.txt"), "w", encoding="utf-8") as fh:
+            fh.write("start\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "initial")
+        sha = subprocess.check_output(
+            ["git", "-C", repo, "rev-parse", "HEAD"], text=True,
+        ).strip()
+
+        task = os.path.join(repo, ".openbench", "tasks", "git-oracle")
+        os.makedirs(os.path.join(task, "solution"))
+        os.makedirs(os.path.join(task, "checker_data"))
+        with open(os.path.join(task, "instruction.md"), "w", encoding="utf-8") as fh:
+            fh.write("Do the fixture task.\n")
+        with open(os.path.join(task, "PROVENANCE.md"), "w", encoding="utf-8") as fh:
+            fh.write("fixture\n")
+        with open(os.path.join(task, "workspace.toml"), "w", encoding="utf-8") as fh:
+            fh.write(f'kind = "git"\nrepo = "."\nref = "{sha}"\n')
+        with open(os.path.join(task, "solution", "answer.txt"), "w", encoding="utf-8") as fh:
+            fh.write("ok\n")
+        with open(os.path.join(task, "checker_data", "expected.txt"), "w", encoding="utf-8") as fh:
+            fh.write("ok\n")
+        checker = textwrap.dedent("""\
+            #!/usr/bin/env bash
+            set -eu
+            python workspace/oracle.py >/dev/null 2>&1 || true
+            if [ -f answer.txt ]; then
+              echo PASS
+              exit 0
+            fi
+            echo FAIL missing answer
+            exit 1
+            """)
+        checker_path = os.path.join(task, "checker.sh")
+        with open(checker_path, "w", encoding="utf-8") as fh:
+            fh.write(checker)
+        os.chmod(checker_path, os.stat(checker_path).st_mode | stat.S_IXUSR)
+
+        findings = admission_gate.scan_ownership(task)
+        rules = {f.rule for f in findings}
         self.assertIn("ownership.workspace_py_reference", rules)
 
 
