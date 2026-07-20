@@ -30,6 +30,8 @@ import shutil
 import sys
 import traceback
 
+from auth_persist import AUTH_PERSIST
+
 RESULT_SENTINEL = "__BENCH_RESULT__"
 # Container defaults; overridable via env so the entrypoint can be exercised
 # on the host (and to keep the mount points configurable).
@@ -39,6 +41,7 @@ WORKDIR = os.environ.get("BENCH_WORKDIR", "/work")
 # Host auth is bind-mounted READ-ONLY here; we copy it into $HOME so CLIs that
 # must write into their config home work, while the host config stays read-only.
 AUTH_STAGING = os.environ.get("BENCH_AUTH_STAGING", "/bench/auth")
+AUTH_RETURN = os.environ.get("BENCH_AUTH_RETURN", "/bench/auth-return")
 
 
 def _stage_auth():
@@ -60,6 +63,33 @@ def _stage_auth():
         else:
             os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
             shutil.copy2(src, dst)
+
+
+def _return_auth(harness):
+    """Atomically copy declared, possibly rotated auth into the return mount."""
+    if not os.path.isdir(AUTH_RETURN):
+        return
+    home = os.environ.get("HOME", "/root")
+    returned = set()
+    for _master_relative, relative in AUTH_PERSIST.get(harness, []):
+        if relative in returned:
+            continue
+        returned.add(relative)
+        source = os.path.join(home, relative)
+        if not os.path.isfile(source):
+            continue
+        destination = os.path.join(AUTH_RETURN, relative)
+        os.makedirs(os.path.dirname(destination), mode=0o700, exist_ok=True)
+        temporary = destination + ".tmp"
+        try:
+            shutil.copyfile(source, temporary)
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, destination)
+        finally:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
 
 
 def _null_run(instruction, workdir, model, timeout_s):
@@ -147,6 +177,18 @@ def main(argv):
             "completed": False,
             "error": "entry.py adapter exception:\n" + traceback.format_exc(limit=4).strip(),
             "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+        }
+
+    persist_harness = os.environ.get("BENCH_AUTH_PERSIST_HARNESS", harness)
+    try:
+        _return_auth(persist_harness)
+    except OSError as exc:
+        result = {
+            "completed": False,
+            "error": f"entry.py auth persist return failed: {exc}",
+            "output_tail": result.get("output_tail", ""),
+            "tokens": result.get("tokens"), "turns": result.get("turns"),
+            "cmd": result.get("cmd"),
         }
 
     _emit(result)

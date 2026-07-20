@@ -34,10 +34,13 @@ import time
 import uuid
 from types import SimpleNamespace
 
+from auth_persist import AUTH_PERSIST, persist_auth_file
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 ENTRY_PATH = os.path.join(HERE, "entry.py")
 CANDIDATES_PATH = os.path.join(HERE, "candidates.py")
+AUTH_PERSIST_PATH = os.path.join(HERE, "auth_persist.py")
 DOCKERFILE_DIR = os.path.join(HERE, "docker")
 RESULT_SENTINEL = "__BENCH_RESULT__"
 DEFAULT_IMAGE = "openbench-harness:latest"
@@ -55,6 +58,8 @@ _DOCKER_CLIENT_KILL_GRACE_S = 5
 # their config home (e.g. codex's CODEX_HOME) a writable copy. $HOME is /root.
 CONTAINER_HOME = "/root"
 AUTH_STAGING = "/bench/auth"
+AUTH_RETURN = "/bench/auth-return"
+
 AUTH_MOUNTS = {
     # codex: mount ONLY the auth/config files. ~/.codex also holds worktrees,
     # sessions, and sqlite logs (54 GB observed); mounting the whole dir made
@@ -369,6 +374,24 @@ def _run_docker_client_with_deadline(cmd, container_name, host_timeout_s,
         )
 
 
+def _auth_persist_targets(harness):
+    """Return existing (host master, container-HOME relative) auth targets."""
+    targets = []
+    staged = set()
+    home = os.path.expanduser("~")
+    for host_rel, dest_rel in AUTH_PERSIST.get(harness, []):
+        host_path = os.path.join(home, host_rel)
+        if dest_rel not in staged and os.path.isfile(host_path):
+            targets.append((host_path, dest_rel))
+            staged.add(dest_rel)
+    return targets
+
+
+def _persist_returned_auth(return_dir, targets):
+    for master, relative in targets:
+        persist_auth_file(os.path.join(return_dir, relative), master)
+
+
 def _auth_mount_args(harness):
     """Read-only ``-v`` args mounting the harness's auth into the staging dir.
 
@@ -397,7 +420,8 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                      extra_docker_args=None, extra_env=None,
                      candidate_path=None, base_harness=None,
                      candidate_auth_files=None, candidate_pass_env=None,
-                     candidate_config_dir=None, candidate_inherit_env=False):
+                     candidate_config_dir=None, candidate_inherit_env=False,
+                     auth_return_dir=None):
     """Assemble the ``docker run`` argv for one cell (pure; unit-testable)."""
     cmd = ["docker", "run", "--rm"]
     # Bound each cell's CPU quota so co-tenant host load cannot starve a cell
@@ -415,6 +439,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-v", f"{os.path.abspath(workdir)}:/work",
         "-v", f"{os.path.abspath(adapters_dir)}:/bench/adapters:ro",
         "-v", f"{ENTRY_PATH}:/bench/entry.py:ro",
+        "-v", f"{AUTH_PERSIST_PATH}:/bench/auth_persist.py:ro",
         "-v", f"{os.path.abspath(instruction_path)}:/bench/instruction.txt:ro",
     ]
     candidate_arg = None
@@ -461,6 +486,11 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
             cmd += ["-e", name]
     stock_auth_args = _auth_mount_args(effective_harness)
     cmd += stock_auth_args
+    if auth_return_dir and effective_harness in AUTH_PERSIST:
+        cmd += [
+            "-v", f"{os.path.abspath(auth_return_dir)}:{AUTH_RETURN}:rw",
+            "-e", f"BENCH_AUTH_PERSIST_HARNESS={effective_harness}",
+        ]
     mounted_auth_targets = {
         stock_auth_args[i + 1].rsplit(":ro", 1)[0].rsplit(":", 1)[-1]
         for i, item in enumerate(stock_auth_args[:-1]) if item == "-v"
@@ -534,6 +564,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     instruction_path = None
     candidate_spec_path = None
     candidate_config_stage = None
+    auth_return_dir = None
+    auth_persist_targets = []
     agent_started = False
     try:
         preflight(image)
@@ -564,6 +596,11 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         fd, instruction_path = tempfile.mkstemp(prefix="bench_instr_", suffix=".txt", dir=instr_dir)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(instruction)
+        effective_harness = base_harness if (candidate_path or candidate_spec_bytes is not None) else harness
+        auth_persist_targets = _auth_persist_targets(effective_harness)
+        if auth_persist_targets:
+            auth_return_dir = tempfile.mkdtemp(prefix="bench_auth_return_", dir=instr_dir)
+            os.chmod(auth_return_dir, 0o700)
 
         # Unique name so a hung container (an inner CLI that never exits and
         # holds the stdout pipe open) can be force-killed on timeout. Killing
@@ -578,6 +615,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             candidate_pass_env=candidate_pass_env,
             candidate_config_dir=candidate_config_stage,
             candidate_inherit_env=candidate_inherit_env,
+            auth_return_dir=auth_return_dir,
         )
         host_env_setup_s = round(time.monotonic() - env_setup_start, 3)
 
@@ -654,6 +692,11 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             setattr(exc, "bench_agent_wall_time_s", 0.0)
         raise
     finally:
+        if auth_return_dir is not None:
+            try:
+                _persist_returned_auth(auth_return_dir, auth_persist_targets)
+            finally:
+                shutil.rmtree(auth_return_dir, ignore_errors=True)
         if instruction_path is not None:
             os.unlink(instruction_path)
         if candidate_spec_path is not None:
