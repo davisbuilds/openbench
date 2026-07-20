@@ -446,7 +446,8 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         prefix = route_parts[0]
         tail = route_parts[1:]
         if prefix == "subbridge" and registration_meta is not None:
-            if (registration_meta.get("harness"), registration_meta.get("model")) != ("grokbuild", "gpt-5.6"):
+            if (registration_meta.get("harness") != "grokbuild"
+                    or registration_meta.get("model") not in {"gpt-5.6", "gpt-5.6-sol"}):
                 raise RuntimeError("cell token is not authorized for subscription bridge")
         if prefix == "codex":
             upstream = self.server.upstreams["codex"]  # type: ignore[attr-defined]
