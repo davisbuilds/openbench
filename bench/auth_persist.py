@@ -1,7 +1,10 @@
 """Safely persist rotating CLI credentials from disposable auth copies."""
 
 import contextlib
+import json
 import os
+import re
+import sys
 import tempfile
 
 try:
@@ -44,6 +47,53 @@ def _lock(path):
         os.close(fd)
 
 
+def _mutable_auth_key(key):
+    """Fields subscription CLIs are expected to rotate in-place."""
+    normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+    return ("token" in normalized or normalized.startswith("access")
+            or normalized.startswith("refresh")
+            or normalized.startswith("expires")
+            or normalized.startswith("expiry")
+            or normalized in {"lastrefresh", "lastrefreshed", "refreshedat",
+                              "updatedat"})
+
+
+def _validate_rotation(current, updated, path=()):
+    """Require identical schema and immutable provider/account metadata."""
+    if isinstance(current, dict) and isinstance(updated, dict):
+        if current.keys() != updated.keys():
+            raise ValueError(f"auth schema changed at {'.'.join(path) or '<root>'}")
+        for key in current:
+            old_value, new_value = current[key], updated[key]
+            # Containers such as Codex's `tokens` include immutable account_id,
+            # so only scalar token/expiry leaves are mutable.
+            if (_mutable_auth_key(key)
+                    and not isinstance(old_value, (dict, list))
+                    and not isinstance(new_value, (dict, list))):
+                continue
+            _validate_rotation(old_value, new_value, (*path, str(key)))
+        return
+    if isinstance(current, list) and isinstance(updated, list):
+        if len(current) != len(updated):
+            raise ValueError(f"auth list changed at {'.'.join(path)}")
+        for index, (old_value, new_value) in enumerate(zip(current, updated)):
+            _validate_rotation(old_value, new_value, (*path, str(index)))
+        return
+    if current != updated:
+        raise ValueError(f"immutable auth identity changed at {'.'.join(path)}")
+
+
+def _validated_auth_bytes(current_bytes, updated_bytes):
+    try:
+        current = json.loads(current_bytes)
+        updated = json.loads(updated_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("refusing to persist malformed auth JSON") from exc
+    if not isinstance(current, dict) or not isinstance(updated, dict):
+        raise ValueError("refusing to persist non-object auth JSON")
+    _validate_rotation(current, updated)
+
+
 def persist_auth_file(copy_path, master_path):
     """Atomically replace *master_path* when *copy_path* has different bytes.
 
@@ -57,16 +107,25 @@ def persist_auth_file(copy_path, master_path):
     with open(copy_path, "rb") as fh:
         updated = fh.read()
 
+    # Avoid creating a lock file (or requiring directory write access) for the
+    # overwhelmingly common no-rotation case. The locked comparison below is
+    # still authoritative if another runner updates the master meanwhile.
+    try:
+        with open(master_path, "rb") as fh:
+            current = fh.read()
+    except FileNotFoundError:
+        raise ValueError("refusing to create a missing auth master")
+    if current == updated:
+        return False
+    _validated_auth_bytes(current, updated)
+
     parent = os.path.dirname(os.path.abspath(master_path))
-    os.makedirs(parent, mode=0o700, exist_ok=True)
     with _lock(master_path):
-        try:
-            with open(master_path, "rb") as fh:
-                current = fh.read()
-        except FileNotFoundError:
-            current = None
+        with open(master_path, "rb") as fh:
+            current = fh.read()
         if current == updated:
             return False
+        _validated_auth_bytes(current, updated)
 
         fd, temp_path = tempfile.mkstemp(prefix=".auth-persist-", dir=parent)
         try:
@@ -96,3 +155,15 @@ def persist_auth_file(copy_path, master_path):
                 except FileNotFoundError:
                     pass
     return True
+
+
+def try_persist_auth_file(copy_path, master_path):
+    """Best-effort adapter wrapper that never masks the cell's real result."""
+    try:
+        return persist_auth_file(copy_path, master_path)
+    except (OSError, ValueError) as exc:
+        # Do not include credential contents (or exception text, which can be
+        # supplied by a filesystem implementation) in runner output.
+        print(f"WARN auth persist-back failed ({type(exc).__name__})",
+              file=sys.stderr)
+        return False

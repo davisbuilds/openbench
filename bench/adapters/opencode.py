@@ -35,7 +35,7 @@ import shutil
 import subprocess
 import tempfile
 
-from auth_persist import persist_auth_file
+from auth_persist import try_persist_auth_file
 
 NAME = "opencode"
 _EXE = "opencode"
@@ -389,7 +389,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     finally:
         if model in MODELS and auth_source is not None:
             isolated_auth = os.path.join(env["XDG_DATA_HOME"], "opencode", "auth.json")
-            persist_auth_file(isolated_auth, auth_source)
+            try_persist_auth_file(isolated_auth, auth_source)
         shutil.rmtree(iso_home, ignore_errors=True)
 
     combined = (proc.stdout or "") + (proc.stderr or "")

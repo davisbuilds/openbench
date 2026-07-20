@@ -17,7 +17,7 @@ import re
 import shutil
 import tempfile
 
-from auth_persist import persist_auth_file
+from auth_persist import try_persist_auth_file
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
@@ -152,4 +152,4 @@ def run_variant(name, variant, instruction, workdir, model, timeout_s):
                 env_override={"CODEX_HOME": codex_home},
             )
         finally:
-            persist_auth_file(metadata["auth"], metadata["auth_source"])
+            try_persist_auth_file(metadata["auth"], metadata["auth_source"])

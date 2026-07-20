@@ -34,7 +34,7 @@ import time
 import uuid
 from types import SimpleNamespace
 
-from auth_persist import AUTH_PERSIST, persist_auth_file
+from auth_persist import AUTH_PERSIST, try_persist_auth_file
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -389,7 +389,7 @@ def _auth_persist_targets(harness):
 
 def _persist_returned_auth(return_dir, targets):
     for master, relative in targets:
-        persist_auth_file(os.path.join(return_dir, relative), master)
+        try_persist_auth_file(os.path.join(return_dir, relative), master)
 
 
 def _auth_mount_args(harness):

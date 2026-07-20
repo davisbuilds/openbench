@@ -32,9 +32,9 @@ class TestAtomicPersist(unittest.TestCase):
             master = os.path.join(td, "auth.json")
             copy = os.path.join(td, "copy.json")
             with open(master, "wb") as fh:
-                fh.write(b"old-token")
+                fh.write(b'{"provider":"xai","refresh_token":"old-token"}')
             with open(copy, "wb") as fh:
-                fh.write(b"new-rotated-token")
+                fh.write(b'{"provider":"xai","refresh_token":"new-rotated-token"}')
 
             real_replace = os.replace
             observed = []
@@ -51,10 +51,26 @@ class TestAtomicPersist(unittest.TestCase):
             with mock.patch.object(auth_persist.os, "replace", side_effect=inspect_replace):
                 self.assertTrue(auth_persist.persist_auth_file(copy, master))
 
-            self.assertEqual(observed, [(b"old-token", b"new-rotated-token", 0o600)])
+            self.assertEqual(observed, [(
+                b'{"provider":"xai","refresh_token":"old-token"}',
+                b'{"provider":"xai","refresh_token":"new-rotated-token"}', 0o600)])
             with open(master, "rb") as fh:
-                self.assertEqual(fh.read(), b"new-rotated-token")
+                self.assertEqual(
+                    fh.read(), b'{"provider":"xai","refresh_token":"new-rotated-token"}')
             self.assertEqual(stat.S_IMODE(os.stat(master).st_mode), 0o600)
+
+    def test_account_identity_change_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            master = os.path.join(td, "auth.json")
+            copy = os.path.join(td, "copy.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+            with open(copy, "wb") as fh:
+                fh.write(b'{"account_id":"attacker","refresh_token":"new"}')
+            with self.assertRaises(ValueError):
+                auth_persist.persist_auth_file(copy, master)
+            with open(master, "rb") as fh:
+                self.assertIn(b'"owner"', fh.read())
 
     def test_identical_file_is_untouched(self):
         with tempfile.TemporaryDirectory() as td:
@@ -70,6 +86,13 @@ class TestAtomicPersist(unittest.TestCase):
             after = os.stat(master)
             self.assertEqual((before.st_ino, before.st_mtime_ns),
                              (after.st_ino, after.st_mtime_ns))
+            self.assertFalse(os.path.exists(master + ".lock"))
+
+    def test_best_effort_wrapper_does_not_mask_persist_failure(self):
+        with mock.patch.object(auth_persist, "persist_auth_file",
+                               side_effect=PermissionError("synthetic")), \
+                mock.patch.object(auth_persist.sys, "stderr"):
+            self.assertFalse(auth_persist.try_persist_auth_file("copy", "master"))
 
 
 class TestLocalAdapterPersist(unittest.TestCase):

@@ -31,7 +31,7 @@ import shutil
 import subprocess
 import tempfile
 
-from auth_persist import persist_auth_file
+from auth_persist import try_persist_auth_file
 
 NAME = "grokbuild"
 _EXE = "grok"
@@ -446,5 +446,5 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 **token_fields}
     finally:
         if isolated_auth is not None:
-            persist_auth_file(isolated_auth, _REAL_GROK_AUTH)
+            try_persist_auth_file(isolated_auth, _REAL_GROK_AUTH)
         shutil.rmtree(iso_home, ignore_errors=True)

@@ -33,7 +33,7 @@ import subprocess
 import tempfile
 from urllib.parse import urlsplit
 
-from auth_persist import persist_auth_file
+from auth_persist import try_persist_auth_file
 
 NAME = "pi"
 
@@ -435,5 +435,5 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         }
     finally:
         if isolated_auth is not None:
-            persist_auth_file(isolated_auth, _REAL_AUTH)
+            try_persist_auth_file(isolated_auth, _REAL_AUTH)
         shutil.rmtree(iso_home, ignore_errors=True)

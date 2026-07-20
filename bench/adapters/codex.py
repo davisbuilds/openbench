@@ -53,7 +53,7 @@ import socket
 import subprocess
 import tempfile
 
-from auth_persist import persist_auth_file
+from auth_persist import try_persist_auth_file
 
 NAME = "codex"
 _EXE = "codex"
@@ -479,7 +479,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
             }
     finally:
         if isolated_home and auth_src:
-            persist_auth_file(os.path.join(isolated_home, "auth.json"), auth_src)
+            try_persist_auth_file(os.path.join(isolated_home, "auth.json"), auth_src)
         if isolated_home:
             shutil.rmtree(isolated_home, ignore_errors=True)
 
