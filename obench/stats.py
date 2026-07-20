@@ -189,12 +189,76 @@ def task_is_dropped(task, roots, cache):
     return None
 
 
+# Display bases for tok/slv and HTML badges. Cache-read is never folded into
+# the comparable fresh total (see proxy_fresh_tokens / effective_tokens).
+TOKEN_BASIS_SELF = "self-reported"
+TOKEN_BASIS_PROXY = "proxy-measured"
+TOKEN_BASIS_UNMETERED = "unmetered"
+
+
+def proxy_fresh_tokens(row):
+    """Proxy-metered fresh total: uncached input + output.
+
+    Matches native adapters' ``tokens`` scalar (codex/pi/opencode/claude):
+    fresh = tokens_input_uncached + tokens_output. Cache-read and cache-write
+    stay in their own columns and are not mixed into this number. Reasoning is
+    not added separately — ``tokens_proxy_output`` follows the provider's
+    output field the same way native ``tokens_output`` does.
+    """
+    inp = row.get("tokens_proxy_input_uncached")
+    out = row.get("tokens_proxy_output")
+    if is_nonnegative_number(inp) and is_nonnegative_number(out):
+        return float(inp) + float(out)
+    return None
+
+
+def effective_tokens(row):
+    """Return ``(fresh_tokens, basis)`` for comparable tok/slv aggregation.
+
+    Priority:
+      1. Self-reported ``tokens`` when present → ``self-reported``.
+      2. Else, when ``token_basis_proxy == "proxy_measured"``, the proxy fresh
+         total (uncached input + output) → ``proxy-measured``.
+      3. Else, when ``token_basis == "unmetered"`` → ``(None, "unmetered")``.
+      4. Else → ``(None, None)``.
+
+    Older rows without proxy fields behave as before: only a present ``tokens``
+    scalar contributes. Large ``tokens_proxy_cache_read`` never inflates the
+    fresh total.
+    """
+    if is_nonnegative_number(row.get("tokens")):
+        return float(row["tokens"]), TOKEN_BASIS_SELF
+    if row.get("token_basis_proxy") == "proxy_measured":
+        proxy = proxy_fresh_tokens(row)
+        if proxy is not None:
+            return proxy, TOKEN_BASIS_PROXY
+    if row.get("token_basis") == "unmetered":
+        return None, TOKEN_BASIS_UNMETERED
+    return None, None
+
+
+def display_token_basis(row):
+    """Normalize a row's token accounting into a badge label, or None."""
+    _value, basis = effective_tokens(row)
+    if basis is not None:
+        return basis
+    raw = row.get("token_basis") or row.get("token_basis_proxy")
+    if raw in (None, ""):
+        return None
+    text = str(raw)
+    if text == "proxy_measured":
+        return TOKEN_BASIS_PROXY
+    if text == "unmetered":
+        return TOKEN_BASIS_UNMETERED
+    # vendor_split / harness_reported / estimated / scalar_exact / ...
+    return TOKEN_BASIS_SELF
+
+
 def total_tokens(row):
     if is_nonnegative_number(row.get("tokens_total")):
         return row.get("tokens_total")
-    if is_nonnegative_number(row.get("tokens")):
-        return row.get("tokens")
-    return None
+    value, _basis = effective_tokens(row)
+    return value
 
 
 def input_tokens(row):
@@ -202,12 +266,20 @@ def input_tokens(row):
         return row.get("tokens_input")
     if is_nonnegative_number(row.get("tokens_input_uncached")):
         return row.get("tokens_input_uncached")
+    if row.get("token_basis_proxy") == "proxy_measured":
+        proxy = row.get("tokens_proxy_input_uncached")
+        if is_nonnegative_number(proxy):
+            return proxy
     return None
 
 
 def output_tokens(row):
     if is_nonnegative_number(row.get("tokens_output")):
         return row.get("tokens_output")
+    if row.get("token_basis_proxy") == "proxy_measured":
+        proxy = row.get("tokens_proxy_output")
+        if is_nonnegative_number(proxy):
+            return proxy
     return None
 
 
