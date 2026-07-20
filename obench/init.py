@@ -3,6 +3,7 @@
 
     obench init
     obench init --task <name> [--from <dir>]
+    obench init --task <name> --git-ref <sha> [--git-subdir <path>]
 
 Idempotent: existing files are left untouched and noted.
 """
@@ -46,15 +47,23 @@ Each task is a directory with:
 <name>/
   instruction.md   # what the agent is told
   workspace/       # starting files (copied fresh per trial — keep it lean)
+  # OR workspace.toml  # git-ref materialization for monorepo slices
   solution/        # golden overlay for polarity checks only
   checker.sh       # exit 0 = solved; optional SCORE: <float>
   checker_data/    # optional oracle inputs kept out of workspace/
 ```
 
-Scaffold a task from a slice of your repo:
+Scaffold a small snapshot task:
 
 ```bash
 obench init --task my-bug --from path/to/small/subdir
+```
+
+Or a git-ref task (preferred for monorepos — no copytree of the whole tree):
+
+```bash
+obench init --task my-bug --git-ref HEAD --git-subdir services/billing
+# then pin ref to a full commit SHA in workspace.toml
 ```
 
 Then edit ``checker.sh`` / ``solution/`` until polarity passes:
@@ -196,7 +205,14 @@ def init_scaffold(start: str | None = None) -> list[str]:
     return notes
 
 
-def init_task(name: str, from_dir: str | None = None, start: str | None = None) -> str:
+def init_task(
+    name: str,
+    from_dir: str | None = None,
+    start: str | None = None,
+    git_ref: str | None = None,
+    git_subdir: str | None = None,
+    git_repo: str = ".",
+) -> str:
     """Create ``.openbench/tasks/<name>`` via add_task.scaffold."""
     if not _valid_task_name(name):
         raise ValueError(
@@ -210,7 +226,13 @@ def init_task(name: str, from_dir: str | None = None, start: str | None = None) 
     # not clobber an existing tree.
     init_scaffold(start)
     task_path = os.path.join(tasks_dir, name)
-    return add_task.scaffold(task_path, from_dir=from_dir)
+    return add_task.scaffold(
+        task_path,
+        from_dir=from_dir,
+        git_ref=git_ref,
+        git_subdir=git_subdir,
+        git_repo=git_repo,
+    )
 
 
 def main(argv=None):
@@ -225,27 +247,63 @@ def main(argv=None):
         "--from", dest="from_dir", metavar="DIR",
         help="with --task: copy DIR into the new task's workspace/",
     )
+    parser.add_argument(
+        "--git-ref", metavar="REF",
+        help="with --task: write workspace.toml pinned to REF instead of workspace/",
+    )
+    parser.add_argument(
+        "--git-subdir", metavar="PATH",
+        help="with --git-ref: only this repo subtree becomes the workspace root",
+    )
+    parser.add_argument(
+        "--git-repo", default=".", metavar="REPO",
+        help="with --git-ref: local path or URL (default: \".\" = containing git repo)",
+    )
     args = parser.parse_args(argv)
 
     if args.from_dir and not args.task:
         parser.error("--from requires --task")
+    if args.git_ref and not args.task:
+        parser.error("--git-ref requires --task")
+    if args.git_subdir and not args.git_ref:
+        parser.error("--git-subdir requires --git-ref")
+    if args.from_dir and args.git_ref:
+        parser.error("use either --from or --git-ref, not both")
 
     if args.task:
         try:
-            task_path = init_task(args.task, from_dir=args.from_dir)
+            task_path = init_task(
+                args.task,
+                from_dir=args.from_dir,
+                git_ref=args.git_ref,
+                git_subdir=args.git_subdir,
+                git_repo=args.git_repo,
+            )
         except (FileExistsError, NotADirectoryError, ValueError, OSError) as exc:
             print(f"obench init: {exc}", file=sys.stderr)
             return 1
         print(f"Created task scaffold: {task_path}")
-        print(
-            "Next steps:\n"
-            "  1. Fill in every TODO in instruction.md, checker.sh, and PROVENANCE.md.\n"
-            "  2. Leave workspace/ unsolved; put the golden answer in solution/.\n"
-            "  3. Put checker-owned oracle data in checker_data/ if needed.\n"
-            "  4. Run: obench validate\n"
-            "  5. Smoke: obench run --harness null --task "
-            f"{os.path.basename(task_path)}"
-        )
+        if args.git_ref:
+            print(
+                "Next steps:\n"
+                "  1. Pin workspace.toml ref to a full commit SHA.\n"
+                "  2. Fill in every TODO in instruction.md, checker.sh, and PROVENANCE.md.\n"
+                "  3. Put the golden answer in solution/ (overlay on the git-staged tree).\n"
+                "  4. Put checker-owned oracle data in checker_data/ if needed.\n"
+                "  5. Run: obench validate\n"
+                "  6. Smoke: obench run --harness null --task "
+                f"{os.path.basename(task_path)}"
+            )
+        else:
+            print(
+                "Next steps:\n"
+                "  1. Fill in every TODO in instruction.md, checker.sh, and PROVENANCE.md.\n"
+                "  2. Leave workspace/ unsolved; put the golden answer in solution/.\n"
+                "  3. Put checker-owned oracle data in checker_data/ if needed.\n"
+                "  4. Run: obench validate\n"
+                "  5. Smoke: obench run --harness null --task "
+                f"{os.path.basename(task_path)}"
+            )
         return 0
 
     notes = init_scaffold()
@@ -255,6 +313,7 @@ def main(argv=None):
     print()
     print("Next steps:")
     print("  1. Author a task:  obench init --task <name> --from <subdir>")
+    print("     or git-mode:    obench init --task <name> --git-ref <sha> [--git-subdir <path>]")
     print("  2. Validate:       obench validate")
     print("  3. Preflight:      obench doctor --harness <names>")
     print("  4. Run:            obench run --harness null --task <name>")

@@ -10,6 +10,7 @@ from datetime import date
 
 from . import admission_gate
 from .paths import PACKAGE_DIR
+from .workspace import write_git_workspace_toml
 
 HERE = PACKAGE_DIR
 
@@ -56,7 +57,7 @@ PROVENANCE_TEMPLATE = """# Provenance
 
 NEXT_STEPS = """Next steps:
   1. Fill in every TODO in instruction.md, checker.sh, and PROVENANCE.md.
-  2. Put the unsolved starting state in workspace/.
+  2. Put the unsolved starting state in workspace/ (or pin a git ref in workspace.toml).
   3. Put the golden answer in solution/.
   4. Put checker-owned oracle data in checker_data/ if needed.
   5. Run: python3 -m obench.admission_gate {task_path}
@@ -92,7 +93,15 @@ def _copy_contents(src, dst):
             shutil.copy2(src_path, dst_path)
 
 
-def scaffold(task_path, from_dir=None):
+def scaffold(task_path, from_dir=None, git_ref=None, git_subdir=None, git_repo="."):
+    """Create a new task directory.
+
+    Snapshot mode (default): create empty ``workspace/``, optionally seeded
+    from ``from_dir``. Git mode: write ``workspace.toml`` instead of
+    ``workspace/`` when ``git_ref`` is set.
+    """
+    if from_dir is not None and git_ref is not None:
+        raise ValueError("use either --from or --git-ref, not both")
     task_path = os.path.abspath(task_path)
     if os.path.exists(task_path):
         raise FileExistsError(f"refusing to overwrite existing task dir: {task_path}")
@@ -105,15 +114,20 @@ def scaffold(task_path, from_dir=None):
 
     os.makedirs(task_path)
     try:
-        workspace = os.path.join(task_path, "workspace")
         solution = os.path.join(task_path, "solution")
         checker_data = os.path.join(task_path, "checker_data")
-        os.makedirs(workspace)
         os.makedirs(solution)
         os.makedirs(checker_data)
 
-        if from_dir is not None:
-            _copy_contents(from_dir, workspace)
+        if git_ref is not None:
+            write_git_workspace_toml(
+                task_path, git_ref, repo=git_repo or ".", subdir=git_subdir,
+            )
+        else:
+            workspace = os.path.join(task_path, "workspace")
+            os.makedirs(workspace)
+            if from_dir is not None:
+                _copy_contents(from_dir, workspace)
 
         with open(os.path.join(task_path, "instruction.md"), "w", encoding="utf-8") as fh:
             fh.write(INSTRUCTION_TEMPLATE)
@@ -139,11 +153,34 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("task_path", help="new <tasks-dir>/<task-name> directory")
     parser.add_argument("--from", dest="from_dir", help="copy an existing directory into workspace/ as the starting state")
+    parser.add_argument(
+        "--git-ref", metavar="REF",
+        help="write workspace.toml pinned to REF instead of creating workspace/",
+    )
+    parser.add_argument(
+        "--git-subdir", metavar="PATH",
+        help="with --git-ref: only this repo subtree becomes the workspace root",
+    )
+    parser.add_argument(
+        "--git-repo", default=".", metavar="REPO",
+        help="with --git-ref: local path or URL (default: \".\" = repo containing the task)",
+    )
     parser.add_argument("--gate", action="store_true", help="run obench.admission_gate on the new task immediately")
     args = parser.parse_args(argv)
 
+    if args.git_subdir and not args.git_ref:
+        parser.error("--git-subdir requires --git-ref")
+    if args.git_repo != "." and not args.git_ref:
+        parser.error("--git-repo requires --git-ref")
+
     try:
-        task_path = scaffold(args.task_path, from_dir=args.from_dir)
+        task_path = scaffold(
+            args.task_path,
+            from_dir=args.from_dir,
+            git_ref=args.git_ref,
+            git_subdir=args.git_subdir,
+            git_repo=args.git_repo,
+        )
     except (FileExistsError, NotADirectoryError, ValueError, OSError) as exc:
         print(f"add_task: {exc}", file=sys.stderr)
         return 1
