@@ -329,6 +329,15 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
                "wall_time_s": 0.002}
         self.assertEqual(failure_class.classify_failure(row), "infra")
 
+    def test_task_debugging_traceback_with_real_work_is_wrong_answer(self):
+        # Regression: agents debugging Python tasks print tracebacks in their
+        # transcripts; a worked cell (tokens + turns) must never be reclassified
+        # as infra by the adapter-crash markers (10 raman-fitting cells were).
+        row = {"success": False, "completed": True, "tokens": 35768, "turns": 16,
+               "output_tail": "ran fit.py\nTraceback (most recent call last):\n  ...\nValueError: bad fit",
+               "wall_time_s": 234.0, "checker_exit": 1}
+        self.assertEqual(failure_class.classify_failure(row), "wrong_answer")
+
     def test_vendor_authentication_error_is_infra(self):
         row = {"success": False, "completed": True, "tokens": 0,
                "output_tail": 'Fails, Your api key: ****ogus is invalid","type":"authentication_error"',

@@ -50,15 +50,20 @@ _INFRA_RE = re.compile(
     r"image ['\"]?[^'\"\n]+['\"]? not found|"
     r"Cannot connect to the Docker daemon|"
     r"proxy_upstream_failed|"
-    # Adapter-side crash before any model call: an uncaught Python traceback
-    # (e.g. FileNotFoundError for a missing harness binary) is infrastructure,
-    # never a task wrong answer.
-    r"Traceback \(most recent call last\)|"
-    r"FileNotFoundError|"
     # Provider auth rejections in vendor/liteLLM phrasing (aider et al.):
     r"authentication_error|AuthenticationError|"
     r"api key[^\n]{0,40}\binvalid|invalid[^\n]{0,20}api key|incorrect api key"
     r")",
+    re.IGNORECASE,
+)
+
+# Adapter-side crash before any model call: an uncaught Python traceback
+# (e.g. FileNotFoundError for a missing harness binary) is infrastructure —
+# but only when there is no evidence a model ran. Agents debugging Python
+# tasks legitimately print tracebacks in their transcripts, so these markers
+# must never reclassify a cell that shows real work (tokens or turns).
+_ADAPTER_CRASH_RE = re.compile(
+    r"Traceback \(most recent call last\)|FileNotFoundError",
     re.IGNORECASE,
 )
 
@@ -212,6 +217,9 @@ def classify_failure(row, adapter_output="", timeout_s=None):
     if has_rate_limit_marker(combined):
         return "rate_limited"
     if has_infra_marker(combined):
+        return "infra"
+    if (_ADAPTER_CRASH_RE.search(combined)
+            and has_near_zero_agent_tokens(row) and not row.get("turns")):
         return "infra"
     if has_instant_cli_exit_shape(row):
         return "infra"
