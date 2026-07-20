@@ -325,7 +325,7 @@ fields:
 | `completed`    | harness CLI exited cleanly (self-reported; not success)                 |
 | `error`        | timeout / crash / adapter exception, else `null`                        |
 | `wall_time_s`  | adapter wall-clock seconds                                              |
-| `tokens`       | tokens reported by the harness, else `null`                            |
+| `tokens`       | fresh tokens reported by the harness (uncached input + output), else `null` |
 | `turns`        | turns reported by the harness, else `null`                             |
 | `cmd`          | the command line executed (for auditability)                            |
 | `checker_exit` | checker's integer exit code, or `"timeout"`                            |
@@ -342,6 +342,13 @@ success (`x/n`), overall success with a Wilson 95% interval, **mean score**
 (averaged over all trials, the discriminating number for partial-credit tasks),
 mean wall-clock time, tokens-per-solve, and mean turns. `--efficiency` prints a
 per-harness efficiency summary; `--results-path` points it at an alternate log.
+
+Tokens-per-solve is basis-aware: it uses self-reported `tokens` when present,
+otherwise the counting-proxy fresh total (`tokens_proxy_input_uncached +
+tokens_proxy_output`) when `token_basis_proxy` is `proxy_measured`. Cache-read
+is not mixed into that number. Proxy-derived figures are marked `*`; mixed-basis
+tables print a warning. HTML publish/report cards use the same rule and badge
+arms as `unmetered` / `self-reported` / `proxy-measured`.
 
 ### Transcripts are LOCAL-ONLY
 
@@ -393,8 +400,8 @@ at 0/n and n/n, which the naive formula does not.
 - **Negative control.** The `null` adapter should score 0% everywhere; a nonzero
   `null` success would indicate a broken (too-lenient) checker.
 - **Isolation modes.** `--exec local` (default) runs on the host; `--exec docker`
-  runs each cell in a fresh disposable container built from `bench/docker/`
-  (`docker build -t openbench-harness:latest bench/docker`). The **same adapter
+  runs each cell in a fresh disposable container built from `obench/docker/`
+  (`docker build -t openbench-harness:latest obench/docker`). The **same adapter
   module runs unchanged** in both modes — the container only adds isolation, with
   auth bind-mounted read-only at runtime (never baked into the image). If the
   Docker daemon or image is unavailable, the runner falls back to local unless

@@ -41,7 +41,7 @@ Readers open `index.html` and, if they have the same tasks checked out, run
 
 | Path | Role |
 |------|------|
-| `index.html` | Self-contained HTML comparison card (candidate row(s) highlighted; Wilson CIs; mean score / wall; tokens/solve; `token_basis=unmetered` badges when declared) |
+| `index.html` | Self-contained HTML comparison card (candidate row(s) highlighted; Wilson CIs; mean score / wall; tokens/solve; token-basis badges: `unmetered` / `self-reported` / `proxy-measured`) |
 | `results.jsonl` | Filtered rows for the claim — transcript fields stripped |
 | `provenance.json` | `obench` version, per-arm identity digests (`candidate_provenance`), per-task content digests, models, trial counts, SHA-256 of `results.jsonl` |
 | `README.md` | How to re-verify and what verify does / does not prove |

@@ -83,6 +83,14 @@ metric is unavailable if any cell in its efficiency basis lacks that
 measurement. When canonical token fields are unavailable, comparison uses the
 corresponding measured counting-proxy fields.
 
+**Token bases.** Comparable totals (tok/slv, Total tokens/solve) use a *fresh*
+definition that matches native adapters (codex/pi): self-reported `tokens` when
+present, else proxy-measured `tokens_proxy_input_uncached + tokens_proxy_output`
+when `token_basis_proxy == "proxy_measured"`. Cache-read is reported separately
+and is never folded into that total. HTML cards badge each arm as `unmetered`,
+`self-reported`, or `proxy-measured`; `obench report` marks proxy-derived
+tok/slv with `*` and warns when a table mixes bases.
+
 Use `--tasks-dir PATH` (repeatable or comma-separated) when result task roots
 differ from the repository defaults. Tasks containing `DROPPED.md` are excluded
-using the same canonical filtering as `bench/stats.py`.
+using the same canonical filtering as `obench/stats.py`.
