@@ -7,5 +7,14 @@
       "gpt-5.5-medium"
     ],
     "path": "releases/2026-07-02-m3/index.html"
+  },
+  {
+    "id": "2026-07-20-gpt56",
+    "title": "OpenBench: gpt-5.6 across 6 harnesses",
+    "date": "2026-07-20",
+    "models": [
+      "gpt-5.6-sol"
+    ],
+    "path": "releases/2026-07-20-gpt56/index.html"
   }
 ]
