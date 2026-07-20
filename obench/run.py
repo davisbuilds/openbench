@@ -38,6 +38,7 @@ from .bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
                         image_pin_mismatches, parse_image_pin_labels,
                         pinned_versions, reported_version, resolve_pin_key)
 from .failure_class import classify_failure, classify_failure_reason
+from .config import load_config
 from .paths import (PACKAGE_DIR, SOURCE_ROOT, TasksDirError,
                     default_adapters_dir, default_results_path,
                     default_tasks_dir, ensure_package_path_on_sys_path,
@@ -55,6 +56,7 @@ DEFAULT_MAX_CONSECUTIVE_INFRA = 3
 NEAR_ZERO_TOKEN_LIMIT = 100
 INFRA_FAILURE_CLASSES = frozenset({"infra", "rate_limited"})
 PREFLIGHT_TASK = "make-it-run"
+PREFLIGHT_REQUIRED = ("instruction.md", "workspace", "checker.sh")
 PROXY_HARNESSES = {"codex", "pi", "claude", "opencode", "cursor", "devin", "grokbuild"}
 PROXY_CODEX_SUBSCRIPTION_MODELS = {
     "gpt-5.5-medium", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
@@ -1121,6 +1123,40 @@ def preflight_refusal_message(row):
     )
 
 
+def _task_is_preflight_candidate(task_dir):
+    return all(
+        os.path.exists(os.path.join(task_dir, name)) for name in PREFLIGHT_REQUIRED
+    )
+
+
+def select_preflight_task(tasks_dir):
+    """Pick a smoke task from ``tasks_dir``.
+
+    Prefer ``make-it-run`` when present (OpenBench checkout behavior). Otherwise
+    use the first runnable task (sorted by display name). Raise ``TasksDirError``
+    when nothing suitable exists.
+    """
+    from .validate_tasks import discover_tasks
+
+    if not os.path.isdir(tasks_dir):
+        raise TasksDirError(
+            f"preflight smoke: tasks directory not found: {tasks_dir}"
+        )
+    names = []
+    for _tier, name, task_dir in discover_tasks([("tasks", tasks_dir)]):
+        if _task_is_preflight_candidate(task_dir):
+            names.append(name)
+    if PREFLIGHT_TASK in names:
+        return PREFLIGHT_TASK
+    if names:
+        return names[0]
+    raise TasksDirError(
+        "preflight smoke: no runnable task found under "
+        f"{tasks_dir}. Add a task with instruction.md, workspace/, and "
+        f"checker.sh, or place {PREFLIGHT_TASK!r} there."
+    )
+
+
 def default_transcripts_dir(results_path):
     """Base dir for transcripts: a ``transcripts/`` sibling of the results log.
 
@@ -1616,11 +1652,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Agent-harness comparison runner.")
     parser.add_argument("--task", required=True,
                         help="comma-separated task name(s)")
-    parser.add_argument("--harness", default="",
+    parser.add_argument("--harness", default=None,
                         help="comma-separated stock harness or candidate names")
-    parser.add_argument("--model", default=DEFAULT_MODEL,
+    parser.add_argument("--model", default=None,
                         help=f"canonical model name (default: {DEFAULT_MODEL})")
-    parser.add_argument("--trials", type=int, default=1,
+    parser.add_argument("--trials", type=int, default=None,
                         help="trials per (task, harness) cell (default: 1)")
     parser.add_argument("--trial", type=int, default=None,
                         help="run only this trial number (for matrix wrappers; "
@@ -1666,7 +1702,8 @@ def main(argv=None):
                         help="abort after N consecutive near-zero-token infra/rate-limit "
                              "cells (default: 3; 0 disables)")
     parser.add_argument("--preflight-smoke", action="store_true",
-                        help="run one make-it-run smoke cell into a sidecar before main cells")
+                        help="run one smoke cell (make-it-run if present, else "
+                             "first runnable task) into a sidecar before main cells")
     parser.add_argument("--allow-preflight-failure", action="store_true",
                         help="start main cells even if the requested preflight smoke fails")
     parser.add_argument("--proxy", action="store_true",
@@ -1675,12 +1712,22 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.max_consecutive_infra < 0:
         parser.error("--max-consecutive-infra must be >= 0")
+
+    cfg = load_config()
     if args.results_path is None:
-        args.results_path = default_results_path()
+        args.results_path = cfg.results_path or default_results_path()
     if args.adapters_dir is None:
         args.adapters_dir = default_adapters_dir()
+    if args.model is None:
+        args.model = cfg.model or DEFAULT_MODEL
+    if args.trials is None:
+        args.trials = cfg.trials if cfg.trials is not None else 1
+    if args.harness is None:
+        args.harness = ",".join(cfg.harnesses) if cfg.harnesses else ""
     try:
-        args.tasks_dir = resolve_tasks_dir(args.tasks_dir)
+        # Explicit --tasks-dir wins; else config tasks_dir; else discovery.
+        tasks_override = args.tasks_dir or cfg.tasks_dir
+        args.tasks_dir = resolve_tasks_dir(tasks_override)
     except TasksDirError as exc:
         parser.error(str(exc))
 
@@ -1811,11 +1858,16 @@ def main(argv=None):
     infra_streak = 0
     try:
         if args.preflight_smoke:
+            try:
+                smoke_task = select_preflight_task(args.tasks_dir)
+            except TasksDirError as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
             smoke_harness = harnesses[0]
             smoke_candidate = candidates.get(smoke_harness)
             smoke_row = run_cell(
-                smoke_harness, PREFLIGHT_TASK, args.model, 0, args.timeout,
-                (default_tasks_dir() or args.tasks_dir), args.adapters_dir,
+                smoke_harness, smoke_task, args.model, 0, args.timeout,
+                args.tasks_dir, args.adapters_dir,
                 args.checker_timeout,
                 exec_mode=args.exec_mode, docker_image=args.docker_image,
                 docker_fallback=args.docker_fallback,

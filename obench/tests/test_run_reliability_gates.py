@@ -117,6 +117,14 @@ class RunnerReliabilityGateTests(unittest.TestCase):
         smoke = result_row("wrong_answer", 25)
         main = result_row("wrong_answer", 500)
         custom_tasks_dir = os.path.join(self.tmp.name, "custom-tasks")
+        # Runnable smoke target in the resolved tasks dir (no make-it-run).
+        smoke_task = os.path.join(custom_tasks_dir, "alpha-smoke")
+        os.makedirs(os.path.join(smoke_task, "workspace"))
+        open(os.path.join(smoke_task, "instruction.md"), "w", encoding="utf-8").close()
+        open(os.path.join(smoke_task, "checker.sh"), "w", encoding="utf-8").close()
+        # Main task path only needs to exist for argparse; run_cell is mocked.
+        os.makedirs(os.path.join(custom_tasks_dir, "main-task"), exist_ok=True)
+
         code, run_cell, emitted, stdout, stderr = self.invoke(
             [smoke, main], "--preflight-smoke", "--tasks-dir", custom_tasks_dir,
             tasks="main-task")
@@ -124,8 +132,8 @@ class RunnerReliabilityGateTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(run_cell.call_count, 2)
         smoke_call, main_call = run_cell.call_args_list
-        self.assertEqual(smoke_call.args[1:4], ("make-it-run", run.DEFAULT_MODEL, 0))
-        self.assertEqual(smoke_call.args[5], run.DEFAULT_TASKS_DIR)
+        self.assertEqual(smoke_call.args[1:4], ("alpha-smoke", run.DEFAULT_MODEL, 0))
+        self.assertEqual(smoke_call.args[5], custom_tasks_dir)
         self.assertEqual(main_call.args[1:4], ("main-task", run.DEFAULT_MODEL, 1))
         self.assertEqual(main_call.args[5], custom_tasks_dir)
         self.assertEqual(emitted[0][0], os.path.join(self.tmp.name, "results.preflight.jsonl"))
@@ -133,6 +141,31 @@ class RunnerReliabilityGateTests(unittest.TestCase):
         self.assertIn("PREFLIGHT", stdout)
         self.assertEqual(stderr, "")
 
+    def test_preflight_prefers_make_it_run_when_present(self):
+        smoke = result_row("wrong_answer", 25)
+        main = result_row("wrong_answer", 500)
+        custom_tasks_dir = os.path.join(self.tmp.name, "custom-tasks")
+        for name in ("zzz-other", "make-it-run"):
+            task = os.path.join(custom_tasks_dir, name)
+            os.makedirs(os.path.join(task, "workspace"))
+            open(os.path.join(task, "instruction.md"), "w", encoding="utf-8").close()
+            open(os.path.join(task, "checker.sh"), "w", encoding="utf-8").close()
+
+        code, run_cell, _emitted, _stdout, _stderr = self.invoke(
+            [smoke, main], "--preflight-smoke", "--tasks-dir", custom_tasks_dir,
+            tasks="zzz-other")
+        self.assertEqual(code, 0)
+        self.assertEqual(run_cell.call_args_list[0].args[1], "make-it-run")
+
+    def test_preflight_fails_clearly_without_runnable_task(self):
+        custom_tasks_dir = os.path.join(self.tmp.name, "empty-tasks")
+        os.makedirs(custom_tasks_dir)
+        code, run_cell, _emitted, _stdout, stderr = self.invoke(
+            [], "--preflight-smoke", "--tasks-dir", custom_tasks_dir,
+            tasks="main-task")
+        self.assertEqual(code, 2)
+        self.assertEqual(run_cell.call_count, 0)
+        self.assertIn("preflight smoke: no runnable task", stderr)
     def test_preflight_near_zero_infra_refuses_main_run(self):
         smoke = result_row("infra", None, "authentication expired")
         code, run_cell, emitted, _stdout, stderr = self.invoke(
