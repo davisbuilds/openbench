@@ -520,6 +520,7 @@ def _publish_metrics_section(models, highlight_arms, meta):
                 wilson_s = "—"
             else:
                 wilson_s = f"{wilson[0] * 100:.1f}–{wilson[1] * 100:.1f}%"
+            basis = arm.get("token_basis") or "—"
             values = [
                 f"{arm['arm']} × {model['model']}",
                 f"{arm['solved']}/{arm['n']}",
@@ -529,7 +530,7 @@ def _publish_metrics_section(models, highlight_arms, meta):
                 (report_page._num(arm.get("mean_wall"), 1) + "s"
                  if arm.get("mean_wall") is not None else "—"),
                 report_page._num(arm.get("total_tokens")),
-                arm.get("token_basis") or "—",
+                basis,
             ]
             css = ' class="highlight"' if arm["arm"] in highlight else ""
             cells = "".join(f"<td>{html.escape(str(v))}</td>" for v in values)
@@ -544,12 +545,18 @@ def _publish_metrics_section(models, highlight_arms, meta):
     ]
     if meta.get("run_dates"):
         meta_bits.append("dates: " + html.escape(", ".join(meta["run_dates"])))
+    basis_note = (
+        '<p class="table-note token-note">Tokens/solve uses fresh totals: '
+        'self-reported <code>tokens</code> when present, else proxy-measured '
+        '(uncached input + output). Badge: unmetered / self-reported / '
+        'proxy-measured. Cache-read is not folded into Tokens/solve.</p>'
+    )
     return (
         '<section class="publish-card"><h2>Comparison card</h2>'
         '<p class="tag">' + " · ".join(meta_bits) + "</p>"
         '<div class="scroll"><table class="results"><thead><tr>'
         + head + "</tr></thead><tbody>" + "".join(rows_html)
-        + "</tbody></table></div></section>"
+        + "</tbody></table></div>" + basis_note + "</section>"
     )
 
 

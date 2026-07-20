@@ -22,11 +22,12 @@ PALETTE = (
 )
 CLI_ARMS = {"cursor", "opencode"}
 MATERIAL_TIMEOUT_RATE = 0.05
-TOKEN_NOTE = ("Split token columns (uncached-in / output / cache-read) are each harness's "
-              "self-reported classification and are NOT cross-comparable — e.g. cursor reports "
-              "almost all context as cache-read, so its uncached-in reads near-zero. Compare "
-              "harnesses on Total tokens/solve (proxy-metered arms) and treat cli-basis arms' "
-              "totals as self-reported.")
+TOKEN_NOTE = ("Total tokens/solve is the fresh total: self-reported `tokens` when present, "
+              "else proxy-measured (tokens_proxy_input_uncached + tokens_proxy_output) when "
+              "token_basis_proxy=proxy_measured. Cache-read is shown separately and is NOT "
+              "folded into the total — matching native adapters (codex/pi). Split columns "
+              "(uncached-in / output / cache-read) use each harness's own classification and "
+              "are NOT cross-comparable. Badge bases: unmetered / self-reported / proxy-measured.")
 DEFAULT_METHODOLOGY = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "docs",
@@ -45,11 +46,31 @@ def _num(value, digits=0):
 
 
 def _token_basis(rows):
-    values = {
-        str(row.get("token_basis") or row.get("token_basis_proxy") or "unknown")
-        for row in rows
-    }
-    return ", ".join(sorted(values))
+    """Normalize arm badge to unmetered / self-reported / proxy-measured."""
+    values = set()
+    for row in rows:
+        basis = stats.display_token_basis(row)
+        values.add(basis if basis is not None else "unknown")
+    if not values:
+        return "unknown"
+    ranked = [stats.TOKEN_BASIS_UNMETERED, stats.TOKEN_BASIS_PROXY,
+              stats.TOKEN_BASIS_SELF, "unknown"]
+    ordered = [label for label in ranked if label in values]
+    ordered.extend(sorted(values - set(ordered)))
+    return ", ".join(ordered)
+
+
+def _effective_tokens_per_solve(rows, solved):
+    """Fresh tokens/solve from effective_tokens; None if any cell lacks data."""
+    if not solved:
+        return None
+    values = []
+    for row in rows:
+        value, _basis = stats.effective_tokens(row)
+        if value is None:
+            return None
+        values.append(value)
+    return sum(values) / solved
 
 
 def _cost_per_solve(rows, solved, pricing):
@@ -143,8 +164,10 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
             solved_rows = [r for r in rows if r["success"]]
             mean_wall, med_wall = compare._mean_median(solved_rows, "wall_time_s")
             tokens = {field: compare._sum_per_solve(rows, field, solved) for field in TOKEN_FIELDS}
-            total_tokens = sum(v for v in tokens.values() if v is not None) if all(
-                v is not None for v in tokens.values()) else None
+            # Comparable total is the fresh effective total (self-reported
+            # tokens, else proxy uncached+output) — not the sum of splits,
+            # which would silently inflate by cache-read.
+            total_tokens = _effective_tokens_per_solve(rows, solved)
             arms.append({
                 "arm": harness,
                 "solved": solved,
