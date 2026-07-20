@@ -23,6 +23,7 @@ import math
 import os
 
 from .failure_class import FAILURE_CLASSES, class_for_report, is_excluded_from_solve_rate
+from .config import load_config
 from .paths import default_results_path
 
 DEFAULT_RESULTS_PATH = default_results_path()
@@ -306,11 +307,15 @@ def build_taxonomy_report(results_path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Benchmark results report.")
-    parser.add_argument("--results-path", default=DEFAULT_RESULTS_PATH,
-                        help="override the results.jsonl path")
+    parser.add_argument("--results-path", default=None,
+                        help="override the results.jsonl path "
+                             "(default: from openbench.toml or <repo|cwd>/results/results.jsonl)")
     parser.add_argument("--efficiency", action="store_true",
                         help="print only the per-harness efficiency summary")
     args = parser.parse_args(argv)
+    if args.results_path is None:
+        cfg = load_config()
+        args.results_path = cfg.results_path or default_results_path()
     if args.efficiency:
         print(build_efficiency_report(args.results_path))
     else:

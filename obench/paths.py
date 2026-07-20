@@ -2,7 +2,8 @@
 
 When the current working directory contains a ``tasks/`` directory, defaults
 match the historical OpenBench checkout layout. Otherwise tasks are discovered
-under ``./tasks`` or ``./.openbench/tasks``, results default under CWD, and
+under ``./tasks`` or ``./.openbench/tasks``, results default under CWD (or
+``.openbench/results/`` when an ``openbench.toml`` config is present), and
 adapters come from the installed package.
 """
 
@@ -34,13 +35,25 @@ def default_adapters_dir() -> str:
 
 
 def default_results_path(start: str | None = None) -> str:
-    """Default results JSONL path under the repo root or CWD."""
+    """Default results JSONL path under the repo root, config, or CWD."""
+    from .config import load_config
+
+    cfg = load_config(start)
+    if cfg.results_path:
+        return cfg.results_path
     root = find_repo_root(start) or os.path.abspath(start or os.getcwd())
+    if cfg.project_root and not find_repo_root(start):
+        return os.path.join(cfg.project_root, ".openbench", "results", "results.jsonl")
     return os.path.join(root, "results", "results.jsonl")
 
 
 def default_tasks_dir(start: str | None = None) -> str | None:
     """Best-effort tasks directory, or ``None`` if nothing exists."""
+    from .config import load_config
+
+    cfg = load_config(start)
+    if cfg.tasks_dir and os.path.isdir(cfg.tasks_dir):
+        return cfg.tasks_dir
     root = find_repo_root(start)
     if root is not None:
         return os.path.join(root, "tasks")
@@ -51,6 +64,8 @@ def default_tasks_dir(start: str | None = None) -> str | None:
     ):
         if os.path.isdir(candidate):
             return candidate
+    if cfg.tasks_dir:
+        return cfg.tasks_dir
     return None
 
 
@@ -59,7 +74,9 @@ def resolve_tasks_dir(explicit: str | None = None, start: str | None = None) -> 
 
     An explicit ``--tasks-dir`` is returned as an absolute path without requiring
     that it already exist (the runner reports missing tasks later). Auto-
-    discovery requires an existing directory.
+    discovery requires an existing directory (or a config ``tasks_dir`` that
+    may not exist yet — returned so callers can report a clearer missing-task
+    error later).
     """
     if explicit:
         return os.path.abspath(explicit)
@@ -71,7 +88,7 @@ def resolve_tasks_dir(explicit: str | None = None, start: str | None = None) -> 
         "No tasks directory found.\n"
         f"Looked for {os.path.join(cwd, 'tasks')} and "
         f"{os.path.join(cwd, '.openbench', 'tasks')}.\n"
-        "Run from an OpenBench checkout, create ./tasks or ./.openbench/tasks, "
+        "Run `obench init`, create ./tasks or ./.openbench/tasks, "
         "or pass --tasks-dir."
     )
 

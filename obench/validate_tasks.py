@@ -37,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 
+from .config import load_config
 from .paths import (
     TasksDirError,
     default_imported_tasks_dir,
@@ -178,14 +179,20 @@ def main(argv=None):
     )
     parser.add_argument(
         "--tasks-dir", default=None,
-        help="task root to validate (default: ./tasks or ./.openbench/tasks; "
-             "in a checkout also validates tasks-imported/)",
+        help="task root to validate (default: openbench.toml tasks_dir, else "
+             "./tasks or ./.openbench/tasks; in a checkout also validates "
+             "tasks-imported/)",
     )
     parser.add_argument(
         "--no-imported", action="store_true",
         help="skip tasks-imported/ even when running inside a checkout",
     )
     args = parser.parse_args(argv)
+
+    if args.tasks_dir is None:
+        cfg = load_config()
+        if cfg.tasks_dir:
+            args.tasks_dir = cfg.tasks_dir
 
     try:
         task_roots = build_task_roots(
