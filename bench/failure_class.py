@@ -49,7 +49,12 @@ _INFRA_RE = re.compile(
     r"No such image:\s*[^\s]+|"
     r"image ['\"]?[^'\"\n]+['\"]? not found|"
     r"Cannot connect to the Docker daemon|"
-    r"proxy_upstream_failed"
+    r"proxy_upstream_failed|"
+    # Adapter-side crash before any model call: an uncaught Python traceback
+    # (e.g. FileNotFoundError for a missing harness binary) is infrastructure,
+    # never a task wrong answer.
+    r"Traceback \(most recent call last\)|"
+    r"FileNotFoundError"
     r")",
     re.IGNORECASE,
 )

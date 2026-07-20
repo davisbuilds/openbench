@@ -325,5 +325,11 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
         self.assertLess(row["wall_time_s"], 10)
 
 
+    def test_adapter_traceback_missing_binary_is_infra(self):
+        row = {"success": False, "completed": False, "tokens": None,
+               "error": "Traceback (most recent call last):\n  ...\nFileNotFoundError: [Errno 2] No such file or directory: 'aider'",
+               "wall_time_s": 0.002}
+        self.assertEqual(failure_class.classify_failure(row), "infra")
+
 if __name__ == "__main__":
     unittest.main()
