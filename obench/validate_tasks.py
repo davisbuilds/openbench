@@ -4,11 +4,12 @@
 For every task directory under the configured roots this script confirms that
 the checker behaves correctly at both ends of the spectrum:
 
-  1. Run checker.sh against a fresh copy of workspace/ (the unsolved starting
-     state). The checker MUST fail (nonzero exit) -- otherwise the task would
-     be marked solved before the agent does anything.
+  1. Run checker.sh against a freshly materialized workspace (snapshot
+     ``workspace/`` or git ``workspace.toml``). The checker MUST fail
+     (nonzero exit) -- otherwise the task would be marked solved before the
+     agent does anything.
 
-  2. Run checker.sh against a fresh copy of workspace/ with the golden
+  2. Run checker.sh against a freshly materialized workspace with the golden
      solution/ files overlaid on top. The checker MUST pass (exit 0) --
      otherwise a correct solution would be rejected.
 
@@ -44,16 +45,13 @@ from .paths import (
     default_tasks_dir,
     resolve_tasks_dir,
 )
-
-
-def copy_tree(src, dst):
-    """Copy the contents of src into dst (dst may already exist)."""
-    for root, _dirs, files in os.walk(src):
-        rel = os.path.relpath(root, src)
-        target_root = dst if rel == "." else os.path.join(dst, rel)
-        os.makedirs(target_root, exist_ok=True)
-        for name in files:
-            shutil.copy2(os.path.join(root, name), os.path.join(target_root, name))
+from .workspace import (
+    WorkspaceError,
+    has_git_workspace,
+    has_snapshot_workspace,
+    materialize_workspace,
+    overlay_solution,
+)
 
 
 def parse_score(output):
@@ -78,20 +76,21 @@ def effective_score(exit_code, parsed_score):
     return 0.0
 
 
-def run_checker(task_dir, overlay_solution):
+def run_checker(task_dir, overlay_solution_flag):
     """Set up a workspace copy, optionally overlay solution/, run checker.sh.
 
     Returns (exit_code, combined_output, parsed_score).
     """
-    workspace = os.path.join(task_dir, "workspace")
-    solution = os.path.join(task_dir, "solution")
     checker = os.path.join(task_dir, "checker.sh")
 
     tmp = tempfile.mkdtemp(prefix="taskcheck-")
     try:
-        copy_tree(workspace, tmp)
-        if overlay_solution:
-            copy_tree(solution, tmp)
+        try:
+            materialize_workspace(task_dir, tmp)
+        except WorkspaceError as exc:
+            return 99, f"workspace materialization failed: {exc}\n", None
+        if overlay_solution_flag:
+            overlay_solution(task_dir, tmp)
 
         env = dict(os.environ)
         env["TASK_DIR"] = task_dir
@@ -214,21 +213,31 @@ def main(argv=None):
         problems = []
 
         # Required structure.
-        for required in ("instruction.md", "workspace", "solution", "checker.sh"):
+        for required in ("instruction.md", "solution", "checker.sh"):
             if not os.path.exists(os.path.join(task_dir, required)):
                 problems.append("missing {}".format(required))
+        snap = has_snapshot_workspace(task_dir)
+        git = has_git_workspace(task_dir)
+        if snap and git:
+            problems.append("both workspace/ and workspace.toml present")
+        elif not snap and not git:
+            problems.append("missing workspace/ or workspace.toml")
 
         ws_code = ws_out = sol_code = sol_out = None
         ws_score = sol_score = None
         if not problems:
-            ws_code, ws_out, ws_raw = run_checker(task_dir, overlay_solution=False)
-            sol_code, sol_out, sol_raw = run_checker(task_dir, overlay_solution=True)
+            ws_code, ws_out, ws_raw = run_checker(task_dir, overlay_solution_flag=False)
+            sol_code, sol_out, sol_raw = run_checker(task_dir, overlay_solution_flag=True)
             ws_score = effective_score(ws_code, ws_raw)
             sol_score = effective_score(sol_code, sol_raw)
 
-            if ws_code == 0:
+            if ws_code == 99 and ws_out and "workspace materialization failed" in ws_out:
+                problems.append(ws_out.strip().splitlines()[0])
+            elif ws_code == 0:
                 problems.append("workspace checker passed (expected failure)")
-            if sol_code != 0:
+            if sol_code == 99 and sol_out and "workspace materialization failed" in sol_out:
+                problems.append(sol_out.strip().splitlines()[0])
+            elif sol_code != 0:
                 problems.append("solution checker failed (expected pass)")
             # A checker that exits 0 but reports partial credit is inconsistent.
             if sol_code == 0 and sol_raw is not None and abs(sol_raw - 1.0) > 1e-9:

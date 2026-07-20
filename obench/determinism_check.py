@@ -23,6 +23,8 @@ import tempfile
 import time
 from contextlib import contextmanager
 
+from .workspace import materialize_workspace, overlay_solution
+
 EXIT_FINDINGS = 3
 DEFAULT_RUNS = 20
 DEFAULT_STRESS = 6
@@ -244,12 +246,12 @@ def staged_task_copy(task_dir):
 
 
 @contextmanager
-def staged_workspace(task_dir, overlay_solution):
+def staged_workspace(task_dir, overlay_solution_flag):
     tmp = tempfile.mkdtemp(prefix="detcheck-work-")
     try:
-        copy_tree(os.path.join(task_dir, "workspace"), tmp)
-        if overlay_solution:
-            copy_tree(os.path.join(task_dir, "solution"), tmp)
+        materialize_workspace(task_dir, tmp)
+        if overlay_solution_flag:
+            overlay_solution(task_dir, tmp)
         yield tmp
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

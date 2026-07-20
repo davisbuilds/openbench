@@ -17,9 +17,10 @@ import re
 import sys
 
 from . import determinism_check
+from .workspace import has_git_workspace, has_snapshot_workspace
 
 EXIT_FINDINGS = 3
-REQUIRED_ENTRIES = ("instruction.md", "workspace", "checker.sh", "solution", "PROVENANCE.md")
+REQUIRED_ENTRIES = ("instruction.md", "checker.sh", "solution", "PROVENANCE.md")
 HARD = "hard"
 WARN = "warn"
 
@@ -80,6 +81,20 @@ def structure_findings(task_dir):
     for name in REQUIRED_ENTRIES:
         if not os.path.exists(os.path.join(task_dir, name)):
             findings.append(Finding("structure.missing", HARD, f"missing required {name}", name))
+    snap = has_snapshot_workspace(task_dir)
+    git = has_git_workspace(task_dir)
+    if snap and git:
+        findings.append(Finding(
+            "structure.workspace_conflict", HARD,
+            "both workspace/ and workspace.toml present; provide exactly one",
+            "workspace.toml",
+        ))
+    elif not snap and not git:
+        findings.append(Finding(
+            "structure.missing", HARD,
+            "missing required workspace/ or workspace.toml",
+            "workspace",
+        ))
     return findings
 
 
@@ -110,7 +125,13 @@ def checker_data_nonempty(task_dir):
 
 def validate_equivalence(task_dir):
     """Bounded validate_tasks-style polarity check for one task."""
-    missing = [name for name in ("workspace", "solution", "checker.sh") if not os.path.exists(os.path.join(task_dir, name))]
+    missing = [name for name in ("solution", "checker.sh") if not os.path.exists(os.path.join(task_dir, name))]
+    snap = has_snapshot_workspace(task_dir)
+    git = has_git_workspace(task_dir)
+    if snap and git:
+        missing.append("workspace xor workspace.toml")
+    elif not snap and not git:
+        missing.append("workspace/ or workspace.toml")
     if missing:
         return [Finding("validate_tasks.skipped", HARD, "cannot run checker polarity; missing " + ", ".join(missing))], None
     try:

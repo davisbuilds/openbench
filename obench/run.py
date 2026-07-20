@@ -2,7 +2,8 @@
 """Benchmark runner core for the agent-harness comparison.
 
 For each (task, harness, trial) cell this runner:
-  1. copies ``tasks/<task>/workspace/`` to a disposable temp dir,
+  1. materializes the task workspace into a disposable temp dir (snapshot
+     ``workspace/`` copy, or git ``workspace.toml`` archive export),
   2. dynamically imports the harness adapter and calls its ``run()`` per
      ADAPTER_SPEC.md (or uses the built-in ``null`` negative-control adapter),
   3. runs ``tasks/<task>/checker.sh`` with cwd=<temp dir> and env
@@ -44,6 +45,12 @@ from .paths import (PACKAGE_DIR, SOURCE_ROOT, TasksDirError,
                     default_tasks_dir, ensure_package_path_on_sys_path,
                     resolve_tasks_dir)
 from .scrub import build_context as build_scrub_context, scrub_text
+from .workspace import (
+    WorkspaceError,
+    has_git_workspace,
+    has_snapshot_workspace,
+    materialize_workspace,
+)
 
 HERE = PACKAGE_DIR
 REPO = SOURCE_ROOT  # checkout root for editable/source installs
@@ -56,7 +63,7 @@ DEFAULT_MAX_CONSECUTIVE_INFRA = 3
 NEAR_ZERO_TOKEN_LIMIT = 100
 INFRA_FAILURE_CLASSES = frozenset({"infra", "rate_limited"})
 PREFLIGHT_TASK = "make-it-run"
-PREFLIGHT_REQUIRED = ("instruction.md", "workspace", "checker.sh")
+PREFLIGHT_REQUIRED_FILES = ("instruction.md", "checker.sh")
 PROXY_HARNESSES = {"codex", "pi", "claude", "opencode", "cursor", "devin", "grokbuild"}
 PROXY_CODEX_SUBSCRIPTION_MODELS = {
     "gpt-5.5-medium", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
@@ -86,6 +93,7 @@ ROW_FIELDS = (
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
     "harness_version_source", "failure_class", "failure_reason", "workspace_changed", "checker_stdout", "checker_stderr", "checker_workspace_files",
     "image_digest", "candidate_provenance", "version_drift", "timeout_s",
+    "workspace_source",
 )
 
 
@@ -1124,9 +1132,11 @@ def preflight_refusal_message(row):
 
 
 def _task_is_preflight_candidate(task_dir):
-    return all(
-        os.path.exists(os.path.join(task_dir, name)) for name in PREFLIGHT_REQUIRED
-    )
+    if not all(
+        os.path.exists(os.path.join(task_dir, name)) for name in PREFLIGHT_REQUIRED_FILES
+    ):
+        return False
+    return has_snapshot_workspace(task_dir) or has_git_workspace(task_dir)
 
 
 def select_preflight_task(tasks_dir):
@@ -1152,8 +1162,8 @@ def select_preflight_task(tasks_dir):
         return names[0]
     raise TasksDirError(
         "preflight smoke: no runnable task found under "
-        f"{tasks_dir}. Add a task with instruction.md, workspace/, and "
-        f"checker.sh, or place {PREFLIGHT_TASK!r} there."
+        f"{tasks_dir}. Add a task with instruction.md, workspace/ (or "
+        f"workspace.toml), and checker.sh, or place {PREFLIGHT_TASK!r} there."
     )
 
 
@@ -1412,11 +1422,13 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              candidate=None, version_drift=False, workspace_observer=None):
     """Execute one (task, harness, trial) cell and return its results row.
 
-    Copies the task workspace to a temp dir, invokes the adapter (or the
+    Materializes the task workspace into a temp dir (snapshot ``workspace/``
+    copytree, or git ``workspace.toml`` archive), invokes the adapter (or the
     built-in null adapter), runs the checker, and cleans up. Adapter and
-    checker failures are recorded in the row rather than raised. A checker that
-    exceeds ``checker_timeout_s`` records ``checker_exit="timeout"``,
-    ``success=false``.
+    checker failures are recorded in the row rather than raised. Staging
+    failures (including setup scripts) are recorded as ``failure_class=infra``.
+    A checker that exceeds ``checker_timeout_s`` records
+    ``checker_exit="timeout"``, ``success=false``.
 
     Scoring: exit 0 => success=true, score=1.0 (a SCORE line can't lower a pass).
     Nonzero exit => success=false, score = the checker's SCORE line if any, else
@@ -1502,6 +1514,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "candidate_provenance": candidate.provenance if candidate is not None else None,
         "version_drift": bool(version_drift),
         "timeout_s": timeout_s,
+        "workspace_source": None,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
@@ -1517,10 +1530,19 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         os.makedirs(workdir_parent, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix=f"bench_{harness}_{task.replace('/', '_')}_", dir=workdir_parent)
     try:
-        # Copy the pristine workspace into the disposable temp dir. Never touch
-        # the source workspace under tasks/.
-        shutil.rmtree(workdir)
-        shutil.copytree(os.path.join(task_dir, "workspace"), workdir)
+        # Materialize a pristine workspace into the disposable temp dir. Never
+        # touch the source under tasks/ (snapshot copy or git archive export).
+        # Staging runs on the host for both --exec local and --exec docker; the
+        # container bind-mounts the already-staged workdir at /work.
+        try:
+            row["workspace_source"] = materialize_workspace(task_dir, workdir)
+        except WorkspaceError as exc:
+            row["error"] = f"workspace materialization failed: {exc}"
+            row["t_env_setup_s"] = round(time.monotonic() - env_setup_start, 3)
+            row["exec_mode"] = exec_mode
+            row["failure_class"] = "infra"
+            row["failure_reason"] = "workspace_materialization"
+            return _populate_proxy_row(row, active_proxy_ctx, cell_token)
         initial_workspace_files = capture_workspace_files(workdir)
 
         instruction = read_instruction(task_dir)
