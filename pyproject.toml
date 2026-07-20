@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "obench"
+version = "0.1.0"
+description = "OpenBench harness benchmarking framework — compare coding-agent CLIs on shared tasks"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "OpenBench contributors" }]
+keywords = ["benchmark", "coding-agents", "harness", "evaluation", "openbench"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
+# Stdlib-only runtime; no third-party dependencies.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/minghinmatthewlam/openbench"
+Documentation = "https://github.com/minghinmatthewlam/openbench#readme"
+Repository = "https://github.com/minghinmatthewlam/openbench"
+
+[project.scripts]
+obench = "obench.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["obench*"]
+
+[tool.setuptools.package-data]
+obench = [
+    "adapters/*.py",
+    "docker/*",
+    "examples/*",
+    "bridge/*",
+    "*.md",
+    "*.json",
+    "*.sh",
+    "*.sample.json",
+]
