@@ -25,8 +25,11 @@ Docker keeps auth staging read-only and mounts a private per-cell host directory
 
 A mode-`0600` per-master lock serializes cooperating runners. Cells are sequential within one runner; independent concurrent runners remain last-completed-writer-wins because provider files expose no mergeable token generation. Operators should avoid benchmarking the same rotating login concurrently.
 
+Trust boundary: subscription auth is necessarily readable and writable by these third-party CLIs, and some harnesses expose shell tools under the same OS identity. Persist-back therefore assumes benchmark tasks and installed CLI binaries are trusted not to tamper with token fields. Schema/account validation prevents accidental cross-account or malformed replacement, but cannot cryptographically distinguish a provider rotation from deliberate token-field tampering; doing that would require provider-specific refresh brokers outside the CLI process.
+
 ## Verification
 
+- Auth persist-back suite: `python3 -m unittest discover bench/tests` → **465 tests, OK**.
 - Full suite after follow-up corrections: `python3 -m unittest discover bench/tests` → **331 tests, OK** (18.313s).
 - Authenticated runner smokes, local `tasks/make-it-run`, artifacts outside repo at `/tmp/openbench-config-smoke.YU0FtW`:
   - codex / gpt-5.5-medium: completed, checker score 1.0. Re-run after restoring feature guards also passed at `/tmp/openbench-codex-correction.Qj2JSC/codex.jsonl`.
