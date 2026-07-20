@@ -1730,8 +1730,9 @@ def main(argv=None):
     parser.add_argument("--adapters-dir", default=None,
                         help="override the adapters directory "
                              "(default: packaged obench/adapters)")
-    parser.add_argument("--candidate", action="append", default=[], metavar="SPEC.toml",
-                        help="declarative config-variant or harness.toml candidate (repeatable)")
+    parser.add_argument("--candidate", action="append", default=[], metavar="SPEC",
+                        help="candidate TOML path or harness pack ref "
+                             "org/name[@version][:manifest] (repeatable)")
     parser.add_argument("--tasks-dir", default=None,
                         help="override the tasks directory "
                              "(default: ./tasks or ./.openbench/tasks)")

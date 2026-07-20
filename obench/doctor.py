@@ -228,7 +228,10 @@ _STOCK_HARNESSES = {
 # Adapters omitted from the default preflight matrix (opt-in via --harness).
 _OPT_IN_HARNESSES = frozenset({"claude", "grokbuild"})
 
-_CANDIDATE_HINT = "pass --candidate path/to/spec.toml for third-party harnesses"
+_CANDIDATE_HINT = (
+    "pass --candidate path/to/spec.toml or an installed harness pack ref "
+    "(org/name@version) for third-party harnesses"
+)
 
 
 def _import_adapter_module(adapters_dir, name):
@@ -733,8 +736,9 @@ def main(argv=None):
     parser.add_argument("--harness", default=None,
                         help="comma-separated harness names to check "
                              f"(default: all {ALL_HARNESSES})")
-    parser.add_argument("--candidate", action="append", default=[], metavar="SPEC.toml",
-                        help="declarative candidate TOML (repeatable); "
+    parser.add_argument("--candidate", action="append", default=[], metavar="SPEC",
+                        help="candidate TOML path or harness pack ref "
+                             "org/name[@version][:manifest] (repeatable); "
                              "preflight without editing stock harness lists")
     parser.add_argument("--model", default=DEFAULT_MODEL,
                         help=f"canonical model to resolve (default: {DEFAULT_MODEL})")

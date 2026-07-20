@@ -510,10 +510,26 @@ def load_candidate(path, adapters_dir):
     raise ValueError(f"unknown candidate kind {kind!r} in {path}")
 
 
-def load_candidates(paths, adapters_dir):
+def resolve_candidate_path(ref, packs_root=None):
+    """Resolve a filesystem path or installed harness-pack ref to a .toml path.
+
+    Pack refs look like ``org/name[@version][:manifest-stem]`` (see
+    ``obench.packs.resolve_candidate_ref``). Plain paths that exist as files
+    are returned unchanged.
+    """
+    from .packs import PackError, resolve_candidate_ref
+
+    try:
+        return resolve_candidate_ref(ref, packs_root=packs_root)
+    except PackError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def load_candidates(paths, adapters_dir, *, packs_root=None):
     result = {}
     for path in paths:
-        candidate = load_candidate(path, adapters_dir)
+        resolved = resolve_candidate_path(path, packs_root=packs_root)
+        candidate = load_candidate(resolved, adapters_dir)
         if candidate.name in result:
             raise ValueError(f"duplicate candidate name {candidate.name!r}")
         result[candidate.name] = candidate

@@ -202,14 +202,19 @@ def resolve_highlight_names(candidate_specs):
     """Map ``--candidate`` path-or-name args to highlight arm names."""
     names = []
     for spec in candidate_specs or []:
+        from .candidates import load_candidate, resolve_candidate_path
+        from .paths import default_adapters_dir
         if os.path.isfile(spec):
             try:
-                from .candidates import load_candidate
-                from .paths import default_adapters_dir
                 names.append(load_candidate(spec, default_adapters_dir()).name)
             except Exception as exc:  # noqa: BLE001 - surface as publish error
                 raise PublishError(f"could not load candidate {spec!r}: {exc}") from exc
-        else:
+            continue
+        try:
+            path = resolve_candidate_path(spec)
+            names.append(load_candidate(path, default_adapters_dir()).name)
+        except (OSError, ValueError, KeyError):
+            # Bare harness/candidate name for highlight matching.
             names.append(str(spec))
     return names
 
