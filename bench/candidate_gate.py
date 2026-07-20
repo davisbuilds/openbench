@@ -89,15 +89,29 @@ def _timeout_probe(timeout_s=5):
 def _candidate_timeout_probe(candidate, model, timeout_s=5):
     """Deterministically exercise the candidate-owned timeout implementation."""
     if candidate.kind == "config-variant":
-        return _timeout_probe(timeout_s)
-    command, globs = candidate.command, candidate.workspace_file_globs
-    candidate.command = [sys.executable, "-c", "import time; time.sleep(30)"]
-    candidate.workspace_file_globs = []
-    try:
+        executable = getattr(candidate.module, "_EXE", None)
+        if not isinstance(executable, str):
+            return {"failure_class": "infra",
+                    "error": "base adapter exposes no replaceable executable for timeout probe"}
         with tempfile.TemporaryDirectory(prefix="candidate_gate_timeout_") as workdir:
-            result = candidate.run("timeout probe", workdir, model, timeout_s)
-    finally:
-        candidate.command, candidate.workspace_file_globs = command, globs
+            stall = os.path.join(workdir, "stall")
+            with open(stall, "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\nsleep 30\n")
+            os.chmod(stall, 0o755)
+            candidate.module._EXE = stall
+            try:
+                result = candidate.run("timeout probe", workdir, model, timeout_s)
+            finally:
+                candidate.module._EXE = executable
+    else:
+        command, globs = candidate.command, candidate.workspace_file_globs
+        candidate.command = [sys.executable, "-c", "import time; time.sleep(30)"]
+        candidate.workspace_file_globs = []
+        try:
+            with tempfile.TemporaryDirectory(prefix="candidate_gate_timeout_") as workdir:
+                result = candidate.run("timeout probe", workdir, model, timeout_s)
+        finally:
+            candidate.command, candidate.workspace_file_globs = command, globs
     row = dict(result)
     row.update({"success": False, "wall_time_s": timeout_s,
                 "turns": row.get("turns") or 1,
