@@ -2,7 +2,7 @@
 """Umbrella CLI for the OpenBench harness benchmarking framework.
 
     obench run | report | doctor | validate | gate | compare | init |
-         publish | verify | export | import [args...]
+         publish | verify | community | export | import [args...]
 """
 
 from __future__ import annotations
@@ -32,6 +32,11 @@ def main(argv=None):
     sub.add_parser("init", help="scaffold .openbench/ for private evals", add_help=False)
     sub.add_parser("publish", help="build a shareable comparison bundle", add_help=False)
     sub.add_parser("verify", help="re-verify a publish bundle's digests", add_help=False)
+    sub.add_parser(
+        "community",
+        help="manage community publish-bundle submissions",
+        add_help=False,
+    )
     sub.add_parser("export", help="export tasks to external formats (harbor)", add_help=False)
     sub.add_parser("import", help="import tasks from external formats (harbor)", add_help=False)
 
@@ -51,12 +56,13 @@ def main(argv=None):
 
     known = {
         "run", "report", "doctor", "validate", "gate", "compare", "init",
-        "publish", "verify", "export", "import",
+        "publish", "verify", "community", "export", "import",
     }
     if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, report, doctor, "
-            "validate, gate, compare, init, publish, verify, export, import"
+            "validate, gate, compare, init, publish, verify, community, "
+            "export, import"
         )
 
     if command == "run":
@@ -86,6 +92,9 @@ def main(argv=None):
     if command == "verify":
         from .publish import _verify_main
         return _verify_main(rest)
+    if command == "community":
+        from .community import main as community_main
+        return community_main(rest)
     if command == "export":
         from .export_harbor import main as export_main
         return export_main(rest)
