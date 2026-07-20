@@ -92,9 +92,36 @@ obench verify openbench-publish/my-claim
 **Recommendation:** publish the **full matrix** (every planned harness × task ×
 trial cell), not a curated subset of green cells.
 
+## Submit your results
+
+Want the claim listed on the public OpenBench Pages site under **Community
+results**? After a local PASS verify:
+
+1. **Publish** a bundle (`obench publish …`) and confirm
+   `obench verify <bundle>` prints `VERDICT: PASS`.
+2. **Gate** the candidate and archive a PASS record (see the end-to-end
+   workflow above) so reviewers can see admission evidence.
+3. **Open a PR** that adds the bundle under
+   `data/community/<submitter>-<slug>/` with the four publish files
+   (`index.html`, `results.jsonl`, `provenance.json`, `README.md`) plus a
+   small `submission.toml` (submitter GitHub handle, date, claim summary,
+   optional link). Layout details:
+   [`data/community/README.md`](../data/community/README.md).
+4. **CI re-verifies** every bundle under `data/community/` via
+   `obench community verify` (GitHub Actions workflow `community.yml`).
+   Any FAIL verdict blocks the PR.
+5. After merge, maintainers sync accepted cards onto the site with
+   `obench community sync` (writes `docs/community.json`, copies cards to
+   `docs/community/<id>/`, regenerates `docs/index.html`).
+
+Listing proves digests still match — not that runs were not cherry-picked.
+Publish the full matrix whenever possible.
+
 ## Related
 
 - Bring-your-own harness manifests and the admission gate:
   [`docs/byo-harnesses.md`](byo-harnesses.md)
 - Static release-site HTML (separate from shareable claim bundles):
   [`docs/REPORT_PAGE.md`](REPORT_PAGE.md), [`docs/README.md`](README.md)
+- Community submission tree:
+  [`data/community/README.md`](../data/community/README.md)
