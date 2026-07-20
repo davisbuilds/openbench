@@ -34,6 +34,7 @@ def _row(harness, task, trial, success, *, candidate=None, model="model-x", **ex
         "tokens_input_uncached": 100,
         "tokens_output": 20,
         "tokens_cache_read": 50,
+        "tokens": 120,
         "token_basis": "vendor_split",
         "harness_version": "1.0",
         "timeout_s": 60,
@@ -51,6 +52,12 @@ def _row(harness, task, trial, success, *, candidate=None, model="model-x", **ex
         }
         row["run_id"] = f"{candidate}:{task}:{model}:trial{trial}"
         row["token_basis"] = extra.pop("token_basis", "unmetered")
+        # Manifest candidates do not self-report tokens unless the test sets them.
+        if "tokens" not in extra:
+            row["tokens"] = None
+            row["tokens_input_uncached"] = None
+            row["tokens_output"] = None
+            row["tokens_cache_read"] = None
     row.update(extra)
     return row
 

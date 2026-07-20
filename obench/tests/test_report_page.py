@@ -28,8 +28,15 @@ class ReportPageTest(unittest.TestCase):
                "failure_class": "solved" if success else "wrong_answer",
                "wall_time_s": 10, "tokens_input_uncached": 100,
                "tokens_output": 20, "tokens_cache_read": 50,
+               "tokens": 120,  # fresh = uncached + output (cache-read excluded)
                "token_basis": "vendor_split", "harness_version": "1", "timeout_s": 60}
-        row.update(extra); return row
+        row.update(extra)
+        if "tokens" not in extra:
+            inp = row.get("tokens_input_uncached")
+            out = row.get("tokens_output")
+            if isinstance(inp, (int, float)) and isinstance(out, (int, float)):
+                row["tokens"] = inp + out
+        return row
 
     def test_table_assembly_sorts_and_computes_timeout_columns(self):
         path = self.write([
@@ -43,7 +50,9 @@ class ReportPageTest(unittest.TestCase):
         fast = model["arms"][0]
         self.assertEqual((fast["solved"], fast["n"]), (1, 2))
         self.assertEqual(fast["tokens_input_uncached"], 200)
-        self.assertEqual(fast["total_tokens"], 340)
+        # Fresh total: (100+20)*2 rows / 1 solve = 240 (cache-read excluded).
+        self.assertEqual(fast["total_tokens"], 240)
+        self.assertEqual(fast["token_basis"], "self-reported")
         self.assertEqual(fast["finished_rate"], 1.0)
 
     def test_timeout_columns_require_an_arm_above_five_percent(self):
@@ -74,10 +83,11 @@ class ReportPageTest(unittest.TestCase):
                      tokens_output=10, tokens_cache_read=10),
         ])
         model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
-        self.assertEqual(model["arms"][0]["total_tokens"], 300)
+        # Fresh: (120+30)+(80+10) = 240 / 1 solve (cache-read excluded).
+        self.assertEqual(model["arms"][0]["total_tokens"], 240)
         page = report_page.render_page([model], "Method")
         self.assertIn("Total tokens/solve", page)
-        self.assertIn(">300</td>", page)
+        self.assertIn(">240</td>", page)
         self.assertLess(page.index("Total tokens/solve"), page.index("Uncached in/solve"))
         self.assertIn(html.escape(report_page.TOKEN_NOTE), page)
         self.assertIn("Solve rate</th>", page)
@@ -104,7 +114,8 @@ class ReportPageTest(unittest.TestCase):
         model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
         chart_data = {row["arm"]: row for row in report_page._chart_data(model)}
         self.assertTrue(chart_data["cursor"]["cli_basis"])
-        self.assertEqual(chart_data["pi"]["total_tokens"], 170)
+        # Fresh tokens/solve for two solved cells at 120 each → 120.
+        self.assertEqual(chart_data["pi"]["total_tokens"], 120)
         page = report_page.render_page([model], "Method")
         self.assertEqual(page.count('role="img"'), 3)
         for expected in ("Correctness by harness", "Total tokens / solve (log scale)",
@@ -295,18 +306,45 @@ class ReportPageTest(unittest.TestCase):
 
     def test_html_snapshot_smoke_contains_expected_arms_values_and_no_external_assets(self):
         rows = [
-            self.row("pi", 1, True, token_basis=None, token_basis_proxy="proxy_measured"),
+            self.row("pi", 1, True, tokens=None, token_basis=None,
+                     token_basis_proxy="proxy_measured",
+                     tokens_proxy_input_uncached=80, tokens_proxy_output=40,
+                     tokens_proxy_cache_read=9000),
             self.row("codex", 1, False),
         ]
         path = self.write(rows)
         models = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])
         page = report_page.render_page(models, "- Honest limitation", "Snapshot")
         for expected in ("pi × model-x", "codex × model-x", "100.0%", "0.0%",
-                         "proxy_measured", "Harness × model correctness",
+                         "proxy-measured", "Harness × model correctness",
                          "Methodology &amp; limitations"):
             self.assertIn(expected, page)
+        # Proxy fresh total is 80+40=120; huge cache-read must not inflate it.
+        pi = next(a for a in models[0]["arms"] if a["arm"] == "pi")
+        self.assertEqual(pi["total_tokens"], 120)
+        self.assertEqual(pi["token_basis"], "proxy-measured")
         self.assertNotIn("<script src=", page)
         self.assertNotIn("<link ", page)
+
+    def test_candidate_proxy_only_and_unmetered_bases(self):
+        rows = [
+            self.row("aider", 1, True, tokens=None, token_basis=None,
+                     token_basis_proxy="proxy_measured",
+                     tokens_input_uncached=None, tokens_output=None,
+                     tokens_cache_read=None,
+                     tokens_proxy_input_uncached=40000, tokens_proxy_output=10000,
+                     tokens_proxy_cache_read=500000),
+            self.row("quiet", 1, True, tokens=None, token_basis="unmetered",
+                     tokens_input_uncached=None, tokens_output=None,
+                     tokens_cache_read=None),
+        ]
+        path = self.write(rows)
+        model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
+        by_arm = {a["arm"]: a for a in model["arms"]}
+        self.assertEqual(by_arm["aider"]["total_tokens"], 50000)
+        self.assertEqual(by_arm["aider"]["token_basis"], "proxy-measured")
+        self.assertIsNone(by_arm["quiet"]["total_tokens"])
+        self.assertEqual(by_arm["quiet"]["token_basis"], "unmetered")
 
 
 if __name__ == "__main__": unittest.main()

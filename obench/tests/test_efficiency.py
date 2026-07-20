@@ -130,6 +130,90 @@ class TestTables(unittest.TestCase):
         self.assertTrue(rowB.rstrip().endswith("-"))  # turns/solve dash for B
 
 
+class TestProxyTokenBasis(unittest.TestCase):
+    def test_candidate_proxy_only_fills_tok_slv_with_star(self):
+        rows = [{
+            "harness": "aider", "task": "t", "trial": 1, "success": True,
+            "tokens": None, "turns": None, "wall_time_s": 10.0,
+            "token_basis_proxy": "proxy_measured",
+            "tokens_proxy_input_uncached": 40000,
+            "tokens_proxy_output": 10000,
+            "tokens_proxy_cache_read": 500000,
+        }]
+        harnesses, _tasks, stats = report.aggregate(rows)
+        self.assertEqual(report.tokens_per_solve(stats["aider"]), 50000.0)
+        text = report.format_efficiency(harnesses, stats)
+        self.assertIn("50.0k*", text)
+        self.assertIn("proxy-measured", text)
+        self.assertIn("cache-read", text)
+
+    def test_cache_read_does_not_inflate_fresh_total(self):
+        rows = [{
+            "harness": "aider", "task": "t", "trial": 1, "success": True,
+            "tokens": None, "wall_time_s": 1.0,
+            "token_basis_proxy": "proxy_measured",
+            "tokens_proxy_input_uncached": 100,
+            "tokens_proxy_output": 50,
+            "tokens_proxy_cache_read": 999999,
+        }]
+        _, _, stats = report.aggregate(rows)
+        self.assertEqual(report.tokens_per_solve(stats["aider"]), 150.0)
+
+    def test_self_reported_preferred_over_proxy(self):
+        rows = [{
+            "harness": "pi", "task": "t", "trial": 1, "success": True,
+            "tokens": 200, "wall_time_s": 1.0,
+            "token_basis": "vendor_split",
+            "token_basis_proxy": "proxy_measured",
+            "tokens_proxy_input_uncached": 1000,
+            "tokens_proxy_output": 1000,
+            "tokens_proxy_cache_read": 5000,
+        }]
+        harnesses, _tasks, stats = report.aggregate(rows)
+        self.assertEqual(report.tokens_per_solve(stats["pi"]), 200.0)
+        text = report.format_efficiency(harnesses, stats)
+        self.assertIn("200", text)
+        self.assertNotIn("200*", text)
+        self.assertNotIn(report.PROXY_FOOTNOTE, text)
+
+    def test_mixed_basis_table_warns(self):
+        rows = [
+            {"harness": "pi", "task": "t", "trial": 1, "success": True,
+             "tokens": 1000, "wall_time_s": 1.0, "token_basis": "vendor_split"},
+            {"harness": "aider", "task": "t", "trial": 1, "success": True,
+             "tokens": None, "wall_time_s": 1.0,
+             "token_basis_proxy": "proxy_measured",
+             "tokens_proxy_input_uncached": 400, "tokens_proxy_output": 100,
+             "tokens_proxy_cache_read": 9000},
+        ]
+        harnesses, _tasks, stats = report.aggregate(rows)
+        text = report.format_efficiency(harnesses, stats)
+        self.assertIn("1.0k", text)   # pi self-reported, no star
+        self.assertIn("500*", text)   # aider proxy
+        self.assertIn(report.MIXED_BASIS_WARNING, text)
+
+    def test_unmetered_stays_dash(self):
+        rows = [{
+            "harness": "quiet", "task": "t", "trial": 1, "success": True,
+            "tokens": None, "wall_time_s": 1.0, "token_basis": "unmetered",
+        }]
+        harnesses, _tasks, stats = report.aggregate(rows)
+        self.assertIsNone(report.tokens_per_solve(stats["quiet"]))
+        text = report.format_efficiency(harnesses, stats)
+        quiet = next(l for l in text.splitlines() if l.startswith("quiet"))
+        self.assertNotIn("k", quiet)
+        self.assertNotIn("*", quiet)
+
+    def test_older_rows_without_proxy_unchanged(self):
+        rows = rows_for("codex", [(True, 40000, None, 30.0), (True, 50000, None, 40.0)])
+        harnesses, _tasks, stats = report.aggregate(rows)
+        self.assertEqual(report.tokens_per_solve(stats["codex"]), 45000.0)
+        text = report.format_efficiency(harnesses, stats)
+        self.assertIn("45.0k", text)
+        self.assertNotIn("*", text)
+        self.assertNotIn(report.PROXY_FOOTNOTE, text)
+
+
 class TestReportBuilders(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
