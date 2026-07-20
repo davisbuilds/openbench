@@ -43,5 +43,14 @@
       "deepseek-v4-flash"
     ],
     "path": "releases/2026-07-20-deepseek/index.html"
+  },
+  {
+    "id": "2026-07-20-aider-showcase",
+    "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)",
+    "date": "2026-07-20",
+    "models": [
+      "deepseek-v4-flash"
+    ],
+    "path": "releases/2026-07-20-aider-showcase/index.html"
   }
 ]
