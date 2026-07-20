@@ -349,5 +349,234 @@ class GitSourceTests(unittest.TestCase):
             self.assertEqual(source["subdir"], "packs/smoke")
 
 
+def _make_harness_pack(root, *, org="acme", name="cli", version="1.0.0"):
+    os.makedirs(root, exist_ok=True)
+    _write(
+        os.path.join(root, "pack.toml"),
+        textwrap.dedent(f"""\
+            org = "{org}"
+            name = "{name}"
+            version = "{version}"
+            kind = "harness"
+            description = "Synthetic harness pack"
+            license = "Apache-2.0"
+            manifests = ["demo.toml"]
+        """),
+    )
+    _write(
+        os.path.join(root, "demo.toml"),
+        textwrap.dedent("""\
+            kind = "manifest"
+            name = "demo-cli"
+            isolate_home = true
+            unmetered = true
+            policy_headless_args = ["run"]
+            policy_auto_approve_args = ["--yes"]
+            command = ["true", "run", "--yes", "{prompt}"]
+            version_command = ["true", "--version"]
+        """),
+    )
+    return root
+
+
+class HarnessPackTests(unittest.TestCase):
+    def test_install_manifest_digests_and_resolve(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "src")
+            packs_root = os.path.join(td, "packs")
+            _make_harness_pack(src)
+            info = packs.install_pack(
+                "acme/cli@1.0.0", src, packs_root=packs_root
+            )
+            self.assertEqual(info["kind"], "harness")
+            self.assertEqual(info["manifests"], ["demo.toml"])
+            source = packs.load_pack_source(info["dest"])
+            self.assertEqual(source["kind"], "dir")
+            self.assertIn("demo.toml", source["spec_sha256"])
+            self.assertEqual(
+                source["spec_sha256"]["demo.toml"],
+                source["manifest_digests"]["demo.toml"],
+            )
+            self.assertEqual(
+                source["manifest_digests"]["demo.toml"],
+                packs.manifest_spec_sha256(
+                    os.path.join(info["dest"], "demo.toml")
+                ),
+            )
+            resolved = packs.resolve_candidate_ref(
+                "acme/cli@1.0.0", packs_root=packs_root
+            )
+            self.assertEqual(
+                resolved, os.path.join(info["dest"], "demo.toml")
+            )
+            latest = packs.resolve_candidate_ref(
+                "acme/cli", packs_root=packs_root
+            )
+            self.assertEqual(latest, resolved)
+            results = packs.verify_pack(info["dest"])
+            self.assertTrue(all(r["ok"] for r in results))
+
+    def test_resolve_requires_manifest_when_multiple(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "src")
+            _make_harness_pack(src)
+            _write(
+                os.path.join(src, "other.toml"),
+                textwrap.dedent("""\
+                    kind = "manifest"
+                    name = "other-cli"
+                    isolate_home = true
+                    unmetered = true
+                    policy_headless_args = ["run"]
+                    policy_auto_approve_args = ["--yes"]
+                    command = ["true", "run", "--yes", "{prompt}"]
+                """),
+            )
+            _write(
+                os.path.join(src, "pack.toml"),
+                textwrap.dedent("""\
+                    org = "acme"
+                    name = "multi"
+                    version = "1.0.0"
+                    kind = "harness"
+                """),
+            )
+            packs_root = os.path.join(td, "packs")
+            packs.install_pack("acme/multi@1.0.0", src, packs_root=packs_root)
+            with self.assertRaises(packs.PackError):
+                packs.resolve_candidate_ref(
+                    "acme/multi@1.0.0", packs_root=packs_root
+                )
+            path = packs.resolve_candidate_ref(
+                "acme/multi@1.0.0:other", packs_root=packs_root
+            )
+            self.assertTrue(path.endswith("other.toml"))
+
+    def test_load_candidates_pack_ref(self):
+        from obench.candidates import load_candidates
+        from obench.paths import default_adapters_dir
+
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "src")
+            packs_root = os.path.join(td, "packs")
+            _make_harness_pack(src, org="z", name="p", version="0.2.0")
+            packs.install_pack("z/p@0.2.0", src, packs_root=packs_root)
+            old = os.environ.get("PWD")
+            try:
+                # resolve uses default_packs_root()=cwd/.openbench/packs unless given
+                loaded = load_candidates(
+                    ["z/p@0.2.0"],
+                    default_adapters_dir(),
+                    packs_root=packs_root,
+                )
+            finally:
+                pass
+            self.assertIn("demo-cli", loaded)
+
+    def test_reject_invalid_manifest_on_install(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "src")
+            os.makedirs(src)
+            _write(
+                os.path.join(src, "pack.toml"),
+                'org = "acme"\nname = "bad"\nversion = "0.1.0"\nkind = "harness"\n',
+            )
+            _write(os.path.join(src, "broken.toml"), 'kind = "manifest"\nname = "x"\n')
+            with self.assertRaises(packs.PackError):
+                packs.install_pack(
+                    "acme/bad@0.1.0", src,
+                    packs_root=os.path.join(td, "packs"),
+                )
+
+
+class PacksIndexTests(unittest.TestCase):
+    def test_publish_index_upsert_and_site_section(self):
+        from obench import report_page
+
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "src")
+            _make_pack(src, org="acme", name="smoke", version="1.0.0")
+            site = os.path.join(td, "site")
+            os.makedirs(site)
+            _write(os.path.join(site, "releases.json"), "[]\n")
+            _write(os.path.join(site, "community.json"), "[]\n")
+            info = packs.publish_packs_index(
+                src, site_dir=site, source="data/packs/smoke"
+            )
+            self.assertFalse(info["replaced"])
+            self.assertTrue(os.path.isfile(info["manifest_path"]))
+            entries = packs.load_packs_index(site)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["id"], "acme/smoke")
+            self.assertEqual(entries[0]["kind"], "tasks")
+            self.assertEqual(entries[0]["source"], "data/packs/smoke")
+            self.assertIn("content_sha256", entries[0])
+
+            # Bump version and upsert.
+            _make_pack(src, org="acme", name="smoke", version="1.1.0")
+            info2 = packs.publish_packs_index(
+                src, site_dir=site, source="data/packs/smoke"
+            )
+            self.assertTrue(info2["replaced"])
+            entries = packs.load_packs_index(site)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["latest"], "1.1.0")
+
+            html = report_page._site_index([], community=[], packs=entries)
+            self.assertIn('id="packs"', html)
+            self.assertIn("acme/smoke@1.1.0", html)
+            self.assertIn("tasks", html)
+
+    def test_cli_publish_index(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "src")
+            _make_harness_pack(src, org="cli", name="h", version="0.1.0")
+            site = os.path.join(td, "site")
+            os.makedirs(site)
+            _write(os.path.join(site, "releases.json"), "[]\n")
+            r = subprocess.run(
+                [
+                    sys.executable, "-m", "obench.cli", "pack", "publish-index",
+                    "--from", src, "--site-dir", site,
+                    "--source-url", "data/packs/cli-h",
+                ],
+                cwd=td, env=_SUBPROC_ENV, capture_output=True, text=True,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+            with open(os.path.join(site, "packs.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+            self.assertEqual(data[0]["kind"], "harness")
+            with open(os.path.join(site, "index.html"), encoding="utf-8") as fh:
+                self.assertIn("packs", fh.read())
+
+
+class SeededPackSmokeTests(unittest.TestCase):
+    """Repo-rooted smoke for committed seed packs under data/packs/."""
+
+    def test_seeded_task_and_harness_packs_load(self):
+        task_pack = os.path.join(
+            _REPO_ROOT, "data", "packs", "openbench-core-smoke"
+        )
+        harness_pack = os.path.join(
+            _REPO_ROOT, "data", "packs", "openbench-aider"
+        )
+        if not os.path.isdir(task_pack):
+            self.skipTest("seeded task pack missing")
+        meta = packs.load_pack_toml(os.path.join(task_pack, "pack.toml"))
+        self.assertEqual(meta["kind"], "tasks")
+        self.assertEqual(
+            packs.discover_pack_tasks(task_pack, meta),
+            ["make-it-run", "fix-failing-test"],
+        )
+        if not os.path.isdir(harness_pack):
+            self.skipTest("seeded harness pack missing")
+        hmeta = packs.load_pack_toml(os.path.join(harness_pack, "pack.toml"))
+        self.assertEqual(hmeta["kind"], "harness")
+        self.assertEqual(
+            packs.discover_pack_manifests(harness_pack, hmeta),
+            ["aider.toml"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
