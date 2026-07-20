@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 FIXTURES_DIR = os.path.join(BENCH_DIR, "tests", "fixtures")
-RUN_PY = os.path.join(BENCH_DIR, "run.py")
+RUN_MOD = ["-m", "obench.run"]
 from obench import run  # noqa: E402
 from obench import report  # noqa: E402
 
@@ -79,7 +79,7 @@ class TestScoreCoercionE2E(unittest.TestCase):
 
     def _run(self, task, harness):
         proc = subprocess.run(
-            [sys.executable, RUN_PY, "--task", task, "--harness", harness,
+            [sys.executable, *RUN_MOD, "--task", task, "--harness", harness,
              "--results-path", self.results, "--adapters-dir", FIXTURES_DIR,
              "--tasks-dir", FIXTURES_DIR],
             capture_output=True, text=True)
@@ -126,7 +126,7 @@ class TestRunCheckerTimeoutScore(unittest.TestCase):
         tmp = tempfile.mkdtemp()
         results = os.path.join(tmp, "r.jsonl")
         proc = subprocess.run(
-            [sys.executable, RUN_PY, "--task", "slow-checker", "--harness", "null",
+            [sys.executable, *RUN_MOD, "--task", "slow-checker", "--harness", "null",
              "--checker-timeout", "1", "--results-path", results,
              "--adapters-dir", FIXTURES_DIR, "--tasks-dir", FIXTURES_DIR],
             capture_output=True, text=True, timeout=20)

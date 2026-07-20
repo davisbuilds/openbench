@@ -20,7 +20,7 @@ import tempfile
 import unittest
 
 FIXTURES_DIR = os.path.join(BENCH_DIR, "tests", "fixtures")
-RUN_PY = os.path.join(BENCH_DIR, "run.py")
+RUN_MOD = ["-m", "obench.run"]
 from obench import report  # noqa: E402
 
 
@@ -44,7 +44,7 @@ class TestEndToEnd(unittest.TestCase):
 
     def _run(self, harness, *extra_args):
         proc = subprocess.run(
-            [sys.executable, RUN_PY,
+            [sys.executable, *RUN_MOD,
              "--task", "write-marker",
              "--harness", harness,
              "--model", "gpt-5.5-medium",
@@ -63,10 +63,10 @@ class TestEndToEnd(unittest.TestCase):
         # --tasks-dir must still resolve. Drive run.py from the repo root with
         # relative dirs and confirm the fake adapter still solves the task.
         rel_fixtures = os.path.relpath(FIXTURES_DIR, BENCH_DIR)  # tests/fixtures
-        rel_fixtures = os.path.join("bench", rel_fixtures)
+        rel_fixtures = os.path.join("obench", rel_fixtures)
         results = os.path.join(self.tmp, "rel.jsonl")
         proc = subprocess.run(
-            [sys.executable, "obench/run.py",
+            [sys.executable, "-m", "obench.run",
              "--task", "write-marker",
              "--harness", "fake_adapter",
              "--results-path", results,
@@ -137,7 +137,7 @@ class TestEndToEnd(unittest.TestCase):
 
     def test_trial_runs_only_requested_trial(self):
         proc = subprocess.run(
-            [sys.executable, RUN_PY,
+            [sys.executable, *RUN_MOD,
              "--task", "write-marker",
              "--harness", "fake_adapter",
              "--model", "gpt-5.5-medium",
@@ -155,7 +155,7 @@ class TestEndToEnd(unittest.TestCase):
     def test_force_reruns_cell(self):
         self._run("fake_adapter")
         proc = subprocess.run(
-            [sys.executable, RUN_PY,
+            [sys.executable, *RUN_MOD,
              "--task", "write-marker",
              "--harness", "fake_adapter",
              "--model", "gpt-5.5-medium",
@@ -197,7 +197,7 @@ class TestEndToEnd(unittest.TestCase):
         # The slow-checker fixture sleeps 30s; a 1s --checker-timeout must abort
         # it and record checker_exit="timeout", success=false, without hanging.
         proc = subprocess.run(
-            [sys.executable, RUN_PY,
+            [sys.executable, *RUN_MOD,
              "--task", "slow-checker",
              "--harness", "null",
              "--model", "gpt-5.5-medium",

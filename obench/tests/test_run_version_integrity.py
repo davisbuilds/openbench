@@ -146,7 +146,7 @@ class TestVersionPreflight(unittest.TestCase):
         self.assertEqual(emitted, [])
         self.assertEqual(call_count, 0)
         self.assertIn("host=0.144.0 pin=0.144.1", stderr)
-        self.assertIn("obench/bump_clis.py --sync-host", stderr)
+        self.assertIn("python3 -m obench.bump_clis --sync-host", stderr)
 
     def test_mismatch_with_flag_marks_every_row(self):
         drift = [{"harness": "codex", "actual": "0.144.0", "expected": "0.144.1",

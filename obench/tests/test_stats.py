@@ -347,7 +347,7 @@ class TestProvenanceGate(StatsTestCase):
 
     def test_strict_provenance_exits_2_on_flag(self):
         self.write_rows(self.provenance_rows(digest_b="sha256:other"))
-        cmd = [sys.executable, os.path.join(os.path.dirname(os.path.dirname(__file__)), "stats.py"),
+        cmd = [sys.executable, "-m", "obench.stats",
                self.results, "--group", "model", "--tasks-dir", self.tasks, "--strict-provenance"]
         proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
         self.assertEqual(proc.returncode, 2)
@@ -359,7 +359,7 @@ class TestCliOutput(StatsTestCase):
         self.make_task("t1")
         self.write_rows([{"harness": "h", "model": "m", "task": "t1", "trial": 1,
                           "success": True, "failure_class": "solved"}])
-        cmd = [sys.executable, os.path.join(os.path.dirname(os.path.dirname(__file__)), "stats.py"),
+        cmd = [sys.executable, "-m", "obench.stats",
                self.results, "--group", "model", "--tasks-dir", self.tasks]
         text = subprocess.check_output(cmd, text=True)
         self.assertIn("ALL COUNTABLE ROWS (NON-COMPARABLE", text)

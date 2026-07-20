@@ -17,7 +17,7 @@ import tempfile
 import unittest
 
 FIXTURES_DIR = os.path.join(BENCH_DIR, "tests", "fixtures")
-RUN_PY = os.path.join(BENCH_DIR, "run.py")
+RUN_MOD = ["-m", "obench.run"]
 from obench import run  # noqa: E402
 
 
@@ -31,7 +31,7 @@ class TestTranscripts(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _run(self, harness, transcripts_dir=None):
-        argv = [sys.executable, RUN_PY,
+        argv = [sys.executable, *RUN_MOD,
                 "--task", "write-marker",
                 "--harness", harness,
                 "--model", "gpt-5.5-medium",

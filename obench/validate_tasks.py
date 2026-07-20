@@ -155,7 +155,12 @@ def fmt_score(value):
 def build_task_roots(tasks_dir=None, include_imported=True):
     """Build tier roots from an optional ``--tasks-dir`` override."""
     if tasks_dir:
-        path = resolve_tasks_dir(tasks_dir)
+        path = os.path.abspath(tasks_dir)
+        if not os.path.isdir(path):
+            raise TasksDirError(
+                f"tasks directory not found: {path}\n"
+                "Pass --tasks-dir pointing at a directory of OpenBench tasks."
+            )
         return [("tasks", path)]
     roots = default_task_roots()
     if roots:

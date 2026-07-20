@@ -40,7 +40,7 @@ class TestBuildDockerCmd(unittest.TestCase):
             workdir="/tmp/wd",
             model="gpt-5.5-medium",
             timeout_s=240,
-            adapters_dir="/repo/oobench/adapters",
+            adapters_dir="/repo/obench/adapters",
             image="openbench-harness:latest",
             instruction_path="/tmp/instr.txt",
         )
@@ -52,7 +52,7 @@ class TestBuildDockerCmd(unittest.TestCase):
                           "codex", "gpt-5.5-medium", "240"])
         joined = " ".join(cmd)
         self.assertIn("/tmp/wd:/work", joined)
-        self.assertIn("/repo/oobench/adapters:/obench/adapters:ro", joined)
+        self.assertIn("/repo/obench/adapters:/bench/adapters:ro", joined)
         self.assertIn("/tmp/instr.txt:/bench/instruction.txt:ro", joined)
         self.assertIn("entry.py:/bench/entry.py:ro", joined)
         self.assertIn("HOME=/root", joined)
@@ -70,31 +70,31 @@ class TestBuildDockerCmd(unittest.TestCase):
         try:
             cmd = docker_exec.build_docker_cmd(
                 harness="pi", workdir="/tmp/wd", model="deepseek-v4-flash",
-                timeout_s=240, adapters_dir="/repo/oobench/adapters",
+                timeout_s=240, adapters_dir="/repo/obench/adapters",
                 image="openbench-harness:latest",
                 instruction_path="/tmp/instr.txt",
             )
             claude_cmd = docker_exec.build_docker_cmd(
                 harness="claude", workdir="/tmp/wd", model="claude-opus-4-8",
-                timeout_s=240, adapters_dir="/repo/oobench/adapters",
+                timeout_s=240, adapters_dir="/repo/obench/adapters",
                 image="openbench-harness:latest",
                 instruction_path="/tmp/instr.txt",
             )
             cursor_cmd = docker_exec.build_docker_cmd(
                 harness="cursor", workdir="/tmp/wd", model="claude-opus-4-8",
-                timeout_s=240, adapters_dir="/repo/oobench/adapters",
+                timeout_s=240, adapters_dir="/repo/obench/adapters",
                 image="openbench-harness:latest",
                 instruction_path="/tmp/instr.txt",
             )
             codex_opus_cmd = docker_exec.build_docker_cmd(
                 harness="codex", workdir="/tmp/wd", model="claude-opus-4-8",
-                timeout_s=240, adapters_dir="/repo/oobench/adapters",
+                timeout_s=240, adapters_dir="/repo/obench/adapters",
                 image="openbench-harness:latest",
                 instruction_path="/tmp/instr.txt",
             )
             grokbuild_cmd = docker_exec.build_docker_cmd(
                 harness="grokbuild", workdir="/tmp/wd", model="deepseek-v4-flash",
-                timeout_s=240, adapters_dir="/repo/oobench/adapters",
+                timeout_s=240, adapters_dir="/repo/obench/adapters",
                 image="openbench-harness:latest",
                 instruction_path="/tmp/instr.txt",
             )
@@ -128,7 +128,7 @@ class TestBuildDockerCmd(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True):
             cmd = docker_exec.build_docker_cmd(
                 harness="grokbuild", workdir="/tmp/wd", model="gpt-5.6-sol",
-                timeout_s=240, adapters_dir="/repo/oobench/adapters", image="image",
+                timeout_s=240, adapters_dir="/repo/obench/adapters", image="image",
                 instruction_path="/tmp/instr.txt")
         self.assertIn("CLIPROXYAPI_BASE_URL", cmd)
         self.assertIn("CLIPROXYAPI_API_KEY", cmd)
@@ -175,12 +175,12 @@ class TestBuildDockerCmd(unittest.TestCase):
             try:
                 cmd = docker_exec.build_docker_cmd(
                     harness="pi", workdir="/tmp/wd", model="gpt-5.5-medium",
-                    timeout_s=240, adapters_dir="/repo/oobench/adapters", image="image",
+                    timeout_s=240, adapters_dir="/repo/obench/adapters", image="image",
                     instruction_path="/tmp/instr", auth_return_dir=returned,
                 )
                 undeclared = docker_exec.build_docker_cmd(
                     harness="claude", workdir="/tmp/wd", model="claude-opus-4-8",
-                    timeout_s=240, adapters_dir="/repo/oobench/adapters", image="image",
+                    timeout_s=240, adapters_dir="/repo/obench/adapters", image="image",
                     instruction_path="/tmp/instr", auth_return_dir=returned,
                 )
             finally:
@@ -212,7 +212,7 @@ class TestBuildDockerCmd(unittest.TestCase):
             with self.subTest(harness=harness):
                 cmd = docker_exec.build_docker_cmd(
                     harness=harness, workdir="/tmp/wd", model="deepseek-v4-flash",
-                    timeout_s=240, adapters_dir="/repo/oobench/adapters",
+                    timeout_s=240, adapters_dir="/repo/obench/adapters",
                     image="openbench-harness:latest",
                     instruction_path="/tmp/instr.txt",
                 )
@@ -309,7 +309,7 @@ class TestBuildDockerCmd(unittest.TestCase):
             try:
                 cmd = docker_exec.build_docker_cmd(
                     harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
-                    adapters_dir="/repo/oobench/adapters", image="image",
+                    adapters_dir="/repo/obench/adapters", image="image",
                     instruction_path="/tmp/instruction", candidate_path=spec,
                     candidate_auth_files=[{"source": "~/.cli/auth.json", "destination": ".cli/auth.json"}],
                     candidate_config_dir=os.path.join(home, "external-config"),
@@ -329,14 +329,14 @@ class TestBuildDockerCmd(unittest.TestCase):
         with mock.patch.object(docker_exec, "_auth_mount_args", return_value=[]) as auth_mounts:
             docker_exec.build_docker_cmd(
                 harness="codex", workdir="/tmp/wd", model="gpt-5.5-medium", timeout_s=9,
-                adapters_dir="/repo/oobench/adapters", image="image",
+                adapters_dir="/repo/obench/adapters", image="image",
                 instruction_path="/tmp/instruction",
                 candidate_path="/tmp/harness.toml", base_harness=None,
             )
         auth_mounts.assert_called_once_with(None)
         legacy_label = docker_exec.build_docker_cmd(
             harness="codex_v1", workdir="/tmp/wd", model="model", timeout_s=9,
-            adapters_dir="/repo/oobench/adapters", image="image",
+            adapters_dir="/repo/obench/adapters", image="image",
             instruction_path="/tmp/instruction", candidate_path="/tmp/harness.toml",
         )
         self.assertNotIn("/bench/ablation/codex-home-v1", " ".join(legacy_label))
@@ -345,7 +345,7 @@ class TestBuildDockerCmd(unittest.TestCase):
         with mock.patch.dict(os.environ, {"BYO_API_KEY": "secret-value"}):
             cmd = docker_exec.build_docker_cmd(
                 harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
-                adapters_dir="/repo/oobench/adapters", image="image",
+                adapters_dir="/repo/obench/adapters", image="image",
                 instruction_path="/tmp/instruction",
                 candidate_pass_env=["BYO_API_KEY"],
             )
@@ -354,7 +354,7 @@ class TestBuildDockerCmd(unittest.TestCase):
         with mock.patch.dict(os.environ, {"EMPTY_SETTING": ""}):
             empty = docker_exec.build_docker_cmd(
                 harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
-                adapters_dir="/repo/oobench/adapters", image="image",
+                adapters_dir="/repo/obench/adapters", image="image",
                 instruction_path="/tmp/instruction",
                 candidate_pass_env=["EMPTY_SETTING"],
             )
@@ -363,7 +363,7 @@ class TestBuildDockerCmd(unittest.TestCase):
         with mock.patch.dict(os.environ, {"INHERITED_SETTING": "private-value"}):
             inherited = docker_exec.build_docker_cmd(
                 harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
-                adapters_dir="/repo/oobench/adapters", image="image",
+                adapters_dir="/repo/obench/adapters", image="image",
                 instruction_path="/tmp/instruction", candidate_inherit_env=True,
             )
         self.assertIn("INHERITED_SETTING", inherited)
@@ -382,7 +382,7 @@ class TestBuildDockerCmd(unittest.TestCase):
         with mock.patch.dict(os.environ, proxy):
             routed = docker_exec.build_docker_cmd(
                 harness="mine", workdir="/tmp/wd", model="model", timeout_s=9,
-                adapters_dir="/repo/oobench/adapters", image="image",
+                adapters_dir="/repo/obench/adapters", image="image",
                 instruction_path="/tmp/instruction", candidate_inherit_env=True,
                 extra_env=explicit,
             )
@@ -549,7 +549,7 @@ class TestContainerCleanup(unittest.TestCase):
     def _invoke(self, timeout_s=900):
         return docker_exec.run_in_container(
             "pi", "do it", "/tmp/wd", "deepseek-v4-flash", timeout_s,
-            "/repo/oobench/adapters")
+            "/repo/obench/adapters")
 
     def _rm_calls(self, calls):
         return [c for c in calls if c[:3] == ["docker", "rm", "-f"]]
@@ -712,7 +712,7 @@ class TestInvokeAdapterFallback(unittest.TestCase):
             with self.assertRaises(RuntimeError) as cm:
                 docker_exec.run_in_container(
                     "pi", "do it", "/tmp/wd", "deepseek-v4-flash", 30,
-                    "/repo/oobench/adapters")
+                    "/repo/obench/adapters")
         finally:
             docker_exec.preflight = orig
         self.assertGreaterEqual(getattr(cm.exception, "bench_env_setup_s"), 0)

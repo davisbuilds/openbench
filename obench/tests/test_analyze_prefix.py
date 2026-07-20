@@ -44,7 +44,7 @@ class PrefixAnalysisTests(unittest.TestCase):
     def test_cli_emits_json(self):
         path = os.path.join(FIXTURES, "prefix_single_session.jsonl")
         proc = subprocess.run(
-            [sys.executable, os.path.join(BENCH, "analyze_prefix.py"), path],
+            [sys.executable, "-m", "obench.analyze_prefix", path],
             check=True, capture_output=True, text=True,
         )
         self.assertEqual(json.loads(proc.stdout)["sessions_observed"], 1)

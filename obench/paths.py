@@ -55,15 +55,14 @@ def default_tasks_dir(start: str | None = None) -> str | None:
 
 
 def resolve_tasks_dir(explicit: str | None = None, start: str | None = None) -> str:
-    """Return an existing tasks directory or raise :class:`TasksDirError`."""
+    """Return a tasks directory path or raise :class:`TasksDirError`.
+
+    An explicit ``--tasks-dir`` is returned as an absolute path without requiring
+    that it already exist (the runner reports missing tasks later). Auto-
+    discovery requires an existing directory.
+    """
     if explicit:
-        path = os.path.abspath(explicit)
-        if not os.path.isdir(path):
-            raise TasksDirError(
-                f"tasks directory not found: {path}\n"
-                "Pass --tasks-dir pointing at a directory of OpenBench tasks."
-            )
-        return path
+        return os.path.abspath(explicit)
     found = default_tasks_dir(start)
     if found is not None:
         return found

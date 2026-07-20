@@ -16,10 +16,7 @@ import os
 import re
 import sys
 
-try:
-    from . import determinism_check
-except ImportError:  # pragma: no cover - direct package import fallback
-    from . from . import determinism_check
+from . import determinism_check
 
 EXIT_FINDINGS = 3
 REQUIRED_ENTRIES = ("instruction.md", "workspace", "checker.sh", "solution", "PROVENANCE.md")

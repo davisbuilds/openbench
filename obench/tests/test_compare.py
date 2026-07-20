@@ -390,9 +390,8 @@ class TestCompareCli(CompareTestCase):
         a = self.write("a.jsonl", [self.row("h", "t", 1, True)])
         b = self.write("b.jsonl", [self.row("h", "t", 1, False)])
         markdown = self.path("report/scorecard.md")
-        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "compare.py")
         proc = subprocess.run(
-            [sys.executable, script, a, b, "--tasks-dir", self.tasks,
+            [sys.executable, "-m", "obench.compare", a, b, "--tasks-dir", self.tasks,
              "--markdown", markdown],
             text=True, capture_output=True, check=False,
         )
@@ -408,9 +407,8 @@ class TestCompareCli(CompareTestCase):
         a = self.write("a.jsonl", [self.row("h", "t", 1, True)])
         b = self.write("b.jsonl", [self.row("h", "t", 1, True)])
         markdown = self.path("scorecard.md")
-        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "compare.py")
         proc = subprocess.run(
-            [sys.executable, script, a, b, "--tasks-dir", self.tasks,
+            [sys.executable, "-m", "obench.compare", a, b, "--tasks-dir", self.tasks,
              "--solved-intersection", "--markdown", markdown],
             text=True, capture_output=True, check=False,
         )
@@ -423,9 +421,8 @@ class TestCompareCli(CompareTestCase):
     def test_strict_provenance_exits_two_on_version_drift(self):
         a = self.write("a.jsonl", [self.row("h", "t", 1, True, harness_version="1")])
         b = self.write("b.jsonl", [self.row("h", "t", 1, True, harness_version="2")])
-        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "compare.py")
         proc = subprocess.run(
-            [sys.executable, script, a, b, "--tasks-dir", self.tasks,
+            [sys.executable, "-m", "obench.compare", a, b, "--tasks-dir", self.tasks,
              "--strict-provenance"],
             text=True, capture_output=True, check=False,
         )

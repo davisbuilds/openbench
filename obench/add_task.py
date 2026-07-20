@@ -59,7 +59,7 @@ NEXT_STEPS = """Next steps:
   2. Put the unsolved starting state in workspace/.
   3. Put the golden answer in solution/.
   4. Put checker-owned oracle data in checker_data/ if needed.
-  5. Run: python3 bench/admission_gate.py {task_path}
+  5. Run: python3 -m obench.admission_gate {task_path}
 
 This task is NOT admitted until the admission gate passes.
 """

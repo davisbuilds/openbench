@@ -16,7 +16,7 @@ import sys
 import tempfile
 import unittest
 
-SCRUB_PY = os.path.join(BENCH_DIR, "scrub.py")
+SCRUB_MOD = ["-m", "obench.scrub"]
 from obench import scrub  # noqa: E402
 
 # Synthetic identity so tests don't depend on the real machine.
@@ -182,7 +182,7 @@ class TestCli(unittest.TestCase):
 
     def _run(self, *args):
         return subprocess.run(
-            [sys.executable, SCRUB_PY, *args,
+            [sys.executable, *SCRUB_MOD, *args,
              "--user", "alice", "--home", "/Users/alice",
              "--hostname", "Alices-Laptop.local"],
             capture_output=True, text=True,

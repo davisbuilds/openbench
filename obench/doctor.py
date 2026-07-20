@@ -374,7 +374,7 @@ def check_image_versions(p, harnesses, pins, image=DEFAULT_IMAGE):
     ])
     if code != 0:
         return None, (f"{image} unavailable; build with: "
-                      f"docker build -t {image} bench/docker")
+                      f"docker build -t {image} obench/docker")
     labels = parse_image_pin_labels(out)
     keys = []
     for harness in harnesses:

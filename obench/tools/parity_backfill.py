@@ -51,7 +51,7 @@ def _repo_root() -> Path:
 
 
 def _load_adapter(name: str) -> Any:
-    path = _repo_root() / "bench" / "adapters" / f"{name}.py"
+    path = _repo_root() / "obench" / "adapters" / f"{name}.py"
     spec = importlib.util.spec_from_file_location(f"parity_backfill_adapter_{name}", path)
     if spec is None or spec.loader is None:
         raise BackfillError(f"cannot load adapter {name!r} from {path}")
