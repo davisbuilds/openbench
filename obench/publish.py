@@ -59,9 +59,10 @@ highlighted against stock arms on the same result rows.
 
 - The bundled `results.jsonl` still matches the SHA-256 recorded in
   `provenance.json` (tamper-evident).
-- When local task trees are available, per-task content digests
-  (instruction.md + checker.sh + workspace|workspace.toml + checker_data/)
-  still match. Missing digests FAIL verification.
+- When local task trees are available, per-task content digests still
+  match under the bundle's digest scheme (scheme 2: instruction.md +
+  checker.sh + workspace|workspace.toml + checker_data/; scheme 1 /
+  legacy: same without checker_data/). Missing digests FAIL verification.
 
 ## What verify does NOT prove
 
@@ -93,6 +94,14 @@ def _sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
+# Digest schemes for task_content_digest / provenance.json:
+#   1 (legacy) — instruction.md + checker.sh + workspace.toml + workspace/
+#                (no checker_data/). Bundles without digest_scheme use this.
+#   2 (current) — scheme 1 plus checker_data/ (oracle inputs).
+DIGEST_SCHEME_LEGACY = 1
+DIGEST_SCHEME_CURRENT = 2
+
+
 def _feed_tree_into_digest(hasher, task_dir: str, tree_name: str, feed) -> None:
     """Hash every regular file under ``task_dir/tree_name`` in stable order."""
     root_dir = os.path.join(task_dir, tree_name)
@@ -111,14 +120,32 @@ def _feed_tree_into_digest(hasher, task_dir: str, tree_name: str, feed) -> None:
                 feed(rel, fh.read())
 
 
-def task_content_digest(task_dir: str) -> str:
-    """SHA-256 over instruction.md + checker.sh + workspace/checker_data trees.
+def resolve_digest_scheme(provenance) -> int:
+    """Return the digest scheme for a provenance dict (missing → legacy 1)."""
+    raw = provenance.get("digest_scheme") if isinstance(provenance, dict) else None
+    if raw is None:
+        return DIGEST_SCHEME_LEGACY
+    try:
+        scheme = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise PublishError(f"invalid digest_scheme in provenance: {raw!r}") from exc
+    if scheme not in (DIGEST_SCHEME_LEGACY, DIGEST_SCHEME_CURRENT):
+        raise PublishError(f"unsupported digest_scheme: {scheme}")
+    return scheme
 
-    Includes ``workspace.toml`` for git-mode tasks and ``checker_data/`` (oracle
-    inputs) so post-publish changes to checker-owned fixtures fail verify.
+
+def task_content_digest(task_dir: str, scheme: int = DIGEST_SCHEME_CURRENT) -> str:
+    """SHA-256 over task oracle inputs under the given digest scheme.
+
+    Scheme 1 (legacy): instruction.md + checker.sh + workspace.toml + workspace/.
+    Scheme 2 (current): scheme 1 plus ``checker_data/`` so post-publish changes
+    to checker-owned fixtures fail verify.
+
     Files are hashed in a stable path-sorted order. Missing optional pieces are
     skipped; at least instruction.md or checker.sh must exist.
     """
+    if scheme not in (DIGEST_SCHEME_LEGACY, DIGEST_SCHEME_CURRENT):
+        raise PublishError(f"unsupported digest_scheme: {scheme}")
     task_dir = os.path.abspath(task_dir)
     hasher = hashlib.sha256()
     found = False
@@ -138,7 +165,8 @@ def task_content_digest(task_dir: str) -> str:
                 _feed(name, fh.read())
 
     _feed_tree_into_digest(hasher, task_dir, "workspace", _feed)
-    _feed_tree_into_digest(hasher, task_dir, "checker_data", _feed)
+    if scheme >= DIGEST_SCHEME_CURRENT:
+        _feed_tree_into_digest(hasher, task_dir, "checker_data", _feed)
 
     if not found:
         raise PublishError(f"task dir has no hashable content: {task_dir}")
@@ -450,7 +478,9 @@ def build_provenance(rows, results_sha256, tasks_dirs=None, warnings=None,
             digest = None
             if task_dir is not None:
                 try:
-                    digest = task_content_digest(task_dir)
+                    digest = task_content_digest(
+                        task_dir, scheme=DIGEST_SCHEME_CURRENT
+                    )
                 except PublishError:
                     digest = None
             tasks[task] = {
@@ -481,6 +511,7 @@ def build_provenance(rows, results_sha256, tasks_dirs=None, warnings=None,
         "obench_version": obench_version or __version__,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "results_sha256": results_sha256,
+        "digest_scheme": DIGEST_SCHEME_CURRENT,
         "arms": [arms[key] for key in sorted(arms)],
         "tasks": [tasks[name] for name in sorted(tasks)],
         "models": models,
@@ -797,6 +828,16 @@ def verify_bundle(bundle_dir, tasks_dirs=None):
         "detail": f"expected={expected} actual={actual}",
     })
 
+    try:
+        digest_scheme = resolve_digest_scheme(provenance)
+    except PublishError as exc:
+        checks.append({
+            "name": "digest_scheme",
+            "status": "FAIL",
+            "detail": str(exc),
+        })
+        return checks
+
     if tasks_dirs is None:
         discovered = default_tasks_dir()
         tasks_dirs = [discovered] if discovered else []
@@ -823,14 +864,17 @@ def verify_bundle(bundle_dir, tasks_dirs=None):
             })
             continue
         try:
-            actual_digest = task_content_digest(task_dir)
+            actual_digest = task_content_digest(task_dir, scheme=digest_scheme)
         except PublishError as exc:
             checks.append({"name": name, "status": "FAIL", "detail": str(exc)})
             continue
         checks.append({
             "name": name,
             "status": "PASS" if actual_digest == expected_digest else "FAIL",
-            "detail": f"expected={expected_digest} actual={actual_digest}",
+            "detail": (
+                f"scheme={digest_scheme} expected={expected_digest} "
+                f"actual={actual_digest}"
+            ),
         })
 
     return checks

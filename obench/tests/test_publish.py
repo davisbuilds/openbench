@@ -137,10 +137,14 @@ class PublishBundleTests(unittest.TestCase):
             raw = fh.read()
         self.assertEqual(provenance["results_sha256"], hashlib.sha256(raw).hexdigest())
 
+        self.assertEqual(provenance["digest_scheme"], publish.DIGEST_SCHEME_CURRENT)
         task_digests = {t["task"]: t["content_digest"] for t in provenance["tasks"]}
         self.assertEqual(
             task_digests["alpha"],
-            publish.task_content_digest(os.path.join(self.tasks, "alpha")),
+            publish.task_content_digest(
+                os.path.join(self.tasks, "alpha"),
+                scheme=publish.DIGEST_SCHEME_CURRENT,
+            ),
         )
         with open(os.path.join(self.out, "index.html"), encoding="utf-8") as fh:
             html = fh.read()
@@ -325,6 +329,117 @@ class TaskDigestTests(unittest.TestCase):
             with open(os.path.join(cd, "expected.txt"), "a", encoding="utf-8") as fh:
                 fh.write("changed\n")
             self.assertNotEqual(after, publish.task_content_digest(task))
+
+    def test_legacy_scheme1_ignores_checker_data(self):
+        with tempfile.TemporaryDirectory() as td:
+            task = _make_task(td, "t")
+            legacy = publish.task_content_digest(
+                task, scheme=publish.DIGEST_SCHEME_LEGACY
+            )
+            cd = os.path.join(task, "checker_data")
+            os.makedirs(cd)
+            with open(os.path.join(cd, "expected.txt"), "w", encoding="utf-8") as fh:
+                fh.write("oracle\n")
+            self.assertEqual(
+                legacy,
+                publish.task_content_digest(
+                    task, scheme=publish.DIGEST_SCHEME_LEGACY
+                ),
+            )
+            self.assertNotEqual(
+                legacy,
+                publish.task_content_digest(
+                    task, scheme=publish.DIGEST_SCHEME_CURRENT
+                ),
+            )
+
+    def test_verify_legacy_bundle_without_scheme_field(self):
+        """Pre-digest_scheme bundles hash without checker_data/ (scheme 1)."""
+        with tempfile.TemporaryDirectory() as td:
+            tasks = os.path.join(td, "tasks")
+            os.makedirs(tasks)
+            task = _make_task(tasks, "alpha")
+            cd = os.path.join(task, "checker_data")
+            os.makedirs(cd)
+            with open(os.path.join(cd, "expected.txt"), "w", encoding="utf-8") as fh:
+                fh.write("oracle\n")
+            legacy_digest = publish.task_content_digest(
+                task, scheme=publish.DIGEST_SCHEME_LEGACY
+            )
+            current_digest = publish.task_content_digest(
+                task, scheme=publish.DIGEST_SCHEME_CURRENT
+            )
+            self.assertNotEqual(legacy_digest, current_digest)
+
+            bundle = os.path.join(td, "bundle")
+            os.makedirs(bundle)
+            results = os.path.join(bundle, "results.jsonl")
+            _write_jsonl(results, [_row("null", "alpha", 1, False)])
+            with open(results, "rb") as fh:
+                sha = hashlib.sha256(fh.read()).hexdigest()
+            # No digest_scheme field → legacy scheme 1.
+            provenance = {
+                "results_sha256": sha,
+                "tasks": [{"task": "alpha", "content_digest": legacy_digest}],
+            }
+            with open(os.path.join(bundle, "provenance.json"), "w", encoding="utf-8") as fh:
+                json.dump(provenance, fh)
+
+            checks = publish.verify_bundle(bundle, tasks_dirs=[tasks])
+            digest_check = next(c for c in checks if c["name"] == "task_digest:alpha")
+            self.assertEqual(digest_check["status"], "PASS", digest_check)
+            self.assertIn("scheme=1", digest_check["detail"])
+
+    def test_publish_records_scheme2_covering_checker_data(self):
+        with tempfile.TemporaryDirectory() as td:
+            tasks = os.path.join(td, "tasks")
+            os.makedirs(tasks)
+            task = _make_task(tasks, "alpha")
+            cd = os.path.join(task, "checker_data")
+            os.makedirs(cd)
+            with open(os.path.join(cd, "expected.txt"), "w", encoding="utf-8") as fh:
+                fh.write("oracle\n")
+            results = os.path.join(td, "results.jsonl")
+            _write_jsonl(results, [_row("null", "alpha", 1, False)])
+            out = os.path.join(td, "bundle")
+            scrub_ctx = scrub.build_context(
+                user="pubtestuser",
+                home="/Users/pubtestuser",
+                hostnames=["pubtest-host"],
+            )
+            provenance = publish.create_bundle(
+                results,
+                out,
+                tasks_dirs=[tasks],
+                scrub_ctx=scrub_ctx,
+            )
+            self.assertEqual(provenance["digest_scheme"], publish.DIGEST_SCHEME_CURRENT)
+            recorded = next(t["content_digest"] for t in provenance["tasks"]
+                            if t["task"] == "alpha")
+            self.assertEqual(
+                recorded,
+                publish.task_content_digest(
+                    task, scheme=publish.DIGEST_SCHEME_CURRENT
+                ),
+            )
+            self.assertNotEqual(
+                recorded,
+                publish.task_content_digest(
+                    task, scheme=publish.DIGEST_SCHEME_LEGACY
+                ),
+            )
+            checks = publish.verify_bundle(out, tasks_dirs=[tasks])
+            digest_check = next(c for c in checks if c["name"] == "task_digest:alpha")
+            self.assertEqual(digest_check["status"], "PASS", digest_check)
+            self.assertIn("scheme=2", digest_check["detail"])
+
+            # Tampering checker_data must fail scheme-2 verify.
+            with open(os.path.join(cd, "expected.txt"), "a", encoding="utf-8") as fh:
+                fh.write("tampered\n")
+            checks = publish.verify_bundle(out, tasks_dirs=[tasks])
+            digest_check = next(c for c in checks if c["name"] == "task_digest:alpha")
+            self.assertEqual(digest_check["status"], "FAIL")
+            self.assertIn("scheme=2", digest_check["detail"])
 
     def test_verify_fails_missing_content_digest(self):
         with tempfile.TemporaryDirectory() as td:

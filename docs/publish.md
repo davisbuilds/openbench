@@ -43,7 +43,7 @@ Readers open `index.html` and, if they have the same tasks checked out, run
 |------|------|
 | `index.html` | Self-contained HTML comparison card (candidate row(s) highlighted; Wilson CIs; mean score / wall; tokens/solve; token-basis badges: `unmetered` / `self-reported` / `proxy-measured`) |
 | `results.jsonl` | Filtered rows for the claim — transcript fields stripped |
-| `provenance.json` | `obench` version, per-arm identity digests (`candidate_provenance`), per-task content digests, models, trial counts, SHA-256 of `results.jsonl` |
+| `provenance.json` | `obench` version, `digest_scheme`, per-arm identity digests (`candidate_provenance`), per-task content digests, models, trial counts, SHA-256 of `results.jsonl` |
 | `README.md` | How to re-verify and what verify does / does not prove |
 
 Default output directory: `./openbench-publish/<timestamp>/` (override with
@@ -72,9 +72,15 @@ obench verify openbench-publish/my-claim
 
 - The bundled `results.jsonl` still matches `provenance.json`'s `results_sha256`.
 - When local task trees are available (`--tasks-dir` or CWD discovery), each
-  recorded task content digest still matches
-  `hash(instruction.md + checker.sh + workspace|workspace.toml + checker_data/)`.
-  A missing `content_digest` is a FAIL (not skipped).
+  recorded task content digest still matches under the bundle's
+  `digest_scheme`:
+  - **scheme 2** (current publish default):
+    `hash(instruction.md + checker.sh + workspace|workspace.toml + checker_data/)`
+  - **scheme 1** (legacy; also assumed when `digest_scheme` is absent):
+    same inputs **without** `checker_data/`, so pre-scheme-2 bundles still
+    verify honestly against untampered task trees
+  A missing `content_digest` is a FAIL (not skipped). Verify prints
+  `scheme=N` in each task-digest check detail.
 
 ## What verify does NOT prove
 
