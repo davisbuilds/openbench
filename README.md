@@ -218,6 +218,7 @@ as `tasks-imported/<collection>/<name>/` and run with `--tasks-dir tasks-importe
 ```
 instruction.md      what the harness is told (reads as a normal engineering request)
 workspace/          starting files; copied fresh into a temp dir for every run
+                    OR workspace.toml — git-ref materialization (see below)
 checker.sh          grades the result; exit 0 = solved
 solution/           golden files, used ONLY by validate_tasks.py (never shown to the harness)
 checker_data/       optional: inputs/expected outputs the checker owns (kept out of workspace/)
@@ -225,8 +226,12 @@ checker_data/       optional: inputs/expected outputs the checker owns (kept out
 
 Contract the runner honors for every cell:
 
-- `workspace/` is copied to a disposable temp dir; the harness edits that copy.
-  The source under `tasks/` is never modified.
+- The starting workspace is materialized into a disposable temp dir; the harness
+  edits that copy. The source under `tasks/` is never modified.
+  - **Snapshot mode:** `workspace/` is copytree'd.
+  - **Git mode:** `workspace.toml` exports a git ref via `git archive` (optional
+    `subdir` / `setup` script). See [`docs/private-evals.md`](docs/private-evals.md).
+  Provide exactly one of `workspace/` or `workspace.toml`.
 - `checker.sh` runs with **cwd = the temp workspace copy** and the environment
   variable **`TASK_DIR`** set to the absolute task directory. Checkers reference
   their own data via `$TASK_DIR/checker_data/...` rather than a relative path, so
@@ -255,9 +260,9 @@ behaves exactly as before (pass → 1.0, fail → 0.0).
 
 `validate_tasks.py` enforces that each checker is correctly polarized:
 
-1. Run the checker against a fresh copy of `workspace/` → it **must fail**
+1. Run the checker against a freshly materialized workspace → it **must fail**
    (otherwise the task is scored solved before the agent does anything).
-2. Run it against `workspace/` with `solution/` overlaid → it **must pass**
+2. Run it against that workspace with `solution/` overlaid → it **must pass**
    (otherwise a correct answer would be rejected).
 
 This catches the two ways a checker can silently lie about difficulty, and is

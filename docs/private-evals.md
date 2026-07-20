@@ -55,7 +55,9 @@ Re-running `obench init` is idempotent: existing files are skipped and noted.
 `.openbench/openbench.toml` from the current directory or the nearest ancestor.
 **Explicit CLI flags always win** over the config file.
 
-## 3. Author a task from a code slice
+## 3. Author a task
+
+### Snapshot mode (small extracted slices)
 
 Do **not** copy an entire monorepo into `workspace/`. The runner
 `copytree`s the workspace for every trial — keep it a small extracted slice
@@ -68,17 +70,68 @@ obench init --task demo --from path/to/small/subdir
 That wraps the same scaffolder as `python3 -m obench.add_task`, placing the
 task at `.openbench/tasks/demo/` with `subdir` copied into `workspace/`.
 
-Then:
+### Git mode (monorepos)
+
+When the starting tree is too large to snapshot, use a `workspace.toml`
+instead of `workspace/` (having both is a validation error). The runner
+materializes a disposable export from a git ref for every trial — **no**
+`.git` in the staged tree, and the source repo is never mutated.
+
+```bash
+obench init --task billing-bug --git-ref HEAD --git-subdir services/billing
+# then edit .openbench/tasks/billing-bug/workspace.toml and pin ref to a SHA
+```
+
+Example `workspace.toml`:
+
+```toml
+kind = "git"
+repo = "."                 # git repo containing the task (private-repo common case)
+ref = "abc123def..."       # full commit SHA recommended
+subdir = "services/billing"  # optional: only this subtree is the workspace root
+# setup = "setup.sh"       # optional: task-relative script after checkout
+# depth = 1                # optional: shallow clone depth for URL repos
+```
+
+**Staging choice:** OpenBench uses `git archive` (export) into the temp
+workspace. That is fast, leaves no worktrees behind, never checks out or
+mutates the source repo, and omits `.git` by default. Remote `repo` URLs are
+cloned into a disposable temp dir, archived, then deleted.
+
+**Setup script contract** (when `setup` is set):
+
+- Path is task-relative (e.g. `setup.sh` next to `workspace.toml`).
+- Runs with **cwd = staged workspace** and **`TASK_DIR`** pointing at the
+  absolute task directory.
+- Must exit 0; nonzero exit is an **infra** cell failure (not a wrong answer).
+
+**Reproducibility:** pin `ref` to a full 40-character commit SHA. Branch or
+tag names are accepted but warn at staging time; the results row records
+`workspace_source.resolved_sha` so runs stay auditable.
+
+Then (both modes):
 
 1. Edit `instruction.md` so it reads like a normal engineering request (never
    mention the checker, scoring, or that this is a benchmark).
-2. Leave `workspace/` in the **unsolved** starting state.
+2. Leave the starting workspace **unsolved** (snapshot files, or the git ref
+   tree before your golden fix).
 3. Put the golden fix under `solution/` (only files that change or are added).
 4. Implement `checker.sh`:
    - **cwd** = the temp workspace copy
    - **`$TASK_DIR`** = absolute path to the task directory
    - **exit 0** = solved; optional `SCORE: <float>` for partial credit on
      nonzero exits
+
+### When to use which
+
+| Mode | Use when |
+|---|---|
+| `workspace/` snapshot | Small fixture trees you are happy to commit into the task dir |
+| `workspace.toml` git | Real monorepo slices; you already have the code at a git ref |
+
+Docker (`--exec docker`) stages on the **host** before the container starts
+(same as snapshot mode) and bind-mounts the staged tree — git mode works
+there without in-container git.
 
 ## 4. Polarity validation
 
@@ -145,9 +198,6 @@ python3 -m obench.scrub scrubbed/ --check
 
 ## What this path deliberately skips
 
-- Git-ref workspace materialization (clone a ref + setup script instead of a
-  static `workspace/` snapshot) is a separate roadmap item — not required for
-  small extracted slices.
 - PyPI publication of `obench` may lag; git-URL / editable installs are the
   supported path today.
 - Public leaderboard submission and originality review apply only when you
