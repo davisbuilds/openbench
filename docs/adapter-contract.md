@@ -14,13 +14,16 @@ NAME = "name"
 MODELS = {"canonical-model": "cli-model"}
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict: ...
 def version() -> str | None: ...  # optional
+# Optional doctor preflight metadata (scanned by `obench doctor`):
+# DOCTOR = {"cli": "name", "auth": callable}  # auth(probes) -> (ok, detail)
 ```
 
 `run` must be headless, enforce `timeout_s`, and return at least
 `completed`, `error`, `output_tail`, `tokens`, `turns`, and `cmd`. It may also
 return `full_output`, normalized token fields, `usage_raw`, and `token_basis`.
 `completed` means the CLI completed successfully; it does not mean the task
-passed.
+passed. When `DOCTOR` is present, `obench doctor` uses it instead of the
+built-in stock fallback for that adapter name (`pi` is the worked example).
 
 The runner copies `tasks/<task>/workspace/` to a temporary `workdir`, reads
 `instruction.md`, invokes the candidate, then runs `checker.sh` in `workdir`
@@ -64,7 +67,10 @@ configuration. Prefer a fresh temporary HOME/config directory containing only
 required auth files. Config variants stage declared config files in a fresh
 directory and overlay declared environment variables for the base adapter.
 Manifest auth mappings similarly copy only explicitly listed source files to a
-disposable home. Generic manifests receive a minimal environment by default;
+disposable home. By default those copies are discarded after the cell; set
+`persist_auth = true` on the candidate TOML to opt into writing rotated
+`auth_files` back to the host masters (stock adapters keep their existing
+persist allowlist). Generic manifests receive a minimal environment by default;
 `pass_env` explicitly forwards named host variables, while `inherit_env=true`
 is a compatibility escape hatch that should be avoided for untrusted harnesses.
 Specs contain paths and environment variable names, never credential contents.
@@ -104,8 +110,9 @@ with a path under:
 `bench/proxy.py` strips that prefix, forwards to the configured upstream, and
 writes scrubbed usage rows to the cell ledger. A generic manifest may declare a
 base-URL environment variable and proxy route; the runner supplies its per-cell
-URL. A candidate that cannot redirect model traffic must be marked unsupported
-for proxy metering rather than claiming measured usage. Cursor's private HTTP/2
+URL whenever both are present (no stock-harness allowlist). A candidate that cannot redirect model traffic must be marked unsupported
+for proxy metering rather than claiming measured usage — use `unmetered = true`
+when the provider cannot be routed. Cursor's private HTTP/2
 protocol and Devin's cloud-side inference are current examples.
 
 ## Candidate tiers

@@ -74,6 +74,8 @@ pass_env = ["VENDOR_API_KEY"]
 unset_env = ["MY_CLI_CONFIG"]
 base_url_env = "MY_CLI_BASE_URL"
 proxy_route = "chat/vendor/v1"
+# Optional: write rotated auth_files back to the host masters (default false).
+# persist_auth = true
 
 [models]
 "gpt-5.5-medium" = "gpt-5.5"
@@ -96,7 +98,11 @@ the two must be declared together. Matches are contained within the disposable
 workspace. This supports CLIs that require editable files as positional argv
 instead of discovering them from their working directory. Auth files are copied to
 the disposable home; sources must use home-relative `~/...` paths and missing
-files return `SETUP-NEEDED`. `base_url_env` and
+files return `SETUP-NEEDED`. Auth persist-back is **off by default** for
+candidates: set `persist_auth = true` only when the CLI rotates tokens in those
+declared `auth_files` and you want the host masters updated after the cell
+(same atomic schema-preserving path stock adapters use). Without the flag,
+disposable copies are discarded. `base_url_env` and
 `proxy_route` opt the CLI into the counting proxy. `proxy_route` is the path
 after `/cell/<token>/` (for example `chat/zai/api/paas/v4`); the CLI must honor
 the declared base-URL environment variable. Generic output is retained as a
@@ -104,6 +110,34 @@ transcript; token fields remain unknown unless independently metered by the
 proxy. See `bench/examples/pi-harness.toml` for a complete invocation-equivalent
 manifest (it deliberately does not claim proxy support because Pi's native
 adapter routes its subscription endpoint through a generated config file).
+
+## Doctor preflight
+
+`obench doctor` accepts the same `--candidate` flag as `obench run`. For a
+manifest it checks (no tokens spent):
+
+1. **CLI** — `command[0]` is on `PATH`
+2. **VERSION** — `version_command` exits 0 with non-empty output
+3. **AUTH** — every declared `auth_files` source exists
+4. **ENV** — declared `pass_env` names are set (warn/`INFO` if missing; does not
+   fail the preflight unless you treat warnings as blocking yourself)
+5. **MODEL** — `--model` resolves via `[models]` (any model is accepted when the
+   map is empty)
+
+For a config-variant it runs the base adapter's stock CLI/AUTH/MODEL/VERSION
+checks plus a **CONFIG** check that `config_dir` and each `config_files` source
+exist. Unknown plain `--harness` names still fail and list known stock names,
+with a hint to pass `--candidate path/to/spec.toml`.
+
+Stock adapters may optionally export doctor metadata so they stay in the
+preflight table without editing `doctor.py`:
+
+```python
+DOCTOR = {"cli": "pi", "auth": _doctor_auth}  # auth(probes) -> (ok, detail)
+```
+
+`obench/adapters/pi.py` is the worked example; adapters without `DOCTOR` keep
+the built-in fallback entries.
 
 In Docker mode the candidate file's directory is mounted read-only, so config
 sources must live in that directory tree. Declared auth sources must be under

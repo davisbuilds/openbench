@@ -273,13 +273,16 @@ scored separately.
 
 ## Adapters
 
-Each harness is a module `bench/adapters/<name>.py` exposing `NAME`, a `MODELS`
+Each harness is a module `obench/adapters/<name>.py` exposing `NAME`, a `MODELS`
 map, and `run(instruction, workdir, model, timeout_s) -> dict`. The adapter maps
 the canonical model name to the harness's own flags, runs the CLI headlessly with
 cwd = `workdir`, enforces the timeout via `subprocess` (no `timeout` command —
 macOS has none), and returns `completed` / `error` / `tokens` / `turns` / `cmd`.
 `completed` means the CLI exited cleanly; it is **not** task success — the checker
-decides that. Full contract: [`bench/ADAPTER_SPEC.md`](bench/ADAPTER_SPEC.md).
+decides that. Full contract: [`docs/adapter-contract.md`](docs/adapter-contract.md).
+Adapters may optionally export `DOCTOR = {"cli", "auth"}` so `obench doctor`
+picks them up without editing the doctor allowlist; third-party CLIs use
+`--candidate` manifests instead (see [`docs/byo-harnesses.md`](docs/byo-harnesses.md)).
 
 Auth is handled inside each adapter, read-only — the user's real config files are
 never modified:

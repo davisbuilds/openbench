@@ -60,19 +60,21 @@ run loop, tool set, and permission policy. Tasks are self-contained
   directories (today it hard-codes `tasks/` + `tasks-imported/`), and
   `--preflight-smoke` must pick a smoke task from the given root instead of
   hard-requiring the repo's `make-it-run` (`PREFLIGHT_TASK` in `run.py`).
-- **P0 — `obench init` for private repos.** Scaffold `.openbench/` in a
-  company repo; add a task mode that materializes the workspace from a git
-  ref + setup script instead of a static `workspace/` snapshot (the
-  `shutil.copytree` model does not scale to monorepos). Private-eval docs
-  separate from the public contamination/originality contribution rules.
+- **P0 — `obench init` for private repos. [DONE Jul 2026]** `.openbench/`
+  scaffold with `openbench.toml` config defaults; git-mode workspaces
+  (`workspace.toml`: repo/ref/subdir/setup, `git archive` staging, resolved
+  SHA recorded as `workspace_source` provenance); `docs/private-evals.md`.
+  Packaging is also done: `pip install` (git-URL), umbrella `obench` CLI,
+  arbitrary task roots for validate/preflight.
 - **P1 — Show-off loop.** `obench publish`: gate-passing results → shareable
   self-contained HTML card (`report_page.py`) + signed provenance blob; a
   community submission path onto the public site with CI re-verifying
   provenance digests. Seed it by porting 2–3 popular harnesses ourselves.
-- **P1 — Soften allowlists.** `doctor.py:HARNESSES`, `run.py:PROXY_HARNESSES`,
-  `auth_persist.py:AUTH_PERSIST`, and the Docker image's fixed CLI set should
-  be data-driven from adapter/manifest declarations so unknown harnesses get
-  doctor checks, metering, and Docker auth without editing our source.
+- **P1 — Soften allowlists. [DONE Jul 2026]** `doctor.py` discovers optional
+  adapter `DOCTOR` exports (pi migrated) and accepts `--candidate` preflight;
+  proxy metering for manifests is declaration-driven (`base_url_env` +
+  `proxy_route`); candidate auth persist-back defaults off with
+  `persist_auth = true` opt-in. Docker image's fixed CLI set remains a follow-up.
 - **P1 — Harbor bridge.** One-way exporter OpenBench task → Harbor task
   (`checker.sh` + `SCORE:` → `tests/test.sh` writing `reward.txt`); lets
   companies use Harbor's cloud sandboxes while OpenBench stays the
