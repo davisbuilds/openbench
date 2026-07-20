@@ -51,7 +51,7 @@ run loop, tool set, and permission policy. Tasks are self-contained
   (`pip install obench`, `obench run ...`) — zero collision risk. The project
   is still called OpenBench; `obench` is just the install/command handle.
   Umbrella CLI with subcommands (`obench run / report / doctor / validate /
-  gate / compare / init`). Git-URL installs (`pip install git+https://...`)
+  gate / compare / init / publish / verify`). Git-URL installs (`pip install git+https://...`)
   work pre-PyPI. Remove repo-relative defaults (`REPO = dirname(bench)` in
   `run.py`, `report.py`, `doctor.py`, `stats.py`, ...): explicit paths/config,
   with CWD discovery (`tasks/`, then `.openbench/tasks/`) when run outside the
@@ -66,10 +66,10 @@ run loop, tool set, and permission policy. Tasks are self-contained
   SHA recorded as `workspace_source` provenance); `docs/private-evals.md`.
   Packaging is also done: `pip install` (git-URL), umbrella `obench` CLI,
   arbitrary task roots for validate/preflight.
-- **P1 — Show-off loop.** `obench publish`: gate-passing results → shareable
-  self-contained HTML card (`report_page.py`) + signed provenance blob; a
-  community submission path onto the public site with CI re-verifying
-  provenance digests. Seed it by porting 2–3 popular harnesses ourselves.
+- **P1 — Show-off loop. [PARTIAL Jul 2026]** `obench publish` / `obench verify`
+  ship a shareable HTML card + provenance digests (`docs/publish.md`). Still
+  open: community submission path onto the public site with CI re-verifying
+  digests, and seeding by porting 2–3 popular harnesses ourselves.
 - **P1 — Soften allowlists. [DONE Jul 2026]** `doctor.py` discovers optional
   adapter `DOCTOR` exports (pi migrated) and accepts `--candidate` preflight;
   proxy metering for manifests is declaration-driven (`base_url_env` +

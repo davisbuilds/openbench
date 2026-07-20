@@ -210,3 +210,17 @@ current result should be understood conceptually as: schema/policy dry-run
 passes; live metering, timeout, version stamping, failure honesty, and optional
 calibration remain operator-run evidence. This documentation does not claim a
 live result and no live call is needed to review the manifest.
+
+## Publish a shareable claim
+
+After the gate and a matrix run against stock arms, build a postable bundle:
+
+```bash
+obench publish --results-path results/my-claim.jsonl --candidate my-cli
+obench verify openbench-publish/<bundle>
+```
+
+The bundle is self-contained HTML + filtered `results.jsonl` + digests in
+`provenance.json`. Transcripts stay local. See
+[`docs/publish.md`](publish.md) for the full show-off workflow, what verify
+proves, and what it deliberately does not.

@@ -149,7 +149,8 @@ pip install "git+https://github.com/minghinmatthewlam/openbench.git"
 ```
 
 Then use the umbrella CLI: `obench init`, `obench run`, `obench report`,
-`obench doctor`, `obench validate`, `obench gate`, `obench compare`. Legacy
+`obench doctor`, `obench validate`, `obench gate`, `obench compare`,
+`obench publish`, `obench verify`. Legacy
 `python3 bench/run.py` (and friends) still forward with a deprecation note.
 
 ## Quickstart
@@ -348,8 +349,10 @@ unscrubbed** harness output and can contain your absolute home paths, username,
 hostname, email, or secrets the agent echoed (API keys, tokens).
 
 **Hard rule: transcripts are never published as-is.** `transcripts/` is
-gitignored, and there is deliberately no publishing path in this repo. Before
-sharing any transcript you must do a manual review pass:
+gitignored. `obench publish` builds a shareable comparison bundle (HTML card +
+filtered results + provenance) and **refuses** to include transcripts; see
+[`docs/publish.md`](docs/publish.md). Before sharing any transcript you must do
+a manual review pass:
 
 ```bash
 python3 -m obench.scrub transcripts/ --check          # REPORT potential PII (exit 1 if any)
