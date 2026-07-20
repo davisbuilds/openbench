@@ -1,10 +1,12 @@
 # Bring your own harness
 
 Pass one or more candidate files with `--candidate`; each file's `name` becomes
-the independent results group label. Candidate `run_id` values add a short
-content digest (`name@digest:...`) so editing a spec/config cannot silently reuse
-stale rows. Candidates
-may be mixed with stock `--harness` names.
+the independent results group label. `--candidate` accepts a filesystem path to
+a TOML manifest **or** an installed harness-pack ref
+(`org/name[@version][:manifest-stem]` — see [`docs/task-packs.md`](task-packs.md)).
+Candidate `run_id` values add a short content digest (`name@digest:...`) so
+editing a spec/config cannot silently reuse stale rows. Candidates may be mixed
+with stock `--harness` names.
 
 ## Config variant
 

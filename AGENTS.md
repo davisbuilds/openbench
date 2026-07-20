@@ -57,7 +57,7 @@ run loop, tool set, and permission policy. Tasks are self-contained
 | Publish / verify digests | `obench/publish.py` |
 | Counting proxy | `obench/proxy.py` |
 | Harbor export | `obench/export_harbor.py` |
-| Versioned task packs | `obench/packs.py`, `docs/task-packs.md` |
+| Versioned packs (tasks + harness) | `obench/packs.py`, `docs/task-packs.md`, `docs/packs.json` |
 | Stock adapters | `obench/adapters/` |
 | Unit tests | `obench/tests/` |
 | Tasks | `tasks/` (public), `.openbench/tasks/` (private-init), `.openbench/packs/` (installed packs) |
@@ -116,13 +116,17 @@ No live harness or model-API calls; stdlib-only.
   task (`checker.sh` + `SCORE:` → `tests/test.sh` writing `reward.txt`); lets
   companies use Harbor's cloud sandboxes while OpenBench stays the
   comparison/stats/auth layer.
-- **P2 — Versioned task packs. [PARTIAL Jul 2026]** Task packs as versioned,
-  installable-by-name artifacts (`org/pack@version`) via `obench pack`
-  (`init` / `install` / `list` / `verify`): local dir, git (`git archive`), or
-  HTTPS zip/tarball — no custom package server (`docs/task-packs.md`). Layout
-  `.openbench/packs/<org>/<name>/<version>/` with `pack_source.json`
-  provenance + scheme-2 task digests. Still open: harness-manifest packs, a
-  community hub/index, and seeded published pack examples.
+- **P2 — Versioned packs. [DONE Jul 2026]** Task and harness packs as
+  versioned, installable-by-name artifacts (`org/pack@version`) via
+  `obench pack` (`init` / `install` / `list` / `verify` / `publish-index`):
+  local dir, git (`git archive`), or HTTPS zip/tarball — no custom package
+  server (`docs/task-packs.md`). `pack.toml` `kind = "tasks"|"harness"`;
+  layout `.openbench/packs/<org>/<name>/<version>/` with `pack_source.json`
+  provenance (scheme-2 task digests or per-manifest `spec_sha256`). Harness
+  packs resolve as `--candidate org/name[@version][:manifest]`. Static index
+  `docs/packs.json` + site Packs section; seeds under
+  `data/packs/openbench-core-smoke/` and `data/packs/openbench-aider/`.
+  Still open: a community hub beyond the static JSON index.
 
 ## Non-goals
 

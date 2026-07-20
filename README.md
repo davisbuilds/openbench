@@ -18,7 +18,7 @@ local). To run OpenBench tasks on Harbor cloud sandboxes, see
 [`docs/harbor-export.md`](docs/harbor-export.md) (`obench export harbor`).
 To pull Harbor-format tasks into OpenBench, see
 [`docs/harbor-import.md`](docs/harbor-import.md) (`obench import harbor`).
-Versioned task packs (`org/name@version`) are covered in
+Versioned packs (`org/name@version`, tasks or harness manifests) are covered in
 [`docs/task-packs.md`](docs/task-packs.md) (`obench pack install …`).
 
 **Live results:** https://minghinmatthewlam.github.io/openbench/
@@ -157,7 +157,7 @@ Then use the umbrella CLI: `obench init`, `obench run`, `obench report`,
 `obench doctor`, `obench validate`, `obench gate`, `obench compare`,
 `obench publish`, `obench verify`, `obench pack`, `obench export`,
 `obench import`. Legacy `python3 bench/run.py` (and friends) still forward with
-a deprecation note. Versioned task packs (`org/name@version`) are documented in
+a deprecation note. Versioned packs (`org/name@version`) are documented in
 [`docs/task-packs.md`](docs/task-packs.md).
 
 ## Quickstart
