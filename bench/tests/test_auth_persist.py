@@ -59,6 +59,21 @@ class TestAtomicPersist(unittest.TestCase):
                     fh.read(), b'{"provider":"xai","refresh_token":"new-rotated-token"}')
             self.assertEqual(stat.S_IMODE(os.stat(master).st_mode), 0o600)
 
+    def test_symlinked_master_updates_target_without_replacing_link(self):
+        with tempfile.TemporaryDirectory() as td:
+            target = os.path.join(td, "canonical.json")
+            master = os.path.join(td, "auth.json")
+            copy = os.path.join(td, "copy.json")
+            with open(target, "wb") as fh:
+                fh.write(b'{"provider":"xai","refresh_token":"old"}')
+            os.symlink(target, master)
+            with open(copy, "wb") as fh:
+                fh.write(b'{"provider":"xai","refresh_token":"new"}')
+            self.assertTrue(auth_persist.persist_auth_file(copy, master))
+            self.assertTrue(os.path.islink(master))
+            with open(target, "rb") as fh:
+                self.assertIn(b'"new"', fh.read())
+
     def test_account_identity_change_is_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             master = os.path.join(td, "auth.json")

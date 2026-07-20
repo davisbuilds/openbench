@@ -97,12 +97,15 @@ def _validated_auth_bytes(current_bytes, updated_bytes):
 def persist_auth_file(copy_path, master_path):
     """Atomically replace *master_path* when *copy_path* has different bytes.
 
-    Only the named file is read and returned. The lock prevents two local cells
+    Symlinked masters are resolved once so the atomic replacement updates their
+    target without destroying the user's link. Only the named file is read and
+    returned. The lock prevents two local cells
     from interleaving compare/replace; across hosts or non-cooperating writers,
     the last completed cell still wins.
     """
     if not copy_path or not master_path or not os.path.isfile(copy_path):
         return False
+    master_path = os.path.realpath(master_path)
 
     with open(copy_path, "rb") as fh:
         updated = fh.read()
