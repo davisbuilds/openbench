@@ -9,10 +9,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH_DIR)
 
-import add_task  # noqa: E402
+from obench import add_task  # noqa: E402
 
 
 class AddTaskTests(unittest.TestCase):

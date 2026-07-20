@@ -4,9 +4,11 @@
 import importlib.util
 import json
 import os
-import unittest
 
 BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+import unittest
+
 ADAPTERS_DIR = os.path.join(BENCH_DIR, "adapters")
 
 
@@ -106,7 +108,5 @@ class TestCodexConfigIsolation(unittest.TestCase):
                 self.codex._bridge_reachable = old_reach
         self.assertTrue(res["completed"])
         assert_isolated_with_feature_disables(self, calls[0][0], calls[0][1])
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -11,12 +11,14 @@ lock in the decode-safe `_err_tail` helper and the clean-timeout-dict contract.
 
 import importlib.util
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import subprocess
 import sys
 import tempfile
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADAPTERS_DIR = os.path.join(BENCH_DIR, "adapters")
 ADAPTERS = ["codex", "opencode", "pi", "cursor", "devin"]
 
@@ -94,7 +96,5 @@ class TestTimeoutReturnsCleanDict(unittest.TestCase):
 
     def test_devin(self):
         self._assert_clean(self._run_with_timeout(load("devin"), "gpt-5.5-medium"))
-
-
 if __name__ == "__main__":
     unittest.main()

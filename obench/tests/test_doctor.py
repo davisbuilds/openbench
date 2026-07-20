@@ -12,9 +12,8 @@ import sys
 import types
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import doctor  # noqa: E402
+from obench import doctor  # noqa: E402
 
 
 class FakeProbes:
@@ -339,7 +338,7 @@ class TestDockerInformational(unittest.TestCase):
         p.run_map[inspect] = (1, "no such image")
         ok, detail = doctor.check_image_versions(p, ["codex"], doctor.pinned_versions())
         self.assertIsNone(ok)
-        self.assertIn("docker build -t openbench-harness:latest bench/docker", detail)
+        self.assertIn("docker build -t openbench-harness:latest obench/docker", detail)
 
     def test_image_drift_fails_doctor(self):
         p = all_green_probes()

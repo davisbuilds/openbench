@@ -3,16 +3,15 @@ import contextlib
 import io
 import json
 import os
+
+BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import sys
 import tempfile
 import unittest
 from unittest import mock
-
-BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH)
-
-import candidate_gate
-import candidates
+from obench import candidate_gate
+from obench import candidates
 
 
 class CandidateGateTests(unittest.TestCase):

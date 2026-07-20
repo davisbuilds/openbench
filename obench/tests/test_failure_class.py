@@ -5,13 +5,11 @@ import os
 import tempfile
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 import sys
-sys.path.insert(0, BENCH_DIR)
 
-import failure_class  # noqa: E402
-import run  # noqa: E402
+from obench import failure_class  # noqa: E402
+from obench import run  # noqa: E402
 
 
 MOONSHOT_429 = (

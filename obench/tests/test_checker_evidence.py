@@ -3,16 +3,15 @@
 
 import json
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import sys
 import tempfile
 import time
 import unittest
 from unittest import mock
-
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH_DIR)
-
-import run  # noqa: E402
+from obench import run  # noqa: E402
 
 
 def _write(path, text):

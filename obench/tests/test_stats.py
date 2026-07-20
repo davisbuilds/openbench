@@ -8,9 +8,8 @@ import subprocess
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import stats  # noqa: E402
+from obench import stats  # noqa: E402
 
 
 class StatsTestCase(unittest.TestCase):

@@ -9,10 +9,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH_DIR)
 
-import run  # noqa: E402
+from obench import run  # noqa: E402
 
 
 def result_row(failure_class="wrong_answer", tokens=None, error=None):

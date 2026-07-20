@@ -8,15 +8,14 @@ import signal
 import subprocess
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
+from . import run as bench_run
+from .paths import PACKAGE_DIR, SOURCE_ROOT, default_results_path, default_tasks_dir
 
-import run as bench_run  # noqa: E402
+HERE = PACKAGE_DIR
+REPO = SOURCE_ROOT
 
-DEFAULT_OUT = bench_run.DEFAULT_RESULTS_PATH
-DEFAULT_TASKS_DIR = bench_run.DEFAULT_TASKS_DIR
+DEFAULT_OUT = default_results_path()
+DEFAULT_TASKS_DIR = default_tasks_dir() or os.path.join(os.getcwd(), "tasks")
 DEFAULT_RUNNER = os.path.join(HERE, "run.py")
 TERMINATION_GRACE_SECONDS = 5
 

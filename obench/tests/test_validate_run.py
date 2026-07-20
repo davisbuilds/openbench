@@ -9,10 +9,8 @@ import sys
 import tempfile
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH_DIR)
 
-import validate_run  # noqa: E402
+from obench import validate_run  # noqa: E402
 
 
 def row(harness="h1", model="m1", task="t1", trial=1, **overrides):

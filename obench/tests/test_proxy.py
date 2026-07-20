@@ -12,11 +12,9 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH_DIR)
 
-import proxy  # noqa: E402
-import run  # noqa: E402
+from obench import proxy  # noqa: E402
+from obench import run  # noqa: E402
 
 SECRET = "TEST_SECRET_VALUE_MUST_NOT_APPEAR"
 

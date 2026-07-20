@@ -34,10 +34,11 @@ import time
 import uuid
 from types import SimpleNamespace
 
-from auth_persist import AUTH_PERSIST, try_persist_auth_file
+from .auth_persist import AUTH_PERSIST, try_persist_auth_file
+from .paths import PACKAGE_DIR, SOURCE_ROOT
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(HERE)
+HERE = PACKAGE_DIR
+REPO_ROOT = SOURCE_ROOT
 ENTRY_PATH = os.path.join(HERE, "entry.py")
 CANDIDATES_PATH = os.path.join(HERE, "candidates.py")
 AUTH_PERSIST_PATH = os.path.join(HERE, "auth_persist.py")

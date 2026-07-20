@@ -7,10 +7,8 @@ import sys
 import tempfile
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH_DIR)
 
-import backfill_failure_class  # noqa: E402
+from obench import backfill_failure_class  # noqa: E402
 
 
 MOONSHOT_429 = (

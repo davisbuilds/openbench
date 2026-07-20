@@ -8,17 +8,16 @@ machine running the tests.
 """
 
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import subprocess
 import sys
 import tempfile
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRUB_PY = os.path.join(BENCH_DIR, "scrub.py")
-
-sys.path.insert(0, BENCH_DIR)
-
-import scrub  # noqa: E402
+from obench import scrub  # noqa: E402
 
 # Synthetic identity so tests don't depend on the real machine.
 CTX = scrub.build_context(

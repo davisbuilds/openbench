@@ -8,11 +8,10 @@ import stat
 import sys
 from datetime import date
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
+from . import admission_gate
+from .paths import PACKAGE_DIR
 
-import admission_gate  # noqa: E402
+HERE = PACKAGE_DIR
 
 
 INSTRUCTION_TEMPLATE = """# TODO: Task title

@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from run import proxy_split_from_usage
+from .run import proxy_split_from_usage
 
 
 def input_split(usage: Any) -> tuple[int, int, int] | None:

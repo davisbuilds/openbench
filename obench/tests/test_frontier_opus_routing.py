@@ -8,10 +8,12 @@ temporary files or env vars, and the codex bridge reachability probe is patched.
 import importlib.util
 import json
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import tempfile
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADAPTERS_DIR = os.path.join(BENCH_DIR, "adapters")
 
 
@@ -397,7 +399,5 @@ class TestCursorOpus(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--model") + 1], "claude-opus-4-8-thinking-medium")
         self.assertIn("--trust", cmd)
         self.assertIn("--force", cmd)
-
-
 if __name__ == "__main__":
     unittest.main()

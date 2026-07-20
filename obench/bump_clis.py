@@ -15,8 +15,10 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
+from .paths import PACKAGE_DIR, SOURCE_ROOT
+
+HERE = PACKAGE_DIR
+REPO = SOURCE_ROOT
 DOCKERFILE = os.path.join(HERE, "docker", "Dockerfile")
 DEFAULT_IMAGE = "openbench-harness:latest"
 VERSION_FILE = "/etc/openbench-cli-versions.json"

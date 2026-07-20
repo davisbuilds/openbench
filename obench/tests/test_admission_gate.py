@@ -9,11 +9,9 @@ import tempfile
 import textwrap
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH_DIR)
 
-import admission_gate  # noqa: E402
-import determinism_check  # noqa: E402
+from obench import admission_gate  # noqa: E402
+from obench import determinism_check  # noqa: E402
 
 
 class AdmissionGateTests(unittest.TestCase):

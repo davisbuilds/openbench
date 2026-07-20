@@ -26,12 +26,31 @@ import os
 import sys
 from collections import Counter, defaultdict
 
+from .paths import SOURCE_ROOT, default_imported_tasks_dir, default_tasks_dir, find_repo_root
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
-DEFAULT_TASK_DIRS = (
-    os.path.join(REPO, "tasks"),
-    os.path.join(REPO, "tasks-imported", "terminal-bench"),
-)
+REPO = SOURCE_ROOT
+
+
+def _default_task_dirs():
+    dirs = []
+    tasks = default_tasks_dir()
+    if tasks:
+        dirs.append(tasks)
+    root = find_repo_root()
+    if root:
+        tb = os.path.join(root, "tasks-imported", "terminal-bench")
+        if os.path.isdir(tb):
+            dirs.append(tb)
+    elif default_imported_tasks_dir():
+        pass
+    return tuple(dirs) if dirs else (
+        os.path.join(os.getcwd(), "tasks"),
+        os.path.join(os.getcwd(), "tasks-imported", "terminal-bench"),
+    )
+
+
+DEFAULT_TASK_DIRS = _default_task_dirs()
 EXCLUDED_FAILURE_CLASSES = {"infra", "rate_limited"}
 GROUP_CHOICES = ("harness,model", "model", "harness")
 PROVENANCE_CORE_FIELDS = ("image_digest", "harness_version", "harness_version_source", "timeout_s")
@@ -46,10 +65,7 @@ PROVENANCE_CHECKER_FIELDS = (
 )
 Z_95 = 1.96
 
-try:  # Package import path (`import bench.stats`).
-    from .failure_class import class_for_report
-except ImportError:  # Script/test path (`python3 bench/stats.py` or bench on sys.path).
-    from failure_class import class_for_report
+from .failure_class import class_for_report
 
 
 def is_number(value):

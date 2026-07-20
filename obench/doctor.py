@@ -13,7 +13,7 @@ spending any tokens (no live model calls). Per requested harness it verifies:
 Docker daemon/image availability is informational. A successfully inspected
 image whose labels drift from the Dockerfile pins fails the preflight.
 
-    python3 bench/doctor.py [--harness codex,pi,...] [--model gpt-5.5-medium]
+    python3 -m obench.doctor [--harness codex,pi,...] [--model gpt-5.5-medium]
 
 Exit status is nonzero if any requested harness fails any of CLI/AUTH/MODEL.
 
@@ -43,11 +43,12 @@ import http.client
 import subprocess
 from urllib.parse import urlsplit
 
-from bump_clis import (image_pin_mismatches, parse_image_pin_labels,
-                       pinned_versions, reported_version, resolve_pin_key)
+from .bump_clis import (image_pin_mismatches, parse_image_pin_labels,
+                        pinned_versions, reported_version, resolve_pin_key)
+from .paths import PACKAGE_DIR, default_adapters_dir, ensure_package_path_on_sys_path
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ADAPTERS_DIR = os.path.join(HERE, "adapters")
+HERE = PACKAGE_DIR
+ADAPTERS_DIR = default_adapters_dir()
 DEFAULT_MODEL = "gpt-5.5-medium"
 DEFAULT_IMAGE = "openbench-harness:latest"
 
@@ -133,7 +134,8 @@ class Probes:
             return None
 
     def import_adapter(self, name):
-        """Import ``bench/adapters/<name>.py`` and return the module."""
+        """Import ``obench/adapters/<name>.py`` and return the module."""
+        ensure_package_path_on_sys_path()
         path = os.path.join(ADAPTERS_DIR, f"{name}.py")
         if not os.path.isfile(path):
             raise FileNotFoundError(f"adapter not found: {path}")

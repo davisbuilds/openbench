@@ -8,18 +8,17 @@ and lands in the default (results-sibling) location when unspecified.
 """
 
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import subprocess
 import sys
 import tempfile
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(BENCH_DIR, "tests", "fixtures")
 RUN_PY = os.path.join(BENCH_DIR, "run.py")
-
-sys.path.insert(0, BENCH_DIR)
-
-import run  # noqa: E402
+from obench import run  # noqa: E402
 
 
 class TestTranscripts(unittest.TestCase):

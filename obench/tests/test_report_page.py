@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from bench import report_page
+from obench import report_page
 
 
 class ReportPageTest(unittest.TestCase):

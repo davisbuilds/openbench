@@ -22,11 +22,10 @@ import json
 import math
 import os
 
-from failure_class import FAILURE_CLASSES, class_for_report, is_excluded_from_solve_rate
+from .failure_class import FAILURE_CLASSES, class_for_report, is_excluded_from_solve_rate
+from .paths import default_results_path
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
-DEFAULT_RESULTS_PATH = os.path.join(REPO, "results", "results.jsonl")
+DEFAULT_RESULTS_PATH = default_results_path()
 
 
 def wilson_ci(successes, n, z=1.96):

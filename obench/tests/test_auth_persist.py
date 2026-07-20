@@ -2,6 +2,9 @@
 
 import importlib.util
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import stat
 import sys
 import tempfile
@@ -9,13 +12,10 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADAPTERS_DIR = os.path.join(BENCH_DIR, "adapters")
-sys.path.insert(0, BENCH_DIR)
-
-import auth_persist  # noqa: E402
-import docker_exec  # noqa: E402
-import entry  # noqa: E402
+from obench import auth_persist  # noqa: E402
+from obench import docker_exec  # noqa: E402
+from obench import entry  # noqa: E402
 
 
 def _load_adapter(name):

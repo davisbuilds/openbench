@@ -5,9 +5,8 @@ import os
 import sys
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from report import wilson_ci  # noqa: E402
+from obench.report import wilson_ci  # noqa: E402
 
 
 class TestWilsonCI(unittest.TestCase):

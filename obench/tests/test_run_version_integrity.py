@@ -11,11 +11,9 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH_DIR)
 
-import docker_exec  # noqa: E402
-import run  # noqa: E402
+from obench import docker_exec  # noqa: E402
+from obench import run  # noqa: E402
 
 
 class TestContainerVersionFileParsing(unittest.TestCase):
@@ -116,7 +114,7 @@ class TestVersionPreflight(unittest.TestCase):
             [], ["--exec", "docker"], (drift, True))
         self.assertEqual((code, emitted, call_count), (2, [], 0))
         self.assertIn("codex: image=0.144.0 pin=0.144.1", stderr)
-        self.assertIn("docker build -t openbench-harness:latest bench/docker", stderr)
+        self.assertIn("docker build -t openbench-harness:latest obench/docker", stderr)
 
     def test_image_mismatch_with_flag_marks_every_row(self):
         drift = [{"harness": "codex", "actual": "0.144.0",
@@ -131,14 +129,14 @@ class TestVersionPreflight(unittest.TestCase):
             [], ["--exec", "docker"], ([], False))
         self.assertEqual((code, emitted, call_count), (0, [False], 1))
         self.assertIn("falling back to the validated host lane", stderr)
-        self.assertIn("docker build -t openbench-harness:latest bench/docker", stderr)
+        self.assertIn("docker build -t openbench-harness:latest obench/docker", stderr)
 
     def test_missing_image_without_fallback_refuses_with_build_hint(self):
         code, emitted, call_count, stderr = self._run_main(
             [], ["--exec", "docker", "--no-docker-fallback"], ([], False))
         self.assertEqual((code, emitted, call_count), (2, [], 0))
         self.assertIn("Version preflight failed: cannot inspect Docker image", stderr)
-        self.assertIn("docker build -t openbench-harness:latest bench/docker", stderr)
+        self.assertIn("docker build -t openbench-harness:latest obench/docker", stderr)
 
     def test_mismatch_refuses_before_any_cell(self):
         drift = [{"harness": "codex", "actual": "0.144.0", "expected": "0.144.1",
@@ -148,7 +146,7 @@ class TestVersionPreflight(unittest.TestCase):
         self.assertEqual(emitted, [])
         self.assertEqual(call_count, 0)
         self.assertIn("host=0.144.0 pin=0.144.1", stderr)
-        self.assertIn("bench/bump_clis.py --sync-host", stderr)
+        self.assertIn("obench/bump_clis.py --sync-host", stderr)
 
     def test_mismatch_with_flag_marks_every_row(self):
         drift = [{"harness": "codex", "actual": "0.144.0", "expected": "0.144.1",

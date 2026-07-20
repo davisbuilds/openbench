@@ -14,6 +14,9 @@ import tempfile
 import tomllib
 
 
+from .paths import ensure_package_path_on_sys_path
+
+
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
@@ -25,6 +28,7 @@ def _candidate_name(data):
 
 
 def _load_adapter(adapters_dir, name):
+    ensure_package_path_on_sys_path()
     path = os.path.join(adapters_dir, f"{name}.py")
     if not os.path.isfile(path):
         raise FileNotFoundError(f"adapter not found: {path}")

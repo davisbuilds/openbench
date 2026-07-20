@@ -1,13 +1,13 @@
-# Isolation image for `python bench/run.py --exec docker`.
+# Isolation image for `obench run --exec docker` / `python -m obench.run --exec docker`.
 #
 # One disposable container per benchmark cell runs the SAME adapter the host
-# would (bench/entry.py imports bench/adapters/<harness>.py unchanged). This
+# would (obench/entry.py imports obench/adapters/<harness>.py unchanged). This
 # image therefore only needs: a Python 3 interpreter (to run entry.py + the
 # stdlib-only adapters) and the harness CLIs on PATH. Auth is bind-mounted
 # read-only at RUN TIME (see docker_exec.py) and is never baked in here.
 #
 # Build:
-#   docker build -t openbench-harness:latest bench/docker
+#   docker build -t openbench-harness:latest obench/docker
 #
 # node base gives us node+npm for the Node-based CLIs; python3 comes from apt.
 # Both are required.

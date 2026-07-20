@@ -5,10 +5,8 @@ import os
 import sys
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH_DIR)
 
-import report  # noqa: E402
+from obench import report  # noqa: E402
 
 
 class TestReportFailureClass(unittest.TestCase):

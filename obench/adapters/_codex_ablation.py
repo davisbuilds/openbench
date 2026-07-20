@@ -17,7 +17,10 @@ import re
 import shutil
 import tempfile
 
-from auth_persist import try_persist_auth_file
+try:
+    from obench.auth_persist import try_persist_auth_file
+except ImportError:  # file-path / Docker mount layout
+    from auth_persist import try_persist_auth_file
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))

@@ -11,10 +11,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BENCH_DIR)
 
-import run_matrix  # noqa: E402
+from obench import run_matrix  # noqa: E402
 
 
 class RunMatrixTests(unittest.TestCase):

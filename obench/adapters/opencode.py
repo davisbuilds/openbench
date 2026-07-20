@@ -35,7 +35,10 @@ import shutil
 import subprocess
 import tempfile
 
-from auth_persist import try_persist_auth_file
+try:
+    from obench.auth_persist import try_persist_auth_file
+except ImportError:  # file-path / Docker mount layout
+    from auth_persist import try_persist_auth_file
 
 NAME = "opencode"
 _EXE = "opencode"

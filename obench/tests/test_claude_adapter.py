@@ -8,15 +8,14 @@ the process environment.
 
 import importlib.util
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import sys
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADAPTER_PATH = os.path.join(BENCH_DIR, "adapters", "claude.py")
-
-sys.path.insert(0, BENCH_DIR)
-
-import docker_exec  # noqa: E402
+from obench import docker_exec  # noqa: E402
 
 
 def _load_claude():

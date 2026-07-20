@@ -13,7 +13,7 @@ import re
 import sys
 from collections import Counter, defaultdict
 
-from failure_class import FAILURE_CLASSES, has_instant_cli_exit_shape
+from .failure_class import FAILURE_CLASSES, has_instant_cli_exit_shape
 
 EXIT_FINDINGS = 3
 DEFAULT_TIMEOUT_S = 600.0

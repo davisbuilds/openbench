@@ -3,15 +3,15 @@
 
 import json
 import os
+
+BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import subprocess
 import sys
 import unittest
 
-BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(BENCH, "tests", "fixtures")
-sys.path.insert(0, BENCH)
-
-import analyze_prefix  # noqa: E402
+from obench import analyze_prefix  # noqa: E402
 
 
 class PrefixAnalysisTests(unittest.TestCase):

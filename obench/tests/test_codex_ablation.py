@@ -3,10 +3,12 @@
 
 import importlib.util
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import tempfile
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADAPTERS_DIR = os.path.join(BENCH_DIR, "adapters")
 
 
@@ -99,7 +101,5 @@ class TestCodexAblationRegistry(unittest.TestCase):
                 self.assertIn("deepseek-v4-flash", mod.OPEN_MODELS)
                 self.assertTrue(callable(mod.run))
                 self.assertTrue(callable(mod.version))
-
-
 if __name__ == "__main__":
     unittest.main()

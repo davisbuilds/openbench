@@ -13,11 +13,7 @@ import tempfile
 from collections import defaultdict
 from datetime import date
 
-try:
-    from . import compare, stats
-except ImportError:
-    import compare
-    import stats
+from . import compare, stats
 
 TOKEN_FIELDS = ("tokens_input_uncached", "tokens_output", "tokens_cache_read")
 PALETTE = (

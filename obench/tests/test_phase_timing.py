@@ -9,9 +9,8 @@ import tempfile
 import time
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import run  # noqa: E402
+from obench import run  # noqa: E402
 
 
 class TestPhaseTiming(unittest.TestCase):

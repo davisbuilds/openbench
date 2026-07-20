@@ -11,18 +11,17 @@ Uses a tiny fixture task (``write-marker``) plus a fixture adapter
 
 import json
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import subprocess
 import sys
 import tempfile
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(BENCH_DIR, "tests", "fixtures")
 RUN_PY = os.path.join(BENCH_DIR, "run.py")
-
-sys.path.insert(0, BENCH_DIR)
-
-import report  # noqa: E402
+from obench import report  # noqa: E402
 
 
 def read_rows(path):
@@ -67,7 +66,7 @@ class TestEndToEnd(unittest.TestCase):
         rel_fixtures = os.path.join("bench", rel_fixtures)
         results = os.path.join(self.tmp, "rel.jsonl")
         proc = subprocess.run(
-            [sys.executable, "bench/run.py",
+            [sys.executable, "obench/run.py",
              "--task", "write-marker",
              "--harness", "fake_adapter",
              "--results-path", results,

@@ -11,11 +11,13 @@ SETUP-NEEDED dict when the bridge port is unreachable.
 
 import importlib.util
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import sys
 import types
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADAPTERS_DIR = os.path.join(BENCH_DIR, "adapters")
 BRIDGE_DIR = os.path.join(BENCH_DIR, "bridge")
 
@@ -273,7 +275,5 @@ class TestDeepSeekReasoningPreserve(unittest.TestCase):
             "deepseek/deepseek-v4-flash", {"thinking": {"type": "enabled"}}))
         self.assertFalse(self.h._deepseek_thinking_mode_active_for_bridge(
             "deepseek-v4-flash", {"thinking": {"type": "disabled"}}))
-
-
 if __name__ == "__main__":
     unittest.main()

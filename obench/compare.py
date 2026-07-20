@@ -14,12 +14,8 @@ import statistics
 import sys
 from collections import Counter, defaultdict
 
-try:  # Package import path.
-    from . import stats
-    from .failure_class import has_near_zero_agent_tokens
-except ImportError:  # Script path (`python3 bench/compare.py`).
-    import stats
-    from failure_class import has_near_zero_agent_tokens
+from . import stats
+from .failure_class import has_near_zero_agent_tokens
 
 
 TOKEN_METRICS = (

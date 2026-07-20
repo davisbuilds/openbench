@@ -15,12 +15,9 @@ import subprocess
 import sys
 import tempfile
 
-try:
-    import candidates
-    import run as bench_run
-except ImportError:  # pragma: no cover
-    from . import candidates
-    from . import run as bench_run
+from . import candidates
+from . import run as bench_run
+from .paths import default_imported_tasks_dir, default_tasks_dir, find_repo_root
 
 SMOKE_TASK = "make-it-run"
 CORE_TASKS = ("add-feature", "build-a-cli", "fix-failing-test", "make-ci-green",
@@ -149,8 +146,12 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
          adapters_dir=None, tasks_dir=None, imported_tasks_dir=None,
          cell_runner=None, timeout_runner=None, proxy_ctx=None):
     adapters_dir = adapters_dir or os.path.join(os.path.dirname(__file__), "adapters")
-    tasks_dir = tasks_dir or bench_run.DEFAULT_TASKS_DIR
-    imported_tasks_dir = imported_tasks_dir or os.path.join(bench_run.REPO, "tasks-imported")
+    tasks_dir = tasks_dir or default_tasks_dir() or bench_run.DEFAULT_TASKS_DIR
+    imported_tasks_dir = (
+        imported_tasks_dir
+        or default_imported_tasks_dir()
+        or os.path.join(find_repo_root() or os.getcwd(), "tasks-imported")
+    )
     candidate = candidates.load_candidate(spec_path, adapters_dir)
     checks = []
     policy_ok, policy_detail = _policy_check(candidate)
@@ -334,7 +335,7 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
 
 
 def _proxy_context():
-    import proxy
+    from . import proxy
     ledger = tempfile.mkdtemp(prefix="candidate_gate_proxy_")
     server, _thread = proxy.start_in_thread("127.0.0.1", 0, ledger)
     port = server.server_address[1]

@@ -14,11 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from bench.atif import SCHEMA_VERSION, assert_valid_trajectory, dump_trajectory, to_dict
+from obench.atif import SCHEMA_VERSION, assert_valid_trajectory, dump_trajectory, to_dict
 
 HEADER_RE = re.compile(r"^# harness=(?P<harness>\S+) model=(?P<model>\S+) task=(?P<task>\S+) trial=(?P<trial>\d+)")
 RUN_RE = re.compile(r"^# transcript (?P<harness>[^:]+):(?P<task>.+):(?P<model>[^:]+):trial(?P<trial>\d+)")

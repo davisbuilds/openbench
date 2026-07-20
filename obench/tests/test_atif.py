@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bench.atif import validate_trajectory
-from bench.tools.atif_convert import convert_file, main as atif_main
+from obench.atif import validate_trajectory
+from obench.tools.atif_convert import convert_file, main as atif_main
 
 
 class ATIFTests(unittest.TestCase):

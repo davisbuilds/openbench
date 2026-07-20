@@ -2,18 +2,19 @@
 import importlib.util
 import json
 import os
+
+BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import shutil
 import tempfile
 import unittest
 from unittest import mock
 
-BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADAPTERS = os.path.join(BENCH, "adapters")
 
 import sys
-sys.path.insert(0, BENCH)
-import candidates
-import run as bench_run
+from obench import candidates
+from obench import run as bench_run
 
 
 def load(name):

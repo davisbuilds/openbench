@@ -30,7 +30,10 @@ import shutil
 import sys
 import traceback
 
-from auth_persist import AUTH_PERSIST
+try:
+    from obench.auth_persist import AUTH_PERSIST
+except ImportError:  # file-path / Docker mount layout
+    from auth_persist import AUTH_PERSIST
 
 RESULT_SENTINEL = "__BENCH_RESULT__"
 # Container defaults; overridable via env so the entrypoint can be exercised
@@ -156,7 +159,10 @@ def main(argv):
             candidates_path = os.path.dirname(argv[4])
             if candidates_path not in sys.path:
                 sys.path.insert(0, "/bench")
-            from candidates import load_candidate
+            try:
+                from obench.candidates import load_candidate
+            except ImportError:
+                from candidates import load_candidate
             adapter = load_candidate(argv[4], ADAPTERS_DIR)
             if adapter.name != harness:
                 raise ValueError(f"candidate name {adapter.name!r} does not match {harness!r}")

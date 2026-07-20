@@ -4,10 +4,12 @@
 import importlib.util
 import json
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import tempfile
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADAPTERS_DIR = os.path.join(BENCH_DIR, "adapters")
 FIXTURE_DIR = os.path.join(BENCH_DIR, "tests", "fixtures", "usage", "deepseek-v4-flash")
 
@@ -200,7 +202,5 @@ class TokenParityFixtureTests(unittest.TestCase):
         self.assertEqual(usage["token_basis"], "estimated")
         self.assertIsNone(usage["tokens_input_uncached"])
         self.assertIsNone(usage["tokens_output"])
-
-
 if __name__ == "__main__":
     unittest.main()

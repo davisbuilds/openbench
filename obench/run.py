@@ -34,18 +34,22 @@ import time
 import traceback
 from contextlib import contextmanager
 
-from bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
-                       image_pin_mismatches, parse_image_pin_labels,
-                       pinned_versions, reported_version, resolve_pin_key)
-from failure_class import classify_failure, classify_failure_reason
-from scrub import build_context as build_scrub_context, scrub_text
+from .bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
+                        image_pin_mismatches, parse_image_pin_labels,
+                        pinned_versions, reported_version, resolve_pin_key)
+from .failure_class import classify_failure, classify_failure_reason
+from .paths import (PACKAGE_DIR, SOURCE_ROOT, TasksDirError,
+                    default_adapters_dir, default_results_path,
+                    default_tasks_dir, ensure_package_path_on_sys_path,
+                    resolve_tasks_dir)
+from .scrub import build_context as build_scrub_context, scrub_text
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
+HERE = PACKAGE_DIR
+REPO = SOURCE_ROOT  # checkout root for editable/source installs
 
-DEFAULT_RESULTS_PATH = os.path.join(REPO, "results", "results.jsonl")
-DEFAULT_ADAPTERS_DIR = os.path.join(HERE, "adapters")
-DEFAULT_TASKS_DIR = os.path.join(REPO, "tasks")
+DEFAULT_RESULTS_PATH = default_results_path()
+DEFAULT_ADAPTERS_DIR = default_adapters_dir()
+DEFAULT_TASKS_DIR = default_tasks_dir() or os.path.join(os.getcwd(), "tasks")
 DEFAULT_MODEL = "gpt-5.5-medium"
 DEFAULT_MAX_CONSECUTIVE_INFRA = 3
 NEAR_ZERO_TOKEN_LIMIT = 100
@@ -178,11 +182,11 @@ def version_drift_refusal(host_drift, image_drift=None,
             f"  {item['harness']}: image={item['actual']} pin={item['expected']}"
         )
     if host_drift:
-        lines.append("Fix host CLIs: python3 bench/bump_clis.py --sync-host")
+        lines.append("Fix host CLIs: python3 -m obench.bump_clis --sync-host")
     if image_drift:
-        lines.append(f"Fix the image: docker build -t {image} bench/docker")
+        lines.append(f"Fix the image: docker build -t {image} obench/docker")
     lines.extend([
-        "Or update pins and build: python3 bench/bump_clis.py --apply",
+        "Or update pins and build: python3 -m obench.bump_clis --apply",
         "To waive once (all rows will record version_drift=true): --allow-version-drift",
     ])
     return "\n".join(lines)
@@ -518,6 +522,7 @@ def load_adapter(adapters_dir, name):
     The module must expose ``run(instruction, workdir, model, timeout_s)`` per
     ADAPTER_SPEC.md. Raises ``FileNotFoundError`` if the adapter file is absent.
     """
+    ensure_package_path_on_sys_path()
     path = os.path.join(adapters_dir, f"{name}.py")
     if not os.path.isfile(path):
         raise FileNotFoundError(f"adapter not found: {path}")
@@ -672,7 +677,7 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
     """
     fallback_env_setup_s = None
     if exec_mode == "docker":
-        import docker_exec  # lazy: local mode never needs docker
+        from . import docker_exec  # lazy: local mode never needs docker
         docker_start = time.monotonic()
         try:
             result = docker_exec.run_in_container(
@@ -1143,8 +1148,8 @@ def write_transcript(path, row, body):
 
     LOCAL-ONLY (user directive): transcripts are the raw, UNSCRUBBED harness
     output and may contain absolute home paths, usernames, hostnames, or leaked
-    secrets. They are never published as-is -- run ``bench/scrub.py --check``
-    for a manual review pass, then ``bench/scrub.py`` to emit scrubbed copies,
+    secrets. They are never published as-is -- run ``obench/scrub.py --check``
+    for a manual review pass, then ``obench/scrub.py`` to emit scrubbed copies,
     before sharing any transcript. The runner writes originals here and builds
     no publishing path of any kind.
     """
@@ -1153,7 +1158,7 @@ def write_transcript(path, row, body):
         f"# transcript {row['run_id']}\n"
         f"# harness={row['harness']} model={row['model']} "
         f"task={row['task']} trial={row['trial']} ts={row['ts_iso']}\n"
-        "# LOCAL-ONLY -- unscrubbed. Review with bench/scrub.py --check before sharing.\n\n"
+        "# LOCAL-ONLY -- unscrubbed. Review with obench/scrub.py --check before sharing.\n\n"
     )
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(header)
@@ -1402,7 +1407,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         proxy_capable = proxy_supported_for_cell(proxy_harness, model)
     active_proxy_ctx = proxy_ctx if proxy_capable else None
     if active_proxy_ctx:
-        import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
+        from . import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
         cell_token = counting_proxy.new_cell_token()
         _write_proxy_cell_metadata(active_proxy_ctx, cell_token, proxy_harness, model)
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
@@ -1627,19 +1632,22 @@ def main(argv=None):
                              "on timeout the row records checker_exit='timeout'")
     parser.add_argument("--force", action="store_true",
                         help="re-run cells even if their run_id already exists")
-    parser.add_argument("--results-path", default=DEFAULT_RESULTS_PATH,
-                        help="override the results.jsonl path")
-    parser.add_argument("--adapters-dir", default=DEFAULT_ADAPTERS_DIR,
-                        help="override the adapters directory")
+    parser.add_argument("--results-path", default=None,
+                        help="override the results.jsonl path "
+                             "(default: <repo|cwd>/results/results.jsonl)")
+    parser.add_argument("--adapters-dir", default=None,
+                        help="override the adapters directory "
+                             "(default: packaged obench/adapters)")
     parser.add_argument("--candidate", action="append", default=[], metavar="SPEC.toml",
                         help="declarative config-variant or harness.toml candidate (repeatable)")
-    parser.add_argument("--tasks-dir", default=DEFAULT_TASKS_DIR,
-                        help="override the tasks directory")
+    parser.add_argument("--tasks-dir", default=None,
+                        help="override the tasks directory "
+                             "(default: ./tasks or ./.openbench/tasks)")
     parser.add_argument("--transcripts-dir", default=None,
                         help="base dir for LOCAL-ONLY per-cell transcripts "
                              "(default: a 'transcripts/' sibling of the results "
                              "log). Transcripts are unscrubbed; review with "
-                             "bench/scrub.py --check before sharing.")
+                             "obench/scrub.py --check before sharing.")
     parser.add_argument("--exec", dest="exec_mode", default="local",
                         choices=("local", "docker"),
                         help="execution backend: 'local' (host, default) or "
@@ -1667,10 +1675,18 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.max_consecutive_infra < 0:
         parser.error("--max-consecutive-infra must be >= 0")
+    if args.results_path is None:
+        args.results_path = default_results_path()
+    if args.adapters_dir is None:
+        args.adapters_dir = default_adapters_dir()
+    try:
+        args.tasks_dir = resolve_tasks_dir(args.tasks_dir)
+    except TasksDirError as exc:
+        parser.error(str(exc))
 
     tasks = [t.strip() for t in args.task.split(",") if t.strip()]
     harnesses = [h.strip() for h in args.harness.split(",") if h.strip()]
-    from candidates import load_candidates
+    from .candidates import load_candidates
     try:
         candidates = load_candidates(args.candidate, args.adapters_dir)
     except (OSError, ValueError, KeyError) as exc:
@@ -1696,7 +1712,7 @@ def main(argv=None):
             image_drift, image_available = image_version_drift(
                 args.docker_image, harnesses, candidates)
             if not image_available:
-                hint = f"docker build -t {args.docker_image} bench/docker"
+                hint = f"docker build -t {args.docker_image} obench/docker"
                 if not args.docker_fallback:
                     print(
                         f"Version preflight failed: cannot inspect Docker image "
@@ -1741,7 +1757,7 @@ def main(argv=None):
     proxy_ctx = None
     proxy_server = None
     if args.proxy:
-        import proxy as counting_proxy
+        from . import proxy as counting_proxy
         ledger_parent = os.environ.get("OPENBENCH_PROXY_LEDGER_DIR") or tempfile.mkdtemp(
             prefix="openbench_proxy_", dir=os.environ.get("OPENBENCH_DOCKER_TMPDIR") or None)
         listen_host = "0.0.0.0" if args.exec_mode == "docker" else "127.0.0.1"
@@ -1799,7 +1815,8 @@ def main(argv=None):
             smoke_candidate = candidates.get(smoke_harness)
             smoke_row = run_cell(
                 smoke_harness, PREFLIGHT_TASK, args.model, 0, args.timeout,
-                DEFAULT_TASKS_DIR, args.adapters_dir, args.checker_timeout,
+                (default_tasks_dir() or args.tasks_dir), args.adapters_dir,
+                args.checker_timeout,
                 exec_mode=args.exec_mode, docker_image=args.docker_image,
                 docker_fallback=args.docker_fallback,
                 harness_version=versions.get(smoke_harness),

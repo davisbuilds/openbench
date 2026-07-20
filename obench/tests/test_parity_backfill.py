@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bench.tools import parity_backfill
+from obench.tools import parity_backfill
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "parity_backfill"
 RESULTS = FIXTURE_DIR / "results.jsonl"

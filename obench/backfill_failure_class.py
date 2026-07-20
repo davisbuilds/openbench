@@ -18,7 +18,7 @@ import os
 import re
 from collections import Counter
 
-from failure_class import FAILURE_CLASSES, classify_failure
+from .failure_class import FAILURE_CLASSES, classify_failure
 
 _TIMEOUT_AFTER_RE = re.compile(r"\btimeout after (\d+(?:\.\d+)?)s\b", re.IGNORECASE)
 

@@ -12,9 +12,8 @@ import tempfile
 import json
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import report  # noqa: E402
+from obench import report  # noqa: E402
 
 
 def rows_for(harness, specs, task="t"):

@@ -7,11 +7,13 @@ stream parser is exercised against the captured DeepSeek probe fixture.
 
 import importlib.util
 import os
+
+BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 import tempfile
 import tomllib
 import unittest
 
-BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADAPTER_PATH = os.path.join(BENCH_DIR, "adapters", "grokbuild.py")
 FIXTURE_PATH = os.path.join(BENCH_DIR, "tests", "fixtures", "grokbuild_stream_deepseek.jsonl")
 LOG_FIXTURE_PATH = os.path.join(BENCH_DIR, "tests", "fixtures", "grokbuild_unified_multiturn.jsonl")
@@ -357,7 +359,5 @@ class TestRunConstruction(unittest.TestCase):
         self.assertEqual(res["tokens_cache_read"], 40)
         self.assertEqual(res["tokens_output"], 7)
         self.assertEqual(res["tokens_reasoning"], 2)
-
-
 if __name__ == "__main__":
     unittest.main()
