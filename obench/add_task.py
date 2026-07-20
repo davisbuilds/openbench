@@ -139,7 +139,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("task_path", help="new <tasks-dir>/<task-name> directory")
     parser.add_argument("--from", dest="from_dir", help="copy an existing directory into workspace/ as the starting state")
-    parser.add_argument("--gate", action="store_true", help="run bench/admission_gate.py on the new task immediately")
+    parser.add_argument("--gate", action="store_true", help="run obench.admission_gate on the new task immediately")
     args = parser.parse_args(argv)
 
     try:
