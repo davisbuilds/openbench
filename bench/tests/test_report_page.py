@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
+import html
 import json
 import os
 import re
+import stat
 import tempfile
 import unittest
+from unittest import mock
 
 from bench import report_page
 
@@ -43,6 +46,26 @@ class ReportPageTest(unittest.TestCase):
         self.assertEqual(fast["total_tokens"], 340)
         self.assertEqual(fast["finished_rate"], 1.0)
 
+    def test_timeout_columns_require_an_arm_above_five_percent(self):
+        cases = ((0, False), (1, False), (2, True))
+        for timeout_count, material in cases:
+            with self.subTest(timeout_count=timeout_count):
+                rows = []
+                for trial in range(1, 21):
+                    timed_out = trial <= timeout_count
+                    rows.append(self.row("codex", trial, not timed_out,
+                                         failure_class="timeout" if timed_out else "solved"))
+                path = self.write(rows)
+                model = report_page.assemble_tables(
+                    [{"path": path}], tasks_dirs=[self.tmp.name])[0]
+                self.assertEqual(model["material_timeouts"], material)
+                page = report_page.render_page([model], "Method")
+                self.assertEqual("Solve rate @cap" in page, material)
+                self.assertEqual("Solve rate finished" in page, material)
+                self.assertEqual("Solve rate</th>" in page, not material)
+                if timeout_count == 1:
+                    self.assertIn("codex: 1 timeout; finished-basis 100.0%", page)
+
     def test_total_tokens_column_and_timeout_label_suppression(self):
         path = self.write([
             self.row("pi", 1, True, tokens_input_uncached=120,
@@ -55,6 +78,8 @@ class ReportPageTest(unittest.TestCase):
         page = report_page.render_page([model], "Method")
         self.assertIn("Total tokens/solve", page)
         self.assertIn(">300</td>", page)
+        self.assertLess(page.index("Total tokens/solve"), page.index("Uncached in/solve"))
+        self.assertIn(html.escape(report_page.TOKEN_NOTE), page)
         self.assertIn("Solve rate</th>", page)
         self.assertNotIn("@cap", page)
         self.assertNotIn("Solve rate finished", page)
@@ -86,6 +111,17 @@ class ReportPageTest(unittest.TestCase):
                          "Median wall time", "cursor", "pi", "self-reported",
                          'data-arm="cursor"', 'data-arm="pi"', "<circle", "<path d=\"M "):
             self.assertIn(expected, page)
+
+    def test_cli_split_token_cells_are_visually_deemphasized(self):
+        path = self.write([self.row("cursor", 1, True), self.row("pi", 2, True)])
+        model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
+        page = report_page.render_page([model], "Method")
+        rows = re.findall(r'<tr style="[^"]+">.*?</tr>', page)
+        cursor_row = next(row for row in rows if "cursor × model-x" in row)
+        pi_row = next(row for row in rows if "pi × model-x" in row)
+        self.assertEqual(cursor_row.count('class="cli-split"'), 3)
+        self.assertNotIn('class="cli-split"', pi_row)
+        self.assertIn('.cli-split{color:', page)
 
     def test_cli_marker_uses_underlying_harness_for_named_candidate(self):
         path = self.write([
@@ -199,6 +235,63 @@ class ReportPageTest(unittest.TestCase):
         page = report_page.render_page(models, "Method")
         self.assertIn("Non-comparable provenance", page)
         self.assertIn("timeout_s mixed within group", page)
+
+    def test_site_build_appends_manifest_and_links_release(self):
+        path = self.write([self.row("pi", 1, True)])
+        models = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])
+        page = report_page.render_page(models, "Method", "Synthetic release")
+        site = os.path.join(self.tmp.name, "site")
+        destination = report_page.build_site(
+            site, "2026-07-20-synthetic", "2026-07-20", "Synthetic release", models, page)
+        self.assertTrue(os.path.isfile(destination))
+        self.assertEqual(stat.S_IMODE(os.stat(destination).st_mode), 0o644)
+        with open(os.path.join(site, "releases.json"), encoding="utf-8") as fh:
+            manifest = json.load(fh)
+        self.assertEqual(manifest[0]["models"], ["model-x"])
+        with open(os.path.join(site, "index.html"), encoding="utf-8") as fh:
+            index = fh.read()
+        self.assertIn('href="releases/2026-07-20-synthetic/index.html"', index)
+        self.assertIn("Synthetic release", index)
+        self.assertIn("model-x", index)
+        report_page.build_site(site, "2026-07-20-synthetic", "2026-07-20",
+                               "Synthetic release", models, page)
+        with open(os.path.join(site, "releases.json"), encoding="utf-8") as fh:
+            self.assertEqual(len(json.load(fh)), 1)
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            report_page.build_site(site, "2026-07-20-synthetic", "2026-07-20",
+                                   "Different title", models, page)
+        with self.assertRaisesRegex(ValueError, "valid YYYY-MM-DD"):
+            report_page.build_site(site, "bad-date", "2026-99-20",
+                                   "Synthetic release", models, page)
+
+        with open(os.path.join(site, "releases.json"), "rb") as fh:
+            manifest_before = fh.read()
+        with open(os.path.join(site, "index.html"), "rb") as fh:
+            index_before = fh.read()
+        real_replace = os.replace
+        calls = 0
+        def fail_second_replace(source, destination):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("synthetic publish failure")
+            return real_replace(source, destination)
+        with mock.patch.object(report_page.os, "replace", side_effect=fail_second_replace):
+            with self.assertRaisesRegex(OSError, "synthetic publish failure"):
+                report_page.build_site(site, "2026-07-21-synthetic", "2026-07-21",
+                                       "Synthetic release 2", models, page)
+        self.assertFalse(os.path.exists(os.path.join(
+            site, "releases", "2026-07-21-synthetic", "index.html")))
+        with open(os.path.join(site, "releases.json"), "rb") as fh:
+            self.assertEqual(fh.read(), manifest_before)
+        with open(os.path.join(site, "index.html"), "rb") as fh:
+            self.assertEqual(fh.read(), index_before)
+
+        os.remove(os.path.join(site, "releases.json"))
+        report_page.build_site(site, "2026-07-20-synthetic", "2026-07-20",
+                               "Synthetic release", models, page)
+        with open(os.path.join(site, "releases.json"), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)[0]["id"], "2026-07-20-synthetic")
 
     def test_html_snapshot_smoke_contains_expected_arms_values_and_no_external_assets(self):
         rows = [
