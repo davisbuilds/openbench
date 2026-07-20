@@ -1,0 +1,43 @@
+name: Community submissions
+
+# Re-verify every publish bundle under data/community/ when that tree changes.
+# Offline / stdlib-only — same constraints as ci.yml (no live harness or API).
+
+on:
+  pull_request:
+    paths:
+      - "data/community/**"
+      - "obench/community.py"
+      - "obench/publish.py"
+      - ".github/workflows/community.yml"
+  push:
+    branches: [main]
+    paths:
+      - "data/community/**"
+      - "obench/community.py"
+      - "obench/publish.py"
+      - ".github/workflows/community.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install obench (editable, stdlib-only)
+        run: pip install -e .
+
+      - name: Re-verify community publish bundles
+        run: obench community verify --community-dir data/community --tasks-dir tasks
