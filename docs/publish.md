@@ -123,5 +123,7 @@ Publish the full matrix whenever possible.
   [`docs/byo-harnesses.md`](byo-harnesses.md)
 - Static release-site HTML (separate from shareable claim bundles):
   [`docs/REPORT_PAGE.md`](REPORT_PAGE.md), [`docs/README.md`](README.md)
+- Per-bundle leaderboard from verified `results.jsonl` bundles:
+  [`docs/leaderboard.md`](leaderboard.md)
 - Community submission tree:
   [`data/community/README.md`](../data/community/README.md)
