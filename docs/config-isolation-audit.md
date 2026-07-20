@@ -17,6 +17,14 @@ Date: 2026-07-13. Scope: `bench/run.py` adapters, local and disposable-container
 | grok | local | none; generated `~/.grok/config.toml` in fresh HOME, selected provider API-key env | no | No owner `~/.grok`. Generated `[model.<id>]` entries pin `base_url`, `api_backend`, `env_key`, and bearer auth. For gpt-5.6, the base URL is local CLIProxyAPI and the only child credential is optional CLIProxyAPI ingress auth (never `OPENAI_API_KEY`); CLIProxyAPI owns subscription OAuth. Benchmark parity deliberately disables subagents in every cell with both `GROK_SUBAGENTS=0` and `[subagents] enabled=false`; unrelated no-plan/web/memory policy overrides remain absent. |
 | grok | docker | none; no host Grok mount, fresh container and adapter HOME | no | Open-model vendor keys are scoped per cell. The gpt-5.6 route receives only the non-secret CLIProxyAPI address and optional ingress key; subscription OAuth remains in the host daemon. The same generated routing/subagent guards apply. |
 
+## Rotating refresh tokens and auth persist-back
+
+Subscription CLIs can rotate single-use refresh tokens while running. After every CLI return (success, non-zero exit, or timeout), local Pi, OpenCode, Grok Build, and stock/ablation Codex adapters compare only the isolated `auth.json` with its master. Changed bytes are persisted through a mode-`0600`, fsynced temporary file and `os.replace`; identical files are untouched. Claude remains API-key-only.
+
+Docker keeps auth staging read-only and mounts a private per-cell host directory read-write at `/bench/auth-return` only for `AUTH_PERSIST` allowlisted harnesses. `entry.py` returns only the declared auth file, then `docker_exec.py` applies the same comparison and atomic replacement. Grok returns to `~/.openbench/grok-container-auth/auth.json` when that dedicated credential supplied container `~/.grok/auth.json`, otherwise to the host Grok fallback. No config, sessions, or other isolated-HOME state is returned.
+
+A mode-`0600` per-master lock serializes cooperating runners. Cells are sequential within one runner; independent concurrent runners remain last-completed-writer-wins because provider files expose no mergeable token generation. Operators should avoid benchmarking the same rotating login concurrently.
+
 ## Verification
 
 - Full suite after follow-up corrections: `python3 -m unittest discover bench/tests` → **331 tests, OK** (18.313s).

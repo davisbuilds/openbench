@@ -165,6 +165,49 @@ class TestBuildDockerCmd(unittest.TestCase):
             import shutil
             shutil.rmtree(home, ignore_errors=True)
 
+    def test_auth_return_mount_is_writable_and_scoped_to_declared_harness(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as returned:
+            auth = os.path.join(home, ".pi", "agent", "auth.json")
+            os.makedirs(os.path.dirname(auth))
+            with open(auth, "wb") as fh:
+                fh.write(b"synthetic")
+            original = os.path.expanduser
+            os.path.expanduser = lambda value: home if value == "~" else original(value)
+            try:
+                cmd = docker_exec.build_docker_cmd(
+                    harness="pi", workdir="/tmp/wd", model="gpt-5.5-medium",
+                    timeout_s=240, adapters_dir="/repo/bench/adapters", image="image",
+                    instruction_path="/tmp/instr", auth_return_dir=returned,
+                )
+                undeclared = docker_exec.build_docker_cmd(
+                    harness="claude", workdir="/tmp/wd", model="claude-opus-4-8",
+                    timeout_s=240, adapters_dir="/repo/bench/adapters", image="image",
+                    instruction_path="/tmp/instr", auth_return_dir=returned,
+                )
+            finally:
+                os.path.expanduser = original
+            self.assertIn(f"{returned}:/bench/auth-return:rw", cmd)
+            self.assertIn("BENCH_AUTH_PERSIST_HARNESS=pi", cmd)
+            self.assertIn("auth_persist.py:/bench/auth_persist.py:ro", " ".join(cmd))
+            self.assertNotIn("/bench/auth-return", " ".join(undeclared))
+
+    def test_grok_container_auth_is_the_persist_master(self):
+        with tempfile.TemporaryDirectory() as home:
+            dedicated = os.path.join(home, ".openbench", "grok-container-auth", "auth.json")
+            fallback = os.path.join(home, ".grok", "auth.json")
+            os.makedirs(os.path.dirname(dedicated))
+            os.makedirs(os.path.dirname(fallback))
+            for path in (dedicated, fallback):
+                with open(path, "wb") as fh:
+                    fh.write(b"synthetic")
+            original = os.path.expanduser
+            os.path.expanduser = lambda value: home if value == "~" else original(value)
+            try:
+                targets = docker_exec._auth_persist_targets("grokbuild")
+            finally:
+                os.path.expanduser = original
+            self.assertEqual(targets, [(dedicated, ".grok/auth.json")])
+
     def test_codex_ablation_mounts_only_variant_dir(self):
         for harness, variant in (("codex_v1", "v1"), ("codex_v2", "v2")):
             with self.subTest(harness=harness):
