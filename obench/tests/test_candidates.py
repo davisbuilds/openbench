@@ -350,6 +350,92 @@ class CandidateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "base_url_env and proxy_route"):
                 candidates.load_candidate(path, ADAPTERS)
 
+    def test_candidate_proxy_capable_from_manifest_declaration(self):
+        """Proxy gating is declaration-driven; no stock PROXY_HARNESSES lookup."""
+        with tempfile.TemporaryDirectory() as td:
+            metered = os.path.join(td, "metered.toml")
+            with open(metered, "w", encoding="utf-8") as fh:
+                fh.write(
+                    'kind="manifest"\nname="third-party"\ncommand=["cli"]\n'
+                    'base_url_env="CLI_BASE_URL"\nproxy_route="chat/vendor/v1"\n'
+                )
+            unmetered = os.path.join(td, "unmetered.toml")
+            with open(unmetered, "w", encoding="utf-8") as fh:
+                fh.write(
+                    'kind="manifest"\nname="offline"\nunmetered=true\ncommand=["cli"]\n'
+                )
+            bare = os.path.join(td, "bare.toml")
+            with open(bare, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="bare"\ncommand=["cli"]\n')
+            m = candidates.load_candidate(metered, ADAPTERS)
+            u = candidates.load_candidate(unmetered, ADAPTERS)
+            b = candidates.load_candidate(bare, ADAPTERS)
+            self.assertTrue(candidates.candidate_proxy_capable(m))
+            self.assertFalse(candidates.candidate_proxy_capable(u))
+            self.assertFalse(candidates.candidate_proxy_capable(b))
+            self.assertTrue(u.unmetered)
+
+    def test_persist_auth_defaults_off_and_opt_in(self):
+        with tempfile.TemporaryDirectory() as td:
+            master = os.path.join(os.path.expanduser("~"),
+                                  ".openbench-test-persist-auth.json")
+            try:
+                with open(master, "wb") as fh:
+                    fh.write(b'{"provider":"x","refresh_token":"old"}')
+                off_path = os.path.join(td, "off.toml")
+                with open(off_path, "w", encoding="utf-8") as fh:
+                    fh.write(
+                        'kind="manifest"\nname="no-persist"\nisolate_home=true\n'
+                        'command=["true", "{prompt}"]\n'
+                        '[[auth_files]]\n'
+                        'source="~/.openbench-test-persist-auth.json"\n'
+                        'destination=".mycli/auth.json"\n'
+                    )
+                on_path = os.path.join(td, "on.toml")
+                with open(on_path, "w", encoding="utf-8") as fh:
+                    fh.write(
+                        'kind="manifest"\nname="yes-persist"\nisolate_home=true\n'
+                        'persist_auth=true\n'
+                        'command=["true", "{prompt}"]\n'
+                        '[[auth_files]]\n'
+                        'source="~/.openbench-test-persist-auth.json"\n'
+                        'destination=".mycli/auth.json"\n'
+                    )
+                off = candidates.load_candidate(off_path, ADAPTERS)
+                on = candidates.load_candidate(on_path, ADAPTERS)
+                self.assertFalse(off.persist_auth)
+                self.assertTrue(on.persist_auth)
+                self.assertEqual(candidates.candidate_auth_persist_targets(off), [])
+                targets = candidates.candidate_auth_persist_targets(on)
+                self.assertEqual(len(targets), 1)
+                self.assertEqual(targets[0][1], ".mycli/auth.json")
+
+                class Proc:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+
+                def run_mutate(cmd, **kw):
+                    copy = os.path.join(kw["env"]["HOME"], ".mycli", "auth.json")
+                    with open(copy, "wb") as fh:
+                        fh.write(b'{"provider":"x","refresh_token":"rotated"}')
+                    return Proc()
+
+                with mock.patch.object(candidates, "_run_process", side_effect=run_mutate):
+                    off.run("prompt", td, "model", 5)
+                with open(master, "rb") as fh:
+                    self.assertEqual(fh.read(), b'{"provider":"x","refresh_token":"old"}')
+
+                with mock.patch.object(candidates, "_run_process", side_effect=run_mutate):
+                    on.run("prompt", td, "model", 5)
+                with open(master, "rb") as fh:
+                    self.assertEqual(fh.read(), b'{"provider":"x","refresh_token":"rotated"}')
+            finally:
+                try:
+                    os.unlink(master)
+                except FileNotFoundError:
+                    pass
+
     def test_manifest_rejects_auth_destination_escape(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "harness.toml")

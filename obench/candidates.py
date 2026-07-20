@@ -16,6 +16,11 @@ import tomllib
 
 from .paths import ensure_package_path_on_sys_path
 
+try:
+    from .auth_persist import try_persist_auth_file
+except ImportError:  # file-path / Docker mount layout
+    from auth_persist import try_persist_auth_file
+
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
@@ -120,6 +125,59 @@ def _validate_auth_files(auth_files):
             raise ValueError("auth file sources must be home-relative paths beginning with '~/'.")
 
 
+def _parse_persist_auth(data):
+    """Default OFF: candidates never write back auth unless explicitly opted in."""
+    persist_auth = data.get("persist_auth", False)
+    if not isinstance(persist_auth, bool):
+        raise ValueError("candidate persist_auth must be a boolean")
+    return persist_auth
+
+
+def candidate_proxy_capable(candidate):
+    """True when a candidate should receive counting-proxy env injection.
+
+    Manifests opt in solely via ``base_url_env`` + ``proxy_route``. Config
+    variants inherit the base adapter's stock proxy wiring (handled by the
+    runner). ``unmetered=true`` forbids proxy routing at load time.
+    """
+    if candidate is None:
+        return False
+    if candidate.kind == "manifest":
+        return bool(candidate.base_url_env and candidate.proxy_route)
+    return False
+
+
+def candidate_auth_persist_targets(candidate):
+    """Return ``[(master_path, home_relative_dest), ...]`` when persist is on.
+
+    Default is no targets (persist_auth=false). Stock harnesses keep using
+    ``auth_persist.AUTH_PERSIST``; this only covers declarative candidates.
+    """
+    if candidate is None or not getattr(candidate, "persist_auth", False):
+        return []
+    targets = []
+    seen = set()
+    for auth in getattr(candidate, "auth_files", None) or []:
+        dest = auth.get("destination", "")
+        source = auth.get("source", "")
+        if not dest or dest in seen:
+            continue
+        seen.add(dest)
+        master = os.path.expanduser(source)
+        if os.path.isfile(master):
+            targets.append((master, dest))
+    return targets
+
+
+def _persist_candidate_auth(candidate, home, values):
+    if not candidate.persist_auth:
+        return
+    for auth in candidate.auth_files:
+        master = _auth_source(auth["source"])
+        copy_path = _safe_destination(home, _expand(auth["destination"], values))
+        try_persist_auth_file(copy_path, master)
+
+
 def _auth_source(path):
     """Resolve a declared auth file and reject symlink escapes from HOME."""
     home = os.path.realpath(os.path.expanduser("~"))
@@ -190,6 +248,9 @@ class ConfigVariant:
         self.env = {str(k): str(v) for k, v in data.get("env", {}).items()}
         self.auth_files = data.get("auth_files", [])
         _validate_auth_files(self.auth_files)
+        self.persist_auth = _parse_persist_auth(data)
+        if self.persist_auth and not self.auth_files:
+            raise ValueError("config-variant persist_auth=true requires auth_files")
         self.module = _load_adapter(adapters_dir, self.base_adapter)
         self.provenance = self._provenance()
         self.identity_digest = _candidate_identity(self.provenance)
@@ -209,6 +270,7 @@ class ConfigVariant:
                 "config_dir": self.config_dir, "config_files_sha256": files,
                 "config_files": entries, "env_names": sorted(self.env),
                 "unmetered": self.unmetered,
+                "persist_auth": self.persist_auth,
                 "auth_files": [{"source": a["source"], "destination": a["destination"]}
                                for a in self.auth_files]}
 
@@ -243,19 +305,22 @@ class ConfigVariant:
                 shutil.copy2(src, dst)
             env = {key: _expand(value, values) for key, value in self.env.items()}
             if "env_override" in inspect.signature(self.module.run).parameters:
-                return _tag_unmetered(self.module.run(
+                result = _tag_unmetered(self.module.run(
                     instruction, workdir, model, timeout_s, env_override=env), self.unmetered)
-            old = {key: os.environ.get(key) for key in env}
-            try:
-                os.environ.update(env)
-                return _tag_unmetered(
-                    self.module.run(instruction, workdir, model, timeout_s), self.unmetered)
-            finally:
-                for key, value in old.items():
-                    if value is None:
-                        os.environ.pop(key, None)
-                    else:
-                        os.environ[key] = value
+            else:
+                old = {key: os.environ.get(key) for key in env}
+                try:
+                    os.environ.update(env)
+                    result = _tag_unmetered(
+                        self.module.run(instruction, workdir, model, timeout_s), self.unmetered)
+                finally:
+                    for key, value in old.items():
+                        if value is None:
+                            os.environ.pop(key, None)
+                        else:
+                            os.environ[key] = value
+            _persist_candidate_auth(self, staged, values)
+            return result
 
 
 class ManifestHarness:
@@ -310,6 +375,9 @@ class ManifestHarness:
             raise ValueError("manifest env cannot override HOME when isolate_home=true")
         self.auth_files = data.get("auth_files", [])
         _validate_auth_files(self.auth_files)
+        self.persist_auth = _parse_persist_auth(data)
+        if self.persist_auth and not self.auth_files:
+            raise ValueError("manifest persist_auth=true requires auth_files")
         if self.auth_files and not self.isolate_home:
             raise ValueError("manifest auth_files require isolate_home=true")
         self.version_command = data.get("version_command")
@@ -327,6 +395,7 @@ class ManifestHarness:
         self.provenance = {"kind": self.kind, "name": self.name, "spec": self.path,
                            "spec_sha256": hashlib.sha256(self.spec_bytes).hexdigest(), "command": list(self.command),
                            "unmetered": self.unmetered,
+                           "persist_auth": self.persist_auth,
                            "policy_headless_args": list(self.policy_headless_args),
                            "policy_auto_approve_args": list(self.policy_auto_approve_args),
                            "workspace_file_globs": list(self.workspace_file_globs),
@@ -415,10 +484,12 @@ class ManifestHarness:
             except subprocess.TimeoutExpired as exc:
                 out = ((exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or ""))
                 err = ((exc.stderr or b"").decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or ""))
+                _persist_candidate_auth(self, home, values)
                 return _tag_unmetered(
                     _base_result(False, f"timeout after {timeout_s}s", out + err, cmd),
                     self.unmetered)
             output = (proc.stdout or "") + (proc.stderr or "")
+            _persist_candidate_auth(self, home, values)
             return _tag_unmetered(_base_result(
                 proc.returncode == 0, None if proc.returncode == 0 else f"exit {proc.returncode}",
                 output, cmd), self.unmetered)

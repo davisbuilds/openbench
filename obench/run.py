@@ -707,6 +707,8 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 # A manifest's proxy_adapter is accounting metadata only; it
                 # must never grant that stock adapter's credentials.
                 base_harness=candidate.base_adapter if candidate is not None else None,
+                candidate_persist_auth=bool(
+                    candidate is not None and getattr(candidate, "persist_auth", False)),
             )
             return result, "docker"
         except docker_exec.DockerUnavailable as exc:
@@ -1450,7 +1452,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     # Manifests must explicitly route traffic; only config variants inherit the
     # base adapter's proven proxy support.
     if candidate is not None and candidate.kind == "manifest":
-        proxy_capable = bool(candidate.base_url_env and candidate.proxy_route)
+        from .candidates import candidate_proxy_capable
+        proxy_capable = candidate_proxy_capable(candidate)
     else:
         proxy_capable = proxy_supported_for_cell(proxy_harness, model)
     active_proxy_ctx = proxy_ctx if proxy_capable else None
@@ -1755,7 +1758,7 @@ def main(argv=None):
 
     tasks = [t.strip() for t in args.task.split(",") if t.strip()]
     harnesses = [h.strip() for h in args.harness.split(",") if h.strip()]
-    from .candidates import load_candidates
+    from .candidates import load_candidates, candidate_proxy_capable
     try:
         candidates = load_candidates(args.candidate, args.adapters_dir)
     except (OSError, ValueError, KeyError) as exc:
@@ -1857,7 +1860,7 @@ def main(argv=None):
                        for h in harnesses}
         manifest_proxy = {
             h for h, candidate in candidates.items()
-            if candidate.kind == "manifest" and candidate.base_url_env and candidate.proxy_route
+            if candidate_proxy_capable(candidate)
         }
         unsupported = sorted(
             h for h, base in proxy_names.items()
