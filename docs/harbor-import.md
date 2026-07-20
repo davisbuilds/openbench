@@ -97,8 +97,32 @@ Round-trip (export then import) is covered by the unit suite: a core task
 exported to Harbor and imported back must preserve polarity (untouched fails,
 solution overlay passes with the same scores).
 
+## Real-world findings (Terminal-Bench 2.0)
+
+Exercised against tasks from
+[laude-institute/terminal-bench-2](https://github.com/laude-institute/terminal-bench-2)
+(Harbor layout). Patterns the importer now handles:
+
+| Upstream pattern | Example task | Importer behavior |
+|---|---|---|
+| `FROM` + `WORKDIR` only (empty workspace) | `cancel-async-tasks` | Not DOCKER-REQUIRED; empty `workspace/` is OK |
+| `COPY asset /app` + solve writes `/app/...` | `code-from-image` | Stages asset; rewrites `/app` in `solve.sh` for local materialize |
+| Relative `COPY setup.sh ./` then later `WORKDIR` change | `fix-git` | Resolves COPY against WORKDIR **at that line** |
+| `COPY` outside agent workdir (`/etc/nginx/...`) | `git-multibranch` | DOCKER-REQUIRED; best-effort basename staging |
+| Build-time `RUN` (compile, curl fonts, `rm` sources) | `chess-best-move`, `extract-elf` | DOCKER-REQUIRED; staged COPY sources only (not RUN artifacts) |
+| Multi-line `RUN apt-get install -y \` … | `git-multibranch` | Joins `\` continuations; package hints stop at `&&` |
+
+**Still unsupported / residual risk (no Docker run on import):**
+
+- Harbor `tests/test.sh` that `apt-get` / `curl | sh` / `uvx` at check time need network or a matching image; static import succeeds but local polarity may fail offline.
+- `solution/solve.sh` that installs packages (`apt`, `pip`) is skipped (needs-manual-solution).
+- Build products created only by Dockerfile `RUN` (compiled binaries, generated images) are not materialized into `workspace/`.
+- JSON-form `COPY`, `COPY --from=`, remote `ADD`, multi-stage images remain DOCKER-REQUIRED without full staging.
+
 ## Format sources (Jul 2026)
 
 - Harbor task layout / rewards:
   https://www.harborframework.com/docs/tasks
+- Terminal-Bench 2.0 tasks (Harbor format):
+  https://github.com/laude-institute/terminal-bench-2
 - OpenBench exporter (inverse contract): [`docs/harbor-export.md`](harbor-export.md)
