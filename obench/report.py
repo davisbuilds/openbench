@@ -14,6 +14,12 @@ of getting a result, not just raw totals that scale with the trial count. Token
 and turn data is optional per adapter: a harness that reports none shows ``-``
 (never silently counted as zero), and per-solve figures need at least one solve.
 
+Token totals are **basis-aware**: self-reported ``tokens`` when present, else the
+proxy-measured fresh total (uncached input + output) when
+``token_basis_proxy == "proxy_measured"``. Cache-read is never folded into
+tok/slv. Proxy-derived figures are marked ``*`` with a footnote; mixed-basis
+tables print a warning.
+
 Python3 stdlib only.
 """
 
@@ -25,8 +31,24 @@ import os
 from .failure_class import FAILURE_CLASSES, class_for_report, is_excluded_from_solve_rate
 from .config import load_config
 from .paths import default_results_path
+from .stats import (
+    TOKEN_BASIS_PROXY,
+    TOKEN_BASIS_SELF,
+    effective_tokens,
+)
 
 DEFAULT_RESULTS_PATH = default_results_path()
+
+PROXY_FOOTNOTE = (
+    "* tok/slv is proxy-measured fresh tokens "
+    "(tokens_proxy_input_uncached + tokens_proxy_output); "
+    "cache-read is counted separately and not mixed into this total. "
+    "Matches native adapters' self-reported tokens scalar."
+)
+MIXED_BASIS_WARNING = (
+    "Warning: tok/slv bases differ across harnesses in this table "
+    "(self-reported vs proxy-measured); compare with care."
+)
 
 
 def wilson_ci(successes, n, z=1.96):
@@ -78,12 +100,14 @@ def aggregate(rows):
           "scores":      [float, ...],  # per-countable-cell score (derived from success
                                         #   when the row predates the field)
           "wall_times":  [float, ...],  # per-cell wall-clock seconds
-          "token_vals":  [int, ...],    # per-cell tokens, non-null only
+          "token_vals":  [int, ...],    # per-cell effective tokens, non-null only
+          "token_bases": {str, ...},    # bases that contributed to token_vals
           "turn_vals":   [int, ...],    # per-cell turns, non-null only
         }
 
     ``token_vals``/``turn_vals`` collect only rows that actually reported the
     value, so an empty list means "no data" (rendered ``-``) rather than zero.
+    Effective tokens prefer self-reported ``tokens``, else proxy fresh totals.
     """
     harnesses = []
     tasks = []
@@ -95,7 +119,8 @@ def aggregate(rows):
             continue
         if harness not in stats:
             stats[harness] = {"per_task": {}, "succ": 0, "n": 0, "scores": [],
-                              "wall_times": [], "token_vals": [], "turn_vals": [],
+                              "wall_times": [], "token_vals": [], "token_bases": set(),
+                              "turn_vals": [],
                               "taxonomy": {fc: 0 for fc in FAILURE_CLASSES},
                               "taxonomy_by_model": {}}
             harnesses.append(harness)
@@ -131,9 +156,11 @@ def aggregate(rows):
         wt = row.get("wall_time_s")
         if isinstance(wt, (int, float)) and not isinstance(wt, bool):
             st["wall_times"].append(wt)
-        tok = row.get("tokens")
-        if isinstance(tok, (int, float)) and not isinstance(tok, bool):
+        tok, basis = effective_tokens(row)
+        if tok is not None:
             st["token_vals"].append(tok)
+            if basis:
+                st["token_bases"].add(basis)
         turn = row.get("turns")
         if isinstance(turn, (int, float)) and not isinstance(turn, bool):
             st["turn_vals"].append(turn)
@@ -157,7 +184,7 @@ def ci_halfwidth(vals, z=1.96):
 
 
 def tokens_per_solve(st):
-    """Total reported tokens divided by number of solves; None if undefined.
+    """Total effective tokens divided by number of solves; None if undefined.
 
     ``None`` when the harness reported no token data at all, or has no solves to
     normalise by. Reported tokens are never treated as zero when absent.
@@ -174,12 +201,31 @@ def turns_per_solve(st):
     return sum(st["turn_vals"]) / st["succ"]
 
 
+def token_basis_is_proxy(st):
+    """True when this harness's tok/slv comes only from proxy-measured rows."""
+    bases = st.get("token_bases") or set()
+    return bool(bases) and bases == {TOKEN_BASIS_PROXY}
+
+
+def table_has_mixed_token_bases(stats, harnesses):
+    """True when some arms use self-reported tok/slv and others use proxy."""
+    seen = set()
+    for harness in harnesses:
+        bases = stats[harness].get("token_bases") or set()
+        if TOKEN_BASIS_SELF in bases:
+            seen.add(TOKEN_BASIS_SELF)
+        if TOKEN_BASIS_PROXY in bases:
+            seen.add(TOKEN_BASIS_PROXY)
+    return len(seen) > 1
+
+
 # --- cell formatters --------------------------------------------------------- #
-def _fmt_tokens(v):
-    """Compact token count: '-' for None, 'N' below 1k, else 'X.Yk'."""
+def _fmt_tokens(v, proxy_mark=False):
+    """Compact token count: '-' for None, 'N' below 1k, else 'X.Yk'; optional *."""
     if v is None:
         return "-"
-    return f"{v / 1000:.1f}k" if v >= 1000 else f"{v:.0f}"
+    text = f"{v / 1000:.1f}k" if v >= 1000 else f"{v:.0f}"
+    return text + "*" if proxy_mark else text
 
 
 def _fmt_turns(v):
@@ -206,6 +252,16 @@ def _render(headers, rows_text):
     return "\n".join(lines)
 
 
+def _token_notes(stats, harnesses, used_proxy):
+    """Footnotes / warnings for tok/slv basis honesty."""
+    notes = []
+    if used_proxy:
+        notes.append(PROXY_FOOTNOTE)
+    if table_has_mixed_token_bases(stats, harnesses):
+        notes.append(MIXED_BASIS_WARNING)
+    return notes
+
+
 def format_table(harnesses, tasks, stats):
     """Success table: per-task x/n, overall + Wilson CI, mean_s, tok/solve, turns.
 
@@ -216,6 +272,7 @@ def format_table(harnesses, tasks, stats):
     """
     headers = ["harness"] + tasks + ["overall", "wilson95", "mscore", "mean_s", "tok/slv", "turns"]
     rows_text = []
+    used_proxy = False
     for harness in harnesses:
         st = stats[harness]
         cells = [harness]
@@ -231,10 +288,16 @@ def format_table(harnesses, tasks, stats):
         ms = mean(st["scores"])
         cells.append("-" if ms is None else f"{ms:.2f}")
         cells.append(_fmt_secs(mean(st["wall_times"])))
-        cells.append(_fmt_tokens(tokens_per_solve(st)))
+        proxy_mark = token_basis_is_proxy(st)
+        used_proxy = used_proxy or proxy_mark
+        cells.append(_fmt_tokens(tokens_per_solve(st), proxy_mark=proxy_mark))
         cells.append(_fmt_turns(mean(st["turn_vals"])))
         rows_text.append(cells)
-    return _render(headers, rows_text)
+    text = _render(headers, rows_text)
+    notes = _token_notes(stats, harnesses, used_proxy)
+    if notes:
+        text += "\n" + "\n".join(notes)
+    return text
 
 
 def format_efficiency(harnesses, stats):
@@ -245,6 +308,7 @@ def format_efficiency(harnesses, stats):
     """
     headers = ["harness", "success", "rate", "wilson95", "mscore", "mean_s", "tok/slv", "turns/slv"]
     rows_text = []
+    used_proxy = False
     for harness in harnesses:
         st = stats[harness]
         n, succ = st["n"], st["succ"]
@@ -254,6 +318,8 @@ def format_efficiency(harnesses, stats):
         hw = ci_halfwidth(st["wall_times"])
         mean_s = "-" if m is None else (f"{m:.2f} ±{hw:.2f}" if hw is not None else f"{m:.2f}")
         ms = mean(st["scores"])
+        proxy_mark = token_basis_is_proxy(st)
+        used_proxy = used_proxy or proxy_mark
         rows_text.append([
             harness,
             f"{succ}/{n}" if n else "-",
@@ -261,10 +327,14 @@ def format_efficiency(harnesses, stats):
             f"[{lo:.3f}, {hi:.3f}]",
             "-" if ms is None else f"{ms:.2f}",
             mean_s,
-            _fmt_tokens(tokens_per_solve(st)),
+            _fmt_tokens(tokens_per_solve(st), proxy_mark=proxy_mark),
             _fmt_turns(turns_per_solve(st)),
         ])
-    return _render(headers, rows_text)
+    text = _render(headers, rows_text)
+    notes = _token_notes(stats, harnesses, used_proxy)
+    if notes:
+        text += "\n" + "\n".join(notes)
+    return text
 
 
 def format_taxonomy(harnesses, stats):
