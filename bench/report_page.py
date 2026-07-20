@@ -6,8 +6,12 @@ import html
 import json
 import math
 import os
+import re
+import stat
 import sys
+import tempfile
 from collections import defaultdict
+from datetime import date
 
 try:
     from . import compare, stats
@@ -21,6 +25,12 @@ PALETTE = (
     "#CC79A7", "#56B4E9", "#7A6F00", "#000000",
 )
 CLI_ARMS = {"cursor", "opencode"}
+MATERIAL_TIMEOUT_RATE = 0.05
+TOKEN_NOTE = ("Split token columns (uncached-in / output / cache-read) are each harness's "
+              "self-reported classification and are NOT cross-comparable — e.g. cursor reports "
+              "almost all context as cache-read, so its uncached-in reads near-zero. Compare "
+              "harnesses on Total tokens/solve (proxy-metered arms) and treat cli-basis arms' "
+              "totals as self-reported.")
 DEFAULT_METHODOLOGY = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "docs",
@@ -131,6 +141,7 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                              "wilson95": list(stats.wilson_ci(0, 0))}
             solved = canonical["solved"]
             finished = [r for r in rows if stats.class_for_report(r) != "timeout"]
+            timeout_count = len(rows) - len(finished)
             finished_solved = sum(bool(r["success"]) for r in finished)
             solved_rows = [r for r in rows if r["success"]]
             _, med_wall = compare._mean_median(solved_rows, "wall_time_s")
@@ -146,7 +157,9 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                 "finished_solved": finished_solved,
                 "finished_n": len(finished),
                 "finished_rate": finished_solved / len(finished) if finished else None,
-                "has_timeout": len(finished) != len(rows),
+                "timeout_count": timeout_count,
+                "has_timeout": timeout_count > 0,
+                "material_timeout": bool(rows and timeout_count / len(rows) > MATERIAL_TIMEOUT_RATE),
                 "med_wall": med_wall,
                 **tokens,
                 "total_tokens": total_tokens,
@@ -168,6 +181,7 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
             "title": titles.get(model, model),
             "arms": arms,
             "has_timeouts": any(a["has_timeout"] for a in arms),
+            "material_timeouts": any(a["material_timeout"] for a in arms),
             "has_pricing": bool(pricing and model in pricing),
             "provenance": provenance,
         })
@@ -360,11 +374,14 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
     colors = {harness: PALETTE[index % len(PALETTE)] for index, harness in enumerate(harnesses)}
     sections = []
     for model in models:
-        dual = model["has_timeouts"]
+        dual = model.get("material_timeouts", any(
+            a.get("timeout_count", int(bool(a.get("has_timeout")))) / a.get("n", 1) > MATERIAL_TIMEOUT_RATE
+            for a in model["arms"] if a.get("n", 0)
+        ))
         heads = ["Arm (harness × model)", "Solved/countable"]
         heads += ["Solve rate @cap", "Solve rate finished"] if dual else ["Solve rate"]
-        heads += ["Wilson 95% CI", "Med wall", "Uncached in/solve", "Output/solve",
-                  "Cache-read/solve", "Total tokens/solve"]
+        heads += ["Wilson 95% CI", "Med wall", "Total tokens/solve", "Uncached in/solve",
+                  "Output/solve", "Cache-read/solve"]
         if model["has_pricing"]:
             heads.append("$/solve")
         heads.extend(["Token basis", "Excluded / unmatched / duplicates"])
@@ -397,8 +414,8 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
             values += [_pct(a["rate"]), _pct(a["finished_rate"])] if dual else [_pct(a["rate"])]
             values += [f"{a['wilson'][0] * 100:.1f}–{a['wilson'][1] * 100:.1f}%",
                        _num(a["med_wall"], 1) + ("s" if a["med_wall"] is not None else ""),
-                       _num(a["tokens_input_uncached"]), _num(a["tokens_output"]),
-                       _num(a["tokens_cache_read"]), _num(a["total_tokens"])]
+                       _num(a["total_tokens"]), _num(a["tokens_input_uncached"]),
+                       _num(a["tokens_output"]), _num(a["tokens_cache_read"])]
             if model["has_pricing"]:
                 values.append(
                     "—" if a["cost_per_solve"] is None else f"${a['cost_per_solve']:.3f}"
@@ -407,32 +424,208 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
                            f"{sum(a['excluded'].values())} / {a['unmatched']} / {a['duplicates']}"])
             cells = []
             total_index = heads.index("Total tokens/solve")
+            split_indexes = {heads.index(name) for name in
+                             ("Uncached in/solve", "Output/solve", "Cache-read/solve")}
             for index, value in enumerate(values):
-                css_class = ' class="total-tokens"' if index == total_index else ""
+                classes = []
+                if index == total_index:
+                    classes.append("total-tokens")
+                if a["cli_basis"] and index in split_indexes:
+                    classes.append("cli-split")
+                css_class = f' class="{" ".join(classes)}"' if classes else ""
                 cells.append(f"<td{css_class}>{html.escape(str(value))}</td>")
             color = colors[a["arm"]]
             body.append(f'<tr style="--arm-color:{color}">' + "".join(cells) + "</tr>")
         head_cells = "".join(
             f'<th class="total-tokens">{html.escape(h)}</th>' if h == "Total tokens/solve"
             else f"<th>{html.escape(h)}</th>" for h in heads)
+        timeout_note = ""
+        if not dual:
+            timeout_arms = [a for a in model["arms"] if a.get("timeout_count", 0)]
+            if timeout_arms:
+                details = "; ".join(
+                    f"{a['arm']}: {a['timeout_count']} timeout{'s' if a['timeout_count'] != 1 else ''}; "
+                    f"finished-basis {_pct(a['finished_rate'])}" for a in timeout_arms
+                )
+                timeout_note = ('<p class="table-note timeout-note"><strong>Timeouts:</strong> '
+                                + html.escape(details) + ".</p>")
+        token_note = '<p class="table-note token-note">' + html.escape(TOKEN_NOTE) + "</p>"
         sections.append(f'<section><h2>{html.escape(model["title"])}</h2>{warning}' +
                         _charts(model, colors) +
                         '<div class="scroll"><table class="results"><thead><tr>' + head_cells +
-                        "</tr></thead><tbody>" + "".join(body) + "</tbody></table></div></section>")
+                        "</tr></thead><tbody>" + "".join(body) + "</tbody></table></div>" +
+                        timeout_note + token_note + "</section>")
     model_names = [m["model"] for m in models]
     lookup = {(a["arm"], m["model"]): _pct(a["rate"]) for m in models for a in m["arms"]}
     grid_rows = "".join("<tr><th>" + html.escape(h) + "</th>" + "".join(
         f"<td>{html.escape(lookup.get((h, model), '—'))}</td>" for model in model_names) + "</tr>" for h in harnesses)
     grid = '<section><h2>Harness × model correctness</h2><div class="scroll"><table><thead><tr><th>Harness</th>' + "".join(
         f"<th>{html.escape(m)}</th>" for m in model_names) + "</tr></thead><tbody>" + grid_rows + "</tbody></table></div></section>"
-    css = """body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:1200px;margin:auto;padding:2rem;background:#f7f8fa}header{padding:2rem;background:#18253b;color:white;border-radius:12px}section{margin:2rem 0;background:white;padding:1.4rem;border-radius:10px;box-shadow:0 1px 4px #ccd}h1{margin:.1rem 0}.scroll{overflow:auto}table,.chart{font-variant-numeric:tabular-nums}table{border-collapse:collapse;width:100%}th,td{padding:.65rem;border-bottom:1px solid #dde2e8;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}.results tbody tr{border-left:4px solid var(--arm-color)}thead th{background:#edf2f7}.total-tokens{font-weight:800;background:#e6f2f8}.charts{display:grid;gap:1rem;margin:1rem 0 1.5rem}.charts figure{margin:0;border:1px solid #dde2e8;border-radius:8px;padding:.8rem}.charts .hero{border-width:2px;background:#fbfdff}.charts h3{margin:.1rem 0}.chart{width:100%;height:auto}.chart text{font-family:system-ui,sans-serif;font-size:12px;fill:#17202a}.grid{stroke:#d8dee7;stroke-width:1}.whisker{stroke:#17202a;stroke-width:2;fill:none}figcaption,.empty-chart{font-size:.85rem;color:#52606d}.warning{background:#fff1d6;border-left:4px solid #b45309;padding:.75rem}.tag{font-size:.85rem;color:#52606d}footer{color:#52606d;text-align:center}@media(max-width:700px){body{padding:.6rem}section,header{padding:1rem}.charts{grid-template-columns:1fr}.charts .hero{grid-column:auto}}"""
+    css = """body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:1200px;margin:auto;padding:2rem;background:#f7f8fa}header{padding:2rem;background:#18253b;color:white;border-radius:12px}section{margin:2rem 0;background:white;padding:1.4rem;border-radius:10px;box-shadow:0 1px 4px #ccd}h1{margin:.1rem 0}.scroll{overflow:auto}table,.chart{font-variant-numeric:tabular-nums}table{border-collapse:collapse;width:100%}th,td{padding:.65rem;border-bottom:1px solid #dde2e8;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}.results tbody tr{border-left:4px solid var(--arm-color)}thead th{background:#edf2f7}.total-tokens{font-weight:800;background:#e6f2f8}.cli-split{color:#7b8794}.table-note{font-size:.82rem;color:#52606d;margin:.65rem .2rem 0;max-width:105ch}.charts{display:grid;gap:1rem;margin:1rem 0 1.5rem}.charts figure{margin:0;border:1px solid #dde2e8;border-radius:8px;padding:.8rem}.charts .hero{border-width:2px;background:#fbfdff}.charts h3{margin:.1rem 0}.chart{width:100%;height:auto}.chart text{font-family:system-ui,sans-serif;font-size:12px;fill:#17202a}.grid{stroke:#d8dee7;stroke-width:1}.whisker{stroke:#17202a;stroke-width:2;fill:none}figcaption,.empty-chart{font-size:.85rem;color:#52606d}.warning{background:#fff1d6;border-left:4px solid #b45309;padding:.75rem}.tag{font-size:.85rem;color:#52606d}footer{color:#52606d;text-align:center}@media(max-width:700px){body{padding:.6rem}section,header{padding:1rem}.charts{grid-template-columns:1fr}.charts .hero{grid-column:auto}}"""
     return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + html.escape(title) + "</title><style>" + css + "</style></head><body><header><div class=\"tag\">OPENBENCH</div><h1>" + html.escape(title) + "</h1><p>" + html.escape(headline) + "</p></header>" + "".join(sections) + grid + '<section id="methodology"><h2>Methodology &amp; limitations</h2>' + _markdown(methodology) + "</section><footer>Generated by OpenBench · static, self-contained HTML</footer></body></html>\n"
+
+
+def _site_index(releases):
+    cards = []
+    for release in reversed(releases):
+        models = ", ".join(release["models"])
+        cards.append(
+            '<li><a href="' + html.escape(release["path"], quote=True) + '"><strong>'
+            + html.escape(release["title"]) + "</strong></a><br><time datetime=\""
+            + html.escape(release["date"], quote=True) + '\">' + html.escape(release["date"])
+            + "</time> · " + html.escape(models) + "</li>"
+        )
+    listing = "".join(cards) or "<li>No releases published yet.</li>"
+    css = ("body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:800px;margin:auto;"
+           "padding:2rem;background:#f7f8fa}header,main{background:white;padding:1.5rem;"
+           "border-radius:10px;margin-bottom:1rem}h1{margin:.1rem 0}li{margin:1rem 0}"
+           "a{color:#075985}time{color:#52606d}")
+    return ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
+            'content="width=device-width,initial-scale=1"><title>OpenBench releases</title><style>'
+            + css + '</style></head><body><header><div>OPENBENCH</div><h1>Benchmark releases</h1>'
+            '<p>Static, reproducible harness comparison reports.</p></header><main><ul>' + listing
+            + '</ul></main></body></html>\n')
+
+
+def _validated_date(value):
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("release date must be a valid YYYY-MM-DD date") from exc
+    if parsed.isoformat() != value:
+        raise ValueError("release date must be a valid YYYY-MM-DD date")
+    return value
+
+
+def _temporary_text(path, content):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=os.path.dirname(path), delete=False)
+    try:
+        with handle:
+            handle.write(content)
+        os.chmod(handle.name, 0o644)
+        return handle.name
+    except BaseException:
+        os.unlink(handle.name)
+        raise
+
+
+def build_site(site_dir, release_id, release_date, title, models, page):
+    """Add one report while serializing the site's manifest update."""
+    try:
+        import fcntl
+    except ImportError as exc:
+        raise RuntimeError("--site-dir requires POSIX file locking") from exc
+    os.makedirs(site_dir, exist_ok=True)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    lock_fd = os.open(site_dir, flags)
+    try:
+        site_stat = os.fstat(lock_fd)
+        if (not stat.S_ISDIR(site_stat.st_mode) or site_stat.st_uid != os.geteuid()
+                or site_stat.st_mode & 0o022):
+            raise ValueError("site directory must be owned by the current user and not group-writable")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        return _build_site_locked(site_dir, release_id, release_date, title, models, page)
+    finally:
+        os.close(lock_fd)
+
+
+def _owned_directory(path):
+    """Create or validate a non-symlink directory below the trusted site root."""
+    try:
+        os.mkdir(path, 0o755)
+    except FileExistsError:
+        pass
+    info = os.lstat(path)
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+            or info.st_mode & 0o022):
+        raise ValueError(f"unsafe site directory: {path}")
+
+
+def _build_site_locked(site_dir, release_id, release_date, title, models, page):
+    """Publish one release; caller holds the site-level lock."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", release_id):
+        raise ValueError("release id must be a path-safe slug")
+    release_date = _validated_date(release_date)
+    manifest_path = os.path.join(site_dir, "releases.json")
+    if os.path.exists(manifest_path):
+        with open(manifest_path, encoding="utf-8") as fh:
+            releases = json.load(fh)
+        if not isinstance(releases, list):
+            raise ValueError("releases.json must contain a JSON list")
+    else:
+        releases = []
+    release_path = f"releases/{release_id}/index.html"
+    release = {"id": release_id, "title": title, "date": release_date,
+               "models": sorted(m["model"] for m in models), "path": release_path}
+    existing = next((entry for entry in releases if entry.get("id") == release_id), None)
+    if existing is not None and existing != release:
+        raise ValueError(f"release {release_id!r} conflicts with the existing manifest entry")
+    if existing is None:
+        releases.append(release)
+    releases_dir = os.path.join(site_dir, "releases")
+    release_dir = os.path.join(releases_dir, release_id)
+    _owned_directory(releases_dir)
+    _owned_directory(release_dir)
+    destination = os.path.join(release_dir, "index.html")
+    try:
+        with open(destination, encoding="utf-8") as fh:
+            if fh.read() != page:
+                raise ValueError(f"release artifact conflicts with this build: {destination}")
+    except FileNotFoundError:
+        pass
+    manifest_text = json.dumps(releases, indent=2, ensure_ascii=False) + "\n"
+    index_path = os.path.join(site_dir, "index.html")
+    index_text = _site_index(releases)
+    pending = []
+    originals = {}
+    replaced = []
+    try:
+        for content, final in ((page, destination),
+                               (manifest_text, manifest_path),
+                               (index_text, index_path)):
+            pending.append((_temporary_text(final, content), final))
+        for _, final in pending:
+            try:
+                with open(final, "rb") as fh:
+                    originals[final] = fh.read()
+            except FileNotFoundError:
+                originals[final] = None
+        for temporary, final in pending:
+            os.replace(temporary, final)
+            replaced.append(final)
+    except BaseException:
+        for final in reversed(replaced):
+            original = originals[final]
+            if original is None:
+                try:
+                    os.unlink(final)
+                except FileNotFoundError:
+                    pass
+            else:
+                handle = tempfile.NamedTemporaryFile(dir=os.path.dirname(final), delete=False)
+                with handle:
+                    handle.write(original)
+                os.chmod(handle.name, 0o644)
+                os.replace(handle.name, final)
+        raise
+    finally:
+        for temporary, _ in pending:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    return destination
 
 
 def parse_args(argv):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("results", nargs="*", help="OpenBench result JSONL files")
-    p.add_argument("--out", required=True, help="output HTML path")
+    output = p.add_mutually_exclusive_group(required=True)
+    output.add_argument("--out", help="output HTML path")
+    output.add_argument("--site-dir", help="append a release under this static site directory")
+    p.add_argument("--release-id", help="path-safe release identifier (required with --site-dir)")
+    p.add_argument("--release-date", help="release date (YYYY-MM-DD; defaults from release id)")
+    p.add_argument("--title", help="report/release title (overrides config)")
     p.add_argument("--config", help="JSON config containing datasets and titles")
     p.add_argument("--methodology", help="methodology/limitations Markdown")
     p.add_argument("--pricing", help="model pricing JSON (input_per_mtok/output_per_mtok)")
@@ -460,10 +653,21 @@ def main(argv=None):
     pricing_path = args.pricing or config.get("pricing")
     if pricing_path and not os.path.isabs(pricing_path): pricing_path = os.path.join(base, pricing_path)
     pricing = stats.load_pricing(pricing_path)
-    page = render_page(assemble_tables(datasets, pricing), methodology,
-                       config.get("title", "OpenBench report"), config.get("headline"))
-    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as fh: fh.write(page)
+    models = assemble_tables(datasets, pricing)
+    title = args.title or config.get("title", "OpenBench report")
+    page = render_page(models, methodology, title, config.get("headline"))
+    if args.site_dir:
+        if not args.release_id:
+            raise SystemExit("report_page: --release-id is required with --site-dir")
+        release_date = args.release_date
+        if not release_date and re.match(r"^\d{4}-\d{2}-\d{2}", args.release_id):
+            release_date = args.release_id[:10]
+        if not release_date:
+            raise SystemExit("report_page: --release-date is required when release id has no date")
+        build_site(args.site_dir, args.release_id, release_date, title, models, page)
+    else:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+        with open(args.out, "w", encoding="utf-8") as fh: fh.write(page)
     return 0
 
 
