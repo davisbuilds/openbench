@@ -75,8 +75,9 @@ run loop, tool set, and permission policy. Tasks are self-contained
   proxy metering for manifests is declaration-driven (`base_url_env` +
   `proxy_route`); candidate auth persist-back defaults off with
   `persist_auth = true` opt-in. Docker image's fixed CLI set remains a follow-up.
-- **P1 — Harbor bridge.** One-way exporter OpenBench task → Harbor task
-  (`checker.sh` + `SCORE:` → `tests/test.sh` writing `reward.txt`); lets
+- **P1 — Harbor bridge. [DONE Jul 2026]** One-way exporter
+  `obench export harbor` (`docs/harbor-export.md`): OpenBench task → Harbor
+  task (`checker.sh` + `SCORE:` → `tests/test.sh` writing `reward.txt`); lets
   companies use Harbor's cloud sandboxes while OpenBench stays the
   comparison/stats/auth layer.
 - **P2 — Versioned task packs.** Task packs and harness manifests as

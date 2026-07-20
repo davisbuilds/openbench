@@ -14,7 +14,8 @@ first local cell, Docker, imported tasks, and open-model keys. Evaluating
 harnesses on a **private codebase**? Start with
 [`docs/private-evals.md`](docs/private-evals.md) (`obench init`, author a task
 from a small code slice, validate polarity, run, report — transcripts stay
-local).
+local). To run OpenBench tasks on Harbor cloud sandboxes, see
+[`docs/harbor-export.md`](docs/harbor-export.md) (`obench export harbor`).
 
 **Live results:** https://minghinmatthewlam.github.io/openbench/
 
@@ -150,7 +151,7 @@ pip install "git+https://github.com/minghinmatthewlam/openbench.git"
 
 Then use the umbrella CLI: `obench init`, `obench run`, `obench report`,
 `obench doctor`, `obench validate`, `obench gate`, `obench compare`,
-`obench publish`, `obench verify`. Legacy
+`obench publish`, `obench verify`, `obench export`. Legacy
 `python3 bench/run.py` (and friends) still forward with a deprecation note.
 
 ## Quickstart

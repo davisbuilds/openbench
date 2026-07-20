@@ -196,6 +196,19 @@ python3 -m obench.scrub .openbench/results/transcripts/ --out scrubbed/
 python3 -m obench.scrub scrubbed/ --check
 ```
 
+## Optional: run the same tasks on Harbor
+
+If you want Harbor’s cloud sandboxes for execution while keeping OpenBench for
+comparison/stats, export your private tasks:
+
+```bash
+obench export harbor --task all --tasks-dir .openbench/tasks --out ./harbor-out
+```
+
+See [`harbor-export.md`](harbor-export.md) for the field mapping, reward-path
+fallback used by local polarity checks, and known gaps (network defaults,
+partial-credit mapping, checker visibility).
+
 ## What this path deliberately skips
 
 - PyPI publication of `obench` may lag; git-URL / editable installs are the
