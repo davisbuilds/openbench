@@ -41,6 +41,7 @@ import re
 import shlex
 import http.client
 import subprocess
+import sys
 from urllib.parse import urlsplit
 
 from .bump_clis import (image_pin_mismatches, parse_image_pin_labels,
@@ -53,6 +54,8 @@ DEFAULT_MODEL = "gpt-5.5-medium"
 DEFAULT_IMAGE = "openbench-harness:latest"
 
 CHECKS = ("CLI", "VERSION", "AUTH", "MODEL")
+# Candidate-only checks appear in Details (and in the matrix when present).
+CANDIDATE_EXTRA_CHECKS = ("CONFIG", "ENV")
 
 # M4 open canonical model -> the env key its provider needs. When --model is one
 # of these, the AUTH check becomes "is this key exported?" instead of the
@@ -206,9 +209,11 @@ def _auth_devin(p):
     return False, f"missing {os.path.expanduser(path)}"
 
 
-# harness name -> {cli binary, auth checker}. The adapter module name equals the
-# harness name (cursor's binary is cursor-agent but its adapter is cursor.py).
-HARNESSES = {
+# Stock fallback when an adapter does not export DOCTOR = {"cli", "auth"}.
+# Adapters may declare DOCTOR themselves; load_harnesses() overlays those.
+# The adapter module name equals the harness name (cursor's binary is
+# cursor-agent but its adapter is cursor.py).
+_STOCK_HARNESSES = {
     "codex":    {"cli": "codex",        "auth": _auth_codex},
     "codex_v1": {"cli": "codex",        "auth": _auth_codex},
     "codex_v2": {"cli": "codex",        "auth": _auth_codex},
@@ -219,10 +224,75 @@ HARNESSES = {
     "grokbuild": {"cli": "grok",         "auth": lambda p: (True, "BYOK routes checked per model")},
     "devin":    {"cli": "devin",        "auth": _auth_devin},
 }
+
+# Adapters omitted from the default preflight matrix (opt-in via --harness).
+_OPT_IN_HARNESSES = frozenset({"claude", "grokbuild"})
+
+_CANDIDATE_HINT = "pass --candidate path/to/spec.toml for third-party harnesses"
+
+
+def _import_adapter_module(adapters_dir, name):
+    """Import ``adapters/<name>.py``; raise on missing file or load failure."""
+    ensure_package_path_on_sys_path()
+    path = os.path.join(adapters_dir, f"{name}.py")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"adapter not found: {path}")
+    spec = importlib.util.spec_from_file_location(f"doctor_scan_{name}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def discover_adapter_doctor(adapters_dir, name):
+    """Return ``{"cli", "auth"}`` from an adapter's optional ``DOCTOR`` export.
+
+    Returns None when the module is missing, fails to import, or does not
+    declare a usable DOCTOR dict.
+    """
+    try:
+        module = _import_adapter_module(adapters_dir, name)
+    except Exception:  # noqa: BLE001 - keep stock fallback for broken adapters
+        return None
+    doc = getattr(module, "DOCTOR", None)
+    if not isinstance(doc, dict):
+        return None
+    cli, auth = doc.get("cli"), doc.get("auth")
+    if not isinstance(cli, str) or not cli or not callable(auth):
+        return None
+    return {"cli": cli, "auth": auth}
+
+
+def load_harnesses(adapters_dir=None):
+    """Build harness -> {cli, auth} from stock fallback + adapter DOCTOR exports."""
+    adapters_dir = adapters_dir or ADAPTERS_DIR
+    harnesses = {name: dict(spec) for name, spec in _STOCK_HARNESSES.items()}
+    try:
+        names = sorted(
+            os.path.splitext(entry)[0]
+            for entry in os.listdir(adapters_dir)
+            if entry.endswith(".py") and not entry.startswith("_")
+        )
+    except OSError:
+        return harnesses
+    for name in names:
+        discovered = discover_adapter_doctor(adapters_dir, name)
+        if discovered is not None:
+            harnesses[name] = discovered
+    return harnesses
+
+
+HARNESSES = load_harnesses()
 # Default doctor preflight keeps the historical matrix harnesses for the default
 # gpt-5.5-medium model; claude/grokbuild are opt-in because they support
 # API-key/open-model routes, not the default ChatGPT subscription model.
-ALL_HARNESSES = [h for h in HARNESSES if h not in {"claude", "grokbuild"}]
+ALL_HARNESSES = [h for h in HARNESSES if h not in _OPT_IN_HARNESSES]
+
+
+def known_harness_names():
+    """Stock harness names shown in unknown-harness errors (stable order)."""
+    return [h for h in HARNESSES if h not in _OPT_IN_HARNESSES] + sorted(
+        h for h in HARNESSES if h in _OPT_IN_HARNESSES
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -395,23 +465,175 @@ def check_image_versions(p, harnesses, pins, image=DEFAULT_IMAGE):
 
 
 # --------------------------------------------------------------------------- #
+# Candidate preflight (manifest / config-variant)
+# --------------------------------------------------------------------------- #
+def check_manifest_version(p, candidate):
+    """VERSION for manifests: declared version_command must return non-empty."""
+    if not candidate.version_command:
+        return False, "manifest declares no version_command"
+    code, out = p.run(list(candidate.version_command))
+    if code is None:
+        return False, "version_command did not run"
+    if code != 0:
+        return False, f"version_command exit {code}"
+    text = (out or "").strip()
+    if not text:
+        return False, "version_command returned empty"
+    return True, text.splitlines()[0]
+
+
+def check_manifest_auth(p, candidate):
+    """AUTH for manifests: every declared auth_files source must exist."""
+    if not candidate.auth_files:
+        return True, "no auth_files declared"
+    missing = []
+    for auth in candidate.auth_files:
+        source = auth.get("source", "")
+        if not p.exists(source):
+            missing.append(source)
+    if missing:
+        return False, "missing " + ", ".join(missing)
+    return True, f"{len(candidate.auth_files)} auth file(s) present"
+
+
+def check_manifest_pass_env(p, candidate):
+    """ENV for manifests: warn (INFO) when declared pass_env names are unset."""
+    if not candidate.pass_env:
+        return None, "no pass_env declared"
+    missing = [name for name in candidate.pass_env if not p.getenv(name)]
+    if missing:
+        return None, f"WARN unset: {', '.join(missing)}"
+    return True, f"all {len(candidate.pass_env)} pass_env set"
+
+
+def check_manifest_model(candidate, model):
+    """MODEL for manifests: resolve via [models], or accept any when empty."""
+    if not candidate.models:
+        return True, f"{model} accepted (no [models] pin map)"
+    if model in candidate.models:
+        return True, f"{model} -> {candidate.models[model]}"
+    return False, f"{model} not in [models] {list(candidate.models)}"
+
+
+def check_config_variant_files(p, candidate):
+    """CONFIG for config-variants: config_dir and each config_files source exist."""
+    if not p.exists(candidate.config_dir):
+        return False, f"missing config_dir {candidate.config_dir}"
+    missing = []
+    for entry in candidate.config_files:
+        source = entry if isinstance(entry, str) else entry.get("source", "")
+        path = os.path.join(candidate.config_dir, source)
+        if not p.exists(path):
+            missing.append(source)
+    if missing:
+        return False, "missing config_files: " + ", ".join(missing)
+    return True, f"{candidate.config_dir} ({len(candidate.config_files)} file(s))"
+
+
+def evaluate_candidate(candidate, model, probes, pins=None):
+    """Preflight one loaded candidate; return ``(rows, ok)`` like ``evaluate``."""
+    pins = pinned_versions() if pins is None else pins
+    if candidate.kind == "config-variant":
+        return _evaluate_config_variant(candidate, model, probes, pins)
+    return _evaluate_manifest(candidate, model, probes)
+
+
+def _evaluate_manifest(candidate, model, probes):
+    name = candidate.name
+    rows = []
+    all_ok = True
+    cli = candidate.command[0]
+    cli_ok, cli_detail = check_cli(probes, cli)
+    version_ok, version_detail = check_manifest_version(probes, candidate)
+    auth_ok, auth_detail = check_manifest_auth(probes, candidate)
+    env_ok, env_detail = check_manifest_pass_env(probes, candidate)
+    model_ok, model_detail = check_manifest_model(candidate, model)
+    for check, ok, detail in (
+        ("CLI", cli_ok, cli_detail),
+        ("VERSION", version_ok, version_detail),
+        ("AUTH", auth_ok, auth_detail),
+        ("ENV", env_ok, env_detail),
+        ("MODEL", model_ok, model_detail),
+    ):
+        rows.append({"harness": name, "check": check, "ok": ok, "detail": detail})
+        if ok is False:
+            all_ok = False
+    return rows, all_ok
+
+
+def _evaluate_config_variant(candidate, model, probes, pins):
+    """Stock checks for the base adapter, plus config_dir/config_files existence."""
+    name = candidate.name
+    base = candidate.base_adapter
+    spec = HARNESSES.get(base)
+    rows = []
+    all_ok = True
+    if spec is None:
+        rows.append({
+            "harness": name, "check": "KNOWN", "ok": False,
+            "detail": (f"unknown base_adapter {base!r} "
+                       f"(have {known_harness_names()}); {_CANDIDATE_HINT}"),
+        })
+        return rows, False
+
+    cli_ok, cli_detail = check_cli(probes, spec["cli"])
+    version_ok, version_detail = check_version(probes, base, spec["cli"], pins)
+    if base == "grokbuild" and model == "gpt-5.6":
+        auth_ok, auth_detail = check_subbridge(probes)
+    elif model in FRONTIER_MODEL_ENV:
+        auth_ok, auth_detail = _auth_frontier(probes, base, model)
+    elif model in OPEN_MODEL_ENV:
+        keys_env_ok = base in {"codex", "codex_v1", "codex_v2"}
+        auth_ok, auth_detail = check_open_key(
+            probes, OPEN_MODEL_ENV[model], keys_env_ok=keys_env_ok)
+    else:
+        auth_ok, auth_detail = spec["auth"](probes)
+    model_ok, model_detail = check_model(probes, base, model)
+    config_ok, config_detail = check_config_variant_files(probes, candidate)
+    for check, ok, detail in (
+        ("CLI", cli_ok, cli_detail),
+        ("VERSION", version_ok, version_detail),
+        ("AUTH", auth_ok, auth_detail),
+        ("MODEL", model_ok, model_detail),
+        ("CONFIG", config_ok, config_detail),
+    ):
+        rows.append({"harness": name, "check": check, "ok": ok, "detail": detail})
+        if ok is False:
+            all_ok = False
+    return rows, all_ok
+
+
+# --------------------------------------------------------------------------- #
 # Evaluation + rendering
 # --------------------------------------------------------------------------- #
-def evaluate(harnesses, model, probes, pins=None):
+def evaluate(harnesses, model, probes, pins=None, candidates=None):
     """Return ``(rows, ok)`` for the requested harnesses.
 
     ``rows`` is a list of dicts ``{harness, check, ok, detail}`` covering the
     CLI/AUTH/MODEL checks. ``ok`` (the second return value) is True iff every
     such check passed. Unknown harness names produce a single failing row.
+    ``candidates`` maps harness label -> loaded candidate for --candidate specs.
     """
     rows = []
     all_ok = True
     pins = pinned_versions() if pins is None else pins
+    candidates = candidates or {}
     for name in harnesses:
+        if name in candidates:
+            cand_rows, cand_ok = evaluate_candidate(
+                candidates[name], model, probes, pins=pins)
+            rows.extend(cand_rows)
+            if not cand_ok:
+                all_ok = False
+            continue
+
         spec = HARNESSES.get(name)
         if spec is None:
-            rows.append({"harness": name, "check": "KNOWN", "ok": False,
-                         "detail": f"unknown harness (have {ALL_HARNESSES})"})
+            rows.append({
+                "harness": name, "check": "KNOWN", "ok": False,
+                "detail": (f"unknown harness (have {known_harness_names()}); "
+                           f"{_CANDIDATE_HINT}"),
+            })
             all_ok = False
             continue
 
@@ -460,15 +682,20 @@ def format_report(rows, harnesses, docker_row, image_row=None):
     for row in rows:
         by_harness.setdefault(row["harness"], {})[row["check"]] = row["ok"]
 
-    headers = ["harness"] + list(CHECKS)
+    checks = list(CHECKS)
+    for row in rows:
+        if row["check"] in CANDIDATE_EXTRA_CHECKS and row["check"] not in checks:
+            checks.append(row["check"])
+
+    headers = ["harness"] + checks
     table = []
     for name in harnesses:
         cells = [name]
-        checks = by_harness.get(name, {})
-        if "KNOWN" in checks:  # unknown harness -> collapse across columns
-            cells += ["FAIL"] * len(CHECKS)
+        harness_checks = by_harness.get(name, {})
+        if "KNOWN" in harness_checks:  # unknown harness -> collapse across columns
+            cells += ["FAIL"] * len(checks)
         else:
-            cells += [_status(checks.get(c), c) for c in CHECKS]
+            cells += [_status(harness_checks.get(c), c) for c in checks]
         table.append(cells)
 
     widths = [len(h) for h in headers]
@@ -503,22 +730,49 @@ def format_report(rows, harnesses, docker_row, image_row=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Benchmark preflight doctor.")
-    parser.add_argument("--harness", default=",".join(ALL_HARNESSES),
+    parser.add_argument("--harness", default=None,
                         help="comma-separated harness names to check "
                              f"(default: all {ALL_HARNESSES})")
+    parser.add_argument("--candidate", action="append", default=[], metavar="SPEC.toml",
+                        help="declarative candidate TOML (repeatable); "
+                             "preflight without editing stock harness lists")
     parser.add_argument("--model", default=DEFAULT_MODEL,
                         help=f"canonical model to resolve (default: {DEFAULT_MODEL})")
     parser.add_argument("--docker-image", default=DEFAULT_IMAGE,
                         help=f"image to compare with pins (default: {DEFAULT_IMAGE})")
+    parser.add_argument("--adapters-dir", default=ADAPTERS_DIR,
+                        help="adapters directory for stock DOCTOR discovery / "
+                             "config-variant base checks")
     args = parser.parse_args(argv)
 
-    harnesses = [h.strip() for h in args.harness.split(",") if h.strip()]
+    candidates = {}
+    if args.candidate:
+        from .candidates import load_candidates
+        try:
+            candidates = load_candidates(args.candidate, args.adapters_dir)
+        except (OSError, ValueError) as exc:
+            print(f"doctor: failed to load --candidate: {exc}", file=sys.stderr)
+            return 2
+
+    if args.harness is None:
+        harnesses = list(ALL_HARNESSES) if not candidates else []
+    else:
+        harnesses = [h.strip() for h in args.harness.split(",") if h.strip()]
+    for name in candidates:
+        if name not in harnesses:
+            harnesses.append(name)
+    if not harnesses:
+        print("doctor: at least one --harness or --candidate is required",
+              file=sys.stderr)
+        return 2
+
     probes = Probes()
 
     pins = pinned_versions()
-    rows, ok = evaluate(harnesses, args.model, probes, pins=pins)
+    rows, ok = evaluate(harnesses, args.model, probes, pins=pins, candidates=candidates)
     docker_row = check_docker(probes)
-    image_row = check_image_versions(probes, harnesses, pins, args.docker_image)
+    stock_for_image = [h for h in harnesses if h not in candidates]
+    image_row = check_image_versions(probes, stock_for_image, pins, args.docker_image)
     ok = ok and image_row[0] is not False
     print(format_report(rows, harnesses, docker_row, image_row))
     print()

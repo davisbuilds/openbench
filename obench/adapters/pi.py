@@ -40,6 +40,24 @@ except ImportError:  # file-path / Docker mount layout
 
 NAME = "pi"
 
+
+def _doctor_auth(probes):
+    """Doctor AUTH probe: isolated-HOME route needs ~/.pi/agent/auth.json + openai-codex."""
+    path = "~/.pi/agent/auth.json"
+    if not probes.exists(path):
+        return False, f"missing {os.path.expanduser(path)}"
+    data = probes.read_json(path)
+    if not isinstance(data, dict):
+        return False, f"unreadable JSON at {os.path.expanduser(path)}"
+    if "openai-codex" in data:
+        return True, "entry: openai-codex"
+    return False, "no openai-codex entry in ~/.pi/agent/auth.json"
+
+
+# Optional doctor metadata: scanned by obench.doctor to build the harness
+# preflight table without hard-coding every adapter in doctor.py.
+DOCTOR = {"cli": "pi", "auth": _doctor_auth}
+
 # canonical model name -> pi provider/model pair. Both routes use pi's
 # subscription/OAuth credentials under ~/.pi; no API key is required here.
 # Thinking parity for the opus frontier lane: Anthropic Claude Opus 4.8 is run
