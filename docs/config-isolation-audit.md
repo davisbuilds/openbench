@@ -29,7 +29,7 @@ Trust boundary: subscription auth is necessarily readable and writable by these 
 
 ## Verification
 
-- Auth persist-back suite: `python3 -m unittest discover bench/tests` → **465 tests, OK**.
+- Auth persist-back suite: `python3 -m unittest discover bench/tests` → **466 tests, OK**.
 - Full suite after follow-up corrections: `python3 -m unittest discover bench/tests` → **331 tests, OK** (18.313s).
 - Authenticated runner smokes, local `tasks/make-it-run`, artifacts outside repo at `/tmp/openbench-config-smoke.YU0FtW`:
   - codex / gpt-5.5-medium: completed, checker score 1.0. Re-run after restoring feature guards also passed at `/tmp/openbench-codex-correction.Qj2JSC/codex.jsonl`.
