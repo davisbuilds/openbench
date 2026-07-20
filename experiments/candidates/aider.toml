@@ -1,6 +1,8 @@
 kind = "manifest"
 name = "aider"
 isolate_home = true
+policy_headless_args = ["--message"]
+policy_auto_approve_args = ["--yes-always"]
 command = [
   "aider",
   "--message", "{prompt}",
