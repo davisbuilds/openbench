@@ -44,7 +44,7 @@ def main(argv=None):
     )
     sub.add_parser(
         "pack",
-        help="install and manage versioned task packs (org/name@version)",
+        help="install and manage versioned packs (tasks or harness manifests)",
         add_help=False,
     )
     sub.add_parser("export", help="export tasks to external formats (harbor)", add_help=False)
