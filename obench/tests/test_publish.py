@@ -14,6 +14,11 @@ import unittest
 from obench import publish
 from obench import scrub
 
+# The e2e tests run `python -m obench.cli` from a temp cwd; the repo root must
+# be importable regardless of where the suite is invoked from.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_SUBPROC_ENV = {**os.environ, "PYTHONPATH": _REPO_ROOT + os.pathsep + os.environ.get("PYTHONPATH", "")}
+
 
 def _row(harness, task, trial, success, *, candidate=None, model="model-x", **extra):
     row = {
@@ -258,7 +263,7 @@ class PublishBundleTests(unittest.TestCase):
              "--out", out,
              "--tasks-dir", self.tasks],
             capture_output=True, text=True,
-            cwd=self.tmp.name,
+            cwd=self.tmp.name, env=_SUBPROC_ENV,
         )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr + proc.stdout)
         with open(os.path.join(out, "index.html"), encoding="utf-8") as fh:
@@ -270,7 +275,7 @@ class PublishBundleTests(unittest.TestCase):
             [sys.executable, "-m", "obench.cli", "verify", out,
              "--tasks-dir", self.tasks],
             capture_output=True, text=True,
-            cwd=self.tmp.name,
+            cwd=self.tmp.name, env=_SUBPROC_ENV,
         )
         self.assertEqual(verify.returncode, 0, msg=verify.stdout + verify.stderr)
         self.assertIn("VERDICT: PASS", verify.stdout)
@@ -282,7 +287,7 @@ class PublishBundleTests(unittest.TestCase):
             [sys.executable, "-m", "obench.cli", "verify", out,
              "--tasks-dir", self.tasks],
             capture_output=True, text=True,
-            cwd=self.tmp.name,
+            cwd=self.tmp.name, env=_SUBPROC_ENV,
         )
         self.assertNotEqual(verify2.returncode, 0)
         self.assertIn("VERDICT: FAIL", verify2.stdout)
