@@ -56,6 +56,10 @@ _FROM_RE = re.compile(r"^\s*FROM\s+(\S+)", re.IGNORECASE)
 _WORKDIR_RE = re.compile(r"^\s*WORKDIR\s+(\S+)", re.IGNORECASE)
 _RUN_RE = re.compile(r"^\s*RUN\b", re.IGNORECASE)
 _STAGE_AS_RE = re.compile(r"\s+AS\s+(\S+)\s*$", re.IGNORECASE)
+# Harbor agent workdir paths in solve.sh / tests (rewrite for local materialize).
+_HARBOR_ABS_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_])/app(?=/|[\"']|$|\s)"
+)
 
 
 class HarborImportError(ValueError):
@@ -160,25 +164,94 @@ def map_reward_to_checker(reward: float) -> tuple[int, str | None]:
     return 1, None
 
 
+def _iter_dockerfile_logical_lines(dockerfile_text: str):
+    """Yield logical Dockerfile lines with backslash continuations joined."""
+    buf = ""
+    for raw in dockerfile_text.splitlines():
+        if buf:
+            cont = raw.strip()
+            if cont.endswith("\\"):
+                buf += cont[:-1].rstrip() + " "
+            else:
+                buf += cont
+                yield buf
+                buf = ""
+            continue
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.endswith("\\"):
+            buf = line[:-1].rstrip() + " "
+        else:
+            yield line
+    if buf:
+        yield buf
+
+
+def _resolve_container_path(path: str, workdir: str) -> str:
+    """Resolve a container path (absolute or relative) against ``workdir``.
+
+    Preserves a trailing slash when ``path`` denotes a directory destination
+    (``./``, ``foo/``, absolute ``/app/``).
+    """
+    path = (path or "").strip()
+    workdir = (workdir or "/").strip() or "/"
+    if not path or path in (".", "./"):
+        base = workdir.rstrip("/") or ""
+        return (base + "/") if base else "/"
+    trailing = path.endswith("/") and path != "/"
+    if path.startswith("/"):
+        resolved = os.path.normpath(path).replace("\\", "/")
+    else:
+        base = workdir.rstrip("/") or ""
+        joined = f"{base}/{path}" if base else f"/{path}"
+        resolved = os.path.normpath(joined).replace("\\", "/")
+        if not resolved.startswith("/"):
+            resolved = "/" + resolved
+    if resolved != "/" and trailing:
+        return resolved + "/"
+    return resolved if resolved != "/" else "/"
+
+
+def _workspace_rel_for_copy_dest(
+    dest: str, workdir: str
+) -> tuple[str, bool, bool]:
+    """Map absolute container COPY dest → (workspace_rel, unusual, dest_is_dir).
+
+    Tries the final Dockerfile WORKDIR first, then Harbor's common ``/app`` root
+    (COPY often targets ``/app`` before a later WORKDIR change).
+    """
+    dest_is_dir = dest.endswith("/") and dest != "/"
+    dest_norm = dest.rstrip("/") if dest != "/" else "/"
+    roots: list[str] = []
+    for root in (workdir.rstrip("/") or "/", "/app"):
+        if root not in roots:
+            roots.append(root)
+    for root in roots:
+        if dest_norm == root:
+            return "", False, True
+        if dest_norm.startswith(root + "/"):
+            return dest_norm[len(root) + 1 :], False, dest_is_dir
+    rel = os.path.basename(dest_norm)
+    if not rel or rel in (".", ".."):
+        rel = "staged"
+    return rel, True, dest_is_dir
+
+
 def parse_dockerfile(dockerfile_text: str) -> DockerfileAnalysis:
     """Parse a Harbor environment Dockerfile for workspace staging + complexity.
 
     Staging-only images (FROM + WORKDIR + COPY/ADD of local files) import
     cleanly. RUN installs, multi-stage builds, remote ADD, or compose-adjacent
     markers classify the task as DOCKER-REQUIRED (still imported).
+
+    Relative COPY/ADD destinations are resolved against the WORKDIR in effect
+    at that instruction (not the final WORKDIR).
     """
     analysis = DockerfileAnalysis()
     from_count = 0
-    for raw in dockerfile_text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        # Line continuations: join trailing backslash onto next — simplified
-        # by treating a lone trailing \ as "more comes"; callers usually have
-        # simple Dockerfiles. Multi-line RUN is still detected via RUN\.
-        while line.endswith("\\"):
-            line = line[:-1].rstrip()
-
+    current_workdir = "/app"  # Harbor / TB convention when WORKDIR omitted early
+    for line in _iter_dockerfile_logical_lines(dockerfile_text):
         m_from = _FROM_RE.match(line)
         if m_from:
             from_count += 1
@@ -186,6 +259,10 @@ def parse_dockerfile(dockerfile_text: str) -> DockerfileAnalysis:
             # Scratch/builder stages after the first mark multi-stage.
             if from_count == 1:
                 analysis.base_image = image.split(" AS ")[0].split(" as ")[0]
+                # Docker default WORKDIR is "/"; Harbor tasks nearly always
+                # set WORKDIR /app — keep /app as staging default until seen.
+                current_workdir = "/app"
+                analysis.workdir = "/app"
             else:
                 analysis.multi_stage = True
                 analysis.docker_required = True
@@ -196,21 +273,26 @@ def parse_dockerfile(dockerfile_text: str) -> DockerfileAnalysis:
 
         m_wd = _WORKDIR_RE.match(line)
         if m_wd:
-            analysis.workdir = m_wd.group(1).rstrip("/") or "/"
+            current_workdir = _resolve_container_path(
+                m_wd.group(1), current_workdir
+            ).rstrip("/") or "/"
+            analysis.workdir = current_workdir
             continue
 
         if _RUN_RE.match(line):
             analysis.docker_required = True
             analysis.reasons.append(f"RUN directive: {line[:80]}")
-            # Rough package hints for REQUIREMENTS.md
+            # Rough package hints for REQUIREMENTS.md (stop at shell separators).
             for pkg in re.findall(
                 r"(?:apt-get\s+install\s+(?:-y\s+)?|apk\s+add\s+(?:--no-cache\s+)?)"
-                r"(.+)$",
+                r"([^;&\n]+)",
                 line,
                 re.IGNORECASE,
             ):
                 for token in pkg.split():
-                    if token.startswith("-"):
+                    if token.startswith("-") or token in ("&&", "||"):
+                        continue
+                    if token.startswith("/") or token in ("rm", "rmdir"):
                         continue
                     analysis.packages_hint.append(token)
             if re.search(r"\bpip3?\s+install\b", line, re.IGNORECASE):
@@ -236,7 +318,9 @@ def parse_dockerfile(dockerfile_text: str) -> DockerfileAnalysis:
                 analysis.docker_required = True
                 analysis.reasons.append(f"unparseable {kind}: {line[:80]}")
                 continue
-            dest = parts[-1]
+            dest_raw = parts[-1]
+            # Resolve relative dests (., ./, foo) against WORKDIR at this line.
+            dest = _resolve_container_path(dest_raw, current_workdir)
             sources = parts[:-1]
             for src in sources:
                 if src.startswith(("http://", "https://", "git@", "ftp://")):
@@ -284,19 +368,8 @@ def stage_workspace_from_dockerfile(
             analysis.docker_required = True
             analysis.reasons.append(f"COPY path escapes environment/: {src_rel}")
             continue
-        # Map container dest → workspace-relative path.
-        dest_norm = dest.rstrip("/") if dest != "/" else "/"
-        if dest_norm == workdir or dest == workdir + "/":
-            rel = ""
-        elif dest_norm.startswith(workdir + "/"):
-            rel = dest_norm[len(workdir) + 1 :]
-        elif dest_norm.startswith("/app/"):
-            rel = dest_norm[len("/app/") :]
-        elif dest_norm == "/app":
-            rel = ""
-        else:
-            # Unusual dest — keep basename under workspace and flag.
-            rel = os.path.basename(dest_norm.rstrip("/")) or "staged"
+        rel, unusual, dest_is_dir = _workspace_rel_for_copy_dest(dest, workdir)
+        if unusual:
             analysis.docker_required = True
             analysis.reasons.append(
                 f"COPY dest {dest!r} outside WORKDIR {workdir!r}; "
@@ -310,7 +383,10 @@ def stage_workspace_from_dockerfile(
             continue
         if os.path.isdir(src_path):
             # COPY dir/ dest/ → contents when dest is a directory path.
-            if dest.endswith("/") or not rel or dest_norm in (workdir, "/app"):
+            dest_norm = dest.rstrip("/") if dest != "/" else "/"
+            if dest_is_dir or dest.endswith("/") or not rel or dest_norm in (
+                workdir, "/app",
+            ):
                 _copy_tree_contents(src_path, target)
             else:
                 if os.path.exists(target):
@@ -318,8 +394,17 @@ def stage_workspace_from_dockerfile(
                 shutil.copytree(src_path, target)
             staged_any = True
         else:
-            os.makedirs(os.path.dirname(target) or workspace_dest, exist_ok=True)
-            shutil.copy2(src_path, target)
+            # File → directory dest keeps basename (Docker COPY semantics).
+            if not rel or dest_is_dir or dest.endswith("/"):
+                os.makedirs(target if rel else workspace_dest, exist_ok=True)
+                dest_file = os.path.join(
+                    target if rel else workspace_dest,
+                    os.path.basename(src_path),
+                )
+                shutil.copy2(src_path, dest_file)
+            else:
+                os.makedirs(os.path.dirname(target) or workspace_dest, exist_ok=True)
+                shutil.copy2(src_path, target)
             staged_any = True
 
     if not staged_any:
@@ -332,10 +417,12 @@ def stage_workspace_from_dockerfile(
                 "staged workspace from environment/app/ (COPY sources empty/missing)"
             )
         else:
-            analysis.docker_required = True
+            # Empty agent workspace is common for TB tasks that create files
+            # from scratch — note it, but do not escalate to DOCKER-REQUIRED
+            # unless other Dockerfile complexity already did.
             analysis.reasons.append(
                 "no local COPY/ADD sources staged into workspace "
-                "(empty or docker-only environment)"
+                "(empty agent workspace — agent creates files from scratch)"
             )
     return analysis
 
@@ -471,6 +558,40 @@ def solve_sh_is_safe_to_run(solve_text: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _rewrite_harbor_paths_for_local(
+    text: str,
+    local_root: str,
+    *,
+    harbor_workdir: str = "/app",
+) -> str:
+    """Rewrite Harbor absolute workdir paths onto a local workspace root.
+
+    Terminal-Bench solve scripts commonly ``cat > /app/foo``; locally we point
+    those at the materialization sandbox workspace instead.
+    """
+    local_root = os.path.abspath(local_root)
+    # Longer prefixes first so /app/personal-site wins over /app.
+    prefixes: list[str] = []
+    for prefix in (harbor_workdir.rstrip("/") or "/app", "/app"):
+        if prefix not in prefixes:
+            prefixes.append(prefix)
+    prefixes.sort(key=len, reverse=True)
+
+    out = text
+    for prefix in prefixes:
+        if prefix == "/app":
+            out = _HARBOR_ABS_PATH_RE.sub(lambda _m: local_root, out)
+            continue
+        # Escape for regex; require path boundary after the prefix.
+        pat = re.compile(
+            r"(?<![A-Za-z0-9_])"
+            + re.escape(prefix)
+            + r"(?=/|[\"']|$|\s)"
+        )
+        out = pat.sub(lambda _m: local_root, out)
+    return out
+
+
 def materialize_solution_from_harbor(
     harbor_task_dir: str,
     workspace_dir: str,
@@ -527,6 +648,20 @@ def materialize_solution_from_harbor(
         # Also expose Harbor solution dir like Harbor does (/solution).
         sol_mount = os.path.join(sandbox, "solution")
         shutil.copytree(sol_src, sol_mount)
+        # TB/Harbor solve.sh often writes absolute `/app/...` paths. Rewrite
+        # those (and the Dockerfile WORKDIR if different) onto the sandbox
+        # workspace so materialization works without Docker.
+        harbor_workdir = "/app"
+        df_path = os.path.join(harbor_task_dir, "environment", "Dockerfile")
+        if os.path.isfile(df_path):
+            harbor_workdir = (
+                parse_dockerfile(_read_text(df_path)).workdir or "/app"
+            )
+        solve_run = os.path.join(sandbox, "solve-run.sh")
+        rewritten = _rewrite_harbor_paths_for_local(
+            solve_text, work, harbor_workdir=harbor_workdir
+        )
+        _write_text(solve_run, rewritten, mode=0o755)
         env = {
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
             "HOME": sandbox,
@@ -534,7 +669,7 @@ def materialize_solution_from_harbor(
             "LANG": "C.UTF-8",
         }
         proc = subprocess.run(
-            ["env", "-i", *[f"{k}={v}" for k, v in env.items()], "bash", solve],
+            ["env", "-i", *[f"{k}={v}" for k, v in env.items()], "bash", solve_run],
             cwd=work,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
