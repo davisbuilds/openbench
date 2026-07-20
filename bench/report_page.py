@@ -214,12 +214,27 @@ def render_page(models, methodology, title="OpenBench report", headline=None):
         heads.extend(["Token basis", "Excluded / unmatched / duplicates"])
         warning = ""
         if not model["provenance"]["ok"]:
-            messages = "; ".join(
-                f"{flag['field']} {flag['type'].replace('_', ' ')}"
-                for flag in model["provenance"]["flags"]
+            flags = model["provenance"]["flags"]
+            # A real comparability problem is the SAME harness at two CLI
+            # versions (harness_version) or a mixed timeout cap. image_digest
+            # and harness_version_source alone are rebuild / host-vs-container
+            # stamping artifacts — render those as a neutral note, not a red
+            # non-comparable banner.
+            advisory_only = flags and all(
+                flag["field"] in ("image_digest", "harness_version_source")
+                for flag in flags
             )
-            warning = ('<p class="warning"><strong>Non-comparable provenance:</strong> '
-                       + html.escape(messages) + ". Inspect source rows before publishing.</p>")
+            messages = "; ".join(
+                f"{flag['field']} {flag['type'].replace('_', ' ')}" for flag in flags
+            )
+            if advisory_only:
+                warning = ('<p class="tag"><strong>Provenance note:</strong> '
+                           + html.escape(messages)
+                           + " — a container-rebuild / host-vs-container stamping artifact, "
+                           "not a CLI version change. Pinned CLI versions are identical across arms.</p>")
+            else:
+                warning = ('<p class="warning"><strong>Non-comparable provenance:</strong> '
+                           + html.escape(messages) + ". Inspect source rows before publishing.</p>")
         body = []
         for a in model["arms"]:
             values = [f"{a['arm']} × {model['model']}", f"{a['solved']}/{a['n']}"]
