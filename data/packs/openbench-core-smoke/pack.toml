@@ -1,0 +1,7 @@
+org = "openbench"
+name = "core-smoke"
+version = "1.0.0"
+kind = "tasks"
+description = "Tiny polarity-checked smoke tasks (make-it-run, fix-failing-test)"
+license = "Apache-2.0"
+tasks = ["make-it-run", "fix-failing-test"]

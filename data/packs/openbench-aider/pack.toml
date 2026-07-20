@@ -1,0 +1,7 @@
+org = "openbench"
+name = "aider"
+version = "1.0.0"
+kind = "harness"
+description = "BYO Aider candidate manifest (DeepSeek proxy route)"
+license = "Apache-2.0"
+manifests = ["aider.toml"]
