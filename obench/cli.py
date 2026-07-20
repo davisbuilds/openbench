@@ -2,7 +2,7 @@
 """Umbrella CLI for the OpenBench harness benchmarking framework.
 
     obench run | report | doctor | validate | gate | compare | init |
-         publish | verify | export [args...]
+         publish | verify | export | import [args...]
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ def main(argv=None):
     sub.add_parser("publish", help="build a shareable comparison bundle", add_help=False)
     sub.add_parser("verify", help="re-verify a publish bundle's digests", add_help=False)
     sub.add_parser("export", help="export tasks to external formats (harbor)", add_help=False)
+    sub.add_parser("import", help="import tasks from external formats (harbor)", add_help=False)
 
     if not argv:
         parser.print_help()
@@ -50,12 +51,12 @@ def main(argv=None):
 
     known = {
         "run", "report", "doctor", "validate", "gate", "compare", "init",
-        "publish", "verify", "export",
+        "publish", "verify", "export", "import",
     }
     if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, report, doctor, "
-            "validate, gate, compare, init, publish, verify, export"
+            "validate, gate, compare, init, publish, verify, export, import"
         )
 
     if command == "run":
@@ -88,6 +89,9 @@ def main(argv=None):
     if command == "export":
         from .export_harbor import main as export_main
         return export_main(rest)
+    if command == "import":
+        from .import_harbor import main as import_main
+        return import_main(rest)
     return 1
 
 
