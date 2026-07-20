@@ -57,9 +57,10 @@ run loop, tool set, and permission policy. Tasks are self-contained
 | Publish / verify digests | `obench/publish.py` |
 | Counting proxy | `obench/proxy.py` |
 | Harbor export | `obench/export_harbor.py` |
+| Versioned task packs | `obench/packs.py`, `docs/task-packs.md` |
 | Stock adapters | `obench/adapters/` |
 | Unit tests | `obench/tests/` |
-| Tasks | `tasks/` (public), `.openbench/tasks/` (private-init) |
+| Tasks | `tasks/` (public), `.openbench/tasks/` (private-init), `.openbench/packs/` (installed packs) |
 
 ## Always-run CI (offline)
 
@@ -91,7 +92,8 @@ No live harness or model-API calls; stdlib-only.
 
 - **P0 — Package it. [DONE Jul 2026]** `pyproject.toml`, console entry points,
   PyPI name **`obench`** (`pip install obench`, `obench run ...`). Umbrella CLI
-  (`run / report / doctor / validate / gate / compare / init / publish / verify`).
+  (`run / report / doctor / validate / gate / compare / init / publish / verify /
+  pack / …`).
   CWD discovery (`tasks/`, then `.openbench/tasks/`) when run outside the repo.
 - **P0 — Arbitrary task roots. [DONE Jul 2026]** `validate_tasks.py` accepts
   custom task directories; `--preflight-smoke` picks a smoke task from the given
@@ -114,9 +116,13 @@ No live harness or model-API calls; stdlib-only.
   task (`checker.sh` + `SCORE:` → `tests/test.sh` writing `reward.txt`); lets
   companies use Harbor's cloud sandboxes while OpenBench stays the
   comparison/stats/auth layer.
-- **P2 — Versioned task packs.** Task packs and harness manifests as
-  versioned, installable-by-name artifacts (`org/pack@version`), following the
-  verifiers hub packaging pattern.
+- **P2 — Versioned task packs. [PARTIAL Jul 2026]** Task packs as versioned,
+  installable-by-name artifacts (`org/pack@version`) via `obench pack`
+  (`init` / `install` / `list` / `verify`): local dir, git (`git archive`), or
+  HTTPS zip/tarball — no custom package server (`docs/task-packs.md`). Layout
+  `.openbench/packs/<org>/<name>/<version>/` with `pack_source.json`
+  provenance + scheme-2 task digests. Still open: harness-manifest packs, a
+  community hub/index, and seeded published pack examples.
 
 ## Non-goals
 
