@@ -1,0 +1,31 @@
+[
+  {
+    "id": "openbench/aider",
+    "org": "openbench",
+    "name": "aider",
+    "latest": "1.0.0",
+    "kind": "harness",
+    "description": "BYO Aider candidate manifest (DeepSeek proxy route)",
+    "license": "Apache-2.0",
+    "source": "data/packs/openbench-aider",
+    "content_sha256": "7f4a9d273763ec6d90f676771f41ebb12da42dc0197102cbf196b4c0bb6ac0d4",
+    "manifests": [
+      "aider.toml"
+    ]
+  },
+  {
+    "id": "openbench/core-smoke",
+    "org": "openbench",
+    "name": "core-smoke",
+    "latest": "1.0.0",
+    "kind": "tasks",
+    "description": "Tiny polarity-checked smoke tasks (make-it-run, fix-failing-test)",
+    "license": "Apache-2.0",
+    "source": "data/packs/openbench-core-smoke",
+    "content_sha256": "3b1e576398a8c8f6d42a514ce83ec610f81742edd79f733453bbff681dbeca58",
+    "tasks": [
+      "make-it-run",
+      "fix-failing-test"
+    ]
+  }
+]
