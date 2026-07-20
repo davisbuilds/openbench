@@ -331,5 +331,11 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
                "wall_time_s": 0.002}
         self.assertEqual(failure_class.classify_failure(row), "infra")
 
+    def test_vendor_authentication_error_is_infra(self):
+        row = {"success": False, "completed": True, "tokens": 0,
+               "output_tail": 'Fails, Your api key: ****ogus is invalid","type":"authentication_error"',
+               "wall_time_s": 2.0}
+        self.assertEqual(failure_class.classify_failure(row), "infra")
+
 if __name__ == "__main__":
     unittest.main()

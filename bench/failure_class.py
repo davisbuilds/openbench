@@ -54,7 +54,10 @@ _INFRA_RE = re.compile(
     # (e.g. FileNotFoundError for a missing harness binary) is infrastructure,
     # never a task wrong answer.
     r"Traceback \(most recent call last\)|"
-    r"FileNotFoundError"
+    r"FileNotFoundError|"
+    # Provider auth rejections in vendor/liteLLM phrasing (aider et al.):
+    r"authentication_error|AuthenticationError|"
+    r"api key[^\n]{0,40}\binvalid|invalid[^\n]{0,20}api key|incorrect api key"
     r")",
     re.IGNORECASE,
 )
