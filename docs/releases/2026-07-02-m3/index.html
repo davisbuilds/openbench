@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenBench &mdash; Harness Comparison Results</title>
+</head>
+<body>
+<style>
+  body{margin:0; background:#f9f9f7;}
+  @media (prefers-color-scheme:dark){ body{background:#0d0d0d;} }
+  .viz-root{
+    --surface-1:#fcfcfb; --plane:#f9f9f7;
+    --ink-1:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
+    --good:#006300;
+    --c-pi:#2a78d6; --c-cursor:#1baf7a; --c-devin:#eda100; --c-codex:#008300; --c-opencode:#4a3aa7;
+    --c-null:#898781;
+    --m-glm52:#2a78d6; --m-deepseek:#1baf7a; --m-kimi:#4a3aa7; --m-glmflash:#eda100; --m-gpt:#52514e;
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    color:var(--ink-1); background:var(--plane);
+    line-height:1.5; max-width:940px; margin:0 auto; padding:28px 20px 64px;
+    -webkit-text-size-adjust:100%;
+  }
+  @media (prefers-color-scheme:dark){
+    .viz-root{
+      --surface-1:#1a1a19; --plane:#0d0d0d;
+      --ink-1:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+      --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+      --good:#0ca30c;
+      --c-pi:#3987e5; --c-cursor:#199e70; --c-devin:#c98500; --c-codex:#008300; --c-opencode:#9085e9;
+      --m-glm52:#3987e5; --m-deepseek:#199e70; --m-kimi:#9085e9; --m-glmflash:#c98500; --m-gpt:#c3c2b7;
+    }
+  }
+  .viz-root *{box-sizing:border-box;}
+  .viz-root h1{font-size:clamp(1.5rem,4vw,2.05rem); line-height:1.15; margin:0 0 .35em; letter-spacing:-.01em;}
+  .viz-root h2{font-size:1.12rem; margin:2.4em 0 .2em; letter-spacing:-.005em;}
+  .viz-root h2 .m35{color:var(--c-opencode); font-weight:700; margin-right:.5em; letter-spacing:0;}
+  .viz-root h3{font-size:1rem; margin:1.5em 0 .3em; letter-spacing:-.005em;}
+  .rule35{border:none; border-top:1px solid var(--axis); margin:3em 0 0;}
+  .viz-root h2 .n{color:var(--muted); font-weight:600; margin-right:.5em; font-variant-numeric:tabular-nums;}
+  .viz-root p{margin:.5em 0; color:var(--ink-2); font-size:.95rem;}
+  .viz-root .sub{color:var(--muted); font-size:.9rem;}
+  .viz-root .lede{color:var(--ink-1); font-size:1.02rem; max-width:66ch;}
+  .card{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:16px 16px 12px;}
+  .cap{color:var(--muted); font-size:.82rem; margin:.6em 2px 0;}
+  /* KPI row */
+  .kpi{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-top:14px;}
+  .tile{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:14px 15px;}
+  .tile .v{font-size:clamp(1.5rem,4.2vw,1.95rem); font-weight:650; letter-spacing:-.02em; line-height:1;}
+  .tile .l{color:var(--ink-2); font-size:.86rem; margin-top:.45em;}
+  .tile .v small{font-size:.62em; font-weight:600; color:var(--muted); letter-spacing:0;}
+  /* legend */
+  .legend{display:flex; flex-wrap:wrap; gap:6px 16px; margin:2px 2px 12px; font-size:.86rem;}
+  .legend span{display:inline-flex; align-items:center; gap:7px; color:var(--ink-2); font-variant-numeric:tabular-nums;}
+  .sw{width:11px; height:11px; border-radius:3px; flex:0 0 auto;}
+  /* svg */
+  .viz-root svg{display:block; width:100%; height:auto;}
+  .viz-root svg text{fill:var(--ink-2); font-family:inherit;}
+  .lab{fill:var(--ink-1); font-weight:600;}
+  .val{fill:var(--ink-2); font-variant-numeric:tabular-nums;}
+  .tick{fill:var(--muted); font-variant-numeric:tabular-nums;}
+  .gl{stroke:var(--grid); stroke-width:1;}
+  .ax{stroke:var(--axis); stroke-width:1;}
+  /* tables */
+  .scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid var(--border); border-radius:12px; background:var(--surface-1);}
+  table{border-collapse:collapse; width:100%; font-size:.88rem; min-width:520px;}
+  caption{text-align:left; padding:12px 14px 0; color:var(--muted); font-size:.82rem;}
+  th,td{padding:8px 12px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;}
+  th:first-child,td:first-child{text-align:left; font-variant-numeric:normal;}
+  thead th{color:var(--ink-2); font-weight:600; border-bottom:1px solid var(--axis);}
+  tbody td{border-bottom:1px solid var(--grid); color:var(--ink-1);}
+  tbody tr:last-child td{border-bottom:none;}
+  tr.ctrl td{color:var(--ink-2);}
+  .dot{display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:7px; vertical-align:baseline;}
+  .pass{color:var(--good); font-weight:600;}
+  .sm{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px;}
+  .sm .card{padding:12px 12px 8px;}
+  .sm h3{font-size:.92rem; margin:0 0 2px; color:var(--ink-1);}
+  .sm h3 .m{color:var(--muted); font-weight:500; font-size:.82rem;}
+  .callout{background:var(--surface-1); border:1px solid var(--border); border-left:3px solid var(--c-devin);
+    border-radius:10px; padding:12px 14px; margin:.8em 0 1.2em; font-size:.9rem; color:var(--ink-2);}
+  .callout strong{color:var(--ink-1);}
+  footer{margin-top:2.6em; padding-top:14px; border-top:1px solid var(--grid);}
+  footer p{font-size:.86rem;}
+  footer .fn{color:var(--muted);}
+  sup{color:var(--c-devin); font-weight:700;}
+  .asr{color:var(--muted);}
+</style>
+
+<div class="viz-root" data-palette="#2a78d6,#1baf7a,#eda100,#008300,#4a3aa7">
+
+  <h1>OpenBench M3 &mdash; Harness Comparison</h1>
+  <p class="lede">Five coding-agent harnesses on the <strong>same model</strong>
+  (<code>gpt-5.5-medium</code>), 3 tasks &times; 5 trials each, run locally on 2026-07-02.</p>
+  <p class="sub">A shakedown of the benchmark pipeline on a real 75-run spend &mdash; read it as
+  &ldquo;the harness works and here is what it found,&rdquo; <strong>not</strong> a leaderboard.</p>
+
+  <div class="kpi" id="kpi"></div>
+
+  <h2><span class="n">1</span>Speed per harness &mdash; mean wall-time with 95% CI</h2>
+  <p>The one axis on which the harnesses actually separate. Bars are sorted fastest&rarr;slowest;
+  whiskers are the 95% confidence interval of the mean (n=15). Where whiskers <em>overlap</em>,
+  the difference is <strong>not</strong> resolved at this sample size.</p>
+  <div class="card"><div id="chart-main"></div></div>
+  <p class="cap" id="cap-main"></p>
+
+  <h2><span class="n">2</span>Correctness &mdash; success matrix with Wilson 95% intervals</h2>
+  <p>Every real harness solved every task on every trial. Identical intervals mean they are
+  statistically <strong>indistinguishable</strong> on success; only the <code>null</code> control
+  (which makes no edits) separates &mdash; confirming the checkers actually discriminate.</p>
+  <div class="scroll">
+    <table id="tbl-success">
+      <caption>Success = checker exit 0. Wilson 95% interval on the overall rate.</caption>
+    </table>
+  </div>
+
+  <h2><span class="n">3</span>Does the speed order hold across tasks?</h2>
+  <p>Same five harnesses, one panel per task, shared time axis. <code>pi</code> and
+  <code>cursor</code> stay fast everywhere; the slow trio (<code>devin</code>, <code>codex</code>,
+  <code>opencode</code>) reshuffles task to task &mdash; the visual signature of a cluster that
+  isn&rsquo;t cleanly ordered.</p>
+  <div class="legend" id="legend"></div>
+  <div class="sm" id="chart-tasks"></div>
+
+  <h2><span class="n">4</span>The honest view &mdash; every trial&rsquo;s wall-time</h2>
+  <p>All 15 raw timings per harness. <code>pi</code> and <code>cursor</code> are tight;
+  <code>codex</code> and <code>opencode</code> are wide (sd &asymp; 23&nbsp;s), which is why their
+  means blur together. The vertical tick marks each harness&rsquo;s mean.</p>
+  <div class="card"><div id="chart-dots"></div></div>
+
+  <h2><span class="n">5</span>Timing table (the table view)</h2>
+  <div class="scroll">
+    <table id="tbl-timing">
+      <caption>Mean &plusmn; 95% CI half-width, n=15 per harness. &ldquo;Separated&rdquo; pairs have
+      non-overlapping mean intervals.</caption>
+    </table>
+  </div>
+
+  <hr class="rule35">
+  <h2><span class="m35">M3.5</span>The harness tax in tokens <span class="sub" style="font-weight:400">&mdash; added 2026-07-02</span></h2>
+  <p>The matrix re-run (3 trials) with <strong>token capture on every adapter</strong>. Correctness is
+  still a tie (all 9/9), so the story is <strong>cost per solved task</strong>. The token tax spans
+  <strong>~8&times;</strong> &mdash; wider than the wall-time spread &mdash; and the token order is
+  <strong>not</strong> the time order.</p>
+  <div class="legend" id="legend35"></div>
+
+  <h3>Tokens per solved task &mdash; with 95% CI</h3>
+  <div class="card"><div id="chart-tok"></div></div>
+  <p class="cap" id="cap-tok"></p>
+
+  <h3>Two different axes &mdash; wall-time vs token tax</h3>
+  <p>Each harness placed by mean wall-time (x) and tokens per solve (y). If the two axes agreed, the
+  points would fall on a line; they don&rsquo;t.</p>
+  <div class="card"><div id="chart-scatter"></div></div>
+  <p class="cap"><code>opencode</code> and <code>codex</code> sit at nearly the same wall-time yet
+  <code>codex</code> spends ~2&times; the tokens; <code>devin</code> is the slowest but not the
+  heaviest. <code>pi</code> alone is both fast and lean.</p>
+
+  <hr class="rule35">
+  <h2><span class="m35">M4.5</span>Harder tasks &mdash; frontier still saturates <span class="sub" style="font-weight:400">&mdash; added 2026-07-03</span></h2>
+  <p>Three harder, partial-credit tasks (make-ci-green, add-feature, misleading-error), 3 trials.
+  The correctness ceiling <strong>held</strong>: the four clean harnesses each scored
+  <strong>9/9, mean-score 1.0</strong> &mdash; separation on correctness was <strong>not</strong> achieved
+  at gpt-5.5-medium, and a pilot predicted it (every pilot cell hit 1.0, missing the 20&ndash;80% band high).
+  So M4.5 is again an <strong>efficiency</strong> story &mdash; this time on genuinely multi-step tasks.</p>
+
+  <div class="callout" id="devin-flaky">
+    <strong>devin is excluded from all M4.5 rankings &mdash; flaky, data unreliable.</strong>
+    After an adapter regression (invalid effort-pinned model id &rarr; 0/9 instant fails, caught by the
+    anomaly scan &amp; fixed) the re-run was still untrustworthy: intermittent instant exit-1, two 900&thinsp;s
+    hangs (persistent-process pipe issue), and token counts internally inconsistent ~20&times; (716k vs 33k on
+    the same task). Service-side instability is a credible contributor (account model access changed
+    mid-evening). Retained in the raw data for honesty; a daytime investigation is queued.
+  </div>
+
+  <h3>Tokens per solved task &mdash; the clean four, 95% CI</h3>
+  <div class="legend" id="legend45"></div>
+  <div class="card"><div id="chart-tok45"></div></div>
+  <p class="cap" id="cap-tok45"></p>
+
+  <hr class="rule35">
+  <h2><span class="m35">M4</span>Open models &mdash; most reach frontier parity <span class="sub" style="font-weight:400">&mdash; added 2026-07-03</span></h2>
+  <p>Four open models (first-party APIs) on the same three hard tasks GPT-5.5-medium saturated in M4.5, via
+  <code>pi</code> + <code>opencode</code>. The question: does a weaker model finally break the ceiling and show
+  partial scores? Answer: <strong>3 of 4 reach parity</strong> &mdash; <code>glm-5.2</code>,
+  <code>deepseek-v4-flash</code>, and <code>kimi-k2.7-code</code> (via pi) all score a clean 1.00, matching the
+  frontier. <strong>Only <code>glm-4.7-flash</code></strong> (free, small) drops below with genuine partial
+  credit.</p>
+  <p class="lede" style="margin-top:.4em">The efficiency thesis in one number: all
+  <strong>72 real agent runs</strong> (4 open models &times; 2 harnesses &times; 3 hard tasks &times; 3 trials)
+  cost <strong>~$1.02 total</strong> &mdash; frontier-comparable open-model coding for about a dollar.</p>
+  <p>The dashboard below puts <strong>GPT-5.5-medium in the same panels</strong> as the reference. It is a
+  legitimate head-to-head: the frontier rows come from the M4.5 run on the <em>same three tasks</em>, through
+  the <em>same</em> <code>pi</code> harness, at the <em>same</em> 3&times;3 trial grid (n=9 per model). GPT-5.5
+  is drawn in neutral ink as the baseline; the open models carry their own hues.</p>
+
+  <div class="callout" id="opencode-bug">
+    <strong>Two apparent harness gaps are an opencode adapter bug, not model capability.</strong>
+    8 of 72 cells are exceptions from one bug in <code>opencode.py</code>&rsquo;s 900&thinsp;s timeout handler
+    (concatenates <code>bytes</code> stdout with <code>str</code>). They&rsquo;re 7&times; glm-4.7-flash:opencode
+    + 1&times; kimi:opencode &mdash; opencode runs these models so slowly (glm-4.7-flash 789&thinsp;s vs pi&rsquo;s
+    102&thinsp;s; kimi 371 vs 68) that they time out constantly and hit the crash. So the &ldquo;glm-flash pi 0.47
+    vs opencode 0.22&rdquo; gap and the kimi:opencode 0.67 are largely infra artifacts. kimi is fully capable
+    (kimi:pi = 1.00). The 8 cells are excluded from the capability scores below; the bug is filed.
+  </div>
+
+  <div class="legend" id="legend-m4"></div>
+
+  <h3>Mean score &mdash; four open models meet the frontier reference</h3>
+  <div class="card"><div id="chart-m4-score"></div></div>
+  <p class="cap" id="cap-m4-score"></p>
+
+  <h3>Tokens per solve &mdash; parity at comparable-or-fewer tokens</h3>
+  <div class="card"><div id="chart-m4-tok"></div></div>
+  <p class="cap" id="cap-m4-tok"></p>
+
+  <h3>Wall-time per solve</h3>
+  <div class="card"><div id="chart-m4-wall"></div></div>
+  <p class="cap" id="cap-m4-wall"></p>
+
+  <h3>Cost per solve &mdash; measured open spend vs frontier list price</h3>
+  <div class="card"><div id="chart-m4-cost"></div></div>
+  <p class="cap" id="cap-m4-cost"></p>
+
+  <h3>Per-task score &mdash; parity isn&rsquo;t a pooling artifact</h3>
+  <div class="sm" id="chart-m4-tasks"></div>
+  <p class="cap" id="cap-m4-tasks"></p>
+
+  <h3>The numbers (table view)</h3>
+  <div class="scroll">
+    <table id="tbl-m4">
+      <caption>Per model, <code>pi</code>-only, n=9 (3 tasks &times; 3 trials). GPT-5.5-medium is the
+      frontier reference (M4.5 run). $/solve is <em>measured</em> API spend for the open models; the GPT-5.5
+      figure is an <em>estimate</em> at OpenAI list price (see cost chart).</caption>
+    </table>
+  </div>
+
+  <footer>
+    <p class="fn"><sup>*</sup> <strong>codex</strong> (M4.5): tokens are a <em>fresh basis</em> (adapter now
+    parses <code>--json</code> usage) &mdash; <strong>not</strong> comparable with the M3.5 codex column above,
+    which included cache reads.</p>
+    <p class="fn"><sup>*</sup> <strong>codex</strong> (M3.5): token count <em>includes cache-read
+    tokens</em>, so its tax is inflated and not apples-to-apples with the others &mdash; an upper-ish bound.</p>
+    <p class="fn"><sup>**</sup> <strong>devin</strong> (M3.5): now effort-pinned; its wall-time roughly
+    doubled vs M3 (43.0&rarr;83.5&nbsp;s). Consistent with either the effort pin or day/service-load &mdash;
+    not concluded. <code>cursor</code> reports no turns by design. M3&harr;M3.5 wall-times aren&rsquo;t
+    directly comparable (different trial counts and run day).</p>
+    <p class="fn"><sup>*</sup> <strong>devin</strong> (M3): reasoning effort is unpinned (no selector;
+    <code>medium</code> collapses to <code>gpt-5.5</code> at devin&rsquo;s default effort), so its
+    rows are not an effort-for-effort comparison with the others.</p>
+    <p class="fn"><strong>Tokens</strong> are reported only by <code>codex</code> (666,034 across its
+    15 cells); the other adapters don&rsquo;t yet parse a usage line, so token cost is not comparable.</p>
+    <p class="fn"><strong>Limitations:</strong> easy-task ceiling (correctness saturates), n=15 per
+    harness, single macOS host, single day, subscription-OAuth only. Full narrative, methodology, and
+    &ldquo;what would change the picture&rdquo; are in RESULTS.md at the repo root.</p>
+  </footer>
+</div>
+
+<script>
+(function(){
+  const DATA={
+    order:["pi","cursor","devin","codex","opencode"],
+    tasks:["fix-failing-test","build-a-cli","make-it-run"],
+    H:{
+      null:{mean:0,hw:0,sd:0,wl:[0,0.204],pt:[0,0,0],tok:null,
+        raw:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},
+      pi:{mean:16.43,hw:2.28,sd:4.51,wl:[0.796,1],pt:[13.38,20.98,14.94],tok:null,
+        raw:[11.03,11.22,12.28,13.43,13.5,13.63,14.81,14.83,16.33,16.4,18.97,19.64,20.37,24.99,25.09]},
+      cursor:{mean:21.95,hw:1.97,sd:3.9,wl:[0.796,1],pt:[21.53,20.02,24.31],tok:null,
+        raw:[15.14,16.77,18.79,19.29,19.37,19.84,20.65,21.04,22.51,23.98,24.5,25.87,26.82,26.83,27.86]},
+      devin:{mean:43.03,hw:5.84,sd:11.54,wl:[0.796,1],pt:[37.12,54.98,36.99],tok:null,
+        raw:[25.19,31.39,36.37,37.17,37.48,37.7,39.52,40.19,40.43,44.37,45.1,45.73,55.51,56.18,73.1]},
+      codex:{mean:48.28,hw:12.01,sd:23.73,wl:[0.796,1],pt:[32.74,76.49,35.6],tok:666034,
+        raw:[26.18,28.34,28.95,31.03,31.31,31.7,31.91,37.76,40.78,48.55,53.76,74.07,74.48,91.44,93.92]},
+      opencode:{mean:62.7,hw:11.62,sd:22.96,wl:[0.796,1],pt:[67.49,81.67,38.93],tok:null,
+        raw:[26.97,32.93,40.12,41.16,53.48,56.58,56.77,58.04,62.97,67.49,70.08,87.59,89.6,91.22,105.49]}
+    },
+    headline:{real_pass:75,real_total:75,null_pass:0,null_total:15,spread:3.8,codex_tokens:666034},
+    overlaps:{"devin~codex":true,"codex~opencode":true}
+  };
+  const NL="http://www.w3.org/2000/svg";
+  const col=h=>`var(--c-${h})`;
+  const f1=x=>(Math.round(x*10)/10).toFixed(1);
+  const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+
+  function el(tag,attrs,kids){
+    const e=document.createElementNS(NL,tag);
+    for(const k in attrs) e.setAttribute(k,attrs[k]);
+    if(kids) [].concat(kids).forEach(c=>e.appendChild(typeof c==="string"?document.createTextNode(c):c));
+    return e;
+  }
+  function title(node,txt){ node.appendChild(el("title",{},txt)); return node; }
+  function svg(w,h){ return el("svg",{viewBox:`0 0 ${w} ${h}`,role:"img","aria-label":"chart",preserveAspectRatio:"xMinYMin meet"}); }
+  // rounded-right-end bar (square at baseline/left)
+  function barPath(x0,y,w,h,r){
+    r=Math.max(0,Math.min(r,h/2,w));
+    return `M${x0},${y} h${w-r} a${r},${r} 0 0 1 ${r},${r} v${h-2*r} a${r},${r} 0 0 1 ${-r},${r} h${-(w-r)} z`;
+  }
+
+  /* ---- KPI tiles ---- */
+  (function(){
+    const t=[
+      [`${DATA.headline.real_pass}/${DATA.headline.real_total}`,"real cells passed (5 harnesses)"],
+      [`${DATA.headline.spread}<small>&times;</small>`,"speed spread, pi&rarr;opencode"],
+      [`${DATA.headline.null_pass}`,"null-control passes (checkers sound)"],
+      [`~52<small>min</small>`,"wall clock, all 90 cells local"]
+    ];
+    document.getElementById("kpi").innerHTML=
+      t.map(([v,l])=>`<div class="tile"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+  })();
+
+  /* ---- Chart 1: main horizontal bars + CI whiskers ---- */
+  (function(){
+    const W=720,H=300, L=96,R=110,T=18,B=44, x0=L,x1=W-R, pw=x1-x0, xmax=80;
+    const rows=DATA.order, n=rows.length, band=(H-T-B)/n, barH=20;
+    const X=v=>x0+v/xmax*pw;
+    const s=svg(W,H);
+    // gridlines + ticks
+    for(let g=0; g<=xmax; g+=20){
+      s.appendChild(el("line",{class:"gl",x1:X(g),y1:T,x2:X(g),y2:H-B}));
+      s.appendChild(el("text",{class:"tick",x:X(g),y:H-B+18,"text-anchor":"middle","font-size":12}, g===0?"0":g+"s"));
+    }
+    s.appendChild(el("line",{class:"ax",x1:x0,y1:H-B,x2:x1,y2:H-B}));
+    rows.forEach((h,i)=>{
+      const d=DATA.H[h], cy=T+band*i+band/2, y=cy-barH/2, bw=X(d.mean)-x0;
+      const nm=h==="devin"?"devin*":h;
+      s.appendChild(el("text",{class:"lab",x:x0-10,y:cy+4,"text-anchor":"end","font-size":13}, nm));
+      title(s.appendChild(el("path",{d:barPath(x0,y,bw,barH,4),fill:col(h)})),
+            `${h} \u2014 mean ${f1(d.mean)} s (95% CI ${f1(d.mean-d.hw)}\u2013${f1(d.mean+d.hw)} s), n=15`);
+      // whisker: surface underlay then ink line + caps
+      const a=X(d.mean-d.hw), b=X(d.mean+d.hw);
+      s.appendChild(el("line",{x1:a,y1:cy,x2:b,y2:cy,stroke:"var(--surface-1)","stroke-width":4}));
+      s.appendChild(el("line",{x1:a,y1:cy,x2:b,y2:cy,stroke:"var(--ink-1)","stroke-width":2}));
+      [a,b].forEach(cx=>s.appendChild(el("line",{x1:cx,y1:cy-5,x2:cx,y2:cy+5,stroke:"var(--ink-1)","stroke-width":2})));
+      s.appendChild(el("text",{class:"val",x:b+8,y:cy+4,"font-size":12.5},
+        `${f1(d.mean)}s `)).appendChild(document.createTextNode(""));
+      const vt=s.lastChild; vt.appendChild(el("tspan",{class:"tick",dx:1},`\u00b1${f1(d.hw)}`));
+    });
+    document.getElementById("chart-main").appendChild(s);
+    document.getElementById("cap-main").textContent=
+      "pi and cursor are clearly separated from the field and from each other. Within the slow cluster, "+
+      "devin\u2248codex and codex\u2248opencode overlap (not separable at n=15); codex and opencode also carry the widest spread.";
+  })();
+
+  /* ---- Success table ---- */
+  (function(){
+    const th=`<thead><tr><th>harness</th>`+DATA.tasks.map(t=>`<th>${t}</th>`).join("")+
+      `<th>overall</th><th>Wilson 95%</th><th>mean s</th><th>tokens</th></tr></thead>`;
+    const order=["null",...DATA.order];
+    const body=order.map(h=>{
+      const d=DATA.H[h], succ=(h==="null"?0:15), pct=Math.round(succ/15*100);
+      const nm=h==="null"?"null":(h==="devin"?`devin<sup>*</sup>`:h);
+      const swatch=`<span class="dot" style="background:${col(h)}"></span>`;
+      const cells=DATA.tasks.map((t,i)=>`<td>${d.pt[i]!==undefined?(succ?5:0):0}/5</td>`).join("");
+      const ov=succ?`<span class="pass">${succ}/15</span> <span class="asr">(${pct}%)</span>`:`0/15 <span class="asr">(0%)</span>`;
+      const tok=d.tok?d.tok.toLocaleString():"\u2014";
+      return `<tr class="${h==='null'?'ctrl':''}"><td>${swatch}${nm}</td>${cells}`+
+        `<td>${ov}</td><td>[${d.wl[0].toFixed(3)}, ${d.wl[1].toFixed(3)}]</td><td>${f1(d.mean)}</td><td>${tok}</td></tr>`;
+    }).join("");
+    document.getElementById("tbl-success").innerHTML+=th+`<tbody>${body}</tbody>`;
+  })();
+
+  /* ---- Legend (shared by small multiples + dot plot) ---- */
+  document.getElementById("legend").innerHTML=DATA.order.map(h=>
+    `<span><span class="sw" style="background:${col(h)}"></span>${h==="devin"?"devin*":h}</span>`).join("");
+
+  /* ---- Chart 3: small multiples per task ---- */
+  (function(){
+    const taskMax=90; // shared scale (max per-task mean ~81.7)
+    const host=document.getElementById("chart-tasks");
+    DATA.tasks.forEach((t,ti)=>{
+      const W=340,H=196,L=84,R=40,T=8,B=26,x0=L,x1=W-R,pw=x1-x0;
+      const rows=DATA.order,n=rows.length,band=(H-T-B)/n,barH=13;
+      const X=v=>x0+v/taskMax*pw;
+      const s=svg(W,H);
+      for(let g=0; g<=taskMax; g+=30){
+        s.appendChild(el("line",{class:"gl",x1:X(g),y1:T,x2:X(g),y2:H-B}));
+        s.appendChild(el("text",{class:"tick",x:X(g),y:H-B+16,"text-anchor":"middle","font-size":11}, g===0?"0":g+"s"));
+      }
+      s.appendChild(el("line",{class:"ax",x1:x0,y1:H-B,x2:x1,y2:H-B}));
+      rows.forEach((h,i)=>{
+        const v=DATA.H[h].pt[ti], cy=T+band*i+band/2, y=cy-barH/2, bw=Math.max(0,X(v)-x0);
+        s.appendChild(el("text",{class:"lab",x:x0-8,y:cy+4,"text-anchor":"end","font-size":11.5}, h==="devin"?"devin*":h));
+        title(s.appendChild(el("path",{d:barPath(x0,y,bw,barH,3),fill:col(h)})), `${h} \u00b7 ${t}: mean ${f1(v)} s`);
+        s.appendChild(el("text",{class:"val",x:X(v)+6,y:cy+4,"font-size":11}, f1(v)));
+      });
+      const card=document.createElement("div"); card.className="card";
+      card.innerHTML=`<h3>${t} <span class="m">mean s</span></h3>`;
+      card.appendChild(s); host.appendChild(card);
+    });
+  })();
+
+  /* ---- Chart 4: raw dot strip per harness ---- */
+  (function(){
+    const W=720,H=330,L=96,R=40,T=16,B=40,x0=L,x1=W-R,pw=x1-x0,xmax=120;
+    const rows=DATA.order,n=rows.length,band=(H-T-B)/n;
+    const X=v=>x0+v/xmax*pw;
+    const s=svg(W,H);
+    for(let g=0; g<=xmax; g+=30){
+      s.appendChild(el("line",{class:"gl",x1:X(g),y1:T,x2:X(g),y2:H-B}));
+      s.appendChild(el("text",{class:"tick",x:X(g),y:H-B+18,"text-anchor":"middle","font-size":12}, g===0?"0":g+"s"));
+    }
+    s.appendChild(el("line",{class:"ax",x1:x0,y1:H-B,x2:x1,y2:H-B}));
+    rows.forEach((h,i)=>{
+      const d=DATA.H[h], cy=T+band*i+band/2;
+      s.appendChild(el("text",{class:"lab",x:x0-10,y:cy+4,"text-anchor":"end","font-size":13}, h==="devin"?"devin*":h));
+      // mean tick
+      title(s.appendChild(el("line",{x1:X(d.mean),y1:cy-16,x2:X(d.mean),y2:cy+16,stroke:"var(--ink-1)","stroke-width":2})),
+            `${h} mean ${f1(d.mean)} s`);
+      // raw dots with deterministic vertical jitter
+      d.raw.forEach((v,k)=>{
+        const jit=(((k*37)%29)-14)/14*15;
+        const dot=el("circle",{cx:X(v),cy:cy+jit,r:4.2,fill:col(h),"fill-opacity":0.62,
+          stroke:"var(--surface-1)","stroke-width":2});
+        title(dot,`${h}: ${f1(v)} s`); s.appendChild(dot);
+      });
+      s.appendChild(el("text",{class:"tick",x:x1,y:cy-band/2+14,"text-anchor":"end","font-size":10.5},`sd ${f1(d.sd)}`));
+    });
+    document.getElementById("chart-dots").appendChild(s);
+  })();
+
+  /* ---- Timing table ---- */
+  (function(){
+    const th=`<thead><tr><th>harness</th><th>mean s</th><th>95% CI (s)</th><th>sd s</th><th>vs next slower</th></tr></thead>`;
+    const ord=DATA.order;
+    const body=ord.map((h,i)=>{
+      const d=DATA.H[h], swatch=`<span class="dot" style="background:${col(h)}"></span>`;
+      const nm=h==="devin"?`devin<sup>*</sup>`:h;
+      let rel="\u2014";
+      if(i<ord.length-1){ const pair=`${h}~${ord[i+1]}`; rel=DATA.overlaps[pair]?`<span class="asr">overlap</span>`:`<span class="pass">separated</span>`; }
+      return `<tr><td>${swatch}${nm}</td><td>${f1(d.mean)}</td>`+
+        `<td>[${f1(d.mean-d.hw)}, ${f1(d.mean+d.hw)}]</td><td>${f1(d.sd)}</td><td>${rel}</td></tr>`;
+    }).join("");
+    document.getElementById("tbl-timing").innerHTML+=th+`<tbody>${body}</tbody>`;
+  })();
+
+  /* ================= M3.5: harness tax in tokens ================= */
+  const D35={H:{
+    pi:{s:17.63,turns:5.6,raw:[2721,4256,4326,4471,5336,5818,6251,7004,7963]},
+    cursor:{s:26.32,turns:null,raw:[8116,9528,9682,10933,10958,11198,18135,19496,27926]},
+    opencode:{s:54.36,turns:8.0,raw:[12230,13861,14858,15339,19305,20590,23218,29982,36586]},
+    devin:{s:83.54,turns:18.7,raw:[11514,20636,26127,27483,31802,35597,38528,47987,64159]},
+    codex:{s:54.90,turns:null,raw:[19476,22647,32662,39828,40439,46273,52771,54789,73640]}
+  }};
+  const tk=v=>v>=1000?(v/1000).toFixed(1)+"k":(""+Math.round(v));
+  (function(){ // compute tok mean + CI half-width from raw (n=9)
+    const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
+    const ci=a=>{const m=mean(a);const sd=Math.sqrt(a.reduce((s,x)=>s+(x-m)**2,0)/(a.length-1));return 1.96*sd/Math.sqrt(a.length);};
+    Object.values(D35.H).forEach(d=>{d.tok=mean(d.raw); d.thw=ci(d.raw);});
+  })();
+
+  /* ---- M3.5 tokens-per-solve bars + CI ---- */
+  (function(){
+    const order=Object.keys(D35.H).sort((a,b)=>D35.H[a].tok-D35.H[b].tok); // lean->heavy
+    document.getElementById("legend35").innerHTML=order.map(h=>
+      `<span><span class="sw" style="background:${col(h)}"></span>${h==="codex"?"codex*":h==="devin"?"devin**":h}</span>`).join("");
+    const W=720,H=300,L=96,R=120,T=18,B=44,x0=L,x1=W-R,pw=x1-x0,xmax=60000;
+    const n=order.length,band=(H-T-B)/n,barH=20;
+    const X=v=>x0+v/xmax*pw;
+    const s=svg(W,H);
+    for(let g=0;g<=xmax;g+=20000){
+      s.appendChild(el("line",{class:"gl",x1:X(g),y1:T,x2:X(g),y2:H-B}));
+      s.appendChild(el("text",{class:"tick",x:X(g),y:H-B+18,"text-anchor":"middle","font-size":12}, g===0?"0":tk(g)));
+    }
+    s.appendChild(el("line",{class:"ax",x1:x0,y1:H-B,x2:x1,y2:H-B}));
+    order.forEach((h,i)=>{
+      const d=D35.H[h],cy=T+band*i+band/2,y=cy-barH/2,bw=X(d.tok)-x0;
+      const nm=h==="codex"?"codex*":h==="devin"?"devin**":h;
+      s.appendChild(el("text",{class:"lab",x:x0-10,y:cy+4,"text-anchor":"end","font-size":13}, nm));
+      title(s.appendChild(el("path",{d:barPath(x0,y,bw,barH,4),fill:col(h)})),
+            `${h} \u2014 ${tk(d.tok)} tokens/solve (95% CI ${tk(d.tok-d.thw)}\u2013${tk(d.tok+d.thw)}), n=9`);
+      const a=X(d.tok-d.thw),b=X(d.tok+d.thw);
+      s.appendChild(el("line",{x1:a,y1:cy,x2:b,y2:cy,stroke:"var(--surface-1)","stroke-width":4}));
+      s.appendChild(el("line",{x1:a,y1:cy,x2:b,y2:cy,stroke:"var(--ink-1)","stroke-width":2}));
+      [a,b].forEach(cx=>s.appendChild(el("line",{x1:cx,y1:cy-5,x2:cx,y2:cy+5,stroke:"var(--ink-1)","stroke-width":2})));
+      const t=el("text",{class:"val",x:b+8,y:cy+4,"font-size":12.5}, `${tk(d.tok)} `);
+      t.appendChild(el("tspan",{class:"tick"},`\u00b1${tk(d.thw)}`)); s.appendChild(t);
+    });
+    document.getElementById("chart-tok").appendChild(s);
+    document.getElementById("cap-tok").textContent=
+      "pi is clearly the leanest (its interval clears every other). codex is heaviest (cache-inflated*). "+
+      "The cursor / opencode / devin middle overlaps and isn't cleanly ordered at n=9.";
+  })();
+
+  /* ---- M3.5 wall-time vs token scatter ---- */
+  (function(){
+    const W=720,H=380,L=66,R=26,T=20,B=48,x0=L,x1=W-R,y0=H-B,yT=T,xmax=90,ymax=60000;
+    const X=v=>x0+v/xmax*(x1-x0), Y=v=>y0-v/ymax*(y0-yT);
+    const s=svg(W,H);
+    for(let g=0;g<=xmax;g+=30){
+      s.appendChild(el("line",{class:"gl",x1:X(g),y1:yT,x2:X(g),y2:y0}));
+      s.appendChild(el("text",{class:"tick",x:X(g),y:y0+18,"text-anchor":"middle","font-size":11}, g===0?"0":g+"s"));
+    }
+    for(let g=0;g<=ymax;g+=20000){
+      s.appendChild(el("line",{class:"gl",x1:x0,y1:Y(g),x2:x1,y2:Y(g)}));
+      s.appendChild(el("text",{class:"tick",x:x0-8,y:Y(g)+4,"text-anchor":"end","font-size":11}, g===0?"0":tk(g)));
+    }
+    s.appendChild(el("line",{class:"ax",x1:x0,y1:y0,x2:x1,y2:y0}));
+    s.appendChild(el("line",{class:"ax",x1:x0,y1:y0,x2:x0,y2:yT}));
+    const my=(y0+yT)/2;
+    s.appendChild(el("text",{class:"tick",x:(x0+x1)/2,y:H-6,"text-anchor":"middle","font-size":11.5}, "mean wall-time (s) \u2192"));
+    s.appendChild(el("text",{class:"tick",x:15,y:my,"text-anchor":"middle","font-size":11.5,transform:`rotate(-90 15 ${my})`}, "tokens / solve \u2192"));
+    Object.keys(D35.H).forEach(h=>{
+      const d=D35.H[h],cx=X(d.s),cy=Y(d.tok);
+      const dot=el("circle",{cx,cy,r:7,fill:col(h),stroke:"var(--surface-1)","stroke-width":2});
+      title(dot,`${h}: ${d.s.toFixed(1)} s, ${tk(d.tok)} tok/solve`); s.appendChild(dot);
+      const nm=h==="codex"?"codex*":h==="devin"?"devin**":h;
+      const right=cx>x1-96, anchor=right?"end":"start", dx=right?-11:11;
+      s.appendChild(el("text",{class:"lab",x:cx+dx,y:cy+4,"text-anchor":anchor,"font-size":12}, nm));
+    });
+    document.getElementById("chart-scatter").appendChild(s);
+  })();
+
+  /* ================= M4.5: harder tasks, clean four ================= */
+  (function(){
+    const D45={  // tokens/solve + wall + CI half-widths, mean-score 1.0 for all four
+      pi:{tok:17494,thw:6359,s:45.6,turns:10.4},
+      cursor:{tok:21370,thw:7443,s:48.8,turns:null},
+      opencode:{tok:44472,thw:10552,s:175.2,turns:15.0},
+      codex:{tok:75778,thw:19189,s:108.4,turns:1.0}
+    };
+    const tk=v=>v>=1000?(v/1000).toFixed(1)+"k":(""+Math.round(v));
+    const order=Object.keys(D45).sort((a,b)=>D45[a].tok-D45[b].tok); // lean->heavy
+    document.getElementById("legend45").innerHTML=order.map(h=>
+      `<span><span class="sw" style="background:${col(h)}"></span>${h==="codex"?"codex*":h}</span>`).join("");
+    const W=720,H=250,L=96,R=120,T=16,B=42,x0=L,x1=W-R,pw=x1-x0,xmax=100000;
+    const n=order.length,band=(H-T-B)/n,barH=20;
+    const X=v=>x0+v/xmax*pw;
+    const s=svg(W,H);
+    for(let g=0;g<=xmax;g+=25000){
+      s.appendChild(el("line",{class:"gl",x1:X(g),y1:T,x2:X(g),y2:H-B}));
+      s.appendChild(el("text",{class:"tick",x:X(g),y:H-B+18,"text-anchor":"middle","font-size":12}, g===0?"0":tk(g)));
+    }
+    s.appendChild(el("line",{class:"ax",x1:x0,y1:H-B,x2:x1,y2:H-B}));
+    order.forEach((h,i)=>{
+      const d=D45[h],cy=T+band*i+band/2,y=cy-barH/2,bw=X(d.tok)-x0;
+      s.appendChild(el("text",{class:"lab",x:x0-10,y:cy+4,"text-anchor":"end","font-size":13}, h==="codex"?"codex*":h));
+      title(s.appendChild(el("path",{d:barPath(x0,y,bw,barH,4),fill:col(h)})),
+            `${h} \u2014 ${tk(d.tok)} tokens/solve (95% CI ${tk(d.tok-d.thw)}\u2013${tk(d.tok+d.thw)}); mean ${d.s}s, score 1.0`);
+      const a=X(d.tok-d.thw),b=X(d.tok+d.thw);
+      s.appendChild(el("line",{x1:a,y1:cy,x2:b,y2:cy,stroke:"var(--surface-1)","stroke-width":4}));
+      s.appendChild(el("line",{x1:a,y1:cy,x2:b,y2:cy,stroke:"var(--ink-1)","stroke-width":2}));
+      [a,b].forEach(cx=>s.appendChild(el("line",{x1:cx,y1:cy-5,x2:cx,y2:cy+5,stroke:"var(--ink-1)","stroke-width":2})));
+      const t=el("text",{class:"val",x:b+8,y:cy+4,"font-size":12.5}, `${tk(d.tok)} `);
+      t.appendChild(el("tspan",{class:"tick"},`\u00b1${tk(d.thw)}`)); s.appendChild(t);
+    });
+    document.getElementById("chart-tok45").appendChild(s);
+    document.getElementById("cap-tok45").textContent=
+      "All four score 1.0 (correctness saturated). Token rank pi < cursor < opencode < codex; codex is heaviest "+
+      "(~4x pi, fresh basis*). Time rank differs: opencode is slowest (175s) yet not the token-heaviest \u2014 wall-time "+
+      "and token-tax stay different axes.";
+  })();
+
+  /* ================= M4: open models vs frontier reference (5-model dashboard) ================= */
+  (function(){
+    // pi-only, n=9/model. GPT-5.5 = frontier reference (M4.5); opens = M4. Recomputed from results.jsonl.
+    const REF="gpt", tasks=["make-ci-green","add-feature","misleading-error"];
+    const M=[
+      {m:"gpt-5.5-medium",   k:"gpt",      s:1.000, tok:17494, wall:45.6,  cost:0.175, est:true,          byT:[1.000,1.000,1.000]},
+      {m:"glm-5.2",          k:"glm52",    s:1.000, tok:17174, wall:161.9, cost:0.0343,                   byT:[1.000,1.000,1.000]},
+      {m:"deepseek-v4-flash",k:"deepseek", s:1.000, tok:8062,  wall:27.9,  cost:0.00135,                  byT:[1.000,1.000,1.000]},
+      {m:"kimi-k2.7-code",   k:"kimi",     s:1.000, tok:8678,  wall:68.5,  cost:0.0135,                   byT:[1.000,1.000,1.000]},
+      {m:"glm-4.7-flash",    k:"glmflash", s:0.474, tok:null,  wall:101.9, cost:0, free:true, noTok:true, byT:[0.688,0.400,0.333]}
+    ];
+    const mcol=k=>`var(--m-${k})`;
+    const tkf=v=>v>=1000?(v/1000).toFixed(1)+"k":(""+Math.round(v));
+    const usd=v=>v===0?"$0":(v<0.01?"$"+v.toFixed(4):"$"+v.toFixed(3));
+    const byKey=k=>M.find(d=>d.k===k);
+    // shared bar geometry
+    const rowChart=(host,rows,{xmax,fmt,label,ref,refLbl,tickStep,tickFmt,valFmt,hatchKey})=>{
+      const W=720,H=54+rows.length*40,L=150,R=118,T=16,B=42,x0=L,x1=W-R,pw=x1-x0;
+      const band=(H-T-B)/rows.length,barH=21;
+      const X=v=>x0+v/xmax*pw;
+      const s=svg(W,H);
+      if(hatchKey){
+        const defs=el("defs",{}); const p=el("pattern",{id:"hatch-"+hatchKey,width:6,height:6,
+          patternUnits:"userSpaceOnUse",patternTransform:"rotate(45)"});
+        p.appendChild(el("rect",{width:6,height:6,fill:mcol(hatchKey),"fill-opacity":0.18}));
+        p.appendChild(el("line",{x1:0,y1:0,x2:0,y2:6,stroke:mcol(hatchKey),"stroke-width":2.4}));
+        defs.appendChild(p); s.appendChild(defs);
+      }
+      for(let g=0;g<=xmax+1e-9;g+=tickStep){
+        s.appendChild(el("line",{class:"gl",x1:X(g),y1:T,x2:X(g),y2:H-B}));
+        s.appendChild(el("text",{class:"tick",x:X(g),y:H-B+18,"text-anchor":"middle","font-size":12}, g===0?"0":tickFmt(g)));
+      }
+      s.appendChild(el("line",{class:"ax",x1:x0,y1:H-B,x2:x1,y2:H-B}));
+      if(ref!==undefined){
+        s.appendChild(el("line",{x1:X(ref),y1:T-2,x2:X(ref),y2:H-B,stroke:"var(--good)","stroke-width":2,"stroke-dasharray":"4 3"}));
+        s.appendChild(el("text",{x:X(ref),y:T-4,"text-anchor":"end","font-size":11,fill:"var(--good)"}, refLbl));
+      }
+      const costMode=!!hatchKey; // only the cost chart passes hatchKey; est/free apply to $ only
+      rows.forEach((d,i)=>{
+        const cy=T+band*i+band/2,y=cy-barH/2,v=d._v,bw=Math.max(0,X(v)-x0);
+        const isRef=d.k===REF, estThis=costMode&&d.est;
+        const nm=isRef?d.m+"  \u25c7":d.m; // diamond marks the reference row
+        s.appendChild(el("text",{class:"lab",x:x0-10,y:cy+4,"text-anchor":"end","font-size":12.5,
+          "font-style":isRef?"italic":"normal"}, nm));
+        const fill=estThis?`url(#hatch-${d.k})`:mcol(d.k);
+        const bar=el("path",{d:barPath(x0,y,bw,barH,4),fill:fill});
+        if(estThis) bar.setAttribute("stroke",mcol(d.k)), bar.setAttribute("stroke-width",1.3);
+        title(s.appendChild(bar), `${d.m}: ${label} = ${valFmt(v)}${estThis?" (estimated at API list price \u2014 not metered)":""}`);
+        const suffix=costMode?(d.est?" est.":d.free?" free":""):"";
+        s.appendChild(el("text",{class:"val",x:X(v)+8,y:cy+4,"font-size":12.5}, valFmt(v)+suffix));
+      });
+      host.appendChild(s);
+    };
+
+    // legend
+    document.getElementById("legend-m4").innerHTML=M.map(d=>
+      `<span><span class="sw" style="background:${d.k===REF?"var(--m-gpt)":mcol(d.k)}"></span>${d.m}${d.k===REF?" <span class=\"asr\">(reference)</span>":""}</span>`).join("");
+
+    /* --- 1. Mean score --- */
+    (function(){
+      const rows=M.map(d=>({...d,_v:d.s}));
+      rowChart(document.getElementById("chart-m4-score"),rows,{
+        xmax:1.0,tickStep:0.25,tickFmt:g=>g.toFixed(2),ref:1.0,refLbl:"frontier parity 1.0",
+        label:"mean score",valFmt:v=>v.toFixed(2)});
+      document.getElementById("cap-m4-score").textContent=
+        "Same pi harness, same three tasks, n=9. glm-5.2, deepseek-v4-flash and kimi-k2.7-code all match "+
+        "GPT-5.5-medium at a clean 1.00; only glm-4.7-flash (free, small) sits below at 0.47 \u2014 genuine "+
+        "partial credit, not an infra artifact (its pi cells ran clean).";
+    })();
+
+    /* --- 2. Tokens per solve (glm-4.7-flash excluded: tokens under-reported) --- */
+    (function(){
+      const rows=M.filter(d=>!d.noTok).map(d=>({...d,_v:d.tok})).sort((a,b)=>a.tok-b.tok);
+      rowChart(document.getElementById("chart-m4-tok"),rows,{
+        xmax:20000,tickStep:5000,tickFmt:tkf,ref:byKey("gpt").tok,refLbl:"frontier "+tkf(byKey("gpt").tok),
+        label:"tokens/solve",valFmt:v=>tkf(v)});
+      document.getElementById("cap-m4-tok").textContent=
+        "The punchline. glm-5.2 spends about the same as GPT-5.5 (17.2k vs 17.5k); deepseek-v4-flash and "+
+        "kimi-k2.7-code reach the same 1.00 score on roughly half the tokens (8.1k, 8.7k). glm-4.7-flash is "+
+        "omitted here \u2014 its adapter reported tokens on only 2 of 9 cells, so no honest per-solve figure exists.";
+    })();
+
+    /* --- 3. Wall-time per solve --- */
+    (function(){
+      const rows=M.map(d=>({...d,_v:d.wall})).sort((a,b)=>a.wall-b.wall);
+      rowChart(document.getElementById("chart-m4-wall"),rows,{
+        xmax:180,tickStep:30,tickFmt:g=>g+"s",ref:byKey("gpt").wall,refLbl:"frontier 45.6s",
+        label:"wall-time/solve",valFmt:v=>v.toFixed(1)+"s"});
+      document.getElementById("cap-m4-wall").textContent=
+        "Wall-time mixes model speed with provider latency and server load, so read it loosely. deepseek is "+
+        "fastest (27.9s); glm-5.2 is slowest (161.9s), driven almost entirely by add-feature (413s mean) on "+
+        "the Z.ai endpoint \u2014 not a per-token cost.";
+    })();
+
+    /* --- 4. Cost per solve --- */
+    (function(){
+      const rows=M.map(d=>({...d,_v:d.cost})).sort((a,b)=>a.cost-b.cost);
+      rowChart(document.getElementById("chart-m4-cost"),rows,{
+        xmax:0.19,tickStep:0.05,tickFmt:g=>"$"+g.toFixed(2),label:"cost/solve",
+        valFmt:usd,hatchKey:"gpt"});
+      document.getElementById("cap-m4-cost").textContent=
+        "Open-model bars are measured API spend (combined tokens at an 80/20 input/output blend of each "+
+        "provider's list rate). The GPT-5.5 bar is hatched because it is an ESTIMATE at OpenAI list price "+
+        "($5/$30 per M tokens, same 80/20 blend \u2248 $0.175/solve) \u2014 NOT what we paid: that run went "+
+        "through a flat-rate subscription and was never metered. Even so, the open models land ~5x (glm-5.2) "+
+        "to ~130x (deepseek) below the frontier list price per solved task; glm-4.7-flash is free.";
+    })();
+
+    /* --- 5. Per-task score small multiples --- */
+    (function(){
+      const host=document.getElementById("chart-m4-tasks");
+      tasks.forEach((t,ti)=>{
+        const W=340,H=190,L=132,R=34,T=8,B=26,x0=L,x1=W-R,pw=x1-x0;
+        const band=(H-T-B)/M.length,barH=13,X=v=>x0+v*pw;
+        const s=svg(W,H);
+        for(let g=0;g<=1.0001;g+=0.5){
+          s.appendChild(el("line",{class:"gl",x1:X(g),y1:T,x2:X(g),y2:H-B}));
+          s.appendChild(el("text",{class:"tick",x:X(g),y:H-B+16,"text-anchor":"middle","font-size":11}, g.toFixed(1)));
+        }
+        s.appendChild(el("line",{class:"ax",x1:x0,y1:H-B,x2:x1,y2:H-B}));
+        s.appendChild(el("line",{x1:X(1),y1:T,x2:X(1),y2:H-B,stroke:"var(--good)","stroke-width":1.5,"stroke-dasharray":"3 3"}));
+        M.forEach((d,i)=>{
+          const v=d.byT[ti],cy=T+band*i+band/2,y=cy-barH/2,bw=Math.max(0.5,X(v)-x0);
+          const isRef=d.k===REF;
+          s.appendChild(el("text",{class:"lab",x:x0-8,y:cy+4,"text-anchor":"end","font-size":10.5,
+            "font-style":isRef?"italic":"normal"}, d.m));
+          title(s.appendChild(el("path",{d:barPath(x0,y,bw,barH,3),fill:isRef?"var(--m-gpt)":mcol(d.k)})),
+                `${d.m} \u00b7 ${t}: score ${v.toFixed(3)}`);
+          s.appendChild(el("text",{class:"val",x:X(v)+5,y:cy+4,"font-size":10}, v.toFixed(2)));
+        });
+        const card=document.createElement("div"); card.className="card";
+        card.innerHTML=`<h3>${t} <span class="m">mean score</span></h3>`;
+        card.appendChild(s); host.appendChild(card);
+      });
+      document.getElementById("cap-m4-tasks").textContent=
+        "Parity holds task by task, not just pooled: the three parity models and GPT-5.5 sit on the 1.00 line "+
+        "in every panel. glm-4.7-flash is the only one that varies (0.69 / 0.40 / 0.33), and add-feature / "+
+        "misleading-error are where it loses the most.";
+    })();
+
+    /* --- 6. Table view --- */
+    (function(){
+      const th=`<thead><tr><th>model</th><th>mean score</th><th>tokens/solve</th><th>wall s</th>`+
+        `<th>$/solve</th><th>note</th></tr></thead>`;
+      const body=M.map(d=>{
+        const isRef=d.k===REF;
+        const sw=`<span class="dot" style="background:${isRef?"var(--m-gpt)":mcol(d.k)}"></span>`;
+        const tok=d.noTok?"\u2014":tkf(d.tok);
+        const cost=d.est?usd(d.cost)+" <span class=\"asr\">est.</span>":d.free?"$0 <span class=\"asr\">free</span>":usd(d.cost);
+        const sc=`<span class="${d.s>=0.999?'pass':''}">${d.s.toFixed(3)}</span>`;
+        const note=isRef?"frontier reference (est. cost)":d.noTok?"tokens under-reported":"measured spend";
+        return `<tr class="${isRef?'ctrl':''}"><td>${sw}${d.m}</td><td>${sc}</td><td>${tok}</td>`+
+          `<td>${d.wall.toFixed(1)}</td><td>${cost}</td><td class="asr" style="text-align:left">${note}</td></tr>`;
+      }).join("");
+      document.getElementById("tbl-m4").innerHTML+=th+`<tbody>${body}</tbody>`;
+    })();
+  })();
+})();
+</script>
+</body>
+</html>

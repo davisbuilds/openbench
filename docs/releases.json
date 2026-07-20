@@ -1,0 +1,11 @@
+[
+  {
+    "id": "2026-07-02-m3",
+    "title": "OpenBench M3 — Harness Comparison",
+    "date": "2026-07-02",
+    "models": [
+      "gpt-5.5-medium"
+    ],
+    "path": "releases/2026-07-02-m3/index.html"
+  }
+]
