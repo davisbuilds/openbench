@@ -93,7 +93,7 @@ body:
     attributes:
       label: Local checks
       options:
-        - label: "python3 validate_tasks.py passes (my task shows FAIL(ok) ... PASS(ok) ... PASS)."
+        - label: "obench validate (or python3 validate_tasks.py) passes (my task shows FAIL(ok) ... PASS(ok) ... PASS)."
           required: true
-        - label: "python3 -m unittest discover bench/tests passes."
+        - label: "python3 -m unittest discover -s obench/tests passes."
           required: true

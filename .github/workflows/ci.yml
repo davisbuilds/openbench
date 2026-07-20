@@ -5,7 +5,7 @@ name: CI
 # credentials in CI, and none are needed: the tests use fixture adapters + the
 # built-in `null` control, and task validation only overlays the golden
 # solutions locally. Everything is Python 3 standard library, so there is
-# nothing to install.
+# nothing to install beyond the local package itself.
 
 on:
   push:
@@ -30,8 +30,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install obench (editable, stdlib-only)
+        run: pip install -e .
+
       - name: Unit tests (offline — no live harness/API calls)
-        run: python3 -m unittest discover bench/tests
+        run: python3 -m unittest discover -s obench/tests -v
 
       - name: Validate task checkers (fail-on-workspace / pass-on-solution)
-        run: python3 validate_tasks.py
+        run: obench validate

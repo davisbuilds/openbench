@@ -15,12 +15,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install obench
+        run: pip install -e .
+
       - name: Compare Dockerfile pins with npm latest tags
         id: version-check
         shell: bash
         run: |
           set +e
-          python3 bench/bump_clis.py --check-upstream | tee cli-version-report.txt
+          python3 -m obench.bump_clis --check-upstream | tee cli-version-report.txt
           status=${PIPESTATUS[0]}
           set -e
           if [[ "$status" -eq 1 ]]; then
@@ -53,9 +61,9 @@ jobs:
               'After reviewing upstream release notes, run these exact fix commands:',
               '',
               '```bash',
-              'python3 bench/bump_clis.py --apply',
-              'python3 bench/bump_clis.py --sync-host',
-              'docker build -t openbench-harness:latest bench/docker',
+              'python3 -m obench.bump_clis --apply',
+              'python3 -m obench.bump_clis --sync-host',
+              'docker build -t openbench-harness:latest obench/docker',
               '```',
               '',
               'This workflow reports only; it never changes pins or opens a pull request.',

@@ -41,7 +41,6 @@ from .paths import (
     TasksDirError,
     default_imported_tasks_dir,
     default_tasks_dir,
-    find_repo_root,
     resolve_tasks_dir,
 )
 

@@ -114,39 +114,60 @@ runs through the bridge, use [`SETUP.md`](SETUP.md).
 ```
 tasks/                 core benchmark tasks (see "Task format")
 tasks-imported/        separately scored Exercism and Terminal-Bench tiers
-validate_tasks.py      proves every task's checker is correctly polarized
-bench/run.py           the runner (one row per task x harness x trial)
-bench/report.py        aggregates results into a table with Wilson CIs
-bench/adapters/*.py    one adapter per harness (+ built-in "null" control)
-bench/ADAPTER_SPEC.md  the adapter contract
-bench/openmodel_bridge.sh  foreground Codex Responses↔Chat bridge for open models
-bench/scrub.py         PII scrubber for transcripts (local-only; see below)
-bench/entry.py         in-container entrypoint for --exec docker
-bench/docker_exec.py   container-per-cell execution backend
-bench/docker/          isolation image for --exec docker
+obench/                installable package (CLI: obench)
+obench/run.py          the runner (one row per task x harness x trial)
+obench/report.py       aggregates results into a table with Wilson CIs
+obench/adapters/*.py   one adapter per harness (+ built-in "null" control)
+obench/ADAPTER_SPEC.md the adapter contract
+obench/openmodel_bridge.sh  foreground Codex Responses↔Chat bridge for open models
+obench/scrub.py        PII scrubber for transcripts (local-only; see below)
+obench/entry.py        in-container entrypoint for --exec docker
+obench/docker_exec.py  container-per-cell execution backend
+obench/docker/         isolation image for --exec docker
+bench/*.py             thin deprecation shims → obench
+validate_tasks.py      forwarding shim → obench validate
 results/results.jsonl  append-only local results log (gitignored)
 transcripts/           per-cell agent transcripts (gitignored, local-only)
 ```
 
+## Install
+
+The framework installs as **`obench`** (the PyPI name `openbench` is taken):
+
+```bash
+# from this checkout
+pip install -e .
+
+# or, without cloning first
+pip install "git+https://github.com/minghinmatthewlam/openbench.git"
+
+# future: pip install obench
+```
+
+Then use the umbrella CLI: `obench run`, `obench report`, `obench doctor`,
+`obench validate`, `obench gate`, `obench compare`. Legacy
+`python3 bench/run.py` (and friends) still forward with a deprecation note.
+
 ## Quickstart
 
 Everything in the core harness runner is Python 3 standard library only — no
-Python package install is needed for a local `null` smoke. Real harnesses, Docker,
-and the Codex open-model bridge have external CLI/tool requirements; see
-[`SETUP.md`](SETUP.md).
+third-party Python dependencies. Real harnesses, Docker, and the Codex
+open-model bridge have external CLI/tool requirements; see [`SETUP.md`](SETUP.md).
 
 **1. Validate the tasks.** Confirms each checker fails on the untouched
 workspace and passes on the golden solution (see "Task format"). This covers both
 `tasks/` and imported tiers under `tasks-imported/`:
 
 ```
-python3 validate_tasks.py
+obench validate
+# legacy: python3 validate_tasks.py
 ```
 
 **2. Preflight.**
 
 ```
-python3 bench/doctor.py
+obench doctor
+# legacy: python3 bench/doctor.py
 ```
 
 For each harness it checks — spending no tokens — that the CLI is installed, its
@@ -158,21 +179,23 @@ confirm the plumbing, then add real harnesses:
 
 ```
 # negative control — does nothing, so every task should fail (no tokens used)
-python3 bench/run.py --harness null --task fix-failing-test,build-a-cli,make-it-run
+obench run --harness null --task fix-failing-test,build-a-cli,make-it-run
+# legacy: python3 bench/run.py --harness null --task ...
 
 # a real harness, 3 trials per task
-python3 bench/run.py --harness codex --task fix-failing-test,build-a-cli,make-it-run --trials 3
+obench run --harness codex --task fix-failing-test,build-a-cli,make-it-run --trials 3
 ```
 
 Multiple harnesses/tasks are comma-separated. The run loop is **resumable**: a
 cell whose `run_id` already appears in `results/results.jsonl` is skipped, so you
 can stop and re-run freely. Use `--force` to re-run existing cells. Full options:
-`python3 bench/run.py --help`.
+`obench run --help`.
 
 **4. Report.**
 
 ```
-python3 bench/report.py
+obench report
+# legacy: python3 bench/report.py
 ```
 
 Example output (from the `null` control on two tasks):

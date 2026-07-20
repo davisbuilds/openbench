@@ -39,7 +39,7 @@ run loop, tool set, and permission policy. Tasks are self-contained
   realistic conditions — same-model pinning, subscription/OAuth auth handling,
   counting-proxy token metering, polarity-validated checkers
   (`validate_tasks.py`), the null negative control, and the candidate
-  admission gate (`bench/candidate_gate.py`, `docs/byo-harnesses.md`). Plus an
+  admission gate (`obench/candidate_gate.py`, `docs/byo-harnesses.md`). Plus an
   ultra-light stdlib-only, files-plus-shell-checker contract that non-Python
   users and private repos can adopt without learning a framework API.
 
@@ -93,6 +93,6 @@ run loop, tool set, and permission policy. Tasks are self-contained
 - The checker is the sole judge of success; never trust harness self-reports.
 - Every new task must pass `validate_tasks.py` polarity (fails untouched,
   passes with `solution/` overlaid).
-- Transcripts are local-only and never published unscrubbed (`bench/scrub.py`).
+- Transcripts are local-only and never published unscrubbed (`obench/scrub.py`).
 - Committed datasets live under `data/`; local scratch stays in gitignored
   `results/`.
