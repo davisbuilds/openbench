@@ -6,10 +6,13 @@ Headless invocation:
 
 Notes / quirks:
 - `-p/--print` runs non-interactively (process prompt, exit).
-- `--permission-mode accept-edits` auto-approves read-only tools AND workspace
-  edits, so file changes happen unattended. It does NOT auto-approve arbitrary
-  destructive actions (that would be "dangerous"), so it's the least-privileged
-  mode that lets the agent edit files.
+- `--permission-mode dangerous` auto-approves all tools, including shell
+  execution. Required for policy parity: every other harness auto-runs
+  commands (tests, builds); accept-edits blocked devin's runtime verification
+  ("Runtime verification was blocked by the CLI's non-interactive permission
+  mode"), which is fatal on execution-dependent tasks (all of Terminal-Bench).
+  Cells run in disposable temp workdirs with an isolated HOME, the same
+  blast-radius posture as the other harnesses.
 - In print mode `--respect-workspace-trust` defaults to false, so a fresh temp
   workdir does not trigger a trust prompt. No extra flag needed.
 - The prompt is passed after `--` so a leading dash in an instruction can never
@@ -244,7 +247,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     model_uid = MODELS[model]
     cmd = [
         "devin", "-p",
-        "--permission-mode", "accept-edits",
+        "--permission-mode", "dangerous",
         *(["--model", model_uid] if model_uid else []),
         "--export", export_path,
         "--", instruction,
