@@ -34,3 +34,7 @@ datasets and Terminal-Bench tasks carry their own terms.
 
 - **Rate:** 2/13 = **15.4%**
 - **Source:** published Terminal-Bench 2.0 leaderboard submissions in the frontier panel documented in the pack-level `PROVENANCE.md`; snapshot and calculation method are pinned there.
+
+## Pinned media
+
+`workspace/zork.mp4` snapshots the upstream instruction's video URL (`https://www.youtube.com/watch?v=ZCbvyPbhRfA`) at import time so runs do not depend on YouTube availability or agent network access. Downloaded with yt-dlp format 18; SHA-256 is recorded by the pack digest. Upstream included this media as the task's required input; downstream redistributors should independently confirm media redistribution rights.
