@@ -209,9 +209,15 @@ def _isolated_home(tmp_root=None):
     source. The copy is discarded after the run and never written back.
     """
     home = tempfile.mkdtemp(prefix="devin_home_", dir=tmp_root)
-    src = os.path.join(os.path.expanduser("~"), ".devin")
-    if os.path.isdir(src):
-        shutil.copytree(src, os.path.join(home, ".devin"), symlinks=True)
+    real = os.path.expanduser("~")
+    # Auth is ~/.local/share/devin/credentials.toml (XDG data), config is
+    # ~/.config/devin; ~/.devin covered for older builds. ~/.agents and
+    # AGENTS.md are deliberately NOT staged — that's the whole point.
+    for rel in (".devin", os.path.join(".config", "devin"),
+                os.path.join(".local", "share", "devin")):
+        src = os.path.join(real, rel)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(home, rel), symlinks=True)
     return home
 
 
