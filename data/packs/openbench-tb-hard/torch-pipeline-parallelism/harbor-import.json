@@ -1,0 +1,9 @@
+{
+  "base_image": "ubuntu:24.04",
+  "docker_required": false,
+  "importer": "obench import harbor",
+  "obench_version": "0.1.0",
+  "schema_version": "1.1",
+  "solution_materialized": true,
+  "source_path": "/tmp/tb-hard-candidates/torch-pipeline-parallelism"
+}
