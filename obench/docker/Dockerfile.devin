@@ -1,0 +1,48 @@
+# Layered image adding the Devin CLI on top of the standard harness image,
+# for `obench run --exec docker --harness devin --docker-image openbench-harness:devin`.
+#
+# Kept as a separate layer (not folded into the base Dockerfile) so the base
+# image's pin labels and digest stay untouched for the existing matrices.
+# Version-addressed tarball with checksum pinning (same 3000.2.17 build that
+# is validated on the host).
+#
+# Build (after building the base image):
+#   docker build -t openbench-harness:devin -f obench/docker/Dockerfile.devin obench/docker
+FROM openbench-harness:latest
+
+ARG DEVIN_VERSION=3000.2.17
+ARG DEVIN_SHA256_ARM64=116dc71ef085a922bc3ff0ea0377d4b26c529a431d58246e36572913e2d25624
+ARG DEVIN_SHA256_X64=f0e1e9363afc6ee68c4ef87bab4aeb7ff5cc08a5fa838350ef3ceefdbb2a2be2
+
+LABEL org.openbench.cli.devin="${DEVIN_VERSION}"
+
+RUN set -eux; \
+    case "$(uname -m)" in \
+        x86_64|amd64) devin_arch="x86_64-unknown-linux"; devin_sha="${DEVIN_SHA256_X64}" ;; \
+        arm64|aarch64) devin_arch="aarch64-unknown-linux"; devin_sha="${DEVIN_SHA256_ARM64}" ;; \
+        *) echo "unsupported devin architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://static.devin.ai/cli/${DEVIN_VERSION}/devin-${DEVIN_VERSION}-${devin_arch}.tar.gz" \
+        -o /tmp/devin.tar.gz; \
+    echo "${devin_sha}  /tmp/devin.tar.gz" | sha256sum -c -; \
+    mkdir -p /root/.local/bin /tmp/devin-extract; \
+    tar -xzf /tmp/devin.tar.gz -C /tmp/devin-extract; \
+    find /tmp/devin-extract -type f -name devin -exec mv {} /root/.local/bin/devin \; ; \
+    chmod +x /root/.local/bin/devin; \
+    rm -rf /tmp/devin.tar.gz /tmp/devin-extract; \
+    devin --version
+
+# Extend the in-image CLI version stamp so docker-mode rows record the
+# container's devin version (harness_version_source=container).
+RUN python3 - <<'PY'
+import json
+import subprocess
+
+path = "/etc/openbench-cli-versions.json"
+with open(path, encoding="utf-8") as fh:
+    versions = json.load(fh)
+versions["devin"] = subprocess.check_output(["devin", "--version"], text=True).strip()
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(versions, fh, sort_keys=True)
+    fh.write("\n")
+PY

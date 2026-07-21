@@ -79,7 +79,13 @@ AUTH_MOUNTS = {
     "cursor": [
         (".openbench/cursor-container-auth/.config/cursor/auth.json", ".config/cursor/auth.json"),
     ],
-    "devin": [".config/devin"],
+    # devin keeps its config in ~/.config/devin and its login token in
+    # ~/.local/share/devin/credentials.toml (v3000.x layout); stage both so the
+    # container CLI is actually logged in.
+    "devin": [
+        ".config/devin",
+        (".local/share/devin/credentials.toml", ".local/share/devin/credentials.toml"),
+    ],
     # claude uses API keys only (open-model vendor keys or first-party
     # ANTHROPIC_API_KEY, forwarded below). Mount NOTHING: never expose ~/.claude
     # so a container run can't touch the user's Claude Code OAuth subscription.
