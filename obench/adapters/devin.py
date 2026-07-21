@@ -1,7 +1,7 @@
 """Adapter for the `devin` CLI (Cognition Devin, terminal mode).
 
 Headless invocation:
-    devin -p --permission-mode accept-edits --model gpt-5.5 \
+    devin -p --permission-mode accept-edits --model gpt-5-6-sol-medium \
         --export <tmp.json> -- <instruction>
 
 Notes / quirks:
@@ -15,14 +15,26 @@ Notes / quirks:
 - The prompt is passed after `--` so a leading dash in an instruction can never
   be parsed as a flag.
 - cwd=workdir; the agent edits files there.
-- MODEL / REASONING-EFFORT CAVEAT (asterisk): devin's `--model` takes a bare
-  model id (e.g. "gpt-5.5") and exposes NO reasoning-effort selector, so the
-  canonical "gpt-5.5-medium" maps to plain "gpt-5.5" and effort is whatever
-  devin's default is — NOT independently pinnable. This is the one harness where
-  the "medium" pin is not verifiable; it carries an asterisk in the report.
-  (The dashed form "gpt-5-5-medium" is devin's TUI CONFIG representation, NOT a
-  valid CLI value — passing it errors "Unknown model". A dashed id briefly
-  appeared to work under an older devin build but no longer does; reverted.)
+- MODEL SELECTION (verified Jul 2026, devin v3000.2.17 on a Max plan):
+  `--model` accepts dashed menu UIDs (e.g. "gpt-5-6-sol-medium", "glm-5-2");
+  live probes confirm the flag is honored and per-step metrics report the
+  selected model. Effort is part of the UID where devin exposes it
+  ("grok-4-5-{low,medium,high}", "gpt-5-6-sol-medium"), so those canonicals
+  ARE effort-pinned; UIDs without an effort suffix (e.g. "glm-5-2") run
+  devin's default effort. Older builds behaved differently (bare ids only,
+  dashed ids rejected, account-default fallback) — that lane is preserved
+  solely for the legacy "gpt-5.5-medium" canonical, which still omits
+  `--model` and runs the account-configured default.
+- MENU COVERAGE (surveyed Jul 2026): deepseek does NOT appear in devin's model
+  menu at all, and kimi is "kimi-k2-7" (k2.7), not k3 — so devin is EXCLUDED
+  from the deepseek and kimi-k3 comparisons rather than substituted.
+- SERVING-PATH CAVEAT: ALL inference happens behind Devin's cloud boundary.
+  For open-weights models (e.g. glm-5.2) devin serves the model on its OWN
+  infrastructure, a different serving path from the first-party endpoints the
+  other harnesses use — provider-side behavior (quantization, sampling,
+  context policy) is not independently verifiable. ``usage_raw`` carries a
+  ``serving_path: "devin-cloud"`` marker so downstream reports can disclose
+  this.
 - Uses the user's existing devin login as-is (read-only).
 - COUNTING PROXY UNSUPPORTED: the terminal CLI exposes no model-provider base
   URL or custom-provider mechanism. It authenticates to Cognition and receives
@@ -31,13 +43,9 @@ Notes / quirks:
   config's generic network `proxy` setting do not redirect the model endpoint
   to an OpenAI/Anthropic-compatible URL. An HTTP(S) forward proxy would only
   see an encrypted CONNECT tunnel and cannot provide the response usage needed
-  by `bench/proxy.py`, so `--proxy` deliberately leaves this lane unwired.
-- M4 OPEN MODELS (glm-*/deepseek-*/kimi-*) are NOT wired here: devin's `--model`
-  is a closed, account-bound menu with no custom-provider/base-URL override, so
-  the open canonicals fall through to the unsupported-model dict. (devin's menu
-  DOES host some open models, e.g. glm-5.2 / kimi-k2.7 via devin's OWN serving —
-  a different serving path from our first-party endpoints, so intentionally kept
-  out of the M4 open panel.)
+  by `obench/proxy.py`, so `--proxy` deliberately leaves this lane unwired.
+  Token numbers below are therefore SELF-REPORTED by devin's export, never
+  proxy-measured.
 - devin prints no usage on stdout, but `--export <path>` writes a JSON
   conversation dump (to an ABSOLUTE temp path OUTSIDE workdir, so the workspace
   the checker inspects stays clean). Token accounting (see ``_parse_export``)
@@ -45,14 +53,17 @@ Notes / quirks:
     * cache REPORTED (total_cached_tokens > 0): a MEASURED count,
       tokens = total_prompt_tokens - total_cached_tokens + total_completion_tokens
       (fresh input+output, cache re-reads excluded — matches the other adapters).
-    * cache NOT reported (total_cached_tokens 0/None — the account-default model's
-      case): total_prompt_tokens is CUMULATIVE across steps (each step re-sends
-      the whole context), which massively over-counts (e.g. ~185k on a multi-step
-      task, 8-40x the caching harnesses). We instead report a CACHE-EQUIVALENT
-      ESTIMATE = last model step's prompt_tokens + total_completion_tokens — i.e.
-      what a caching provider WOULD bill (peak context + all generated tokens).
-      This is an ESTIMATE, not a measured count.
+      Verified live for glm-5-2 (fresh = 16,358 on the probe task).
+    * cache NOT reported (total_cached_tokens 0/None): total_prompt_tokens is
+      CUMULATIVE across steps (each step re-sends the whole context), which
+      massively over-counts (e.g. ~185k on a multi-step task, 8-40x the caching
+      harnesses). We instead report a CACHE-EQUIVALENT ESTIMATE = last model
+      step's prompt_tokens + total_completion_tokens — i.e. what a caching
+      provider WOULD bill (peak context + all generated tokens). This is an
+      ESTIMATE, not a measured count.
     turns  = number of steps that carry model metrics (model rounds).
+  Either way ``token_basis`` stays "estimated": even the cache-reported count
+  is devin's own accounting with no independent (proxy) verification.
   output_tail stays the human-readable stdout. Parsing is defensive: a missing
   or drifted export yields tokens=None/turns=None, never raising.
 """
@@ -78,12 +89,16 @@ def _empty_token_usage():
         "token_basis": None,
     }
 
-# canonical model name -> devin `--model` string.
-# devin has no CLI reasoning-effort selector; the canonical medium pin collapses
-# to plain "gpt-5.5" (the dashed "gpt-5-5-medium" is a TUI-config id, not a valid
-# CLI value -> "Unknown model"). Effort is unpinned -> asterisk in the report.
+# canonical model name -> devin `--model` UID (dashed menu ids, verified live
+# on devin v3000.2.17 / Max plan). "grok-4-5-medium" matches the medium effort
+# pin used by cursor in the grok-4.5 matrix; "glm-5-2" has no effort suffix in
+# devin's menu (default effort). None -> omit --model and run the
+# account-configured default (legacy gpt-5.5 lane; see module docstring).
 MODELS = {
-    "gpt-5.5-medium": "gpt-5.5",
+    "gpt-5.5-medium": None,
+    "gpt-5.6-sol": "gpt-5-6-sol-medium",
+    "grok-4.5": "grok-4-5-medium",
+    "glm-5.2": "glm-5-2",
 }
 
 
@@ -162,7 +177,9 @@ def _parse_export_with_usage(path):
 
     token_usage = _empty_token_usage()
     if tokens is not None:
-        token_usage["usage_raw"] = fm
+        # serving_path marker: all devin inference (including open-weights
+        # models) runs behind Cognition's cloud, not first-party endpoints.
+        token_usage["usage_raw"] = dict(fm, serving_path="devin-cloud")
         token_usage["token_basis"] = "estimated"
 
     turns = len(model_steps) or None
@@ -192,17 +209,14 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     fd, export_path = tempfile.mkstemp(prefix="devin_export_", suffix=".json")
     os.close(fd)
 
-    # devin's `--model` CLI values are broken on this account: `gpt-5.5` ->
-    # "/upgrade to access this model", `gpt-5-5-medium` (the TUI id) -> "Unknown
-    # model". Only the ACCOUNT DEFAULT (agent.model in ~/.config/devin/config.json,
-    # currently "gpt-5-5-medium" = GPT-5.5 medium, set via the TUI) is accessible,
-    # and it's used when --model is omitted. So we DON'T pass --model and run the
-    # account-configured model. Effort/model is pinned by the user's devin config,
-    # not our CLI -> keeps the reasoning-effort asterisk. MODELS still gates which
-    # canonical names this adapter accepts.
+    # Pass --model explicitly with the dashed menu UID (verified working on
+    # devin v3000.2.17 / Max plan). The legacy gpt-5.5 canonical maps to None:
+    # omit --model and run the account-configured default (older behavior).
+    model_uid = MODELS[model]
     cmd = [
         "devin", "-p",
         "--permission-mode", "accept-edits",
+        *(["--model", model_uid] if model_uid else []),
         "--export", export_path,
         "--", instruction,
     ]
