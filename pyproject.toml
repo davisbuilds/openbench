@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "obench"
-version = "0.1.0"
+version = "1.0.0"
 description = "OpenBench harness benchmarking framework — compare coding-agent CLIs on shared tasks"
 readme = "README.md"
 license = { text = "MIT" }
