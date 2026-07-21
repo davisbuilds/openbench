@@ -35,7 +35,11 @@ Notes / quirks:
   context policy) is not independently verifiable. ``usage_raw`` carries a
   ``serving_path: "devin-cloud"`` marker so downstream reports can disclose
   this.
-- Uses the user's existing devin login as-is (read-only).
+- Uses the user's existing devin login via a COPY of ~/.devin staged into a
+  throwaway HOME (see ``_isolated_home``): the login works, but the user's
+  global agent config — ~/.agents/skills, personal workflow instructions —
+  cannot leak into cells (plan-approval stops and review-subagent hangs
+  contaminated the 2026-07-20 devin arm this way).
 - COUNTING PROXY UNSUPPORTED: the terminal CLI exposes no model-provider base
   URL or custom-provider mechanism. It authenticates to Cognition and receives
   a service-selected inference endpoint; model inference and usage accounting
@@ -192,6 +196,25 @@ def _parse_export(stdout):
     tokens, turns, token_usage = _parse_export_with_usage(stdout)
     return tokens, turns
 
+def _isolated_home(tmp_root=None):
+    """Create a throwaway HOME with only devin's auth/config staged in.
+
+    Devin's CLI discovers the invoking user's global agent config — shared
+    skills in ~/.agents/skills (plan-loop, simplify, review subagents) and
+    personal workflow instructions. Those contaminated benchmark cells: the
+    agent solved tasks in under a minute, then followed the user's closeout
+    ritual (plan approval, simplify, 3 review subagents) which dead-ends in
+    print mode and burned the full wall cap. A fresh HOME containing just
+    ~/.devin keeps the login while shutting out every user-level behavior
+    source. The copy is discarded after the run and never written back.
+    """
+    home = tempfile.mkdtemp(prefix="devin_home_", dir=tmp_root)
+    src = os.path.join(os.path.expanduser("~"), ".devin")
+    if os.path.isdir(src):
+        shutil.copytree(src, os.path.join(home, ".devin"), symlinks=True)
+    return home
+
+
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model not in MODELS:
         return {
@@ -221,6 +244,12 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         "--", instruction,
     ]
 
+    iso_home = _isolated_home()
+    env = {**os.environ, "HOME": iso_home}
+    # Drop env-level behavior overrides so cells run devin's defaults.
+    for var in ("DEVIN_PERMISSION_MODE", "DEVIN_MODEL"):
+        env.pop(var, None)
+
     try:
         try:
             proc = subprocess.run(
@@ -230,6 +259,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 text=True,
                 timeout=timeout_s,
                 stdin=subprocess.DEVNULL,
+                env=env,
             )
         except subprocess.TimeoutExpired as e:
             full_output = _err_tail(e, limit=None)
@@ -267,3 +297,4 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             os.unlink(export_path)
         except OSError:
             pass
+        shutil.rmtree(iso_home, ignore_errors=True)
