@@ -184,7 +184,7 @@ def test_csv_shape_cols():
     import pandas as pd
 
     out_df = pd.read_csv("/app/test_output.csv")
-    correct_df = pd.read_csv("correct_output.csv")
+    correct_df = pd.read_csv("/tests/correct_output.csv")
 
     # Check number of rows (should match input CSV)
     assert out_df.shape == correct_df.shape, (f"Output df shape is incorrect,  "
@@ -213,7 +213,7 @@ def test_mask_alignment():
     '''Test that the predicted masks align reasonably with the masks generated
      by solution.sh '''
     out_df = _read_polylines_csv("/app/test_output.csv")
-    correct_df = _read_polylines_csv("/app/correct_output.csv")
+    correct_df = _read_polylines_csv("/tests/correct_output.csv")
     for (_, row_out), (_, row_correct) in zip(out_df.iterrows(), correct_df.iterrows()):
         points_out = list(zip(row_out['coords_x'], row_out['coords_y']))
         points_correct = list(zip(row_correct['coords_x'], row_correct['coords_y']))

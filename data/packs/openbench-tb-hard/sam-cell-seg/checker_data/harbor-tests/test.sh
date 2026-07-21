@@ -23,7 +23,6 @@ curl -L -o mobile_sam.pt https://github.com/ChaoningZhang/MobileSAM/raw/master/w
 # so the test script can find them.
 cp /tests/test_metadata.csv .
 cp /tests/test_img.png .
-cp /tests/correct_output.csv .
 
 # Run pytest. The test file is in the /tests directory.
 uvx \
