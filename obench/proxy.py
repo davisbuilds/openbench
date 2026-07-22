@@ -405,7 +405,10 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             capture = bytearray()
             limit = self.server.capture_limit  # type: ignore[attr-defined]
             while True:
-                chunk = resp.read(65536)
+                # read1() returns as soon as one recv's worth of data is ready
+                # (vs. read(), which blocks for the full amount) — required to
+                # timestamp streamed SSE chunks for TTFT / generation window.
+                chunk = resp.read1(65536)
                 if not chunk:
                     break
                 now = time.time()
