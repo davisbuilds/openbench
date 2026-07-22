@@ -1,0 +1,90 @@
+task,domain-guess,solved,trials,rate
+adaptive-rejection-sampler,statistics / Monte Carlo,6,13,0.461538461538
+bn-fit-modify,probabilistic graphical models,11,13,0.846153846154
+break-filter-js-from-html,web security,9,12,0.75
+build-cython-ext,Python packaging / native extensions,12,13,0.923076923077
+build-pmars,systems build / CoreWars,9,13,0.692307692308
+build-pov-ray,systems build / graphics,12,13,0.923076923077
+caffe-cifar-10,machine learning / computer vision,1,13,0.0769230769231
+cancel-async-tasks,Python async concurrency,8,13,0.615384615385
+chess-best-move,chess / search,4,13,0.307692307692
+circuit-fibsqrt,digital logic / circuits,12,13,0.923076923077
+cobol-modernization,legacy systems / COBOL,13,13,1
+code-from-image,computer vision / code reconstruction,13,13,1
+compile-compcert,compilers / formal methods,12,13,0.923076923077
+configure-git-webserver,DevOps / Git and web services,6,13,0.461538461538
+constraints-scheduling,constraint optimization / scheduling,13,13,1
+count-dataset-tokens,NLP data processing,11,13,0.846153846154
+crack-7z-hash,security / password recovery,9,13,0.692307692308
+custom-memory-heap-crash,systems debugging / memory management,12,13,0.923076923077
+db-wal-recovery,database recovery,5,13,0.384615384615
+distribution-search,statistics / distribution fitting,13,13,1
+dna-assembly,bioinformatics,3,11,0.272727272727
+dna-insert,bioinformatics / primer design,1,13,0.0769230769231
+extract-elf,binary formats / ELF,8,13,0.615384615385
+extract-moves-from-video,video analytics / chess,2,13,0.153846153846
+feal-differential-cryptanalysis,cryptanalysis,13,13,1
+feal-linear-cryptanalysis,cryptanalysis,11,13,0.846153846154
+filter-js-from-html,web security,0,12,0
+financial-document-processor,document AI / OCR,6,13,0.461538461538
+fix-code-vulnerability,application security,13,13,1
+fix-git,Git repair,13,13,1
+fix-ocaml-gc,runtime systems / OCaml,13,13,1
+gcode-to-text,CAD / manufacturing,2,13,0.153846153846
+git-leak-recovery,Git forensics / security,13,13,1
+git-multibranch,Git workflows,12,13,0.923076923077
+gpt2-codegolf,machine learning / code golf,0,13,0
+headless-terminal,terminal emulation,11,13,0.846153846154
+hf-model-inference,machine learning inference,13,13,1
+install-windows-3.11,retro operating systems / virtualization,0,13,0
+kv-store-grpc,distributed systems / gRPC,13,13,1
+large-scale-text-editing,text processing,13,13,1
+largest-eigenval,numerical linear algebra,11,13,0.846153846154
+llm-inference-batching-scheduler,distributed ML / scheduling,13,13,1
+log-summary-date-ranges,log analytics,13,13,1
+mailman,email server administration,10,13,0.769230769231
+make-doom-for-mips,cross-compilation / embedded systems,0,13,0
+make-mips-interpreter,emulators / MIPS,2,12,0.166666666667
+mcmc-sampling-stan,Bayesian statistics / Stan,12,12,1
+merge-diff-arc-agi-task,Git merge / ARC reasoning,9,13,0.692307692308
+model-extraction-relu-logits,adversarial machine learning,3,12,0.25
+modernize-scientific-stack,scientific Python modernization,13,13,1
+mteb-leaderboard,ML evaluation / information retrieval,2,9,0.222222222222
+mteb-retrieve,information retrieval / embeddings,4,13,0.307692307692
+multi-source-data-merger,data engineering / ETL,13,13,1
+nginx-request-logging,web server administration,13,13,1
+openssl-selfsigned-cert,PKI / TLS,11,13,0.846153846154
+overfull-hbox,LaTeX / typesetting,9,13,0.692307692308
+password-recovery,security / password recovery,11,13,0.846153846154
+path-tracing,computer graphics / program synthesis,6,13,0.461538461538
+path-tracing-reverse,inverse graphics / program synthesis,5,13,0.384615384615
+polyglot-c-py,systems / polyglot binaries,5,13,0.384615384615
+polyglot-rust-c,systems / polyglot binaries,5,13,0.384615384615
+portfolio-optimization,quantitative finance / optimization,13,13,1
+protein-assembly,bioinformatics / protein engineering,8,12,0.666666666667
+prove-plus-comm,formal proof / theorem proving,13,13,1
+pypi-server,Python packaging / service administration,12,13,0.923076923077
+pytorch-model-cli,machine learning tooling,10,13,0.769230769231
+pytorch-model-recovery,machine learning forensics,11,13,0.846153846154
+qemu-alpine-ssh,virtualization / Linux administration,6,13,0.461538461538
+qemu-startup,virtualization / Linux administration,8,13,0.615384615385
+query-optimize,databases / SQL optimization,6,13,0.461538461538
+raman-fitting,spectroscopy / scientific computing,0,13,0
+regex-chess,formal languages / chess,0,10,0
+regex-log,regular expressions / log parsing,13,13,1
+reshard-c4-data,ML data engineering,12,13,0.923076923077
+rstan-to-pystan,Bayesian statistics / Stan,7,13,0.538461538462
+sam-cell-seg,computer vision / biology,0,13,0
+sanitize-git-repo,repository security / secret scanning,9,13,0.692307692308
+schemelike-metacircular-eval,programming languages / interpreters,12,12,1
+sparql-university,knowledge graphs / SPARQL,10,13,0.769230769231
+sqlite-db-truncate,database internals / recovery,13,13,1
+sqlite-with-gcov,systems build / test coverage,12,13,0.923076923077
+torch-pipeline-parallelism,distributed machine learning,0,13,0
+torch-tensor-parallelism,distributed machine learning,0,13,0
+train-fasttext,machine learning / NLP,0,10,0
+tune-mjcf,robotics simulation / optimization,11,13,0.846153846154
+video-processing,video analytics,1,13,0.0769230769231
+vulnerable-secret,application security / secrets,13,13,1
+winning-avg-corewars,game AI / CoreWars,7,13,0.538461538462
+write-compressor,compression algorithms,5,13,0.384615384615
