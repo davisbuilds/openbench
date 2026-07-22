@@ -673,9 +673,50 @@ def _write_proxy_cell_metadata(proxy_ctx, cell_token, harness, model):
         pass
 
 
+def task_docker_spec(task_dir):
+    """Return an optional pinned image/workdir declared by task.toml."""
+    path = os.path.join(task_dir, "task.toml")
+    if not os.path.isfile(path):
+        return None, "/work"
+    try:
+        import tomllib
+        with open(path, "rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, ValueError):
+        return None, "/work"
+    return data.get("docker_image"), data.get("docker_workdir", "/work")
+
+
+def hydrate_image_workdir(image, container_workdir, workdir):
+    """Copy a task image's native workdir into the disposable host workspace."""
+    try:
+        proc = subprocess.run(
+            ["docker", "create", image], capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"timed out creating task image {image!r}") from exc
+    if proc.returncode != 0:
+        raise RuntimeError(f"cannot create task image {image!r}: {proc.stderr.strip()}")
+    container = proc.stdout.strip()
+    try:
+        try:
+            copied = subprocess.run(
+                ["docker", "cp", f"{container}:{container_workdir}/.", workdir],
+                capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"timed out hydrating {container_workdir}") from exc
+        if copied.returncode != 0:
+            raise RuntimeError(f"cannot hydrate {container_workdir}: {copied.stderr.strip()}")
+    finally:
+        try:
+            subprocess.run(["docker", "rm", "-f", container], capture_output=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            pass
+
+
 def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                    adapters_dir, docker_image, docker_fallback,
-                   proxy_ctx=None, cell_token=None, candidate=None):
+                   proxy_ctx=None, cell_token=None, candidate=None,
+                   container_workdir="/work"):
     """Run the harness for one cell, honoring the execution mode.
 
     Returns ``(result_dict, exec_used)`` where ``exec_used`` is ``"local"`` or
@@ -709,6 +750,7 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 base_harness=candidate.base_adapter if candidate is not None else None,
                 candidate_persist_auth=bool(
                     candidate is not None and getattr(candidate, "persist_auth", False)),
+                container_workdir=container_workdir,
             )
             return result, "docker"
         except docker_exec.DockerUnavailable as exc:
@@ -994,6 +1036,7 @@ def run_checker(task_dir, workdir, timeout_s):
     checker = os.path.join(task_dir, "checker.sh")
     env = dict(os.environ)
     env["TASK_DIR"] = os.path.abspath(task_dir)
+    env.pop("OPENBENCH_SOLUTION_OVERLAY", None)
     stdout_capture = TailCapture()
     stderr_capture = TailCapture()
     score_parser = StreamingScoreParser()
@@ -1495,6 +1538,9 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
     # correctly regardless of the caller's cwd or a relative --tasks-dir.
     task_dir = os.path.abspath(os.path.join(tasks_dir, task))
+    task_image, task_workdir = task_docker_spec(task_dir)
+    if exec_mode == "docker" and task_image:
+        docker_image = task_image
     if os.path.exists(os.path.join(task_dir, "DROPPED.md")):
         raise SystemExit(
             f"task {task!r} is dropped from the active set "
@@ -1569,8 +1615,23 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         # Staging runs on the host for both --exec local and --exec docker; the
         # container bind-mounts the already-staged workdir at /work.
         try:
-            row["workspace_source"] = materialize_workspace(task_dir, workdir)
-        except WorkspaceError as exc:
+            if exec_mode == "docker" and task_image:
+                staged_workspace = tempfile.mkdtemp(prefix="obench_task_overlay_", dir=workdir_parent)
+                try:
+                    row["workspace_source"] = materialize_workspace(task_dir, staged_workspace)
+                    hydrate_image_workdir(task_image, task_workdir, workdir)
+                    for root, dirs, files in os.walk(workdir):
+                        for name in dirs + files:
+                            if os.path.islink(os.path.join(root, name)):
+                                raise RuntimeError("task image workdir contains a symlink")
+                    shutil.copytree(staged_workspace, workdir, dirs_exist_ok=True)
+                finally:
+                    shutil.rmtree(staged_workspace, ignore_errors=True)
+                with open(os.path.join(workdir, ".openbench-image-hydrated"), "w", encoding="utf-8") as fh:
+                    fh.write(task_image + "\n")
+            else:
+                row["workspace_source"] = materialize_workspace(task_dir, workdir)
+        except (WorkspaceError, RuntimeError) as exc:
             row["error"] = f"workspace materialization failed: {exc}"
             row["t_env_setup_s"] = round(time.monotonic() - env_setup_start, 3)
             row["exec_mode"] = exec_mode
@@ -1588,7 +1649,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 exec_mode, harness, instruction, workdir, model, timeout_s,
                 adapters_dir, docker_image, docker_fallback,
                 proxy_ctx=active_proxy_ctx, cell_token=cell_token,
-                candidate=candidate,
+                candidate=candidate, container_workdir=task_workdir,
             )
         except Exception as exc:  # noqa: BLE001 - never crash the loop on an adapter
             exec_used = getattr(exc, "bench_exec_used", exec_mode)
@@ -1819,26 +1880,48 @@ def main(argv=None):
         if args.exec_mode == "local" or args.docker_fallback:
             host_drift = host_version_drift(harnesses, candidates)
         if args.exec_mode == "docker":
-            image_drift, image_available = image_version_drift(
-                args.docker_image, harnesses, candidates)
-            if not image_available:
-                hint = f"docker build -t {args.docker_image} obench/docker"
-                if not args.docker_fallback:
-                    print(
-                        f"Version preflight failed: cannot inspect Docker image "
-                        f"{args.docker_image!r}. Build it with: {hint}",
-                        file=sys.stderr,
-                    )
-                    return 2
+            declared_images = []
+            has_undeclared = False
+            for task in tasks:
+                declared, _ = task_docker_spec(
+                    os.path.abspath(os.path.join(args.tasks_dir, task)))
+                if declared:
+                    declared_images.append(declared)
+                else:
+                    has_undeclared = True
+            preflight_images = sorted(set(declared_images))
+            if declared_images and args.docker_fallback:
                 print(
-                    f"WARN: cannot inspect Docker image {args.docker_image!r}; "
-                    f"falling back to the validated host lane. Build it with: {hint}",
+                    "Version preflight failed: --docker-fallback is incompatible "
+                    "with tasks that declare docker_image",
                     file=sys.stderr,
                 )
-                # Do not let a later per-cell Docker retry bypass an inconclusive
-                # image gate. The host lane was validated above because fallback
-                # is enabled, so force this whole invocation onto that lane.
-                args.exec_mode = "local"
+                return 2
+            if has_undeclared or not preflight_images:
+                preflight_images.append(args.docker_image)
+            image_available = True
+            for image in preflight_images:
+                drift, available = image_version_drift(image, harnesses, candidates)
+                image_drift.extend(drift)
+                if not available:
+                    image_available = False
+                    hint = f"docker build -t {image} obench/docker"
+                    if not args.docker_fallback:
+                        print(
+                            f"Version preflight failed: cannot inspect Docker image "
+                            f"{image!r}. Build it with: {hint}",
+                            file=sys.stderr,
+                        )
+                        return 2
+                    print(
+                        f"WARN: cannot inspect Docker image {image!r}; "
+                        f"falling back to the validated host lane. Build it with: {hint}",
+                        file=sys.stderr,
+                    )
+                    # Do not let a later per-cell Docker retry bypass an inconclusive
+                    # image gate. The host lane was validated above because fallback
+                    # is enabled, so force this whole invocation onto that lane.
+                    args.exec_mode = "local"
     except (OSError, VersionDriftError) as exc:
         print(f"Version preflight failed: {exc}", file=sys.stderr)
         return 2

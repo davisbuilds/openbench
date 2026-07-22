@@ -104,6 +104,10 @@ def run_checker(task_dir, overlay_solution_flag):
 
         env = dict(os.environ)
         env["TASK_DIR"] = task_dir
+        if overlay_solution_flag:
+            env["OPENBENCH_SOLUTION_OVERLAY"] = "1"
+        else:
+            env.pop("OPENBENCH_SOLUTION_OVERLAY", None)
 
         try:
             proc = subprocess.run(
