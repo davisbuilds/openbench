@@ -28,7 +28,6 @@ For every available published trial, rate is `sum(verifier/reward.txt) / trial c
 | `torch-tensor-parallelism` | distributed ML | 0 / 13 | 0.0% |
 | `dna-insert` | bioinformatics | 1 / 13 | 7.7% |
 | `video-processing` | video analytics | 1 / 13 | 7.7% |
-| `extract-moves-from-video` | video / chess | 2 / 13 | 15.4% |
 | `model-extraction-relu-logits` | adversarial ML | 3 / 12 | 25.0% |
 | `polyglot-rust-c` | systems / polyglot binaries | 5 / 13 | 38.5% |
 
@@ -44,3 +43,5 @@ Importer-materialized solutions were retained where clean. Three newer-format ta
 - `video-processing`: corrected the imported absolute materialization path to write `output.toml` in the current workspace and emit the instructed schema.
 
 Every checker fails untouched and passes after its `solution/` overlay; `obench validate` is the admission proof.
+
+Note: `extract-moves-from-video` was removed before publication — its required input video derives from YouTube content with unconfirmed redistribution rights.
