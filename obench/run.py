@@ -69,6 +69,15 @@ PROXY_CODEX_SUBSCRIPTION_MODELS = {
     "gpt-5.5-medium", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 }
 PROXY_CHAT_MODELS = {"glm-5.2", "glm-4.7-flash", "deepseek-v4-flash", "kimi-k2.7-code", "kimi-k3"}
+# Gateway/router arms (phase-1 spike): a canonical model name that names both the
+# gateway and the model it fronts, run in fixed-model mode (single model, no
+# router fallback). Metered through the proxy's ``gateway/<name>`` route. Kept
+# here to mirror the existing per-model proxy gating; pi's adapter maps these to
+# the gateway's model slug (obench/adapters/pi.py GATEWAY_MODELS).
+PROXY_GATEWAY_MODELS = {
+    "openrouter/openai/gpt-5.6",
+    "openrouter/anthropic/claude-sonnet-4.5",
+}
 PROXY_CLAUDE_MODELS = PROXY_CHAT_MODELS | {"claude-opus-4-8", "gpt-5.6-sol"}
 CHECKER_CAPTURE_LIMIT = 8000
 CHECKER_CAPTURE_TRUNCATED_PREFIX = "[truncated to last 8000 chars]\n"
@@ -93,7 +102,7 @@ ROW_FIELDS = (
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
     "harness_version_source", "failure_class", "failure_reason", "workspace_changed", "checker_stdout", "checker_stderr", "checker_workspace_files",
     "image_digest", "candidate_provenance", "version_drift", "timeout_s",
-    "workspace_source",
+    "workspace_source", "served_model", "cost", "upstream_cost",
 )
 
 
@@ -617,8 +626,11 @@ def proxy_supported_for_cell(harness, model):
     if harness == "pi":
         # Open models route via the provider extension's proxied baseUrl
         # (adapters/pi.py _pi_provider_ext), same mechanism as opencode.
+        # Gateway arms use the same extension pointed at the proxy's
+        # gateway/<name> route (adapters/pi.py GATEWAY_MODELS).
         return (model in PROXY_CODEX_SUBSCRIPTION_MODELS
-                or model in PROXY_CHAT_MODELS)
+                or model in PROXY_CHAT_MODELS
+                or model in PROXY_GATEWAY_MODELS)
     if harness == "claude":
         return model in PROXY_CLAUDE_MODELS
     if harness == "opencode":
@@ -643,6 +655,10 @@ def _proxy_sampling_for_cell(harness, model):
         return {"model": subscription_models[model], "reasoning_effort": "medium"}
     if harness == "pi" and model in subscription_models:
         return {"provider": "openai-codex", "model": subscription_models[model], "thinking": "medium"}
+    if harness == "pi" and model in PROXY_GATEWAY_MODELS:
+        # Record the requested (fixed) model slug for the ledger; the proxy
+        # additionally records the served_model the gateway reports back.
+        return {"model": model.split("/", 1)[1], "thinking": "medium"}
     if harness == "opencode" and model in PROXY_CHAT_MODELS:
         return {"model": model, "variant": "medium"}
     if harness == "claude" and model in PROXY_CLAUDE_MODELS:
@@ -1478,6 +1494,19 @@ def apply_proxy_ledger(row, ledger_rows):
                 samplings.append(sampling)
     row.update(totals)
     row["sampling_observed"] = samplings or None
+    served = [r.get("served_model") for r in calls
+             if isinstance(r.get("served_model"), str) and r.get("served_model")]
+    if served:
+        # De-duplicated, order-preserving: a router may serve >1 model per cell.
+        row["served_model"] = list(dict.fromkeys(served))
+    cost = sum(r["cost"] for r in calls
+              if isinstance(r.get("cost"), (int, float)) and not isinstance(r.get("cost"), bool))
+    if any("cost" in r for r in calls):
+        row["cost"] = cost
+    upstream = sum(r["upstream_cost"] for r in calls
+                  if isinstance(r.get("upstream_cost"), (int, float)) and not isinstance(r.get("upstream_cost"), bool))
+    if any("upstream_cost" in r for r in calls):
+        row["upstream_cost"] = upstream
     if not truncated:
         row["token_basis_proxy"] = "proxy_measured"
     return row

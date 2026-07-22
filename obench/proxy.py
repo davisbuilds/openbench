@@ -47,6 +47,12 @@ SAMPLING_KEYS = {
 TOKEN_RE = re.compile(r"/cell/([^/?#]+)")
 
 DEFAULT_CURSOR_UPSTREAM = "https://api2.cursor.sh"
+# AI gateways / model routers expose one OpenAI-compatible endpoint that fronts
+# many providers. A gateway is metered on a dedicated ``gateway/<name>`` route so
+# gateway cells never collide with the direct-provider ``chat/<vendor>`` routes.
+DEFAULT_GATEWAY_UPSTREAMS = {
+    "openrouter": "https://openrouter.ai/api/v1",
+}
 DEFAULT_CHAT_UPSTREAMS = {
     "deepseek": "https://api.deepseek.com",
     "zai": "https://api.z.ai",
@@ -112,6 +118,49 @@ def _looks_like_usage(value: Any) -> bool:
         "cacheRead", "cacheWrite", "input", "output",
     }
     return any(k in value for k in keys)
+
+
+def extract_response_model(body: bytes) -> str | None:
+    """Return the model a gateway/router *actually served*, from the response.
+
+    For a router the served model can differ from the requested model, so this
+    reads the response body (JSON or SSE chunks) rather than request sampling.
+    The last non-empty ``model`` wins (SSE emits one per chunk); the OpenAI
+    Responses API nests it under ``response.model``.
+    """
+    found = None
+    for obj in _json_objects(body):
+        if not isinstance(obj, dict):
+            continue
+        model = obj.get("model")
+        if isinstance(model, str) and model:
+            found = model
+        response = obj.get("response")
+        if isinstance(response, dict) and isinstance(response.get("model"), str) and response["model"]:
+            found = response["model"]
+    return found
+
+
+def extract_cost(usage: Any) -> dict[str, float]:
+    """Return gateway-reported cost fields from a usage object, when present.
+
+    OpenRouter returns ``usage.cost`` (credits charged) and
+    ``usage.cost_details.upstream_inference_cost`` (provider's own charge).
+    Gateways that omit these leave the row's cost unset (compute it later from a
+    per-gateway price sheet).
+    """
+    out: dict[str, float] = {}
+    if not isinstance(usage, dict):
+        return out
+    cost = usage.get("cost")
+    if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+        out["cost"] = float(cost)
+    details = usage.get("cost_details")
+    if isinstance(details, dict):
+        upstream = details.get("upstream_inference_cost")
+        if isinstance(upstream, (int, float)) and not isinstance(upstream, bool):
+            out["upstream_cost"] = float(upstream)
+    return out
 
 
 def extract_usage(obj: Any) -> Any:
@@ -317,6 +366,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         sampling: dict[str, Any] = {}
         links: dict[str, str] = {}
         route = None
+        served_model = None
         capture_truncated = False
         headers_sent = False
         error = None
@@ -369,6 +419,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             usage = parse_json_usage(parse_body)
             if usage is None:
                 usage = parse_sse_usage(parse_body)
+            served_model = extract_response_model(parse_body)
             links.update(protocol_links(parse_body, response=True))
             conn.close()
         except Exception as exc:  # noqa: BLE001
@@ -404,6 +455,9 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             if route is not None:
                 rec["route"] = route.route
                 rec["upstream"] = f"{route.upstream.scheme}://{route.upstream.netloc}{route.upstream.path.rstrip('/')}"
+            if served_model:
+                rec["served_model"] = served_model
+            rec.update(extract_cost(usage))
             if "session" in links:
                 rec["session_hash"] = _identifier_hash(links["session"], self.server.identifier_salt)
             if "previous_response" in links:
@@ -477,6 +531,15 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 tail = tail[1:]
             upstream = self.server.anthropic_upstreams[name]  # type: ignore[attr-defined]
             route_name = f"anthropic/{name}"
+        elif prefix == "gateway":
+            if not tail:
+                raise RuntimeError("/gateway route requires a gateway segment")
+            name = tail[0]
+            if name not in self.server.gateway_upstreams:  # type: ignore[attr-defined]
+                raise RuntimeError(f"unknown gateway: {name}")
+            tail = tail[1:]
+            upstream = self.server.gateway_upstreams[name]  # type: ignore[attr-defined]
+            route_name = f"gateway/{name}"
         elif prefix == "chat":
             if not tail:
                 raise RuntimeError("/chat route requires a vendor segment")
@@ -586,6 +649,7 @@ class CountingProxyServer(ThreadingHTTPServer):
 
 def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
                 chat_upstreams: dict[str, str] | None = None,
+                gateway_upstreams: dict[str, str] | None = None,
                 anthropic_upstreams: dict[str, str] | None = None,
                 openai_upstream: str = "https://api.openai.com",
                 subbridge_upstream: str = "http://127.0.0.1:8317",
@@ -597,6 +661,9 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     chat = dict(DEFAULT_CHAT_UPSTREAMS)
     if chat_upstreams:
         chat.update({k: v for k, v in chat_upstreams.items() if v})
+    gateway = dict(DEFAULT_GATEWAY_UPSTREAMS)
+    if gateway_upstreams:
+        gateway.update({k: v for k, v in gateway_upstreams.items() if v})
     anthropic = dict(DEFAULT_ANTHROPIC_UPSTREAMS)
     if anthropic_upstreams:
         anthropic.update({k: v for k, v in anthropic_upstreams.items() if v})
@@ -609,6 +676,7 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
         "bridge": "http://127.0.0.1:" + os.environ.get("BENCH_BRIDGE_PORT", "4141"),
     })
     httpd.chat_upstreams = _urlsplit_map(chat)
+    httpd.gateway_upstreams = _urlsplit_map(gateway)
     httpd.anthropic_upstreams = _urlsplit_map(anthropic)
     httpd.ledger_dir = Path(ledger_dir)
     httpd.timeout_s = timeout_s
@@ -647,6 +715,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--ledger-dir", required=True)
     parser.add_argument("--chat-upstream", action="append", default=[], help="name=url")
+    parser.add_argument("--gateway-upstream", action="append", default=[], help="name=url")
     parser.add_argument("--openai-upstream", default="https://api.openai.com")
     parser.add_argument("--subbridge-upstream", default="http://127.0.0.1:8317")
     parser.add_argument("--cursor-upstream", default=DEFAULT_CURSOR_UPSTREAM)
@@ -657,6 +726,7 @@ def main(argv: list[str] | None = None) -> int:
     httpd = make_server(
         args.listen_host, args.port, args.ledger_dir,
         chat_upstreams=_parse_upstream_args(args.chat_upstream),
+        gateway_upstreams=_parse_upstream_args(args.gateway_upstream),
         anthropic_upstreams=_parse_upstream_args(args.anthropic_upstream),
         openai_upstream=args.openai_upstream,
         subbridge_upstream=args.subbridge_upstream,

@@ -118,6 +118,10 @@ def _proxied_base_url(route, original_url=None):
         return _proxy_cell_url("codex", "backend-api")
     parsed = urlsplit(original_url or "")
     tail = (parsed.path or "").strip("/")
+    # AI gateways / routers meter on the proxy's dedicated gateway/<name> route;
+    # direct providers use chat/<vendor>.
+    if route in GATEWAY_PROVIDERS:
+        return _proxy_cell_url("gateway", route, tail)
     vendor = route
     return _proxy_cell_url("chat", vendor, tail)
 
@@ -230,8 +234,50 @@ OPEN_MODELS = {
 }
 
 
+# Gateway / model-router provider names. Their baseUrl is metered through the
+# counting proxy's gateway/<name> route (obench/proxy.py DEFAULT_GATEWAY_UPSTREAMS)
+# rather than the direct-provider chat/<vendor> route.
+GATEWAY_PROVIDERS = {"openrouter"}
+
+# --- Gateway arms (phase-1 spike) -------------------------------------------
+# One OpenAI-compatible endpoint (OpenRouter) fronting many providers, so a
+# single OPENROUTER_API_KEY reaches models from different vendors -- e.g. an
+# OpenAI and an Anthropic model in the same run without per-vendor auth. The
+# canonical key names both the gateway and the fronted model slug. These run in
+# FIXED-MODEL mode: exactly one model, no router fallback (add provider routing
+# controls later for a router-mode arm). Registered via the same provider
+# extension as OPEN_MODELS; only the proxy route differs (GATEWAY_PROVIDERS).
+GATEWAY_MODELS = {
+    "openrouter/openai/gpt-5.6": {
+        "provider": "openrouter", "model_id": "openai/gpt-5.6",
+        "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY",
+        "display": "OpenRouter", "thinking": "medium",
+        "context_window": 400000, "max_tokens": 32768,
+        "compat": {"supportsStore": False, "supportsDeveloperRole": False,
+                   "supportsReasoningEffort": True, "supportsStrictMode": False},
+        "thinkingLevelMap": {"minimal": "minimal", "low": "low", "medium": "medium",
+                             "high": "high", "xhigh": "high"},
+    },
+    "openrouter/anthropic/claude-sonnet-4.5": {
+        "provider": "openrouter", "model_id": "anthropic/claude-sonnet-4.5",
+        "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY",
+        "display": "OpenRouter", "thinking": "medium",
+        "context_window": 200000, "max_tokens": 32768,
+        "compat": {"supportsStore": False, "supportsDeveloperRole": False,
+                   "supportsReasoningEffort": True, "supportsStrictMode": False},
+        "thinkingLevelMap": {"minimal": "minimal", "low": "low", "medium": "medium",
+                             "high": "high", "xhigh": "high"},
+    },
+}
+
+
+def _open_model_spec(model):
+    """Return the extension-registered spec for an open or gateway model."""
+    return GATEWAY_MODELS.get(model) or OPEN_MODELS.get(model)
+
+
 def _unsupported(model):
-    known = list(MODELS) + list(OPEN_MODELS)
+    known = list(MODELS) + list(OPEN_MODELS) + list(GATEWAY_MODELS)
     return {"completed": False, "error": f"unsupported-model: {model!r} (have {known})",
             "output_tail": "", "tokens": None, "turns": None, "cmd": None,
             **_empty_token_usage()}
@@ -404,8 +450,8 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
         provider = MODELS[model]["provider"]
         if not _has_subscription_auth(provider):
             return _subscription_setup_needed(provider, model)
-    elif model in OPEN_MODELS:
-        spec = OPEN_MODELS[model]
+    elif _open_model_spec(model) is not None:
+        spec = _open_model_spec(model)
         if not os.environ.get(spec["env_key"]):
             return _setup_needed(spec["env_key"], model)
     else:
@@ -446,9 +492,9 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 instruction,
             ]
         else:
-            # Open model: register the provider via a temp extension (env key
-            # supplies auth). No subscription auth.json needed.
-            spec = OPEN_MODELS[model]
+            # Open / gateway model: register the provider via a temp extension
+            # (env key supplies auth). No subscription auth.json needed.
+            spec = _open_model_spec(model)
             ext_path = os.path.join(iso_home, "open-provider.mjs")
             with open(ext_path, "w", encoding="utf-8") as fh:
                 fh.write(_pi_provider_ext(spec))
