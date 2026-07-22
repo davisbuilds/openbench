@@ -75,8 +75,9 @@ PROXY_CHAT_MODELS = {"glm-5.2", "glm-4.7-flash", "deepseek-v4-flash", "kimi-k2.7
 # here to mirror the existing per-model proxy gating; pi's adapter maps these to
 # the gateway's model slug (obench/adapters/pi.py GATEWAY_MODELS).
 PROXY_GATEWAY_MODELS = {
-    "openrouter/openai/gpt-5.6",
-    "openrouter/anthropic/claude-sonnet-4.5",
+    f"{gw}/{slug}"
+    for gw in ("openrouter", "vercel", "concentrate")
+    for slug in ("openai/gpt-5.6", "anthropic/claude-sonnet-4.5")
 }
 PROXY_CLAUDE_MODELS = PROXY_CHAT_MODELS | {"claude-opus-4-8", "gpt-5.6-sol"}
 CHECKER_CAPTURE_LIMIT = 8000

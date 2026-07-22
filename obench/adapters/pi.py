@@ -116,12 +116,16 @@ def _proxied_base_url(route, original_url=None):
         return original_url
     if route == "codex":
         return _proxy_cell_url("codex", "backend-api")
+    # AI gateways / routers meter on the proxy's dedicated gateway/<name> route;
+    # direct providers use chat/<vendor>. The gateway upstream registry
+    # (proxy.DEFAULT_GATEWAY_UPSTREAMS) already carries the full base path
+    # (e.g. .../api/v1), so we must NOT also append the model base_url's path
+    # tail here — doing so doubles it (.../api/v1/api/v1/...). pi's
+    # openai-completions api appends /chat/completions to whatever base we return.
+    if route in GATEWAY_PROVIDERS:
+        return _proxy_cell_url("gateway", route)
     parsed = urlsplit(original_url or "")
     tail = (parsed.path or "").strip("/")
-    # AI gateways / routers meter on the proxy's dedicated gateway/<name> route;
-    # direct providers use chat/<vendor>.
-    if route in GATEWAY_PROVIDERS:
-        return _proxy_cell_url("gateway", route, tail)
     vendor = route
     return _proxy_cell_url("chat", vendor, tail)
 
@@ -234,41 +238,58 @@ OPEN_MODELS = {
 }
 
 
-# Gateway / model-router provider names. Their baseUrl is metered through the
-# counting proxy's gateway/<name> route (obench/proxy.py DEFAULT_GATEWAY_UPSTREAMS)
-# rather than the direct-provider chat/<vendor> route.
-GATEWAY_PROVIDERS = {"openrouter"}
-
-# --- Gateway arms (phase-1 spike) -------------------------------------------
-# One OpenAI-compatible endpoint (OpenRouter) fronting many providers, so a
-# single OPENROUTER_API_KEY reaches models from different vendors -- e.g. an
-# OpenAI and an Anthropic model in the same run without per-vendor auth. The
-# canonical key names both the gateway and the fronted model slug. These run in
-# FIXED-MODEL mode: exactly one model, no router fallback (add provider routing
-# controls later for a router-mode arm). Registered via the same provider
-# extension as OPEN_MODELS; only the proxy route differs (GATEWAY_PROVIDERS).
-GATEWAY_MODELS = {
-    "openrouter/openai/gpt-5.6": {
-        "provider": "openrouter", "model_id": "openai/gpt-5.6",
-        "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY",
-        "display": "OpenRouter", "thinking": "medium",
-        "context_window": 400000, "max_tokens": 32768,
-        "compat": {"supportsStore": False, "supportsDeveloperRole": False,
-                   "supportsReasoningEffort": True, "supportsStrictMode": False},
-        "thinkingLevelMap": {"minimal": "minimal", "low": "low", "medium": "medium",
-                             "high": "high", "xhigh": "high"},
-    },
-    "openrouter/anthropic/claude-sonnet-4.5": {
-        "provider": "openrouter", "model_id": "anthropic/claude-sonnet-4.5",
-        "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY",
-        "display": "OpenRouter", "thinking": "medium",
-        "context_window": 200000, "max_tokens": 32768,
-        "compat": {"supportsStore": False, "supportsDeveloperRole": False,
-                   "supportsReasoningEffort": True, "supportsStrictMode": False},
-        "thinkingLevelMap": {"minimal": "minimal", "low": "low", "medium": "medium",
-                             "high": "high", "xhigh": "high"},
-    },
+# --- Gateway arms (gateway / model-router benchmarking) ---------------------
+# A gateway is one OpenAI-compatible endpoint fronting many providers, so a
+# single gateway key reaches models from different vendors -- e.g. an OpenAI and
+# an Anthropic model in the same run without per-vendor auth. Each gateway's
+# baseUrl is metered through the counting proxy's gateway/<name> route
+# (obench/proxy.py DEFAULT_GATEWAY_UPSTREAMS) rather than the direct-provider
+# chat/<vendor> route; GATEWAY_PROVIDERS lists the provider names that route that
+# way. All three below are OpenAI-compatible (swap baseUrl + key, keep the
+# provider-qualified model slug).
+GATEWAYS = {
+    "openrouter": {"display": "OpenRouter", "base_url": "https://openrouter.ai/api/v1",
+                   "env_key": "OPENROUTER_API_KEY"},
+    "vercel": {"display": "Vercel AI Gateway", "base_url": "https://ai-gateway.vercel.sh/v1",
+               "env_key": "AI_GATEWAY_API_KEY"},
+    "concentrate": {"display": "Concentrate.ai", "base_url": "https://api.concentrate.ai/v1",
+                    "env_key": "CONCENTRATE_API_KEY"},
 }
+GATEWAY_PROVIDERS = set(GATEWAYS)
+
+# Provider-qualified model slugs offered behind every gateway (all three accept
+# the OpenAI/Anthropic-style creator/model form). Context windows are per model.
+_GATEWAY_MODEL_SLUGS = {
+    "openai/gpt-5.6": {"context_window": 400000, "max_tokens": 32768},
+    "anthropic/claude-sonnet-4.5": {"context_window": 200000, "max_tokens": 32768},
+}
+_GATEWAY_COMPAT = {"supportsStore": False, "supportsDeveloperRole": False,
+                   "supportsReasoningEffort": True, "supportsStrictMode": False}
+_GATEWAY_THINKING_MAP = {"minimal": "minimal", "low": "low", "medium": "medium",
+                         "high": "high", "xhigh": "high"}
+
+
+def _build_gateway_models():
+    """Fixed-model arms: canonical name ``<gateway>/<provider>/<model>``.
+
+    FIXED-MODEL mode: exactly one model, no router fallback (add provider routing
+    controls later for a router-mode arm). Registered via the same provider
+    extension as OPEN_MODELS; only the proxy route differs (GATEWAY_PROVIDERS).
+    """
+    models = {}
+    for gw_name, gw in GATEWAYS.items():
+        for slug, dims in _GATEWAY_MODEL_SLUGS.items():
+            models[f"{gw_name}/{slug}"] = {
+                "provider": gw_name, "model_id": slug,
+                "base_url": gw["base_url"], "env_key": gw["env_key"],
+                "display": gw["display"], "thinking": "medium",
+                "context_window": dims["context_window"], "max_tokens": dims["max_tokens"],
+                "compat": _GATEWAY_COMPAT, "thinkingLevelMap": _GATEWAY_THINKING_MAP,
+            }
+    return models
+
+
+GATEWAY_MODELS = _build_gateway_models()
 
 
 def _open_model_spec(model):

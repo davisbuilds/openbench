@@ -52,6 +52,8 @@ DEFAULT_CURSOR_UPSTREAM = "https://api2.cursor.sh"
 # gateway cells never collide with the direct-provider ``chat/<vendor>`` routes.
 DEFAULT_GATEWAY_UPSTREAMS = {
     "openrouter": "https://openrouter.ai/api/v1",
+    "vercel": "https://ai-gateway.vercel.sh/v1",
+    "concentrate": "https://api.concentrate.ai/v1",
 }
 DEFAULT_CHAT_UPSTREAMS = {
     "deepseek": "https://api.deepseek.com",

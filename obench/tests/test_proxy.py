@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from obench import proxy  # noqa: E402
 from obench import run  # noqa: E402
+from obench.adapters import pi  # noqa: E402
 
 SECRET = "TEST_SECRET_VALUE_MUST_NOT_APPEAR"
 
@@ -107,7 +108,13 @@ class ProxyTests(unittest.TestCase):
         self.proxy = proxy.make_server(
             "127.0.0.1", 0, self.tmp.name,
             chat_upstreams={"deepseek": upstream_url},
-            gateway_upstreams={"openrouter": upstream_url},
+            gateway_upstreams={
+                "openrouter": upstream_url,
+                # A gateway upstream that carries a base path (like the real
+                # openrouter/vercel/concentrate upstreams) — exercises the
+                # path-join so the doubled-/api/v1 bug can't regress.
+                "orv1": upstream_url + "/api/v1",
+            },
             anthropic_upstreams={"deepseek": upstream_url},
             openai_upstream=upstream_url,
             subbridge_upstream=upstream_url,
@@ -342,6 +349,46 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(proxy.extract_cost({"prompt_tokens": 1}), {})
         # booleans must not be mistaken for numeric cost
         self.assertEqual(proxy.extract_cost({"cost": True}), {})
+
+    def test_gateway_upstream_base_path_is_not_doubled(self):
+        # pi hands the proxy a base URL of .../gateway/orv1 (no path tail); pi's
+        # openai-completions api then appends /chat/completions. With an upstream
+        # that carries /api/v1, the forwarded path must be /api/v1/chat/completions
+        # — NOT /api/v1/api/v1/chat/completions.
+        self._post("/cell/tok-orv1/gateway/orv1/chat/completions",
+                   {"model": "openai/gpt-5.6", "stream": False})
+        self.assertEqual(self.upstream.requests[-1]["path"], "/api/v1/chat/completions")
+        row = self._ledger("tok-orv1")[0]
+        self.assertEqual(row["route"], "gateway/orv1")
+
+    def test_pi_proxied_base_url_for_gateway_drops_path_tail(self):
+        # Regression: the gateway upstream registry carries the /api/v1 base, so
+        # the pi base URL must be .../gateway/<name> with no model-base-url tail.
+        env = {
+            "OPENBENCH_PROXY": "1",
+            "OPENBENCH_PROXY_BASE_URL": "http://127.0.0.1:9",
+            "OPENBENCH_PROXY_CELL_TOKEN": "tok",
+        }
+        old = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        try:
+            url = pi._proxied_base_url("openrouter", "https://openrouter.ai/api/v1")
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.assertEqual(url, "http://127.0.0.1:9/cell/tok/gateway/openrouter")
+        self.assertNotIn("api/v1", url)
+
+    def test_pi_gateway_models_cover_all_three_gateways(self):
+        for name in ("openrouter", "vercel", "concentrate"):
+            self.assertIn(f"{name}/openai/gpt-5.6", pi.GATEWAY_MODELS)
+            spec = pi.GATEWAY_MODELS[f"{name}/anthropic/claude-sonnet-4.5"]
+            self.assertEqual(spec["provider"], name)
+            self.assertEqual(spec["model_id"], "anthropic/claude-sonnet-4.5")
+            self.assertIn(name, pi.GATEWAY_PROVIDERS)
 
     def test_pi_gateway_cells_are_proxy_supported(self):
         self.assertTrue(run.proxy_supported_for_cell("pi", "openrouter/openai/gpt-5.6"))
