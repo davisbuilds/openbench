@@ -1,0 +1,19 @@
+#!/bin/sh
+# OpenBench launcher for OMP. The candidate runner injects the per-cell
+# counting-proxy URL into DEEPSEEK_API_BASE before invoking this file.
+set -eu
+
+: "${PI_CODING_AGENT_DIR:?PI_CODING_AGENT_DIR must name the isolated OMP agent directory}"
+: "${DEEPSEEK_API_BASE:?DEEPSEEK_API_BASE must be injected by the OpenBench counting proxy}"
+: "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}"
+
+# Override only the bundled DeepSeek provider endpoint. OMP retains its bundled
+# deepseek-v4-flash model metadata and compatibility policy.
+mkdir -p "$PI_CODING_AGENT_DIR"
+cat >"$PI_CODING_AGENT_DIR/models.yml" <<EOF
+providers:
+  deepseek:
+    baseUrl: "$DEEPSEEK_API_BASE"
+EOF
+
+exec omp "$@"
