@@ -1,6 +1,148 @@
 {
-  "bundle_count": 1,
+  "bundle_count": 2,
   "bundles": [
+    {
+      "also_seen_as": [],
+      "arms": [
+        {
+          "harness": "cursor",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.8780487804878049,
+          "solved": 36,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 407404.55555555556,
+          "wilson95": [
+            0.7445549235115514,
+            0.9467674200265918
+          ]
+        },
+        {
+          "harness": "devin",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.8048780487804879,
+          "solved": 33,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": null,
+          "wilson95": [
+            0.6598611764744329,
+            0.8976568425079408
+          ]
+        },
+        {
+          "harness": "grokbuild",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.8048780487804879,
+          "solved": 33,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 394809.1818181818,
+          "wilson95": [
+            0.6598611764744329,
+            0.8976568425079408
+          ]
+        },
+        {
+          "harness": "opencode",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.8048780487804879,
+          "solved": 33,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 351618.36363636365,
+          "wilson95": [
+            0.6598611764744329,
+            0.8976568425079408
+          ]
+        },
+        {
+          "harness": "claude",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.7560975609756098,
+          "solved": 31,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 181456.51612903227,
+          "wilson95": [
+            0.6065636934554182,
+            0.8617514424897756
+          ]
+        },
+        {
+          "harness": "codex",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.7560975609756098,
+          "solved": 31,
+          "token_bases": [
+            "proxy-measured",
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 997008.8064516129,
+          "wilson95": [
+            0.6065636934554182,
+            0.8617514424897756
+          ]
+        },
+        {
+          "harness": "pi",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.7560975609756098,
+          "solved": 31,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 144650.5806451613,
+          "wilson95": [
+            0.6065636934554182,
+            0.8617514424897756
+          ]
+        }
+      ],
+      "caveats": [],
+      "claim": null,
+      "countable_rows": 311,
+      "date": "2026-07-21",
+      "excluded_counts": {
+        "infra": 2,
+        "rate_limited": 2
+      },
+      "has_caveats": false,
+      "id": "2026-07-21-gpt56",
+      "kind": "release",
+      "link": null,
+      "matched": {
+        "duplicate_cells_excluded": 0,
+        "duplicate_rows_excluded": 0,
+        "groups_compared": 7,
+        "matched_cells_per_group": 41,
+        "matched_rows": 287,
+        "unmatched_countable_rows": 24
+      },
+      "models": [
+        "gpt-5.6-sol"
+      ],
+      "path": "releases/2026-07-21-gpt56/index.html",
+      "raw_rows": 315,
+      "results_path": "releases/2026-07-21-gpt56/results.jsonl",
+      "results_sha256": "e65a9406dc9acc80a55b89cf1586f94492da36fe4faf316c62afad7f09633f20",
+      "submitter": null,
+      "table": "matched",
+      "task_set_digest": null,
+      "title": "OpenBench: gpt-5.6 across 7 harnesses"
+    },
     {
       "also_seen_as": [
         {
@@ -12,7 +154,6 @@
       ],
       "arms": [
         {
-          "effective_tokens_per_solve": 5856.0,
           "harness": "aider",
           "model": "deepseek-v4-flash",
           "n": 8,
@@ -21,13 +162,13 @@
           "token_bases": [
             "proxy-measured"
           ],
+          "total_tokens_per_solve": 6192.0,
           "wilson95": [
             0.6755843804891231,
             1.0
           ]
         },
         {
-          "effective_tokens_per_solve": 13669.375,
           "harness": "opencode",
           "model": "deepseek-v4-flash",
           "n": 8,
@@ -36,13 +177,13 @@
           "token_bases": [
             "self-reported"
           ],
+          "total_tokens_per_solve": 105269.375,
           "wilson95": [
             0.6755843804891231,
             1.0
           ]
         },
         {
-          "effective_tokens_per_solve": 7742.25,
           "harness": "pi",
           "model": "deepseek-v4-flash",
           "n": 8,
@@ -51,6 +192,7 @@
           "token_bases": [
             "self-reported"
           ],
+          "total_tokens_per_solve": 43198.25,
           "wilson95": [
             0.6755843804891231,
             1.0
@@ -60,7 +202,7 @@
       "caveats": [
         "Harness mode is not apples-to-apples: aider ran as a one-shot --message invocation, while pi and opencode ran full agentic loops. Token comparison reflects that difference in harness mode, not a pure like-for-like agent loop contest.",
         "One aider cell excluded: 1 of 9 aider cells was infrastructure-classified and is excluded from solve-rate denominators (aider reported as 8/8). pi and opencode are 9/9.",
-        "Fresh tokens only: figures are proxy-measured fresh tokens (uncached input + output). Cache reads are shown separately and are not included. Honest comparison: 5,856 vs 8,184 vs 14,186 fresh tokens/solve (aider vs pi vs opencode).",
+        "Uniform total-token basis: totals include uncached input, output, and cache reads from split fields; the vendor aggregate is never used. Values are 6,192 vs 48,262 vs 111,380 tokens/solve (aider vs pi vs opencode).",
         "Verifiable bundle: this release includes results.jsonl and provenance.json. Re-check digests with obench verify docs/releases/2026-07-20-aider-showcase."
       ],
       "claim": null,
@@ -107,12 +249,6 @@
       "id": "2026-07-20-deepseek",
       "kind": "release",
       "path": "releases/2026-07-20-deepseek/index.html",
-      "reason": "no results.jsonl (HTML-only release page)"
-    },
-    {
-      "id": "2026-07-20-gpt56",
-      "kind": "release",
-      "path": "releases/2026-07-20-gpt56/index.html",
       "reason": "no results.jsonl (HTML-only release page)"
     },
     {

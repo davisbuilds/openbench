@@ -24,7 +24,7 @@ import sys
 import tomllib
 from collections import defaultdict
 
-from . import stats
+from . import report_page, stats
 from .paths import SOURCE_ROOT
 
 METHODOLOGY_NOTE = (
@@ -260,24 +260,13 @@ def discover_bundle_dirs(site_dir, community_dir=None):
                 yield "community", path, data_manifest.get(name)
 
 
-def _effective_tokens_per_solve(rows):
-    """Mean effective tokens among solved rows that reported tokens; basis tags."""
-    token_vals = []
-    bases = set()
-    solved = 0
-    for row in rows:
-        if not row.get("success"):
-            continue
-        solved += 1
-        tok, basis = stats.effective_tokens(row)
-        if tok is not None:
-            token_vals.append(float(tok))
-            if basis:
-                bases.add(basis)
-    if solved <= 0 or not token_vals:
-        return None, sorted(bases)
-    # Match report.py: total reported tokens / solves (not mean of only metered).
-    return sum(token_vals) / solved, sorted(bases)
+def _total_tokens_per_solve(rows):
+    """Uniform split-derived total tokens/solve plus accounting basis tags."""
+    bases = {
+        basis for row in rows
+        if (basis := stats.display_token_basis(row)) is not None
+    }
+    return report_page.split_total_tokens_per_solve(rows), sorted(bases)
 
 
 def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
@@ -315,7 +304,7 @@ def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
         n = len(arm_rows)
         lo, hi = stats.wilson_ci(solved, n)
         rate = (solved / n) if n else None
-        tok_slv, bases = _effective_tokens_per_solve(arm_rows)
+        tok_slv, bases = _total_tokens_per_solve(arm_rows)
         arms.append({
             "harness": harness,
             "model": model,
@@ -323,7 +312,7 @@ def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
             "n": n,
             "solve_rate": rate,
             "wilson95": [lo, hi],
-            "effective_tokens_per_solve": tok_slv,
+            "total_tokens_per_solve": tok_slv,
             "token_bases": bases,
         })
 
@@ -539,7 +528,7 @@ def render_leaderboard_html(doc):
                 f"<td>{arm.get('solved', 0)}/{arm.get('n', 0)}</td>"
                 f"<td>{html.escape(_fmt_pct(arm.get('solve_rate')))}</td>"
                 f"<td>{html.escape(_fmt_wilson(arm.get('wilson95')))}</td>"
-                f"<td>{html.escape(_fmt_tokens(arm.get('effective_tokens_per_solve')))}</td>"
+                f"<td>{html.escape(_fmt_tokens(arm.get('total_tokens_per_solve')))}</td>"
                 f"<td>{html.escape(bases)}</td>"
                 f"<td>{caveat_cell}</td>"
                 "</tr>"
@@ -551,7 +540,7 @@ def render_leaderboard_html(doc):
             '<div class="scroll"><table><thead><tr>'
             "<th>#</th><th>Arm (harness × model)</th><th>Solved/n</th>"
             "<th>Solve rate</th><th>Wilson 95% CI</th>"
-            "<th>Eff. tokens/solve</th><th>Token basis</th><th>Caveat</th>"
+            "<th>Total tokens/solve (incl. cache reads)</th><th>Token basis</th><th>Caveat</th>"
             "</tr></thead><tbody>" + body + "</tbody></table></div>"
         )
         sections.append(
