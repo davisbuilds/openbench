@@ -285,6 +285,21 @@ class BuildLeaderboardTests(unittest.TestCase):
         self.assertEqual(doc["bundle_count"], 1)
         self.assertEqual(doc["skipped"][0]["id"], "html-only")
 
+    def test_skips_results_without_verified_provenance(self):
+        release = {
+            "id": "unverified", "title": "Unverified", "date": "2026-07-20",
+            "models": ["model-x"], "path": "releases/unverified/index.html",
+        }
+        bundle = os.path.join(self.site, "releases", "unverified")
+        _write_results(os.path.join(bundle, "results.jsonl"), [
+            _row("pi", "alpha", 1, True),
+        ])
+        _write(os.path.join(self.site, "releases.json"), json.dumps([release]))
+        _write(os.path.join(self.site, "community.json"), "[]\n")
+        doc = leaderboard.build_leaderboard(self.site)
+        self.assertEqual(doc["bundle_count"], 0)
+        self.assertIn("missing provenance.json", doc["skipped"][0]["reason"])
+
     def test_write_leaderboard_and_index_link(self):
         rows = [
             _row("pi", "alpha", 1, True),

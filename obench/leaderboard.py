@@ -90,6 +90,31 @@ def _load_manifest_list(path):
     return data
 
 
+
+def _results_verification_error(bundle_dir):
+    """Return why a result bundle is not digest-verified, else ``None``."""
+    results_path = os.path.join(bundle_dir, "results.jsonl")
+    provenance_path = os.path.join(bundle_dir, "provenance.json")
+    if not os.path.isfile(results_path):
+        return "no results.jsonl (HTML-only release page)"
+    if not os.path.isfile(provenance_path):
+        return "missing provenance.json (results are not verified)"
+    try:
+        provenance = _read_json(provenance_path)
+    except (OSError, json.JSONDecodeError):
+        return "invalid provenance.json (results are not verified)"
+    expected = provenance.get("results_sha256") if isinstance(provenance, dict) else None
+    if not isinstance(expected, str) or not expected:
+        return "missing results_sha256 in provenance.json"
+    digest = hashlib.sha256()
+    with open(results_path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != expected:
+        return "results_sha256 mismatch"
+    return None
+
+
 def task_set_digest(provenance):
     """Stable digest over provenance task content digests (sorted by task)."""
     if not isinstance(provenance, dict):
@@ -272,7 +297,7 @@ def _total_tokens_per_solve(rows):
 def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
     """Aggregate one bundle. Returns None when results.jsonl is missing."""
     results_path = os.path.join(bundle_dir, "results.jsonl")
-    if not os.path.isfile(results_path):
+    if _results_verification_error(bundle_dir) is not None:
         return None
 
     meta = _bundle_meta(bundle_dir, kind, manifest_entry=manifest_entry)
@@ -327,14 +352,7 @@ def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
     )
 
     caveats = load_bundle_caveats(bundle_dir)
-    results_sha = provenance.get("results_sha256")
-    if not isinstance(results_sha, str) or not results_sha:
-        # Fall back to hashing the file so dedupe still works.
-        h = hashlib.sha256()
-        with open(results_path, "rb") as fh:
-            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                h.update(chunk)
-        results_sha = h.hexdigest()
+    results_sha = provenance["results_sha256"]
 
     page_path = meta["page_path"]
     if not page_path and site_dir:
@@ -379,12 +397,13 @@ def build_leaderboard(site_dir, community_dir=None):
     for entry in _load_manifest_list(os.path.join(site_dir, "releases.json")):
         if not isinstance(entry, dict) or not entry.get("id"):
             continue
-        results = os.path.join(site_dir, "releases", entry["id"], "results.jsonl")
-        if not os.path.isfile(results):
+        bundle_dir = os.path.join(site_dir, "releases", entry["id"])
+        verification_error = _results_verification_error(bundle_dir)
+        if verification_error:
             skipped.append({
                 "id": entry["id"],
                 "kind": "release",
-                "reason": "no results.jsonl (HTML-only release page)",
+                "reason": verification_error,
                 "path": entry.get("path"),
             })
 
