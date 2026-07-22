@@ -299,6 +299,9 @@ class BuildLeaderboardTests(unittest.TestCase):
         doc = leaderboard.build_leaderboard(self.site)
         self.assertEqual(doc["bundle_count"], 0)
         self.assertIn("missing provenance.json", doc["skipped"][0]["reason"])
+        page = leaderboard.render_leaderboard_html(doc)
+        self.assertIn("Skipped (not verified)", page)
+        self.assertIn("failed provenance verification", page)
 
     def test_write_leaderboard_and_index_link(self):
         rows = [

@@ -410,11 +410,22 @@ def build_leaderboard(site_dir, community_dir=None):
     for kind, bundle_dir, manifest_entry in discover_bundle_dirs(
         site_dir, community_dir=community_dir
     ):
+        verification_error = _results_verification_error(bundle_dir)
+        if verification_error:
+            bundle_id = ((manifest_entry or {}).get("id")
+                         or os.path.basename(bundle_dir))
+            if not any(item.get("id") == bundle_id for item in skipped):
+                skipped.append({
+                    "id": bundle_id,
+                    "kind": kind,
+                    "reason": verification_error,
+                    "path": (manifest_entry or {}).get("path"),
+                })
+            continue
         bundled = aggregate_bundle(
             bundle_dir, kind=kind, manifest_entry=manifest_entry, site_dir=site_dir,
         )
         if bundled is None:
-            # Already recorded HTML-only releases above; skip quiet dirs.
             continue
         sha = bundled["results_sha256"]
         if sha in by_sha:
@@ -574,9 +585,9 @@ def render_leaderboard_html(doc):
             for s in doc["skipped"]
         )
         sections.append(
-            "<section><h2>Skipped (no machine-readable bundle)</h2>"
-            "<p class=\"tag\">These release pages have HTML cards but no "
-            "<code>results.jsonl</code>, so they cannot appear in the ranked "
+            "<section><h2>Skipped (not verified)</h2>"
+            "<p class=\"tag\">These bundles are missing machine-readable results "
+            "or failed provenance verification, so they cannot appear in the ranked "
             f"tables.</p><ul>{items}</ul></section>"
         )
 
