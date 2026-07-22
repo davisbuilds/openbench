@@ -334,6 +334,23 @@ class ReportPageTest(unittest.TestCase):
         )[0]["arms"][0]
         self.assertIsNone(arm["total_tokens"])
 
+    def test_total_tokens_never_mix_native_and_proxy_rows(self):
+        rows = [
+            self.row("mixed", 1, True),
+            self.row(
+                "mixed", 2, True, tokens=None, token_basis=None,
+                tokens_input_uncached=None, tokens_output=None,
+                tokens_cache_read=None, token_basis_proxy="proxy_measured",
+                tokens_proxy_input_uncached=100, tokens_proxy_output=20,
+                tokens_proxy_cache_read=50,
+            ),
+        ]
+        path = self.write(rows)
+        arm = report_page.assemble_tables(
+            [{"path": path}], tasks_dirs=[self.tmp.name]
+        )[0]["arms"][0]
+        self.assertIsNone(arm["total_tokens"])
+
     def test_candidate_proxy_only_and_unmetered_bases(self):
         rows = [
             self.row("aider", 1, True, tokens=None, token_basis=None,
