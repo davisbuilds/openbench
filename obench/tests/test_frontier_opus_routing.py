@@ -75,7 +75,7 @@ class TestPiOpus(unittest.TestCase):
 
     def test_constructs_gpt56_openai_codex_medium_commands(self):
         variants = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
-        old_run = self.pi.subprocess.run
+        old_run = self.pi._run_streaming
         old_auth = self.pi._REAL_AUTH
         fd, auth = tempfile.mkstemp()
         with os.fdopen(fd, "w") as fh:
@@ -83,12 +83,13 @@ class TestPiOpus(unittest.TestCase):
 
         calls = []
 
-        def fake_run(cmd, **kwargs):
-            calls.append((cmd, kwargs))
+        def fake_run(cmd, cwd, timeout_s, env):
+            calls.append((cmd, {"cwd": cwd, "timeout": timeout_s, "env": env}))
             usage = {"input": 3, "cacheRead": 0, "cacheWrite": 0, "output": 4, "reasoning": 1, "totalTokens": 7}
-            return FakeProc(stdout=json.dumps({"type": "turn_end", "message": {"usage": usage}}) + "\n")
+            stdout = json.dumps({"type": "turn_end", "message": {"usage": usage}}) + "\n"
+            return stdout, "", 0, False
 
-        self.pi.subprocess.run = fake_run
+        self.pi._run_streaming = fake_run
         self.pi._REAL_AUTH = auth
         try:
             for model in variants:
@@ -101,28 +102,29 @@ class TestPiOpus(unittest.TestCase):
                     self.assertEqual(cmd[cmd.index("--thinking") + 1], "medium")
                     self.assertEqual(res["token_basis"], "vendor_split")
         finally:
-            self.pi.subprocess.run = old_run
+            self.pi._run_streaming = old_run
             self.pi._REAL_AUTH = old_auth
             os.unlink(auth)
 
     def test_constructs_anthropic_medium_command(self):
         calls = []
-        old_run = self.pi.subprocess.run
+        old_run = self.pi._run_streaming
         old_auth = self.pi._REAL_AUTH
         fd, auth = tempfile.mkstemp()
         with os.fdopen(fd, "w") as fh:
             json.dump({"anthropic": {"type": "oauth", "access": "x"}}, fh)
 
-        def fake_run(cmd, **kwargs):
-            calls.append((cmd, kwargs))
-            return FakeProc(stdout=json.dumps({"type": "agent_end", "messages": []}) + "\n")
+        def fake_run(cmd, cwd, timeout_s, env):
+            calls.append((cmd, {"cwd": cwd, "timeout": timeout_s, "env": env}))
+            stdout = json.dumps({"type": "agent_end", "messages": []}) + "\n"
+            return stdout, "", 0, False
 
-        self.pi.subprocess.run = fake_run
+        self.pi._run_streaming = fake_run
         self.pi._REAL_AUTH = auth
         try:
             res = self.pi.run("hi", "/tmp", "claude-opus-4-8", 5)
         finally:
-            self.pi.subprocess.run = old_run
+            self.pi._run_streaming = old_run
             self.pi._REAL_AUTH = old_auth
             os.unlink(auth)
         self.assertTrue(res["completed"])
