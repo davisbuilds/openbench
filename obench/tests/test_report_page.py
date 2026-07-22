@@ -323,6 +323,17 @@ class ReportPageTest(unittest.TestCase):
         self.assertNotIn("<script src=", page)
         self.assertNotIn("<link ", page)
 
+    def test_total_tokens_never_mix_native_and_proxy_splits(self):
+        rows = [self.row(
+            "mixed", 1, True, tokens_cache_read=None,
+            token_basis_proxy="proxy_measured", tokens_proxy_cache_read=5000,
+        )]
+        path = self.write(rows)
+        arm = report_page.assemble_tables(
+            [{"path": path}], tasks_dirs=[self.tmp.name]
+        )[0]["arms"][0]
+        self.assertIsNone(arm["total_tokens"])
+
     def test_candidate_proxy_only_and_unmetered_bases(self):
         rows = [
             self.row("aider", 1, True, tokens=None, token_basis=None,

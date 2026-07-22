@@ -72,8 +72,17 @@ def split_total_tokens_per_solve(rows, solved=None):
         return None
     totals = []
     for row in rows:
-        splits = [compare._measurement(row, field) for field in TOKEN_FIELDS]
-        if any(value is None for value in splits):
+        native = [row.get(field) for field in TOKEN_FIELDS]
+        if all(stats.is_nonnegative_number(value) for value in native):
+            splits = native
+        elif row.get("token_basis_proxy") == "proxy_measured":
+            splits = [
+                row.get("tokens_proxy_" + field.removeprefix("tokens_"))
+                for field in TOKEN_FIELDS
+            ]
+            if not all(stats.is_nonnegative_number(value) for value in splits):
+                return None
+        else:
             return None
         totals.append(sum(splits))
     return sum(totals) / solved
