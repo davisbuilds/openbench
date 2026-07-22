@@ -152,6 +152,13 @@ The ledger row for a gateway cell adds `served_model` (the model the gateway
 actually served — may differ from the requested one under routing), `cost`, and
 `upstream_cost` where the gateway reports them in the response `usage`.
 
+Because the proxy sees every streamed byte, it also measures latency per call and
+rolls it up per cell: `proxy_ttft_ms` (median time-to-first-token),
+`proxy_gen_ms` (total streaming time), and `proxy_output_tps` (output
+tokens/second). These are populated only for streaming calls. `obench report`
+prints a per-`(harness, model)` latency summary (TTFT p50/p95 and output tok/s);
+`obench report --latency` shows just that table.
+
 ## Doctor preflight
 
 `obench doctor` accepts the same `--candidate` flag as `obench run`. For a

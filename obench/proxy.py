@@ -372,6 +372,8 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         capture_truncated = False
         headers_sent = False
         error = None
+        first_byte_at = None
+        last_byte_at = None
         try:
             route = self._route_request()
             body = self._read_body()
@@ -406,6 +408,10 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 chunk = resp.read(65536)
                 if not chunk:
                     break
+                now = time.time()
+                if first_byte_at is None:
+                    first_byte_at = now
+                last_byte_at = now
                 if len(capture) + len(chunk) <= limit:
                     capture.extend(chunk)
                 else:
@@ -454,6 +460,14 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 "sampling_source": "http_request" if sampling else (meta.get("source") if recorded_sampling else None),
                 "duration_ms": round((time.time() - started) * 1000),
             }
+            # Streaming latency: TTFT is request-send -> first response byte; the
+            # generation window is first -> last byte. Both are None for a
+            # non-streaming call that returns in a single read (only one byte
+            # timestamp), where TTFT and total latency coincide.
+            if first_byte_at is not None:
+                rec["ttft_ms"] = round((first_byte_at - started) * 1000)
+                if last_byte_at is not None and last_byte_at > first_byte_at:
+                    rec["gen_ms"] = round((last_byte_at - first_byte_at) * 1000)
             if route is not None:
                 rec["route"] = route.route
                 rec["upstream"] = f"{route.upstream.scheme}://{route.upstream.netloc}{route.upstream.path.rstrip('/')}"

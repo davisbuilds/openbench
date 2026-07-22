@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 from obench import proxy  # noqa: E402
+from obench import report  # noqa: E402
 from obench import run  # noqa: E402
 from obench.adapters import pi  # noqa: E402
 
@@ -408,6 +409,73 @@ class ProxyTests(unittest.TestCase):
         self.assertAlmostEqual(row["cost"], 0.0015)
         self.assertAlmostEqual(row["upstream_cost"], 0.0008)
         self.assertEqual(row["tokens_proxy_calls"], 2)
+
+    def test_proxy_records_ttft_ms(self):
+        # Every proxied response yields at least a first-byte timestamp, so the
+        # ledger row must carry a non-negative ttft_ms.
+        self._post("/cell/tok-ttft/chat/deepseek/chat/completions")
+        row = self._ledger("tok-ttft")[0]
+        self.assertIn("ttft_ms", row)
+        self.assertIsInstance(row["ttft_ms"], int)
+        self.assertGreaterEqual(row["ttft_ms"], 0)
+
+    def test_apply_proxy_ledger_aggregates_latency(self):
+        # ttft_ms -> median across calls; gen_ms -> summed; output_tps derived
+        # from proxy output tokens over total generation seconds.
+        row = {}
+        run.apply_proxy_ledger(row, [
+            {"usage": {"prompt_tokens": 10, "completion_tokens": 100},
+             "ttft_ms": 200, "gen_ms": 1000},
+            {"usage": {"prompt_tokens": 10, "completion_tokens": 100},
+             "ttft_ms": 400, "gen_ms": 1000},
+            {"usage": {"prompt_tokens": 10, "completion_tokens": 100},
+             "ttft_ms": 600, "gen_ms": 2000},
+        ])
+        self.assertEqual(row["proxy_ttft_ms"], 400)     # median(200,400,600)
+        self.assertEqual(row["proxy_gen_ms"], 4000)     # 1000+1000+2000
+        # 300 output tokens over 4.0s = 75.0 tok/s
+        self.assertEqual(row["proxy_output_tps"], 75.0)
+
+    def test_apply_proxy_ledger_latency_absent_when_no_timing(self):
+        row = {}
+        run.apply_proxy_ledger(row, [
+            {"usage": {"prompt_tokens": 10, "completion_tokens": 2}},
+        ])
+        self.assertIsNone(row.get("proxy_ttft_ms"))
+        self.assertIsNone(row.get("proxy_gen_ms"))
+        self.assertIsNone(row.get("proxy_output_tps"))
+
+
+class ReportLatencyTests(unittest.TestCase):
+    def test_percentile_interpolates(self):
+        self.assertIsNone(report.percentile([], 50))
+        self.assertEqual(report.percentile([5], 95), 5.0)
+        self.assertEqual(report.percentile([10, 20, 30], 50), 20.0)
+        self.assertEqual(report.percentile([0, 100], 95), 95.0)
+
+    def test_format_latency_reports_ttft_and_tps(self):
+        rows = [
+            {"harness": "pi", "model": "openrouter/openai/gpt-5.6", "task": "t",
+             "success": True, "score": 1.0,
+             "proxy_ttft_ms": 200, "proxy_output_tps": 80.0},
+            {"harness": "pi", "model": "openrouter/openai/gpt-5.6", "task": "t",
+             "success": True, "score": 1.0,
+             "proxy_ttft_ms": 600, "proxy_output_tps": 40.0},
+        ]
+        arms, _tasks, stats = report.aggregate(rows)
+        text = report.format_latency(arms, stats)
+        self.assertIn("ttft_p50_ms", text)
+        self.assertIn("openrouter/openai/gpt-5.6", text)
+        st = stats[("pi", "openrouter/openai/gpt-5.6")]
+        self.assertEqual(report.percentile(st["ttft_vals"], 50), 400.0)
+        self.assertEqual(report.percentile(st["tps_vals"], 50), 60.0)
+
+    def test_format_latency_empty_when_no_proxy_timing(self):
+        rows = [{"harness": "pi", "model": "m", "task": "t",
+                 "success": True, "score": 1.0}]
+        arms, _tasks, stats = report.aggregate(rows)
+        text = report.format_latency(arms, stats)
+        self.assertIn("no proxy-measured latency", text)
 
 
 if __name__ == "__main__":

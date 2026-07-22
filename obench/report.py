@@ -130,7 +130,7 @@ def aggregate(rows):
         if key not in stats:
             stats[key] = {"per_task": {}, "succ": 0, "n": 0, "scores": [],
                           "wall_times": [], "token_vals": [], "token_bases": set(),
-                          "turn_vals": [],
+                          "turn_vals": [], "ttft_vals": [], "tps_vals": [],
                           "taxonomy": {fc: 0 for fc in FAILURE_CLASSES}}
             arms.append(key)
         if task not in tasks:
@@ -168,6 +168,12 @@ def aggregate(rows):
         turn = row.get("turns")
         if isinstance(turn, (int, float)) and not isinstance(turn, bool):
             st["turn_vals"].append(turn)
+        ttft = row.get("proxy_ttft_ms")
+        if isinstance(ttft, (int, float)) and not isinstance(ttft, bool):
+            st["ttft_vals"].append(ttft)
+        tps = row.get("proxy_output_tps")
+        if isinstance(tps, (int, float)) and not isinstance(tps, bool):
+            st["tps_vals"].append(tps)
     return arms, tasks, stats
 
 
@@ -175,6 +181,21 @@ def aggregate(rows):
 def mean(vals):
     """Arithmetic mean, or None for an empty list."""
     return (sum(vals) / len(vals)) if vals else None
+
+
+def percentile(vals, p):
+    """Linear-interpolated p-th percentile (0..100), or None for an empty list."""
+    if not vals:
+        return None
+    ordered = sorted(vals)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    rank = (p / 100.0) * (len(ordered) - 1)
+    lo = int(math.floor(rank))
+    hi = int(math.ceil(rank))
+    if lo == hi:
+        return float(ordered[lo])
+    return ordered[lo] + (ordered[hi] - ordered[lo]) * (rank - lo)
 
 
 def ci_halfwidth(vals, z=1.96):
@@ -362,6 +383,52 @@ def format_taxonomy(arms, stats):
     return _render(headers, rows_text)
 
 
+def _fmt_ms(v):
+    return "-" if v is None else f"{v:.0f}"
+
+
+def _fmt_tps(v):
+    return "-" if v is None else f"{v:.1f}"
+
+
+def format_latency(arms, stats):
+    """Gateway/router latency view from proxy-measured streaming timing.
+
+    Columns per (harness, model): number of cells with timing, TTFT p50/p95
+    (ms, time-to-first-token), and output throughput p50 (tokens/sec). All
+    ``-`` when no proxy latency was recorded (non-streaming or unproxied arms).
+    """
+    headers = ["harness", "model", "cells", "ttft_p50_ms", "ttft_p95_ms", "tps_p50"]
+    rows_text = []
+    any_data = False
+    for arm in arms:
+        harness, model = arm
+        st = stats[arm]
+        ttfts = st.get("ttft_vals") or []
+        tpss = st.get("tps_vals") or []
+        if ttfts or tpss:
+            any_data = True
+        rows_text.append([
+            harness, model, str(len(ttfts)),
+            _fmt_ms(percentile(ttfts, 50)),
+            _fmt_ms(percentile(ttfts, 95)),
+            _fmt_tps(percentile(tpss, 50)),
+        ])
+    text = _render(headers, rows_text)
+    if not any_data:
+        text += "\n(no proxy-measured latency; run with --proxy on a streaming harness)"
+    return text
+
+
+def build_latency_report(results_path):
+    """Load, aggregate, and format the proxy latency summary from a results file."""
+    rows = load_rows(results_path)
+    if not rows:
+        return f"No results found at {results_path}"
+    arms, _tasks, stats = aggregate(rows)
+    return format_latency(arms, stats)
+
+
 def build_report(results_path):
     """Load, aggregate, and format the success and taxonomy tables."""
     rows = load_rows(results_path)
@@ -400,16 +467,23 @@ def main(argv=None):
                              "(default: from openbench.toml or <repo|cwd>/results/results.jsonl)")
     parser.add_argument("--efficiency", action="store_true",
                         help="print only the per-(harness, model) efficiency summary")
+    parser.add_argument("--latency", action="store_true",
+                        help="print only the per-(harness, model) proxy latency "
+                             "summary (TTFT p50/p95, output throughput)")
     args = parser.parse_args(argv)
     if args.results_path is None:
         cfg = load_config()
         args.results_path = cfg.results_path or default_results_path()
     if args.efficiency:
         print(build_efficiency_report(args.results_path))
+    elif args.latency:
+        print(build_latency_report(args.results_path))
     else:
         print(build_report(args.results_path))
         print("\nEfficiency summary (per solved task):")
         print(build_efficiency_report(args.results_path))
+        print("\nProxy latency summary (streaming; TTFT p50/p95, output tok/s):")
+        print(build_latency_report(args.results_path))
     return 0
 
 

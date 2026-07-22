@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import signal
+import statistics
 import stat
 import subprocess
 import sys
@@ -104,6 +105,7 @@ ROW_FIELDS = (
     "harness_version_source", "failure_class", "failure_reason", "workspace_changed", "checker_stdout", "checker_stderr", "checker_workspace_files",
     "image_digest", "candidate_provenance", "version_drift", "timeout_s",
     "workspace_source", "served_model", "cost", "upstream_cost",
+    "proxy_ttft_ms", "proxy_gen_ms", "proxy_output_tps",
 )
 
 
@@ -1508,8 +1510,33 @@ def apply_proxy_ledger(row, ledger_rows):
                   if isinstance(r.get("upstream_cost"), (int, float)) and not isinstance(r.get("upstream_cost"), bool))
     if any("upstream_cost" in r for r in calls):
         row["upstream_cost"] = upstream
+    _apply_proxy_latency(row, calls)
     if not truncated:
         row["token_basis_proxy"] = "proxy_measured"
+    return row
+
+
+def _apply_proxy_latency(row, calls):
+    """Aggregate per-call streaming latency into cell-level proxy fields.
+
+    ``proxy_ttft_ms`` is the median time-to-first-token across the cell's calls
+    (representative rather than skewed by one slow call); ``proxy_gen_ms`` is the
+    total streaming/generation time; ``proxy_output_tps`` is output tokens per
+    generation-second (throughput). Only streaming calls report these, so all
+    three stay None when no call carried timing (e.g. non-streaming arms).
+    """
+    ttfts = [r["ttft_ms"] for r in calls
+             if isinstance(r.get("ttft_ms"), (int, float)) and not isinstance(r.get("ttft_ms"), bool)]
+    gens = [r["gen_ms"] for r in calls
+            if isinstance(r.get("gen_ms"), (int, float)) and not isinstance(r.get("gen_ms"), bool)]
+    if ttfts:
+        row["proxy_ttft_ms"] = round(statistics.median(ttfts))
+    if gens:
+        gen_total = sum(gens)
+        row["proxy_gen_ms"] = gen_total
+        out_tok = row.get("tokens_proxy_output")
+        if gen_total > 0 and isinstance(out_tok, (int, float)) and not isinstance(out_tok, bool) and out_tok > 0:
+            row["proxy_output_tps"] = round(out_tok / (gen_total / 1000.0), 2)
     return row
 
 
