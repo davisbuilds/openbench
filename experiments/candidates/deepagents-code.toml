@@ -1,0 +1,34 @@
+kind = "manifest"
+name = "deepagents-code"
+isolate_home = true
+policy_headless_args = ["--non-interactive"]
+policy_auto_approve_args = ["--shell-allow-list", "all"]
+command = [
+  "/Users/matthewlam/dev/openbench/experiments/candidates/.deepagents-code-venv/bin/deepagents-code",
+  "--non-interactive", "{prompt}",
+  "--model", "{model}",
+  "--shell-allow-list", "all",
+  "--sandbox", "none",
+  "--no-mcp",
+  "--no-interpreter",
+  "--quiet",
+  "--timeout", "840",
+]
+version_command = [
+  "/Users/matthewlam/dev/openbench/experiments/candidates/.deepagents-code-venv/bin/deepagents-code",
+  "--version",
+]
+pass_env = ["DEEPSEEK_API_KEY"]
+base_url_env = "DEEPSEEK_API_BASE"
+proxy_route = "chat/deepseek"
+
+[models]
+"deepseek-v4-flash" = "deepseek:deepseek-v4-flash"
+
+[env]
+# Each OpenBench cell also gets a fresh isolated HOME. These settings prevent
+# dcode from saving AGENTS.md memory or making unrelated discovery/update calls.
+DEEPAGENTS_CODE_MEMORY_AUTO_SAVE = "false"
+DEEPAGENTS_CODE_AUTO_UPDATE = "false"
+DEEPAGENTS_CODE_OLLAMA_DISCOVERY = "false"
+LANGSMITH_TRACING = "false"
