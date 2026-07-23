@@ -119,13 +119,13 @@ class TestLocalAdapterPersist(unittest.TestCase):
                 fh.write('{"openai-codex":{"refresh":"old"}}')
             pi._REAL_AUTH = master
 
-            def failed_run(*args, **kwargs):
-                isolated = os.path.join(kwargs["env"]["PI_CODING_AGENT_DIR"], "auth.json")
+            def failed_run(cmd, cwd, timeout_s, env):
+                isolated = os.path.join(env["PI_CODING_AGENT_DIR"], "auth.json")
                 with open(isolated, "w", encoding="utf-8") as fh:
                     fh.write('{"openai-codex":{"refresh":"rotated"}}')
-                return SimpleNamespace(returncode=1, stdout="", stderr="failed")
+                return "", "failed", 1, False
 
-            with mock.patch.object(pi.subprocess, "run", side_effect=failed_run):
+            with mock.patch.object(pi, "_run_streaming", side_effect=failed_run):
                 result = pi.run("task", td, "gpt-5.5-medium", 10)
             self.assertFalse(result["completed"])
             with open(master, encoding="utf-8") as fh:

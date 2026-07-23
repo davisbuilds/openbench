@@ -106,6 +106,7 @@ MODELS = {
     "gpt-5.6-sol": "gpt-5-6-sol-medium",
     "grok-4.5": "grok-4-5-medium",
     "glm-5.2": "glm-5-2",
+    "inkling": "inkling",
 }
 
 

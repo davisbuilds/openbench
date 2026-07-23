@@ -1,0 +1,7 @@
+org = "openbench"
+name = "tb-mid"
+version = "1.0.0"
+kind = "tasks"
+description = "Terminal-Bench 2 mid-band tasks with pinned per-task images"
+license = "Apache-2.0"
+tasks = ["adaptive-rejection-sampler","query-optimize","winning-avg-corewars","merge-diff-arc-agi-task","overfull-hbox","sanitize-git-repo"]

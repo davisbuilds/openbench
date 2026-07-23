@@ -53,8 +53,8 @@ are picked up automatically when no TOML list is present (or merged with it).
 Per arm inside a bundle:
 
 - Solve rate on countable cells (infra / rate-limit excluded), with Wilson 95% CI
-- Effective tokens / solve (self-reported `tokens` when present, else
-  proxy-measured fresh total) plus token-basis tags
+- Total tokens / solve, computed from uncached-input + output + cache-read
+  split fields (never the vendor aggregate `tokens` field), plus token-basis tags
 - Cell counts and links back to the bundle card / `results.jsonl`
 
 Regenerate after adding or updating a verified bundle so the Pages site stays

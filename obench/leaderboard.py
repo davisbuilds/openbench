@@ -24,7 +24,7 @@ import sys
 import tomllib
 from collections import defaultdict
 
-from . import stats
+from . import report_page, stats
 from .paths import SOURCE_ROOT
 
 METHODOLOGY_NOTE = (
@@ -88,6 +88,31 @@ def _load_manifest_list(path):
     if not isinstance(data, list):
         raise ValueError(f"{path} must contain a JSON list")
     return data
+
+
+
+def _results_verification_error(bundle_dir):
+    """Return why a result bundle is not digest-verified, else ``None``."""
+    results_path = os.path.join(bundle_dir, "results.jsonl")
+    provenance_path = os.path.join(bundle_dir, "provenance.json")
+    if not os.path.isfile(results_path):
+        return "no results.jsonl (HTML-only release page)"
+    if not os.path.isfile(provenance_path):
+        return "missing provenance.json (results are not verified)"
+    try:
+        provenance = _read_json(provenance_path)
+    except (OSError, json.JSONDecodeError):
+        return "invalid provenance.json (results are not verified)"
+    expected = provenance.get("results_sha256") if isinstance(provenance, dict) else None
+    if not isinstance(expected, str) or not expected:
+        return "missing results_sha256 in provenance.json"
+    digest = hashlib.sha256()
+    with open(results_path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != expected:
+        return "results_sha256 mismatch"
+    return None
 
 
 def task_set_digest(provenance):
@@ -260,30 +285,19 @@ def discover_bundle_dirs(site_dir, community_dir=None):
                 yield "community", path, data_manifest.get(name)
 
 
-def _effective_tokens_per_solve(rows):
-    """Mean effective tokens among solved rows that reported tokens; basis tags."""
-    token_vals = []
-    bases = set()
-    solved = 0
-    for row in rows:
-        if not row.get("success"):
-            continue
-        solved += 1
-        tok, basis = stats.effective_tokens(row)
-        if tok is not None:
-            token_vals.append(float(tok))
-            if basis:
-                bases.add(basis)
-    if solved <= 0 or not token_vals:
-        return None, sorted(bases)
-    # Match report.py: total reported tokens / solves (not mean of only metered).
-    return sum(token_vals) / solved, sorted(bases)
+def _total_tokens_per_solve(rows):
+    """Uniform split-derived total tokens/solve plus accounting basis tags."""
+    bases = {
+        basis for row in rows
+        if (basis := stats.display_token_basis(row)) is not None
+    }
+    return report_page.split_total_tokens_per_solve(rows), sorted(bases)
 
 
 def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
     """Aggregate one bundle. Returns None when results.jsonl is missing."""
     results_path = os.path.join(bundle_dir, "results.jsonl")
-    if not os.path.isfile(results_path):
+    if _results_verification_error(bundle_dir) is not None:
         return None
 
     meta = _bundle_meta(bundle_dir, kind, manifest_entry=manifest_entry)
@@ -315,7 +329,7 @@ def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
         n = len(arm_rows)
         lo, hi = stats.wilson_ci(solved, n)
         rate = (solved / n) if n else None
-        tok_slv, bases = _effective_tokens_per_solve(arm_rows)
+        tok_slv, bases = _total_tokens_per_solve(arm_rows)
         arms.append({
             "harness": harness,
             "model": model,
@@ -323,7 +337,7 @@ def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
             "n": n,
             "solve_rate": rate,
             "wilson95": [lo, hi],
-            "effective_tokens_per_solve": tok_slv,
+            "total_tokens_per_solve": tok_slv,
             "token_bases": bases,
         })
 
@@ -338,14 +352,7 @@ def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
     )
 
     caveats = load_bundle_caveats(bundle_dir)
-    results_sha = provenance.get("results_sha256")
-    if not isinstance(results_sha, str) or not results_sha:
-        # Fall back to hashing the file so dedupe still works.
-        h = hashlib.sha256()
-        with open(results_path, "rb") as fh:
-            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                h.update(chunk)
-        results_sha = h.hexdigest()
+    results_sha = provenance["results_sha256"]
 
     page_path = meta["page_path"]
     if not page_path and site_dir:
@@ -390,23 +397,35 @@ def build_leaderboard(site_dir, community_dir=None):
     for entry in _load_manifest_list(os.path.join(site_dir, "releases.json")):
         if not isinstance(entry, dict) or not entry.get("id"):
             continue
-        results = os.path.join(site_dir, "releases", entry["id"], "results.jsonl")
-        if not os.path.isfile(results):
+        bundle_dir = os.path.join(site_dir, "releases", entry["id"])
+        verification_error = _results_verification_error(bundle_dir)
+        if verification_error:
             skipped.append({
                 "id": entry["id"],
                 "kind": "release",
-                "reason": "no results.jsonl (HTML-only release page)",
+                "reason": verification_error,
                 "path": entry.get("path"),
             })
 
     for kind, bundle_dir, manifest_entry in discover_bundle_dirs(
         site_dir, community_dir=community_dir
     ):
+        verification_error = _results_verification_error(bundle_dir)
+        if verification_error:
+            bundle_id = ((manifest_entry or {}).get("id")
+                         or os.path.basename(bundle_dir))
+            if not any(item.get("id") == bundle_id for item in skipped):
+                skipped.append({
+                    "id": bundle_id,
+                    "kind": kind,
+                    "reason": verification_error,
+                    "path": (manifest_entry or {}).get("path"),
+                })
+            continue
         bundled = aggregate_bundle(
             bundle_dir, kind=kind, manifest_entry=manifest_entry, site_dir=site_dir,
         )
         if bundled is None:
-            # Already recorded HTML-only releases above; skip quiet dirs.
             continue
         sha = bundled["results_sha256"]
         if sha in by_sha:
@@ -539,7 +558,7 @@ def render_leaderboard_html(doc):
                 f"<td>{arm.get('solved', 0)}/{arm.get('n', 0)}</td>"
                 f"<td>{html.escape(_fmt_pct(arm.get('solve_rate')))}</td>"
                 f"<td>{html.escape(_fmt_wilson(arm.get('wilson95')))}</td>"
-                f"<td>{html.escape(_fmt_tokens(arm.get('effective_tokens_per_solve')))}</td>"
+                f"<td>{html.escape(_fmt_tokens(arm.get('total_tokens_per_solve')))}</td>"
                 f"<td>{html.escape(bases)}</td>"
                 f"<td>{caveat_cell}</td>"
                 "</tr>"
@@ -551,7 +570,7 @@ def render_leaderboard_html(doc):
             '<div class="scroll"><table><thead><tr>'
             "<th>#</th><th>Arm (harness × model)</th><th>Solved/n</th>"
             "<th>Solve rate</th><th>Wilson 95% CI</th>"
-            "<th>Eff. tokens/solve</th><th>Token basis</th><th>Caveat</th>"
+            "<th>Total tokens/solve (incl. cache reads)</th><th>Token basis</th><th>Caveat</th>"
             "</tr></thead><tbody>" + body + "</tbody></table></div>"
         )
         sections.append(
@@ -566,9 +585,9 @@ def render_leaderboard_html(doc):
             for s in doc["skipped"]
         )
         sections.append(
-            "<section><h2>Skipped (no machine-readable bundle)</h2>"
-            "<p class=\"tag\">These release pages have HTML cards but no "
-            "<code>results.jsonl</code>, so they cannot appear in the ranked "
+            "<section><h2>Skipped (not verified)</h2>"
+            "<p class=\"tag\">These bundles are missing machine-readable results "
+            "or failed provenance verification, so they cannot appear in the ranked "
             f"tables.</p><ul>{items}</ul></section>"
         )
 

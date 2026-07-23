@@ -112,8 +112,11 @@ class CandidateTests(unittest.TestCase):
             manifest.auth_files[0]["source"] = auth
             captures = []
             def run(cmd, **kw): captures.append((cmd, kw["env"])); return Proc()
+            def pi_run(cmd, cwd, timeout_s, env):
+                captures.append((cmd, env))
+                return "", "", 0, False
             fixed_home = os.path.join(td, "fixed-pi-home")
-            with mock.patch("subprocess.run", side_effect=run), \
+            with mock.patch.object(pi, "_run_streaming", side_effect=pi_run), \
                  mock.patch.object(candidates, "_auth_source", return_value=auth), \
                  mock.patch.object(candidates, "_run_process", side_effect=run), \
                  mock.patch.object(pi.tempfile, "mkdtemp", return_value=fixed_home), \

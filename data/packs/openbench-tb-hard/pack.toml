@@ -1,0 +1,17 @@
+org = "openbench"
+name = "tb-hard"
+version = "1.0.0"
+kind = "tasks"
+description = "Nine diverse Terminal-Bench 2.0 tasks with published frontier-panel solve rates of 0–38.5%"
+license = "Apache-2.0"
+tasks = [
+  "dna-insert",
+  "filter-js-from-html",
+  "model-extraction-relu-logits",
+  "polyglot-rust-c",
+  "regex-chess",
+  "sam-cell-seg",
+  "torch-pipeline-parallelism",
+  "torch-tensor-parallelism",
+  "video-processing",
+]

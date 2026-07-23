@@ -1,0 +1,40 @@
+kind = "manifest"
+name = "omp"
+isolate_home = true
+policy_headless_args = ["--print"]
+policy_auto_approve_args = ["--auto-approve"]
+command = [
+  "/Users/matthewlam/dev/openbench/experiments/candidates/omp-openbench",
+  "--print",
+  "--auto-approve",
+  "--approval-mode", "yolo",
+  "--no-session",
+  "--no-extensions",
+  "--no-skills",
+  "--no-rules",
+  "--no-title",
+  "--no-prewalk",
+  "--no-lsp",
+  "--no-pty",
+  "--tools", "read,bash,edit,write,grep,glob",
+  "--model", "{model}",
+  "--smol", "{model}",
+  "--slow", "{model}",
+  "--plan", "{model}",
+  "--models", "{model}",
+  "--thinking", "medium",
+  "--mode", "json",
+  "{prompt}",
+]
+version_command = ["omp", "--version"]
+pass_env = ["DEEPSEEK_API_KEY"]
+unset_env = ["OMP_PROFILE", "PI_PACKAGE_DIR"]
+base_url_env = "DEEPSEEK_API_BASE"
+proxy_route = "chat/deepseek"
+
+[models]
+"deepseek-v4-flash" = "deepseek/deepseek-v4-flash"
+
+[env]
+PI_CODING_AGENT_DIR = "{home}/.omp/agent"
+PI_NO_PTY = "1"

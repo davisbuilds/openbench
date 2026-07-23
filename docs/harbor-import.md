@@ -126,3 +126,31 @@ Exercised against tasks from
 - Terminal-Bench 2.0 tasks (Harbor format):
   https://github.com/laude-institute/terminal-bench-2
 - OpenBench exporter (inverse contract): [`docs/harbor-export.md`](harbor-export.md)
+
+## Pinned per-task Docker images
+
+Docker-required imports may declare their native image in a task-level
+`task.toml`:
+
+```toml
+docker_image = "openbench-tb2-example:pinned"
+docker_workdir = "/app"
+```
+
+With `obench run --exec docker`, this declaration overrides the CLI's generic
+`--docker-image` for that task. The runner copies the image's native workdir
+into the disposable cell workspace, bind-mounts that workspace back at
+`docker_workdir`, and runs the harness there. This preserves Dockerfile-created
+state without committing build artifacts to the task workspace. Checkers remain
+the task's responsibility; pinned-image imports should run verifier assets from
+`checker_data/` in the same image with `--network none` and install all verifier
+dependencies at image-build time.
+
+A task image used for agent execution must also contain the pinned OpenBench
+harness CLI runtime (including pin labels and
+`/etc/openbench-cli-versions.json`). Seeded pinned-image packs compose that
+runtime as a final build layer; an upstream-only verifier image is insufficient
+for non-null harnesses. The runner leaves `.openbench-image-hydrated` in its
+disposable workspace so a checker can distinguish an already-prepared agent
+cell from standalone polarity validation and must not restore pristine files
+over agent edits.

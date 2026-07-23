@@ -1,0 +1,2 @@
+deepagents-code==0.1.45
+langchain-deepseek==1.1.0

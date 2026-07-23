@@ -143,7 +143,7 @@ class AggregateBundleTests(unittest.TestCase):
         self.assertAlmostEqual(by_key[("pi", "m1")]["solve_rate"], 1.0)
         self.assertEqual(len(by_key[("pi", "m1")]["wilson95"]), 2)
 
-    def test_effective_tokens_and_basis(self):
+    def test_split_total_tokens_and_basis(self):
         bundle = os.path.join(self.tmp.name, "bundle-tok")
         rows = [
             _row("pi", "alpha", 1, True, tokens=100),
@@ -154,8 +154,8 @@ class AggregateBundleTests(unittest.TestCase):
         _publish_bundle(bundle, self.tasks, rows)
         agg = leaderboard.aggregate_bundle(bundle, kind="release")
         pi = next(a for a in agg["arms"] if a["harness"] == "pi")
-        # report.py style: sum(tokens on solved rows) / solves
-        self.assertAlmostEqual(pi["effective_tokens_per_solve"], 200.0)
+        # (100+50 + 300+50) / 2 solves; vendor `tokens` is not the total.
+        self.assertAlmostEqual(pi["total_tokens_per_solve"], 250.0)
         self.assertIn("self-reported", pi["token_bases"])
 
 
@@ -224,6 +224,7 @@ class BuildLeaderboardTests(unittest.TestCase):
         self.assertIn("bundle-a", html_page)
         self.assertIn("bundle-b", html_page)
         self.assertIn("pi × model-x", html_page)
+        self.assertIn("Total tokens/solve (incl. cache reads)", html_page)
 
     def test_dedupes_identical_results_sha(self):
         rows = [
@@ -283,6 +284,24 @@ class BuildLeaderboardTests(unittest.TestCase):
         doc = leaderboard.build_leaderboard(self.site)
         self.assertEqual(doc["bundle_count"], 1)
         self.assertEqual(doc["skipped"][0]["id"], "html-only")
+
+    def test_skips_results_without_verified_provenance(self):
+        release = {
+            "id": "unverified", "title": "Unverified", "date": "2026-07-20",
+            "models": ["model-x"], "path": "releases/unverified/index.html",
+        }
+        bundle = os.path.join(self.site, "releases", "unverified")
+        _write_results(os.path.join(bundle, "results.jsonl"), [
+            _row("pi", "alpha", 1, True),
+        ])
+        _write(os.path.join(self.site, "releases.json"), json.dumps([release]))
+        _write(os.path.join(self.site, "community.json"), "[]\n")
+        doc = leaderboard.build_leaderboard(self.site)
+        self.assertEqual(doc["bundle_count"], 0)
+        self.assertIn("missing provenance.json", doc["skipped"][0]["reason"])
+        page = leaderboard.render_leaderboard_html(doc)
+        self.assertIn("Skipped (not verified)", page)
+        self.assertIn("failed provenance verification", page)
 
     def test_write_leaderboard_and_index_link(self):
         rows = [

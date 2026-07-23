@@ -22,12 +22,10 @@ PALETTE = (
 )
 CLI_ARMS = {"cursor", "opencode"}
 MATERIAL_TIMEOUT_RATE = 0.05
-TOKEN_NOTE = ("Total tokens/solve is the fresh total: self-reported `tokens` when present, "
-              "else proxy-measured (tokens_proxy_input_uncached + tokens_proxy_output) when "
-              "token_basis_proxy=proxy_measured. Cache-read is shown separately and is NOT "
-              "folded into the total — matching native adapters (codex/pi). Split columns "
-              "(uncached-in / output / cache-read) use each harness's own classification and "
-              "are NOT cross-comparable. Badge bases: unmetered / self-reported / proxy-measured.")
+TOKEN_NOTE = ("Total tokens/solve (incl. cache reads) is computed uniformly from the split "
+              "fields: uncached input + output + cache read. The vendor `tokens` field is never "
+              "used. Split fields use each harness's own classification and are NOT "
+              "cross-comparable. Badge bases: unmetered / self-reported / proxy-measured.")
 DEFAULT_METHODOLOGY = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "docs",
@@ -60,17 +58,39 @@ def _token_basis(rows):
     return ", ".join(ordered)
 
 
-def _effective_tokens_per_solve(rows, solved):
-    """Fresh tokens/solve from effective_tokens; None if any cell lacks data."""
+def split_total_tokens_per_solve(rows, solved=None):
+    """Total tokens/solve from uncached input + output + cache read splits.
+
+    This intentionally never consults the vendor aggregate ``tokens`` field.
+    As with the split columns, proxy splits are used only when a native split is
+    unavailable, and incomplete rows make the arm unmetered rather than mixing
+    unlike accounting bases.
+    """
+    if solved is None:
+        solved = sum(bool(row.get("success")) for row in rows)
     if not solved:
         return None
-    values = []
+    totals = []
+    selected_source = None
     for row in rows:
-        value, _basis = stats.effective_tokens(row)
-        if value is None:
+        native = [row.get(field) for field in TOKEN_FIELDS]
+        if all(stats.is_nonnegative_number(value) for value in native):
+            source, splits = "native", native
+        elif row.get("token_basis_proxy") == "proxy_measured":
+            source = "proxy"
+            splits = [
+                row.get("tokens_proxy_" + field.removeprefix("tokens_"))
+                for field in TOKEN_FIELDS
+            ]
+            if not all(stats.is_nonnegative_number(value) for value in splits):
+                return None
+        else:
             return None
-        values.append(value)
-    return sum(values) / solved
+        if selected_source is not None and source != selected_source:
+            return None
+        selected_source = source
+        totals.append(sum(splits))
+    return sum(totals) / solved
 
 
 def _cost_per_solve(rows, solved, pricing):
@@ -164,10 +184,9 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
             solved_rows = [r for r in rows if r["success"]]
             mean_wall, med_wall = compare._mean_median(solved_rows, "wall_time_s")
             tokens = {field: compare._sum_per_solve(rows, field, solved) for field in TOKEN_FIELDS}
-            # Comparable total is the fresh effective total (self-reported
-            # tokens, else proxy uncached+output) — not the sum of splits,
-            # which would silently inflate by cache-read.
-            total_tokens = _effective_tokens_per_solve(rows, solved)
+            # Uniform total is derived from the three displayed split fields;
+            # never trust the vendor aggregate, whose semantics vary by harness.
+            total_tokens = split_total_tokens_per_solve(rows, solved)
             arms.append({
                 "arm": harness,
                 "solved": solved,
@@ -349,7 +368,7 @@ def _scatter_chart(data, colors, field, title, log_scale=False):
 def _charts(model, colors):
     data = _chart_data(model)
     correctness = _correctness_chart(data, colors)
-    efficiency = _scatter_chart(data, colors, "total_tokens", "Total tokens / solve (log scale)", True)
+    efficiency = _scatter_chart(data, colors, "total_tokens", "Total tokens / solve incl. cache reads (log scale)", True)
     speed = _scatter_chart(data, colors, "med_wall", "Median wall time")
     return f'''<div class="charts">
 <figure><h3>Correctness</h3>{correctness}<figcaption>Bars show solve rate; whiskers show Wilson 95% confidence intervals.</figcaption></figure>
@@ -416,7 +435,7 @@ def render_page(models, methodology, title="OpenBench report", headline=None,
         ))
         heads = ["Arm (harness × model)", "Solved/countable"]
         heads += ["Solve rate @cap", "Solve rate finished"] if dual else ["Solve rate"]
-        heads += ["Wilson 95% CI", "Med wall", "Total tokens/solve", "Uncached in/solve",
+        heads += ["Wilson 95% CI", "Med wall", "Total tokens/solve (incl. cache reads)", "Uncached in/solve",
                   "Output/solve", "Cache-read/solve"]
         if model["has_pricing"]:
             heads.append("$/solve")
@@ -459,7 +478,7 @@ def render_page(models, methodology, title="OpenBench report", headline=None,
             values.extend([a["token_basis"],
                            f"{sum(a['excluded'].values())} / {a['unmatched']} / {a['duplicates']}"])
             cells = []
-            total_index = heads.index("Total tokens/solve")
+            total_index = heads.index("Total tokens/solve (incl. cache reads)")
             split_indexes = {heads.index(name) for name in
                              ("Uncached in/solve", "Output/solve", "Cache-read/solve")}
             for index, value in enumerate(values):
@@ -478,7 +497,7 @@ def render_page(models, methodology, title="OpenBench report", headline=None,
                 + "".join(cells) + "</tr>"
             )
         head_cells = "".join(
-            f'<th class="total-tokens">{html.escape(h)}</th>' if h == "Total tokens/solve"
+            f'<th class="total-tokens">{html.escape(h)}</th>' if h == "Total tokens/solve (incl. cache reads)"
             else f"<th>{html.escape(h)}</th>" for h in heads)
         timeout_note = ""
         if not dual:

@@ -12,7 +12,6 @@
       ],
       "arms": [
         {
-          "effective_tokens_per_solve": 5856.0,
           "harness": "aider",
           "model": "deepseek-v4-flash",
           "n": 8,
@@ -21,13 +20,13 @@
           "token_bases": [
             "proxy-measured"
           ],
+          "total_tokens_per_solve": 6192.0,
           "wilson95": [
             0.6755843804891231,
             1.0
           ]
         },
         {
-          "effective_tokens_per_solve": 13669.375,
           "harness": "opencode",
           "model": "deepseek-v4-flash",
           "n": 8,
@@ -36,13 +35,13 @@
           "token_bases": [
             "self-reported"
           ],
+          "total_tokens_per_solve": 105269.375,
           "wilson95": [
             0.6755843804891231,
             1.0
           ]
         },
         {
-          "effective_tokens_per_solve": 7742.25,
           "harness": "pi",
           "model": "deepseek-v4-flash",
           "n": 8,
@@ -51,6 +50,7 @@
           "token_bases": [
             "self-reported"
           ],
+          "total_tokens_per_solve": 43198.25,
           "wilson95": [
             0.6755843804891231,
             1.0
@@ -60,7 +60,7 @@
       "caveats": [
         "Harness mode is not apples-to-apples: aider ran as a one-shot --message invocation, while pi and opencode ran full agentic loops. Token comparison reflects that difference in harness mode, not a pure like-for-like agent loop contest.",
         "One aider cell excluded: 1 of 9 aider cells was infrastructure-classified and is excluded from solve-rate denominators (aider reported as 8/8). pi and opencode are 9/9.",
-        "Fresh tokens only: figures are proxy-measured fresh tokens (uncached input + output). Cache reads are shown separately and are not included. Honest comparison: 5,856 vs 8,184 vs 14,186 fresh tokens/solve (aider vs pi vs opencode).",
+        "Uniform total-token basis: totals include uncached input, output, and cache reads from split fields; the vendor aggregate is never used. Values are 6,192 vs 48,262 vs 111,380 tokens/solve (aider vs pi vs opencode).",
         "Verifiable bundle: this release includes results.jsonl and provenance.json. Re-check digests with obench verify docs/releases/2026-07-20-aider-showcase."
       ],
       "claim": null,
@@ -110,12 +110,6 @@
       "reason": "no results.jsonl (HTML-only release page)"
     },
     {
-      "id": "2026-07-20-gpt56",
-      "kind": "release",
-      "path": "releases/2026-07-20-gpt56/index.html",
-      "reason": "no results.jsonl (HTML-only release page)"
-    },
-    {
       "id": "2026-07-20-grok45",
       "kind": "release",
       "path": "releases/2026-07-20-grok45/index.html",
@@ -126,6 +120,12 @@
       "kind": "release",
       "path": "releases/2026-07-20-kimi-k3/index.html",
       "reason": "no results.jsonl (HTML-only release page)"
+    },
+    {
+      "id": "2026-07-21-gpt56",
+      "kind": "release",
+      "path": "releases/2026-07-21-gpt56/index.html",
+      "reason": "missing provenance.json (results are not verified)"
     }
   ]
 }

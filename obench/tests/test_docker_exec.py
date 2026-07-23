@@ -57,6 +57,21 @@ class TestBuildDockerCmd(unittest.TestCase):
         self.assertIn("entry.py:/bench/entry.py:ro", joined)
         self.assertIn("HOME=/root", joined)
 
+    def test_task_container_workdir_mount(self):
+        cmd = docker_exec.build_docker_cmd(
+            harness="null", workdir="/tmp/wd", model="none", timeout_s=10,
+            adapters_dir="/repo/obench/adapters", image="task:pinned",
+            instruction_path="/tmp/instr", container_workdir="/app")
+        joined = " ".join(cmd)
+        self.assertIn("/tmp/wd:/app", joined)
+        self.assertIn("-w /app", joined)
+
+    def test_task_docker_spec(self):
+        with tempfile.TemporaryDirectory() as task:
+            with open(os.path.join(task, "task.toml"), "w", encoding="utf-8") as fh:
+                fh.write('docker_image = "task:pinned"\ndocker_workdir = "/app"\n')
+            self.assertEqual(run.task_docker_spec(task), ("task:pinned", "/app"))
+
     def test_api_key_passthrough_by_name_only(self):
         # A set key is forwarded as a bare `-e VAR` (docker reads the value
         # from the client env; the secret never lands in argv); unset keys are

@@ -446,7 +446,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
                      candidate_path=None, base_harness=None,
                      candidate_auth_files=None, candidate_pass_env=None,
                      candidate_config_dir=None, candidate_inherit_env=False,
-                     auth_return_dir=None, candidate_persist_auth=False):
+                     auth_return_dir=None, candidate_persist_auth=False, container_workdir="/work"):
     """Assemble the ``docker run`` argv for one cell (pure; unit-testable)."""
     cmd = ["docker", "run", "--rm"]
     # Bound each cell's CPU quota so co-tenant host load cannot starve a cell
@@ -461,7 +461,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
     # generic manifests intentionally resolve to no stock harness here.
     effective_harness = base_harness if candidate_path else harness
     cmd += [
-        "-v", f"{os.path.abspath(workdir)}:/work",
+        "-v", f"{os.path.abspath(workdir)}:{container_workdir}",
         "-v", f"{os.path.abspath(adapters_dir)}:/bench/adapters:ro",
         "-v", f"{ENTRY_PATH}:/bench/entry.py:ro",
         "-v", f"{AUTH_PERSIST_PATH}:/bench/auth_persist.py:ro",
@@ -485,7 +485,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         container_variant = f"/bench/ablation/codex-home-{variant}"
         cmd += ["-v", f"{host_variant}:{container_variant}:ro"]
     cmd += [
-        "-w", "/work",
+        "-w", container_workdir,
         "-e", f"HOME={CONTAINER_HOME}",
     ]
     for assignment in _placeholder_env(effective_harness, model):
@@ -582,7 +582,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                      candidate_auth_files=None, candidate_pass_env=None,
                      candidate_config_dir=None, candidate_inherit_env=False,
                      candidate_spec_bytes=None, candidate_config_contents=None,
-                     candidate_persist_auth=False):
+                     candidate_persist_auth=False, container_workdir="/work"):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -653,6 +653,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             candidate_inherit_env=candidate_inherit_env,
             auth_return_dir=auth_return_dir,
             candidate_persist_auth=candidate_persist_auth,
+            container_workdir=container_workdir,
         )
         host_env_setup_s = round(time.monotonic() - env_setup_start, 3)
 

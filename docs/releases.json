@@ -9,15 +9,6 @@
     "path": "releases/2026-07-02-m3/index.html"
   },
   {
-    "id": "2026-07-20-gpt56",
-    "title": "OpenBench: gpt-5.6 across 6 harnesses",
-    "date": "2026-07-20",
-    "models": [
-      "gpt-5.6-sol"
-    ],
-    "path": "releases/2026-07-20-gpt56/index.html"
-  },
-  {
     "id": "2026-07-20-grok45",
     "title": "OpenBench: grok-4.5 across 4 harnesses",
     "date": "2026-07-20",
@@ -52,5 +43,14 @@
       "deepseek-v4-flash"
     ],
     "path": "releases/2026-07-20-aider-showcase/index.html"
+  },
+  {
+    "id": "2026-07-21-gpt56",
+    "title": "OpenBench: gpt-5.6 across 7 harnesses",
+    "date": "2026-07-21",
+    "models": [
+      "gpt-5.6-sol"
+    ],
+    "path": "releases/2026-07-21-gpt56/index.html"
   }
 ]

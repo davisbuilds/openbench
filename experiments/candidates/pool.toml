@@ -1,0 +1,23 @@
+kind = "manifest"
+name = "pool"
+isolate_home = true
+policy_headless_args = ["exec", "--prompt"]
+policy_auto_approve_args = ["--unsafe-auto-allow"]
+command = [
+  "pool", "exec",
+  "--prompt", "{prompt}",
+  "--directory", "{workspace}",
+  "--output", "json",
+  "--unsafe-auto-allow",
+  "--sandbox", "disabled",
+]
+version_command = ["pool", "--version"]
+pass_env = ["POOLSIDE_API_KEY"]
+base_url_env = "POOLSIDE_STANDALONE_BASE_URL"
+proxy_route = "chat/openrouter/api/v1"
+
+[models]
+"laguna-s-2.1" = "poolside/laguna-s-2.1"
+
+[env]
+POOLSIDE_STANDALONE_MODEL = "{model}"
