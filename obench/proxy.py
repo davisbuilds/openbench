@@ -21,10 +21,14 @@ import sys
 import threading
 import time
 import zlib
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
+
+from obench.router_metrics import OpenAIChatSSEParser
+from obench.router_spec import RoutePlan, SecretPlan
 
 HOP_BY_HOP = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -62,6 +66,41 @@ DEFAULT_ANTHROPIC_UPSTREAMS = {
     # Local CLIProxyAPI Anthropic-compatible ingress (claude x gpt-5.6-sol).
     "cliproxyapi": "http://127.0.0.1:8317",
 }
+EMPTY_LEDGER_HASH = hashlib.sha256(b"").hexdigest()
+
+
+@dataclass(frozen=True)
+class LedgerSeal:
+    """Durable terminal state for one explicitly registered cell ledger."""
+
+    token: str
+    path: Path
+    record_count: int
+    last_sequence: int
+    root_hash: str
+
+    @property
+    def ledger_path(self) -> Path:
+        return self.path
+
+
+@dataclass
+class _CellLedger:
+    state: str = "ACTIVE"
+    in_flight: int = 0
+    record_count: int = 0
+    last_sequence: int = 0
+    root_hash: str = EMPTY_LEDGER_HASH
+    seal: LedgerSeal | None = None
+    write_error: str | None = None
+    terminal_written: bool = False
+
+
+@dataclass(frozen=True, repr=False)
+class _RouterRoute:
+    plan: RoutePlan
+    upstream: Any
+    secret: str
 
 
 def new_cell_token() -> str:
@@ -90,6 +129,17 @@ def _sensitive_name(name: str) -> bool:
     # Redact credential-like fields without catching accounting fields such as
     # input_tokens / completion_tokens / totalTokens.
     return any(part in low for part in ("secret", "password")) or low.endswith("_token") or low.endswith("token")
+
+
+def _credential_header(name: str) -> bool:
+    low = name.lower().replace("-", "_")
+    return (
+        name.lower() in SENSITIVE_HEADERS
+        or low in {"authorization", "proxy_authorization", "cookie", "set_cookie"}
+        or low.endswith(("_token", "_secret", "_password"))
+        or ("api" in low and low.endswith("_key"))
+        or "credential" in low
+    )
 
 
 def scrub(obj: Any) -> Any:
@@ -288,11 +338,13 @@ def _urlsplit_map(values: dict[str, str]) -> dict[str, Any]:
 
 
 class Route:
-    def __init__(self, token: str, route: str, upstream: Any, upstream_path: str):
+    def __init__(self, token: str, route: str, upstream: Any, upstream_path: str,
+                 router: _RouterRoute | None = None):
         self.token = token
         self.route = route
         self.upstream = upstream
         self.upstream_path = upstream_path
+        self.router = router
 
 
 class CountingProxyHandler(BaseHTTPRequestHandler):
@@ -312,6 +364,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
 
     def _proxy(self) -> None:
         started = time.time()
+        started_monotonic = time.monotonic()
         status = 502
         usage = None
         body = b""
@@ -321,17 +374,25 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         capture_truncated = False
         headers_sent = False
         error = None
+        token = self._token_from_header_or_path()
+        managed_ledger: bool | None = None
+        router_parser = None
+        router_metrics = None
         try:
             route = self._route_request()
+            token = route.token
+            managed_ledger = self.server.admit_cell_request(token)  # type: ignore[attr-defined]
             body = self._read_body()
+            if route.router is not None:
+                body = self._router_request_body(body, route.router.plan)
             request_body = decode_for_parsing(body, self.headers.get("content-encoding", ""))
             sampling = observed_sampling(
                 body,
                 self.headers.get("content-type", ""),
-                self.headers.get("content-encoding", ""),
+                "" if route.router is not None else self.headers.get("content-encoding", ""),
             )
             links.update(protocol_links(request_body))
-            headers = self._forward_headers()
+            headers = self._forward_headers(route, len(body))
             conn_cls = http.client.HTTPSConnection if route.upstream.scheme == "https" else http.client.HTTPConnection
             if not route.upstream.hostname:
                 raise RuntimeError("upstream URL missing host")
@@ -340,6 +401,22 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             resp = conn.getresponse()
             status = resp.status
             resp_headers = resp.getheaders()
+            if route.router is not None and 300 <= resp.status < 400:
+                status = 502
+                conn.close()
+                raise RuntimeError(f"router upstream redirect rejected: HTTP {resp.status}")
+            header_map = {k.lower(): v for k, v in resp_headers}
+            if (route.router is not None
+                    and "text/event-stream" in header_map.get("content-type", "").lower()):
+                router_parser = OpenAIChatSSEParser(
+                    requested_model=route.router.plan.requested_model,
+                    started_at=started_monotonic,
+                    route_kind=route.router.plan.route_kind,
+                    requested_provider=route.router.plan.requested_provider,
+                    allowed_models=route.router.plan.allowed_models,
+                    allowed_providers=route.router.plan.allowed_providers,
+                    fallback_enabled=route.router.plan.fallback_enabled,
+                )
             self.send_response(resp.status, resp.reason)
             for key, value in resp_headers:
                 if key.lower() in HOP_BY_HOP:
@@ -352,9 +429,11 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             capture = bytearray()
             limit = self.server.capture_limit  # type: ignore[attr-defined]
             while True:
-                chunk = resp.read(65536)
+                chunk = resp.read1(65536)
                 if not chunk:
                     break
+                if router_parser is not None:
+                    router_parser.feed(chunk, time.monotonic())
                 if len(capture) + len(chunk) <= limit:
                     capture.extend(chunk)
                 else:
@@ -365,11 +444,14 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                     capture.extend(chunk[-limit:])
                 self.wfile.write(chunk)
                 self.wfile.flush()
-            header_map = {k.lower(): v for k, v in resp_headers}
+            if router_parser is not None:
+                router_metrics = router_parser.finalize(time.monotonic())
             parse_body = decode_for_parsing(bytes(capture), header_map.get("content-encoding", ""))
             usage = parse_json_usage(parse_body)
             if usage is None:
                 usage = parse_sse_usage(parse_body)
+            if router_metrics is not None and router_metrics.get("usage") is not None:
+                usage = router_metrics["usage"]
             links.update(protocol_links(parse_body, response=True))
             conn.close()
         except Exception as exc:  # noqa: BLE001
@@ -387,7 +469,12 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             else:
                 self.close_connection = True
         finally:
-            token = route.token if route is not None else self._token_from_header_or_path()
+            if router_parser is not None and router_metrics is None:
+                try:
+                    router_metrics = router_parser.finalize(time.monotonic())
+                except Exception:
+                    router_metrics = None
+            token = route.token if route is not None else token
             meta = self._read_metadata(token)
             configured_sampling = meta.get("sampling") if isinstance(meta.get("sampling"), dict) else {}
             recorded_sampling = sampling or configured_sampling
@@ -405,6 +492,14 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             if route is not None:
                 rec["route"] = route.route
                 rec["upstream"] = f"{route.upstream.scheme}://{route.upstream.netloc}{route.upstream.path.rstrip('/')}"
+                if route.router is not None:
+                    rec["router_arm"] = {
+                        "arm_id": route.router.plan.arm_id,
+                        "arm_digest": route.router.plan.arm_digest,
+                        "route_kind": route.router.plan.route_kind,
+                    }
+            if router_metrics is not None:
+                rec["router_metrics"] = router_metrics
             if "session" in links:
                 rec["session_hash"] = _identifier_hash(links["session"], self.server.identifier_salt)
             if "previous_response" in links:
@@ -416,7 +511,12 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 rec["capture_truncated"] = True
             if error:
                 rec["error"] = error
-            self._write_record(token, scrub(rec))
+            if managed_ledger:
+                self.server.complete_cell_request(token, rec)  # type: ignore[attr-defined]
+            elif managed_ledger is False:
+                self.server.complete_legacy_request(token, rec)  # type: ignore[attr-defined]
+            else:
+                self.server.write_legacy_record_if_unregistered(token, rec)  # type: ignore[attr-defined]
 
     def _route_request(self) -> Route:
         path_query = self.path if self.path.startswith("/") else "/" + self.path
@@ -450,6 +550,16 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             if (registration_meta.get("harness") != "grokbuild"
                     or registration_meta.get("model") not in {"gpt-5.6", "gpt-5.6-sol"}):
                 raise RuntimeError("cell token is not authorized for subscription bridge")
+        router = None
+        if prefix == "route":
+            if not tail:
+                raise RuntimeError("/route requires an arm digest")
+            router = self.server.resolve_route(token, tail[0])  # type: ignore[attr-defined]
+            upstream = router.upstream
+            upstream_path = upstream.path or "/"
+            if upstream.query:
+                upstream_path += "?" + upstream.query
+            return Route(token, f"route/{router.plan.arm_digest}", upstream, upstream_path, router)
         if prefix == "codex":
             upstream = self.server.upstreams["codex"]  # type: ignore[attr-defined]
             route_name = "codex"
@@ -515,14 +625,71 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
     def _scrub_cell_path(path: str) -> str:
         return TOKEN_RE.sub("/cell/<redacted>", path)
 
-    def _forward_headers(self) -> dict[str, str]:
+    def _forward_headers(self, route: Route, body_length: int) -> dict[str, str]:
         connection_tokens = set()
         if self.headers.get("Connection"):
             connection_tokens = {x.strip().lower() for x in self.headers.get("Connection", "").split(",")}
         # Host identifies this proxy on ingress; let http.client generate the
         # selected upstream's Host header instead of forwarding the proxy host.
         blocked = HOP_BY_HOP | connection_tokens | {"host", "x-openbench-cell-token"}
-        return {k: v for k, v in self.headers.items() if k.lower() not in blocked}
+        if route.router is None:
+            return {k: v for k, v in self.headers.items() if k.lower() not in blocked}
+        headers = {
+            k: v for k, v in self.headers.items()
+            if k.lower() not in blocked
+            and not _credential_header(k)
+            and k.lower() not in {
+                "content-length", "content-encoding", "accept-encoding",
+                "x-openrouter-metadata",
+            }
+            and not k.lower().startswith("x-openrouter-cache")
+        }
+        headers["Authorization"] = f"Bearer {route.router.secret}"
+        headers["Content-Length"] = str(body_length)
+        if route.router.plan.route_kind == "gateway":
+            headers["X-OpenRouter-Metadata"] = "enabled"
+            headers["X-OpenRouter-Cache"] = "false"
+        return headers
+
+    def _router_request_body(self, body: bytes, plan: RoutePlan) -> bytes:
+        if self.headers.get("content-encoding"):
+            raise RuntimeError("router requests do not permit content encoding")
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("router request body must be a JSON object") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("router request body must be a JSON object")
+        payload["model"] = plan.requested_model
+        for key in ("top_k", "reasoning_effort", "reasoning", "thinking"):
+            payload.pop(key, None)
+        payload.update({
+            "temperature": plan.sampling.temperature,
+            "top_p": plan.sampling.top_p,
+            "seed": plan.sampling.seed,
+        })
+        if plan.route_kind == "gateway":
+            self._strip_cache_controls(payload)
+            payload["provider"] = {
+                "only": [plan.requested_provider],
+                "allow_fallbacks": False,
+            }
+        else:
+            payload.pop("provider", None)
+        return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    @classmethod
+    def _strip_cache_controls(cls, value: Any) -> None:
+        if isinstance(value, dict):
+            for key in list(value):
+                normalized = str(key).lower().replace("-", "_")
+                if normalized in {"cache", "cache_control", "cache_key", "prompt_cache_key"}:
+                    value.pop(key)
+                else:
+                    cls._strip_cache_controls(value[key])
+        elif isinstance(value, list):
+            for item in value:
+                cls._strip_cache_controls(item)
 
     def _read_body(self) -> bytes:
         max_bytes = self.server.max_request_bytes  # type: ignore[attr-defined]
@@ -584,6 +751,263 @@ class CountingProxyServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
+    def register_cell(self, token: str) -> None:
+        """Opt a router cell into lifecycle-managed, sealed ledger writes."""
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", token):
+            raise ValueError("cell token must contain only letters, digits, '.', '_', or '-'")
+        with self._ledger_condition:
+            if token in self._cell_ledgers:
+                raise RuntimeError(f"cell already registered: {token}")
+            if self._legacy_in_flight.get(token, 0):
+                raise RuntimeError(f"cell has active legacy requests: {token}")
+            path = self._ledger_path(token)
+            if path.exists():
+                raise FileExistsError(f"cell ledger already exists: {path}")
+            self._cell_ledgers[token] = _CellLedger()
+
+    def register_route(
+            self, token: str, plan: RoutePlan, secrets_plan: SecretPlan) -> None:
+        """Bind one committed arm and its admitted credential to a managed cell."""
+        if not isinstance(plan, RoutePlan):
+            raise TypeError("plan must be a RoutePlan")
+        if not isinstance(secrets_plan, SecretPlan):
+            raise TypeError("secrets_plan must be a SecretPlan")
+        if plan.protocol != "openai_chat":
+            raise ValueError("router route protocol must be openai_chat")
+        if plan.route_kind not in {"direct", "gateway"}:
+            raise ValueError("router route kind must be direct or gateway")
+        if plan.requested_model not in plan.allowed_models:
+            raise ValueError("requested model is not allowed by the route plan")
+        if plan.allowed_providers != (plan.requested_provider,):
+            raise ValueError("router route must allow exactly the requested provider")
+        if plan.fallback_enabled or plan.retry_count or plan.cache_enabled:
+            raise ValueError("router route controls do not match gateway_tax")
+        upstream = urlsplit(plan.endpoint)
+        if upstream.scheme not in {"http", "https"} or not upstream.hostname:
+            raise ValueError("router route endpoint must be an absolute HTTP(S) URL")
+        secret = secrets_plan.value_for(plan.arm_id)
+        if secrets_plan.env_name_for(plan.arm_id) != plan.auth_env:
+            raise ValueError("secret plan does not match route auth environment")
+        if not secret:
+            raise ValueError("router route secret must not be empty")
+        with self._ledger_condition:
+            ledger = self._require_cell(token)
+            if ledger.state != "ACTIVE" or ledger.in_flight:
+                raise RuntimeError(f"cell cannot register a route while {ledger.state.lower()}")
+            if token in self._router_routes:
+                raise RuntimeError(f"cell already has a registered route: {token}")
+            self._router_routes[token] = _RouterRoute(plan, upstream, secret)
+
+    register_router_route = register_route
+
+    def resolve_route(self, token: str, arm_digest: str) -> _RouterRoute:
+        """Authorize one route digest without exposing its in-memory secret."""
+        with self._ledger_condition:
+            route = self._router_routes.get(token)
+            if route is None or route.plan.arm_digest != arm_digest:
+                raise RuntimeError("router arm is not authorized for this cell")
+            return route
+
+    def cell_is_registered(self, token: str) -> bool:
+        with self._ledger_condition:
+            return token in self._cell_ledgers
+
+    def admit_cell_request(self, token: str) -> bool:
+        """Atomically admit a request, returning False for a legacy cell."""
+        with self._ledger_condition:
+            ledger = self._cell_ledgers.get(token)
+            if ledger is None:
+                self._legacy_in_flight[token] = self._legacy_in_flight.get(token, 0) + 1
+                return False
+            if ledger.state != "ACTIVE":
+                raise RuntimeError(f"cell ledger is {ledger.state.lower()}: {token}")
+            ledger.in_flight += 1
+            return True
+
+    def complete_cell_request(self, token: str, record: dict[str, Any]) -> None:
+        """Durably append one admitted request and release its in-flight slot."""
+        with self._ledger_condition:
+            ledger = self._cell_ledgers.get(token)
+            if ledger is None:
+                raise RuntimeError(f"cell is not registered: {token}")
+            if ledger.state == "SEALED":
+                raise RuntimeError(f"cell ledger is sealed: {token}")
+            if ledger.in_flight <= 0:
+                raise RuntimeError(f"cell has no admitted request: {token}")
+            try:
+                sequence = ledger.last_sequence + 1
+                chained = scrub(record)
+                for key in ("record_type", "sequence", "previous_hash", "record_hash"):
+                    chained.pop(key, None)
+                chained.update({
+                    "record_type": "request",
+                    "sequence": sequence,
+                    "previous_hash": ledger.root_hash,
+                })
+                canonical = json.dumps(chained, sort_keys=True, separators=(",", ":"))
+                record_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+                chained["record_hash"] = record_hash
+                self._append_durable(self._ledger_path(token), chained)
+                ledger.record_count += 1
+                ledger.last_sequence = sequence
+                ledger.root_hash = record_hash
+            except Exception as exc:
+                ledger.state = "DRAINING"
+                ledger.write_error = f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                ledger.in_flight -= 1
+                self._ledger_condition.notify_all()
+
+    def complete_legacy_request(self, token: str, record: dict[str, Any]) -> None:
+        """Append a request admitted before explicit lifecycle registration."""
+        with self._ledger_condition:
+            in_flight = self._legacy_in_flight.get(token, 0)
+            if in_flight <= 0:
+                raise RuntimeError(f"cell has no admitted legacy request: {token}")
+            try:
+                self._append_legacy(self._legacy_ledger_path(token), scrub(record))
+            finally:
+                if in_flight == 1:
+                    self._legacy_in_flight.pop(token, None)
+                else:
+                    self._legacy_in_flight[token] = in_flight - 1
+                self._ledger_condition.notify_all()
+
+    def write_legacy_record_if_unregistered(
+            self, token: str, record: dict[str, Any]) -> bool:
+        """Atomically retain a pre-admission error unless the cell is managed."""
+        with self._ledger_condition:
+            if token in self._cell_ledgers:
+                return False
+            self._append_legacy(self._legacy_ledger_path(token), scrub(record))
+            return True
+
+    def revoke_cell(self, token: str) -> None:
+        """Stop new admissions while allowing admitted requests to drain."""
+        with self._ledger_condition:
+            ledger = self._require_cell(token)
+            if ledger.state == "SEALED":
+                raise RuntimeError(f"cell ledger is sealed: {token}")
+            ledger.state = "DRAINING"
+
+    def seal_cell(self, token: str, timeout_s: float = 30.0) -> LedgerSeal:
+        """Drain a cell for at most ``timeout_s`` and durably seal its ledger."""
+        if timeout_s < 0:
+            raise ValueError("timeout_s must be nonnegative")
+        deadline = time.monotonic() + timeout_s
+        with self._ledger_condition:
+            ledger = self._require_cell(token)
+            if ledger.seal is not None:
+                return ledger.seal
+            ledger.state = "DRAINING"
+            while ledger.in_flight:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"timed out draining cell {token}: {ledger.in_flight} request(s) remain")
+                self._ledger_condition.wait(remaining)
+            if ledger.write_error is not None:
+                raise RuntimeError(
+                    f"cannot seal cell {token} after ledger write failure: {ledger.write_error}")
+
+            path = self._ledger_path(token)
+            terminal = {
+                "record_type": "ledger_seal",
+                "state": "SEALED",
+                "record_count": ledger.record_count,
+                "last_sequence": ledger.last_sequence,
+                "root_hash": ledger.root_hash,
+            }
+            if not ledger.terminal_written:
+                try:
+                    self._append_durable(path, terminal)
+                except Exception:
+                    if self._last_record_equals(path, terminal):
+                        ledger.terminal_written = True
+                    else:
+                        self._truncate_partial_record(path)
+                    raise
+                ledger.terminal_written = True
+            else:
+                self._fsync_file(path)
+            self._fsync_directory(path.parent)
+            ledger.state = "SEALED"
+            ledger.seal = LedgerSeal(
+                token=token,
+                path=path,
+                record_count=ledger.record_count,
+                last_sequence=ledger.last_sequence,
+                root_hash=ledger.root_hash,
+            )
+            return ledger.seal
+
+    def _require_cell(self, token: str) -> _CellLedger:
+        ledger = self._cell_ledgers.get(token)
+        if ledger is None:
+            raise RuntimeError(f"cell is not registered: {token}")
+        return ledger
+
+    def _ledger_path(self, token: str) -> Path:
+        return self.ledger_dir / f"{token}.jsonl"  # type: ignore[attr-defined]
+
+    def _legacy_ledger_path(self, token: str) -> Path:
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", token or "unknown")
+        return self.ledger_dir / f"{safe}.jsonl"  # type: ignore[attr-defined]
+
+    def _append_durable(self, path: Path, record: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if getattr(self, "verbose", False):
+            print(line, end="", flush=True)
+
+    def _append_legacy(self, path: Path, record: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+        if getattr(self, "verbose", False):
+            print(line, end="", flush=True)
+
+    @staticmethod
+    def _last_record_equals(path: Path, expected: dict[str, Any]) -> bool:
+        try:
+            lines = path.read_bytes().splitlines()
+            return bool(lines) and json.loads(lines[-1]) == expected
+        except (OSError, json.JSONDecodeError):
+            return False
+
+    @staticmethod
+    def _truncate_partial_record(path: Path) -> None:
+        try:
+            with path.open("r+b") as fh:
+                data = fh.read()
+                if not data or data.endswith(b"\n"):
+                    return
+                last_newline = data.rfind(b"\n")
+                fh.truncate(last_newline + 1)
+                fh.flush()
+                os.fsync(fh.fileno())
+        except FileNotFoundError:
+            return
+
+    @staticmethod
+    def _fsync_file(path: Path) -> None:
+        with path.open("rb") as fh:
+            os.fsync(fh.fileno())
+
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
 
 def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
                 chat_upstreams: dict[str, str] | None = None,
@@ -615,6 +1039,10 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     httpd.timeout_s = timeout_s
     httpd.capture_limit = max(capture_limit, 4096)
     httpd.max_request_bytes = max(max_request_bytes, 0)
+    httpd._ledger_condition = threading.Condition()
+    httpd._cell_ledgers = {}
+    httpd._legacy_in_flight = {}
+    httpd._router_routes = {}
     # Docker requires a non-loopback bind. In that mode the runner enables this
     # gate so arbitrary LAN clients cannot spend through a subscription route.
     httpd.require_registered_tokens = require_registered_tokens

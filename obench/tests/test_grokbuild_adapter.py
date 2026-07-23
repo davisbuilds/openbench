@@ -273,6 +273,7 @@ class TestRunConstruction(unittest.TestCase):
                     "DEEPSEEK_API_KEY": "deepseek-test",
                     "ZAI_API_KEY": "zai-test",
                     "MOONSHOT_API_KEY": "moonshot-test",
+                    "CLIPROXYAPI_API_KEY": "ob-test-synthetic-ingress",
                     # This sentinel must be stripped from the gpt-5.6 child.
                     "OPENAI_API_KEY": "must-not-reach-subbridge",
                 })
@@ -311,7 +312,7 @@ class TestRunConstruction(unittest.TestCase):
             self.assertEqual(kwargs["env"]["GROK_SUBAGENTS"], "0")
             if model == "gpt-5.6-sol":
                 self.assertNotIn("OPENAI_API_KEY", kwargs["env"])
-                self.assertEqual(kwargs["env"]["CLIPROXYAPI_API_KEY"], "openbench-local-ingress")
+                self.assertEqual(kwargs["env"]["CLIPROXYAPI_API_KEY"], "ob-test-synthetic-ingress")
             self.assertIn(f'model = "{spec["model_id"]}"', cfg)
             self.assertIn(f'base_url = "{spec["base_url"]}"', cfg)
             self.assertIn(f'env_key = "{spec["env_key"]}"', cfg)
