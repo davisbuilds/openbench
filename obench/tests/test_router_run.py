@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import http.client
 import io
 import json
@@ -426,6 +427,59 @@ direct_control_arm_id = "direct"
             },
         }
         self.assertIn("malformed_sse_event", router_run._route_reasons(metrics, plan))
+
+    def test_profile_specific_served_and_attempt_model_integrity(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        openrouter = next(item for item in plans if item.route_kind == "gateway")
+        revision = "fake-model-2026-07-22"
+        openrouter = dataclasses.replace(
+            openrouter,
+            allowed_models=(openrouter.requested_model, revision),
+        )
+
+        def metrics(*, served=revision, attempt=revision):
+            return {
+                "route": {
+                    "requested_model": openrouter.requested_model,
+                    "metadata_requested_model": openrouter.requested_model,
+                    "served_model": served,
+                    "provider": openrouter.requested_provider,
+                    "attempts": [{
+                        "provider": openrouter.requested_provider,
+                        "model": attempt,
+                        "status": 200,
+                    }],
+                },
+                "stream": {"done": True},
+                "route_evidence": {"pass": True, "reasons": []},
+            }
+
+        openrouter_reasons = router_run._route_reasons(metrics(), openrouter)
+        self.assertIn("served_model_conflict", openrouter_reasons)
+        self.assertIn("attempt_model_conflict", openrouter_reasons)
+
+        for gateway in ("vercel", "cloudflare"):
+            with self.subTest(gateway=gateway):
+                plan = dataclasses.replace(openrouter, gateway=gateway)
+                self.assertEqual(router_run._route_reasons(metrics(), plan), [])
+                undeclared = router_run._route_reasons(
+                    metrics(served="undeclared", attempt="undeclared"),
+                    plan,
+                )
+                self.assertIn("served_model_conflict", undeclared)
+                self.assertIn("attempt_model_conflict", undeclared)
+
+                wrong_request = metrics()
+                wrong_request["route"]["requested_model"] = revision
+                wrong_request["route"]["metadata_requested_model"] = revision
+                reasons = router_run._route_reasons(wrong_request, plan)
+                self.assertIn("requested_model_conflict", reasons)
+                self.assertIn("metadata_requested_model_conflict", reasons)
 
     def test_price_coverage_and_auth_failures_fail_closed(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)

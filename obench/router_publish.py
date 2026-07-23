@@ -98,12 +98,21 @@ _ATTEMPT_SCHEMA = {
     "model": _SCALAR,
     "status": _SCALAR,
 }
+_GATEWAY_METADATA_SCHEMA = {
+    "generation_id_sha256": _SCALAR,
+    "cost": _SCALAR,
+    "market_cost": _SCALAR,
+    "log_id_sha256": _SCALAR,
+    "cache_status": _SCALAR,
+    "step": _SCALAR,
+}
 _ROUTE_SCHEMA = {
     "requested_model": _SCALAR,
     "metadata_requested_model": _SCALAR,
     "served_model": _SCALAR,
     "provider": _SCALAR,
     "attempts": [_ATTEMPT_SCHEMA],
+    "gateway_metadata": _GATEWAY_METADATA_SCHEMA,
 }
 _ROUTE_EVIDENCE_SCHEMA = {
     "pass": _SCALAR,
@@ -294,6 +303,8 @@ _EXPERIMENT_ARM_SCHEMA = {
     "arm_id": _SCALAR,
     "arm_digest": _SCALAR,
     "route_kind": _SCALAR,
+    "gateway": _SCALAR,
+    "gateway_id": _SCALAR,
     "protocol": _SCALAR,
     "baseline": _SCALAR,
     "canonical_model": _SCALAR,
@@ -494,7 +505,7 @@ def _snapshot_source(value: Any, kind: str) -> tuple[Any, str]:
 def _experiment_dto(source: Mapping[str, Any], source_digest: str) -> dict[str, Any]:
     arms = []
     for arm in source["arms"]:
-        arms.append({
+        public_arm = {
             "arm_id": arm["arm_id"],
             "arm_digest": router_spec.canonical_digest(arm),
             "route_kind": arm["route_kind"],
@@ -509,7 +520,12 @@ def _experiment_dto(source: Mapping[str, Any], source_digest: str) -> dict[str, 
             "cache_enabled": arm["cache_enabled"],
             "sampling": dict(arm["sampling"]),
             "direct_control_arm_id": arm["direct_control_arm_id"],
-        })
+        }
+        if "gateway" in arm:
+            public_arm["gateway"] = arm["gateway"]
+        if "gateway_id" in arm:
+            public_arm["gateway_id"] = arm["gateway_id"]
+        arms.append(public_arm)
     return {
         "kind": "experiment",
         "source_digest": source_digest,
@@ -597,6 +613,18 @@ def _public_ledger(
     previous = hashlib.sha256(b"").hexdigest()
     for sequence, source in enumerate(requests, 1):
         projected = _project(source, _LEDGER_REQUEST_SCHEMA, f"ledger[{sequence}]")
+        source_metrics = source.get("router_metrics")
+        public_metrics = projected.get("router_metrics")
+        if isinstance(source_metrics, Mapping) and isinstance(public_metrics, dict):
+            source_route = source_metrics.get("route")
+            public_route = public_metrics.get("route")
+            if isinstance(source_route, Mapping) and isinstance(public_route, dict):
+                metadata = source_route.get("gateway_metadata")
+                if metadata is not None:
+                    public_route["gateway_metadata"] = _gateway_metadata_dto(
+                        metadata,
+                        f"ledger[{sequence}].router_metrics.route.gateway_metadata",
+                    )
         row = {
             "record_type": "request",
             "sequence": sequence,
@@ -619,6 +647,36 @@ def _public_ledger(
     _assert_safe(public_rows, f"ledger for {cell_id}")
     raw = b"".join(_artifact_bytes(row) for row in public_rows)
     return raw, seal
+
+
+def _gateway_metadata_dto(value: Any, path: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise RouterPublishError(f"{path} must be an object")
+    result = {}
+    opaque_ids = {
+        "generationId": "generation_id_sha256",
+        "log_id": "log_id_sha256",
+    }
+    for source_key, public_key in opaque_ids.items():
+        if source_key not in value:
+            continue
+        raw = value[source_key]
+        if not isinstance(raw, str) or not raw:
+            raise RouterPublishError(f"{path}.{source_key} must be a non-empty string")
+        result[public_key] = _sha256(raw.encode("utf-8"))
+    scalar_fields = {
+        "cost": "cost",
+        "marketCost": "market_cost",
+        "cache_status": "cache_status",
+        "step": "step",
+    }
+    for source_key, public_key in scalar_fields.items():
+        if source_key in value:
+            result[public_key] = _json_scalar(
+                value[source_key],
+                f"{path}.{source_key}",
+            )
+    return result
 
 
 def _ledger_mapping(
