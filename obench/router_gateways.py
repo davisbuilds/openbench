@@ -130,13 +130,9 @@ def shape_body(
         payload.pop("provider", None)
         for key in ("models", "order", "sort", "caching"):
             payload.pop(key, None)
-        options = payload.get("providerOptions")
-        if not isinstance(options, dict):
-            options = {}
-        else:
-            options = dict(options)
-        options["gateway"] = {"only": [requested_provider]}
-        payload["providerOptions"] = options
+        payload["providerOptions"] = {
+            "gateway": {"only": [requested_provider]},
+        }
         return
     if gateway == "cloudflare":
         payload.pop("provider", None)

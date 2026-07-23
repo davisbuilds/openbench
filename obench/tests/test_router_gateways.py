@@ -65,7 +65,6 @@ class GatewayRequestProfileTests(unittest.TestCase):
         )
         self.assertEqual(body["providerOptions"], {
             "gateway": {"only": ["openai"]},
-            "openai": {"reasoningEffort": "low"},
         })
         for key in ("provider", "models", "order", "sort", "caching", "cache"):
             self.assertNotIn(key, body)
