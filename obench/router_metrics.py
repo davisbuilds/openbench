@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Privacy-preserving metrics and route evidence for OpenAI Chat SSE streams.
+"""Privacy-preserving metrics and route evidence for OpenAI streaming APIs.
 
 The parser accepts response chunks with caller-supplied monotonic timestamps.
 It deliberately exposes no event payloads or generated text: snapshots contain
@@ -69,6 +69,17 @@ def _has_semantic_delta(obj: dict[str, Any]) -> bool:
             return True
         if _has_text(delta.get("tool_calls")) or _has_text(delta.get("function_call")):
             return True
+    return False
+
+
+def _has_responses_semantic_delta(obj: dict[str, Any]) -> bool:
+    event_type = obj.get("type")
+    if event_type in {
+        "response.output_text.delta",
+        "response.refusal.delta",
+        "response.function_call_arguments.delta",
+    }:
+        return _has_text(obj.get("delta"))
     return False
 
 
@@ -340,7 +351,8 @@ class OpenAIChatSSEParser:
             self._ignored_events += 1
             return
         if data.strip() == "[DONE]":
-            self._done_seen = True
+            if self._accept_done_marker():
+                self._done_seen = True
             self._events += 1
             return
         try:
@@ -351,67 +363,88 @@ class OpenAIChatSSEParser:
         if not isinstance(obj, dict):
             self._ignored_events += 1
             return
+        if self._is_terminal_event(obj):
+            self._done_seen = True
         if self._observe(obj, event_data_at):
             self._events += 1
         else:
             self._ignored_events += 1
 
+    def _metric_objects(self, obj: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+        return (obj,)
+
+    def _accept_done_marker(self) -> bool:
+        return True
+
+    def _is_terminal_event(self, obj: dict[str, Any]) -> bool:
+        return False
+
+    def _has_semantic_content(self, obj: dict[str, Any]) -> bool:
+        return _has_semantic_delta(obj)
+
     def _observe(self, obj: dict[str, Any], timestamp: float) -> bool:
         gateway_metadata_observed = False
-        if self._gateway_evidence is not None:
-            gateway_metadata_observed = self._gateway_evidence.observe(obj)
-        model = _identifier(obj.get("model"))
-        if model is not None:
-            if self._route_kind == "direct" and self._model_match == "rolling_alias":
-                revision = router_gateways.concrete_model_revision(model)
-                if revision is not None:
-                    self._direct_dated_model_ids.add(revision)
-                    if len(self._direct_dated_model_ids) > 1:
+        usage_observed = False
+        for metric_obj in self._metric_objects(obj):
+            if self._gateway_evidence is not None:
+                gateway_metadata_observed = (
+                    self._gateway_evidence.observe(metric_obj)
+                    or gateway_metadata_observed
+                )
+            model = _identifier(metric_obj.get("model"))
+            if model is not None:
+                if self._route_kind == "direct" and self._model_match == "rolling_alias":
+                    revision = router_gateways.concrete_model_revision(model)
+                    if revision is not None:
+                        self._direct_dated_model_ids.add(revision)
+                        if len(self._direct_dated_model_ids) > 1:
+                            self._direct_model_conflict = True
+                    if (
+                        self._requested_provider
+                        and not router_gateways.model_provider_matches(
+                            model, self._requested_provider
+                        )
+                    ):
                         self._direct_model_conflict = True
+                self._served_model = model
+            provider = _identifier(metric_obj.get("provider"))
+            if provider is not None:
                 if (
-                    self._requested_provider
-                    and not router_gateways.model_provider_matches(
-                        model, self._requested_provider
-                    )
+                    self._route_kind == "direct"
+                    and self._requested_provider
+                    and provider.casefold() != self._requested_provider.casefold()
                 ):
-                    self._direct_model_conflict = True
-            self._served_model = model
-        provider = _identifier(obj.get("provider"))
-        if provider is not None:
-            if (
-                self._route_kind == "direct"
-                and self._requested_provider
-                and provider.casefold() != self._requested_provider.casefold()
-            ):
-                self._direct_provider_conflict = True
-            self._top_level_provider = provider
+                    self._direct_provider_conflict = True
+                self._top_level_provider = provider
 
-        usage = obj.get("usage")
-        if isinstance(usage, dict):
-            prompt = _token_count(usage.get("prompt_tokens"))
-            completion = _token_count(usage.get("completion_tokens"))
-            if prompt is None:
-                prompt = _token_count(usage.get("input_tokens"))
-            if completion is None:
-                completion = _token_count(usage.get("output_tokens"))
-            total = _token_count(usage.get("total_tokens"))
-            clean = {}
-            if prompt is not None:
-                clean["input_tokens"] = prompt
-            if completion is not None:
-                clean["output_tokens"] = completion
-            if total is not None:
-                clean["total_tokens"] = total
-            if clean:
-                self._usage = clean
+            usage = metric_obj.get("usage")
+            if isinstance(usage, dict):
+                prompt = _token_count(usage.get("prompt_tokens"))
+                completion = _token_count(usage.get("completion_tokens"))
+                if prompt is None:
+                    prompt = _token_count(usage.get("input_tokens"))
+                if completion is None:
+                    completion = _token_count(usage.get("output_tokens"))
+                total = _token_count(usage.get("total_tokens"))
+                clean = {}
+                if prompt is not None:
+                    clean["input_tokens"] = prompt
+                if completion is not None:
+                    clean["output_tokens"] = completion
+                if total is not None:
+                    clean["total_tokens"] = total
+                if clean:
+                    self._usage = clean
+                    usage_observed = True
 
-        semantic = _has_semantic_delta(obj)
+        semantic = self._has_semantic_content(obj)
         if self._first_semantic_at is None and semantic:
             self._first_semantic_at = timestamp
         return (
             semantic
             or gateway_metadata_observed
-            or (self._usage is not None and isinstance(usage, dict))
+            or usage_observed
+            or self._is_terminal_event(obj)
         )
 
     def _resolved_provider(self) -> str | None:
@@ -477,6 +510,34 @@ class OpenAIChatSSEParser:
 ChatSSEMetricsParser = OpenAIChatSSEParser
 
 
+class OpenAIResponsesSSEParser(OpenAIChatSSEParser):
+    """Incrementally derive metrics from an OpenAI Responses SSE body."""
+
+    def _metric_objects(self, obj: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+        response = obj.get("response")
+        if isinstance(response, dict):
+            return obj, response
+        return (obj,)
+
+    def _accept_done_marker(self) -> bool:
+        return False
+
+    def _is_terminal_event(self, obj: dict[str, Any]) -> bool:
+        return obj.get("type") == "response.completed"
+
+    def _has_semantic_content(self, obj: dict[str, Any]) -> bool:
+        return _has_responses_semantic_delta(obj)
+
+
+def sse_parser(protocol: str, **kwargs: Any) -> OpenAIChatSSEParser:
+    """Construct the strict parser for a Router Bench wire protocol."""
+    if protocol == "openai_chat":
+        return OpenAIChatSSEParser(**kwargs)
+    if protocol == "openai_responses":
+        return OpenAIResponsesSSEParser(**kwargs)
+    raise ValueError(f"unsupported router protocol: {protocol}")
+
+
 def parse_chat_sse(
     chunks: Iterable[tuple[float, bytes | str]],
     *,
@@ -495,6 +556,41 @@ def parse_chat_sse(
 ) -> dict[str, Any]:
     """Replay timestamped chunks through :class:`OpenAIChatSSEParser`."""
     parser = OpenAIChatSSEParser(
+        requested_model=requested_model,
+        started_at=started_at,
+        route_kind=route_kind,
+        requested_provider=requested_provider,
+        allowed_models=allowed_models,
+        allowed_providers=allowed_providers,
+        fallback_enabled=fallback_enabled,
+        router_mode=router_mode,
+        model_match=model_match,
+        gateway=gateway,
+        response_headers=response_headers,
+    )
+    for received_at, chunk in chunks:
+        parser.feed(chunk, received_at)
+    return parser.finalize(completed_at)
+
+
+def parse_responses_sse(
+    chunks: Iterable[tuple[float, bytes | str]],
+    *,
+    requested_model: str | None,
+    started_at: float,
+    completed_at: float | None = None,
+    route_kind: str = "gateway",
+    requested_provider: str | None = None,
+    allowed_models: Iterable[str] = (),
+    allowed_providers: Iterable[str] = (),
+    fallback_enabled: bool = False,
+    router_mode: str | None = None,
+    model_match: str = "exact_revision",
+    gateway: str | None = None,
+    response_headers: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Replay timestamped chunks through :class:`OpenAIResponsesSSEParser`."""
+    parser = OpenAIResponsesSSEParser(
         requested_model=requested_model,
         started_at=started_at,
         route_kind=route_kind,

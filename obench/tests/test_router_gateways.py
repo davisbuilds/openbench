@@ -133,6 +133,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
                     route_kind="gateway",
                     gateway="cloudflare",
                     endpoint=endpoint,
+                    protocol="openai_chat",
                     requested_model="openai/gpt-4o-mini",
                     requested_provider="openai",
                     track="gateway_tax",
@@ -145,7 +146,6 @@ class GatewayRequestProfileTests(unittest.TestCase):
             rest_endpoint.replace(
                 "0123456789abcdef0123456789abcdef", "account-id"
             ),
-            rest_endpoint.replace("/chat/completions", "/responses"),
             rest_endpoint + "?gateway=other",
             compat_endpoint.replace("openbench-router-bench", "{gateway_id}"),
             compat_endpoint.replace("/compat/chat/completions", "/openai"),
@@ -160,6 +160,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
                         route_kind="gateway",
                         gateway="cloudflare",
                         endpoint=invalid,
+                        protocol="openai_chat",
                         requested_model="openai/gpt-4o-mini",
                         requested_provider="openai",
                         track="gateway_tax",
@@ -173,6 +174,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
                 route_kind="gateway",
                 gateway="cloudflare",
                 endpoint=rest_endpoint,
+                protocol="openai_chat",
                 requested_model="anthropic/gpt-4o-mini",
                 requested_provider="openai",
                 track="gateway_tax",
@@ -185,10 +187,37 @@ class GatewayRequestProfileTests(unittest.TestCase):
                 route_kind="gateway",
                 gateway="cloudflare",
                 endpoint=rest_endpoint,
+                protocol="openai_chat",
                 requested_model="openai/gpt-4o-mini",
                 requested_provider="openai",
                 track="model_router",
                 router_mode="fixed",
+            )
+
+        responses_endpoint = rest_endpoint.replace(
+            "/chat/completions", "/responses"
+        )
+        router_gateways.validate_arm(
+            route_kind="gateway",
+            gateway="cloudflare",
+            endpoint=responses_endpoint,
+            protocol="openai_responses",
+            requested_model="openai/gpt-4o-mini",
+            requested_provider="openai",
+            track="gateway_tax",
+        )
+        with self.assertRaisesRegex(
+            router_gateways.GatewayProfileError,
+            "cloudflare endpoint must be",
+        ):
+            router_gateways.validate_arm(
+                route_kind="gateway",
+                gateway="cloudflare",
+                endpoint=responses_endpoint,
+                protocol="openai_chat",
+                requested_model="openai/gpt-4o-mini",
+                requested_provider="openai",
+                track="gateway_tax",
             )
 
     def test_cloudflare_overwrites_headers_and_strips_body_controls(self):

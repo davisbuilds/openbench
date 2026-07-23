@@ -16,11 +16,18 @@ CONCENTRATE_UNSUPPORTED = (
     "fallback policy, and cache policy"
 )
 
-_OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
-_VERCEL_ENDPOINT = "https://ai-gateway.vercel.sh/v1/chat/completions"
+_OPENROUTER_ENDPOINTS = {
+    "openai_chat": "https://openrouter.ai/api/v1/chat/completions",
+    "openai_responses": "https://openrouter.ai/api/v1/responses",
+}
+_VERCEL_ENDPOINTS = {
+    "openai_chat": "https://ai-gateway.vercel.sh/v1/chat/completions",
+    "openai_responses": "https://ai-gateway.vercel.sh/v1/responses",
+}
 _CLOUDFLARE_REST_ENDPOINT_RE = re.compile(
     r"https://api\.cloudflare\.com/client/v4/accounts/"
-    r"(?P<account_id>[0-9a-fA-F]{32})/ai/v1/chat/completions"
+    r"(?P<account_id>[0-9a-fA-F]{32})/ai/v1/"
+    r"(?P<operation>chat/completions|responses)"
 )
 _CLOUDFLARE_COMPAT_ENDPOINT_RE = re.compile(
     r"https://gateway\.ai\.cloudflare\.com/v1/"
@@ -110,6 +117,7 @@ def validate_arm(
     route_kind: str,
     gateway: str | None,
     endpoint: str,
+    protocol: str,
     requested_model: str,
     requested_provider: str,
     private_router: bool = False,
@@ -141,26 +149,33 @@ def validate_arm(
 
     if private_router:
         return
-    if gateway == "openrouter" and endpoint != _OPENROUTER_ENDPOINT:
+    if gateway == "openrouter" and endpoint != _OPENROUTER_ENDPOINTS.get(protocol):
         raise GatewayProfileError(
-            f"openrouter endpoint must be {_OPENROUTER_ENDPOINT}"
+            f"openrouter endpoint must be {_OPENROUTER_ENDPOINTS.get(protocol)}"
         )
     if gateway == "vercel":
-        if endpoint != _VERCEL_ENDPOINT:
-            raise GatewayProfileError(f"vercel endpoint must be {_VERCEL_ENDPOINT}")
+        if endpoint != _VERCEL_ENDPOINTS.get(protocol):
+            raise GatewayProfileError(
+                f"vercel endpoint must be {_VERCEL_ENDPOINTS.get(protocol)}"
+            )
         if "/" not in requested_model:
             raise GatewayProfileError(
                 "vercel requested_model must be a provider-qualified model ID"
             )
     if gateway == "cloudflare":
+        rest_match = _CLOUDFLARE_REST_ENDPOINT_RE.fullmatch(endpoint)
+        compat_match = _CLOUDFLARE_COMPAT_ENDPOINT_RE.fullmatch(endpoint)
+        expected_operation = (
+            "responses" if protocol == "openai_responses" else "chat/completions"
+        )
         if (
-            _CLOUDFLARE_REST_ENDPOINT_RE.fullmatch(endpoint) is None
-            and _CLOUDFLARE_COMPAT_ENDPOINT_RE.fullmatch(endpoint) is None
+            (rest_match is None or rest_match.group("operation") != expected_operation)
+            and (compat_match is None or protocol != "openai_chat")
         ):
             raise GatewayProfileError(
                 "cloudflare endpoint must be either "
                 "https://api.cloudflare.com/client/v4/accounts/"
-                "{32-hex-account-id}/ai/v1/chat/completions or "
+                "{32-hex-account-id}/ai/v1/{chat/completions|responses} or "
                 "https://gateway.ai.cloudflare.com/v1/"
                 "{32-hex-account-id}/{gateway-id}/compat/chat/completions; metadata-only "
                 "Logs API verification is required for other Cloudflare routes"
@@ -188,6 +203,11 @@ def _strip_cache_controls(value: Any) -> None:
             _strip_cache_controls(item)
 
 
+def strip_cache_controls(payload: dict[str, Any]) -> None:
+    """Remove cache-affecting fields from any managed route request."""
+    _strip_cache_controls(payload)
+
+
 def shape_body(
     payload: dict[str, Any],
     *,
@@ -200,7 +220,7 @@ def shape_body(
     session_id: str | None = None,
 ) -> None:
     """Replace caller-controlled gateway routing and cache policy in-place."""
-    _strip_cache_controls(payload)
+    strip_cache_controls(payload)
     if gateway == "openrouter":
         if router_mode == "auto":
             for key in (

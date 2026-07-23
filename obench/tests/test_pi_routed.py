@@ -53,7 +53,7 @@ class PiRoutedTests(unittest.TestCase):
     def test_capabilities_are_strict_v2(self):
         self.assertEqual(pi.ADAPTER_API_VERSION, 2)
         self.assertEqual(pi.ROUTED_CAPABILITIES, {
-            "protocols": ["openai_chat"],
+            "protocols": ["openai_chat", "openai_responses"],
             "execution_lanes": ["local", "docker"],
             "streaming": True,
             "dynamic_model_ids": True,
@@ -103,6 +103,41 @@ class PiRoutedTests(unittest.TestCase):
         self.assertIn("contextWindow: 128000, maxTokens: 16384", extension)
         self.assertNotIn("router-secret", extension)
         self.assertNotIn("sk-inherited", extension)
+
+    def test_responses_route_uses_native_pi_responses_provider(self):
+        captured = {}
+
+        def fake_run(cmd, cwd, timeout_s, env):
+            captured["extension"] = Path(cmd[cmd.index("-e") + 1]).read_text()
+            return "", "", 0, False
+
+        responses_plan = plan_dict(
+            endpoint="https://api.openai.com/v1/responses",
+            protocol="openai_responses",
+            route_kind="direct",
+            requested_model="gpt-4o-mini",
+            canonical_model="openai/gpt-4o-mini",
+            requested_provider="openai",
+            allowed_models=["gpt-4o-mini"],
+            allowed_providers=["openai"],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_plan(tmp, responses_plan)
+            env = {
+                "OPENBENCH_PROXY": "1",
+                "OPENBENCH_PROXY_BASE_URL": "http://127.0.0.1:8123",
+                "OPENBENCH_PROXY_CELL_TOKEN": "cell-1",
+                "PATH": os.environ.get("PATH", ""),
+            }
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(pi, "_run_streaming", side_effect=fake_run):
+                result = pi.run_routed("fix it", tmp, path, 17)
+
+        self.assertTrue(result["completed"])
+        extension = captured["extension"]
+        self.assertIn('api: "openai-responses"', extension)
+        self.assertIn('sessionAffinityFormat: "openai-nosession"', extension)
+        self.assertNotIn('maxTokensField: "max_tokens"', extension)
 
     def test_malformed_and_unsupported_plans_fail_before_launch(self):
         with tempfile.TemporaryDirectory() as tmp:

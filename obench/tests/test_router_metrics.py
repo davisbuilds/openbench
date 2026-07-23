@@ -129,6 +129,7 @@ class RouterMetricsTests(unittest.TestCase):
         result = parser.finalize(3.0)
         self.assertEqual(result["timing"]["semantic_ttft_s"], 1.0)
 
+
     def test_comments_role_only_and_empty_events_do_not_count_as_ttft(self):
         result = self.parse([(11.0, (
             b": comment\n\n"
@@ -386,6 +387,120 @@ class RouterMetricsTests(unittest.TestCase):
         parser.feed(b"data: ", 6.0)
         with self.assertRaises(TypeError):
             parser.feed("{}\n\n", 6.5)
+
+
+class ResponsesRouterMetricsTests(unittest.TestCase):
+    def test_nested_response_model_usage_and_terminal_event_pass(self):
+        secret = "RESPONSES_OUTPUT_MUST_NOT_SURVIVE"
+        payload = sse(
+            {
+                "type": "response.created",
+                "response": {"model": "gpt-4o-mini-2024-07-18"},
+            },
+            {"type": "response.output_text.delta", "delta": secret},
+            {
+                "type": "response.completed",
+                "response": {
+                    "model": "gpt-4o-mini-2024-07-18",
+                    "usage": {
+                        "input_tokens": 13,
+                        "output_tokens": 3,
+                        "total_tokens": 16,
+                    },
+                },
+            },
+        )
+        result = router_metrics.parse_responses_sse(
+            [(10.5, payload)],
+            requested_model="gpt-4o-mini",
+            started_at=10.0,
+            completed_at=11.0,
+            route_kind="direct",
+            requested_provider="openai",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+        self.assertEqual(result["route"]["served_model"], "gpt-4o-mini-2024-07-18")
+        self.assertEqual(result["usage"], {
+            "input_tokens": 13,
+            "output_tokens": 3,
+            "total_tokens": 16,
+        })
+        self.assertEqual(result["timing"]["semantic_ttft_s"], 0.5)
+        self.assertTrue(result["stream"]["done"])
+        self.assertTrue(result["route_evidence"]["pass"])
+        self.assertNotIn(secret, json.dumps(result))
+
+    def test_incomplete_responses_stream_fails_closed(self):
+        result = router_metrics.parse_responses_sse(
+            [(1.0, sse({
+                "type": "response.output_text.delta",
+                "delta": "partial",
+            }))],
+            requested_model="gpt-4o-mini",
+            started_at=0.0,
+            completed_at=2.0,
+            route_kind="direct",
+            requested_provider="openai",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("stream_not_done", result["route_evidence"]["reasons"])
+        self.assertIn("missing_served_model", result["route_evidence"]["reasons"])
+
+    def test_done_sentinel_does_not_replace_response_completed(self):
+        result = router_metrics.parse_responses_sse(
+            [(1.0, sse(
+                {
+                    "type": "response.created",
+                    "response": {"model": "gpt-4o-mini-2024-07-18"},
+                },
+                "[DONE]",
+            ))],
+            requested_model="gpt-4o-mini",
+            started_at=0.0,
+            completed_at=2.0,
+            route_kind="direct",
+            requested_provider="openai",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+        self.assertFalse(result["stream"]["done"])
+        self.assertIn("stream_not_done", result["route_evidence"]["reasons"])
+
+    def test_cloudflare_responses_derives_locked_provider(self):
+        result = router_metrics.parse_responses_sse(
+            [(1.0, sse(
+                {
+                    "type": "response.created",
+                    "response": {"model": "gpt-4o-mini-2024-07-18"},
+                },
+                {"type": "response.output_text.delta", "delta": "ok"},
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "model": "gpt-4o-mini-2024-07-18",
+                        "usage": {"input_tokens": 5, "output_tokens": 1},
+                    },
+                },
+            ))],
+            requested_model="openai/gpt-4o-mini",
+            started_at=0.0,
+            completed_at=2.0,
+            route_kind="gateway",
+            requested_provider="openai",
+            allowed_models=("openai/gpt-4o-mini",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+            gateway="cloudflare",
+        )
+        self.assertEqual(result["route"]["provider"], "openai")
+        self.assertEqual(result["route"]["served_model"], "gpt-4o-mini-2024-07-18")
+        self.assertTrue(result["route_evidence"]["pass"])
 
 
 if __name__ == "__main__":

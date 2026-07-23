@@ -25,7 +25,11 @@ SCHEMA_VERSION = 1
 TRACKS = frozenset({"gateway_tax", "model_router"})
 MODEL_MATCHES = frozenset({"exact_revision", "model_family", "rolling_alias"})
 HARNESS = "pi"
-PROTOCOL = "openai_chat"
+PROTOCOLS = frozenset({"openai_chat", "openai_responses"})
+PROTOCOL_ENDPOINT_SUFFIXES = {
+    "openai_chat": "/chat/completions",
+    "openai_responses": "/responses",
+}
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _TASK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./@:-]*$")
@@ -522,8 +526,20 @@ def _parse_arm(
     if route_kind not in {"direct", "gateway"}:
         raise RouterSpecError(f"{path}.route_kind must be 'direct' or 'gateway'")
     protocol = _string(_required(table, "protocol", path), f"{path}.protocol")
-    if protocol != PROTOCOL:
-        raise RouterSpecError(f"{path}.protocol must be {PROTOCOL!r} for the MVP")
+    if protocol not in PROTOCOLS:
+        raise RouterSpecError(
+            f"{path}.protocol must be one of: {', '.join(sorted(PROTOCOLS))}"
+        )
+    endpoint = _validate_endpoint(
+        _required(table, "endpoint", path),
+        f"{path}.endpoint",
+        private_router,
+        private_hosts,
+        private_cidrs,
+    )
+    suffix = PROTOCOL_ENDPOINT_SUFFIXES[protocol]
+    if not urllib.parse.urlsplit(endpoint).path.rstrip("/").endswith(suffix):
+        raise RouterSpecError(f"{path}.endpoint path must end with {suffix}")
     direct_control = table.get("direct_control_arm_id")
     if direct_control is not None:
         direct_control = _string(direct_control, f"{path}.direct_control_arm_id", _ID_RE)
@@ -544,9 +560,7 @@ def _parse_arm(
     arm = Arm(
         arm_id=_string(_required(table, "arm_id", path), f"{path}.arm_id", _ID_RE),
         route_kind=route_kind,
-        endpoint=_validate_endpoint(_required(table, "endpoint", path),
-                                    f"{path}.endpoint", private_router,
-                                    private_hosts, private_cidrs),
+        endpoint=endpoint,
         protocol=protocol,
         baseline=_boolean(_required(table, "baseline", path), f"{path}.baseline"),
         canonical_model=_string(_required(table, "canonical_model", path),
@@ -596,6 +610,7 @@ def _parse_arm(
             route_kind=arm.route_kind,
             gateway=arm.gateway,
             endpoint=arm.endpoint,
+            protocol=arm.protocol,
             requested_model=arm.requested_model,
             requested_provider=arm.requested_provider,
             private_router=private_router,
@@ -797,6 +812,8 @@ def parse_experiment(data: Mapping[str, Any]) -> RouterExperiment:
     if track == "gateway_tax":
         _validate_gateway_controls(arms)
     else:
+        if any(arm.protocol != "openai_chat" for arm in arms):
+            raise RouterSpecError("model_router supports only protocol='openai_chat'")
         _validate_model_router_controls(arms)
     lane = _string(_required(table, "execution_lane", "experiment"), "execution_lane")
     if lane not in {"local", "docker"}:

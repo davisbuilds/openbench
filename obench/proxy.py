@@ -28,7 +28,7 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 
 from obench import router_gateways
-from obench.router_metrics import OpenAIChatSSEParser
+from obench.router_metrics import sse_parser
 from obench.router_spec import RoutePlan, SecretPlan
 
 HOP_BY_HOP = {
@@ -414,7 +414,8 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             header_map = {k.lower(): v for k, v in resp_headers}
             if (route.router is not None
                     and "text/event-stream" in header_map.get("content-type", "").lower()):
-                router_parser = OpenAIChatSSEParser(
+                router_parser = sse_parser(
+                    route.router.plan.protocol,
                     requested_model=route.router.plan.requested_model,
                     started_at=started_monotonic,
                     route_kind=route.router.plan.route_kind,
@@ -677,8 +678,12 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         payload.update({
             "temperature": plan.sampling.temperature,
             "top_p": plan.sampling.top_p,
-            "seed": plan.sampling.seed,
         })
+        if plan.protocol == "openai_chat":
+            payload["seed"] = plan.sampling.seed
+        else:
+            payload.pop("seed", None)
+        router_gateways.strip_cache_controls(payload)
         if plan.route_kind == "gateway":
             if plan.gateway is None:
                 raise RuntimeError("gateway route plan is missing gateway profile")
@@ -777,8 +782,8 @@ class CountingProxyServer(ThreadingHTTPServer):
             raise TypeError("plan must be a RoutePlan")
         if not isinstance(secrets_plan, SecretPlan):
             raise TypeError("secrets_plan must be a SecretPlan")
-        if plan.protocol != "openai_chat":
-            raise ValueError("router route protocol must be openai_chat")
+        if plan.protocol not in {"openai_chat", "openai_responses"}:
+            raise ValueError("unsupported router route protocol")
         if plan.route_kind not in {"direct", "gateway"}:
             raise ValueError("router route kind must be direct or gateway")
         if (
@@ -806,6 +811,7 @@ class CountingProxyServer(ThreadingHTTPServer):
                 route_kind=plan.route_kind,
                 gateway=plan.gateway,
                 endpoint=plan.endpoint,
+                protocol=plan.protocol,
                 requested_model=plan.requested_model,
                 requested_provider=plan.requested_provider,
                 private_router=plan.private_router,

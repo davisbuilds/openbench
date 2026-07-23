@@ -45,7 +45,7 @@ except ImportError:  # file-path / Docker mount layout
 NAME = "pi"
 ADAPTER_API_VERSION = 2
 ROUTED_CAPABILITIES = {
-    "protocols": ["openai_chat"],
+    "protocols": ["openai_chat", "openai_responses"],
     "execution_lanes": ["local", "docker"],
     "streaming": True,
     "dynamic_model_ids": True,
@@ -399,8 +399,11 @@ def _load_route_plan(route_plan_path):
     if schema_version != _router_spec.SCHEMA_VERSION:
         _route_error(f"schema_version must be {_router_spec.SCHEMA_VERSION}")
     protocol = _route_string(data["protocol"], "protocol")
-    if protocol != "openai_chat":
-        _route_error("protocol must be 'openai_chat'")
+    if protocol not in _router_spec.PROTOCOLS:
+        _route_error(
+            "protocol must be one of: "
+            + ", ".join(sorted(_router_spec.PROTOCOLS))
+        )
     route_kind = _route_string(data["route_kind"], "route_kind")
     if route_kind not in {"direct", "gateway"}:
         _route_error("route_kind must be 'direct' or 'gateway'")
@@ -456,8 +459,9 @@ def _load_route_plan(route_plan_path):
             data["endpoint"], "endpoint", private_router, hosts, cidrs)
     except _router_spec.RouterSpecError as exc:
         _route_error(str(exc))
-    if not urlsplit(endpoint).path.rstrip("/").endswith("/chat/completions"):
-        _route_error("endpoint path must end with /chat/completions")
+    suffix = _router_spec.PROTOCOL_ENDPOINT_SUFFIXES[protocol]
+    if not urlsplit(endpoint).path.rstrip("/").endswith(suffix):
+        _route_error(f"endpoint path must end with {suffix}")
 
     return _router_spec.RoutePlan(
         schema_version=schema_version,
@@ -502,21 +506,33 @@ def _routed_proxy_url(plan):
 
 
 def _routed_provider_ext(plan, proxy_url):
+    api = (
+        "openai-responses"
+        if plan.protocol == "openai_responses"
+        else "openai-completions"
+    )
+    compat = (
+        "supportsDeveloperRole: true, "
+        'sessionAffinityFormat: "openai-nosession", '
+        "supportsLongCacheRetention: false, supportsToolSearch: false"
+        if plan.protocol == "openai_responses"
+        else (
+            "supportsStore: false, supportsDeveloperRole: false, "
+            'supportsUsageInStreaming: true, maxTokensField: "max_tokens"'
+        )
+    )
     return (
         "export default function (pi) {\n"
         f"  pi.registerProvider({json.dumps(_ROUTED_PROVIDER)}, {{\n"
         '    name: "OpenBench routed proxy",\n'
         f"    baseUrl: {json.dumps(proxy_url)},\n"
         f"    apiKey: {json.dumps(_SYNTHETIC_API_KEY)},\n"
-        '    api: "openai-completions",\n'
+        f"    api: {json.dumps(api)},\n"
         "    models: [{\n"
         f"      id: {json.dumps(plan.requested_model)},\n"
         f"      name: {json.dumps(plan.requested_model)},\n"
         '      reasoning: false, input: ["text"],\n'
-        "      compat: {\n"
-        "        supportsStore: false, supportsDeveloperRole: false,\n"
-        "        supportsUsageInStreaming: true, maxTokensField: \"max_tokens\"\n"
-        "      },\n"
+        f"      compat: {{ {compat} }},\n"
         "      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },\n"
         "      contextWindow: 128000, maxTokens: 16384\n"
         "    }]\n"

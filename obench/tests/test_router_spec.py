@@ -282,6 +282,33 @@ class RouterExperimentTests(unittest.TestCase):
                 with self.assertRaisesRegex(RouterSpecError, message):
                     parse_experiment_toml(text)
 
+    def test_model_router_rejects_responses_and_mixed_protocols(self):
+        responses = model_router_manifest().replace(
+            "/chat/completions", "/responses"
+        ).replace(
+            'protocol = "openai_chat"', 'protocol = "openai_responses"'
+        )
+        with self.assertRaisesRegex(
+            RouterSpecError,
+            "model_router supports only protocol='openai_chat'",
+        ):
+            parse_experiment_toml(responses)
+
+        mixed = responses.replace(
+            "https://openrouter.ai/api/v1/responses",
+            "https://openrouter.ai/api/v1/chat/completions",
+            1,
+        ).replace(
+            'protocol = "openai_responses"',
+            'protocol = "openai_chat"',
+            1,
+        )
+        with self.assertRaisesRegex(
+            RouterSpecError,
+            "model_router supports only protocol='openai_chat'",
+        ):
+            parse_experiment_toml(mixed)
+
     def test_load_file_matches_text_and_digest_ignores_toml_formatting(self):
         text = manifest()
         with tempfile.TemporaryDirectory() as tmp:
@@ -488,6 +515,28 @@ class RouterExperimentTests(unittest.TestCase):
                     'direct_control_arm_id = "direct-openai"'
                 ),
             ))
+
+    def test_responses_protocol_requires_responses_endpoints(self):
+        responses = manifest().replace(
+            "/chat/completions", "/responses"
+        ).replace(
+            'protocol = "openai_chat"', 'protocol = "openai_responses"'
+        )
+        parsed = parse_experiment_toml(responses)
+        self.assertEqual(
+            {arm.protocol for arm in parsed.arms},
+            {"openai_responses"},
+        )
+        with self.assertRaisesRegex(
+            RouterSpecError,
+            "endpoint path must end with /responses",
+        ):
+            parse_experiment_toml(
+                responses.replace(
+                    "https://api.openai.com/v1/responses",
+                    "https://api.openai.com/v1/chat/completions",
+                )
+            )
 
     def test_private_literal_endpoint_must_match_declared_allowlist(self):
         private = manifest().replace(

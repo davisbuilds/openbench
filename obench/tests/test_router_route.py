@@ -118,6 +118,7 @@ def route_plan(
     arm_id,
     arm_digest,
     gateway=None,
+    protocol="openai_chat",
 ):
     return router_spec.RoutePlan(
         schema_version=1,
@@ -126,7 +127,7 @@ def route_plan(
         arm_id=arm_id,
         route_kind=route_kind,
         endpoint=endpoint,
-        protocol="openai_chat",
+        protocol=protocol,
         canonical_model="openai/gpt-route-test",
         requested_model="gpt-route-test",
         requested_provider="openai",
@@ -169,6 +170,40 @@ class RouterRouteTests(unittest.TestCase):
         self.upstream.shutdown()
         self.upstream.server_close()
         self.tmp.cleanup()
+
+    def test_responses_route_removes_unsupported_seed(self):
+        plan = route_plan(
+            endpoint=self.upstream_base + "/responses",
+            route_kind="direct",
+            arm_id="direct-responses",
+            arm_digest="d" * 64,
+            protocol="openai_responses",
+        )
+        token = "responses-cell"
+        self.server.register_cell(token)
+        self.server.register_route(token, plan, secret_plan(plan.arm_id))
+
+        status, _ = self._post(
+            token,
+            plan.arm_digest,
+            body={
+                "model": "attacker-model",
+                "input": "private",
+                "temperature": 0.8,
+                "top_p": 0.1,
+                "seed": 99,
+                "prompt_cache_key": "client-cache",
+            },
+        )
+        self.assertEqual(status, 200)
+        request = self.upstream.requests[-1]
+        self.assertEqual(request["path"], "/responses")
+        self.assertEqual(request["body"]["model"], plan.requested_model)
+        self.assertEqual(request["body"]["temperature"], 0.0)
+        self.assertEqual(request["body"]["top_p"], 1.0)
+        self.assertNotIn("seed", request["body"])
+        self.assertNotIn("prompt_cache_key", request["body"])
+        self.server.seal_cell(token)
 
     def _register(
         self,

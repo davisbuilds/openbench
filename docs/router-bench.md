@@ -16,9 +16,10 @@ tax result measures a serving path around a fixed model; a model-router result
 measures a policy that may choose different models and fall back within a
 declared pool.
 
-Both tracks currently use Pi and the OpenAI Chat Completions streaming protocol.
-The local execution lane is exploratory because it does not enforce outbound
-network isolation.
+Both tracks use Pi. Gateway Tax supports separate `openai_chat` and
+`openai_responses` experiments; Auto Router Bench remains on `openai_chat`.
+Never pool rows across protocols. The local execution lane is exploratory
+because it does not enforce outbound network isolation.
 
 ## Fixed Gateway Tax
 
@@ -108,6 +109,41 @@ Authenticated Gateway was enabled. Streaming returned
 completed one valid direct-versus-Cloudflare block with four model calls per
 arm. This is integration proof, not a statistically meaningful performance
 result.
+
+### Responses API lane
+
+[`router-bench-responses.toml`](../obench/examples/router-bench-responses.toml)
+is a separate Pi-based Gateway Tax experiment comparing native OpenAI Responses
+against Cloudflare's documented
+`POST /client/v4/accounts/{account_id}/ai/v1/responses` route. Pi selects its
+native `openai-responses` provider implementation, so no protocol translation
+or harness switch is involved.
+
+The proxy recognizes Responses SSE event types, measures semantic TTFT from
+output-text, refusal, or function-call argument deltas, and extracts served
+model and token usage from the nested final `response.completed` object. A
+missing completed event, model, usage, or Cloudflare provider lock fails closed
+under the same sealed-ledger rules as Chat.
+
+Responses supports the matched `temperature` and `top_p` controls used here but
+does not accept Chat Completions' `seed` field. OpenBench strips `seed` from
+Responses requests; the schema value remains part of experiment identity but
+must not be interpreted as deterministic sampling. Cache fields are removed
+from both direct and gateway requests, Cloudflare receives
+`cf-aig-skip-cache: true` and `cf-aig-max-attempts: 1`, and client retries remain
+zero.
+
+Validate and run it independently:
+
+```bash
+python3 -m obench.cli router validate \
+  obench/examples/router-bench-responses.toml --tasks-dir tasks
+
+python3 -m obench.cli router run \
+  obench/examples/router-bench-responses.toml \
+  --tasks-dir tasks \
+  --results results/router-gpt-4o-mini-responses.jsonl
+```
 
 Vercel supports routing one requested model across providers, provider filters,
 fallbacks, and explicit model rewrite rules. Its documented cost-aware model
