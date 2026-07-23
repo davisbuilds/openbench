@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""Contract tests for protocol-aware, privacy-safe router metrics."""
+
+import json
+import unittest
+
+from obench import router_metrics
+
+
+def sse(*objects, newline="\n"):
+    events = []
+    for obj in objects:
+        data = obj if isinstance(obj, str) else json.dumps(obj, separators=(",", ":"))
+        events.append(f"data: {data}{newline}{newline}")
+    return "".join(events).encode()
+
+
+class RouterMetricsTests(unittest.TestCase):
+    def setUp(self):
+        self.secret = "RAW_GENERATED_CONTENT_MUST_NOT_SURVIVE"
+        self.role = {
+            "model": "openai/gpt-4o-mini",
+            "provider": "OpenAI",
+            "choices": [{"delta": {"role": "assistant", "content": ""}}],
+        }
+        self.token = {
+            "model": "openai/gpt-4o-mini",
+            "provider": "OpenAI",
+            "choices": [{"delta": {"content": self.secret}}],
+        }
+        self.final = {
+            "model": "openai/gpt-4o-mini",
+            "choices": [{"delta": {}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 11, "completion_tokens": 4, "total_tokens": 15},
+            "openrouter_metadata": {
+                "requested": "openai/gpt-4o-mini",
+                "attempt": 2,
+                "endpoints": {"available": [
+                    {"provider": "Other", "model": "openai/gpt-4o-mini", "selected": False},
+                    {"provider": "OpenAI", "model": "openai/gpt-4o-mini", "selected": True},
+                ]},
+                "attempts": [
+                    {"provider": "Other", "model": "openai/gpt-4o-mini", "status": 503,
+                     "private_detail": self.secret},
+                    {"provider": "OpenAI", "model": "openai/gpt-4o-mini", "status": 200},
+                ],
+                "summary": self.secret,
+            },
+        }
+
+    def payload(self, newline="\n"):
+        prefix = f": keepalive{newline}{newline}event: ping{newline}{newline}"
+        empty = {"choices": [{"delta": {"content": ""}}]}
+        return prefix.encode() + sse(self.role, empty, self.token, self.final, "[DONE]", newline=newline)
+
+    def parse(self, chunks, completed_at=16.0):
+        return router_metrics.parse_chat_sse(
+            chunks,
+            requested_model="openai/gpt-4o-mini",
+            started_at=10.0,
+            completed_at=completed_at,
+        )
+
+    def test_fragmented_and_coalesced_frames_have_identical_evidence(self):
+        payload = self.payload()
+        expected = self.parse([(12.0, payload)])
+        for split in range(len(payload) + 1):
+            with self.subTest(split=split):
+                actual = self.parse([(12.0, payload[:split]), (12.0, payload[split:])])
+                self.assertEqual(actual, expected)
+        bytewise = self.parse([(12.0, payload[index:index + 1]) for index in range(len(payload))])
+        self.assertEqual(bytewise, expected)
+
+    def test_crlf_delimiters_can_split_between_cr_and_lf(self):
+        payload = self.payload(newline="\r\n")
+        parser = router_metrics.OpenAIChatSSEParser(
+            requested_model="openai/gpt-4o-mini", started_at=10.0
+        )
+        for index, byte in enumerate(payload):
+            parser.feed(bytes([byte]), 11.0 + index / 1000)
+        result = parser.finalize(14.0)
+        self.assertTrue(result["stream"]["done"])
+        self.assertEqual(result["usage"]["output_tokens"], 4)
+        self.assertTrue(result["route_evidence"]["pass"])
+
+    def test_ttfb_and_semantic_ttft_use_observation_timestamps(self):
+        parser = router_metrics.ChatSSEMetricsParser(
+            requested_model="openai/gpt-4o-mini", started_at=100.0
+        )
+        parser.feed(b": comment\n\n", 100.25)
+        parser.feed(sse(self.role), 100.5)
+        parser.feed(sse(self.token), 101.75)
+        parser.feed(sse(self.final, "[DONE]"), 103.0)
+        result = parser.finalize(104.0)
+        self.assertEqual(result["timing"], {
+            "ttfb_s": 0.25,
+            "semantic_ttft_s": 1.75,
+            "total_s": 4.0,
+        })
+        self.assertEqual(result["generation"], {
+            "output_tokens": 4,
+            "duration_s": 2.25,
+            "tokens_per_second": 4 / 2.25,
+        })
+
+    def test_ttft_uses_data_timestamp_not_later_event_delimiter(self):
+        event = sse(self.token)
+        delimiter = event[-1:]
+        parser = router_metrics.OpenAIChatSSEParser(
+            requested_model="openai/gpt-4o-mini", started_at=10.0
+        )
+        parser.feed(event[:-1], 11.25)
+        parser.feed(delimiter, 14.0)
+        parser.feed(sse(self.final, "[DONE]"), 15.0)
+        result = parser.finalize(16.0)
+        self.assertEqual(result["timing"]["semantic_ttft_s"], 1.25)
+        self.assertEqual(result["generation"]["duration_s"], 4.75)
+
+    def test_zero_timestamp_is_not_replaced_by_delimiter_timestamp(self):
+        event = sse(self.token)
+        parser = router_metrics.OpenAIChatSSEParser(
+            requested_model="openai/gpt-4o-mini", started_at=-1.0
+        )
+        parser.feed(event[:-1], 0.0)
+        parser.feed(event[-1:], 2.0)
+        result = parser.finalize(3.0)
+        self.assertEqual(result["timing"]["semantic_ttft_s"], 1.0)
+
+    def test_comments_role_only_and_empty_events_do_not_count_as_ttft(self):
+        result = self.parse([(11.0, (
+            b": comment\n\n"
+            + sse(self.role)
+            + b"data:\n\n"
+            + sse({"choices": [{"delta": {"content": []}}]}, "[DONE]")
+        ))])
+        self.assertIsNone(result["timing"]["semantic_ttft_s"])
+        self.assertFalse(result["coverage"]["semantic_ttft"])
+        self.assertGreaterEqual(result["stream"]["ignored_events"], 2)
+
+    def test_tool_call_function_delta_establishes_semantic_ttft(self):
+        tool_call = {
+            "choices": [{"delta": {"tool_calls": [{
+                "index": 0,
+                "function": {"name": "lookup", "arguments": ""},
+            }]}}],
+        }
+        result = self.parse([(11.5, sse(self.role, tool_call, "[DONE]"))])
+        self.assertEqual(result["timing"]["semantic_ttft_s"], 1.5)
+        self.assertTrue(result["coverage"]["semantic_ttft"])
+
+    def test_usage_is_paired_with_generation_duration(self):
+        result = self.parse([
+            (10.2, sse(self.token)),
+            (12.2, sse(self.final, "[DONE]")),
+        ], completed_at=13.2)
+        self.assertEqual(result["usage"], {
+            "input_tokens": 11,
+            "output_tokens": 4,
+            "total_tokens": 15,
+        })
+        self.assertEqual(result["generation"]["output_tokens"], 4)
+        self.assertEqual(result["generation"]["duration_s"], 3.0)
+        self.assertEqual(result["generation"]["tokens_per_second"], 4 / 3)
+
+    def test_route_evidence_extracts_provider_attempts_and_passes(self):
+        result = self.parse([(11.0, self.payload())])
+        self.assertEqual(result["route"], {
+            "requested_model": "openai/gpt-4o-mini",
+            "metadata_requested_model": "openai/gpt-4o-mini",
+            "served_model": "openai/gpt-4o-mini",
+            "provider": "OpenAI",
+            "attempts": [
+                {"provider": "Other", "model": "openai/gpt-4o-mini", "status": 503},
+                {"provider": "OpenAI", "model": "openai/gpt-4o-mini", "status": 200},
+            ],
+        })
+        self.assertEqual(result["route_evidence"], {"pass": True, "verdict": "pass", "reasons": []})
+        self.assertEqual(result["coverage"]["covered"], result["coverage"]["total"])
+
+    def test_route_evidence_fails_closed_when_metadata_is_missing(self):
+        payload = sse(self.token, {
+            "model": "openai/gpt-4o-mini",
+            "choices": [{"delta": {}}],
+            "usage": {"completion_tokens": 1},
+        }, "[DONE]")
+        result = self.parse([(11.0, payload)])
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertEqual(result["route_evidence"]["verdict"], "fail")
+        self.assertIn("missing_openrouter_metadata", result["route_evidence"]["reasons"])
+        self.assertIn("missing_metadata_requested_model", result["route_evidence"]["reasons"])
+        self.assertIn("missing_attempts", result["route_evidence"]["reasons"])
+
+    def test_route_evidence_fails_closed_on_conflicting_attempt(self):
+        final = dict(self.final)
+        final["openrouter_metadata"] = dict(self.final["openrouter_metadata"])
+        final["openrouter_metadata"]["attempts"] = [
+            {"provider": "Different", "model": "other/model", "status": 200}
+        ]
+        result = self.parse([(11.0, sse(self.token, final, "[DONE]"))])
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("provider_conflict", result["route_evidence"]["reasons"])
+        self.assertIn("served_model_conflict", result["route_evidence"]["reasons"])
+
+    def test_malformed_event_does_not_poison_later_events(self):
+        payload = b"data: {not-json}\n\n" + self.payload()
+        result = self.parse([(11.0, payload)])
+        self.assertEqual(result["stream"]["malformed_events"], 1)
+        self.assertEqual(result["usage"]["output_tokens"], 4)
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("malformed_events", result["route_evidence"]["reasons"])
+
+    def test_route_evidence_requires_done_marker(self):
+        result = self.parse([(11.0, sse(self.token, self.final))])
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("stream_not_done", result["route_evidence"]["reasons"])
+
+    def test_no_raw_prompt_or_output_content_is_retained(self):
+        parser = router_metrics.OpenAIChatSSEParser(
+            requested_model="openai/gpt-4o-mini", started_at=10.0
+        )
+        parser.feed(self.payload(), 11.0)
+        result = parser.finalize(12.0)
+        self.assertNotIn(self.secret, json.dumps(result, sort_keys=True))
+        self.assertNotIn(self.secret, repr(vars(parser)))
+        self.assertNotIn("summary", json.dumps(result, sort_keys=True))
+        self.assertNotIn("private_detail", json.dumps(result, sort_keys=True))
+
+    def test_finalize_purges_truncated_raw_event_content(self):
+        parser = router_metrics.OpenAIChatSSEParser(
+            requested_model="openai/gpt-4o-mini", started_at=10.0
+        )
+        parser.feed(("data: " + json.dumps(self.token)).encode(), 11.0)
+        result = parser.finalize(12.0)
+        self.assertEqual(result["stream"]["malformed_events"], 1)
+        self.assertNotIn(self.secret, repr(vars(parser)))
+        self.assertFalse(result["route_evidence"]["pass"])
+
+    def test_rejects_non_monotonic_timestamps_and_feed_after_finalize(self):
+        parser = router_metrics.OpenAIChatSSEParser(requested_model="model", started_at=5.0)
+        parser.feed(b"data: ", 6.0)
+        parser.feed(b"", 6.5)
+        with self.assertRaises(ValueError):
+            parser.feed(b"{}\n\n", 6.25)
+        parser.finalize(7.0)
+        with self.assertRaises(RuntimeError):
+            parser.feed(b"", 7.0)
+
+    def test_rejects_mixed_bytes_and_text_chunks(self):
+        parser = router_metrics.OpenAIChatSSEParser(requested_model="model", started_at=5.0)
+        parser.feed(b"data: ", 6.0)
+        with self.assertRaises(TypeError):
+            parser.feed("{}\n\n", 6.5)
+
+
+if __name__ == "__main__":
+    unittest.main()
