@@ -22,13 +22,36 @@ and the OpenAI Chat Completions streaming protocol.
 | Model Router | How well does a router choose among models? | Deferred; not implemented |
 
 Gateway Tax uses one baseline `direct` arm and one or more `gateway` arms. Every
-gateway arm names its `direct_control_arm_id`. The schema requires each pair to
+gateway arm names its `gateway` profile and `direct_control_arm_id`; direct arms
+must not declare `gateway`. The schema requires each pair to
 use the same canonical model revision, requested provider, provider allowlist,
 protocol, and sampling. Each arm has its own endpoint-specific `requested_model`
 wire ID and model allowlist. Fallbacks, gateway retries, and caching must all be
 disabled. This
 design measures the gateway path itself, rather than a gateway's model choice,
 fallback policy, cache hit rate, or retry policy.
+
+## Gateway profiles
+
+Gateway arms must select one of these strict managed profiles:
+
+| `gateway` | Endpoint and auth | Forced request controls | Required route evidence |
+|---|---|---|---|
+| `openrouter` | `https://openrouter.ai/api/v1/chat/completions`; Bearer token from `auth_env` | `provider.only`, `allow_fallbacks=false`, metadata enabled, cache disabled | OpenRouter requested/served model, selected provider, and strict attempt parsing when attempts are present |
+| `vercel` | `https://ai-gateway.vercel.sh/v1/chat/completions`; Bearer token from `auth_env` (normally `AI_GATEWAY_API_KEY`) | provider-qualified model ID and only `providerOptions.gateway.only`; model fallbacks, order, sort, caching, and cache markers are removed | `finalProvider`, `resolvedProviderApiModelId`, single-attempt counts, and `modelAttempts.providerAttempts` |
+| `cloudflare` | `https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1/chat/completions`; Bearer token from configurable `auth_env` | required nonsecret `gateway_id`, `cf-aig-skip-cache:true`, `cf-aig-max-attempts:1`, metadata-only logging, and an explicit provider/model wire ID | response-header provider and model; step, cache status, and privacy-safe log ID are captured when present |
+
+Vercel evidence also retains privacy-safe `generationId`, `cost`, and
+`marketCost` values when returned. This implementation does not make a paid
+post-run generation lookup. Cloudflare does not call the Logs API; the response
+must prove the provider and served model on its own. A requested Cloudflare
+alias may resolve to a different exact revision only when that served revision
+is declared in `allowed_models`. Missing or contradictory provider, model, or
+attempt evidence fails route integrity closed.
+
+`gateway = "concentrate"` is admission-blocked. Concentrate's current Chat
+Completions contract cannot disable or prove fallback, retries, and caching, so
+it cannot support strict Gateway Tax without weakening route integrity.
 
 ## Coding taskset
 
@@ -156,11 +179,12 @@ or pricing evidence does not silently become zero. Cost per solve is withheld
 unless the selected cost basis covers every included call.
 
 The managed proxy fixes the requested model, provider, and sampling on every
-request. For gateway calls it requests OpenRouter route metadata and checks the
-requested model, served model, selected provider, complete stream, and parse
-integrity. When attempt metadata is present, it also rejects unsuccessful or
-fallback attempts. Route failures are recorded as reasons, and the entire
-all-arm block is excluded from matched reporting. Ledgers contain
+request and applies the selected gateway profile's retry, fallback, cache, and
+evidence controls. OpenRouter preserves its existing strict metadata behavior.
+Vercel requires documented routing and attempt metadata. Cloudflare requires
+response-header evidence and never infers a provider from the requested model.
+Route failures are recorded as reasons, and the entire all-arm block is
+excluded from matched reporting. Ledgers contain
 privacy-safe timing, usage, route identifiers, status, and hashes; they do not
 retain prompts, generated text, or credential values.
 
@@ -168,10 +192,11 @@ retain prompts, generated text, or credential values.
 
 At admission, declared key values are loaded into a memory-only secret plan.
 The Pi subprocess receives a sanitized route plan, a synthetic proxy key, and a
-cell-scoped proxy URL, not the OpenAI or OpenRouter key. The proxy authorizes the
-committed arm digest, strips client credential headers and uncontrolled cache
-or routing fields, injects the admitted upstream credential, rejects redirects,
-and forwards the fixed request.
+cell-scoped proxy URL, not the direct or gateway credential. Gateway profile
+controls remain inside the proxy and are bound by the committed arm digest. The
+proxy strips client credential headers and uncontrolled cache or routing
+fields, injects the admitted upstream credential, rejects redirects, and
+forwards the fixed request.
 
 Each cell has an append-only JSONL proxy ledger. Calls are sequence-bound and
 hash-chained; the ledger is drained and terminally sealed before the checker

@@ -48,6 +48,7 @@ seed = 20260722
 [[arms]]
 arm_id = "openrouter-openai"
 route_kind = "gateway"
+gateway = "openrouter"
 endpoint = "https://openrouter.ai/api/v1/chat/completions"
 protocol = "openai_chat"
 baseline = false
