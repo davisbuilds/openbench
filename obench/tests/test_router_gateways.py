@@ -161,6 +161,139 @@ class GatewayEvidenceTests(unittest.TestCase):
             "marketCost": 0.002,
         })
 
+    def test_vercel_live_delta_routing_shape_passes_without_private_metadata(self):
+        result = self.parse(
+            sse(
+                {
+                    "model": "openai/gpt-4o-mini",
+                    "choices": [{
+                        "delta": {
+                            "content": "x",
+                            "provider_metadata": {
+                                "gateway": {
+                                    "routing": {
+                                        "originalModelId": "openai/gpt-4o-mini",
+                                        "resolvedProvider": "openai",
+                                        "finalProvider": "openai",
+                                        "canonicalSlug": "openai/gpt-4o-mini",
+                                        "modelAttemptCount": 1,
+                                        "totalProviderAttemptCount": 1,
+                                        "planningReasoning": "private-plan",
+                                        "modelAttempts": [{
+                                            "canonicalSlug": "openai/gpt-4o-mini",
+                                            "success": True,
+                                            "providerAttempts": [{
+                                                "provider": "openai",
+                                                "credentialType": "private-credential",
+                                                "success": True,
+                                                "statusCode": 200,
+                                                "providerRequestId": "private-request-id",
+                                                "providerResponseId": "private-response-id",
+                                            }],
+                                        }],
+                                    },
+                                    "generationId": "gen_live",
+                                    "cost": 0.001,
+                                    "marketCost": 0.002,
+                                },
+                            },
+                        },
+                    }],
+                    "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+                },
+                "[DONE]",
+            ),
+            gateway="vercel",
+            requested_model="openai/gpt-4o-mini",
+            requested_provider="openai",
+            allowed_models=("openai/gpt-4o-mini",),
+            allowed_providers=("openai",),
+        )
+
+        self.assertTrue(result["route_evidence"]["pass"])
+        self.assertEqual(
+            result["route"],
+            {
+                "requested_model": "openai/gpt-4o-mini",
+                "metadata_requested_model": "openai/gpt-4o-mini",
+                "served_model": "openai/gpt-4o-mini",
+                "provider": "openai",
+                "attempts": [{
+                    "provider": "openai",
+                    "model": "openai/gpt-4o-mini",
+                    "status": 200,
+                }],
+                "gateway_metadata": {
+                    "generationId": "gen_live",
+                    "cost": 0.001,
+                    "marketCost": 0.002,
+                },
+            },
+        )
+        serialized = json.dumps(result, sort_keys=True)
+        for private_value in (
+            "private-plan",
+            "private-credential",
+            "private-request-id",
+            "private-response-id",
+        ):
+            self.assertNotIn(private_value, serialized)
+
+    def test_vercel_live_delta_rejects_wrong_request_and_multiple_attempts(self):
+        result = self.parse(
+            sse(
+                {
+                    "model": "openai/gpt-4o-mini",
+                    "choices": [{
+                        "delta": {
+                            "provider_metadata": {
+                                "gateway": {
+                                    "routing": {
+                                        "originalModelId": "openai/other-model",
+                                        "resolvedProvider": "anthropic",
+                                        "finalProvider": "openai",
+                                        "canonicalSlug": "openai/gpt-4o-mini-revision",
+                                        "modelAttemptCount": 1,
+                                        "totalProviderAttemptCount": 2,
+                                        "modelAttempts": [{
+                                            "canonicalSlug": "openai/gpt-4o-mini-revision",
+                                            "success": True,
+                                            "providerAttempts": [
+                                                {
+                                                    "provider": "openai",
+                                                    "success": True,
+                                                    "statusCode": 200,
+                                                },
+                                                {
+                                                    "provider": "anthropic",
+                                                    "success": True,
+                                                    "statusCode": 200,
+                                                },
+                                            ],
+                                        }],
+                                    },
+                                },
+                            },
+                        },
+                    }],
+                },
+                "[DONE]",
+            ),
+            gateway="vercel",
+            requested_model="openai/gpt-4o-mini",
+            requested_provider="openai",
+            allowed_models=("openai/gpt-4o-mini",),
+            allowed_providers=("openai",),
+        )
+
+        self.assertFalse(result["route_evidence"]["pass"])
+        reasons = result["route_evidence"]["reasons"]
+        self.assertIn("requested_model_conflict", reasons)
+        self.assertIn("provider_conflict", reasons)
+        self.assertIn("multiple_attempts", reasons)
+        self.assertIn("fallback_attempt", reasons)
+        self.assertIn("served_model_not_allowed", reasons)
+
     def test_vercel_fails_closed_on_missing_or_contradictory_attempt_evidence(self):
         base = {
             "finalProvider": "other",

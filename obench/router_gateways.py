@@ -306,12 +306,22 @@ class GatewayEvidence:
 
     @staticmethod
     def _vercel_metadata(obj: Mapping[str, Any]) -> Mapping[str, Any] | None:
-        for key in ("providerMetadata", "provider_metadata"):
-            provider_metadata = obj.get(key)
-            if isinstance(provider_metadata, Mapping):
-                gateway = provider_metadata.get("gateway")
-                if isinstance(gateway, Mapping):
-                    return gateway
+        containers = [obj]
+        choices = obj.get("choices")
+        if isinstance(choices, list):
+            for choice in choices:
+                if not isinstance(choice, Mapping):
+                    continue
+                delta = choice.get("delta")
+                if isinstance(delta, Mapping):
+                    containers.append(delta)
+        for container in containers:
+            for key in ("providerMetadata", "provider_metadata"):
+                provider_metadata = container.get(key)
+                if isinstance(provider_metadata, Mapping):
+                    gateway = provider_metadata.get("gateway")
+                    if isinstance(gateway, Mapping):
+                        return gateway
         gateway = obj.get("gateway")
         return gateway if isinstance(gateway, Mapping) else None
 
@@ -325,13 +335,29 @@ class GatewayEvidence:
         if metadata is None:
             return False
         self.metadata_seen = True
-        self.metadata_requested_model = self.requested_model
-        final_provider = _identifier(metadata.get("finalProvider"))
-        resolved_model = _identifier(metadata.get("resolvedProviderApiModelId"))
+        routing = metadata.get("routing")
+        evidence = routing if isinstance(routing, Mapping) else metadata
+
+        if "originalModelId" in evidence:
+            self.metadata_requested_model = _identifier(
+                evidence.get("originalModelId")
+            )
+        else:
+            self.metadata_requested_model = self.requested_model
+
+        final_provider = _identifier(evidence.get("finalProvider"))
+        resolved_provider = _identifier(evidence.get("resolvedProvider"))
+        if resolved_provider is not None:
+            self._set_provider(resolved_provider)
         if final_provider is not None:
             self._set_provider(final_provider)
-        elif top_provider is not None:
+        elif resolved_provider is None and top_provider is not None:
             self._set_provider(top_provider)
+
+        resolved_model = (
+            _identifier(evidence.get("canonicalSlug"))
+            or _identifier(evidence.get("resolvedProviderApiModelId"))
+        )
         if resolved_model is not None:
             self._set_model(resolved_model)
         elif top_model is not None:
@@ -340,39 +366,56 @@ class GatewayEvidence:
             top_model is not None
             and resolved_model is not None
             and top_model not in {self.requested_model, resolved_model}
-            and top_model not in self.allowed_models
         ):
             self.profile_reasons.append("served_model_conflict")
 
         counts = [
-            _integer(metadata.get(key))
+            _integer(evidence.get(key))
             for key in ("modelAttemptCount", "totalProviderAttemptCount")
-            if key in metadata
+            if key in evidence
         ]
         if not counts:
             self.profile_reasons.append("missing_attempt_count")
         elif any(count != 1 for count in counts):
             self.profile_reasons.append("multiple_attempts")
 
-        model_attempts = metadata.get("modelAttempts")
+        model_attempts = evidence.get("modelAttempts")
         if isinstance(model_attempts, Mapping):
             model_attempts = [model_attempts]
         if not isinstance(model_attempts, list) or not model_attempts:
             self.profile_reasons.append("missing_model_attempts")
             return True
+        if len(model_attempts) != 1:
+            self.profile_reasons.append("multiple_attempts")
         provider_attempts = []
         self.attempts = []
         for model_attempt in model_attempts:
             if not isinstance(model_attempt, Mapping):
                 self.attempts_malformed = True
                 continue
+            model_attempt_model = (
+                _identifier(model_attempt.get("canonicalSlug"))
+                or resolved_model
+            )
+            if (
+                model_attempt_model is not None
+                and resolved_model is not None
+                and model_attempt_model != resolved_model
+            ):
+                self.profile_reasons.append("served_model_conflict")
             raw = model_attempt.get("providerAttempts")
             if not isinstance(raw, list):
                 self.attempts_malformed = True
                 continue
-            provider_attempts.extend(raw)
+            provider_attempts.extend(
+                (attempt, model_attempt_model, model_attempt.get("success"))
+                for attempt in raw
+            )
         self.attempts_present = True
-        for raw in provider_attempts:
+        if len(provider_attempts) != 1:
+            self.profile_reasons.append("multiple_attempts")
+        successful_attempts = 0
+        for raw, model_attempt_model, model_attempt_success in provider_attempts:
             if not isinstance(raw, Mapping):
                 self.attempts_malformed = True
                 continue
@@ -380,11 +423,46 @@ class GatewayEvidence:
             model = (
                 _identifier(raw.get("resolvedProviderApiModelId"))
                 or _identifier(raw.get("providerApiModelId"))
+                or model_attempt_model
                 or resolved_model
             )
             status = _integer(raw.get("statusCode"))
-            if status is None and raw.get("success") is True:
+            provider_attempt_success = raw.get("success")
+            if (
+                provider_attempt_success is not None
+                and not isinstance(provider_attempt_success, bool)
+            ):
+                self.attempts_malformed = True
+            if (
+                model_attempt_success is not None
+                and not isinstance(model_attempt_success, bool)
+            ):
+                self.attempts_malformed = True
+            if (
+                isinstance(provider_attempt_success, bool)
+                and isinstance(model_attempt_success, bool)
+                and provider_attempt_success != model_attempt_success
+            ):
+                self.attempts_malformed = True
+            if status is None and provider_attempt_success is True:
                 status = 200
+            status_success = status is not None and 200 <= status < 300
+            if provider_attempt_success is True and not status_success:
+                self.attempts_malformed = True
+            if provider_attempt_success is False and status_success:
+                self.attempts_malformed = True
+            successful = (
+                status_success
+                and provider_attempt_success is not False
+                and model_attempt_success is not False
+            )
+            if (
+                model_attempt_success is False
+                and provider_attempt_success is True
+            ):
+                self.attempts_malformed = True
+            if successful:
+                successful_attempts += 1
             attempt = {}
             if provider is not None:
                 attempt["provider"] = provider
@@ -397,6 +475,8 @@ class GatewayEvidence:
                 self.attempts_malformed = True
         if len(self.attempts) != 1:
             self.profile_reasons.append("multiple_attempts")
+        if successful_attempts != 1:
+            self.profile_reasons.append("missing_successful_attempt")
 
         for key in ("generationId", "cost", "marketCost"):
             value = metadata.get(key)
@@ -464,7 +544,7 @@ class GatewayEvidence:
         allowed = {provider.casefold() for provider in self.allowed_providers}
         if self.provider and allowed and self.provider.casefold() not in allowed:
             reasons.append("provider_not_allowed")
-        if self.gateway == "openrouter":
+        if self.gateway in {"openrouter", "vercel"}:
             if not self.metadata_requested_model:
                 reasons.append("missing_metadata_requested_model")
             elif self.metadata_requested_model != self.requested_model:
