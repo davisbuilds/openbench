@@ -339,6 +339,8 @@ class RouterRouteTests(unittest.TestCase):
                         "order": ["attacker"],
                         "caching": "auto",
                     },
+                    "openai": {"reasoningEffort": "low"},
+                    "attacker": {"arbitrary": {"nested": True}},
                 },
                 "models": ["fallback/model"],
                 "order": ["attacker"],
