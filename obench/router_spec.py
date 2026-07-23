@@ -537,6 +537,10 @@ def _parse_arm(
         raise RouterSpecError(f"{path}.allowed_models must contain requested_model")
     if arm.requested_provider not in arm.allowed_providers:
         raise RouterSpecError(f"{path}.allowed_providers must contain requested_provider")
+    if arm.allowed_providers != (arm.requested_provider,):
+        raise RouterSpecError(
+            f"{path}.allowed_providers must contain only requested_provider"
+        )
     if arm.route_kind == "direct" and arm.direct_control_arm_id is not None:
         raise RouterSpecError(f"{path}: direct arm cannot set direct_control_arm_id")
     if arm.route_kind == "gateway" and arm.direct_control_arm_id is None:

@@ -227,6 +227,28 @@ class RouterReportTests(unittest.TestCase):
         self.assertEqual(gateway["metrics"]["availability"]["estimate"], 0.75)
         self.assertEqual(gateway["metrics"]["latency_s"]["estimate"], 22.5)
 
+    def test_only_latest_block_attempt_is_reported(self):
+        rows = [
+            make_row(
+                task="task_a", arm_id=arm, role=role, baseline=baseline,
+                block_attempt=attempt, solved=attempt == 0,
+                score=1.0 if attempt == 0 else 0.0,
+                calls=[call(),],
+            )
+            for attempt in (0, 1)
+            for arm, role, baseline in (
+                ("direct", "direct", True),
+                ("gateway", "gateway", False),
+            )
+        ]
+        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        self.assertEqual(report["blocks"]["observed"], 1)
+        self.assertEqual(report["arms"]["direct"]["attempted_cells"], 1)
+        self.assertEqual(
+            report["arms"]["direct"]["metrics"]["solve_rate"]["estimate"],
+            0.0,
+        )
+
     def test_invalid_and_incomplete_blocks_are_excluded_and_counted(self):
         rows = self.complete_rows()
         rows[0]["result"]["infrastructure_invalid_reason"] = "host"

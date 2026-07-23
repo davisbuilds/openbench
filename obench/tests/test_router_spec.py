@@ -266,6 +266,9 @@ class RouterExperimentTests(unittest.TestCase):
             (manifest().replace(
                 'canonical_model = "openai/gpt-test-2026-07-01"',
                 'canonical_model = "openai/other-model"', 1), "canonical_model"),
+            (manifest().replace(
+                'allowed_providers = ["openai"]',
+                'allowed_providers = ["openai", "other"]', 1), "only requested_provider"),
         )
         for text, message in cases:
             with self.subTest(message=message):

@@ -353,10 +353,10 @@ direct_control_arm_id = "direct"
             self.assertEqual((code, err), (0, ""))
             report = json.loads(out)
             self.assertEqual(report["blocks"], {
-                "excluded": 1,
-                "excluded_by_reason": {"incomplete_all_arm_block": 1},
+                "excluded": 0,
+                "excluded_by_reason": {},
                 "included": 1,
-                "observed": 2,
+                "observed": 1,
             })
             self.assertEqual(report["arms"]["gateway"]["attempted_cells"], 1)
 

@@ -215,6 +215,10 @@ def _block_key(identity: results.CellIdentity) -> tuple[Any, ...]:
     )
 
 
+def _block_coordinate(identity: results.CellIdentity) -> tuple[Any, ...]:
+    return identity.task, identity.window_id, identity.repetition
+
+
 def _logical_cell_key(identity: results.CellIdentity) -> tuple[Any, ...]:
     return (*_block_key(identity), identity.arm_id)
 
@@ -585,9 +589,20 @@ def aggregate(
                 + (f"; unexpected: {', '.join(extra)}" if extra else "")
             )
 
+    latest_attempts: dict[tuple[Any, ...], int] = {}
+    for item in parsed:
+        identity = item["identity"]
+        coordinate = _block_coordinate(identity)
+        latest_attempts[coordinate] = max(
+            latest_attempts.get(coordinate, -1), identity.block_attempt
+        )
+
     blocks: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
     for item in parsed:
-        blocks[_block_key(item["identity"])].append(item)
+        identity = item["identity"]
+        coordinate = _block_coordinate(identity)
+        if identity.block_attempt == latest_attempts[coordinate]:
+            blocks[coordinate].append(item)
 
     exclusions = Counter()
     included_blocks = []
