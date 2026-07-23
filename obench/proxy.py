@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
+from obench import router_gateways
 from obench.router_metrics import OpenAIChatSSEParser
 from obench.router_spec import RoutePlan, SecretPlan
 
@@ -416,6 +417,8 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                     allowed_models=route.router.plan.allowed_models,
                     allowed_providers=route.router.plan.allowed_providers,
                     fallback_enabled=route.router.plan.fallback_enabled,
+                    gateway=route.router.plan.gateway,
+                    response_headers=header_map,
                 )
             self.send_response(resp.status, resp.reason)
             for key, value in resp_headers:
@@ -640,15 +643,15 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             and not _credential_header(k)
             and k.lower() not in {
                 "content-length", "content-encoding", "accept-encoding",
-                "x-openrouter-metadata",
             }
-            and not k.lower().startswith("x-openrouter-cache")
+            and not router_gateways.blocked_request_header(k)
         }
-        headers["Authorization"] = f"Bearer {route.router.secret}"
+        headers.update(router_gateways.request_headers(
+            gateway=route.router.plan.gateway,
+            gateway_id=route.router.plan.gateway_id,
+            secret=route.router.secret,
+        ))
         headers["Content-Length"] = str(body_length)
-        if route.router.plan.route_kind == "gateway":
-            headers["X-OpenRouter-Metadata"] = "enabled"
-            headers["X-OpenRouter-Cache"] = "false"
         return headers
 
     def _router_request_body(self, body: bytes, plan: RoutePlan) -> bytes:
@@ -669,27 +672,16 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             "seed": plan.sampling.seed,
         })
         if plan.route_kind == "gateway":
-            self._strip_cache_controls(payload)
-            payload["provider"] = {
-                "only": [plan.requested_provider],
-                "allow_fallbacks": False,
-            }
+            if plan.gateway is None:
+                raise RuntimeError("gateway route plan is missing gateway profile")
+            router_gateways.shape_body(
+                payload,
+                gateway=plan.gateway,
+                requested_provider=plan.requested_provider,
+            )
         else:
             payload.pop("provider", None)
         return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-    @classmethod
-    def _strip_cache_controls(cls, value: Any) -> None:
-        if isinstance(value, dict):
-            for key in list(value):
-                normalized = str(key).lower().replace("-", "_")
-                if normalized in {"cache", "cache_control", "cache_key", "prompt_cache_key"}:
-                    value.pop(key)
-                else:
-                    cls._strip_cache_controls(value[key])
-        elif isinstance(value, list):
-            for item in value:
-                cls._strip_cache_controls(item)
 
     def _read_body(self) -> bytes:
         max_bytes = self.server.max_request_bytes  # type: ignore[attr-defined]
@@ -782,6 +774,18 @@ class CountingProxyServer(ThreadingHTTPServer):
             raise ValueError("router route must allow exactly the requested provider")
         if plan.fallback_enabled or plan.retry_count or plan.cache_enabled:
             raise ValueError("router route controls do not match gateway_tax")
+        try:
+            router_gateways.validate_arm(
+                route_kind=plan.route_kind,
+                gateway=plan.gateway,
+                gateway_id=plan.gateway_id,
+                endpoint=plan.endpoint,
+                requested_model=plan.requested_model,
+                requested_provider=plan.requested_provider,
+                private_router=plan.private_router,
+            )
+        except router_gateways.GatewayProfileError as exc:
+            raise ValueError(f"invalid router gateway profile: {exc}") from exc
         upstream = urlsplit(plan.endpoint)
         if upstream.scheme not in {"http", "https"} or not upstream.hostname:
             raise ValueError("router route endpoint must be an absolute HTTP(S) URL")

@@ -110,7 +110,15 @@ class RouteFixtureHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
-def route_plan(*, endpoint, route_kind, arm_id, arm_digest):
+def route_plan(
+    *,
+    endpoint,
+    route_kind,
+    arm_id,
+    arm_digest,
+    gateway=None,
+    gateway_id=None,
+):
     return router_spec.RoutePlan(
         schema_version=1,
         experiment_digest="e" * 64,
@@ -132,6 +140,8 @@ def route_plan(*, endpoint, route_kind, arm_id, arm_digest):
         private_router=True,
         private_host_allowlist=("127.0.0.1",),
         private_cidr_allowlist=(),
+        gateway=gateway or ("openrouter" if route_kind == "gateway" else None),
+        gateway_id=gateway_id,
     )
 
 
@@ -161,13 +171,23 @@ class RouterRouteTests(unittest.TestCase):
         self.upstream.server_close()
         self.tmp.cleanup()
 
-    def _register(self, token, *, route_kind="gateway", path="/gateway"):
+    def _register(
+        self,
+        token,
+        *,
+        route_kind="gateway",
+        path="/gateway",
+        gateway=None,
+        gateway_id=None,
+    ):
         digest = ("a" if route_kind == "gateway" else "b") * 64
         plan = route_plan(
             endpoint=self.upstream_base + path,
             route_kind=route_kind,
             arm_id=f"{route_kind}-{token}",
             arm_digest=digest,
+            gateway=gateway,
+            gateway_id=gateway_id,
         )
         self.server.register_cell(token)
         self.server.register_route(token, plan, secret_plan(plan.arm_id))
@@ -298,6 +318,76 @@ class RouterRouteTests(unittest.TestCase):
             {key: request["body"][key] for key in ("temperature", "top_p", "seed")},
             {"temperature": 0.0, "top_p": 1.0, "seed": 1234},
         )
+
+    def test_vercel_proxy_replaces_client_routing_and_cache_controls(self):
+        token = "vercel-cell"
+        plan = self._register(token, gateway="vercel", path="/vercel")
+        status, _ = self._post(
+            token,
+            plan.arm_digest,
+            body={
+                "model": "attacker/model",
+                "messages": [{
+                    "role": "user",
+                    "content": PRIVATE_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                "provider": {"only": ["attacker"]},
+                "providerOptions": {
+                    "gateway": {
+                        "models": ["fallback/model"],
+                        "order": ["attacker"],
+                        "caching": "auto",
+                    },
+                },
+                "models": ["fallback/model"],
+                "order": ["attacker"],
+                "sort": "price",
+                "caching": "auto",
+            },
+        )
+        self.assertEqual(status, 200)
+        request = self.upstream.requests[-1]
+        self.assertEqual(request["path"], "/vercel")
+        self.assertEqual(request["headers"]["authorization"], f"Bearer {HOST_SECRET}")
+        self.assertNotIn("x-openrouter-metadata", request["headers"])
+        self.assertEqual(
+            request["body"]["providerOptions"],
+            {"gateway": {"only": ["openai"]}},
+        )
+        for key in ("provider", "models", "order", "sort", "caching"):
+            self.assertNotIn(key, request["body"])
+        self.assertNotIn("cache_control", request["body"]["messages"][0])
+
+    def test_cloudflare_proxy_forces_gateway_controls_and_strips_client_headers(self):
+        token = "cloudflare-cell"
+        plan = self._register(
+            token,
+            gateway="cloudflare",
+            gateway_id="strict-tax",
+            path="/cloudflare",
+        )
+        status, _ = self._post(
+            token,
+            plan.arm_digest,
+            headers={
+                "cf-aig-gateway-id": "attacker",
+                "cf-aig-skip-cache": "false",
+                "cf-aig-max-attempts": "5",
+                "cf-aig-collect-log": "false",
+                "cf-aig-collect-log-payload": "true",
+            },
+        )
+        self.assertEqual(status, 200)
+        request = self.upstream.requests[-1]
+        self.assertEqual(request["path"], "/cloudflare")
+        self.assertEqual(request["headers"]["authorization"], f"Bearer {HOST_SECRET}")
+        self.assertEqual(request["headers"]["cf-aig-gateway-id"], "strict-tax")
+        self.assertEqual(request["headers"]["cf-aig-skip-cache"], "true")
+        self.assertEqual(request["headers"]["cf-aig-max-attempts"], "1")
+        self.assertEqual(request["headers"]["cf-aig-collect-log"], "true")
+        self.assertEqual(request["headers"]["cf-aig-collect-log-payload"], "false")
+        self.assertNotIn("provider", request["body"])
 
     def test_redirect_is_rejected_and_recorded_without_following(self):
         token = "redirect-cell"

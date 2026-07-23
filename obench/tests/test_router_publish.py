@@ -67,7 +67,8 @@ def experiment():
             {
                 "arm_id": "gateway",
                 "route_kind": "gateway",
-                "endpoint": "https://router.example.test/private/v1/chat/completions",
+                "gateway": "openrouter",
+                "endpoint": "https://openrouter.ai/api/v1/chat/completions",
                 "protocol": "openai_chat",
                 "baseline": False,
                 "canonical_model": "openai/gpt-test",

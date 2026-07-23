@@ -23,6 +23,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from . import router_gateways
+
 
 SCHEMA_VERSION = 1
 TRACK = "gateway_tax"
@@ -128,9 +130,11 @@ class Arm:
     auth_env: str
     sampling: Sampling
     direct_control_arm_id: str | None = None
+    gateway: str | None = None
+    gateway_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "arm_id": self.arm_id,
             "route_kind": self.route_kind,
             "endpoint": self.endpoint,
@@ -148,6 +152,11 @@ class Arm:
             "sampling": self.sampling.to_dict(),
             "direct_control_arm_id": self.direct_control_arm_id,
         }
+        if self.gateway is not None:
+            result["gateway"] = self.gateway
+        if self.gateway_id is not None:
+            result["gateway_id"] = self.gateway_id
+        return result
 
     @property
     def digest(self) -> str:
@@ -222,6 +231,10 @@ class RoutePlan:
     private_router: bool
     private_host_allowlist: tuple[str, ...]
     private_cidr_allowlist: tuple[str, ...]
+    # Proxy-only controls. They are bound by arm_digest but intentionally
+    # omitted from the adapter-facing route-plan JSON.
+    gateway: str | None = None
+    gateway_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -299,7 +312,7 @@ _ARM_FIELDS = {
     "arm_id", "route_kind", "endpoint", "protocol", "baseline",
     "canonical_model", "requested_model", "requested_provider", "allowed_models",
     "allowed_providers", "fallback_enabled", "retry_count", "cache_enabled",
-    "auth_env", "sampling", "direct_control_arm_id",
+    "auth_env", "sampling", "direct_control_arm_id", "gateway", "gateway_id",
 }
 
 
@@ -505,6 +518,12 @@ def _parse_arm(
     direct_control = table.get("direct_control_arm_id")
     if direct_control is not None:
         direct_control = _string(direct_control, f"{path}.direct_control_arm_id", _ID_RE)
+    gateway = table.get("gateway")
+    if gateway is not None:
+        gateway = _string(gateway, f"{path}.gateway")
+    gateway_id = table.get("gateway_id")
+    if gateway_id is not None:
+        gateway_id = _string(gateway_id, f"{path}.gateway_id", _ID_RE)
     arm = Arm(
         arm_id=_string(_required(table, "arm_id", path), f"{path}.arm_id", _ID_RE),
         route_kind=route_kind,
@@ -532,6 +551,8 @@ def _parse_arm(
         auth_env=_string(_required(table, "auth_env", path), f"{path}.auth_env", _ENV_RE),
         sampling=_parse_sampling(_required(table, "sampling", path), f"{path}.sampling"),
         direct_control_arm_id=direct_control,
+        gateway=gateway,
+        gateway_id=gateway_id,
     )
     if arm.requested_model not in arm.allowed_models:
         raise RouterSpecError(f"{path}.allowed_models must contain requested_model")
@@ -545,6 +566,22 @@ def _parse_arm(
         raise RouterSpecError(f"{path}: direct arm cannot set direct_control_arm_id")
     if arm.route_kind == "gateway" and arm.direct_control_arm_id is None:
         raise RouterSpecError(f"{path}: gateway arm requires direct_control_arm_id")
+    if arm.route_kind == "direct" and "gateway" in table:
+        raise RouterSpecError(f"{path}: direct arm must not declare gateway")
+    if arm.route_kind == "direct" and "gateway_id" in table:
+        raise RouterSpecError(f"{path}: direct arm must not declare gateway_id")
+    try:
+        router_gateways.validate_arm(
+            route_kind=arm.route_kind,
+            gateway=arm.gateway,
+            gateway_id=arm.gateway_id,
+            endpoint=arm.endpoint,
+            requested_model=arm.requested_model,
+            requested_provider=arm.requested_provider,
+            private_router=private_router,
+        )
+    except router_gateways.GatewayProfileError as exc:
+        raise RouterSpecError(f"{path}: {exc}") from exc
     if arm.fallback_enabled:
         raise RouterSpecError(f"{path}.fallback_enabled must be false for gateway_tax")
     if arm.retry_count != 0:
@@ -758,6 +795,8 @@ def compile_route_plans(
             private_router=experiment.private_router,
             private_host_allowlist=experiment.private_host_allowlist,
             private_cidr_allowlist=experiment.private_cidr_allowlist,
+            gateway=arm.gateway,
+            gateway_id=arm.gateway_id,
         ))
         secrets.append(_ArmSecret(arm.arm_id, arm.auth_env, value))
     return tuple(plans), SecretPlan(tuple(secrets))
