@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import zlib
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,34 @@ DEFAULT_ANTHROPIC_UPSTREAMS = {
     # Local CLIProxyAPI Anthropic-compatible ingress (claude x gpt-5.6-sol).
     "cliproxyapi": "http://127.0.0.1:8317",
 }
+EMPTY_LEDGER_HASH = hashlib.sha256(b"").hexdigest()
+
+
+@dataclass(frozen=True)
+class LedgerSeal:
+    """Durable terminal state for one explicitly registered cell ledger."""
+
+    token: str
+    path: Path
+    record_count: int
+    last_sequence: int
+    root_hash: str
+
+    @property
+    def ledger_path(self) -> Path:
+        return self.path
+
+
+@dataclass
+class _CellLedger:
+    state: str = "ACTIVE"
+    in_flight: int = 0
+    record_count: int = 0
+    last_sequence: int = 0
+    root_hash: str = EMPTY_LEDGER_HASH
+    seal: LedgerSeal | None = None
+    write_error: str | None = None
+    terminal_written: bool = False
 
 
 def new_cell_token() -> str:
@@ -321,8 +350,12 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         capture_truncated = False
         headers_sent = False
         error = None
+        token = self._token_from_header_or_path()
+        managed_ledger: bool | None = None
         try:
             route = self._route_request()
+            token = route.token
+            managed_ledger = self.server.admit_cell_request(token)  # type: ignore[attr-defined]
             body = self._read_body()
             request_body = decode_for_parsing(body, self.headers.get("content-encoding", ""))
             sampling = observed_sampling(
@@ -387,7 +420,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             else:
                 self.close_connection = True
         finally:
-            token = route.token if route is not None else self._token_from_header_or_path()
+            token = route.token if route is not None else token
             meta = self._read_metadata(token)
             configured_sampling = meta.get("sampling") if isinstance(meta.get("sampling"), dict) else {}
             recorded_sampling = sampling or configured_sampling
@@ -416,7 +449,12 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 rec["capture_truncated"] = True
             if error:
                 rec["error"] = error
-            self._write_record(token, scrub(rec))
+            if managed_ledger:
+                self.server.complete_cell_request(token, rec)  # type: ignore[attr-defined]
+            elif managed_ledger is False:
+                self.server.complete_legacy_request(token, rec)  # type: ignore[attr-defined]
+            else:
+                self.server.write_legacy_record_if_unregistered(token, rec)  # type: ignore[attr-defined]
 
     def _route_request(self) -> Route:
         path_query = self.path if self.path.startswith("/") else "/" + self.path
@@ -584,6 +622,220 @@ class CountingProxyServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
+    def register_cell(self, token: str) -> None:
+        """Opt a router cell into lifecycle-managed, sealed ledger writes."""
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", token):
+            raise ValueError("cell token must contain only letters, digits, '.', '_', or '-'")
+        with self._ledger_condition:
+            if token in self._cell_ledgers:
+                raise RuntimeError(f"cell already registered: {token}")
+            if self._legacy_in_flight.get(token, 0):
+                raise RuntimeError(f"cell has active legacy requests: {token}")
+            path = self._ledger_path(token)
+            if path.exists():
+                raise FileExistsError(f"cell ledger already exists: {path}")
+            self._cell_ledgers[token] = _CellLedger()
+
+    def cell_is_registered(self, token: str) -> bool:
+        with self._ledger_condition:
+            return token in self._cell_ledgers
+
+    def admit_cell_request(self, token: str) -> bool:
+        """Atomically admit a request, returning False for a legacy cell."""
+        with self._ledger_condition:
+            ledger = self._cell_ledgers.get(token)
+            if ledger is None:
+                self._legacy_in_flight[token] = self._legacy_in_flight.get(token, 0) + 1
+                return False
+            if ledger.state != "ACTIVE":
+                raise RuntimeError(f"cell ledger is {ledger.state.lower()}: {token}")
+            ledger.in_flight += 1
+            return True
+
+    def complete_cell_request(self, token: str, record: dict[str, Any]) -> None:
+        """Durably append one admitted request and release its in-flight slot."""
+        with self._ledger_condition:
+            ledger = self._cell_ledgers.get(token)
+            if ledger is None:
+                raise RuntimeError(f"cell is not registered: {token}")
+            if ledger.state == "SEALED":
+                raise RuntimeError(f"cell ledger is sealed: {token}")
+            if ledger.in_flight <= 0:
+                raise RuntimeError(f"cell has no admitted request: {token}")
+            try:
+                sequence = ledger.last_sequence + 1
+                chained = scrub(record)
+                for key in ("record_type", "sequence", "previous_hash", "record_hash"):
+                    chained.pop(key, None)
+                chained.update({
+                    "record_type": "request",
+                    "sequence": sequence,
+                    "previous_hash": ledger.root_hash,
+                })
+                canonical = json.dumps(chained, sort_keys=True, separators=(",", ":"))
+                record_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+                chained["record_hash"] = record_hash
+                self._append_durable(self._ledger_path(token), chained)
+                ledger.record_count += 1
+                ledger.last_sequence = sequence
+                ledger.root_hash = record_hash
+            except Exception as exc:
+                ledger.state = "DRAINING"
+                ledger.write_error = f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                ledger.in_flight -= 1
+                self._ledger_condition.notify_all()
+
+    def complete_legacy_request(self, token: str, record: dict[str, Any]) -> None:
+        """Append a request admitted before explicit lifecycle registration."""
+        with self._ledger_condition:
+            in_flight = self._legacy_in_flight.get(token, 0)
+            if in_flight <= 0:
+                raise RuntimeError(f"cell has no admitted legacy request: {token}")
+            try:
+                self._append_legacy(self._legacy_ledger_path(token), scrub(record))
+            finally:
+                if in_flight == 1:
+                    self._legacy_in_flight.pop(token, None)
+                else:
+                    self._legacy_in_flight[token] = in_flight - 1
+                self._ledger_condition.notify_all()
+
+    def write_legacy_record_if_unregistered(
+            self, token: str, record: dict[str, Any]) -> bool:
+        """Atomically retain a pre-admission error unless the cell is managed."""
+        with self._ledger_condition:
+            if token in self._cell_ledgers:
+                return False
+            self._append_legacy(self._legacy_ledger_path(token), scrub(record))
+            return True
+
+    def revoke_cell(self, token: str) -> None:
+        """Stop new admissions while allowing admitted requests to drain."""
+        with self._ledger_condition:
+            ledger = self._require_cell(token)
+            if ledger.state == "SEALED":
+                raise RuntimeError(f"cell ledger is sealed: {token}")
+            ledger.state = "DRAINING"
+
+    def seal_cell(self, token: str, timeout_s: float = 30.0) -> LedgerSeal:
+        """Drain a cell for at most ``timeout_s`` and durably seal its ledger."""
+        if timeout_s < 0:
+            raise ValueError("timeout_s must be nonnegative")
+        deadline = time.monotonic() + timeout_s
+        with self._ledger_condition:
+            ledger = self._require_cell(token)
+            if ledger.seal is not None:
+                return ledger.seal
+            ledger.state = "DRAINING"
+            while ledger.in_flight:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"timed out draining cell {token}: {ledger.in_flight} request(s) remain")
+                self._ledger_condition.wait(remaining)
+            if ledger.write_error is not None:
+                raise RuntimeError(
+                    f"cannot seal cell {token} after ledger write failure: {ledger.write_error}")
+
+            path = self._ledger_path(token)
+            terminal = {
+                "record_type": "ledger_seal",
+                "state": "SEALED",
+                "record_count": ledger.record_count,
+                "last_sequence": ledger.last_sequence,
+                "root_hash": ledger.root_hash,
+            }
+            if not ledger.terminal_written:
+                try:
+                    self._append_durable(path, terminal)
+                except Exception:
+                    if self._last_record_equals(path, terminal):
+                        ledger.terminal_written = True
+                    else:
+                        self._truncate_partial_record(path)
+                    raise
+                ledger.terminal_written = True
+            else:
+                self._fsync_file(path)
+            self._fsync_directory(path.parent)
+            ledger.state = "SEALED"
+            ledger.seal = LedgerSeal(
+                token=token,
+                path=path,
+                record_count=ledger.record_count,
+                last_sequence=ledger.last_sequence,
+                root_hash=ledger.root_hash,
+            )
+            return ledger.seal
+
+    def _require_cell(self, token: str) -> _CellLedger:
+        ledger = self._cell_ledgers.get(token)
+        if ledger is None:
+            raise RuntimeError(f"cell is not registered: {token}")
+        return ledger
+
+    def _ledger_path(self, token: str) -> Path:
+        return self.ledger_dir / f"{token}.jsonl"  # type: ignore[attr-defined]
+
+    def _legacy_ledger_path(self, token: str) -> Path:
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", token or "unknown")
+        return self.ledger_dir / f"{safe}.jsonl"  # type: ignore[attr-defined]
+
+    def _append_durable(self, path: Path, record: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if getattr(self, "verbose", False):
+            print(line, end="", flush=True)
+
+    def _append_legacy(self, path: Path, record: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+        if getattr(self, "verbose", False):
+            print(line, end="", flush=True)
+
+    @staticmethod
+    def _last_record_equals(path: Path, expected: dict[str, Any]) -> bool:
+        try:
+            lines = path.read_bytes().splitlines()
+            return bool(lines) and json.loads(lines[-1]) == expected
+        except (OSError, json.JSONDecodeError):
+            return False
+
+    @staticmethod
+    def _truncate_partial_record(path: Path) -> None:
+        try:
+            with path.open("r+b") as fh:
+                data = fh.read()
+                if not data or data.endswith(b"\n"):
+                    return
+                last_newline = data.rfind(b"\n")
+                fh.truncate(last_newline + 1)
+                fh.flush()
+                os.fsync(fh.fileno())
+        except FileNotFoundError:
+            return
+
+    @staticmethod
+    def _fsync_file(path: Path) -> None:
+        with path.open("rb") as fh:
+            os.fsync(fh.fileno())
+
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
 
 def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
                 chat_upstreams: dict[str, str] | None = None,
@@ -615,6 +867,9 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     httpd.timeout_s = timeout_s
     httpd.capture_limit = max(capture_limit, 4096)
     httpd.max_request_bytes = max(max_request_bytes, 0)
+    httpd._ledger_condition = threading.Condition()
+    httpd._cell_ledgers = {}
+    httpd._legacy_in_flight = {}
     # Docker requires a non-loopback bind. In that mode the runner enables this
     # gate so arbitrary LAN clients cannot spend through a subscription route.
     httpd.require_registered_tokens = require_registered_tokens
