@@ -119,6 +119,20 @@ against Cloudflare's documented
 native `openai-responses` provider implementation, so no protocol translation
 or harness switch is involved.
 
+[`router-bench-five-way-responses.toml`](../obench/examples/router-bench-five-way-responses.toml)
+specifies the matched comparison across direct OpenAI, OpenRouter, Vercel,
+Cloudflare, and Concentrate. Every arm uses Pi's native `openai_responses`
+protocol, uses the canonical comparison key `openai/gpt-4o-mini`, targets the
+OpenAI provider, and disables fallback, cache, and client retries. Its one
+`make-it-run` task and ten repetitions form ten matched blocks and 50 cells.
+With `max_calls = 8` per cell, the explicit ceiling is 400 paid model calls.
+
+All five arms must run as the same experiment and appear together in each
+complete matched block; separate gateway runs must not be pooled. A missing
+arm, completed event, served model, provider lock, or other required route
+evidence excludes the entire block rather than leaving an unmatched arm in the
+report.
+
 The proxy recognizes Responses SSE event types, measures semantic TTFT from
 output-text, refusal, or function-call argument deltas, and extracts served
 model and token usage from the nested final `response.completed` object. A
@@ -133,6 +147,16 @@ from both direct and gateway requests, Cloudflare receives
 `cf-aig-skip-cache: true` and `cf-aig-max-attempts: 1`, and client retries remain
 zero.
 
+On 2026-07-23 raw streaming probes against OpenRouter, Vercel, and Concentrate
+returned HTTP 200 and a terminal `response.completed` event. Concentrate's
+verified endpoint is `https://api.concentrate.ai/v1/responses`, authenticated
+through `CONCENTRATE_API_KEY`, with requested model
+`openai/gpt-4o-mini`. Its final streamed model is provider-qualified, but the
+response exposes no attempt metadata. The probe establishes wire compatibility,
+not complete Router Bench route evidence; the current runtime therefore remains
+expected to reject the Concentrate arm until its strict gateway profile can
+admit that evidence contract.
+
 Validate and run it independently:
 
 ```bash
@@ -145,18 +169,33 @@ python3 -m obench.cli router run \
   --results results/router-gpt-4o-mini-responses.jsonl
 ```
 
+Before `doctor` or `run`, set `OPENAI_API_KEY`, `OPENROUTER_API_KEY`,
+`VERCEL_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CONCENTRATE_API_KEY`, and the frozen
+price snapshot in `OPENBENCH_ROUTER_FROZEN_PRICES_JSON`. Validate the five-way
+specification before authorizing its paid run:
+
+```bash
+python3 -m obench.cli router validate \
+  obench/examples/router-bench-five-way-responses.toml --tasks-dir tasks
+
+python3 -m obench.cli router doctor \
+  obench/examples/router-bench-five-way-responses.toml --tasks-dir tasks
+
+python3 -m obench.cli router run \
+  obench/examples/router-bench-five-way-responses.toml \
+  --tasks-dir tasks \
+  --results results/router-gpt-4o-mini-five-way-responses.jsonl
+
+python3 -m obench.cli router report \
+  results/router-gpt-4o-mini-five-way-responses.jsonl
+```
+
 Vercel supports routing one requested model across providers, provider filters,
 fallbacks, and explicit model rewrite rules. Its documented cost-aware model
 routing example puts a separate classifier in application code. As of
 2026-07-22, Vercel documents no native prompt-aware model classifier comparable
 to OpenRouter Auto Beta. OpenBench therefore treats Vercel as a fixed gateway
 arm here, not an Auto Router Bench arm.
-
-Concentrate can join this track once its integration is reproducible from a
-documented request contract. Admission requires pinning both the OpenAI provider
-and `gpt-4o-mini` alias, disabling or proving fallback, retries, and caching,
-and returning evidence for the requested model, served model, provider, and
-attempts. Provider-slug selection alone establishes only the provider lock.
 
 ## Auto Router Bench
 

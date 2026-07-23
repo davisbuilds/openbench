@@ -1,0 +1,138 @@
+schema_version = 1
+experiment_id = "gpt-4o-mini-five-way-responses-gateway-tax"
+track = "gateway_tax"
+model_match = "rolling_alias"
+harness = "pi"
+tasks = ["make-it-run"]
+repetitions_per_window = 10
+schedule_seed = 20260723
+execution_lane = "local"
+private_router = false
+
+# Replace this illustrative future window with the UTC window for the run.
+[[windows]]
+window_id = "window-a"
+start = "2026-08-04T15:00:00Z"
+end = "2026-08-04T17:00:00Z"
+
+# 1 task x 10 repetitions x 5 arms = 50 cells. At 8 calls per cell, this
+# experiment permits at most 400 paid model calls.
+[budget]
+timeout_s = 600
+max_calls = 8
+max_output_tokens = 12000
+usd_cap = 0.50
+
+[[arms]]
+arm_id = "direct-openai-responses"
+route_kind = "direct"
+endpoint = "https://api.openai.com/v1/responses"
+protocol = "openai_responses"
+baseline = true
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "gpt-4o-mini"
+requested_provider = "openai"
+allowed_models = ["gpt-4o-mini"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "OPENAI_API_KEY"
+
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260723
+
+[[arms]]
+arm_id = "openrouter-openai-responses"
+route_kind = "gateway"
+gateway = "openrouter"
+endpoint = "https://openrouter.ai/api/v1/responses"
+protocol = "openai_responses"
+baseline = false
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "openai/gpt-4o-mini"
+requested_provider = "openai"
+allowed_models = ["openai/gpt-4o-mini"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "OPENROUTER_API_KEY"
+direct_control_arm_id = "direct-openai-responses"
+
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260723
+
+[[arms]]
+arm_id = "vercel-openai-responses"
+route_kind = "gateway"
+gateway = "vercel"
+endpoint = "https://ai-gateway.vercel.sh/v1/responses"
+protocol = "openai_responses"
+baseline = false
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "openai/gpt-4o-mini"
+requested_provider = "openai"
+allowed_models = ["openai/gpt-4o-mini"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "VERCEL_API_KEY"
+direct_control_arm_id = "direct-openai-responses"
+
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260723
+
+[[arms]]
+arm_id = "cloudflare-openai-responses"
+route_kind = "gateway"
+gateway = "cloudflare"
+# Replace the illustrative account ID before running.
+endpoint = "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1/responses"
+protocol = "openai_responses"
+baseline = false
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "openai/gpt-4o-mini"
+requested_provider = "openai"
+allowed_models = ["openai/gpt-4o-mini"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "CLOUDFLARE_API_TOKEN"
+direct_control_arm_id = "direct-openai-responses"
+
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260723
+
+[[arms]]
+arm_id = "concentrate-openai-responses"
+route_kind = "gateway"
+gateway = "concentrate"
+endpoint = "https://api.concentrate.ai/v1/responses"
+protocol = "openai_responses"
+baseline = false
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "openai/gpt-4o-mini"
+requested_provider = "openai"
+allowed_models = ["openai/gpt-4o-mini"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "CONCENTRATE_API_KEY"
+direct_control_arm_id = "direct-openai-responses"
+
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260723
