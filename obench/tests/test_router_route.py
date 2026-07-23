@@ -238,6 +238,7 @@ class RouterRouteTests(unittest.TestCase):
                 "x-openrouter-cache": "true",
                 "x-openrouter-cache-key": "client-cache",
                 "x-openrouter-cache-control": "max-age=3600",
+                "accept-encoding": "gzip",
             },
         )
         self.assertEqual(status, 200)
@@ -252,6 +253,7 @@ class RouterRouteTests(unittest.TestCase):
         self.assertNotIn("x-openrouter-api-key", request["headers"])
         self.assertNotIn("cookie", request["headers"])
         self.assertNotIn("x-auth-token", request["headers"])
+        self.assertEqual(request["headers"].get("accept-encoding"), "identity")
         self.assertEqual(request["body"]["model"], plan.requested_model)
         self.assertEqual(request["body"]["temperature"], 0.0)
         self.assertEqual(request["body"]["top_p"], 1.0)

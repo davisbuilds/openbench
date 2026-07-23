@@ -743,8 +743,36 @@ def publish_bundle(
         artifacts: dict[str, str] = {}
         ledger_provenance: dict[str, Any] = {}
         bindings: dict[str, dict[str, Any]] = {}
+        rows_by_cell = {
+            results.result_cell_id(row): row for row in resume.rows
+        }
         for cell_id in sorted(cell_ids):
-            requests, _source_seal = _validate_source_ledger(ledger_sources[cell_id])
+            source_path = ledger_sources[cell_id]
+            requests, source_seal = _validate_source_ledger(source_path)
+            source_row = rows_by_cell[cell_id]
+            identity = results.router_identity_from_row(source_row)
+            expected_seal = source_row.get("ledger_seal")
+            if not isinstance(expected_seal, Mapping):
+                raise RouterPublishError(f"result {cell_id} is missing ledger_seal")
+            for field in ("record_count", "last_sequence", "root_hash"):
+                if expected_seal.get(field) != source_seal.get(field):
+                    raise RouterPublishError(
+                        f"result {cell_id} ledger_seal.{field} does not match source ledger"
+                    )
+            if expected_seal.get("ledger_file") != source_path.name:
+                raise RouterPublishError(
+                    f"result {cell_id} ledger file does not match source ledger"
+                )
+            for request in requests:
+                arm = request.get("router_arm")
+                if (
+                    not isinstance(arm, Mapping)
+                    or arm.get("arm_id") != identity.arm_id
+                    or arm.get("arm_digest") != identity.arm_digest
+                ):
+                    raise RouterPublishError(
+                        f"result {cell_id} arm identity does not match source ledger"
+                    )
             raw, seal = _public_ledger(cell_id, requests)
             relative = f"ledgers/{cell_id}.jsonl"
             artifacts[relative] = _write_file(temporary, relative, raw)

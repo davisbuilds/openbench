@@ -402,6 +402,30 @@ direct_control_arm_id = "direct"
             {0},
         )
 
+    def test_proxy_evidence_honors_parser_integrity_verdict(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = next(item for item in plans if item.route_kind == "gateway")
+        metrics = {
+            "route": {
+                "requested_model": plan.requested_model,
+                "metadata_requested_model": plan.requested_model,
+                "served_model": plan.requested_model,
+                "provider": plan.requested_provider,
+                "attempts": [],
+            },
+            "stream": {"done": True},
+            "route_evidence": {
+                "pass": False,
+                "reasons": ["malformed_sse_event"],
+            },
+        }
+        self.assertIn("malformed_sse_event", router_run._route_reasons(metrics, plan))
+
     def test_docker_fails_closed_in_local_mvp(self):
         with self._runtime():
             with self.assertRaisesRegex(router_run.RouterRunError, "unsupported"):

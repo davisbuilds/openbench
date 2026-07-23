@@ -327,8 +327,9 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
     calls = []
     for call_number, raw_call in enumerate(raw_calls, 1):
         call = _object(raw_call, f"row {row_number} call {call_number}")
+        timing_value = call.get("timing")
         timing = _object(
-            call.get("timing", {}),
+            {} if timing_value is None else timing_value,
             f"row {row_number} call {call_number} timing",
         )
         generation = call.get("generation")

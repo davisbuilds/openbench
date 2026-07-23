@@ -653,6 +653,17 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
     if not isinstance(route, Mapping):
         return ["missing_route_evidence"]
     reasons = []
+    evidence = metrics.get("route_evidence")
+    if not isinstance(evidence, Mapping):
+        reasons.append("missing_route_evidence_verdict")
+    elif evidence.get("pass") is not True:
+        evidence_reasons = evidence.get("reasons")
+        if isinstance(evidence_reasons, list) and all(
+            isinstance(reason, str) and reason for reason in evidence_reasons
+        ):
+            reasons.extend(evidence_reasons)
+        else:
+            reasons.append("route_evidence_failed")
     if route.get("requested_model") != plan.requested_model:
         reasons.append("requested_model_conflict")
     if route.get("served_model") != plan.requested_model:
@@ -698,12 +709,34 @@ def _proxy_evidence(
     total_output = 0
     total_cost = Decimal(0)
     priced_calls = 0
+    successful_calls = 0
     for row in ledger_rows:
+        status = row.get("status")
+        if isinstance(status, int) and 400 <= status <= 599:
+            calls.append({
+                "timing": None,
+                "generation": None,
+                "route": {
+                    "provider": plan.requested_provider,
+                    "served_model": plan.requested_model,
+                },
+                "costs": None,
+            })
+            continue
         metrics = row.get("router_metrics")
         if not isinstance(metrics, dict):
             reasons.append("missing_router_metrics")
-            calls.append({})
+            calls.append({
+                "timing": None,
+                "generation": None,
+                "route": {
+                    "provider": plan.requested_provider,
+                    "served_model": plan.requested_model,
+                },
+                "costs": None,
+            })
             continue
+        successful_calls += 1
         reasons.extend(_route_reasons(metrics, plan))
         usage = metrics.get("usage") if isinstance(metrics.get("usage"), dict) else {}
         output_tokens = usage.get("output_tokens")
@@ -731,7 +764,7 @@ def _proxy_evidence(
         infrastructure_reason = "max_calls_exceeded"
     elif total_output > budget.max_output_tokens:
         infrastructure_reason = "max_output_tokens_exceeded"
-    elif ledger_rows and priced_calls != len(ledger_rows):
+    elif successful_calls and priced_calls != successful_calls:
         infrastructure_reason = "usd_cap_unenforceable_no_frozen_price"
     elif total_cost > Decimal(budget.usd_cap):
         infrastructure_reason = "usd_cap_exceeded"

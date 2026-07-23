@@ -639,7 +639,8 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             if k.lower() not in blocked
             and not _credential_header(k)
             and k.lower() not in {
-                "content-length", "content-encoding", "x-openrouter-metadata",
+                "content-length", "content-encoding", "accept-encoding",
+                "x-openrouter-metadata",
             }
             and not k.lower().startswith("x-openrouter-cache")
         }

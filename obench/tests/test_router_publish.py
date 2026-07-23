@@ -202,7 +202,6 @@ class RouterPublishTests(unittest.TestCase):
             "response_body": "private answer",
             "transcript_path": "/Users/private/transcript.txt",
         }
-        self._write_results(self.row)
         self._write_ledger()
 
     def _write_results(self, *rows):
@@ -252,6 +251,13 @@ class RouterPublishTests(unittest.TestCase):
             canonical_line(request) + canonical_line(seal),
             encoding="utf-8",
         )
+        self.row["ledger_seal"] = {
+            "record_count": seal["record_count"],
+            "last_sequence": seal["last_sequence"],
+            "root_hash": seal["root_hash"],
+            "ledger_file": self.source_ledger.name,
+        }
+        self._write_results(self.row)
 
     def publish(self):
         return router_publish.publish_bundle(
@@ -319,6 +325,34 @@ class RouterPublishTests(unittest.TestCase):
         direct["proxy_metrics"]["calls"][0]["timing"]["ttfb_s"] = 0.5
         direct["proxy_metrics"]["calls"][0]["timing"]["semantic_ttft_s"] = 1.0
         direct["proxy_metrics"]["calls"][0]["route"]["provider"] = "Direct"
+        direct_ledger = self.root / "direct-ledger.jsonl"
+        request = json.loads(self.source_ledger.read_text().splitlines()[0])
+        request["router_arm"] = {
+            "arm_id": "direct",
+            "arm_digest": direct_identity.arm_digest,
+            "route_kind": "direct",
+        }
+        request["record_hash"] = hashlib.sha256(
+            results.canonical_json_bytes({
+                key: value for key, value in request.items() if key != "record_hash"
+            })
+        ).hexdigest()
+        seal = {
+            "record_type": "ledger_seal",
+            "state": "SEALED",
+            "record_count": 1,
+            "last_sequence": 1,
+            "root_hash": request["record_hash"],
+        }
+        direct_ledger.write_text(
+            canonical_line(request) + canonical_line(seal), encoding="utf-8"
+        )
+        direct["ledger_seal"] = {
+            "record_count": 1,
+            "last_sequence": 1,
+            "root_hash": request["record_hash"],
+            "ledger_file": direct_ledger.name,
+        }
 
         source_rows = [direct, self.row]
         self._write_results(*source_rows)
@@ -330,7 +364,7 @@ class RouterPublishTests(unittest.TestCase):
             catalog=self.catalog,
             prices=self.prices,
             ledgers={
-                direct["cell_id"]: self.source_ledger,
+                direct["cell_id"]: direct_ledger,
                 self.cell_id: self.source_ledger,
             },
         )
@@ -419,6 +453,12 @@ class RouterPublishTests(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaisesRegex(router_publish.RouterPublishError, "tampered"):
+            self.publish()
+
+    def test_publish_rejects_source_ledger_not_bound_to_result(self):
+        self.row["ledger_seal"]["root_hash"] = "0" * 64
+        self._write_results(self.row)
+        with self.assertRaisesRegex(router_publish.RouterPublishError, "does not match"):
             self.publish()
 
     def test_verify_rejects_tamper_extra_artifact_and_binding_mismatch(self):
