@@ -59,6 +59,7 @@ DEFAULT_CHAT_UPSTREAMS = {
     "deepseek": "https://api.deepseek.com",
     "zai": "https://api.z.ai",
     "moonshot": "https://api.moonshot.ai",
+    "openrouter": "https://openrouter.ai",
 }
 DEFAULT_ANTHROPIC_UPSTREAMS = {
     "default": "https://api.anthropic.com",
