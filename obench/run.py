@@ -70,6 +70,7 @@ PROXY_CODEX_SUBSCRIPTION_MODELS = {
     "gpt-5.5-medium", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 }
 PROXY_CHAT_MODELS = {"glm-5.2", "glm-4.7-flash", "deepseek-v4-flash", "kimi-k2.7-code", "kimi-k3"}
+PROXY_OPENROUTER_MODELS = {"laguna-s-2.1", "inkling"}
 # Gateway/router arms (phase-1 spike): a canonical model name that names both the
 # gateway and the model it fronts, run in fixed-model mode (single model, no
 # router fallback). Metered through the proxy's ``gateway/<name>`` route. Kept
@@ -633,13 +634,14 @@ def proxy_supported_for_cell(harness, model):
         # gateway/<name> route (adapters/pi.py GATEWAY_MODELS).
         return (model in PROXY_CODEX_SUBSCRIPTION_MODELS
                 or model in PROXY_CHAT_MODELS
+                or model in PROXY_OPENROUTER_MODELS
                 or model in PROXY_GATEWAY_MODELS)
     if harness == "claude":
         return model in PROXY_CLAUDE_MODELS
     if harness == "opencode":
-        return model in PROXY_CHAT_MODELS
+        return model in PROXY_CHAT_MODELS or model in PROXY_OPENROUTER_MODELS
     if harness == "grokbuild":
-        return model in {"glm-5.2", "deepseek-v4-flash", "kimi-k2.7-code", "kimi-k3", "gpt-5.6-sol"}
+        return model in {"glm-5.2", "deepseek-v4-flash", "kimi-k2.7-code", "kimi-k3", "laguna-s-2.1", "inkling", "gpt-5.6-sol"}
     # Cursor's model stream requires its private HTTP/2 agent protocol, which
     # the stdlib HTTP/1.1 proxy cannot meter; Devin performs inference behind
     # Cognition's cloud boundary. See both adapter docstrings.
@@ -662,7 +664,7 @@ def _proxy_sampling_for_cell(harness, model):
         # Record the requested (fixed) model slug for the ledger; the proxy
         # additionally records the served_model the gateway reports back.
         return {"model": model.split("/", 1)[1], "thinking": "medium"}
-    if harness == "opencode" and model in PROXY_CHAT_MODELS:
+    if harness == "opencode" and model in PROXY_CHAT_MODELS | PROXY_OPENROUTER_MODELS:
         return {"model": model, "variant": "medium"}
     if harness == "claude" and model in PROXY_CLAUDE_MODELS:
         return {"model": model, "effort": "medium"}
