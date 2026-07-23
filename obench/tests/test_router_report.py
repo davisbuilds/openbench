@@ -490,17 +490,16 @@ class RouterReportTests(unittest.TestCase):
         self.assertEqual(
             metrics["mean_cached_input_tokens_per_call"]["estimate"], 35.0
         )
-        self.assertEqual(metrics["cache_hit_call_rate"]["estimate"], 0.75)
         self.assertEqual(
             metrics["mean_cache_write_input_tokens_per_call"]["estimate"], 25.0
         )
-        self.assertEqual(
-            report["arms"]["direct"]["metrics"]["cache_hit_call_rate"]["estimate"],
-            0.0,
+        self.assertNotIn("cache_hit_call_rate", metrics)
+        self.assertNotIn(
+            "cache_hit_call_rate",
+            report["arms"]["direct"]["metrics"],
         )
         for name in (
             "mean_cached_input_tokens_per_call",
-            "cache_hit_call_rate",
             "mean_cache_write_input_tokens_per_call",
         ):
             self.assertEqual(
@@ -520,7 +519,7 @@ class RouterReportTests(unittest.TestCase):
         self.assertEqual(
             contrasts["mean_cached_input_tokens_per_call"]["estimate"], 35.0
         )
-        self.assertEqual(contrasts["cache_hit_call_rate"]["estimate"], 0.75)
+        self.assertNotIn("cache_hit_call_rate", contrasts)
         self.assertEqual(
             contrasts["mean_cache_write_input_tokens_per_call"]["estimate"], 25.0
         )

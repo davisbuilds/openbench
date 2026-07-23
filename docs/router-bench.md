@@ -150,14 +150,12 @@ zero.
 
 Those controls disable explicit gateway response caching and prevent the caller
 from selecting cache behavior. They do not disable provider-native OpenAI prompt
-caching, which may still occur upstream and is intentionally measured as part
-of each gateway's behavior. Reports expose task-weighted per-arm
-`mean_cached_input_tokens_per_call`, `cache_hit_call_rate`, and
+caching, which may still occur upstream and is retained as diagnostic evidence.
+Reports expose task-weighted per-arm `mean_cached_input_tokens_per_call` and
 `mean_cache_write_input_tokens_per_call`, each with call, cell, and task
-coverage. Compare these per-arm metrics across gateways; direct OpenAI and the
-paired gateway-minus-direct contrasts are secondary references for separating
-gateway behavior from the direct serving path. Missing cache values reduce
-coverage rather than being interpreted as zero.
+coverage. These are not ranking columns: provider-native cache ownership and
+sharding can differ between gateways. Missing cache values reduce coverage
+rather than being interpreted as zero.
 
 On 2026-07-23 raw streaming probes against OpenRouter, Vercel, and Concentrate
 returned HTTP 200 and a terminal `response.completed` event. Concentrate's

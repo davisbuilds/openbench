@@ -43,7 +43,6 @@ _CALL_COVERAGE_FIELDS = {
     "ttfb_s": "ttfb",
     "semantic_ttft_s": "ttft",
     "mean_cached_input_tokens_per_call": "cached_input_tokens",
-    "cache_hit_call_rate": "cached_input_tokens",
     "mean_cache_write_input_tokens_per_call": "cache_write_input_tokens",
 }
 _ROLES = frozenset({"direct", "gateway"})
@@ -485,17 +484,6 @@ def _cell_throughput(cell: Mapping[str, Any]) -> float | None:
     return sum(item[0] for item in paired) / duration
 
 
-def _cell_cache_hit_rate(cell: Mapping[str, Any]) -> float | None:
-    values = [
-        call["cached_input_tokens"]
-        for call in cell["calls"]
-        if call["cached_input_tokens"] is not None
-    ]
-    if not values:
-        return None
-    return sum(value > 0 for value in values) / len(values)
-
-
 def _cell_cost(cell: Mapping[str, Any], basis: str) -> float | None:
     calls = cell["calls"]
     if not calls or any(basis not in call["costs"] for call in calls):
@@ -793,7 +781,6 @@ def aggregate(
             "mean_cached_input_tokens_per_call": lambda cell: _cell_call_metric(
                 cell, "cached_input_tokens"
             ),
-            "cache_hit_call_rate": _cell_cache_hit_rate,
             "mean_cache_write_input_tokens_per_call": lambda cell: _cell_call_metric(
                 cell, "cache_write_input_tokens"
             ),
@@ -1014,7 +1001,6 @@ def aggregate(
         "mean_cached_input_tokens_per_call": lambda cell: _cell_call_metric(
             cell, "cached_input_tokens"
         ),
-        "cache_hit_call_rate": _cell_cache_hit_rate,
         "mean_cache_write_input_tokens_per_call": lambda cell: _cell_call_metric(
             cell, "cache_write_input_tokens"
         ),
