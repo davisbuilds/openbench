@@ -28,17 +28,29 @@ Notes / quirks:
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 from urllib.parse import urlsplit
 
 try:
     from obench.auth_persist import try_persist_auth_file
+    from obench import router_spec as _router_spec
 except ImportError:  # file-path / Docker mount layout
     from auth_persist import try_persist_auth_file
+    import router_spec as _router_spec
 
 NAME = "pi"
+ADAPTER_API_VERSION = 2
+ROUTED_CAPABILITIES = {
+    "protocols": ["openai_chat"],
+    "execution_lanes": ["local", "docker"],
+    "streaming": True,
+    "dynamic_model_ids": True,
+    "route_plan_transport": "sanitized_file",
+}
 
 
 def _doctor_auth(probes):
@@ -72,6 +84,26 @@ MODELS = {
 }
 _REAL_AUTH = os.path.expanduser("~/.pi/agent/auth.json")
 _EXE = "pi"
+_ROUTED_PROVIDER = "openbench-routed"
+_SYNTHETIC_API_KEY = "openbench-routed-synthetic"
+_ROUTE_PLAN_FIELDS = {
+    "schema_version", "experiment_digest", "arm_digest", "arm_id",
+    "route_kind", "endpoint", "protocol", "requested_model",
+    "requested_provider", "allowed_models", "allowed_providers",
+    "fallback_enabled", "retry_count", "cache_enabled", "auth_env",
+    "sampling", "private_router", "private_host_allowlist",
+    "private_cidr_allowlist",
+}
+_SAMPLING_FIELDS = {"temperature", "top_p", "seed"}
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_ENV_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+_CELL_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_ROUTED_ENV_ALLOWLIST = {
+    "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TMP", "TEMP",
+    "TERM", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+    "NO_PROXY", "no_proxy",
+}
 
 
 def _empty_token_usage():
@@ -293,6 +325,205 @@ def _pi_provider_ext(spec):
     )
 
 
+def _route_error(message):
+    raise _router_spec.RouterSpecError(f"invalid sanitized RoutePlan: {message}")
+
+
+def _strict_keys(value, expected, path):
+    if not isinstance(value, dict):
+        _route_error(f"{path} must be an object")
+    unknown = sorted(set(value) - expected)
+    missing = sorted(expected - set(value))
+    if unknown:
+        _route_error(f"{path} has unknown fields: {', '.join(unknown)}")
+    if missing:
+        _route_error(f"{path} missing fields: {', '.join(missing)}")
+    return value
+
+
+def _route_string(value, path, pattern=None):
+    if not isinstance(value, str) or not value.strip():
+        _route_error(f"{path} must be a non-empty string")
+    result = value.strip()
+    if pattern is not None and not pattern.fullmatch(result):
+        _route_error(f"{path} has invalid format")
+    return result
+
+
+def _route_string_tuple(value, path, pattern=None):
+    if not isinstance(value, list) or not value:
+        _route_error(f"{path} must be a non-empty array")
+    result = tuple(
+        _route_string(item, f"{path}[{index}]", pattern)
+        for index, item in enumerate(value)
+    )
+    if len(set(result)) != len(result):
+        _route_error(f"{path} must not contain duplicates")
+    return result
+
+
+def _route_bool(value, path):
+    if not isinstance(value, bool):
+        _route_error(f"{path} must be a boolean")
+    return value
+
+
+def _route_int(value, path, minimum=0):
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        _route_error(f"{path} must be an integer of at least {minimum}")
+    return value
+
+
+def _route_number(value, path, minimum, maximum):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        _route_error(f"{path} must be a number")
+    result = float(value)
+    if not minimum <= result <= maximum:
+        _route_error(f"{path} must be between {minimum} and {maximum}")
+    return result
+
+
+def _load_route_plan(route_plan_path):
+    path = Path(route_plan_path)
+    try:
+        if path.stat().st_size > 1024 * 1024:
+            _route_error("file exceeds 1 MiB")
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except _router_spec.RouterSpecError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        _route_error(f"cannot load {path}: {exc}")
+
+    data = _strict_keys(raw, _ROUTE_PLAN_FIELDS, "route plan")
+    schema_version = _route_int(data["schema_version"], "schema_version", 1)
+    if schema_version != _router_spec.SCHEMA_VERSION:
+        _route_error(f"schema_version must be {_router_spec.SCHEMA_VERSION}")
+    protocol = _route_string(data["protocol"], "protocol")
+    if protocol != "openai_chat":
+        _route_error("protocol must be 'openai_chat'")
+    route_kind = _route_string(data["route_kind"], "route_kind")
+    if route_kind not in {"direct", "gateway"}:
+        _route_error("route_kind must be 'direct' or 'gateway'")
+
+    allowed_models = _route_string_tuple(data["allowed_models"], "allowed_models")
+    allowed_providers = _route_string_tuple(
+        data["allowed_providers"], "allowed_providers", _ID_RE)
+    requested_model = _route_string(data["requested_model"], "requested_model")
+    requested_provider = _route_string(
+        data["requested_provider"], "requested_provider", _ID_RE)
+    if requested_model not in allowed_models:
+        _route_error("allowed_models must contain requested_model")
+    if requested_provider not in allowed_providers:
+        _route_error("allowed_providers must contain requested_provider")
+
+    fallback_enabled = _route_bool(data["fallback_enabled"], "fallback_enabled")
+    retry_count = _route_int(data["retry_count"], "retry_count")
+    cache_enabled = _route_bool(data["cache_enabled"], "cache_enabled")
+    if fallback_enabled or retry_count != 0 or cache_enabled:
+        _route_error("fallback, retries, and cache must be disabled")
+
+    sampling_data = _strict_keys(data["sampling"], _SAMPLING_FIELDS, "sampling")
+    sampling = _router_spec.Sampling(
+        temperature=_route_number(
+            sampling_data["temperature"], "sampling.temperature", 0.0, 2.0),
+        top_p=_route_number(sampling_data["top_p"], "sampling.top_p", 0.0, 1.0),
+        seed=_route_int(sampling_data["seed"], "sampling.seed"),
+    )
+
+    private_router = _route_bool(data["private_router"], "private_router")
+    hosts_raw = data["private_host_allowlist"]
+    cidrs_raw = data["private_cidr_allowlist"]
+    try:
+        hosts, cidrs = _router_spec._parse_allowlists(  # noqa: SLF001
+            {
+                "private_host_allowlist": hosts_raw,
+                "private_cidr_allowlist": cidrs_raw,
+            },
+            private_router,
+        )
+        endpoint = _router_spec._validate_endpoint(  # noqa: SLF001
+            data["endpoint"], "endpoint", private_router, hosts, cidrs)
+    except _router_spec.RouterSpecError as exc:
+        _route_error(str(exc))
+    if not urlsplit(endpoint).path.rstrip("/").endswith("/chat/completions"):
+        _route_error("endpoint path must end with /chat/completions")
+
+    return _router_spec.RoutePlan(
+        schema_version=schema_version,
+        experiment_digest=_route_string(
+            data["experiment_digest"], "experiment_digest", _DIGEST_RE),
+        arm_digest=_route_string(data["arm_digest"], "arm_digest", _DIGEST_RE),
+        arm_id=_route_string(data["arm_id"], "arm_id", _ID_RE),
+        route_kind=route_kind,
+        endpoint=endpoint,
+        protocol=protocol,
+        requested_model=requested_model,
+        requested_provider=requested_provider,
+        allowed_models=allowed_models,
+        allowed_providers=allowed_providers,
+        fallback_enabled=fallback_enabled,
+        retry_count=retry_count,
+        cache_enabled=cache_enabled,
+        auth_env=_route_string(data["auth_env"], "auth_env", _ENV_RE),
+        sampling=sampling,
+        private_router=private_router,
+        private_host_allowlist=hosts,
+        private_cidr_allowlist=cidrs,
+    )
+
+
+def _routed_proxy_url(plan):
+    if os.environ.get("OPENBENCH_PROXY") != "1":
+        _route_error("OPENBENCH_PROXY=1 is required")
+    base = os.environ.get("OPENBENCH_PROXY_BASE_URL", "")
+    token = os.environ.get("OPENBENCH_PROXY_CELL_TOKEN", "")
+    parsed = urlsplit(base)
+    if (parsed.scheme not in {"http", "https"} or not parsed.netloc
+            or parsed.username or parsed.password or parsed.query or parsed.fragment):
+        _route_error("OPENBENCH_PROXY_BASE_URL must be an absolute HTTP(S) URL")
+    if not _CELL_TOKEN_RE.fullmatch(token):
+        _route_error("OPENBENCH_PROXY_CELL_TOKEN has invalid format")
+
+    return (
+        f"{base.rstrip('/')}/cell/{token}/route/{plan.arm_digest}"
+    )
+
+
+def _routed_provider_ext(plan, proxy_url):
+    return (
+        "export default function (pi) {\n"
+        f"  pi.registerProvider({json.dumps(_ROUTED_PROVIDER)}, {{\n"
+        '    name: "OpenBench routed proxy",\n'
+        f"    baseUrl: {json.dumps(proxy_url)},\n"
+        f"    apiKey: {json.dumps(_SYNTHETIC_API_KEY)},\n"
+        '    api: "openai-completions",\n'
+        "    models: [{\n"
+        f"      id: {json.dumps(plan.requested_model)},\n"
+        f"      name: {json.dumps(plan.requested_model)},\n"
+        '      reasoning: false, input: ["text"],\n'
+        "      compat: {\n"
+        "        supportsStore: false, supportsDeveloperRole: true,\n"
+        "        supportsUsageInStreaming: true\n"
+        "      },\n"
+        "      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },\n"
+        "      contextWindow: 1000000, maxTokens: 32768\n"
+        "    }]\n"
+        "  });\n"
+        "}\n"
+    )
+
+
+def _routed_child_env(iso_home):
+    env = {
+        key: value for key, value in os.environ.items()
+        if key in _ROUTED_ENV_ALLOWLIST
+    }
+    env["HOME"] = iso_home
+    env["PI_CODING_AGENT_DIR"] = os.path.join(iso_home, ".pi", "agent")
+    env["PI_TELEMETRY"] = "0"
+    return env
+
+
 def _parse_json_with_usage(stdout):
     """Parse pi's JSONL event stream into (tokens, turns, tail, token_usage).
 
@@ -398,6 +629,56 @@ def _parse_json(stdout):
     """Backward-compatible parser returning legacy fields only."""
     tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
     return tokens, turns, tail
+
+
+def run_routed(
+    instruction: str,
+    workdir: str,
+    route_plan_path: str,
+    timeout_s: int,
+) -> dict:
+    plan = _load_route_plan(route_plan_path)
+    proxy_url = _routed_proxy_url(plan)
+    iso_home = tempfile.mkdtemp(prefix="pi_routed_home_")
+    try:
+        ext_path = os.path.join(iso_home, "routed-provider.mjs")
+        with open(ext_path, "w", encoding="utf-8") as fh:
+            fh.write(_routed_provider_ext(plan, proxy_url))
+        cmd = [
+            _EXE, "-p", "--no-approve", "--no-extensions",
+            "-e", ext_path,
+            "--provider", _ROUTED_PROVIDER,
+            "--model", plan.requested_model,
+            "--mode", "json",
+            instruction,
+        ]
+        stdout_text, stderr_text, returncode, timed_out = _run_streaming(
+            cmd, workdir, timeout_s, _routed_child_env(iso_home))
+        combined = stdout_text + stderr_text
+        if timed_out:
+            return {
+                "completed": False, "error": f"timeout after {timeout_s}s",
+                "output_tail": combined[-2000:], "full_output": combined,
+                "tokens": None, "turns": None, "cmd": cmd,
+                **_empty_token_usage(),
+            }
+        try:
+            tokens, turns, tail, token_usage = _parse_json_with_usage(stdout_text)
+        except Exception:  # noqa: BLE001
+            tokens, turns, tail, token_usage = None, None, "", _empty_token_usage()
+        return {
+            "completed": returncode == 0,
+            "error": None if returncode == 0 else f"exit {returncode}",
+            "output_tail": tail or combined[-2000:],
+            "full_output": combined,
+            "tokens": tokens,
+            "turns": turns,
+            "cmd": cmd,
+            **token_usage,
+        }
+    finally:
+        shutil.rmtree(iso_home, ignore_errors=True)
+
 
 def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
     if model in MODELS:
