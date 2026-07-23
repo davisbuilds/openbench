@@ -11,6 +11,20 @@ row with no evidence of agent work is treated as harness/provider infra instead:
 no tokens, no turns, and effectively empty saved output/text after generic
 headers and timeout boilerplate are removed. Genuine timeouts still show work via
 tokens, turns, or meaningful transcript/error text and remain ``timeout``.
+
+Zero-work classifier gate (P0 hardening)
+-----------------------------------------
+A completed cell with zero output tokens AND at most 1 turn AND no meaningful
+adapter-output text is infrastructure, never a capability "wrong answer."
+The canonical pattern is a gpt-5.6-sol cell that completes in 2--9s wall time
+with 0 output tokens and exactly 1 turn — the harness started, the model
+returned nothing useful (connection dropped, auth rejected early, or the
+adapter's minimal turn was a probe that got no response), and the cell
+finished without the adapter crashing visibly.
+
+This is symmetric with the crash-marker / adapter-traceback gate: when no
+model output was produced, the failure belongs to the harness or provider, not
+the model's ability to solve the task.
 """
 
 import re
@@ -105,6 +119,46 @@ def has_instant_cli_exit_shape(row):
     return float(wall) < 30.0
 
 
+def has_zero_output_and_minimal_turns(row, text=""):
+    """True when a completed cell produced no model output and at most 1 turn.
+
+    A harness that started but returned zero output tokens in its only turn
+    (or zero turns) is infrastructure: the model never produced a useful
+    response.  This prevents cells that complete in a few seconds with no
+    output tokens from being misclassified as ``wrong_answer`` (the model
+    couldn't have answered wrong if it never answered).
+
+    The canonical pattern: gpt-5.6-sol cells with 2--9s wall time,
+    0 tokens_output, 1 turn, untouched workspace.
+
+    Pass ``text`` (adapter output) to suppress the gate when meaningful
+    model/adapter text exists despite zero reported tokens — some adapters
+    print diagnostic output on stdout without going through the token parser.
+    """
+    row = row or {}
+    if row.get("harness") == "null":
+        return False
+    if not bool(row.get("completed")):
+        return False
+    if bool(row.get("success")):
+        return False
+    # Check tokens_output specifically — zero model output is the signal.
+    out = row.get("tokens_output")
+    if out not in (None, 0):
+        return False
+    # Also check aggregate tokens to catch proxy-only token fields.
+    if row.get("tokens") not in (None, 0):
+        return False
+    # At most 1 turn — a single probe-turn that produced nothing is infra.
+    turns = row.get("turns")
+    if turns is None or (isinstance(turns, (int, float)) and turns > 1):
+        return False
+    # Suppress gate when there's meaningful output text despite zero tokens.
+    if text and len(_meaningful_work_text(text)) >= 10:
+        return False
+    return True
+
+
 def _wall_rode_cap(row, timeout_s):
     if timeout_s is None:
         timeout_s = row.get("timeout_s")
@@ -176,12 +230,19 @@ def _has_no_work_evidence(row, text):
 
 
 def is_silent_no_model_call(row, adapter_output=""):
-    """True for a completed, unsolved cell with no evidence the model ran."""
+    """True for a completed, unsolved cell with no evidence the model ran.
+
+    The zero-work classifier gate (``has_zero_output_and_minimal_turns``) is
+    checked here for symmetry — a cell that produced zero output tokens in <=1
+    turn is infra regardless of whether near-zero aggregate tokens or turns=1
+    happens to satisfy the broader ``_has_model_work_evidence`` heuristic.
+    """
     row = row or {}
     text = _text(adapter_output, row.get("output_tail"), row.get("error"))
     return (row.get("harness") != "null"
             and bool(row.get("completed")) and not bool(row.get("success"))
-            and not _has_model_work_evidence(row, text))
+            and (has_zero_output_and_minimal_turns(row, text)
+                 or not _has_model_work_evidence(row, text)))
 
 
 def classify_failure_reason(row, adapter_output=""):
