@@ -251,6 +251,14 @@ def load_frozen_prices(
     return _load_prices(environ)
 
 
+def _missing_price_models(
+    experiment: router_spec.RouterExperiment,
+    prices: Mapping[str, Price],
+) -> list[str]:
+    required = {arm.canonical_model for arm in experiment.arms}
+    return sorted(required - set(prices))
+
+
 def _price_snapshot_path(results_path: Path) -> Path:
     return results_path.parent / f".{results_path.stem}.router-prices.json"
 
@@ -710,9 +718,12 @@ def _proxy_evidence(
     total_cost = Decimal(0)
     priced_calls = 0
     successful_calls = 0
+    auth_failure = False
     for row in ledger_rows:
         status = row.get("status")
         if isinstance(status, int) and 400 <= status <= 599:
+            if status in {401, 403, 407}:
+                auth_failure = True
             calls.append({
                 "timing": None,
                 "generation": None,
@@ -760,7 +771,9 @@ def _proxy_evidence(
             }
         )
     infrastructure_reason = None
-    if len(ledger_rows) > budget.max_calls:
+    if auth_failure:
+        infrastructure_reason = "upstream_auth_failure"
+    elif len(ledger_rows) > budget.max_calls:
         infrastructure_reason = "max_calls_exceeded"
     elif total_output > budget.max_output_tokens:
         infrastructure_reason = "max_output_tokens_exceeded"
@@ -989,6 +1002,7 @@ def doctor_experiment(
         experiment, environ=environ, admitted_auth_envs=admitted
     )
     prices, price_snapshot = _load_prices(environ)
+    missing_prices = _missing_price_models(experiment, prices)
     version = pi.version()
     if not version:
         raise RouterRunError("Pi CLI is unavailable or did not report a version")
@@ -998,8 +1012,9 @@ def doctor_experiment(
         "tasks": len(tasks),
         "arms": len(experiment.arms),
         "pi_version": version,
-        "prices": "frozen" if prices else "unavailable",
-        "usd_cap_enforceable": bool(prices),
+        "prices": "frozen" if prices and not missing_prices else "incomplete",
+        "missing_price_models": missing_prices,
+        "usd_cap_enforceable": bool(prices) and not missing_prices,
         "route_isolation": "exploratory",
     }
 
@@ -1032,6 +1047,12 @@ def run_experiment(
     if not prices:
         raise RouterRunError(
             f"USD cap cannot be enforced without {FROZEN_PRICES_ENV}; refusing to run"
+        )
+    missing_prices = _missing_price_models(experiment, prices)
+    if missing_prices:
+        raise RouterRunError(
+            "USD cap cannot be enforced; frozen prices are missing: "
+            + ", ".join(missing_prices)
         )
     full_schedule = build_schedule(experiment)
     schedule = _active_schedule(experiment, full_schedule)

@@ -426,6 +426,64 @@ direct_control_arm_id = "direct"
         }
         self.assertIn("malformed_sse_event", router_run._route_reasons(metrics, plan))
 
+    def test_price_coverage_and_auth_failures_fail_closed(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        with mock.patch.object(router_run.pi, "version", return_value="fake-pi 1.0"):
+            report = router_run.doctor_experiment(
+                self.experiment,
+                tasks_dir=self.tasks,
+                environ={
+                    **self.env,
+                    router_run.FROZEN_PRICES_ENV: json.dumps({
+                        "other/model": {
+                            "input_per_million": "1",
+                            "output_per_million": "1",
+                            "effective_at": "2026-07-22",
+                        }
+                    }),
+                },
+            )
+        self.assertFalse(report["usd_cap_enforceable"])
+        self.assertEqual(report["missing_price_models"], ["openai/fake-model"])
+        incomplete_env = {
+            **self.env,
+            router_run.FROZEN_PRICES_ENV: json.dumps({
+                "other/model": {
+                    "input_per_million": "1",
+                    "output_per_million": "1",
+                    "effective_at": "2026-07-22",
+                }
+            }),
+        }
+        with mock.patch.object(router_run.pi, "version", return_value="fake-pi 1.0"):
+            with self.assertRaisesRegex(router_run.RouterRunError, "missing"):
+                router_run.run_experiment(
+                    self.experiment,
+                    results_path=self.results,
+                    tasks_dir=self.tasks,
+                    exec_mode="local",
+                    environ=incomplete_env,
+                    adapters_dir=self.adapters,
+                )
+        self.assertFalse(self.results.exists())
+
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = plans[0]
+        _calls, integrity, reason = router_run._proxy_evidence(
+            [{"status": 401}],
+            {plan.canonical_model: router_run.Price(
+                router_run.Decimal("1"), router_run.Decimal("1"), "2026-07-22"
+            )},
+            experiment.budget,
+            plan,
+        )
+        self.assertTrue(integrity["pass"])
+        self.assertEqual(reason, "upstream_auth_failure")
+
     def test_docker_fails_closed_in_local_mvp(self):
         with self._runtime():
             with self.assertRaisesRegex(router_run.RouterRunError, "unsupported"):
