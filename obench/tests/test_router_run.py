@@ -463,7 +463,11 @@ direct_control_arm_id = "direct"
         self.assertIn("served_model_conflict", openrouter_reasons)
         self.assertIn("attempt_model_conflict", openrouter_reasons)
 
-        vercel = dataclasses.replace(openrouter, gateway="vercel")
+        vercel = dataclasses.replace(
+            openrouter,
+            gateway="vercel",
+            model_match="model_family",
+        )
         self.assertEqual(router_run._route_reasons(metrics(), vercel), [])
         undeclared = router_run._route_reasons(
             metrics(served="undeclared", attempt="undeclared"),
@@ -663,6 +667,59 @@ direct_control_arm_id = "direct"
         )
         self.assertNotIn("router_reported", costs)
         self.assertIn("frozen_list_estimate", costs)
+
+    def test_model_router_prices_each_call_by_observed_served_model(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = dataclasses.replace(
+            next(item for item in plans if item.route_kind == "gateway"),
+            track="model_router",
+            router_mode="auto",
+            requested_model="openrouter/auto-beta",
+            allowed_models=("openai/model-a", "anthropic/model-b"),
+            allowed_providers=("openai", "anthropic"),
+            fallback_enabled=True,
+            cost_quality_tradeoff=5,
+        )
+        prices = {
+            "openai/model-a": router_run.Price(
+                router_run.Decimal("1"),
+                router_run.Decimal("1"),
+                "2026-07-01T00:00:00Z",
+            ),
+            "anthropic/model-b": router_run.Price(
+                router_run.Decimal("3"),
+                router_run.Decimal("5"),
+                "2026-07-01T00:00:00Z",
+            ),
+        }
+        metrics = {
+            "route": {
+                "served_model": "anthropic/model-b",
+                "gateway_metadata": {},
+            },
+            "usage": {"input_tokens": 2, "output_tokens": 4},
+        }
+
+        costs, amount = router_run._price_call(
+            metrics, prices, plan, "2026-07-22T12:34:56Z"
+        )
+
+        self.assertEqual(
+            costs["frozen_list_estimate"]["amount_usd"], 0.000026
+        )
+        self.assertEqual(amount, router_run.Decimal("0.000026"))
+
+        metrics["route"]["gateway_metadata"]["cost"] = "0.000019"
+        costs, amount = router_run._price_call(
+            metrics, prices, plan, "2026-07-22T12:34:56Z"
+        )
+        self.assertEqual(costs["router_reported"]["amount_usd"], 0.000019)
+        self.assertEqual(amount, router_run.Decimal("0.000019"))
 
     def test_price_coverage_and_auth_failures_fail_closed(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)

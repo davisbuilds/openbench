@@ -106,7 +106,7 @@ def _publish(args: argparse.Namespace) -> int:
         results_path,
         args.bundle,
         experiment=experiment,
-        policy=router_run.policy_snapshot(),
+        policy=router_run.policy_snapshot(experiment),
         catalog=router_run.catalog_snapshot(experiment),
         prices=price_snapshot,
         ledgers=ledgers,

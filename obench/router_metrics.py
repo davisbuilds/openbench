@@ -85,6 +85,8 @@ class OpenAIChatSSEParser:
         allowed_models: Iterable[str] = (),
         allowed_providers: Iterable[str] = (),
         fallback_enabled: bool = False,
+        router_mode: str | None = None,
+        model_match: str = "exact_revision",
         gateway: str | None = None,
         response_headers: Mapping[str, str] | None = None,
     ):
@@ -103,6 +105,7 @@ class OpenAIChatSSEParser:
             if (provider := _identifier(value)) is not None
         )
         self._fallback_enabled = bool(fallback_enabled)
+        self._router_mode = router_mode
         self._gateway = gateway or ("openrouter" if route_kind == "gateway" else None)
         self._gateway_evidence = (
             router_gateways.GatewayEvidence(
@@ -111,6 +114,8 @@ class OpenAIChatSSEParser:
                 requested_provider=self._requested_provider or "",
                 allowed_models=self._allowed_models,
                 allowed_providers=self._allowed_providers,
+                router_mode=self._router_mode,
+                model_match=model_match,
                 response_headers=response_headers or {},
             )
             if self._gateway is not None
@@ -242,6 +247,11 @@ class OpenAIChatSSEParser:
             ),
             "provider": provider is not None,
             "attempts": bool(attempts),
+            "attempt_evidence": (
+                gateway_evidence.attempts_present
+                if gateway_evidence is not None
+                else False
+            ),
             "stream_done": self._done_seen,
         }
         covered = sum(coverage.values())
@@ -403,7 +413,7 @@ class OpenAIChatSSEParser:
                 reasons.append("missing_gateway_profile")
             else:
                 reasons.extend(self._gateway_evidence.route_reasons())
-            if self._fallback_enabled:
+            if self._fallback_enabled and self._router_mode != "auto":
                 reasons.append("fallback_enabled")
         elif self._requested_model and served_model != self._requested_model:
             reasons.append("served_model_conflict")
@@ -429,6 +439,8 @@ def parse_chat_sse(
     allowed_models: Iterable[str] = (),
     allowed_providers: Iterable[str] = (),
     fallback_enabled: bool = False,
+    router_mode: str | None = None,
+    model_match: str = "exact_revision",
     gateway: str | None = None,
     response_headers: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -441,6 +453,8 @@ def parse_chat_sse(
         allowed_models=allowed_models,
         allowed_providers=allowed_providers,
         fallback_enabled=fallback_enabled,
+        router_mode=router_mode,
+        model_match=model_match,
         gateway=gateway,
         response_headers=response_headers,
     )

@@ -14,6 +14,8 @@ DIGESTS = {
             "experiment",
             "direct_arm",
             "gateway_arm",
+            "auto_arm",
+            "fixed_arm",
             "policy",
             "catalog",
             "price",
@@ -45,11 +47,14 @@ def make_row(
     infrastructure_reason=None,
     route_pass=True,
     route_reasons=None,
+    track="gateway_tax",
+    router_mode=None,
+    model_match="exact_revision",
 ):
     block_id = f"{task}-{window}-{repetition}-a{block_attempt}"
     identity = results.CellIdentity.for_router(
-        track="gateway_tax",
-        experiment_id="gateway-tax-fixture",
+        track=track,
+        experiment_id=f"{track}-fixture",
         experiment_digest=DIGESTS["experiment"],
         arm_id=arm_id,
         arm_digest=DIGESTS[f"{arm_id}_arm"],
@@ -92,6 +97,7 @@ def make_row(
         "cell_id": results.make_router_cell_id(identity),
         "identity": identity.as_dict(),
         "arm_role": role,
+        "model_match": model_match,
         "baseline": baseline,
         "result": result,
         "route_integrity": {
@@ -100,6 +106,8 @@ def make_row(
         },
         "proxy_metrics": {"calls": [] if calls is None else calls},
     }
+    if router_mode is not None:
+        row["router_mode"] = router_mode
     return row
 
 
@@ -112,6 +120,8 @@ def call(
     tokens=10,
     generation_s=2.0,
     costs=True,
+    attempts=None,
+    attempts_present=False,
 ):
     bases = {}
     if costs:
@@ -130,7 +140,12 @@ def call(
     return {
         "timing": {"ttfb_s": ttfb, "semantic_ttft_s": ttft},
         "generation": {"output_tokens": tokens, "duration_s": generation_s},
-        "route": {"provider": provider, "served_model": model},
+        "route": {
+            "provider": provider,
+            "served_model": model,
+            "attempts": [] if attempts is None else attempts,
+            "attempts_present": attempts_present,
+        },
         "costs": bases,
     }
 
@@ -206,6 +221,81 @@ class RouterReportTests(unittest.TestCase):
         )
         self.assertFalse(report["analysis"]["wilson_intervals"])
         self.assertFalse(report["analysis"]["composite_score"])
+
+    def test_model_router_reports_auto_minus_fixed_and_attempt_coverage(self):
+        rows = []
+        for task in ("task_a", "task_b"):
+            rows.extend([
+                make_row(
+                    task=task,
+                    arm_id="fixed",
+                    role="gateway",
+                    router_mode="fixed",
+                    baseline=True,
+                    track="model_router",
+                    calls=[call(
+                        provider="OpenAI",
+                        model="openai/gpt-fixed",
+                    )],
+                ),
+                make_row(
+                    task=task,
+                    arm_id="auto",
+                    role="gateway",
+                    router_mode="auto",
+                    baseline=False,
+                    track="model_router",
+                    solved=task == "task_a",
+                    score=1.0 if task == "task_a" else 0.0,
+                    calls=[call(
+                        provider="Anthropic",
+                        model="anthropic/claude-routed",
+                        attempts=[
+                            {
+                                "provider": "OpenAI",
+                                "model": "openai/gpt-fixed",
+                                "status": 429,
+                            },
+                            {
+                                "provider": "Anthropic",
+                                "model": "anthropic/claude-routed",
+                                "status": 200,
+                            },
+                        ],
+                        attempts_present=True,
+                    )],
+                ),
+            ])
+
+        report = router_report.aggregate(
+            rows, bootstrap_replicates=50, bootstrap_seed=9
+        )
+
+        self.assertEqual(report["track"], "model_router")
+        self.assertEqual(report["model_match"], "exact_revision")
+        self.assertEqual(report["baseline_arm"], "fixed")
+        self.assertEqual(
+            report["paired_contrasts"]["auto"]["direction"],
+            "auto_minus_fixed",
+        )
+        self.assertNotIn("fixed", report["paired_contrasts"])
+        self.assertEqual(
+            report["arms"]["auto"]["routing"]["fallback_call_rate"]["estimate"],
+            1.0,
+        )
+        self.assertEqual(
+            report["arms"]["auto"]["routing"]["mean_attempts_per_call"]["estimate"],
+            2.0,
+        )
+        self.assertEqual(
+            report["arms"]["auto"]["primary_cost_basis"], "router_reported"
+        )
+        self.assertEqual(
+            report["arms"]["auto"]["actual_cost"]["cost_per_solve_usd"], 0.2
+        )
+        rendered = router_report.render_text(report)
+        self.assertIn("auto_minus_fixed", rendered)
+        self.assertNotIn("gateway tax", rendered.lower())
 
     def test_router_provider_failure_stays_in_attempted_denominator(self):
         rows = self.complete_rows()

@@ -1,4 +1,4 @@
-"""Matched, task-weighted reporting for schema-v2 Gateway Tax rows.
+"""Matched, task-weighted reporting for schema-v2 Router Bench rows.
 
 The report consumes canonical router identities from :mod:`obench.results` plus
 these result fields:
@@ -169,7 +169,9 @@ def _metric(
     }
 
 
-def _arm_metadata(row: Mapping[str, Any], row_number: int) -> tuple[str, bool]:
+def _arm_metadata(
+    row: Mapping[str, Any], row_number: int
+) -> tuple[str, bool, str | None]:
     role = row.get("arm_role")
     baseline = row.get("baseline")
     if role is None and isinstance(row.get("arm"), Mapping):
@@ -182,7 +184,14 @@ def _arm_metadata(row: Mapping[str, Any], row_number: int) -> tuple[str, bool]:
         raise RouterReportError(
             f"row {row_number} arm_role must be one of {sorted(_ROLES)}"
         )
-    return role, _bool(baseline, f"row {row_number} baseline")
+    router_mode = row.get("router_mode")
+    if router_mode is not None:
+        router_mode = _string(router_mode, f"row {row_number} router_mode")
+        if router_mode not in {"auto", "fixed"}:
+            raise RouterReportError(
+                f"row {row_number} router_mode must be 'auto' or 'fixed'"
+            )
+    return role, _bool(baseline, f"row {row_number} baseline"), router_mode
 
 
 def _stratum(identity: results.CellIdentity) -> tuple[Any, ...]:
@@ -344,6 +353,19 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
         )
         provider = route.get("provider")
         model = route.get("served_model")
+        raw_attempts = route.get("attempts", [])
+        if not isinstance(raw_attempts, list) or not all(
+            isinstance(attempt, Mapping) for attempt in raw_attempts
+        ):
+            raise RouterReportError(
+                f"row {row_number} call {call_number} route.attempts must be a list"
+            )
+        attempts_present = route.get("attempts_present", False)
+        if not isinstance(attempts_present, bool):
+            raise RouterReportError(
+                f"row {row_number} call {call_number} "
+                "route.attempts_present must be a boolean"
+            )
         if provider is not None:
             provider = _string(
                 provider, f"row {row_number} call {call_number} route.provider"
@@ -352,6 +374,24 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
             model = _string(
                 model, f"row {row_number} call {call_number} route.served_model"
             )
+        fallback_observed = len(raw_attempts) > 1 or any(
+            (
+                isinstance(attempt.get("status"), int)
+                and not isinstance(attempt.get("status"), bool)
+                and not 200 <= attempt["status"] < 300
+            )
+            or (
+                provider is not None
+                and isinstance(attempt.get("provider"), str)
+                and attempt["provider"].casefold() != provider.casefold()
+            )
+            or (
+                model is not None
+                and isinstance(attempt.get("model"), str)
+                and attempt["model"] != model
+            )
+            for attempt in raw_attempts
+        )
         output_tokens = generation_duration = None
         if generation is not None:
             output_tokens = _optional_number(
@@ -380,6 +420,9 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
                 "output_tokens": output_tokens,
                 "generation_duration": generation_duration,
                 "route": _route_label(provider, model),
+                "attempts": len(raw_attempts),
+                "attempts_present": attempts_present,
+                "fallback_observed": fallback_observed,
                 "costs": _costs(call, row_number, call_number),
             }
         )
@@ -423,6 +466,22 @@ def _cell_cost(cell: Mapping[str, Any], basis: str) -> float | None:
     if not calls or any(basis not in call["costs"] for call in calls):
         return None
     return sum(call["costs"][basis][0] for call in calls)
+
+
+def _cell_attempt_metric(cell: Mapping[str, Any], name: str) -> float | None:
+    calls = cell["calls"]
+    if not calls:
+        return None
+    if name == "evidence":
+        return sum(call["attempts_present"] for call in calls) / len(calls)
+    covered = [call for call in calls if call["attempts_present"]]
+    if not covered:
+        return None
+    if name == "fallback":
+        return sum(call["fallback_observed"] for call in covered) / len(covered)
+    if name == "attempts":
+        return sum(call["attempts"] for call in covered) / len(covered)
+    raise AssertionError(name)
 
 
 def _task_values(
@@ -475,7 +534,8 @@ def aggregate(
     strata = set()
     cell_ids = {}
     logical_cells = {}
-    arm_metadata: dict[str, tuple[str, bool, str]] = {}
+    arm_metadata: dict[str, tuple[str, bool, str, str | None]] = {}
+    model_matches = set()
     task_metadata: dict[str, tuple[str, str, str]] = {}
     block_coordinates: dict[str, tuple[Any, ...]] = {}
     coordinate_block_ids: dict[tuple[Any, ...], str] = {}
@@ -488,6 +548,12 @@ def aggregate(
         except results.ResultError as exc:
             raise RouterReportError(f"row {row_number} has invalid identity: {exc}") from exc
         tracks.add(identity.track)
+        model_match = row.get("model_match", "exact_revision")
+        if model_match not in {"exact_revision", "model_family"}:
+            raise RouterReportError(
+                f"row {row_number} has invalid model_match"
+            )
+        model_matches.add(model_match)
         experiment_ids.add(identity.experiment_id)
         experiment_digests.add(identity.experiment_digest)
         strata.add(_stratum(identity))
@@ -503,8 +569,8 @@ def aggregate(
                 f"{logical_cells[logical]} and {row_number}"
             )
         logical_cells[logical] = row_number
-        role, baseline = _arm_metadata(row, row_number)
-        metadata = (role, baseline, identity.arm_digest)
+        role, baseline, router_mode = _arm_metadata(row, row_number)
+        metadata = (role, baseline, identity.arm_digest, router_mode)
         previous = arm_metadata.setdefault(identity.arm_id, metadata)
         if previous != metadata:
             raise RouterReportError(f"arm {identity.arm_id!r} metadata is inconsistent")
@@ -549,26 +615,53 @@ def aggregate(
 
     if len(experiment_ids) != 1 or len(experiment_digests) != 1:
         raise RouterReportError("rows mix experiments")
-    if tracks != {"gateway_tax"}:
-        raise RouterReportError("rows must contain only the gateway_tax track")
+    if len(tracks) != 1 or not tracks <= {"gateway_tax", "model_router"}:
+        raise RouterReportError("rows must contain one supported router track")
+    track = next(iter(tracks))
+    if len(model_matches) != 1:
+        raise RouterReportError("rows mix model_match policies")
+    model_match = next(iter(model_matches))
     if len(strata) != 1:
         raise RouterReportError("rows mix comparison strata")
 
     baseline_arms = [
-        arm_id for arm_id, (role, baseline, _digest) in arm_metadata.items() if baseline
+        arm_id
+        for arm_id, (_role, baseline, _digest, _mode) in arm_metadata.items()
+        if baseline
     ]
     if len(baseline_arms) != 1:
-        raise RouterReportError("gateway_tax requires exactly one baseline arm")
+        raise RouterReportError(f"{track} requires exactly one baseline arm")
     baseline_arm = baseline_arms[0]
-    if arm_metadata[baseline_arm][0] != "direct":
-        raise RouterReportError("the gateway_tax baseline arm must be direct")
-    if any(
-        role == "direct" and arm_id != baseline_arm
-        for arm_id, (role, _baseline, _digest) in arm_metadata.items()
-    ):
-        raise RouterReportError("gateway_tax allows exactly one direct arm")
-    if not any(role == "gateway" for role, _baseline, _digest in arm_metadata.values()):
-        raise RouterReportError("gateway_tax requires at least one gateway arm")
+    if track == "gateway_tax":
+        if arm_metadata[baseline_arm][0] != "direct":
+            raise RouterReportError("the gateway_tax baseline arm must be direct")
+        if any(
+            role == "direct" and arm_id != baseline_arm
+            for arm_id, (role, _baseline, _digest, _mode) in arm_metadata.items()
+        ):
+            raise RouterReportError("gateway_tax allows exactly one direct arm")
+        if not any(
+            role == "gateway"
+            for role, _baseline, _digest, _mode in arm_metadata.values()
+        ):
+            raise RouterReportError("gateway_tax requires at least one gateway arm")
+        if any(mode is not None for _role, _baseline, _digest, mode in arm_metadata.values()):
+            raise RouterReportError("gateway_tax rows must not set router_mode")
+    else:
+        modes = [metadata[3] for metadata in arm_metadata.values()]
+        if modes.count("auto") != 1 or not modes.count("fixed"):
+            raise RouterReportError(
+                "model_router requires one auto arm and one or more fixed controls"
+            )
+        if arm_metadata[baseline_arm][3] != "fixed":
+            raise RouterReportError(
+                "the model_router baseline arm must be a fixed control"
+            )
+        if any(
+            role != "gateway"
+            for role, _baseline, _digest, _mode in arm_metadata.values()
+        ):
+            raise RouterReportError("model_router arms must all use gateway routes")
 
     if expected_arm_ids is None:
         expected_arms = frozenset(arm_metadata)
@@ -819,7 +912,7 @@ def aggregate(
                 },
             }
 
-        report_arms[arm_id] = {
+        report_arm = {
             "role": arm_metadata[arm_id][0],
             "baseline": arm_metadata[arm_id][1],
             "arm_digest": arm_metadata[arm_id][2],
@@ -828,6 +921,44 @@ def aggregate(
             "costs": costs,
             "route_distribution": distribution,
         }
+        if arm_metadata[arm_id][3] is not None:
+            report_arm["router_mode"] = arm_metadata[arm_id][3]
+        report_arms[arm_id] = report_arm
+        if track == "model_router":
+            primary_basis = next(
+                (
+                    basis
+                    for basis in ("router_reported", "frozen_list_estimate")
+                    if costs[basis]["basis_coverage"]["complete"]
+                ),
+                None,
+            )
+            report_arms[arm_id]["primary_cost_basis"] = primary_basis
+            report_arms[arm_id]["actual_cost"] = (
+                costs[primary_basis] if primary_basis is not None else None
+            )
+            report_arms[arm_id]["routing"] = {}
+            for name, getter_name in (
+                ("attempt_evidence_coverage", "evidence"),
+                ("fallback_call_rate", "fallback"),
+                ("mean_attempts_per_call", "attempts"),
+            ):
+                values, covered_cells = _task_values(
+                    cells_by_task,
+                    lambda cell, metric=getter_name: _cell_attempt_metric(
+                        cell, metric
+                    ),
+                )
+                report_arms[arm_id]["routing"][name] = _metric(
+                    values,
+                    eligible_tasks=eligible_tasks,
+                    cells_covered=covered_cells,
+                    cells_total=cells_total,
+                    replicates=bootstrap_replicates,
+                    seed=_seed(
+                        bootstrap_seed, f"arm:{arm_id}:routing:{name}"
+                    ),
+                )
 
     contrasts = {}
     contrast_getters = {
@@ -846,15 +977,17 @@ def aggregate(
     for arm_id in sorted(expected_arms):
         if arm_id == baseline_arm:
             continue
+        if track == "model_router" and arm_metadata[arm_id][3] != "auto":
+            continue
         metrics = {}
         for name, getter in contrast_getters.items():
             block_differences: dict[str, list[float]] = defaultdict(list)
             covered_blocks = 0
             for block in analyzed_blocks:
-                gateway = getter(block["cells"][arm_id])
-                direct = getter(block["cells"][baseline_arm])
-                if gateway is not None and direct is not None:
-                    block_differences[block["task"]].append(gateway - direct)
+                treatment = getter(block["cells"][arm_id])
+                control = getter(block["cells"][baseline_arm])
+                if treatment is not None and control is not None:
+                    block_differences[block["task"]].append(treatment - control)
                     covered_blocks += 1
             paired = {
                 task: sum(values) / len(values)
@@ -882,17 +1015,27 @@ def aggregate(
                     ),
                 },
             }
-        contrasts[arm_id] = {
-            "gateway_arm": arm_id,
-            "direct_arm": baseline_arm,
-            "direction": "gateway_minus_direct",
-            "metrics": metrics,
-        }
+        contrasts[arm_id] = (
+            {
+                "auto_arm": arm_id,
+                "fixed_control_arm": baseline_arm,
+                "direction": "auto_minus_fixed",
+                "metrics": metrics,
+            }
+            if track == "model_router"
+            else {
+                "gateway_arm": arm_id,
+                "direct_arm": baseline_arm,
+                "direction": "gateway_minus_direct",
+                "metrics": metrics,
+            }
+        )
 
     dto = {
         "schema_version": 1,
         "benchmark": "router",
-        "track": "gateway_tax",
+        "track": track,
+        "model_match": model_match,
         "experiment_id": next(iter(experiment_ids)),
         "experiment_digest": next(iter(experiment_digests)),
         "analysis": {
@@ -940,8 +1083,9 @@ def render_text(report: Mapping[str, Any]) -> str:
         score = metrics["mean_checker_score"]["estimate"]
         availability = metrics["availability"]["estimate"]
         latency = metrics["latency_s"]["estimate"]
+        role = arm.get("router_mode") or arm["role"]
         lines.append(
-            f"{arm_id} ({arm['role']}): solve {_format_percent(solve)}, "
+            f"{arm_id} ({role}): solve {_format_percent(solve)}, "
             f"score {_format_number(score)}, availability {_format_percent(availability)}, "
             f"latency {_format_seconds(latency)}"
         )
@@ -957,8 +1101,9 @@ def render_text(report: Mapping[str, Any]) -> str:
     for arm_id, contrast in report["paired_contrasts"].items():
         latency = contrast["metrics"]["latency_s"]["estimate"]
         solve = contrast["metrics"]["solve_rate"]["estimate"]
+        control = contrast.get("fixed_control_arm", contrast.get("direct_arm"))
         lines.append(
-            f"{arm_id} - {contrast['direct_arm']}: "
+            f"{arm_id} - {control} ({contrast['direction']}): "
             f"solve {_format_signed(solve)}, latency {_format_signed(latency, 's')}"
         )
     return "\n".join(lines)

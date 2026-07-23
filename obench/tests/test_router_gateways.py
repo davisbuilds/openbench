@@ -76,6 +76,53 @@ class GatewayRequestProfileTests(unittest.TestCase):
             {"Authorization": "Bearer secret"},
         )
 
+    def test_auto_router_replaces_plugins_routing_session_and_cache_controls(self):
+        body = self.base_body()
+        body.update({
+            "plugins": [{"id": "attacker"}],
+            "router": {"strategy": "attacker"},
+            "session_id": "attacker-session",
+            "conversation_id": "attacker-conversation",
+            "providerOptions": {"gateway": {"only": ["attacker"]}},
+        })
+
+        router_gateways.shape_body(
+            body,
+            gateway="openrouter",
+            requested_provider="openrouter",
+            router_mode="auto",
+            allowed_models=("openai/gpt-a", "anthropic/claude-b"),
+            allowed_providers=("OpenAI", "Anthropic"),
+            cost_quality_tradeoff=6,
+            session_id="cell-opaque",
+        )
+
+        self.assertEqual(body["provider"], {
+            "only": ["OpenAI", "Anthropic"],
+            "allow_fallbacks": True,
+        })
+        self.assertEqual(body["plugins"], [{
+            "id": "auto-router",
+            "allowed_models": ["openai/gpt-a", "anthropic/claude-b"],
+            "cost_quality_tradeoff": 6,
+        }])
+        self.assertEqual(body["session_id"], "cell-opaque")
+        for key in (
+            "router", "conversation_id", "providerOptions", "cache",
+            "prompt_cache_key",
+        ):
+            self.assertNotIn(key, body)
+
+    def test_model_match_distinguishes_exact_revision_from_family_alias(self):
+        requested = "openai/gpt-5.6-2026-07-01"
+        observed = "openai/gpt-5.6"
+        self.assertFalse(
+            router_gateways.models_match(requested, observed, "exact_revision")
+        )
+        self.assertTrue(
+            router_gateways.models_match(requested, observed, "model_family")
+        )
+
 class GatewayEvidenceTests(unittest.TestCase):
     def parse(self, payload, **kwargs):
         return router_metrics.parse_chat_sse(
@@ -123,6 +170,7 @@ class GatewayEvidenceTests(unittest.TestCase):
             requested_provider="openai",
             allowed_models=("openai/gpt-4o-mini", "gpt-4o-mini-2024-07-18"),
             allowed_providers=("openai",),
+            model_match="model_family",
         )
         self.assertTrue(result["route_evidence"]["pass"])
         self.assertEqual(result["route"]["provider"], "openai")
@@ -133,6 +181,58 @@ class GatewayEvidenceTests(unittest.TestCase):
             "cost": 0.001,
             "marketCost": 0.002,
         })
+
+    def test_vercel_family_match_accepts_canonical_alias_without_exact_claim(self):
+        requested = "openai/gpt-5.6-2026-07-01"
+        alias = "openai/gpt-5.6"
+        payload = sse(
+            {
+                "model": requested,
+                "choices": [{
+                    "delta": {
+                        "content": "x",
+                        "provider_metadata": {
+                            "gateway": {
+                                "routing": {
+                                    "originalModelId": requested,
+                                    "finalProvider": "openai",
+                                    "canonicalSlug": alias,
+                                    "modelAttemptCount": 1,
+                                    "totalProviderAttemptCount": 1,
+                                    "modelAttempts": [{
+                                        "canonicalSlug": alias,
+                                        "success": True,
+                                        "providerAttempts": [{
+                                            "provider": "openai",
+                                            "success": True,
+                                            "statusCode": 200,
+                                        }],
+                                    }],
+                                },
+                            },
+                        },
+                    },
+                }],
+            },
+            "[DONE]",
+        )
+        common = {
+            "gateway": "vercel",
+            "requested_model": requested,
+            "requested_provider": "openai",
+            "allowed_models": (requested,),
+            "allowed_providers": ("openai",),
+        }
+
+        family = self.parse(payload, model_match="model_family", **common)
+        exact = self.parse(payload, model_match="exact_revision", **common)
+
+        self.assertTrue(family["route_evidence"]["pass"])
+        self.assertEqual(family["route"]["served_model"], alias)
+        self.assertFalse(exact["route_evidence"]["pass"])
+        self.assertIn(
+            "served_model_not_allowed", exact["route_evidence"]["reasons"]
+        )
 
     def test_openrouter_keeps_only_valid_streamed_usage_cost(self):
         private_value = "private-usage-detail"
@@ -217,6 +317,79 @@ class GatewayEvidenceTests(unittest.TestCase):
                     allowed_providers=("OpenAI",),
                 )
                 self.assertNotIn("gateway_metadata", result["route"])
+
+    def test_auto_router_allows_documented_in_pool_fallback_attempts(self):
+        result = self.parse(
+            sse(
+                {
+                    "model": "anthropic/claude-b",
+                    "provider": "Anthropic",
+                    "choices": [{"delta": {"content": "x"}}],
+                    "openrouter_metadata": {
+                        "requested": "openrouter/auto-beta",
+                        "attempts": [
+                            {
+                                "provider": "OpenAI",
+                                "model": "openai/gpt-a",
+                                "status": 429,
+                            },
+                            {
+                                "provider": "Anthropic",
+                                "model": "anthropic/claude-b",
+                                "status": 200,
+                            },
+                        ],
+                    },
+                },
+                "[DONE]",
+            ),
+            gateway="openrouter",
+            router_mode="auto",
+            fallback_enabled=True,
+            requested_model="openrouter/auto-beta",
+            requested_provider="openrouter",
+            allowed_models=("openai/gpt-a", "anthropic/claude-b"),
+            allowed_providers=("OpenAI", "Anthropic"),
+        )
+
+        self.assertTrue(result["route_evidence"]["pass"])
+        self.assertEqual(result["route"]["served_model"], "anthropic/claude-b")
+        self.assertEqual(len(result["route"]["attempts"]), 2)
+
+    def test_auto_router_fails_closed_on_out_of_pool_attempt(self):
+        result = self.parse(
+            sse(
+                {
+                    "model": "openai/gpt-a",
+                    "provider": "OpenAI",
+                    "choices": [{"delta": {"content": "x"}}],
+                    "openrouter_metadata": {
+                        "requested": "openrouter/auto-beta",
+                        "attempts": [{
+                            "provider": "Other",
+                            "model": "other/model",
+                            "status": 500,
+                        }],
+                    },
+                },
+                "[DONE]",
+            ),
+            gateway="openrouter",
+            router_mode="auto",
+            fallback_enabled=True,
+            requested_model="openrouter/auto-beta",
+            requested_provider="openrouter",
+            allowed_models=("openai/gpt-a",),
+            allowed_providers=("OpenAI",),
+        )
+
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn(
+            "attempt_provider_not_allowed", result["route_evidence"]["reasons"]
+        )
+        self.assertIn(
+            "attempt_model_not_allowed", result["route_evidence"]["reasons"]
+        )
 
     def test_vercel_live_delta_routing_shape_passes_without_private_metadata(self):
         result = self.parse(

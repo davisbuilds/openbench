@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 from datetime import datetime, timezone
 
-from . import proxy, results, router_spec
+from . import proxy, results, router_gateways, router_spec
 from .adapters import pi
 from .publish import task_content_digest
 from .run import read_instruction, run_checker
@@ -263,7 +263,15 @@ def _missing_price_models(
     experiment: router_spec.RouterExperiment,
     prices: Mapping[str, Price],
 ) -> list[str]:
-    required = {arm.canonical_model for arm in experiment.arms}
+    required = (
+        {
+            model
+            for arm in experiment.arms
+            for model in arm.allowed_models
+        }
+        if experiment.track == "model_router"
+        else {arm.canonical_model for arm in experiment.arms}
+    )
     return sorted(required - set(prices))
 
 
@@ -302,8 +310,21 @@ def load_persisted_price_snapshot(results_path: Path) -> dict[str, Any]:
     return value
 
 
-def policy_snapshot() -> dict[str, Any]:
-    return dict(_POLICY)
+def policy_snapshot(
+    experiment: router_spec.RouterExperiment | None = None,
+) -> dict[str, Any]:
+    policy = dict(_POLICY)
+    if experiment is not None:
+        policy.update({
+            "track": experiment.track,
+            "model_match": experiment.model_match,
+            "fallback": (
+                "in_pool_router_attempts"
+                if experiment.track == "model_router"
+                else False
+            ),
+        })
+    return policy
 
 
 def catalog_snapshot(experiment: router_spec.RouterExperiment) -> dict[str, Any]:
@@ -328,7 +349,7 @@ def _comparison_digests(
     price_snapshot: Mapping[str, Any],
 ) -> dict[str, str]:
     return {
-        "policy_digest": results.canonical_digest(policy_snapshot()),
+        "policy_digest": results.canonical_digest(policy_snapshot(experiment)),
         "catalog_digest": results.canonical_digest(catalog_snapshot(experiment)),
         "price_digest": results.canonical_digest(price_snapshot),
         "sampling_digest": results.canonical_digest(
@@ -652,8 +673,17 @@ def _price_call(
             }
 
     usage = metrics.get("usage") if isinstance(metrics.get("usage"), dict) else {}
-    price = prices.get(plan.canonical_model)
+    route = metrics.get("route")
+    observed_model = (
+        route.get("served_model")
+        if plan.track == "model_router" and isinstance(route, Mapping)
+        else plan.canonical_model
+    )
+    price = prices.get(observed_model) if isinstance(observed_model, str) else None
     if price is None:
+        reported = evidence.get("router_reported")
+        if plan.track == "model_router" and isinstance(reported, Mapping):
+            return evidence, Decimal(str(reported["amount_usd"]))
         return evidence, None
     input_tokens = usage.get("input_tokens")
     output_tokens = usage.get("output_tokens")
@@ -663,6 +693,9 @@ def _price_call(
         or not isinstance(output_tokens, int)
         or isinstance(output_tokens, bool)
     ):
+        reported = evidence.get("router_reported")
+        if plan.track == "model_router" and isinstance(reported, Mapping):
+            return evidence, Decimal(str(reported["amount_usd"]))
         return evidence, None
     amount = (
         Decimal(input_tokens) * price.input_per_million
@@ -673,6 +706,10 @@ def _price_call(
         "currency": "USD",
         "effective_at": price.effective_at,
     }
+    if plan.track == "model_router":
+        reported = evidence.get("router_reported")
+        if isinstance(reported, Mapping):
+            return evidence, Decimal(str(reported["amount_usd"]))
     return evidence, amount
 
 
@@ -726,27 +763,29 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
             reasons.append("route_evidence_failed")
     if route.get("requested_model") != plan.requested_model:
         reasons.append("requested_model_conflict")
-    flexible_gateway_model = plan.gateway == "vercel"
     served_model = route.get("served_model")
     served_model_matches = (
         isinstance(served_model, str)
         and (
             served_model in plan.allowed_models
-            if flexible_gateway_model
-            else served_model == plan.requested_model
+            if plan.router_mode == "auto"
+            else router_gateways.models_match(
+                plan.requested_model, served_model, plan.model_match
+            )
         )
     )
     if not served_model_matches:
         reasons.append("served_model_conflict")
     provider = route.get("provider")
-    if (
-        plan.route_kind == "gateway"
-        and (
-            not isinstance(provider, str)
-            or provider.casefold() != plan.requested_provider.casefold()
-        )
-    ):
-        reasons.append("provider_conflict")
+    if plan.route_kind == "gateway":
+        if not isinstance(provider, str):
+            reasons.append("provider_conflict")
+        elif plan.router_mode == "auto":
+            allowed = {item.casefold() for item in plan.allowed_providers}
+            if provider.casefold() not in allowed:
+                reasons.append("provider_conflict")
+        elif provider.casefold() != plan.requested_provider.casefold():
+            reasons.append("provider_conflict")
     if not isinstance(stream, Mapping) or stream.get("done") is not True:
         reasons.append("stream_not_done")
     attempts = route.get("attempts")
@@ -761,15 +800,27 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
                 if not isinstance(attempt, Mapping):
                     reasons.append("malformed_attempt")
                     continue
-                if str(attempt.get("provider", "")).casefold() != plan.requested_provider.casefold():
+                attempt_provider = str(attempt.get("provider", "")).casefold()
+                allowed_providers = {
+                    item.casefold() for item in plan.allowed_providers
+                }
+                if (
+                    attempt_provider not in allowed_providers
+                    if plan.router_mode == "auto"
+                    else attempt_provider != plan.requested_provider.casefold()
+                ):
                     reasons.append("attempt_provider_conflict")
                 attempt_model = attempt.get("model")
                 attempt_model_matches = (
                     isinstance(attempt_model, str)
                     and (
                         attempt_model in plan.allowed_models
-                        if flexible_gateway_model
-                        else attempt_model == plan.requested_model
+                        if plan.router_mode == "auto"
+                        else router_gateways.models_match(
+                            plan.requested_model,
+                            attempt_model,
+                            plan.model_match,
+                        )
                     )
                 )
                 if not attempt_model_matches:
@@ -831,6 +882,12 @@ def _proxy_evidence(
         normalized_route = metrics.get("route")
         if isinstance(normalized_route, dict):
             normalized_route = dict(normalized_route)
+            if plan.track == "model_router":
+                coverage = metrics.get("coverage")
+                normalized_route["attempts_present"] = bool(
+                    isinstance(coverage, Mapping)
+                    and coverage.get("attempt_evidence") is True
+                )
             if plan.route_kind == "direct" and not normalized_route.get("provider"):
                 normalized_route["provider"] = plan.requested_provider
         calls.append(
@@ -1008,7 +1065,9 @@ def _run_cell(
         "identity": identity.as_dict(),
         "expected_arm_ids": expected_arm_ids,
         "arm_role": arm.route_kind,
+        "router_mode": arm.router_mode,
         "baseline": arm.baseline,
+        "model_match": experiment.model_match,
         "result": {
             "solved": solved,
             "checker_score": checker_score,

@@ -1,9 +1,4 @@
-"""Immutable Router Bench experiment schema and route-plan compilation.
-
-The MVP intentionally accepts only the Pi/OpenAI Chat ``gateway_tax`` track.
-TOML contains credential environment-variable names; credential values enter an
-in-memory ``SecretPlan`` only after explicit admission.
-"""
+"""Immutable Router Bench experiment schema and route-plan compilation."""
 
 from __future__ import annotations
 
@@ -27,7 +22,8 @@ from . import router_gateways
 
 
 SCHEMA_VERSION = 1
-TRACK = "gateway_tax"
+TRACKS = frozenset({"gateway_tax", "model_router"})
+MODEL_MATCHES = frozenset({"exact_revision", "model_family"})
 HARNESS = "pi"
 PROTOCOL = "openai_chat"
 
@@ -130,6 +126,9 @@ class Arm:
     auth_env: str
     sampling: Sampling
     direct_control_arm_id: str | None = None
+    router_mode: str | None = None
+    fixed_control_arm_id: str | None = None
+    cost_quality_tradeoff: int | None = None
     gateway: str | None = None
     gateway_id: str | None = None
 
@@ -152,6 +151,12 @@ class Arm:
             "sampling": self.sampling.to_dict(),
             "direct_control_arm_id": self.direct_control_arm_id,
         }
+        if self.router_mode is not None:
+            result["router_mode"] = self.router_mode
+        if self.fixed_control_arm_id is not None:
+            result["fixed_control_arm_id"] = self.fixed_control_arm_id
+        if self.cost_quality_tradeoff is not None:
+            result["cost_quality_tradeoff"] = self.cost_quality_tradeoff
         if self.gateway is not None:
             result["gateway"] = self.gateway
         if self.gateway_id is not None:
@@ -168,6 +173,7 @@ class RouterExperiment:
     schema_version: int
     experiment_id: str
     track: str
+    model_match: str
     harness: str
     tasks: tuple[str, ...]
     repetitions_per_window: int
@@ -185,6 +191,7 @@ class RouterExperiment:
             "schema_version": self.schema_version,
             "experiment_id": self.experiment_id,
             "track": self.track,
+            "model_match": self.model_match,
             "harness": self.harness,
             "tasks": list(self.tasks),
             "repetitions_per_window": self.repetitions_per_window,
@@ -235,6 +242,10 @@ class RoutePlan:
     # omitted from the adapter-facing route-plan JSON.
     gateway: str | None = None
     gateway_id: str | None = None
+    track: str = "gateway_tax"
+    model_match: str = "exact_revision"
+    router_mode: str | None = None
+    cost_quality_tradeoff: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -300,7 +311,7 @@ class SecretPlan:
 
 
 _ROOT_FIELDS = {
-    "schema_version", "experiment_id", "track", "harness", "tasks",
+    "schema_version", "experiment_id", "track", "model_match", "harness", "tasks",
     "repetitions_per_window", "schedule_seed", "execution_lane",
     "private_router", "private_host_allowlist", "private_cidr_allowlist",
     "windows", "budget", "arms",
@@ -312,7 +323,8 @@ _ARM_FIELDS = {
     "arm_id", "route_kind", "endpoint", "protocol", "baseline",
     "canonical_model", "requested_model", "requested_provider", "allowed_models",
     "allowed_providers", "fallback_enabled", "retry_count", "cache_enabled",
-    "auth_env", "sampling", "direct_control_arm_id", "gateway", "gateway_id",
+    "auth_env", "sampling", "direct_control_arm_id", "router_mode",
+    "fixed_control_arm_id", "cost_quality_tradeoff", "gateway", "gateway_id",
 }
 
 
@@ -503,6 +515,7 @@ def _validate_endpoint(
 def _parse_arm(
     value: Any,
     index: int,
+    track: str,
     private_router: bool,
     private_hosts: tuple[str, ...],
     private_cidrs: tuple[str, ...],
@@ -518,6 +531,17 @@ def _parse_arm(
     direct_control = table.get("direct_control_arm_id")
     if direct_control is not None:
         direct_control = _string(direct_control, f"{path}.direct_control_arm_id", _ID_RE)
+    router_mode = table.get("router_mode")
+    if router_mode is not None:
+        router_mode = _string(router_mode, f"{path}.router_mode")
+    fixed_control = table.get("fixed_control_arm_id")
+    if fixed_control is not None:
+        fixed_control = _string(fixed_control, f"{path}.fixed_control_arm_id", _ID_RE)
+    tradeoff = table.get("cost_quality_tradeoff")
+    if tradeoff is not None:
+        tradeoff = _integer(tradeoff, f"{path}.cost_quality_tradeoff", minimum=0)
+        if tradeoff > 10:
+            raise RouterSpecError(f"{path}.cost_quality_tradeoff must be at most 10")
     gateway = table.get("gateway")
     if gateway is not None:
         gateway = _string(gateway, f"{path}.gateway")
@@ -551,20 +575,27 @@ def _parse_arm(
         auth_env=_string(_required(table, "auth_env", path), f"{path}.auth_env", _ENV_RE),
         sampling=_parse_sampling(_required(table, "sampling", path), f"{path}.sampling"),
         direct_control_arm_id=direct_control,
+        router_mode=router_mode,
+        fixed_control_arm_id=fixed_control,
+        cost_quality_tradeoff=tradeoff,
         gateway=gateway,
         gateway_id=gateway_id,
     )
-    if arm.requested_model not in arm.allowed_models:
+    if track == "gateway_tax" and arm.requested_model not in arm.allowed_models:
         raise RouterSpecError(f"{path}.allowed_models must contain requested_model")
-    if arm.requested_provider not in arm.allowed_providers:
+    if track == "gateway_tax" and arm.requested_provider not in arm.allowed_providers:
         raise RouterSpecError(f"{path}.allowed_providers must contain requested_provider")
-    if arm.allowed_providers != (arm.requested_provider,):
+    if track == "gateway_tax" and arm.allowed_providers != (arm.requested_provider,):
         raise RouterSpecError(
             f"{path}.allowed_providers must contain only requested_provider"
         )
     if arm.route_kind == "direct" and arm.direct_control_arm_id is not None:
         raise RouterSpecError(f"{path}: direct arm cannot set direct_control_arm_id")
-    if arm.route_kind == "gateway" and arm.direct_control_arm_id is None:
+    if (
+        track == "gateway_tax"
+        and arm.route_kind == "gateway"
+        and arm.direct_control_arm_id is None
+    ):
         raise RouterSpecError(f"{path}: gateway arm requires direct_control_arm_id")
     if arm.route_kind == "direct" and "gateway" in table:
         raise RouterSpecError(f"{path}: direct arm must not declare gateway")
@@ -579,15 +610,24 @@ def _parse_arm(
             requested_model=arm.requested_model,
             requested_provider=arm.requested_provider,
             private_router=private_router,
+            track=track,
+            router_mode=arm.router_mode,
         )
     except router_gateways.GatewayProfileError as exc:
         raise RouterSpecError(f"{path}: {exc}") from exc
-    if arm.fallback_enabled:
-        raise RouterSpecError(f"{path}.fallback_enabled must be false for gateway_tax")
     if arm.retry_count != 0:
-        raise RouterSpecError(f"{path}.retry_count must be 0 for gateway_tax")
+        raise RouterSpecError(f"{path}.retry_count must be 0")
     if arm.cache_enabled:
-        raise RouterSpecError(f"{path}.cache_enabled must be false for gateway_tax")
+        raise RouterSpecError(f"{path}.cache_enabled must be false")
+    if track == "gateway_tax":
+        if arm.fallback_enabled:
+            raise RouterSpecError(f"{path}.fallback_enabled must be false for gateway_tax")
+        if any((
+            arm.router_mode is not None,
+            arm.fixed_control_arm_id is not None,
+            arm.cost_quality_tradeoff is not None,
+        )):
+            raise RouterSpecError(f"{path}: model router fields require track='model_router'")
     return arm
 
 
@@ -620,6 +660,76 @@ def _validate_gateway_controls(arms: tuple[Arm, ...]) -> None:
                 raise RouterSpecError(
                     f"arm {arm.arm_id!r} {field} must match direct control {control.arm_id!r}"
                 )
+
+
+def _validate_model_router_controls(arms: tuple[Arm, ...]) -> None:
+    by_id = {arm.arm_id: arm for arm in arms}
+    if len(by_id) != len(arms):
+        raise RouterSpecError("arms must have unique arm_id values")
+    auto = [arm for arm in arms if arm.router_mode == "auto"]
+    fixed = [arm for arm in arms if arm.router_mode == "fixed"]
+    if len(auto) != 1:
+        raise RouterSpecError("model_router requires exactly one auto arm")
+    if not fixed:
+        raise RouterSpecError("model_router requires one or more fixed controls")
+    if len([arm for arm in fixed if arm.baseline]) != 1:
+        raise RouterSpecError("model_router requires exactly one baseline fixed control")
+    if any(arm.baseline for arm in auto):
+        raise RouterSpecError("model_router auto arm cannot be the baseline")
+    if len(auto) + len(fixed) != len(arms):
+        raise RouterSpecError("model_router arms require router_mode='auto' or 'fixed'")
+    for arm in arms:
+        if arm.route_kind != "gateway" or arm.gateway != "openrouter":
+            raise RouterSpecError("model_router arms must route through openrouter")
+        if arm.direct_control_arm_id is not None:
+            raise RouterSpecError("model_router arms must not declare direct_control_arm_id")
+    selected = auto[0]
+    if selected.requested_model != "openrouter/auto-beta":
+        raise RouterSpecError(
+            "model_router auto requested_model must be 'openrouter/auto-beta'"
+        )
+    if selected.requested_provider != "openrouter":
+        raise RouterSpecError(
+            "model_router auto requested_provider must be 'openrouter'"
+        )
+    if selected.cost_quality_tradeoff is None:
+        raise RouterSpecError("model_router auto arm requires cost_quality_tradeoff")
+    if not selected.fallback_enabled:
+        raise RouterSpecError("model_router auto arm requires fallback_enabled=true")
+    control = by_id.get(selected.fixed_control_arm_id)
+    if control is None or control.router_mode != "fixed" or not control.baseline:
+        raise RouterSpecError(
+            "model_router auto arm fixed_control_arm_id must reference the baseline fixed control"
+        )
+    fixed_models = {arm.requested_model for arm in fixed}
+    if set(selected.allowed_models) != fixed_models:
+        raise RouterSpecError(
+            "model_router auto allowed_models must exactly match fixed control models"
+        )
+    fixed_providers = {arm.requested_provider.casefold() for arm in fixed}
+    if {provider.casefold() for provider in selected.allowed_providers} != fixed_providers:
+        raise RouterSpecError(
+            "model_router auto allowed_providers must exactly match fixed control providers"
+        )
+    for arm in fixed:
+        if arm.fallback_enabled:
+            raise RouterSpecError("model_router fixed controls require fallback_enabled=false")
+        if arm.cost_quality_tradeoff is not None or arm.fixed_control_arm_id is not None:
+            raise RouterSpecError(
+                "model_router fixed controls must not declare auto-only fields"
+            )
+        if arm.allowed_models != (arm.requested_model,):
+            raise RouterSpecError(
+                "model_router fixed control allowed_models must contain only requested_model"
+            )
+        if arm.allowed_providers != (arm.requested_provider,):
+            raise RouterSpecError(
+                "model_router fixed control allowed_providers must contain only requested_provider"
+            )
+        if arm.sampling != selected.sampling:
+            raise RouterSpecError(
+                f"model_router fixed control {arm.arm_id!r} sampling must match auto arm"
+            )
 
 
 def _parse_allowlists(table: Mapping[str, Any], private_router: bool) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -675,8 +785,13 @@ def parse_experiment(data: Mapping[str, Any]) -> RouterExperiment:
     if schema_version != SCHEMA_VERSION:
         raise RouterSpecError(f"schema_version must be {SCHEMA_VERSION}")
     track = _string(_required(table, "track", "experiment"), "track")
-    if track != TRACK:
-        raise RouterSpecError(f"track must be {TRACK!r} for the MVP")
+    if track not in TRACKS:
+        raise RouterSpecError(f"track must be one of: {', '.join(sorted(TRACKS))}")
+    model_match = _string(table.get("model_match", "exact_revision"), "model_match")
+    if model_match not in MODEL_MATCHES:
+        raise RouterSpecError(
+            f"model_match must be one of: {', '.join(sorted(MODEL_MATCHES))}"
+        )
     harness = _string(_required(table, "harness", "experiment"), "harness")
     if harness != HARNESS:
         raise RouterSpecError(f"harness must be {HARNESS!r} for the MVP")
@@ -688,9 +803,12 @@ def parse_experiment(data: Mapping[str, Any]) -> RouterExperiment:
     raw_arms = _required(table, "arms", "experiment")
     if not isinstance(raw_arms, list) or len(raw_arms) < 2:
         raise RouterSpecError("arms must contain at least two arm tables")
-    arms = tuple(_parse_arm(raw, index, private_router, hosts, cidrs)
+    arms = tuple(_parse_arm(raw, index, track, private_router, hosts, cidrs)
                  for index, raw in enumerate(raw_arms))
-    _validate_gateway_controls(arms)
+    if track == "gateway_tax":
+        _validate_gateway_controls(arms)
+    else:
+        _validate_model_router_controls(arms)
     lane = _string(_required(table, "execution_lane", "experiment"), "execution_lane")
     if lane not in {"local", "docker"}:
         raise RouterSpecError("execution_lane must be 'local' or 'docker'")
@@ -699,6 +817,7 @@ def parse_experiment(data: Mapping[str, Any]) -> RouterExperiment:
         experiment_id=_string(_required(table, "experiment_id", "experiment"),
                               "experiment_id", _ID_RE),
         track=track,
+        model_match=model_match,
         harness=harness,
         tasks=tasks,
         repetitions_per_window=_integer(
@@ -777,6 +896,8 @@ def compile_route_plans(
         plans.append(RoutePlan(
             schema_version=SCHEMA_VERSION,
             experiment_digest=experiment.digest,
+            track=experiment.track,
+            model_match=experiment.model_match,
             arm_digest=arm.digest,
             arm_id=arm.arm_id,
             route_kind=arm.route_kind,
@@ -792,6 +913,8 @@ def compile_route_plans(
             cache_enabled=arm.cache_enabled,
             auth_env=arm.auth_env,
             sampling=arm.sampling,
+            router_mode=arm.router_mode,
+            cost_quality_tradeoff=arm.cost_quality_tradeoff,
             private_router=experiment.private_router,
             private_host_allowlist=experiment.private_host_allowlist,
             private_cidr_allowlist=experiment.private_cidr_allowlist,

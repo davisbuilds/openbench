@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end tests for managed Router Bench proxy routes."""
 
+import dataclasses
 import http.client
 import json
 import tempfile
@@ -292,6 +293,60 @@ class RouterRouteTests(unittest.TestCase):
         self.assertEqual(rows[0]["router_arm"]["arm_digest"], plan.arm_digest)
         for secret in (HOST_SECRET, CLIENT_SECRET, PRIVATE_PROMPT):
             self.assertNotIn(secret, ledger)
+
+    def test_auto_router_session_is_stable_authoritative_and_not_persisted(self):
+        token = "auto-cell"
+        base = route_plan(
+            endpoint=self.upstream_base + "/auto",
+            route_kind="gateway",
+            arm_id="auto",
+            arm_digest="c" * 64,
+        )
+        plan = dataclasses.replace(
+            base,
+            track="model_router",
+            router_mode="auto",
+            requested_model="openrouter/auto-beta",
+            requested_provider="openrouter",
+            allowed_models=("openai/gpt-route-test",),
+            allowed_providers=("openai",),
+            fallback_enabled=True,
+            cost_quality_tradeoff=7,
+        )
+        self.server.register_cell(token)
+        self.server.register_route(token, plan, secret_plan(plan.arm_id))
+        body = {
+            "messages": [{"role": "user", "content": PRIVATE_PROMPT}],
+            "plugins": [{"id": "attacker"}],
+            "router": {"strategy": "attacker"},
+            "provider": {"only": ["attacker"]},
+            "session_id": "attacker-session",
+            "cache": True,
+        }
+
+        for _ in range(2):
+            status, _ = self._post(token, plan.arm_digest, body=body)
+            self.assertEqual(status, 200)
+
+        first, second = (request["body"] for request in self.upstream.requests)
+        self.assertEqual(first["session_id"], token)
+        self.assertEqual(second["session_id"], token)
+        self.assertEqual(first["plugins"], [{
+            "id": "auto-router",
+            "allowed_models": ["openai/gpt-route-test"],
+            "cost_quality_tradeoff": 7,
+        }])
+        self.assertEqual(first["provider"], {
+            "only": ["openai"],
+            "allow_fallbacks": True,
+        })
+        self.assertNotIn("router", first)
+        self.assertNotIn("cache", first)
+        rows = self._seal_rows(token)
+        serialized = json.dumps(rows, sort_keys=True)
+        self.assertNotIn(token, serialized)
+        self.assertNotIn("attacker-session", serialized)
+        self.assertNotIn("session_hash", rows[0])
 
     def test_direct_openai_forces_model_and_sampling_without_gateway_metadata(self):
         token = "direct-cell"

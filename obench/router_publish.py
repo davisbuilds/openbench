@@ -123,6 +123,7 @@ _COVERAGE_SCHEMA = {
     "semantic_ttft": _SCALAR,
     "route": _SCALAR,
     "attempts": _SCALAR,
+    "attempt_evidence": _SCALAR,
 }
 _STREAM_SCHEMA = {
     "done": _SCALAR,
@@ -159,6 +160,8 @@ _REPORT_GENERATION_SCHEMA = {
 _REPORT_ROUTE_SCHEMA = {
     "served_model": _SCALAR,
     "provider": _SCALAR,
+    "attempts": [_ATTEMPT_SCHEMA],
+    "attempts_present": _SCALAR,
 }
 _PROXY_CALL_SCHEMA = {
     "timing": _NullableSchema(_REPORT_TIMING_SCHEMA),
@@ -177,7 +180,9 @@ _CANONICAL_RESULT_SCHEMA = {
 }
 _RESULT_SCHEMA = {
     "arm_role": _SCALAR,
+    "router_mode": _SCALAR,
     "baseline": _SCALAR,
+    "model_match": _SCALAR,
     "result": _CANONICAL_RESULT_SCHEMA,
     "route_integrity": _ROUTE_EVIDENCE_SCHEMA,
     "proxy_metrics": {"calls": [_PROXY_CALL_SCHEMA]},
@@ -226,6 +231,7 @@ _POLICY_SCHEMA = {
     "name": _SCALAR,
     "version": _SCALAR,
     "track": _SCALAR,
+    "model_match": _SCALAR,
     "route_kind": _SCALAR,
     "allowed_models": [_SCALAR],
     "allowed_providers": [_SCALAR],
@@ -313,6 +319,9 @@ _EXPERIMENT_ARM_SCHEMA = {
     "cache_enabled": _SCALAR,
     "sampling": _SAMPLING_PUBLIC_SCHEMA,
     "direct_control_arm_id": _SCALAR,
+    "router_mode": _SCALAR,
+    "fixed_control_arm_id": _SCALAR,
+    "cost_quality_tradeoff": _SCALAR,
 }
 _EXPERIMENT_PUBLIC_SCHEMA = {
     "kind": _SCALAR,
@@ -320,6 +329,7 @@ _EXPERIMENT_PUBLIC_SCHEMA = {
     "schema_version": _SCALAR,
     "experiment_id": _SCALAR,
     "track": _SCALAR,
+    "model_match": _SCALAR,
     "harness": _SCALAR,
     "tasks": [_SCALAR],
     "repetitions_per_window": _SCALAR,
@@ -517,6 +527,11 @@ def _experiment_dto(source: Mapping[str, Any], source_digest: str) -> dict[str, 
             "sampling": dict(arm["sampling"]),
             "direct_control_arm_id": arm["direct_control_arm_id"],
         }
+        for field in (
+            "router_mode", "fixed_control_arm_id", "cost_quality_tradeoff",
+        ):
+            if field in arm:
+                public_arm[field] = arm[field]
         if "gateway" in arm:
             public_arm["gateway"] = arm["gateway"]
         arms.append(public_arm)
@@ -526,6 +541,7 @@ def _experiment_dto(source: Mapping[str, Any], source_digest: str) -> dict[str, 
         "schema_version": source["schema_version"],
         "experiment_id": source["experiment_id"],
         "track": source["track"],
+        "model_match": source["model_match"],
         "harness": source["harness"],
         "tasks": list(source["tasks"]),
         "repetitions_per_window": source["repetitions_per_window"],

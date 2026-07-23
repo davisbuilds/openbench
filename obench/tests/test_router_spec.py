@@ -126,6 +126,96 @@ def manifest(**replacements):
     )
 
 
+def model_router_manifest(**replacements):
+    values = {
+        "model_match": "exact_revision",
+        "auto_models": '["openai/gpt-fixed"]',
+        "auto_providers": '["openai"]',
+        "auto_model": "openrouter/auto-beta",
+        "auto_provider": "openrouter",
+        "auto_tradeoff": "6",
+        "auto_fallback": "true",
+        "auto_control": 'fixed_control_arm_id = "fixed-openai"',
+        "fixed_mode": "fixed",
+        "fixed_baseline": "true",
+        "fixed_gateway": 'gateway = "openrouter"',
+    }
+    values.update(replacements)
+    return textwrap.dedent(
+        f"""
+        schema_version = 1
+        experiment_id = "model-router-smoke"
+        track = "model_router"
+        model_match = "{values['model_match']}"
+        harness = "pi"
+        tasks = ["task-a"]
+        repetitions_per_window = 1
+        schedule_seed = 17
+        execution_lane = "local"
+        private_router = false
+
+        [[windows]]
+        window_id = "window"
+        start = "2026-07-22T08:00:00Z"
+        end = "2026-07-22T09:00:00Z"
+
+        [budget]
+        timeout_s = 300
+        max_calls = 8
+        max_output_tokens = 16000
+        usd_cap = 2.5
+
+        [[arms]]
+        arm_id = "auto"
+        route_kind = "gateway"
+        router_mode = "auto"
+        gateway = "openrouter"
+        endpoint = "https://openrouter.ai/api/v1/chat/completions"
+        protocol = "openai_chat"
+        baseline = false
+        canonical_model = "openrouter/auto-beta"
+        requested_model = "{values['auto_model']}"
+        requested_provider = "{values['auto_provider']}"
+        allowed_models = {values['auto_models']}
+        allowed_providers = {values['auto_providers']}
+        fallback_enabled = {values['auto_fallback']}
+        retry_count = 0
+        cache_enabled = false
+        cost_quality_tradeoff = {values['auto_tradeoff']}
+        {values['auto_control']}
+        auth_env = "OPENROUTER_API_KEY"
+
+        [arms.sampling]
+        temperature = 0.0
+        top_p = 1.0
+        seed = 1234
+
+        [[arms]]
+        arm_id = "fixed-openai"
+        route_kind = "gateway"
+        router_mode = "{values['fixed_mode']}"
+        {values['fixed_gateway']}
+        endpoint = "https://openrouter.ai/api/v1/chat/completions"
+        protocol = "openai_chat"
+        baseline = {values['fixed_baseline']}
+        canonical_model = "openai/gpt-fixed"
+        requested_model = "openai/gpt-fixed"
+        requested_provider = "openai"
+        allowed_models = ["openai/gpt-fixed"]
+        allowed_providers = ["openai"]
+        fallback_enabled = false
+        retry_count = 0
+        cache_enabled = false
+        auth_env = "OPENROUTER_API_KEY"
+
+        [arms.sampling]
+        temperature = 0.0
+        top_p = 1.0
+        seed = 1234
+        """
+    )
+
+
 class RouterExperimentTests(unittest.TestCase):
     def test_loads_frozen_normalized_experiment(self):
         spec = parse_experiment_toml(manifest())
@@ -138,6 +228,59 @@ class RouterExperimentTests(unittest.TestCase):
         self.assertTrue(spec.windows[1].start.endswith("Z"))
         with self.assertRaises(dataclasses.FrozenInstanceError):
             spec.track = "model_router"
+
+    def test_model_match_defaults_compatibly_and_is_normative(self):
+        defaulted = parse_experiment_toml(manifest())
+        family = parse_experiment_toml(
+            manifest().replace(
+                'track = "gateway_tax"',
+                'track = "gateway_tax"\nmodel_match = "model_family"',
+            )
+        )
+
+        self.assertEqual(defaulted.model_match, "exact_revision")
+        self.assertEqual(family.model_match, "model_family")
+        self.assertNotEqual(defaulted.digest, family.digest)
+        with self.assertRaisesRegex(RouterSpecError, "model_match"):
+            parse_experiment_toml(
+                manifest().replace(
+                    'track = "gateway_tax"',
+                    'track = "gateway_tax"\nmodel_match = "alias"',
+                )
+            )
+
+    def test_model_router_accepts_one_auto_arm_and_openrouter_fixed_control(self):
+        spec = parse_experiment_toml(model_router_manifest())
+
+        self.assertEqual(spec.track, "model_router")
+        self.assertEqual(spec.arms[0].router_mode, "auto")
+        self.assertEqual(spec.arms[0].cost_quality_tradeoff, 6)
+        self.assertEqual(spec.arms[0].fixed_control_arm_id, "fixed-openai")
+        self.assertTrue(spec.arms[0].fallback_enabled)
+        self.assertTrue(spec.arms[1].baseline)
+        plans, _secrets = compile_route_plans(
+            spec,
+            environ={"OPENROUTER_API_KEY": "secret"},
+            admitted_auth_envs={"OPENROUTER_API_KEY"},
+        )
+        self.assertEqual(plans[0].track, "model_router")
+        self.assertEqual(plans[0].model_match, "exact_revision")
+
+    def test_model_router_rejects_invalid_pool_and_options(self):
+        cases = (
+            (model_router_manifest(auto_models='["openai/other"]'), "exactly match"),
+            (model_router_manifest(auto_providers='["anthropic"]'), "allowed_providers"),
+            (model_router_manifest(auto_providers="[]"), "non-empty array"),
+            (model_router_manifest(auto_tradeoff="11"), "at most 10"),
+            (model_router_manifest(auto_fallback="false"), "fallback_enabled=true"),
+            (model_router_manifest(auto_control=""), "fixed_control_arm_id"),
+            (model_router_manifest(fixed_baseline="false"), "baseline fixed"),
+            (model_router_manifest(fixed_gateway='gateway = "vercel"'), "openrouter"),
+        )
+        for text, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(RouterSpecError, message):
+                    parse_experiment_toml(text)
 
     def test_load_file_matches_text_and_digest_ignores_toml_formatting(self):
         text = manifest()

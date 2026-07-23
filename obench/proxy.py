@@ -385,7 +385,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             managed_ledger = self.server.admit_cell_request(token)  # type: ignore[attr-defined]
             body = self._read_body()
             if route.router is not None:
-                body = self._router_request_body(body, route.router.plan)
+                body = self._router_request_body(body, route.router.plan, route.token)
             request_body = decode_for_parsing(body, self.headers.get("content-encoding", ""))
             sampling = observed_sampling(
                 body,
@@ -393,6 +393,11 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 "" if route.router is not None else self.headers.get("content-encoding", ""),
             )
             links.update(protocol_links(request_body))
+            if (
+                route.router is not None
+                and route.router.plan.router_mode == "auto"
+            ):
+                links.pop("session", None)
             headers = self._forward_headers(route, len(body))
             conn_cls = http.client.HTTPSConnection if route.upstream.scheme == "https" else http.client.HTTPConnection
             if not route.upstream.hostname:
@@ -417,6 +422,8 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                     allowed_models=route.router.plan.allowed_models,
                     allowed_providers=route.router.plan.allowed_providers,
                     fallback_enabled=route.router.plan.fallback_enabled,
+                    router_mode=route.router.plan.router_mode,
+                    model_match=route.router.plan.model_match,
                     gateway=route.router.plan.gateway,
                     response_headers=header_map,
                 )
@@ -654,7 +661,9 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         headers["Content-Length"] = str(body_length)
         return headers
 
-    def _router_request_body(self, body: bytes, plan: RoutePlan) -> bytes:
+    def _router_request_body(
+        self, body: bytes, plan: RoutePlan, session_id: str
+    ) -> bytes:
         if self.headers.get("content-encoding"):
             raise RuntimeError("router requests do not permit content encoding")
         try:
@@ -678,6 +687,11 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 payload,
                 gateway=plan.gateway,
                 requested_provider=plan.requested_provider,
+                router_mode=plan.router_mode,
+                allowed_models=plan.allowed_models,
+                allowed_providers=plan.allowed_providers,
+                cost_quality_tradeoff=plan.cost_quality_tradeoff,
+                session_id=session_id,
             )
         else:
             payload.pop("provider", None)
@@ -768,12 +782,26 @@ class CountingProxyServer(ThreadingHTTPServer):
             raise ValueError("router route protocol must be openai_chat")
         if plan.route_kind not in {"direct", "gateway"}:
             raise ValueError("router route kind must be direct or gateway")
-        if plan.requested_model not in plan.allowed_models:
+        if (
+            plan.router_mode != "auto"
+            and plan.requested_model not in plan.allowed_models
+        ):
             raise ValueError("requested model is not allowed by the route plan")
-        if plan.allowed_providers != (plan.requested_provider,):
+        if (
+            plan.router_mode != "auto"
+            and plan.allowed_providers != (plan.requested_provider,)
+        ):
             raise ValueError("router route must allow exactly the requested provider")
-        if plan.fallback_enabled or plan.retry_count or plan.cache_enabled:
-            raise ValueError("router route controls do not match gateway_tax")
+        if plan.retry_count or plan.cache_enabled:
+            raise ValueError("router route retries and cache must be disabled")
+        if plan.track == "gateway_tax" and plan.fallback_enabled:
+            raise ValueError("gateway_tax route fallback must be disabled")
+        if plan.track == "model_router":
+            if plan.router_mode == "auto":
+                if not plan.fallback_enabled or plan.cost_quality_tradeoff is None:
+                    raise ValueError("model_router auto route controls are incomplete")
+            elif plan.router_mode != "fixed" or plan.fallback_enabled:
+                raise ValueError("model_router fixed route controls are invalid")
         try:
             router_gateways.validate_arm(
                 route_kind=plan.route_kind,
@@ -783,6 +811,8 @@ class CountingProxyServer(ThreadingHTTPServer):
                 requested_model=plan.requested_model,
                 requested_provider=plan.requested_provider,
                 private_router=plan.private_router,
+                track=plan.track,
+                router_mode=plan.router_mode,
             )
         except router_gateways.GatewayProfileError as exc:
             raise ValueError(f"invalid router gateway profile: {exc}") from exc

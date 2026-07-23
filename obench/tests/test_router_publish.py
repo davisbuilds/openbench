@@ -90,6 +90,70 @@ def experiment():
     })
 
 
+def model_router_experiment():
+    common = {
+        "route_kind": "gateway",
+        "gateway": "openrouter",
+        "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+        "protocol": "openai_chat",
+        "retry_count": 0,
+        "cache_enabled": False,
+        "auth_env": "VERY_PRIVATE_ROUTER_KEY",
+        "sampling": {"temperature": 0.0, "top_p": 1.0, "seed": 17},
+    }
+    return router_spec.parse_experiment({
+        "schema_version": 1,
+        "experiment_id": "model-router-publish",
+        "track": "model_router",
+        "model_match": "exact_revision",
+        "harness": "pi",
+        "tasks": ["make-it-run"],
+        "repetitions_per_window": 1,
+        "schedule_seed": 17,
+        "execution_lane": "docker",
+        "private_router": False,
+        "windows": [{
+            "window_id": "morning",
+            "start": "2026-07-22T08:00:00Z",
+            "end": "2026-07-22T09:00:00Z",
+        }],
+        "budget": {
+            "timeout_s": 300,
+            "max_calls": 8,
+            "max_output_tokens": 16000,
+            "usd_cap": "2.5",
+        },
+        "arms": [
+            {
+                **common,
+                "arm_id": "auto",
+                "router_mode": "auto",
+                "baseline": False,
+                "canonical_model": "openrouter/auto-beta",
+                "requested_model": "openrouter/auto-beta",
+                "requested_provider": "openrouter",
+                "allowed_models": ["openai/gpt-test"],
+                "allowed_providers": ["OpenAI"],
+                "fallback_enabled": True,
+                "cost_quality_tradeoff": 6,
+                "fixed_control_arm_id": "fixed",
+            },
+            {
+                **common,
+                "arm_id": "fixed",
+                "router_mode": "fixed",
+                "baseline": True,
+                "canonical_model": "openai/gpt-test",
+                "requested_model": "openai/gpt-test",
+                "requested_provider": "OpenAI",
+                "allowed_models": ["openai/gpt-test"],
+                "allowed_providers": ["OpenAI"],
+                "fallback_enabled": False,
+            },
+        ],
+    })
+
+
 class RouterPublishTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="router_publish_test_")
@@ -502,6 +566,132 @@ class RouterPublishTests(unittest.TestCase):
             public_rows, bootstrap_replicates=20, bootstrap_seed=7
         )
         self.assertEqual(actual, expected)
+
+    def test_model_router_track_policy_and_attempts_survive_publish_round_trip(self):
+        experiment_value = model_router_experiment()
+        policy = {
+            "schema_version": 1,
+            "policy_id": "model-router-v1",
+            "track": "model_router",
+            "model_match": "exact_revision",
+            "allowed_models": ["openai/gpt-test"],
+            "allowed_providers": ["OpenAI"],
+            "fallback_enabled": True,
+            "retry_count": 0,
+            "cache_enabled": False,
+        }
+        rows = []
+        ledgers = {}
+        for arm in experiment_value.arms:
+            identity = dataclasses.replace(
+                self.identity,
+                track="model_router",
+                experiment_id=experiment_value.experiment_id,
+                experiment_digest=experiment_value.digest,
+                arm_id=arm.arm_id,
+                arm_digest=arm.digest,
+                policy_digest=results.canonical_digest(policy),
+                block_id="model-router-block",
+            )
+            cell_id = results.make_router_cell_id(identity)
+            row = copy.deepcopy(self.row)
+            row.update({
+                "identity": identity.as_dict(),
+                "run_id": results.make_router_run_id(identity),
+                "cell_id": cell_id,
+                "expected_arm_ids": ["auto", "fixed"],
+                "arm_role": "gateway",
+                "router_mode": arm.router_mode,
+                "baseline": arm.baseline,
+                "model_match": "exact_revision",
+            })
+            row["proxy_metrics"]["calls"][0]["route"] = {
+                "provider": "OpenAI",
+                "served_model": "openai/gpt-test",
+                "attempts": [{
+                    "provider": "OpenAI",
+                    "model": "openai/gpt-test",
+                    "status": 200,
+                }],
+                "attempts_present": True,
+            }
+            ledger_path = self.root / f"{arm.arm_id}.jsonl"
+            request = json.loads(self.source_ledger.read_text().splitlines()[0])
+            request.pop("session_hash", None)
+            request["router_arm"] = {
+                "arm_id": arm.arm_id,
+                "arm_digest": arm.digest,
+                "route_kind": "gateway",
+            }
+            request["record_hash"] = hashlib.sha256(
+                results.canonical_json_bytes({
+                    key: value
+                    for key, value in request.items()
+                    if key != "record_hash"
+                })
+            ).hexdigest()
+            seal = {
+                "record_type": "ledger_seal",
+                "state": "SEALED",
+                "record_count": 1,
+                "last_sequence": 1,
+                "root_hash": request["record_hash"],
+            }
+            ledger_path.write_text(
+                canonical_line(request) + canonical_line(seal),
+                encoding="utf-8",
+            )
+            row["ledger_seal"] = {
+                "record_count": 1,
+                "last_sequence": 1,
+                "root_hash": request["record_hash"],
+                "ledger_file": ledger_path.name,
+            }
+            rows.append(row)
+            ledgers[cell_id] = ledger_path
+
+        self._write_results(*rows)
+        router_publish.publish_bundle(
+            self.results_path,
+            self.bundle,
+            experiment=experiment_value,
+            policy=policy,
+            catalog=self.catalog,
+            prices=self.prices,
+            ledgers=ledgers,
+        )
+        self.assertTrue(router_publish.verify_bundle(self.bundle))
+        public_experiment = json.loads(
+            (self.bundle / "experiment.json").read_text(encoding="utf-8")
+        )
+        public_policy = json.loads(
+            (self.bundle / "policy.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(public_experiment["track"], "model_router")
+        self.assertEqual(public_experiment["model_match"], "exact_revision")
+        self.assertEqual(
+            public_experiment["arms"][0]["cost_quality_tradeoff"], 6
+        )
+        self.assertEqual(
+            public_policy["data"]["model_match"], "exact_revision"
+        )
+        public_rows = [
+            json.loads(line)
+            for line in (self.bundle / "results.jsonl").read_text().splitlines()
+        ]
+        report = router_report.aggregate(
+            public_rows, bootstrap_replicates=20, bootstrap_seed=7
+        )
+        self.assertEqual(
+            report["paired_contrasts"]["auto"]["direction"],
+            "auto_minus_fixed",
+        )
+        bundle_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in self.bundle.rglob("*")
+            if path.is_file()
+        )
+        self.assertNotIn("session_id", bundle_text)
 
     def test_partial_failed_call_with_nullable_evidence_is_published(self):
         call = self.row["proxy_metrics"]["calls"][0]
