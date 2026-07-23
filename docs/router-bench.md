@@ -30,14 +30,15 @@ and fallbacks are forbidden. This compares the direct, OpenRouter, Vercel, or
 Cloudflare serving path around the same rolling model alias instead of
 measuring provider choice or recovery policy.
 
-[`router-bench-three-way.toml`](../obench/examples/router-bench-three-way.toml)
+[`router-bench-four-way.toml`](../obench/examples/router-bench-four-way.toml)
 is the recommended matched comparison:
 
 1. OpenAI directly;
 2. OpenRouter restricted to OpenAI;
-3. Vercel AI Gateway restricted to OpenAI.
+3. Vercel AI Gateway restricted to OpenAI;
+4. Cloudflare AI Gateway restricted to OpenAI.
 
-All three request the current `gpt-4o-mini` alias and use the canonical
+All four request the current `gpt-4o-mini` alias and use the canonical
 comparison key `openai/gpt-4o-mini`. `model_match = "rolling_alias"` accepts
 that provider-qualified alias or a dated snapshot that a provider reports after
 resolving it. Other model families, conflicting provider qualifications, and
@@ -76,7 +77,9 @@ comparison and budget enforcement in Gateway Tax.
 Cloudflare supports two OpenAI-compatible fixed routes. The documented
 `POST https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions`
 REST endpoint uses Cloudflare unified billing and an `AI Gateway: Run` API
-token. The named
+token. Enable Authenticated Gateway in the Cloudflare dashboard, authenticate
+Wrangler with `npx wrangler login`, and export the token returned by
+`npx wrangler auth token`. The named
 `https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/compat/chat/completions`
 route uses the upstream provider key directly; for the OpenAI control, set its
 `auth_env` to the same `OPENAI_API_KEY` as the direct arm and disable
@@ -84,10 +87,8 @@ Authenticated Gateway for that named gateway. Both require a real 32-hex
 account ID plus a provider-qualified requested model such as
 `openai/gpt-4o-mini`.
 
-Cloudflare marks the named compatibility route deprecated. It is therefore
-available only as the explicitly temporary
-[`router-bench-four-way-cloudflare-legacy.toml`](../obench/examples/router-bench-four-way-cloudflare-legacy.toml)
-fallback, not the canonical comparison.
+Cloudflare marks the named compatibility route deprecated. OpenBench accepts it
+for existing integrations, but the canonical four-way example uses REST.
 
 OpenBench removes caller cache and routing controls, blocks caller `cf-aig-*`
 headers, and forces
@@ -101,13 +102,12 @@ provider qualifier, or a conflicting dated revision fails route integrity.
 OpenBench does not invent response headers or attempt evidence that this REST
 response does not provide.
 
-On 2026-07-23 the named compatibility route was live-smoked successfully
-against OpenAI and returned `gpt-4o-mini-2024-07-18`, token usage, and a
-successful completion. The newer unified-billing REST route returned
-`401 Authentication error` with both active user-owned and account-owned
-`AI Gateway: Run` tokens on the same account. Treat that route as
-contract-supported but live-unverified until Cloudflare resolves the account
-issue.
+On 2026-07-23 the REST route was live-smoked with a Wrangler OAuth token after
+Authenticated Gateway was enabled. Streaming returned
+`openai/gpt-4o-mini`, complete usage, and `[DONE]`; a matched Pi canary then
+completed one valid direct-versus-Cloudflare block with four model calls per
+arm. This is integration proof, not a statistically meaningful performance
+result.
 
 Vercel supports routing one requested model across providers, provider filters,
 fallbacks, and explicit model rewrite rules. Its documented cost-aware model
@@ -183,7 +183,7 @@ Validation reads no secrets and makes no model calls:
 
 ```bash
 python3 -m obench.cli router validate \
-  obench/examples/router-bench-three-way.toml --tasks-dir tasks
+  obench/examples/router-bench-four-way.toml --tasks-dir tasks
 ```
 
 Set environment-variable names referenced by the TOML and freeze the one
@@ -200,35 +200,36 @@ export OPENBENCH_ROUTER_FROZEN_PRICES_JSON='{
 }'
 ```
 
-Set `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, and `VERCEL_API_KEY` in the
-shell that runs `doctor` or `run`. The TOML and commands name those variables
-but never contain key values.
+Set `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `VERCEL_API_KEY`, and
+`CLOUDFLARE_API_TOKEN` in the shell that runs `doctor` or `run`. The TOML and
+commands name those variables but never contain key values. Generate the
+Cloudflare token from the authenticated Wrangler session:
+
+```bash
+npx wrangler login
+export CLOUDFLARE_API_TOKEN="$(npx wrangler auth token)"
+```
 
 ```bash
 python3 -m obench.cli router doctor \
-  obench/examples/router-bench-three-way.toml --tasks-dir tasks
+  obench/examples/router-bench-four-way.toml --tasks-dir tasks
 
 python3 -m obench.cli router run \
-  obench/examples/router-bench-three-way.toml \
+  obench/examples/router-bench-four-way.toml \
   --tasks-dir tasks \
-  --results results/router-gpt-4o-mini-three-way.jsonl
+  --results results/router-gpt-4o-mini-four-way.jsonl
 
 python3 -m obench.cli router report \
-  results/router-gpt-4o-mini-three-way.jsonl
+  results/router-gpt-4o-mini-four-way.jsonl
 
 python3 -m obench.cli router publish \
-  results/router-gpt-4o-mini-three-way.jsonl \
-  obench/examples/router-bench-three-way.toml \
-  results/router-gpt-4o-mini-three-way-bundle
+  results/router-gpt-4o-mini-four-way.jsonl \
+  obench/examples/router-bench-four-way.toml \
+  results/router-gpt-4o-mini-four-way-bundle
 
 python3 -m obench.cli router verify \
-  results/router-gpt-4o-mini-three-way-bundle
+  results/router-gpt-4o-mini-four-way-bundle
 ```
-
-To reproduce the temporary Cloudflare BYOK lane, replace the illustrative
-account and gateway IDs in
-`obench/examples/router-bench-four-way-cloudflare-legacy.toml`, then run the
-same commands against that manifest.
 
 ## Auto Router commands
 

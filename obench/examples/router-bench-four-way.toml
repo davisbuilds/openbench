@@ -1,5 +1,5 @@
 schema_version = 1
-experiment_id = "gpt-4o-mini-four-way-cloudflare-legacy"
+experiment_id = "gpt-4o-mini-four-way-gateway-tax"
 track = "gateway_tax"
 model_match = "rolling_alias"
 harness = "pi"
@@ -9,8 +9,6 @@ schedule_seed = 20260723
 execution_lane = "local"
 private_router = false
 
-# TEMPORARY: Cloudflare marks the /compat route deprecated. Use this only while
-# its replacement REST endpoint cannot authenticate on your account.
 # Replace these illustrative future windows with the UTC windows for the run.
 [[windows]]
 window_id = "window-a"
@@ -99,8 +97,8 @@ seed = 20260723
 arm_id = "cloudflare-openai"
 route_kind = "gateway"
 gateway = "cloudflare"
-# Replace the illustrative account ID and gateway ID before running.
-endpoint = "https://gateway.ai.cloudflare.com/v1/0123456789abcdef0123456789abcdef/openbench-router-bench/compat/chat/completions"
+# Replace the illustrative account ID before running.
+endpoint = "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1/chat/completions"
 protocol = "openai_chat"
 baseline = false
 canonical_model = "openai/gpt-4o-mini"
@@ -111,7 +109,7 @@ allowed_providers = ["openai"]
 fallback_enabled = false
 retry_count = 0
 cache_enabled = false
-auth_env = "OPENAI_API_KEY"
+auth_env = "CLOUDFLARE_API_TOKEN"
 direct_control_arm_id = "direct-openai"
 
 [arms.sampling]
