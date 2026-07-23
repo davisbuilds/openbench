@@ -325,6 +325,9 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
         result.get("checker_score"),
         f"row {row_number} result.checker_score",
     )
+    if result.get("budget_exhausted_reason") == "max_calls":
+        solved = False
+        score = 0.0
     available = _bool(
         result.get("available"),
         f"row {row_number} result.available",

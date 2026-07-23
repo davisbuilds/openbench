@@ -177,6 +177,7 @@ _CANONICAL_RESULT_SCHEMA = {
     "timed_out": _SCALAR,
     "infrastructure_invalid_reason": _SCALAR,
     "infrastructure_valid": _SCALAR,
+    "budget_exhausted_reason": _SCALAR,
 }
 _RESULT_SCHEMA = {
     "arm_role": _SCALAR,

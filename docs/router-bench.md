@@ -370,8 +370,16 @@ python3 -m obench.cli router verify \
 ```
 
 Only `run` sends paid model requests. It is the explicit cost-authorization
-step. `usd_cap`, `max_calls`, and `max_output_tokens` are checked from the
-sealed cell ledger; they are not provider-side prepaid limits and cannot
+step. The local proxy reserves `max_calls` atomically before forwarding, so an
+over-cap request is rejected locally and retained in the sealed ledger without
+reaching the paid upstream. A cell that exhausts `max_calls` is a valid unsolved
+benchmark outcome and remains in its complete matched block; it is not an
+infrastructure failure or an automatic paid-replacement candidate. Sanitized
+published results retain `result.budget_exhausted_reason = "max_calls"` so this
+interpretation remains explicit outside the local ledger.
+
+`usd_cap` and `max_output_tokens` are still checked from completed calls in the
+sealed cell ledger. They are not provider-side prepaid limits and cannot
 guarantee against overspend. Review prices and windows, then start with the
 examples' one repetition and low caps.
 

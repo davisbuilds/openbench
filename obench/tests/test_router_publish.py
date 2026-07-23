@@ -567,6 +567,27 @@ class RouterPublishTests(unittest.TestCase):
         )
         self.assertEqual(actual, expected)
 
+    def test_max_calls_outcome_reason_survives_publish(self):
+        self.row["result"].update(
+            solved=False,
+            checker_score=0.0,
+            available=True,
+            budget_exhausted_reason="max_calls",
+        )
+        self._write_results(self.row)
+
+        provenance = self.publish()
+
+        self.assertEqual(router_publish.verify_bundle(self.bundle), provenance)
+        public_row = json.loads((self.bundle / "results.jsonl").read_text())
+        self.assertEqual(
+            public_row["result"]["budget_exhausted_reason"],
+            "max_calls",
+        )
+        self.assertIsNone(public_row["result"]["infrastructure_invalid_reason"])
+        self.assertFalse(public_row["result"]["solved"])
+        self.assertTrue(public_row["result"]["available"])
+
     def test_model_router_track_policy_and_attempts_survive_publish_round_trip(self):
         experiment_value = model_router_experiment()
         policy = {

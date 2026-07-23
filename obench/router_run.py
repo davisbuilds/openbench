@@ -883,6 +883,8 @@ def _proxy_evidence(
     auth_failure = False
     for row in ledger_rows:
         status = row.get("status")
+        if _is_max_calls_rejection(row):
+            continue
         if isinstance(status, int) and 400 <= status <= 599:
             if (
                 plan.track == "model_router"
@@ -950,19 +952,23 @@ def _proxy_evidence(
     infrastructure_reason = None
     if auth_failure:
         infrastructure_reason = "upstream_auth_failure"
-    elif len(ledger_rows) > budget.max_calls:
-        infrastructure_reason = "max_calls_exceeded"
     elif total_output > budget.max_output_tokens:
         infrastructure_reason = "max_output_tokens_exceeded"
     elif successful_calls and priced_calls != successful_calls:
         infrastructure_reason = "usd_cap_unenforceable_no_frozen_price"
     elif total_cost > Decimal(budget.usd_cap):
         infrastructure_reason = "usd_cap_exceeded"
+    elif len(ledger_rows) > budget.max_calls:
+        infrastructure_reason = "max_calls_exceeded"
     route_integrity = {
         "pass": not reasons,
         "reasons": sorted(set(reasons)),
     }
     return calls, route_integrity, infrastructure_reason
+
+
+def _is_max_calls_rejection(row: Mapping[str, Any]) -> bool:
+    return row.get("status") == 429 and row.get("error") == "max_calls_exceeded"
 
 
 def _append_row(path: Path, row: Mapping[str, Any]) -> None:
@@ -1004,6 +1010,7 @@ def _run_cell(
     server.register_route(token, plan, secret_plan)
     started = time.monotonic()
     infrastructure_reason = None
+    budget_exhausted_reason = None
     adapter_result: dict[str, Any] = {}
     seal = None
     ledger_rows: list[dict[str, Any]] = []
@@ -1049,7 +1056,10 @@ def _run_cell(
             calls, route_integrity, budget_reason = _proxy_evidence(
                 ledger_rows, prices, experiment.budget, plan
             )
-            infrastructure_reason = infrastructure_reason or budget_reason
+            if budget_reason == "max_calls_exceeded":
+                budget_exhausted_reason = "max_calls"
+            else:
+                infrastructure_reason = infrastructure_reason or budget_reason
         except Exception as exc:  # noqa: BLE001 - sealing is evidence-critical
             infrastructure_reason = infrastructure_reason or "ledger_seal_failure"
             adapter_result.setdefault("error", str(exc))
@@ -1088,10 +1098,13 @@ def _run_cell(
                 infrastructure_reason = infrastructure_reason or "checker_failure"
                 checker_stderr = str(exc)
     duration = time.monotonic() - started
-    solved = checker_exit == 0
-    available = bool(ledger_rows) and all(
+    solved = checker_exit == 0 and budget_exhausted_reason is None
+    if budget_exhausted_reason is not None:
+        checker_score = 0.0
+    upstream_rows = [row for row in ledger_rows if not _is_max_calls_rejection(row)]
+    available = bool(upstream_rows) and all(
         isinstance(row.get("status"), int) and 200 <= row["status"] < 300
-        for row in ledger_rows
+        for row in upstream_rows
     )
     timed_out = bool(adapter_result.get("entry_timed_out")) or "timeout" in str(
         adapter_result.get("error", "")
@@ -1124,6 +1137,7 @@ def _run_cell(
             "duration_s": duration,
             "timed_out": timed_out,
             "infrastructure_invalid_reason": infrastructure_reason,
+            "budget_exhausted_reason": budget_exhausted_reason,
             "failure_class": failure_class,
             "adapter_completed": bool(adapter_result.get("completed", False)),
             "adapter_error": adapter_result.get("error"),

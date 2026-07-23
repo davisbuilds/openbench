@@ -44,7 +44,7 @@ class _UpstreamHandler(BaseHTTPRequestHandler):
             "authorization": self.headers.get("authorization"),
         })
         gateway = "/gateway/" in self.path
-        status = 503 if gateway else 200
+        status = self.server.gateway_status if gateway else 200
         event = {
             "model": "fake-model",
             "provider": "openai",
@@ -155,6 +155,7 @@ class RouterRunE2ETests(unittest.TestCase):
 
         self.upstream = ThreadingHTTPServer(("127.0.0.1", 0), _UpstreamHandler)
         self.upstream.requests = []
+        self.upstream.gateway_status = 503
         self.upstream_thread = threading.Thread(
             target=self.upstream.serve_forever, daemon=True
         )
@@ -405,9 +406,10 @@ direct_control_arm_id = "direct"
             {0},
         )
 
-    def test_max_calls_stops_upstream_and_invalidates_cell(self):
+    def test_max_calls_stops_upstream_and_counts_as_valid_unsolved(self):
         capped_results = self.root / "capped.jsonl"
         statuses = []
+        self.upstream.gateway_status = 200
 
         def invoke_many(**kwargs):
             plan = json.loads(kwargs["plan_path"].read_text())
@@ -434,30 +436,68 @@ direct_control_arm_id = "direct"
         with self._runtime(), mock.patch.object(
             router_run, "_invoke_local", side_effect=invoke_many
         ):
-            with self.assertRaisesRegex(router_run.RouterRunError, "explicit rerun"):
-                router_run.run_experiment(
-                    self.experiment,
-                    results_path=capped_results,
-                    tasks_dir=self.tasks,
-                    exec_mode="local",
-                    environ={**os.environ, **self.env},
-                    adapters_dir=self.adapters,
-                )
+            summary = router_run.run_experiment(
+                self.experiment,
+                results_path=capped_results,
+                tasks_dir=self.tasks,
+                exec_mode="local",
+                environ={**os.environ, **self.env},
+                adapters_dir=self.adapters,
+            )
+            upstream_after_first_run = len(self.upstream.requests)
+            resumed = router_run.run_experiment(
+                self.experiment,
+                results_path=capped_results,
+                tasks_dir=self.tasks,
+                exec_mode="local",
+                environ={**os.environ, **self.env},
+                adapters_dir=self.adapters,
+            )
 
         rows = results.read_jsonl_for_resume(capped_results).rows
+        self.assertEqual((summary.blocks_completed, summary.rows_appended), (1, 2))
+        self.assertEqual((resumed.blocks_skipped, resumed.rows_appended), (1, 0))
         self.assertEqual(len(self.upstream.requests), len(rows))
-        self.assertEqual(sum(status in {200, 503} for status in statuses), len(rows))
+        self.assertEqual(len(self.upstream.requests), upstream_after_first_run)
+        self.assertEqual(statuses.count(200), len(rows))
         self.assertEqual(statuses.count(429), 3 * len(rows))
         self.assertTrue(all(
-            row["result"]["infrastructure_invalid_reason"] == "max_calls_exceeded"
+            row["result"]["infrastructure_invalid_reason"] is None
             for row in rows
         ))
+        self.assertTrue(all(
+            row["result"]["budget_exhausted_reason"] == "max_calls"
+            for row in rows
+        ))
+        self.assertTrue(all(not row["result"]["solved"] for row in rows))
+        self.assertTrue(all(row["result"]["checker_score"] == 0.0 for row in rows))
+        self.assertTrue(all(row["result"]["available"] for row in rows))
+        self.assertTrue(all(not row["result"]["adapter_completed"] for row in rows))
         self.assertTrue(all(row["ledger_seal"]["record_count"] == 2 for row in rows))
-        self.assertTrue(all(row["result"]["failure_class"] == "infrastructure" for row in rows))
+        self.assertTrue(all(row["result"]["failure_class"] == "treatment" for row in rows))
+        self.assertTrue(all(row["route_integrity"]["pass"] for row in rows))
+        self.assertTrue(all(len(row["proxy_metrics"]["calls"]) == 1 for row in rows))
+        self.assertTrue(all(
+            row["proxy_metrics"]["calls"][0]["route"] is not None
+            for row in rows
+        ))
+        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        self.assertEqual(report["blocks"], {
+            "excluded": 0,
+            "excluded_by_reason": {},
+            "included": 1,
+            "observed": 1,
+        })
+        self.assertTrue(all(
+            arm["attempted_cells"] == 1
+            and arm["metrics"]["solve_rate"]["estimate"] == 0.0
+            for arm in report["arms"].values()
+        ))
         ledgers = "".join(
             path.read_text()
             for path in (self.root / ".capped.router-ledgers").glob("*.jsonl")
         )
+        self.assertEqual(ledgers.count('"error":"max_calls_exceeded"'), len(rows))
         self.assertNotIn(SECRET, capped_results.read_text() + ledgers)
 
     def test_proxy_evidence_honors_parser_integrity_verdict(self):
@@ -483,6 +523,66 @@ direct_control_arm_id = "direct"
             },
         }
         self.assertIn("malformed_sse_event", router_run._route_reasons(metrics, plan))
+
+    def test_posthoc_caps_override_combined_max_calls_exhaustion(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = next(item for item in plans if item.route_kind == "direct")
+        metrics = {
+            "usage": {"input_tokens": 2, "output_tokens": 11},
+            "route": {
+                "requested_model": plan.requested_model,
+                "metadata_requested_model": None,
+                "served_model": plan.requested_model,
+                "provider": plan.requested_provider,
+                "attempts": [],
+            },
+            "stream": {"done": True},
+            "route_evidence": {"pass": True, "reasons": []},
+        }
+        rejection = {"status": 429, "error": "max_calls_exceeded"}
+        price = {
+            plan.canonical_model: router_run.Price(
+                router_run.Decimal("1"),
+                router_run.Decimal("1"),
+                "2026-07-22",
+            )
+        }
+
+        cases = (
+            (
+                experiment.budget,
+                metrics,
+                "max_output_tokens_exceeded",
+            ),
+            (
+                dataclasses.replace(
+                    experiment.budget,
+                    max_output_tokens=100,
+                    usd_cap="0.000001",
+                ),
+                {
+                    **metrics,
+                    "usage": {"input_tokens": 2, "output_tokens": 1},
+                },
+                "usd_cap_exceeded",
+            ),
+        )
+        for budget, call_metrics, expected in cases:
+            with self.subTest(expected=expected):
+                calls, integrity, reason = router_run._proxy_evidence(
+                    [{"status": 200, "router_metrics": call_metrics}, rejection],
+                    price,
+                    budget,
+                    plan,
+                )
+                self.assertEqual(reason, expected)
+                self.assertTrue(integrity["pass"])
+                self.assertEqual(len(calls), 1)
 
     def test_profile_specific_served_and_attempt_model_integrity(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)
