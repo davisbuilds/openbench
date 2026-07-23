@@ -39,3 +39,9 @@ jobs:
 
       - name: Validate task checkers (fail-on-workspace / pass-on-solution)
         run: obench validate --no-imported
+
+      - name: Validate imported Terminal-Bench checkers (offline tier)
+        run: obench validate --tasks-dir tasks-imported/terminal-bench
+
+      - name: Validate imported Exercism checkers (offline tier)
+        run: obench validate --tasks-dir tasks-imported/exercism

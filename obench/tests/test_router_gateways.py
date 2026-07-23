@@ -84,6 +84,10 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "session_id": "attacker-session",
             "conversation_id": "attacker-conversation",
             "providerOptions": {"gateway": {"only": ["attacker"]}},
+            "models": ["attacker/model"],
+            "order": ["attacker"],
+            "sort": "price",
+            "caching": True,
         })
 
         router_gateways.shape_body(
@@ -108,8 +112,8 @@ class GatewayRequestProfileTests(unittest.TestCase):
         }])
         self.assertEqual(body["session_id"], "cell-opaque")
         for key in (
-            "router", "conversation_id", "providerOptions", "cache",
-            "prompt_cache_key",
+            "router", "conversation_id", "providerOptions", "models", "order",
+            "sort", "caching", "cache", "prompt_cache_key",
         ):
             self.assertNotIn(key, body)
 

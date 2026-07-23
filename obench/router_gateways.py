@@ -129,7 +129,8 @@ def shape_body(
         if router_mode == "auto":
             for key in (
                 "provider", "providerOptions", "plugins", "router",
-                "session_id", "conversation_id",
+                "session_id", "conversation_id", "models", "order", "sort",
+                "caching",
             ):
                 payload.pop(key, None)
             payload["provider"] = {
