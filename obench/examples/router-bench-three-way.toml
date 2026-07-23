@@ -1,0 +1,100 @@
+schema_version = 1
+experiment_id = "gpt-4o-mini-three-way-gateway-tax"
+track = "gateway_tax"
+model_match = "model_family"
+harness = "pi"
+tasks = ["make-ci-green", "add-feature", "misleading-error"]
+repetitions_per_window = 1
+schedule_seed = 20260722
+execution_lane = "local"
+private_router = false
+
+# Absolute RFC3339 windows are required by schema v1. Replace these illustrative
+# future windows with the UTC windows for the experiment before running.
+[[windows]]
+window_id = "window-a"
+start = "2026-08-04T15:00:00Z"
+end = "2026-08-04T17:00:00Z"
+
+[[windows]]
+window_id = "window-b"
+start = "2026-08-05T00:00:00Z"
+end = "2026-08-05T02:00:00Z"
+
+[budget]
+timeout_s = 600
+max_calls = 8
+max_output_tokens = 12000
+usd_cap = 0.50
+
+[[arms]]
+arm_id = "direct-openai"
+route_kind = "direct"
+endpoint = "https://api.openai.com/v1/chat/completions"
+protocol = "openai_chat"
+baseline = true
+canonical_model = "openai/gpt-4o-mini-2024-07-18"
+requested_model = "gpt-4o-mini-2024-07-18"
+requested_provider = "openai"
+allowed_models = ["gpt-4o-mini-2024-07-18"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "OPENAI_API_KEY"
+
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260722
+
+[[arms]]
+arm_id = "openrouter-openai"
+route_kind = "gateway"
+gateway = "openrouter"
+endpoint = "https://openrouter.ai/api/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "openai/gpt-4o-mini-2024-07-18"
+requested_model = "openai/gpt-4o-mini-2024-07-18"
+requested_provider = "openai"
+allowed_models = ["openai/gpt-4o-mini-2024-07-18"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "OPENROUTER_API_KEY"
+direct_control_arm_id = "direct-openai"
+
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260722
+
+[[arms]]
+arm_id = "vercel-openai"
+route_kind = "gateway"
+gateway = "vercel"
+endpoint = "https://ai-gateway.vercel.sh/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "openai/gpt-4o-mini-2024-07-18"
+requested_model = "openai/gpt-4o-mini-2024-07-18"
+requested_provider = "openai"
+# Vercel may report its family alias or the resolved provider API model ID.
+allowed_models = [
+  "openai/gpt-4o-mini-2024-07-18",
+  "openai/gpt-4o-mini",
+  "gpt-4o-mini-2024-07-18",
+]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "VERCEL_API_KEY"
+direct_control_arm_id = "direct-openai"
+
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260722

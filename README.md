@@ -35,9 +35,9 @@ credit), never by the harness's own claim of success.
 OpenBench has two separate benchmark families. **Harness Bench**, described
 throughout this README, varies the coding-agent harness while holding the model
 and task fixed. **Router Bench** holds the Pi harness, model, provider, sampling,
-and task fixed while varying the serving route. Its implemented MVP is the
-direct-vs-gateway **Gateway Tax** track; Provider Router and Model Router tracks
-are deferred, not implemented. See
+and task fixed while varying the serving route. Its implemented tracks are the
+direct-vs-gateway **Gateway Tax** comparison and OpenRouter Auto Beta
+**Model Router** comparison; Provider Router remains deferred. See
 [`docs/router-bench.md`](docs/router-bench.md) for its methodology, exploratory
 eligibility limits, example TOML, and separate `obench router` command group.
 

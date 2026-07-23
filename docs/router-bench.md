@@ -1,106 +1,144 @@
 # Router Bench
 
-OpenBench has two separate benchmark families:
+OpenBench keeps three questions separate:
 
-- **Harness Bench** asks how much the coding-agent harness matters when the
-  underlying model and task are held fixed. Its top-level commands are
-  `obench validate`, `obench doctor`, `obench run`, and `obench report`.
-- **Router Bench** asks how much the serving route matters when the harness,
-  model, provider, sampling, task, and budget are held fixed. Its command group
-  is `obench router validate|doctor|run|report|publish|verify`.
+- **Harness Bench** compares coding-agent harnesses while holding the model and
+  task fixed. It uses `obench validate|doctor|run|report`.
+- **Gateway Tax** compares fixed routes to the same model/provider while holding
+  the harness, sampling, task, and budget fixed.
+- **Auto Router Bench** compares a prompt-aware model router with fixed-model
+  controls drawn from the router's declared candidate pool.
 
-Do not combine their result rows or interpret a Router Bench arm as another
-harness. Router Bench currently supports only the **Gateway Tax** track with Pi
-and the OpenAI Chat Completions streaming protocol.
+Gateway Tax and Auto Router Bench share
+`obench router validate|doctor|run|report|publish|verify`, but they are different
+tracks (`gateway_tax` and `model_router`). Do not combine their rows. A gateway
+tax result measures a serving path around a fixed model; a model-router result
+measures a policy that may choose different models and fall back within a
+declared pool.
 
-## Tracks and status
+Both tracks currently use Pi and the OpenAI Chat Completions streaming protocol.
+The local execution lane is exploratory because it does not enforce outbound
+network isolation.
 
-| Track | Question | Status |
-|---|---|---|
-| Gateway Tax | What changes when the same model/provider is called directly versus through a gateway? | Implemented MVP |
-| Provider Router | How well does a router choose among providers for one model? | Deferred; not implemented |
-| Model Router | How well does a router choose among models? | Deferred; not implemented |
+## Fixed Gateway Tax
 
-Gateway Tax uses one baseline `direct` arm and one or more `gateway` arms. Every
-gateway arm names its `gateway` profile and `direct_control_arm_id`; direct arms
-must not declare `gateway`. The schema requires each pair to
-use the same canonical model revision, requested provider, provider allowlist,
-protocol, and sampling. Each arm has its own endpoint-specific `requested_model`
-wire ID and model allowlist. Fallbacks, gateway retries, and caching must all be
-disabled. This
-design measures the gateway path itself, rather than a gateway's model choice,
-fallback policy, cache hit rate, or retry policy.
+A `gateway_tax` experiment has exactly one baseline `direct` arm and one or more
+`gateway` arms. Every gateway arm references the direct arm with
+`direct_control_arm_id` and must match its canonical model, requested provider,
+provider allowlist, protocol, and sampling. Client retries and caching are off,
+and fallbacks are forbidden. This isolates the direct, OpenRouter, or Vercel
+serving path instead of measuring provider choice or recovery policy.
 
-## Gateway profiles
+[`router-bench-three-way.toml`](../obench/examples/router-bench-three-way.toml)
+is a matched three-way comparison:
 
-Gateway arms may select one of these admitted strict managed profiles:
+1. OpenAI directly;
+2. OpenRouter restricted to OpenAI;
+3. Vercel AI Gateway restricted to OpenAI.
 
-| `gateway` | Endpoint and auth | Forced request controls | Required route evidence |
-|---|---|---|---|
-| `openrouter` | `https://openrouter.ai/api/v1/chat/completions`; Bearer token from `auth_env` | `provider.only`, `allow_fallbacks=false`, metadata enabled, cache disabled | OpenRouter requested/served model, selected provider, and strict attempt parsing when attempts are present |
-| `vercel` | `https://ai-gateway.vercel.sh/v1/chat/completions`; Bearer token from `auth_env` (normally `AI_GATEWAY_API_KEY`) | provider-qualified model ID and only `providerOptions.gateway.only`; model fallbacks, order, sort, caching, and cache markers are removed | requested model, final/resolved provider, canonical served model, single-attempt counts, and successful provider-attempt evidence |
+All three request `gpt-4o-mini-2024-07-18` and use the canonical comparison key
+`openai/gpt-4o-mini-2024-07-18`. The experiment deliberately sets
+`model_match = "model_family"` because Vercel can report the provider-qualified
+family alias `openai/gpt-4o-mini` while preserving the dated original request.
+The Vercel arm admits both forms explicitly without claiming the served alias
+proves an immutable revision.
 
-Vercel evidence also retains privacy-safe `generationId`, `cost`, and
-`marketCost` values when returned. This implementation does not make a paid
-post-run generation lookup. Missing or contradictory provider, model, or
-attempt evidence fails route integrity closed.
+Use `model_match = "exact_revision"` only when every route returns the exact
+requested model identifier. `model_family` strips a trailing dated revision and
+compares the provider-independent family name. It admits a documented alias
+without claiming that alias is immutable or revision-pinned; undeclared model
+families still fail route integrity.
 
-A valid nonnegative Vercel `cost` is reported per call under the
-`router_reported` USD cost basis using that sealed ledger row's observation
-timestamp. Missing or malformed cost remains absent rather than becoming zero.
-The independent `frozen_list_estimate` basis remains the budget-enforcement
-source.
+### Gateway evidence
 
-`gateway = "cloudflare"` is admission-blocked. The admitted REST profile cannot
-prove provider and served-model integrity because Cloudflare documents the
-relevant response headers only for dynamic routes. Strict Gateway Tax support
-therefore requires a metadata-only Logs API verification flow with explicit
-secret and lifecycle ownership. That follow-up must keep payload logging
-disabled (`cf-aig-collect-log-payload: false`) so prompts and responses are
-never collected.
+OpenRouter receives `provider.only = ["openai"]`,
+`allow_fallbacks = false`, metadata opt-in, and cache-off controls. Its response
+must identify the requested and served model, selected provider, and any
+attempts. OpenRouter's response-reported cost is retained when present.
 
-`gateway = "concentrate"` is admission-blocked. Concentrate's current Chat
-Completions contract cannot disable or prove fallback, retries, and caching, so
-it cannot support strict Gateway Tax without weakening route integrity.
+Vercel receives a provider-qualified model ID and only
+`providerOptions.gateway.only = ["openai"]`; model fallbacks, provider ordering,
+sorting, and cache controls are removed. Its documented provider metadata must
+show the original model, final provider, resolved/canonical model, one model
+attempt, one provider attempt, and success. `cost` and `marketCost` are retained
+when returned. A valid timestamped `cost` becomes `router_reported` evidence,
+while the independent frozen list-price estimate remains available for
+comparison and budget enforcement in Gateway Tax.
 
-## Coding taskset
+Vercel supports routing one requested model across providers, provider filters,
+fallbacks, and explicit model rewrite rules. Its documented cost-aware model
+routing example puts a separate classifier in application code. As of
+2026-07-22, Vercel documents no native prompt-aware model classifier comparable
+to OpenRouter Auto Beta. OpenBench therefore treats Vercel as a fixed gateway
+arm here, not an Auto Router Bench arm.
 
-Router Bench runs the normal OpenBench coding tasks. Each arm receives a fresh
-copy of the same task workspace, and `checker.sh` remains the sole judge of
-correctness and partial credit. A useful starter taskset is:
+## Auto Router Bench
 
-- `make-ci-green`
-- `add-feature`
-- `misleading-error`
+A `model_router` experiment has exactly one OpenRouter Auto Beta arm and one or
+more fixed OpenRouter controls. It permits no direct arm. This keeps gateway and
+account effects common while asking whether prompt-aware model selection beats a
+fixed model.
 
-These tasks exercise multi-step code inspection and editing without the runtime
-of the imported Terminal-Bench tier. Use multiple repetitions and time windows
-to reduce sensitivity to transient provider load. The runner deterministically
-counterbalances arm order within complete all-arm blocks. A report includes a
-block only when every expected arm is present, infrastructure-valid, and passes
-route integrity.
+[`router-bench-auto.toml`](../obench/examples/router-bench-auto.toml) compares:
 
-`run` executes only blocks whose declared UTC window is currently active. Run
-the command again during each later window; completed blocks resume from the
-same results file without changing the full schedule digest.
+- `openrouter/auto-beta`, restricted to exactly
+  `openai/gpt-5-mini` and `anthropic/claude-haiku-4.5`;
+- fixed `openai/gpt-5-mini`, the declared baseline;
+- fixed `anthropic/claude-haiku-4.5`.
 
-## Example: OpenAI direct vs OpenRouter/OpenAI
+Both candidate models support tool-using coding workflows. The auto arm's
+`allowed_models` and `allowed_providers` must exactly equal the union of the
+fixed controls. `cost_quality_tradeoff = 7` is committed into the experiment;
+OpenRouter documents the scale as `0` for quality-first through `10` for
+cost-first. Fixed controls disable fallback. Auto Beta enables only in-pool
+router fallback; every arm still has cache off and client `retry_count = 0`.
 
-[`obench/examples/router-bench.toml`](../obench/examples/router-bench.toml)
-compares the exact `gpt-4o-mini-2024-07-18` model:
+The proxy overwrites caller routing fields and injects one opaque `session_id`
+per benchmark cell. Auto Beta therefore pins its selected model and provider
+across the multi-call Pi interaction for that task cell. A new arm/task/window/
+repetition cell gets a new session, so stickiness cannot leak between matched
+cells. Cache remains disabled even though OpenRouter also documents implicit
+cache-based stickiness.
 
-- directly through OpenAI, using `OPENAI_API_KEY`;
-- through OpenRouter while pinning provider `openai`, using
-  `OPENROUTER_API_KEY`.
+Reports show:
 
-Both arms set temperature `0`, top-p `1`, and the same seed. The canonical
-comparison model is `openai/gpt-4o-mini-2024-07-18`; the OpenAI wire ID omits
-the provider prefix while the OpenRouter wire ID includes it. Both pin provider
-`openai`; fallbacks, caching, and retries are disabled.
+- solve rate, checker score, availability, latency, timing, throughput, and
+  actual cost by arm;
+- task-weighted served model/provider route distribution;
+- attempt-evidence coverage, fallback call rate, and mean attempts per call;
+- paired Auto-minus-baseline contrasts over complete matched blocks.
 
-The TOML stores environment-variable **names only**, never credential values.
-Export the two keys in the shell that runs `doctor` or `run`. For cost
-validation, also provide a frozen price snapshot:
+Route distribution answers which model/provider served calls. Attempt and
+fallback metrics answer how often the router retried before success. They are
+different signals and neither should be inferred from the other.
+
+## Matched scheduling
+
+Each arm receives a fresh copy of the same task workspace, and `checker.sh`
+remains the sole judge. The runner deterministically counterbalances arm order
+inside complete all-arm blocks keyed by task, window, and repetition. Reporting
+includes a block only when every expected arm is present, infrastructure-valid,
+and route-integrity-valid. It then weights calls to cells, complete blocks to
+tasks, and tasks equally, with task-cluster bootstrap intervals.
+
+Schema v1 requires absolute RFC3339 UTC windows; it has no relative
+`next-week` form. The examples therefore contain clearly marked illustrative
+future windows. Replace them with the intended non-overlapping windows before a
+real run. `run` executes only currently active windows and resumes completed
+blocks from the same results file.
+
+## Three-way commands
+
+Validation reads no secrets and makes no model calls:
+
+```bash
+python3 -m obench.cli router validate \
+  obench/examples/router-bench-three-way.toml --tasks-dir tasks
+```
+
+Set environment-variable names referenced by the TOML and freeze the one
+canonical model price. These rates are an illustrative list-price snapshot as
+of 2026-07-22, not a promise that provider prices remain unchanged:
 
 ```bash
 export OPENBENCH_ROUTER_FROZEN_PRICES_JSON='{
@@ -112,124 +150,116 @@ export OPENBENCH_ROUTER_FROZEN_PRICES_JSON='{
 }'
 ```
 
-Pricing changes over time; review and deliberately update this snapshot before
-each experiment. The example values are illustrative, not a current price
-claim.
-
-## Commands
-
-Validate the experiment structure, task paths, workspace materialization, and
-deterministic schedule without reading credentials or making model calls:
+Set `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, and `VERCEL_API_KEY` in the
+shell that runs `doctor` or `run`. The TOML and commands name those variables
+but never contain key values.
 
 ```bash
-obench router validate obench/examples/router-bench.toml
+python3 -m obench.cli router doctor \
+  obench/examples/router-bench-three-way.toml --tasks-dir tasks
+
+python3 -m obench.cli router run \
+  obench/examples/router-bench-three-way.toml \
+  --tasks-dir tasks \
+  --results results/router-gpt-4o-mini-three-way.jsonl
+
+python3 -m obench.cli router report \
+  results/router-gpt-4o-mini-three-way.jsonl
+
+python3 -m obench.cli router publish \
+  results/router-gpt-4o-mini-three-way.jsonl \
+  obench/examples/router-bench-three-way.toml \
+  results/router-gpt-4o-mini-three-way-bundle
+
+python3 -m obench.cli router verify \
+  results/router-gpt-4o-mini-three-way-bundle
 ```
 
-Preflight credentials, Pi, tasks, and frozen prices without spending tokens:
+## Auto Router commands
+
+Validation is likewise offline:
 
 ```bash
-obench router doctor obench/examples/router-bench.toml
+python3 -m obench.cli router validate \
+  obench/examples/router-bench-auto.toml --tasks-dir tasks
 ```
 
-Run or resume the scheduled blocks:
+The Auto example needs only the OpenRouter key. Its frozen snapshot must cover
+every model in the declared candidate pool because calls are priced by the
+observed served model. These are illustrative list prices as of 2026-07-22:
 
 ```bash
-obench router run obench/examples/router-bench.toml \
-  --results results/router-gpt-4o-mini-openrouter.jsonl
+export OPENBENCH_ROUTER_FROZEN_PRICES_JSON='{
+  "openai/gpt-5-mini": {
+    "input_per_million": "0.25",
+    "output_per_million": "2.00",
+    "effective_at": "2026-07-22"
+  },
+  "anthropic/claude-haiku-4.5": {
+    "input_per_million": "1.00",
+    "output_per_million": "5.00",
+    "effective_at": "2026-07-22"
+  }
+}'
 ```
 
-`execution_lane` selects the default lane; `--exec local|docker` overrides it.
-The MVP currently executes only `local` and fails closed if `docker` is chosen.
-An already valid latest block is skipped. `--force` appends a replacement block
-attempt instead of rewriting prior evidence. Invalid paid blocks are never
-retried automatically; an explicit later `run` is required.
-
-Report matched, eligible blocks:
+Set `OPENROUTER_API_KEY` in the shell that runs `doctor` or `run`; do not put
+its value in the experiment file.
 
 ```bash
-obench router report results/router-gpt-4o-mini-openrouter.jsonl
-obench router report results/router-gpt-4o-mini-openrouter.jsonl --json
+python3 -m obench.cli router doctor \
+  obench/examples/router-bench-auto.toml --tasks-dir tasks
+
+python3 -m obench.cli router run \
+  obench/examples/router-bench-auto.toml \
+  --tasks-dir tasks \
+  --results results/router-openrouter-auto-beta.jsonl
+
+python3 -m obench.cli router report \
+  results/router-openrouter-auto-beta.jsonl --json
+
+python3 -m obench.cli router publish \
+  results/router-openrouter-auto-beta.jsonl \
+  obench/examples/router-bench-auto.toml \
+  results/router-openrouter-auto-beta-bundle
+
+python3 -m obench.cli router verify \
+  results/router-openrouter-auto-beta-bundle
 ```
 
-Create a sanitized evidence bundle, then verify every artifact digest and
-public ledger chain:
+Only `run` sends paid model requests. It is the explicit cost-authorization
+step. `usd_cap`, `max_calls`, and `max_output_tokens` are checked from the
+sealed cell ledger; they are not provider-side prepaid limits and cannot
+guarantee against overspend. Review prices and windows, then start with the
+examples' one repetition and low caps.
 
-```bash
-obench router publish results/router-gpt-4o-mini-openrouter.jsonl \
-  obench/examples/router-bench.toml results/router-gpt-4o-mini-bundle
-obench router verify results/router-gpt-4o-mini-bundle
-```
+## Secrets, ledgers, and publication
 
-The runner durably persists the frozen price snapshot beside the results file,
-so publishing does not depend on retaining the original shell environment.
-Published rows retain their `exploratory` route-isolation classification.
+At admission, key values are loaded into a memory-only secret plan. Pi receives
+a synthetic proxy key and cell-scoped proxy URL, not upstream credentials. The
+proxy strips client credential, routing, retry, fallback, and cache fields and
+injects the committed arm policy. Ledgers retain privacy-safe timing, usage,
+route identifiers, status, cost, and hashes, not prompts, generated text, or
+credential values.
 
-Only `run` sends paid model requests. Invoking it is the explicit cost
-authorization step. `budget.usd_cap`, `max_calls`, and `max_output_tokens` are
-checked from the sealed cell ledger and can invalidate a cell, but they are not
-a provider-side prepaid limit or a guarantee against overspend. In particular,
-the USD check uses the frozen price estimate after observed calls. Start with a
-small taskset, one repetition, and a low cap.
-
-For tasks outside `tasks/`, pass the same `--tasks-dir PATH` to `validate`,
-`doctor`, and `run`.
-
-## Metrics and route evidence
-
-Reports keep the direct and gateway arms separate and calculate:
-
-- solve rate, mean checker score, availability, and task latency;
-- time to first byte, semantic time to first token, and generation throughput;
-- attempted cost and cost per solve for each available cost basis;
-- served provider/model route distribution;
-- paired gateway-minus-direct contrasts with task-cluster bootstrap intervals.
-
-Metrics retain explicit task, cell, call, and cost-basis coverage. Missing timing
-or pricing evidence does not silently become zero. Cost per solve is withheld
-unless the selected cost basis covers every included call.
-
-The managed proxy fixes the requested model, provider, and sampling on every
-request and applies the selected gateway profile's retry, fallback, cache, and
-evidence controls. OpenRouter preserves its existing strict metadata behavior.
-Vercel requires documented routing and attempt metadata. Cloudflare requires
-response-header evidence and never infers a provider from the requested model.
-Route failures are recorded as reasons, and the entire all-arm block is
-excluded from matched reporting. Ledgers contain
-privacy-safe timing, usage, route identifiers, status, and hashes; they do not
-retain prompts, generated text, or credential values.
-
-## Secrets, proxy, and ledgers
-
-At admission, declared key values are loaded into a memory-only secret plan.
-The Pi subprocess receives a sanitized route plan, a synthetic proxy key, and a
-cell-scoped proxy URL, not the direct or gateway credential. Gateway profile
-controls remain inside the proxy and are bound by the committed arm digest. The
-proxy strips client credential headers and uncontrolled cache or routing
-fields, injects the admitted upstream credential, rejects redirects, and
-forwards the fixed request.
-
-Each cell has an append-only JSONL proxy ledger. Calls are sequence-bound and
-hash-chained; the ledger is drained and terminally sealed before the checker
-runs and before the result row is appended. Results bind the arm, task,
+Each cell ledger is append-only, sequence-bound, hash-chained, and terminally
+sealed before the checker and result append. Results bind the arm, task,
 experiment, policy, pricing, schedule, sampling, harness version, execution
-lane, and ledger seal by digest.
+lane, and ledger seal by digest. Publishing uses the persisted frozen-price
+snapshot, sanitizes the evidence bundle, and verifies all artifact digests and
+the public ledger chain.
 
-## Exploratory and verified-route eligibility
+The local lane records `classification = "exploratory"` and
+`egress_enforced = false`. Docker execution remains deferred until route and
+secret isolation can be enforced. Do not mix execution lanes in one comparison
+stratum.
 
-Route integrity and route isolation are different claims:
+## References
 
-- **Route integrity** means the observed response evidence matches the committed
-  arm. It is required for a block to enter the report.
-- **Verified-route eligibility** would additionally require enforced outbound
-  network isolation, so the harness cannot bypass the managed proxy.
-
-The current local lane records `classification = "exploratory"` and
-`egress_enforced = false`. Therefore current Router Bench results are
-eligible only for **exploratory** analysis, not verified-route publication or
-ranking.
-
-The local lane runs the adapter on the host, has no image
-digest, and inherits host CLI/runtime and network conditions. Use it for schema,
-credential, and low-cost smoke work. Docker execution remains deferred until
-its route and secret isolation contract can be enforced; do not mix execution
-lanes in one comparison stratum.
+- [OpenRouter Auto Router](https://openrouter.ai/docs/guides/routing/routers/auto-router)
+- [OpenRouter provider routing](https://openrouter.ai/docs/guides/routing/provider-selection)
+- [OpenRouter router metadata](https://openrouter.ai/docs/guides/features/router-metadata)
+- [Vercel AI Gateway models and providers](https://vercel.com/docs/ai-gateway/models-and-providers)
+- [Vercel AI Gateway provider options](https://vercel.com/docs/ai-gateway/models-and-providers/provider-options)
+- [Vercel cost-aware model routing](https://vercel.com/kb/guide/cost-aware-model-routing-with-ai-gateway)
+- [Vercel routing rules](https://vercel.com/changelog/ai-gateway-routing-rules)
