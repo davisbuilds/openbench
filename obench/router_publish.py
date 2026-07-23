@@ -64,6 +64,12 @@ _FORBIDDEN_EXACT_KEYS = {
 
 _SCALAR = object()
 
+
+class _NullableSchema:
+    def __init__(self, schema: Any):
+        self.schema = schema
+
+
 _USAGE_SCHEMA = {
     "input_tokens": _SCALAR,
     "output_tokens": _SCALAR,
@@ -118,31 +124,57 @@ _STREAM_SCHEMA = {
     "ignored_events": _SCALAR,
 }
 _METRICS_SCHEMA = {
-    "timing": _TIMING_SCHEMA,
-    "usage": _USAGE_SCHEMA,
-    "generation": _GENERATION_SCHEMA,
-    "route": _ROUTE_SCHEMA,
-    "route_evidence": _ROUTE_EVIDENCE_SCHEMA,
-    "coverage": _COVERAGE_SCHEMA,
-    "stream": _STREAM_SCHEMA,
+    "timing": _NullableSchema(_TIMING_SCHEMA),
+    "usage": _NullableSchema(_USAGE_SCHEMA),
+    "generation": _NullableSchema(_GENERATION_SCHEMA),
+    "route": _NullableSchema(_ROUTE_SCHEMA),
+    "route_evidence": _NullableSchema(_ROUTE_EVIDENCE_SCHEMA),
+    "coverage": _NullableSchema(_COVERAGE_SCHEMA),
+    "stream": _NullableSchema(_STREAM_SCHEMA),
+}
+_COST_ITEM_SCHEMA = {
+    "amount_usd": _SCALAR,
+    "currency": _SCALAR,
+    "effective_at": _SCALAR,
+}
+_COSTS_SCHEMA = {
+    "router_reported": _COST_ITEM_SCHEMA,
+    "invoice_reconciled": _COST_ITEM_SCHEMA,
+    "frozen_list_estimate": _COST_ITEM_SCHEMA,
+}
+_REPORT_TIMING_SCHEMA = {
+    "ttfb_s": _SCALAR,
+    "semantic_ttft_s": _SCALAR,
+}
+_REPORT_GENERATION_SCHEMA = {
+    "output_tokens": _SCALAR,
+    "duration_s": _SCALAR,
+}
+_REPORT_ROUTE_SCHEMA = {
+    "served_model": _SCALAR,
+    "provider": _SCALAR,
+}
+_PROXY_CALL_SCHEMA = {
+    "timing": _NullableSchema(_REPORT_TIMING_SCHEMA),
+    "generation": _NullableSchema(_REPORT_GENERATION_SCHEMA),
+    "route": _NullableSchema(_REPORT_ROUTE_SCHEMA),
+    "costs": _NullableSchema(_COSTS_SCHEMA),
+}
+_CANONICAL_RESULT_SCHEMA = {
+    "solved": _SCALAR,
+    "checker_score": _SCALAR,
+    "available": _SCALAR,
+    "duration_s": _SCALAR,
+    "timed_out": _SCALAR,
+    "infrastructure_invalid_reason": _SCALAR,
+    "infrastructure_valid": _SCALAR,
 }
 _RESULT_SCHEMA = {
-    "completed": _SCALAR,
-    "success": _SCALAR,
-    "score": _SCALAR,
-    "failure_class": _SCALAR,
-    "wall_time_s": _SCALAR,
-    "checker_exit_code": _SCALAR,
-    "checker_timed_out": _SCALAR,
-    "cost_usd": _SCALAR,
-    "timing": _TIMING_SCHEMA,
-    "usage": _USAGE_SCHEMA,
-    "generation": _GENERATION_SCHEMA,
-    "route": _ROUTE_SCHEMA,
-    "route_evidence": _ROUTE_EVIDENCE_SCHEMA,
-    "coverage": _COVERAGE_SCHEMA,
-    "stream": _STREAM_SCHEMA,
-    "router_metrics": _METRICS_SCHEMA,
+    "arm_role": _SCALAR,
+    "baseline": _SCALAR,
+    "result": _CANONICAL_RESULT_SCHEMA,
+    "route_integrity": _ROUTE_EVIDENCE_SCHEMA,
+    "proxy_metrics": {"calls": [_PROXY_CALL_SCHEMA]},
 }
 _SAMPLING_SCHEMA = {
     "model": _SCALAR,
@@ -164,13 +196,13 @@ _ROUTER_ARM_SCHEMA = {
 _LEDGER_REQUEST_SCHEMA = {
     "ts": _SCALAR,
     "status": _SCALAR,
-    "usage": _USAGE_SCHEMA,
+    "usage": _NullableSchema(_USAGE_SCHEMA),
     "model": _SCALAR,
     "sampling_observed": _SAMPLING_SCHEMA,
     "sampling_source": _SCALAR,
     "duration_ms": _SCALAR,
     "router_arm": _ROUTER_ARM_SCHEMA,
-    "router_metrics": _METRICS_SCHEMA,
+    "router_metrics": _NullableSchema(_METRICS_SCHEMA),
     "session_hash": _SCALAR,
     "previous_response_hash": _SCALAR,
     "response_hash": _SCALAR,
@@ -352,6 +384,10 @@ def _json_scalar(value: Any, path: str) -> Any:
 def _project(value: Any, schema: Any, path: str) -> Any:
     if schema is _SCALAR:
         return _json_scalar(value, path)
+    if isinstance(schema, _NullableSchema):
+        if value is None:
+            return None
+        return _project(value, schema.schema, path)
     if isinstance(schema, list):
         if not isinstance(value, list):
             raise RouterPublishError(f"{path} must be an array")
@@ -369,6 +405,27 @@ def _project(value: Any, schema: Any, path: str) -> Any:
 def _require_projected(value: Any, schema: Any, path: str) -> None:
     if _project(value, schema, path) != value:
         raise RouterPublishError(f"{path} contains missing or extra public DTO fields")
+
+
+def _require_public_result_shape(value: Mapping[str, Any], path: str) -> None:
+    _require_projected(value, _RESULT_SCHEMA, path)
+    required = {"arm_role", "baseline", "result", "route_integrity", "proxy_metrics"}
+    missing = sorted(required - set(value))
+    if missing:
+        raise RouterPublishError(f"{path} is missing required fields: {missing!r}")
+
+    required_result = {"solved", "checker_score", "available"}
+    missing = sorted(required_result - set(value["result"]))
+    if missing:
+        raise RouterPublishError(
+            f"{path}.result is missing required fields: {missing!r}"
+        )
+    if set(value["route_integrity"]) != {"pass", "reasons"}:
+        raise RouterPublishError(
+            f"{path}.route_integrity must contain pass and reasons"
+        )
+    if set(value["proxy_metrics"]) != {"calls"}:
+        raise RouterPublishError(f"{path}.proxy_metrics must contain calls")
 
 
 def _assert_safe(value: Any, artifact: str) -> None:
@@ -576,17 +633,24 @@ def _result_dto(
     ledger_binding: Mapping[str, Any],
 ) -> dict[str, Any]:
     identity = results.router_identity_from_row(row)
+    public_result = _project(row, _RESULT_SCHEMA, "result")
+    for call in public_result.get("proxy_metrics", {}).get("calls", []):
+        for field in ("timing", "route"):
+            if call.get(field) is None:
+                call.pop(field)
     dto = {
         "schema_version": results.CURRENT_SCHEMA_VERSION,
         "benchmark": results.ROUTER_BENCHMARK,
         "identity": identity.as_dict(),
         "run_id": results.make_router_run_id(identity),
         "cell_id": results.make_router_cell_id(identity),
-        **_project(row, _RESULT_SCHEMA, "result"),
+        **public_result,
         "ledger": dict(ledger_binding),
     }
     if row.get("run_id") != dto["run_id"] or row.get("cell_id") != dto["cell_id"]:
         raise RouterPublishError(f"result {dto['cell_id']} has inconsistent IDs")
+    public_fields = {key: dto[key] for key in _RESULT_SCHEMA if key in dto}
+    _require_public_result_shape(public_fields, f"result {dto['cell_id']}")
     _assert_safe(dto, f"result {dto['cell_id']}")
     return dto
 
@@ -865,7 +929,7 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             key: value for key, value in row.items()
             if key in _RESULT_SCHEMA
         }
-        _require_projected(public_fields, _RESULT_SCHEMA, "result")
+        _require_public_result_shape(public_fields, "result")
         try:
             cell_id = results.result_cell_id(row)
         except results.ResultError as exc:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import hashlib
 import json
@@ -11,6 +12,7 @@ import unittest
 
 from obench import results
 from obench import router_publish
+from obench import router_report
 from obench import router_spec
 
 
@@ -160,10 +162,33 @@ class RouterPublishTests(unittest.TestCase):
             "identity": self.identity.as_dict(),
             "run_id": results.make_router_run_id(self.identity),
             "cell_id": self.cell_id,
-            "completed": True,
-            "success": True,
-            "score": 1.0,
-            "usage": {"input_tokens": 11, "output_tokens": 4, "total_tokens": 15},
+            "expected_arm_ids": ["direct", "gateway"],
+            "arm_role": "gateway",
+            "baseline": False,
+            "result": {
+                "solved": True,
+                "checker_score": 1.0,
+                "available": True,
+                "duration_s": 12.0,
+                "timed_out": False,
+                "infrastructure_invalid_reason": None,
+            },
+            "route_integrity": {"pass": True, "reasons": []},
+            "proxy_metrics": {"calls": [{
+                "timing": {"ttfb_s": 1.0, "semantic_ttft_s": 2.0},
+                "generation": {"output_tokens": 4, "duration_s": 1.0},
+                "route": {
+                    "provider": "OpenAI",
+                    "served_model": "openai/gpt-test",
+                },
+                "costs": {
+                    "frozen_list_estimate": {
+                        "amount_usd": 0.001,
+                        "currency": "USD",
+                        "effective_at": "2026-07-01T00:00:00Z",
+                    },
+                },
+            }]},
             "raw_headers": {"authorization": "Bearer source-result-secret"},
             "query": "api_key=source-result-secret",
             "request_body": "private prompt",
@@ -179,7 +204,7 @@ class RouterPublishTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _write_ledger(self, *, allowed_secret=None):
+    def _write_ledger(self, *, allowed_secret=None, partial=False):
         request = {
             "record_type": "request",
             "sequence": 1,
@@ -190,7 +215,11 @@ class RouterPublishTests(unittest.TestCase):
             "upstream": "https://router.example.test/private/v1",
             "status": 200,
             "model": allowed_secret or "openai/gpt-test",
-            "usage": {"input_tokens": 11, "output_tokens": 4, "total_tokens": 15},
+            "usage": (
+                None
+                if partial
+                else {"input_tokens": 11, "output_tokens": 4, "total_tokens": 15}
+            ),
             "router_arm": {
                 "arm_id": "gateway",
                 "arm_digest": self.identity.arm_digest,
@@ -198,6 +227,8 @@ class RouterPublishTests(unittest.TestCase):
             },
             "error": "request body and credentials must never publish",
         }
+        if partial:
+            request["router_metrics"] = None
         request["record_hash"] = hashlib.sha256(
             results.canonical_json_bytes({
                 key: value for key, value in request.items() if key != "record_hash"
@@ -265,6 +296,89 @@ class RouterPublishTests(unittest.TestCase):
         self.assertEqual(seal["root_hash"], binding["root_hash"])
         self.assertEqual(seal["seal_sha256"], binding["seal_sha256"])
 
+    def test_published_results_round_trip_through_router_report(self):
+        direct_identity = dataclasses.replace(
+            self.identity,
+            arm_id="direct",
+            arm_digest=self.experiment.arms[0].digest,
+        )
+        direct = copy.deepcopy(self.row)
+        direct["identity"] = direct_identity.as_dict()
+        direct["run_id"] = results.make_router_run_id(direct_identity)
+        direct["cell_id"] = results.make_router_cell_id(direct_identity)
+        direct["arm_role"] = "direct"
+        direct["baseline"] = True
+        direct["result"]["duration_s"] = 10.0
+        direct["proxy_metrics"]["calls"][0]["timing"]["ttfb_s"] = 0.5
+        direct["proxy_metrics"]["calls"][0]["timing"]["semantic_ttft_s"] = 1.0
+        direct["proxy_metrics"]["calls"][0]["route"]["provider"] = "Direct"
+
+        source_rows = [direct, self.row]
+        self._write_results(*source_rows)
+        router_publish.publish_bundle(
+            self.results_path,
+            self.bundle,
+            experiment=self.experiment,
+            policy=self.policy,
+            catalog=self.catalog,
+            prices=self.prices,
+            ledgers={
+                direct["cell_id"]: self.source_ledger,
+                self.cell_id: self.source_ledger,
+            },
+        )
+        public_rows = [
+            json.loads(line)
+            for line in (self.bundle / "results.jsonl").read_text().splitlines()
+        ]
+
+        expected = router_report.aggregate(
+            source_rows, bootstrap_replicates=20, bootstrap_seed=7
+        )
+        actual = router_report.aggregate(
+            public_rows, bootstrap_replicates=20, bootstrap_seed=7
+        )
+        self.assertEqual(actual, expected)
+
+    def test_partial_failed_call_with_nullable_evidence_is_published(self):
+        call = self.row["proxy_metrics"]["calls"][0]
+        call["timing"] = None
+        call["generation"] = None
+        call["route"] = None
+        call["costs"] = None
+        self.row["result"].update(
+            solved=False,
+            checker_score=0.0,
+            available=False,
+            duration_s=None,
+            timed_out=True,
+        )
+        self._write_results(self.row)
+        self._write_ledger(partial=True)
+
+        provenance = self.publish()
+        self.assertEqual(router_publish.verify_bundle(self.bundle), provenance)
+        public_row = json.loads((self.bundle / "results.jsonl").read_text())
+        public_call = public_row["proxy_metrics"]["calls"][0]
+        self.assertNotIn("timing", public_call)
+        self.assertIsNone(public_call["generation"])
+        self.assertNotIn("route", public_call)
+        self.assertIsNone(public_call["costs"])
+        public_ledger = self.bundle / public_row["ledger"]["artifact"]
+        request = json.loads(public_ledger.read_text().splitlines()[0])
+        self.assertIsNone(request["usage"])
+        self.assertIsNone(request["router_metrics"])
+
+    def test_partial_call_shape_validation_remains_fail_closed(self):
+        self.row["proxy_metrics"]["calls"][0]["generation"] = "unknown"
+        self._write_results(self.row)
+
+        with self.assertRaisesRegex(
+            router_publish.RouterPublishError,
+            "generation must be an object",
+        ):
+            self.publish()
+
     def test_publish_rejects_corrupt_jsonl_and_cell_ledger_mismatch(self):
         self.results_path.write_bytes(self.results_path.read_bytes()[:-1])
         with self.assertRaisesRegex(router_publish.RouterPublishError, "newline"):
@@ -303,7 +417,12 @@ class RouterPublishTests(unittest.TestCase):
     def test_verify_rejects_tamper_extra_artifact_and_binding_mismatch(self):
         self.publish()
         results_path = self.bundle / "results.jsonl"
-        results_path.write_bytes(results_path.read_bytes().replace(b'"score":1.0', b'"score":0.0'))
+        results_path.write_bytes(
+            results_path.read_bytes().replace(
+                b'"checker_score":1.0',
+                b'"checker_score":0.0',
+            )
+        )
         with self.assertRaisesRegex(router_publish.RouterPublishError, "digest mismatch"):
             router_publish.verify_bundle(self.bundle)
 
