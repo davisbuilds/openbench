@@ -1000,7 +1000,7 @@ def _run_cell(
     token = "cell-" + hashlib.sha256(
         f"{results.make_router_cell_id(identity)}:{time.time_ns()}".encode()
     ).hexdigest()[:32]
-    server.register_cell(token)
+    server.register_cell(token, max_calls=experiment.budget.max_calls)
     server.register_route(token, plan, secret_plan)
     started = time.monotonic()
     infrastructure_reason = None

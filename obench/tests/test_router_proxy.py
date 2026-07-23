@@ -31,6 +31,8 @@ class BlockingHandler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         length = int(self.headers.get("content-length") or 0)
         self.rfile.read(length)
+        with self.server.request_count_lock:
+            self.server.request_count += 1
         self.server.started.set()
         self.server.release.wait(5)
         payload = b'{"usage":{"prompt_tokens":3,"completion_tokens":2}}'
@@ -47,6 +49,8 @@ class RouterProxyLedgerTests(unittest.TestCase):
         self.upstream = BlockingUpstream(("127.0.0.1", 0), BlockingHandler)
         self.upstream.started = threading.Event()
         self.upstream.release = threading.Event()
+        self.upstream.request_count = 0
+        self.upstream.request_count_lock = threading.Lock()
         self.upstream_thread = threading.Thread(target=self.upstream.serve_forever, daemon=True)
         self.upstream_thread.start()
         upstream_url = f"http://127.0.0.1:{self.upstream.server_address[1]}"
@@ -68,7 +72,7 @@ class RouterProxyLedgerTests(unittest.TestCase):
         self.upstream.server_close()
         self.tmp.cleanup()
 
-    def _post(self, token):
+    def _post(self, token, *, include_body=False):
         body = json.dumps({"model": "router-model", "api_key": SECRET}).encode()
         conn = http.client.HTTPConnection(self.host, self.port, timeout=5)
         conn.request(
@@ -78,9 +82,9 @@ class RouterProxyLedgerTests(unittest.TestCase):
             headers={"content-type": "application/json", "content-length": str(len(body))},
         )
         response = conn.getresponse()
-        response.read()
+        response_body = response.read()
         conn.close()
-        return response.status
+        return (response.status, response_body) if include_body else response.status
 
     def _rows(self, token):
         path = self.server.ledger_dir / f"{token}.jsonl"
@@ -153,6 +157,48 @@ class RouterProxyLedgerTests(unittest.TestCase):
             previous = row["record_hash"]
         self.assertEqual(seal.record_count, 8)
         self.assertEqual(seal.root_hash, previous)
+
+    def test_max_calls_is_reserved_atomically_before_upstream_forwarding(self):
+        token = "capped-cell"
+        max_calls = 8
+        self.server.register_cell(token, max_calls=max_calls)
+        self.upstream.request_count = 0
+        self.upstream.release.set()
+        start = threading.Barrier(25)
+        responses = []
+
+        def post():
+            start.wait()
+            responses.append(self._post(token, include_body=True))
+
+        threads = [threading.Thread(target=post) for _ in range(24)]
+        for thread in threads:
+            thread.start()
+        start.wait()
+        for thread in threads:
+            thread.join(3)
+            self.assertFalse(thread.is_alive())
+
+        seal = self.server.seal_cell(token, timeout_s=1)
+        rows = self._rows(token)
+        requests = rows[:-1]
+        statuses = [status for status, _body in responses]
+        self.assertEqual(self.upstream.request_count, max_calls)
+        self.assertEqual(statuses.count(200), max_calls)
+        self.assertEqual(statuses.count(429), len(threads) - max_calls)
+        rejection_bodies = {
+            body for status, body in responses if status == 429
+        }
+        self.assertEqual(rejection_bodies, {
+            b'{"error":{"code":"max_calls_exceeded",'
+            b'"message":"OpenBench max_calls budget exceeded",'
+            b'"type":"openbench_budget_error"}}'
+        })
+        self.assertEqual(seal.record_count, max_calls + 1)
+        self.assertEqual([row["status"] for row in requests].count(429), 1)
+        rejection = next(row for row in requests if row["status"] == 429)
+        self.assertEqual(rejection["error"], "max_calls_exceeded")
+        self.assertNotIn(SECRET, seal.path.read_text(encoding="utf-8"))
 
     def test_unregistered_legacy_cell_keeps_plain_append_behavior(self):
         self.upstream.release.set()

@@ -14,6 +14,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
+from urllib.parse import urlsplit
 
 from obench import cli, proxy, results, router_metrics, router_report, router_run
 
@@ -403,6 +404,61 @@ direct_control_arm_id = "direct"
             {row["identity"]["schedule"]["block_attempt"] for row in rows},
             {0},
         )
+
+    def test_max_calls_stops_upstream_and_invalidates_cell(self):
+        capped_results = self.root / "capped.jsonl"
+        statuses = []
+
+        def invoke_many(**kwargs):
+            plan = json.loads(kwargs["plan_path"].read_text())
+            url = urlsplit(kwargs["proxy_base_url"])
+            body = json.dumps({
+                "model": "client-controlled",
+                "messages": [{"role": "user", "content": "private prompt"}],
+                "stream": True,
+            })
+            for _ in range(4):
+                conn = http.client.HTTPConnection(url.hostname, url.port, timeout=5)
+                conn.request(
+                    "POST",
+                    f"/cell/{kwargs['token']}/route/{plan['arm_digest']}",
+                    body=body,
+                    headers={"content-type": "application/json"},
+                )
+                response = conn.getresponse()
+                statuses.append(response.status)
+                response.read()
+                conn.close()
+            return {"completed": False, "error": "budget rejection"}
+
+        with self._runtime(), mock.patch.object(
+            router_run, "_invoke_local", side_effect=invoke_many
+        ):
+            with self.assertRaisesRegex(router_run.RouterRunError, "explicit rerun"):
+                router_run.run_experiment(
+                    self.experiment,
+                    results_path=capped_results,
+                    tasks_dir=self.tasks,
+                    exec_mode="local",
+                    environ={**os.environ, **self.env},
+                    adapters_dir=self.adapters,
+                )
+
+        rows = results.read_jsonl_for_resume(capped_results).rows
+        self.assertEqual(len(self.upstream.requests), len(rows))
+        self.assertEqual(sum(status in {200, 503} for status in statuses), len(rows))
+        self.assertEqual(statuses.count(429), 3 * len(rows))
+        self.assertTrue(all(
+            row["result"]["infrastructure_invalid_reason"] == "max_calls_exceeded"
+            for row in rows
+        ))
+        self.assertTrue(all(row["ledger_seal"]["record_count"] == 2 for row in rows))
+        self.assertTrue(all(row["result"]["failure_class"] == "infrastructure" for row in rows))
+        ledgers = "".join(
+            path.read_text()
+            for path in (self.root / ".capped.router-ledgers").glob("*.jsonl")
+        )
+        self.assertNotIn(SECRET, capped_results.read_text() + ledgers)
 
     def test_proxy_evidence_honors_parser_integrity_verdict(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)

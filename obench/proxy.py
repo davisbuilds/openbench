@@ -89,6 +89,9 @@ class LedgerSeal:
 class _CellLedger:
     state: str = "ACTIVE"
     in_flight: int = 0
+    max_calls: int | None = None
+    admitted_calls: int = 0
+    max_calls_exceeded: bool = False
     record_count: int = 0
     last_sequence: int = 0
     root_hash: str = EMPTY_LEDGER_HASH
@@ -102,6 +105,15 @@ class _RouterRoute:
     plan: RoutePlan
     upstream: Any
     secret: str
+
+
+class MaxCallsExceeded(RuntimeError):
+    """Raised when a managed cell has exhausted its upstream call budget."""
+
+    def __init__(self, max_calls: int, *, record: bool):
+        super().__init__(f"cell max_calls budget exhausted ({max_calls})")
+        self.max_calls = max_calls
+        self.record = record
 
 
 def new_cell_token() -> str:
@@ -382,7 +394,32 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         try:
             route = self._route_request()
             token = route.token
-            managed_ledger = self.server.admit_cell_request(token)  # type: ignore[attr-defined]
+            try:
+                managed_ledger = self.server.admit_cell_request(token)  # type: ignore[attr-defined]
+            except MaxCallsExceeded as exc:
+                status = 429
+                error = "max_calls_exceeded"
+                managed_ledger = True if exc.record else None
+                payload = json.dumps(
+                    {
+                        "error": {
+                            "code": "max_calls_exceeded",
+                            "message": "OpenBench max_calls budget exceeded",
+                            "type": "openbench_budget_error",
+                        }
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+                self.send_response(status)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(payload)))
+                self.send_header("connection", "close")
+                self.end_headers()
+                self.wfile.write(payload)
+                headers_sent = True
+                self.close_connection = True
+                return
             body = self._read_body()
             if route.router is not None:
                 body = self._router_request_body(body, route.router.plan, route.token)
@@ -761,10 +798,15 @@ class CountingProxyServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def register_cell(self, token: str) -> None:
+    def register_cell(self, token: str, *, max_calls: int | None = None) -> None:
         """Opt a router cell into lifecycle-managed, sealed ledger writes."""
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", token):
             raise ValueError("cell token must contain only letters, digits, '.', '_', or '-'")
+        if (
+            max_calls is not None
+            and (isinstance(max_calls, bool) or not isinstance(max_calls, int) or max_calls < 1)
+        ):
+            raise ValueError("max_calls must be a positive integer")
         with self._ledger_condition:
             if token in self._cell_ledgers:
                 raise RuntimeError(f"cell already registered: {token}")
@@ -773,7 +815,7 @@ class CountingProxyServer(ThreadingHTTPServer):
             path = self._ledger_path(token)
             if path.exists():
                 raise FileExistsError(f"cell ledger already exists: {path}")
-            self._cell_ledgers[token] = _CellLedger()
+            self._cell_ledgers[token] = _CellLedger(max_calls=max_calls)
 
     def register_route(
             self, token: str, plan: RoutePlan, secrets_plan: SecretPlan) -> None:
@@ -859,6 +901,13 @@ class CountingProxyServer(ThreadingHTTPServer):
                 return False
             if ledger.state != "ACTIVE":
                 raise RuntimeError(f"cell ledger is {ledger.state.lower()}: {token}")
+            if ledger.max_calls is not None and ledger.admitted_calls >= ledger.max_calls:
+                record = not ledger.max_calls_exceeded
+                ledger.max_calls_exceeded = True
+                if record:
+                    ledger.in_flight += 1
+                raise MaxCallsExceeded(ledger.max_calls, record=record)
+            ledger.admitted_calls += 1
             ledger.in_flight += 1
             return True
 
