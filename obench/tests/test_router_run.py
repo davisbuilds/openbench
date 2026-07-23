@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from obench import cli, proxy, results, router_report, router_run
+from obench import cli, proxy, results, router_metrics, router_report, router_run
 
 
 SECRET = "gateway-tax-secret-that-must-not-persist"
@@ -539,6 +539,66 @@ direct_control_arm_id = "direct"
             router_report._costs(calls[0], 1, 1)["router_reported"],
             (0.00125, "USD", observed_at),
         )
+
+    def test_openrouter_streamed_usage_cost_flows_into_call_costs(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = next(item for item in plans if item.route_kind == "gateway")
+        final = {
+            "model": plan.requested_model,
+            "usage": {
+                "prompt_tokens": 5,
+                "completion_tokens": 3,
+                "cost": 0.00125,
+            },
+            "openrouter_metadata": {
+                "requested": plan.requested_model,
+                "endpoints": {"available": [{
+                    "provider": plan.requested_provider,
+                    "selected": True,
+                }]},
+            },
+        }
+        payload = (
+            f"data: {json.dumps(final, separators=(',', ':'))}\n\n"
+            "data: [DONE]\n\n"
+        ).encode()
+        metrics = router_metrics.parse_chat_sse(
+            [(11.0, payload)],
+            requested_model=plan.requested_model,
+            requested_provider=plan.requested_provider,
+            allowed_models=plan.allowed_models,
+            allowed_providers=plan.allowed_providers,
+            gateway="openrouter",
+            started_at=10.0,
+            completed_at=12.0,
+        )
+        observed_at = "2026-07-22T12:34:56Z"
+        calls, integrity, reason = router_run._proxy_evidence(
+            [{"status": 200, "ts": observed_at, "router_metrics": metrics}],
+            {
+                plan.canonical_model: router_run.Price(
+                    router_run.Decimal("1"),
+                    router_run.Decimal("2"),
+                    "2026-07-01T00:00:00Z",
+                )
+            },
+            experiment.budget,
+            plan,
+        )
+
+        self.assertTrue(integrity["pass"])
+        self.assertIsNone(reason)
+        self.assertEqual(calls[0]["route"]["gateway_metadata"], {"cost": 0.00125})
+        self.assertEqual(calls[0]["costs"]["router_reported"], {
+            "amount_usd": 0.00125,
+            "currency": "USD",
+            "effective_at": observed_at,
+        })
 
     def test_vercel_malformed_or_unstamped_cost_remains_absent(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)

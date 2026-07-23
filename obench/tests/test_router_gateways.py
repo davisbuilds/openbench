@@ -134,6 +134,90 @@ class GatewayEvidenceTests(unittest.TestCase):
             "marketCost": 0.002,
         })
 
+    def test_openrouter_keeps_only_valid_streamed_usage_cost(self):
+        private_value = "private-usage-detail"
+        result = self.parse(
+            sse(
+                {
+                    "model": "openai/gpt-4o-mini",
+                    "provider": "OpenAI",
+                    "choices": [{"delta": {"content": "x"}}],
+                },
+                {
+                    "model": "openai/gpt-4o-mini",
+                    "usage": {
+                        "prompt_tokens": 2,
+                        "completion_tokens": 1,
+                        "cost": 0.00125,
+                        "private": private_value,
+                    },
+                    "openrouter_metadata": {
+                        "requested": "openai/gpt-4o-mini",
+                        "endpoints": {"available": [{
+                            "provider": "OpenAI",
+                            "selected": True,
+                            "private": private_value,
+                        }]},
+                    },
+                },
+                "[DONE]",
+            ),
+            gateway="openrouter",
+            requested_model="openai/gpt-4o-mini",
+            requested_provider="OpenAI",
+            allowed_models=("openai/gpt-4o-mini",),
+            allowed_providers=("OpenAI",),
+        )
+
+        self.assertTrue(result["route_evidence"]["pass"])
+        self.assertEqual(result["route"]["gateway_metadata"], {"cost": 0.00125})
+        self.assertNotIn(private_value, json.dumps(result, sort_keys=True))
+
+    def test_openrouter_omits_missing_or_invalid_streamed_usage_cost(self):
+        cases = {
+            "missing": {},
+            "malformed": {"cost": "0.00125"},
+            "negative": {"cost": -0.00125},
+            "bool": {"cost": True},
+            "non_finite": {"cost": float("inf")},
+        }
+        for name, usage_values in cases.items():
+            with self.subTest(name=name):
+                result = self.parse(
+                    sse(
+                        {
+                            "model": "openai/gpt-4o-mini",
+                            "provider": "OpenAI",
+                            "choices": [{"delta": {"content": "x"}}],
+                        },
+                        {
+                            "usage": {
+                                "prompt_tokens": 1,
+                                "completion_tokens": 1,
+                                "cost": 0.99,
+                            },
+                        },
+                        {
+                            "model": "openai/gpt-4o-mini",
+                            "usage": {
+                                "prompt_tokens": 2,
+                                "completion_tokens": 1,
+                                **usage_values,
+                            },
+                            "openrouter_metadata": {
+                                "requested": "openai/gpt-4o-mini",
+                            },
+                        },
+                        "[DONE]",
+                    ),
+                    gateway="openrouter",
+                    requested_model="openai/gpt-4o-mini",
+                    requested_provider="OpenAI",
+                    allowed_models=("openai/gpt-4o-mini",),
+                    allowed_providers=("OpenAI",),
+                )
+                self.assertNotIn("gateway_metadata", result["route"])
+
     def test_vercel_live_delta_routing_shape_passes_without_private_metadata(self):
         result = self.parse(
             sse(

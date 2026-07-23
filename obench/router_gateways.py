@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -156,6 +157,14 @@ def _integer(value: Any) -> int | None:
     return value
 
 
+def _finite_nonnegative_number(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value < 0 or (isinstance(value, float) and not math.isfinite(value)):
+        return None
+    return value
+
+
 def _clean_openrouter_attempts(value: Any) -> tuple[list[dict[str, Any]], bool]:
     if not isinstance(value, list):
         return [], False
@@ -223,6 +232,13 @@ class GatewayEvidence:
         self.served_model = value
 
     def _observe_openrouter(self, obj: Mapping[str, Any]) -> bool:
+        usage = obj.get("usage")
+        if isinstance(usage, Mapping):
+            self.safe_metadata.pop("cost", None)
+            cost = _finite_nonnegative_number(usage.get("cost"))
+            if cost is not None:
+                self.safe_metadata["cost"] = cost
+
         metadata = obj.get("openrouter_metadata")
         if not isinstance(metadata, dict):
             return False

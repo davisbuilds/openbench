@@ -637,7 +637,7 @@ def _price_call(
     observed_at: Any,
 ) -> tuple[dict[str, Any], Decimal | None]:
     evidence = {}
-    if plan.gateway == "vercel":
+    if plan.gateway in {"openrouter", "vercel"}:
         route = metrics.get("route")
         metadata = route.get("gateway_metadata") if isinstance(route, Mapping) else None
         reported_amount = _reported_cost(
