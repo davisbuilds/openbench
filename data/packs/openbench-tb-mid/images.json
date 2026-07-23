@@ -3,36 +3,42 @@
     "digest": "openbench-tb2-adaptive-rejection-sampler@sha256:b5df629425a80e7ced5d68628bd2ee4d16523a6ec9c09f42b5fea900c0e1a575",
     "dockerfile_sha256": "82344bdebd3f5b7f0c8af24594eb90281e8f05f0e09485ec7ac80acc9ba3ee77",
     "platform": "linux/arm64",
+    "registry_ref": "ghcr.io/minghinmatthewlam/openbench-tb2-adaptive-rejection-sampler@sha256:b5df629425a80e7ced5d68628bd2ee4d16523a6ec9c09f42b5fea900c0e1a575",
     "tag": "openbench-tb2-adaptive-rejection-sampler:pinned"
   },
   "merge-diff-arc-agi-task": {
     "digest": "openbench-tb2-merge-diff-arc-agi-task@sha256:11dc550b6657fd5dbd4840823cf7c3c4fe07f94e2e06f24b7005aff1d28191ff",
     "dockerfile_sha256": "618c93fab9559caae5ede08f457b064f2beb332eca9f919c438e8dc0ec6ccff6",
     "platform": "linux/arm64",
+    "registry_ref": "ghcr.io/minghinmatthewlam/openbench-tb2-merge-diff-arc-agi-task@sha256:11dc550b6657fd5dbd4840823cf7c3c4fe07f94e2e06f24b7005aff1d28191ff",
     "tag": "openbench-tb2-merge-diff-arc-agi-task:pinned"
   },
   "overfull-hbox": {
     "digest": "openbench-tb2-overfull-hbox@sha256:b30720af09e1818e4c906be3414edad593d3d271992c5257532d4f06f2ec1e05",
     "dockerfile_sha256": "d4a249058f02abfae575e9e75d7170265bdd638fe4f024831b8addc741c7ef58",
     "platform": "linux/arm64",
+    "registry_ref": "ghcr.io/minghinmatthewlam/openbench-tb2-overfull-hbox@sha256:b30720af09e1818e4c906be3414edad593d3d271992c5257532d4f06f2ec1e05",
     "tag": "openbench-tb2-overfull-hbox:pinned"
   },
   "query-optimize": {
     "digest": "openbench-tb2-query-optimize@sha256:9e847e4af966d76e41363651967f2523e469bd8a8e517b5364a9f79fe95d4134",
     "dockerfile_sha256": "aafdc214251ae6d989ed8d63e104b39bff96b759b5e2df8918f3407376c5935c",
     "platform": "linux/arm64",
+    "registry_ref": "ghcr.io/minghinmatthewlam/openbench-tb2-query-optimize@sha256:9e847e4af966d76e41363651967f2523e469bd8a8e517b5364a9f79fe95d4134",
     "tag": "openbench-tb2-query-optimize:pinned"
   },
   "sanitize-git-repo": {
     "digest": "openbench-tb2-sanitize-git-repo@sha256:d972cfdfdee6b175d3593a2b0bac469b9d8e06c3be64148650af427ec1995298",
     "dockerfile_sha256": "4379f706a46746dca12271a685f39b208de7bf88c55710ba54e3fbbfe5b7618b",
     "platform": "linux/arm64",
+    "registry_ref": "ghcr.io/minghinmatthewlam/openbench-tb2-sanitize-git-repo@sha256:d972cfdfdee6b175d3593a2b0bac469b9d8e06c3be64148650af427ec1995298",
     "tag": "openbench-tb2-sanitize-git-repo:pinned"
   },
   "winning-avg-corewars": {
     "digest": "openbench-tb2-winning-avg-corewars@sha256:6144649d4a2d9aa0bb25c86715b66e720274e53a37480cae0f1c26ae6edfb251",
     "dockerfile_sha256": "8e76f686e1db2a8eb598c06523fbae405327ddb4442a24b788e51ac2be54db4b",
     "platform": "linux/arm64",
+    "registry_ref": "ghcr.io/minghinmatthewlam/openbench-tb2-winning-avg-corewars@sha256:6144649d4a2d9aa0bb25c86715b66e720274e53a37480cae0f1c26ae6edfb251",
     "tag": "openbench-tb2-winning-avg-corewars:pinned"
   }
 }
