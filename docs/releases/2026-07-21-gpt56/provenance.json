@@ -64,7 +64,7 @@
     "gpt-5.6-sol"
   ],
   "obench_version": "0.1.0",
-  "results_sha256": "9d82d88b878f6bff0e3432d0a1d650f0a33fe8f11a93f2e2ac1d00318c16f925",
+  "results_sha256": "546f167576aac07d8d4c889d559ac86d9f9ad427c5fa53e5a421059f9db498b6",
   "run_dates": [],
   "tasks": [
     {
@@ -103,37 +103,37 @@
       "workspace_source_samples": []
     },
     {
-      "content_digest": null,
+      "content_digest": "0bee1dcc3feece5a10416eabfa33b51a2aa0c3503521a50b7e4be8ddec05ade1",
       "task": "terminal-bench/db-wal-recovery",
       "workspace_source_samples": []
     },
     {
-      "content_digest": null,
+      "content_digest": "a6a151c8318d92f6a75da115d6273a1a40c1c2d29376cd0e713c185331f2e9ce",
       "task": "terminal-bench/extract-elf",
       "workspace_source_samples": []
     },
     {
-      "content_digest": null,
+      "content_digest": "23c33187f7e1353c902b26ddef5de966e14067872699f5ddf4aeedb8107991e9",
       "task": "terminal-bench/feal-differential-cryptanalysis",
       "workspace_source_samples": []
     },
     {
-      "content_digest": null,
+      "content_digest": "72e65813175d582cdec21d16d2dd2c0826da56b90ed56c59f1e3bad5d203840b",
       "task": "terminal-bench/gcode-to-text",
       "workspace_source_samples": []
     },
     {
-      "content_digest": null,
+      "content_digest": "f57710291e1083a09cb01e806ea284cff48f1df843dff4aeff218027009cf5f7",
       "task": "terminal-bench/llm-inference-batching-scheduler",
       "workspace_source_samples": []
     },
     {
-      "content_digest": null,
+      "content_digest": "39d35bcd5e89e7ba924f9503ed12b1b51e5c9ac00a3f90311fb3427e29fcaacd",
       "task": "terminal-bench/raman-fitting",
       "workspace_source_samples": []
     },
     {
-      "content_digest": null,
+      "content_digest": "27fcf996765c8be427c23db2e99125745b35e92dcd373fc75c58cc0daa77dfaa",
       "task": "terminal-bench/schemelike-metacircular-eval",
       "workspace_source_samples": []
     },
