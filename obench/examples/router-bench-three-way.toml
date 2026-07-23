@@ -1,7 +1,7 @@
 schema_version = 1
 experiment_id = "gpt-4o-mini-three-way-gateway-tax"
 track = "gateway_tax"
-model_match = "model_family"
+model_match = "rolling_alias"
 harness = "pi"
 tasks = ["make-ci-green", "add-feature", "misleading-error"]
 repetitions_per_window = 1
@@ -33,10 +33,10 @@ route_kind = "direct"
 endpoint = "https://api.openai.com/v1/chat/completions"
 protocol = "openai_chat"
 baseline = true
-canonical_model = "openai/gpt-4o-mini-2024-07-18"
-requested_model = "gpt-4o-mini-2024-07-18"
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "gpt-4o-mini"
 requested_provider = "openai"
-allowed_models = ["gpt-4o-mini-2024-07-18"]
+allowed_models = ["gpt-4o-mini"]
 allowed_providers = ["openai"]
 fallback_enabled = false
 retry_count = 0
@@ -55,10 +55,10 @@ gateway = "openrouter"
 endpoint = "https://openrouter.ai/api/v1/chat/completions"
 protocol = "openai_chat"
 baseline = false
-canonical_model = "openai/gpt-4o-mini-2024-07-18"
-requested_model = "openai/gpt-4o-mini-2024-07-18"
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "openai/gpt-4o-mini"
 requested_provider = "openai"
-allowed_models = ["openai/gpt-4o-mini-2024-07-18"]
+allowed_models = ["openai/gpt-4o-mini"]
 allowed_providers = ["openai"]
 fallback_enabled = false
 retry_count = 0
@@ -78,15 +78,10 @@ gateway = "vercel"
 endpoint = "https://ai-gateway.vercel.sh/v1/chat/completions"
 protocol = "openai_chat"
 baseline = false
-canonical_model = "openai/gpt-4o-mini-2024-07-18"
-requested_model = "openai/gpt-4o-mini-2024-07-18"
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "openai/gpt-4o-mini"
 requested_provider = "openai"
-# Vercel may report its family alias or the resolved provider API model ID.
-allowed_models = [
-  "openai/gpt-4o-mini-2024-07-18",
-  "openai/gpt-4o-mini",
-  "gpt-4o-mini-2024-07-18",
-]
+allowed_models = ["openai/gpt-4o-mini"]
 allowed_providers = ["openai"]
 fallback_enabled = false
 retry_count = 0

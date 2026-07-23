@@ -229,18 +229,18 @@ class RouterExperimentTests(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             spec.track = "model_router"
 
-    def test_model_match_defaults_compatibly_and_is_normative(self):
+    def test_model_match_defaults_exact_and_rolling_alias_is_normative(self):
         defaulted = parse_experiment_toml(manifest())
-        family = parse_experiment_toml(
+        rolling = parse_experiment_toml(
             manifest().replace(
                 'track = "gateway_tax"',
-                'track = "gateway_tax"\nmodel_match = "model_family"',
+                'track = "gateway_tax"\nmodel_match = "rolling_alias"',
             )
         )
 
         self.assertEqual(defaulted.model_match, "exact_revision")
-        self.assertEqual(family.model_match, "model_family")
-        self.assertNotEqual(defaulted.digest, family.digest)
+        self.assertEqual(rolling.model_match, "rolling_alias")
+        self.assertNotEqual(defaulted.digest, rolling.digest)
         with self.assertRaisesRegex(RouterSpecError, "model_match"):
             parse_experiment_toml(
                 manifest().replace(
@@ -443,7 +443,7 @@ class RouterExperimentTests(unittest.TestCase):
             parse_experiment_toml(manifest(direct_extra='gateway = "openrouter"'))
         with self.assertRaisesRegex(
             RouterSpecError,
-            "strict Gateway Tax is unsupported for concentrate",
+            "Gateway Tax is unsupported for concentrate",
         ):
             parse_experiment_toml(manifest(gateway_extra=(
                 'gateway = "concentrate"\n'

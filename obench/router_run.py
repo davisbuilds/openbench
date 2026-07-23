@@ -786,6 +786,19 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
                 reasons.append("provider_conflict")
         elif provider.casefold() != plan.requested_provider.casefold():
             reasons.append("provider_conflict")
+    else:
+        if (
+            isinstance(served_model, str)
+            and not router_gateways.model_provider_matches(
+                served_model, plan.requested_provider
+            )
+        ):
+            reasons.append("served_model_conflict")
+        if (
+            isinstance(provider, str)
+            and provider.casefold() != plan.requested_provider.casefold()
+        ):
+            reasons.append("provider_conflict")
     if not isinstance(stream, Mapping) or stream.get("done") is not True:
         reasons.append("stream_not_done")
     attempts = route.get("attempts")

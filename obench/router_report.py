@@ -549,7 +549,7 @@ def aggregate(
             raise RouterReportError(f"row {row_number} has invalid identity: {exc}") from exc
         tracks.add(identity.track)
         model_match = row.get("model_match", "exact_revision")
-        if model_match not in {"exact_revision", "model_family"}:
+        if model_match not in {"exact_revision", "model_family", "rolling_alias"}:
             raise RouterReportError(
                 f"row {row_number} has invalid model_match"
             )

@@ -23,7 +23,7 @@ from . import router_gateways
 
 SCHEMA_VERSION = 1
 TRACKS = frozenset({"gateway_tax", "model_router"})
-MODEL_MATCHES = frozenset({"exact_revision", "model_family"})
+MODEL_MATCHES = frozenset({"exact_revision", "model_family", "rolling_alias"})
 HARNESS = "pi"
 PROTOCOL = "openai_chat"
 

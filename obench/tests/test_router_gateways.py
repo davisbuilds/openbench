@@ -117,14 +117,64 @@ class GatewayRequestProfileTests(unittest.TestCase):
         ):
             self.assertNotIn(key, body)
 
-    def test_model_match_distinguishes_exact_revision_from_family_alias(self):
+    def test_model_match_distinguishes_exact_revision_from_rolling_alias(self):
         requested = "openai/gpt-5.6-2026-07-01"
         observed = "openai/gpt-5.6"
         self.assertFalse(
             router_gateways.models_match(requested, observed, "exact_revision")
         )
         self.assertTrue(
+            router_gateways.models_match(requested, observed, "rolling_alias")
+        )
+        self.assertTrue(
             router_gateways.models_match(requested, observed, "model_family")
+        )
+        self.assertFalse(
+            router_gateways.models_match(
+                "openai/gpt-4o-mini", "anthropic/claude-haiku-4.5", "rolling_alias"
+            )
+        )
+        self.assertFalse(
+            router_gateways.models_match(
+                "openai/gpt-4o-mini",
+                "anthropic/gpt-4o-mini",
+                "rolling_alias",
+            )
+        )
+        self.assertTrue(
+            router_gateways.models_match(
+                "openai/gpt-4o-mini",
+                "anthropic/gpt-4o-mini",
+                "model_family",
+            )
+        )
+        self.assertFalse(
+            router_gateways.models_match(
+                "gpt-4o-mini-2024-07-18",
+                "gpt-4o-mini-2024-08-01",
+                "rolling_alias",
+            )
+        )
+        self.assertTrue(
+            router_gateways.model_evidence_consistent(
+                "openai/gpt-4o-mini",
+                "gpt-4o-mini-2024-07-18",
+                "rolling_alias",
+            )
+        )
+        self.assertFalse(
+            router_gateways.model_evidence_consistent(
+                "gpt-4o-mini-2024-07-18",
+                "gpt-4o-mini-2024-08-01",
+                "rolling_alias",
+            )
+        )
+        self.assertFalse(
+            router_gateways.model_evidence_consistent(
+                "openai/gpt-4o-mini",
+                "anthropic/gpt-4o-mini-2024-07-18",
+                "rolling_alias",
+            )
         )
 
 class GatewayEvidenceTests(unittest.TestCase):
@@ -238,6 +288,127 @@ class GatewayEvidenceTests(unittest.TestCase):
             "served_model_not_allowed", exact["route_evidence"]["reasons"]
         )
 
+    def test_vercel_rolling_alias_accepts_snapshot_and_alias_evidence_fields(self):
+        alias = "openai/gpt-4o-mini"
+        snapshot = "gpt-4o-mini-2024-07-18"
+        payload = sse(
+            {"model": snapshot, "choices": [{"delta": {"content": "x"}}]},
+            {
+                "providerMetadata": {
+                    "gateway": {
+                        "finalProvider": "openai",
+                        "canonicalSlug": alias,
+                        "resolvedProviderApiModelId": snapshot,
+                        "modelAttemptCount": 1,
+                        "totalProviderAttemptCount": 1,
+                        "modelAttempts": [{
+                            "canonicalSlug": alias,
+                            "success": True,
+                            "providerAttempts": [{
+                                "provider": "openai",
+                                "resolvedProviderApiModelId": snapshot,
+                                "statusCode": 200,
+                            }],
+                        }],
+                    },
+                },
+            },
+            "[DONE]",
+        )
+        common = {
+            "gateway": "vercel",
+            "requested_model": alias,
+            "requested_provider": "openai",
+            "allowed_models": (alias,),
+            "allowed_providers": ("openai",),
+        }
+
+        rolling = self.parse(payload, model_match="rolling_alias", **common)
+        exact = self.parse(payload, model_match="exact_revision", **common)
+
+        self.assertTrue(rolling["route_evidence"]["pass"])
+        self.assertFalse(exact["route_evidence"]["pass"])
+
+    def test_vercel_rolling_alias_rejects_two_snapshots_bridged_by_alias(self):
+        alias = "openai/gpt-4o-mini"
+        payload = sse(
+            {
+                "model": "gpt-4o-mini-2024-07-18",
+                "choices": [{"delta": {"content": "x"}}],
+            },
+            {
+                "providerMetadata": {
+                    "gateway": {
+                        "finalProvider": "openai",
+                        "canonicalSlug": alias,
+                        "modelAttemptCount": 1,
+                        "totalProviderAttemptCount": 1,
+                        "modelAttempts": [{
+                            "canonicalSlug": alias,
+                            "success": True,
+                            "providerAttempts": [{
+                                "provider": "openai",
+                                "resolvedProviderApiModelId": "gpt-4o-mini-2024-08-01",
+                                "statusCode": 200,
+                            }],
+                        }],
+                    },
+                },
+            },
+            "[DONE]",
+        )
+        result = self.parse(
+            payload,
+            gateway="vercel",
+            requested_model=alias,
+            requested_provider="openai",
+            allowed_models=(alias,),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("served_model_conflict", result["route_evidence"]["reasons"])
+
+    def test_vercel_records_provider_model_even_with_canonical_alias(self):
+        alias = "openai/gpt-4o-mini"
+        result = self.parse(
+            sse(
+                {
+                    "model": alias,
+                    "choices": [{"delta": {"content": "x"}}],
+                    "providerMetadata": {
+                        "gateway": {
+                            "finalProvider": "openai",
+                            "canonicalSlug": alias,
+                            "resolvedProviderApiModelId": "gpt-4o-mini-2024-07-18",
+                            "modelAttemptCount": 1,
+                            "totalProviderAttemptCount": 1,
+                            "modelAttempts": [{
+                                "canonicalSlug": alias,
+                                "success": True,
+                                "providerAttempts": [{
+                                    "provider": "openai",
+                                    "resolvedProviderApiModelId": "gpt-4o-mini-2024-08-01",
+                                    "statusCode": 200,
+                                }],
+                            }],
+                        },
+                    },
+                },
+                "[DONE]",
+            ),
+            gateway="vercel",
+            requested_model=alias,
+            requested_provider="openai",
+            allowed_models=(alias,),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("served_model_conflict", result["route_evidence"]["reasons"])
+
     def test_openrouter_keeps_only_valid_streamed_usage_cost(self):
         private_value = "private-usage-detail"
         result = self.parse(
@@ -276,6 +447,41 @@ class GatewayEvidenceTests(unittest.TestCase):
         self.assertTrue(result["route_evidence"]["pass"])
         self.assertEqual(result["route"]["gateway_metadata"], {"cost": 0.00125})
         self.assertNotIn(private_value, json.dumps(result, sort_keys=True))
+
+    def test_openrouter_rejects_selected_endpoint_from_other_model_family(self):
+        requested = "openai/gpt-4o-mini"
+        result = self.parse(
+            sse(
+                {
+                    "model": requested,
+                    "provider": "OpenAI",
+                    "choices": [{"delta": {"content": "x"}}],
+                    "openrouter_metadata": {
+                        "requested": requested,
+                        "endpoints": {"available": [{
+                            "provider": "OpenAI",
+                            "model": "anthropic/claude-haiku-4.5",
+                            "selected": True,
+                        }]},
+                        "attempts": [{
+                            "provider": "OpenAI",
+                            "model": requested,
+                            "status": 200,
+                        }],
+                    },
+                },
+                "[DONE]",
+            ),
+            gateway="openrouter",
+            requested_model=requested,
+            requested_provider="openai",
+            allowed_models=(requested,),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("served_model_conflict", result["route_evidence"]["reasons"])
 
     def test_openrouter_omits_missing_or_invalid_streamed_usage_cost(self):
         cases = {

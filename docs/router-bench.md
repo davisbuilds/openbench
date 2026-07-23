@@ -26,8 +26,9 @@ A `gateway_tax` experiment has exactly one baseline `direct` arm and one or more
 `gateway` arms. Every gateway arm references the direct arm with
 `direct_control_arm_id` and must match its canonical model, requested provider,
 provider allowlist, protocol, and sampling. Client retries and caching are off,
-and fallbacks are forbidden. This isolates the direct, OpenRouter, or Vercel
-serving path instead of measuring provider choice or recovery policy.
+and fallbacks are forbidden. This compares the direct, OpenRouter, or Vercel
+serving path around the same rolling model alias instead of measuring provider
+choice or recovery policy.
 
 [`router-bench-three-way.toml`](../obench/examples/router-bench-three-way.toml)
 is a matched three-way comparison:
@@ -36,18 +37,22 @@ is a matched three-way comparison:
 2. OpenRouter restricted to OpenAI;
 3. Vercel AI Gateway restricted to OpenAI.
 
-All three request `gpt-4o-mini-2024-07-18` and use the canonical comparison key
-`openai/gpt-4o-mini-2024-07-18`. The experiment deliberately sets
-`model_match = "model_family"` because Vercel can report the provider-qualified
-family alias `openai/gpt-4o-mini` while preserving the dated original request.
-The Vercel arm admits both forms explicitly without claiming the served alias
-proves an immutable revision.
+All three request the current `gpt-4o-mini` alias and use the canonical
+comparison key `openai/gpt-4o-mini`. `model_match = "rolling_alias"` accepts
+that provider-qualified alias or a dated snapshot that a provider reports after
+resolving it. Other model families, conflicting provider qualifications, and
+two different dated snapshots still fail route integrity.
 
-Use `model_match = "exact_revision"` only when every route returns the exact
-requested model identifier. `model_family` strips a trailing dated revision and
-compares the provider-independent family name. It admits a documented alias
-without claiming that alias is immutable or revision-pinned; undeclared model
-families still fail route integrity.
+This is intentionally a practical product comparison: it measures the
+end-to-end experience of asking each gateway for the same rolling alias at
+approximately the same time. It does not prove that every arm served the same
+immutable model revision, so observed differences must not be attributed only
+to gateway overhead. Matched-block scheduling reduces alias-roll timing risk.
+
+Use `model_match = "exact_revision"` only for an optional stricter experiment
+where every route accepts and reports the same immutable identifier. The legacy
+`model_family` value remains accepted with the same normalization behavior as
+`rolling_alias`.
 
 ### Gateway evidence
 
@@ -71,6 +76,12 @@ routing example puts a separate classifier in application code. As of
 2026-07-22, Vercel documents no native prompt-aware model classifier comparable
 to OpenRouter Auto Beta. OpenBench therefore treats Vercel as a fixed gateway
 arm here, not an Auto Router Bench arm.
+
+Concentrate can join this track once its integration is reproducible from a
+documented request contract. Admission requires pinning both the OpenAI provider
+and `gpt-4o-mini` alias, disabling or proving fallback, retries, and caching,
+and returning evidence for the requested model, served model, provider, and
+attempts. Provider-slug selection alone establishes only the provider lock.
 
 ## Auto Router Bench
 
@@ -142,7 +153,7 @@ of 2026-07-22, not a promise that provider prices remain unchanged:
 
 ```bash
 export OPENBENCH_ROUTER_FROZEN_PRICES_JSON='{
-  "openai/gpt-4o-mini-2024-07-18": {
+  "openai/gpt-4o-mini": {
     "input_per_million": "0.15",
     "output_per_million": "0.60",
     "effective_at": "2026-07-22"

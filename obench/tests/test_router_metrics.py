@@ -270,6 +270,73 @@ class RouterMetricsTests(unittest.TestCase):
         self.assertFalse(result["coverage"]["openrouter_metadata"])
         self.assertFalse(result["coverage"]["attempts"])
 
+    def test_direct_rolling_alias_accepts_resolved_dated_snapshot(self):
+        token = dict(self.token)
+        token["model"] = "gpt-4o-mini-2024-07-18"
+        result = router_metrics.parse_chat_sse(
+            [(11.0, sse(token, "[DONE]"))],
+            requested_model="gpt-4o-mini",
+            started_at=10.0,
+            completed_at=12.0,
+            route_kind="direct",
+            requested_provider="OpenAI",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("OpenAI",),
+            model_match="rolling_alias",
+        )
+        self.assertTrue(result["route_evidence"]["pass"])
+
+    def test_direct_rolling_alias_rejects_conflicting_provider_qualification(self):
+        token = dict(self.token)
+        token["model"] = "anthropic/gpt-4o-mini"
+        result = router_metrics.parse_chat_sse(
+            [(11.0, sse(token, "[DONE]"))],
+            requested_model="gpt-4o-mini",
+            started_at=10.0,
+            completed_at=12.0,
+            route_kind="direct",
+            requested_provider="OpenAI",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("OpenAI",),
+            model_match="rolling_alias",
+        )
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("served_model_conflict", result["route_evidence"]["reasons"])
+
+    def test_direct_rolling_alias_rejects_two_snapshots_across_stream(self):
+        first = dict(self.token)
+        first["model"] = "gpt-4o-mini-2024-07-18"
+        second = dict(self.token)
+        second["model"] = "gpt-4o-mini-2024-08-01"
+        result = router_metrics.parse_chat_sse(
+            [(11.0, sse(first, second, "[DONE]"))],
+            requested_model="gpt-4o-mini",
+            started_at=10.0,
+            completed_at=12.0,
+            route_kind="direct",
+            requested_provider="OpenAI",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("OpenAI",),
+            model_match="rolling_alias",
+        )
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("served_model_conflict", result["route_evidence"]["reasons"])
+
+    def test_direct_rejects_completed_stream_without_served_model(self):
+        result = router_metrics.parse_chat_sse(
+            [(11.0, sse({"choices": [{"delta": {"content": "x"}}]}, "[DONE]"))],
+            requested_model="gpt-4o-mini",
+            started_at=10.0,
+            completed_at=12.0,
+            route_kind="direct",
+            requested_provider="OpenAI",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("OpenAI",),
+            model_match="rolling_alias",
+        )
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("missing_served_model", result["route_evidence"]["reasons"])
+
     def test_malformed_event_does_not_poison_later_events(self):
         payload = b"data: {not-json}\n\n" + self.payload()
         result = self.parse([(11.0, payload)])

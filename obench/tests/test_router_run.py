@@ -440,6 +440,7 @@ direct_control_arm_id = "direct"
         openrouter = dataclasses.replace(
             openrouter,
             allowed_models=(openrouter.requested_model, revision),
+            model_match="exact_revision",
         )
 
         def metrics(*, served=revision, attempt=revision):

@@ -11,8 +11,9 @@ from typing import Any
 
 GATEWAYS = frozenset({"openrouter", "vercel"})
 CONCENTRATE_UNSUPPORTED = (
-    "strict Gateway Tax is unsupported for concentrate because its current "
-    "Chat Completions contract cannot disable or prove fallback, retries, and caching"
+    "Gateway Tax is unsupported for concentrate until its request contract and "
+    "response evidence prove the requested model alias, provider lock, attempts, "
+    "fallback policy, and cache policy"
 )
 CLOUDFLARE_UNSUPPORTED = (
     "strict Gateway Tax is unsupported for cloudflare REST because provider and "
@@ -39,15 +40,65 @@ def models_match(requested: str, observed: str, mode: str) -> bool:
     """Compare an observed route without overstating revision equivalence."""
     if mode == "exact_revision":
         return observed == requested
-    if mode != "model_family":
+    if mode not in {"model_family", "rolling_alias"}:
         raise GatewayProfileError(f"unsupported model_match mode: {mode}")
-    requested_family = _DATED_REVISION_RE.sub(
-        "", requested.casefold().rsplit("/", 1)[-1]
+    if mode == "rolling_alias":
+        return model_evidence_consistent(requested, observed, mode)
+    return _model_alias(requested) == _model_alias(observed)
+
+
+def model_evidence_consistent(first: str, second: str, mode: str) -> bool:
+    """Accept alias resolution while rejecting two contradictory snapshots."""
+    if mode == "exact_revision":
+        return first == second
+    if mode not in {"model_family", "rolling_alias"}:
+        raise GatewayProfileError(f"unsupported model_match mode: {mode}")
+    if not _providers_compatible(first, second):
+        return False
+    first_id = _model_id(first)
+    second_id = _model_id(second)
+    if first_id == second_id:
+        return True
+    if _DATED_REVISION_RE.search(first_id) and _DATED_REVISION_RE.search(second_id):
+        return False
+    return _model_alias(first_id) == _model_alias(second_id)
+
+
+def _model_id(value: str) -> str:
+    return value.casefold().rsplit("/", 1)[-1]
+
+
+def _model_provider(value: str) -> str | None:
+    normalized = value.casefold()
+    if "/" not in normalized:
+        return None
+    return normalized.rsplit("/", 1)[0]
+
+
+def _providers_compatible(first: str, second: str) -> bool:
+    first_provider = _model_provider(first)
+    second_provider = _model_provider(second)
+    return (
+        first_provider is None
+        or second_provider is None
+        or first_provider == second_provider
     )
-    observed_family = _DATED_REVISION_RE.sub(
-        "", observed.casefold().rsplit("/", 1)[-1]
-    )
-    return requested_family == observed_family
+
+
+def model_provider_matches(value: str, expected_provider: str) -> bool:
+    """Allow an unqualified model ID, but reject a contradictory qualifier."""
+    provider = _model_provider(value)
+    return provider is None or provider == expected_provider.casefold()
+
+
+def concrete_model_revision(value: str) -> str | None:
+    """Return a normalized dated model ID, or None for a rolling alias."""
+    model_id = _model_id(value)
+    return model_id if _DATED_REVISION_RE.search(model_id) else None
+
+
+def _model_alias(value: str) -> str:
+    return _DATED_REVISION_RE.sub("", _model_id(value))
 
 
 def validate_arm(
@@ -254,6 +305,9 @@ class GatewayEvidence:
     attempts_malformed: bool = False
     profile_reasons: list[str] = dataclasses.field(default_factory=list)
     safe_metadata: dict[str, Any] = dataclasses.field(default_factory=dict)
+    _dated_model_ids: set[str] = dataclasses.field(
+        default_factory=set, repr=False
+    )
 
     def observe(self, obj: Mapping[str, Any]) -> bool:
         top_model = _identifier(obj.get("model"))
@@ -274,9 +328,24 @@ class GatewayEvidence:
         self.provider = value
 
     def _set_model(self, value: str) -> None:
-        if self.served_model is not None and self.served_model != value:
+        self._record_model(value)
+        if (
+            self.served_model is not None
+            and not model_evidence_consistent(
+                self.served_model, value, self.model_match
+            )
+        ):
             self.profile_reasons.append("served_model_conflict")
         self.served_model = value
+
+    def _record_model(self, value: str) -> None:
+        if self.model_match != "rolling_alias" or self.router_mode == "auto":
+            return
+        revision = concrete_model_revision(value)
+        if revision is not None:
+            self._dated_model_ids.add(revision)
+            if len(self._dated_model_ids) > 1:
+                self.profile_reasons.append("served_model_conflict")
 
     def _observe_openrouter(self, obj: Mapping[str, Any]) -> bool:
         usage = obj.get("usage")
@@ -301,6 +370,10 @@ class GatewayEvidence:
             else:
                 self.attempts, valid = _clean_openrouter_attempts(raw_attempts)
                 self.attempts_malformed = not valid
+                for attempt in self.attempts:
+                    model = attempt.get("model")
+                    if isinstance(model, str):
+                        self._record_model(model)
         endpoints = metadata.get("endpoints")
         available = endpoints.get("available") if isinstance(endpoints, dict) else None
         if isinstance(available, list):
@@ -309,6 +382,16 @@ class GatewayEvidence:
                     provider = _identifier(endpoint.get("provider"))
                     if provider is not None:
                         self._set_provider(provider)
+                    model = _identifier(endpoint.get("model"))
+                    if model is not None:
+                        self._record_model(model)
+                        if (
+                            self.router_mode != "auto"
+                            and not models_match(
+                                self.requested_model, model, self.model_match
+                            )
+                        ):
+                            self.profile_reasons.append("served_model_conflict")
                     break
         return True
 
@@ -339,6 +422,8 @@ class GatewayEvidence:
         top_model: str | None,
         top_provider: str | None,
     ) -> bool:
+        if top_model is not None:
+            self._record_model(top_model)
         metadata = self._vercel_metadata(obj)
         if metadata is None:
             return False
@@ -362,10 +447,20 @@ class GatewayEvidence:
         elif resolved_provider is None and top_provider is not None:
             self._set_provider(top_provider)
 
-        resolved_model = (
-            _identifier(evidence.get("canonicalSlug"))
-            or _identifier(evidence.get("resolvedProviderApiModelId"))
-        )
+        canonical_model = _identifier(evidence.get("canonicalSlug"))
+        provider_api_model = _identifier(evidence.get("resolvedProviderApiModelId"))
+        for model in (canonical_model, provider_api_model):
+            if model is None:
+                continue
+            self._record_model(model)
+            if (
+                self.router_mode != "auto"
+                and not models_match(
+                    self.requested_model, model, self.model_match
+                )
+            ):
+                self.profile_reasons.append("served_model_conflict")
+        resolved_model = canonical_model or provider_api_model
         if resolved_model is not None:
             self._set_model(resolved_model)
         elif top_model is not None:
@@ -373,7 +468,9 @@ class GatewayEvidence:
         if (
             top_model is not None
             and resolved_model is not None
-            and top_model not in {self.requested_model, resolved_model}
+            and not model_evidence_consistent(
+                top_model, resolved_model, self.model_match
+            )
         ):
             self.profile_reasons.append("served_model_conflict")
 
@@ -405,10 +502,14 @@ class GatewayEvidence:
                 _identifier(model_attempt.get("canonicalSlug"))
                 or resolved_model
             )
+            if model_attempt_model is not None:
+                self._record_model(model_attempt_model)
             if (
                 model_attempt_model is not None
                 and resolved_model is not None
-                and model_attempt_model != resolved_model
+                and not model_evidence_consistent(
+                    model_attempt_model, resolved_model, self.model_match
+                )
             ):
                 self.profile_reasons.append("served_model_conflict")
             raw = model_attempt.get("providerAttempts")
@@ -476,6 +577,7 @@ class GatewayEvidence:
                 attempt["provider"] = provider
             if model is not None:
                 attempt["model"] = model
+                self._record_model(model)
             if status is not None:
                 attempt["status"] = status
             self.attempts.append(attempt)

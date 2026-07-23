@@ -106,6 +106,7 @@ class OpenAIChatSSEParser:
         )
         self._fallback_enabled = bool(fallback_enabled)
         self._router_mode = router_mode
+        self._model_match = model_match
         self._gateway = gateway or ("openrouter" if route_kind == "gateway" else None)
         self._gateway_evidence = (
             router_gateways.GatewayEvidence(
@@ -133,6 +134,9 @@ class OpenAIChatSSEParser:
         self._last_received_at: float | None = None
         self._completed_at: float | None = None
         self._served_model: str | None = None
+        self._direct_dated_model_ids: set[str] = set()
+        self._direct_model_conflict = False
+        self._direct_provider_conflict = False
         self._top_level_provider: str | None = None
         self._usage: dict[str, int] | None = None
         self._events = 0
@@ -358,9 +362,28 @@ class OpenAIChatSSEParser:
             gateway_metadata_observed = self._gateway_evidence.observe(obj)
         model = _identifier(obj.get("model"))
         if model is not None:
+            if self._route_kind == "direct" and self._model_match == "rolling_alias":
+                revision = router_gateways.concrete_model_revision(model)
+                if revision is not None:
+                    self._direct_dated_model_ids.add(revision)
+                    if len(self._direct_dated_model_ids) > 1:
+                        self._direct_model_conflict = True
+                if (
+                    self._requested_provider
+                    and not router_gateways.model_provider_matches(
+                        model, self._requested_provider
+                    )
+                ):
+                    self._direct_model_conflict = True
             self._served_model = model
         provider = _identifier(obj.get("provider"))
         if provider is not None:
+            if (
+                self._route_kind == "direct"
+                and self._requested_provider
+                and provider.casefold() != self._requested_provider.casefold()
+            ):
+                self._direct_provider_conflict = True
             self._top_level_provider = provider
 
         usage = obj.get("usage")
@@ -415,8 +438,34 @@ class OpenAIChatSSEParser:
                 reasons.extend(self._gateway_evidence.route_reasons())
             if self._fallback_enabled and self._router_mode != "auto":
                 reasons.append("fallback_enabled")
-        elif self._requested_model and served_model != self._requested_model:
-            reasons.append("served_model_conflict")
+        else:
+            if self._direct_model_conflict:
+                reasons.append("served_model_conflict")
+            if (
+                self._requested_model
+                and isinstance(served_model, str)
+                and (
+                    not router_gateways.models_match(
+                        self._requested_model, served_model, self._model_match
+                    )
+                    or (
+                        self._requested_provider
+                        and not router_gateways.model_provider_matches(
+                            served_model, self._requested_provider
+                        )
+                    )
+                )
+            ):
+                reasons.append("served_model_conflict")
+            if (
+                self._direct_provider_conflict
+                or (
+                    provider is not None
+                    and self._requested_provider
+                    and provider.casefold() != self._requested_provider.casefold()
+                )
+            ):
+                reasons.append("provider_conflict")
         return {
             "pass": not reasons,
             "verdict": "pass" if not reasons else "fail",
