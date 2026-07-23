@@ -150,6 +150,7 @@ class OpenAIChatSSEParser:
         self._metadata_provider: str | None = None
         self._attempts: list[dict[str, Any]] = []
         self._attempts_present = False
+        self._attempts_malformed = False
         self._usage: dict[str, int] | None = None
         self._events = 0
         self._ignored_events = 0
@@ -350,10 +351,19 @@ class OpenAIChatSSEParser:
             requested = _identifier(metadata.get("requested"))
             if requested is not None:
                 self._metadata_requested = requested
-            raw_attempts = metadata.get("attempts")
-            if isinstance(raw_attempts, list) and raw_attempts:
-                self._attempts_present = True
-                self._attempts = _clean_attempts(raw_attempts)
+            if "attempts" in metadata:
+                raw_attempts = metadata.get("attempts")
+                if not isinstance(raw_attempts, list):
+                    self._attempts_present = True
+                    self._attempts_malformed = True
+                    self._attempts = []
+                elif not raw_attempts:
+                    self._attempts = []
+                else:
+                    self._attempts_present = True
+                    self._attempts = _clean_attempts(raw_attempts)
+                    if len(self._attempts) != len(raw_attempts):
+                        self._attempts_malformed = True
             endpoints = metadata.get("endpoints")
             available = endpoints.get("available") if isinstance(endpoints, dict) else None
             if isinstance(available, list):
@@ -434,7 +444,7 @@ class OpenAIChatSSEParser:
                 reasons.append("provider_conflict")
 
             if self._attempts_present:
-                if not self._attempts:
+                if self._attempts_malformed or not self._attempts:
                     reasons.append("malformed_attempts")
                 success = _successful_attempt(self._attempts)
                 if success is None:
@@ -442,6 +452,7 @@ class OpenAIChatSSEParser:
                 for attempt in self._attempts:
                     attempt_provider = _identifier(attempt.get("provider"))
                     attempt_model = _identifier(attempt.get("model"))
+                    status = attempt.get("status")
                     if not attempt_provider:
                         reasons.append("missing_attempt_provider")
                     elif provider_folded and attempt_provider.casefold() != provider_folded:
@@ -450,6 +461,10 @@ class OpenAIChatSSEParser:
                         reasons.append("missing_attempt_model")
                     elif self._served_model and attempt_model != self._served_model:
                         reasons.append("fallback_attempt")
+                    if not isinstance(status, int) or isinstance(status, bool):
+                        reasons.append("missing_attempt_status")
+                    elif not 200 <= status < 300:
+                        reasons.append("unsuccessful_attempt")
                 if self._fallback_enabled:
                     reasons.append("fallback_enabled")
         return {

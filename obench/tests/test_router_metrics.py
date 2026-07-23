@@ -227,6 +227,33 @@ class RouterMetricsTests(unittest.TestCase):
         result = self.parse([(11.0, sse(self.token, final, "[DONE]"))])
         self.assertFalse(result["route_evidence"]["pass"])
         self.assertIn("fallback_attempt", result["route_evidence"]["reasons"])
+        self.assertIn("unsuccessful_attempt", result["route_evidence"]["reasons"])
+
+    def test_gateway_same_route_unsuccessful_attempt_fails(self):
+        final = dict(self.final)
+        final["openrouter_metadata"] = dict(self.final["openrouter_metadata"])
+        final["openrouter_metadata"]["attempts"] = [
+            {"provider": "OpenAI", "model": "openai/gpt-4o-mini", "status": 503},
+            {"provider": "OpenAI", "model": "openai/gpt-4o-mini", "status": 200},
+        ]
+        result = self.parse([(11.0, sse(self.token, final, "[DONE]"))])
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("unsuccessful_attempt", result["route_evidence"]["reasons"])
+
+    def test_gateway_explicit_empty_attempts_is_optional(self):
+        final = dict(self.final)
+        final["openrouter_metadata"] = dict(self.final["openrouter_metadata"])
+        final["openrouter_metadata"]["attempts"] = []
+        result = self.parse([(11.0, sse(self.token, final, "[DONE]"))])
+        self.assertTrue(result["route_evidence"]["pass"])
+
+    def test_gateway_malformed_attempts_fail(self):
+        final = dict(self.final)
+        final["openrouter_metadata"] = dict(self.final["openrouter_metadata"])
+        final["openrouter_metadata"]["attempts"] = ["malformed"]
+        result = self.parse([(11.0, sse(self.token, final, "[DONE]"))])
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("malformed_attempts", result["route_evidence"]["reasons"])
 
     def test_direct_exact_served_model_and_done_pass_without_gateway_evidence(self):
         result = router_metrics.parse_chat_sse(
