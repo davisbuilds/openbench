@@ -463,23 +463,21 @@ direct_control_arm_id = "direct"
         self.assertIn("served_model_conflict", openrouter_reasons)
         self.assertIn("attempt_model_conflict", openrouter_reasons)
 
-        for gateway in ("vercel", "cloudflare"):
-            with self.subTest(gateway=gateway):
-                plan = dataclasses.replace(openrouter, gateway=gateway)
-                self.assertEqual(router_run._route_reasons(metrics(), plan), [])
-                undeclared = router_run._route_reasons(
-                    metrics(served="undeclared", attempt="undeclared"),
-                    plan,
-                )
-                self.assertIn("served_model_conflict", undeclared)
-                self.assertIn("attempt_model_conflict", undeclared)
+        vercel = dataclasses.replace(openrouter, gateway="vercel")
+        self.assertEqual(router_run._route_reasons(metrics(), vercel), [])
+        undeclared = router_run._route_reasons(
+            metrics(served="undeclared", attempt="undeclared"),
+            vercel,
+        )
+        self.assertIn("served_model_conflict", undeclared)
+        self.assertIn("attempt_model_conflict", undeclared)
 
-                wrong_request = metrics()
-                wrong_request["route"]["requested_model"] = revision
-                wrong_request["route"]["metadata_requested_model"] = revision
-                reasons = router_run._route_reasons(wrong_request, plan)
-                self.assertIn("requested_model_conflict", reasons)
-                self.assertIn("metadata_requested_model_conflict", reasons)
+        wrong_request = metrics()
+        wrong_request["route"]["requested_model"] = revision
+        wrong_request["route"]["metadata_requested_model"] = revision
+        reasons = router_run._route_reasons(wrong_request, vercel)
+        self.assertIn("requested_model_conflict", reasons)
+        self.assertIn("metadata_requested_model_conflict", reasons)
 
     def test_price_coverage_and_auth_failures_fail_closed(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)

@@ -361,36 +361,6 @@ class RouterRouteTests(unittest.TestCase):
             self.assertNotIn(key, request["body"])
         self.assertNotIn("cache_control", request["body"]["messages"][0])
 
-    def test_cloudflare_proxy_forces_gateway_controls_and_strips_client_headers(self):
-        token = "cloudflare-cell"
-        plan = self._register(
-            token,
-            gateway="cloudflare",
-            gateway_id="strict-tax",
-            path="/cloudflare",
-        )
-        status, _ = self._post(
-            token,
-            plan.arm_digest,
-            headers={
-                "cf-aig-gateway-id": "attacker",
-                "cf-aig-skip-cache": "false",
-                "cf-aig-max-attempts": "5",
-                "cf-aig-collect-log": "false",
-                "cf-aig-collect-log-payload": "true",
-            },
-        )
-        self.assertEqual(status, 200)
-        request = self.upstream.requests[-1]
-        self.assertEqual(request["path"], "/cloudflare")
-        self.assertEqual(request["headers"]["authorization"], f"Bearer {HOST_SECRET}")
-        self.assertEqual(request["headers"]["cf-aig-gateway-id"], "strict-tax")
-        self.assertEqual(request["headers"]["cf-aig-skip-cache"], "true")
-        self.assertEqual(request["headers"]["cf-aig-max-attempts"], "1")
-        self.assertEqual(request["headers"]["cf-aig-collect-log"], "true")
-        self.assertEqual(request["headers"]["cf-aig-collect-log-payload"], "false")
-        self.assertNotIn("provider", request["body"])
-
     def test_redirect_is_rejected_and_recorded_without_following(self):
         token = "redirect-cell"
         plan = self._register(token, path="/redirect")

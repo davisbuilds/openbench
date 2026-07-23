@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import dataclasses
-import re
-import urllib.parse
 from collections.abc import Mapping
 from typing import Any
 
 
-GATEWAYS = frozenset({"openrouter", "vercel", "cloudflare"})
+GATEWAYS = frozenset({"openrouter", "vercel"})
 CONCENTRATE_UNSUPPORTED = (
     "strict Gateway Tax is unsupported for concentrate because its current "
     "Chat Completions contract cannot disable or prove fallback, retries, and caching"
 )
+CLOUDFLARE_UNSUPPORTED = (
+    "strict Gateway Tax is unsupported for cloudflare REST because provider and "
+    "served-model response headers are documented only for dynamic routes; "
+    "metadata-only Logs API verification is required"
+)
 
 _OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 _VERCEL_ENDPOINT = "https://ai-gateway.vercel.sh/v1/chat/completions"
-_CLOUDFLARE_PATH_RE = re.compile(
-    r"^/client/v4/accounts/[A-Za-z0-9_-]+/ai/v1/chat/completions$"
-)
 _CACHE_KEYS = frozenset({
     "cache",
     "cache_control",
@@ -53,14 +53,14 @@ def validate_arm(
         raise GatewayProfileError("gateway arm requires gateway")
     if gateway == "concentrate":
         raise GatewayProfileError(CONCENTRATE_UNSUPPORTED)
+    if gateway == "cloudflare":
+        raise GatewayProfileError(CLOUDFLARE_UNSUPPORTED)
     if gateway not in GATEWAYS:
         raise GatewayProfileError(
             f"gateway must be one of: {', '.join(sorted(GATEWAYS))}"
         )
-    if gateway != "cloudflare" and gateway_id is not None:
+    if gateway_id is not None:
         raise GatewayProfileError(f"{gateway} arm must not declare gateway_id")
-    if gateway == "cloudflare" and gateway_id is None:
-        raise GatewayProfileError("cloudflare arm requires nonsecret gateway_id")
 
     if private_router:
         return
@@ -75,29 +75,6 @@ def validate_arm(
             raise GatewayProfileError(
                 "vercel requested_model must be a provider-qualified model ID"
             )
-    if gateway == "cloudflare":
-        parsed = urllib.parse.urlsplit(endpoint)
-        if (
-            parsed.hostname != "api.cloudflare.com"
-            or not _CLOUDFLARE_PATH_RE.fullmatch(parsed.path)
-        ):
-            raise GatewayProfileError(
-                "cloudflare endpoint must match "
-                "https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}"
-                "/ai/v1/chat/completions"
-            )
-        prefix, separator, model = requested_model.partition("/")
-        if not separator or not model or prefix == "dynamic":
-            raise GatewayProfileError(
-                "cloudflare requested_model must be an explicit provider/model ID, "
-                "never dynamic/*"
-            )
-        if prefix.casefold() != requested_provider.casefold():
-            raise GatewayProfileError(
-                "cloudflare requested_model provider prefix must match requested_provider"
-            )
-
-
 def _strip_cache_controls(value: Any) -> None:
     if isinstance(value, dict):
         for key in list(value):
@@ -134,12 +111,6 @@ def shape_body(
             "gateway": {"only": [requested_provider]},
         }
         return
-    if gateway == "cloudflare":
-        payload.pop("provider", None)
-        payload.pop("providerOptions", None)
-        for key in ("models", "order", "sort", "caching"):
-            payload.pop(key, None)
-        return
     raise GatewayProfileError(f"unsupported gateway profile: {gateway}")
 
 
@@ -158,16 +129,6 @@ def request_headers(
             "X-OpenRouter-Metadata": "enabled",
             "X-OpenRouter-Cache": "false",
         })
-    elif gateway == "cloudflare":
-        if not gateway_id:
-            raise GatewayProfileError("cloudflare gateway_id is required")
-        headers.update({
-            "cf-aig-gateway-id": gateway_id,
-            "cf-aig-skip-cache": "true",
-            "cf-aig-max-attempts": "1",
-            "cf-aig-collect-log": "true",
-            "cf-aig-collect-log-payload": "false",
-        })
     elif gateway != "vercel":
         raise GatewayProfileError(f"unsupported gateway profile: {gateway}")
     return headers
@@ -179,7 +140,6 @@ def blocked_request_header(name: str) -> bool:
     return (
         normalized == "x-openrouter-metadata"
         or normalized.startswith("x-openrouter-cache")
-        or normalized.startswith("cf-aig-")
     )
 
 
@@ -238,21 +198,6 @@ class GatewayEvidence:
     attempts_malformed: bool = False
     profile_reasons: list[str] = dataclasses.field(default_factory=list)
     safe_metadata: dict[str, Any] = dataclasses.field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self.response_headers = {
-            str(key).lower(): str(value)
-            for key, value in self.response_headers.items()
-            if str(key).lower() in {
-                "cf-aig-log-id",
-                "cf-aig-cache-status",
-                "cf-aig-provider",
-                "cf-aig-model",
-                "cf-aig-step",
-            }
-        }
-        if self.gateway == "cloudflare":
-            self._observe_cloudflare_headers()
 
     def observe(self, obj: Mapping[str, Any]) -> bool:
         top_model = _identifier(obj.get("model"))
@@ -484,42 +429,6 @@ class GatewayEvidence:
                 self.safe_metadata[key] = value
         return True
 
-    def _observe_cloudflare_headers(self) -> None:
-        headers = self.response_headers
-        provider = _identifier(headers.get("cf-aig-provider"))
-        model = _identifier(headers.get("cf-aig-model"))
-        step = _integer_from_text(headers.get("cf-aig-step"))
-        cache_status = _identifier(headers.get("cf-aig-cache-status"))
-        log_id = _identifier(headers.get("cf-aig-log-id"))
-        if provider is not None:
-            self._set_provider(provider)
-        if model is not None:
-            self._set_model(model)
-        self.metadata_seen = any(
-            value is not None for value in (provider, model, step, cache_status, log_id)
-        )
-        self.metadata_requested_model = self.requested_model
-        if step is not None and step != 0:
-            self.profile_reasons.append("fallback_attempt")
-        if cache_status is not None and cache_status.casefold() in {"hit", "stale"}:
-            self.profile_reasons.append("cache_hit")
-        self.safe_metadata = {
-            key: value
-            for key, value in {
-                "log_id": log_id,
-                "cache_status": cache_status,
-                "step": step,
-            }.items()
-            if value is not None
-        }
-        if provider is not None or model is not None:
-            self.attempts_present = True
-            self.attempts = [{
-                **({"provider": provider} if provider is not None else {}),
-                **({"model": model} if model is not None else {}),
-                "status": 200,
-            }]
-
     def route_reasons(self) -> list[str]:
         reasons = list(self.profile_reasons)
         required = (
@@ -549,7 +458,7 @@ class GatewayEvidence:
                 reasons.append("missing_metadata_requested_model")
             elif self.metadata_requested_model != self.requested_model:
                 reasons.append("requested_model_conflict")
-        if self.gateway in {"vercel", "cloudflare"} and not self.attempts_present:
+        if self.gateway == "vercel" and not self.attempts_present:
             reasons.append("missing_attempt_evidence")
         if self.attempts_malformed:
             reasons.append("malformed_attempts")
@@ -586,9 +495,3 @@ class GatewayEvidence:
             elif not 200 <= status < 300:
                 reasons.append("unsuccessful_attempt")
         return list(dict.fromkeys(reasons))
-
-
-def _integer_from_text(value: Any) -> int | None:
-    if not isinstance(value, str) or not value.isdigit():
-        return None
-    return int(value)

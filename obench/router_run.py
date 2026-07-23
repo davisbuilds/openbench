@@ -674,7 +674,7 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
             reasons.append("route_evidence_failed")
     if route.get("requested_model") != plan.requested_model:
         reasons.append("requested_model_conflict")
-    flexible_gateway_model = plan.gateway in {"vercel", "cloudflare"}
+    flexible_gateway_model = plan.gateway == "vercel"
     served_model = route.get("served_model")
     served_model_matches = (
         isinstance(served_model, str)
