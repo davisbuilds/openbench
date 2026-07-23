@@ -412,16 +412,26 @@ def _load_route_plan(route_plan_path):
     canonical_model = _route_string(data["canonical_model"], "canonical_model")
     requested_provider = _route_string(
         data["requested_provider"], "requested_provider", _ID_RE)
-    if requested_model not in allowed_models:
-        _route_error("allowed_models must contain requested_model")
-    if requested_provider not in allowed_providers:
-        _route_error("allowed_providers must contain requested_provider")
 
     fallback_enabled = _route_bool(data["fallback_enabled"], "fallback_enabled")
     retry_count = _route_int(data["retry_count"], "retry_count")
     cache_enabled = _route_bool(data["cache_enabled"], "cache_enabled")
-    if fallback_enabled or retry_count != 0 or cache_enabled:
-        _route_error("fallback, retries, and cache must be disabled")
+    # Adapter plans omit track/router_mode; validated auto arms are the only
+    # plans allowed to enable fallback.
+    if fallback_enabled:
+        if requested_model != "openrouter/auto-beta":
+            _route_error(
+                "fallback-enabled auto routes must request 'openrouter/auto-beta'")
+        if requested_provider != "openrouter":
+            _route_error(
+                "fallback-enabled auto routes must request provider 'openrouter'")
+    else:
+        if requested_model not in allowed_models:
+            _route_error("allowed_models must contain requested_model")
+        if requested_provider not in allowed_providers:
+            _route_error("allowed_providers must contain requested_provider")
+    if retry_count != 0 or cache_enabled:
+        _route_error("retries and cache must be disabled")
 
     sampling_data = _strict_keys(data["sampling"], _SAMPLING_FIELDS, "sampling")
     sampling = _router_spec.Sampling(

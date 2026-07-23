@@ -7,7 +7,14 @@ from unittest import mock
 
 from obench import entry
 from obench.adapters import pi
-from obench.router_spec import RoutePlan, RouterSpecError, Sampling
+from obench.router_spec import (
+    RoutePlan,
+    RouterSpecError,
+    Sampling,
+    compile_route_plans,
+    parse_experiment_toml,
+)
+from obench.tests.test_router_spec import model_router_manifest
 
 
 def plan_dict(**updates):
@@ -110,6 +117,81 @@ class PiRoutedTests(unittest.TestCase):
                     with self.assertRaises(RouterSpecError):
                         pi.run_routed("x", tmp, path, 1)
                     launch.assert_not_called()
+
+    def test_loads_compiled_model_router_auto_plan(self):
+        experiment = parse_experiment_toml(model_router_manifest())
+        plans, _ = compile_route_plans(
+            experiment,
+            environ={"OPENROUTER_API_KEY": "secret"},
+            admitted_auth_envs={"OPENROUTER_API_KEY"},
+        )
+        auto = plans[0]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "route-plan.json")
+            path.write_text(auto.canonical_json + "\n", encoding="utf-8")
+            loaded = pi._load_route_plan(path)
+
+        self.assertEqual(loaded.requested_model, "openrouter/auto-beta")
+        self.assertEqual(loaded.allowed_models, ("openai/gpt-fixed",))
+        self.assertEqual(loaded.allowed_providers, ("openai",))
+        self.assertTrue(loaded.fallback_enabled)
+
+    def test_rejects_invalid_auto_and_preserves_fixed_pool_membership(self):
+        cases = (
+            (
+                {
+                    **plan_dict(),
+                    "fallback_enabled": True,
+                    "requested_model": "openrouter/not-auto",
+                },
+                "openrouter/auto-beta",
+            ),
+            (
+                {
+                    **plan_dict(),
+                    "fallback_enabled": True,
+                    "requested_model": "openrouter/auto-beta",
+                    "requested_provider": "not-openrouter",
+                },
+                "provider 'openrouter'",
+            ),
+            (
+                {
+                    **plan_dict(),
+                    "fallback_enabled": True,
+                    "requested_model": "openrouter/auto-beta",
+                    "requested_provider": "openrouter",
+                    "allowed_models": [],
+                },
+                "allowed_models must be a non-empty array",
+            ),
+            (
+                {
+                    **plan_dict(),
+                    "fallback_enabled": True,
+                    "requested_model": "openrouter/auto-beta",
+                    "requested_provider": "openrouter",
+                    "allowed_providers": [],
+                },
+                "allowed_providers must be a non-empty array",
+            ),
+            (
+                {**plan_dict(), "requested_model": "vendor/not-allowed"},
+                "allowed_models must contain requested_model",
+            ),
+            (
+                {**plan_dict(), "requested_provider": "not-allowed"},
+                "allowed_providers must contain requested_provider",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for index, (data, message) in enumerate(cases):
+                with self.subTest(message=message):
+                    path = Path(tmp, f"route-plan-{index}.json")
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                    with self.assertRaisesRegex(RouterSpecError, message):
+                        pi._load_route_plan(path)
 
     def test_entry_rejects_incompatible_capabilities_before_dispatch(self):
         adapter = mock.Mock(
