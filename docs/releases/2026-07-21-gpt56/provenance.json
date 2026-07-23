@@ -1,0 +1,674 @@
+{
+  "arms": [
+    {
+      "candidate_provenance": null,
+      "harness": "claude",
+      "harness_version": "2.1.214 (Claude Code) (<HOME>/.local/bin/claude)",
+      "identity_digest": null,
+      "kind": "baseline",
+      "name": "claude"
+    },
+    {
+      "candidate_provenance": null,
+      "harness": "codex",
+      "harness_version": "codex-cli 0.144.5 (/opt/homebrew/bin/codex)",
+      "identity_digest": null,
+      "kind": "baseline",
+      "name": "codex"
+    },
+    {
+      "candidate_provenance": null,
+      "harness": "cursor",
+      "harness_version": null,
+      "identity_digest": null,
+      "kind": "baseline",
+      "name": "cursor"
+    },
+    {
+      "candidate_provenance": null,
+      "harness": "devin",
+      "harness_version": "devin 3000.2.17 (2c489dfc) (<HOME>/.local/bin/devin)",
+      "identity_digest": null,
+      "kind": "baseline",
+      "name": "devin"
+    },
+    {
+      "candidate_provenance": null,
+      "harness": "grokbuild",
+      "harness_version": "grok 0.2.103 (89c3d36fb6f1) (/opt/homebrew/bin/grok)",
+      "identity_digest": null,
+      "kind": "baseline",
+      "name": "grokbuild"
+    },
+    {
+      "candidate_provenance": null,
+      "harness": "opencode",
+      "harness_version": "1.18.3 (/opt/homebrew/bin/opencode)",
+      "identity_digest": null,
+      "kind": "baseline",
+      "name": "opencode"
+    },
+    {
+      "candidate_provenance": null,
+      "harness": "pi",
+      "harness_version": "0.80.10 (/opt/homebrew/bin/pi)",
+      "identity_digest": null,
+      "kind": "baseline",
+      "name": "pi"
+    }
+  ],
+  "digest_scheme": 2,
+  "generated_at": "2026-07-23T06:11:50Z",
+  "highlight_arms": [],
+  "models": [
+    "gpt-5.6-sol"
+  ],
+  "obench_version": "0.1.0",
+  "results_sha256": "9d82d88b878f6bff0e3432d0a1d650f0a33fe8f11a93f2e2ac1d00318c16f925",
+  "run_dates": [],
+  "tasks": [
+    {
+      "content_digest": "a92851b04c53117e7cd7b8079a899d68b1ef1a5124c9bf871e07596dbf9d17df",
+      "task": "add-feature",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": "64f22ffb96dc32345047884ce648768d96d1c4cc9bebef127c19f422f10b9bea",
+      "task": "build-a-cli",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": "57cc75a6fb25ac9fe1a99b769000a96d1744a35d8d724d900f1fb37cf3da1e29",
+      "task": "fix-failing-test",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": "acc4f4ef069fee296af14b4cce78daf7e117118fcabdbf07dbb50047cef082d2",
+      "task": "make-ci-green",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": "ae605369bf3da7ce9510ffd14c70f874c24e8da0158b0234051d8083355e3a3b",
+      "task": "make-it-run",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": "0049b22b033d1df2c229d0f24ab681bb3ed3f450cb7f9aaa6c6c01899401290e",
+      "task": "misleading-error",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": "6235600b7e3c30e34dd1f4198a857051d8b0253134a6b7b93995f214772989ee",
+      "task": "taskflow",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": null,
+      "task": "terminal-bench/db-wal-recovery",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": null,
+      "task": "terminal-bench/extract-elf",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": null,
+      "task": "terminal-bench/feal-differential-cryptanalysis",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": null,
+      "task": "terminal-bench/gcode-to-text",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": null,
+      "task": "terminal-bench/llm-inference-batching-scheduler",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": null,
+      "task": "terminal-bench/raman-fitting",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": null,
+      "task": "terminal-bench/schemelike-metacircular-eval",
+      "workspace_source_samples": []
+    },
+    {
+      "content_digest": "da1dd951a6b8a06653dd52dcd1aaa307e89749141851764175b9351ab3b2f4d8",
+      "task": "webcore",
+      "workspace_source_samples": []
+    }
+  ],
+  "trial_counts": {
+    "claude/add-feature/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/build-a-cli/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/fix-failing-test/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/make-ci-green/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/make-it-run/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/misleading-error/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/taskflow/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/terminal-bench/db-wal-recovery/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/terminal-bench/extract-elf/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/terminal-bench/feal-differential-cryptanalysis/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/terminal-bench/gcode-to-text/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/terminal-bench/llm-inference-batching-scheduler/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/terminal-bench/raman-fitting/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/terminal-bench/schemelike-metacircular-eval/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "claude/webcore/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/add-feature/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/build-a-cli/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/fix-failing-test/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/make-ci-green/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/make-it-run/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/misleading-error/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/taskflow/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/terminal-bench/db-wal-recovery/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/terminal-bench/extract-elf/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/terminal-bench/feal-differential-cryptanalysis/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/terminal-bench/gcode-to-text/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/terminal-bench/llm-inference-batching-scheduler/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/terminal-bench/raman-fitting/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/terminal-bench/schemelike-metacircular-eval/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "codex/webcore/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/add-feature/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/build-a-cli/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/fix-failing-test/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/make-ci-green/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/make-it-run/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/misleading-error/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/taskflow/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/terminal-bench/db-wal-recovery/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/terminal-bench/extract-elf/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/terminal-bench/feal-differential-cryptanalysis/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/terminal-bench/gcode-to-text/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/terminal-bench/llm-inference-batching-scheduler/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/terminal-bench/raman-fitting/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/terminal-bench/schemelike-metacircular-eval/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "cursor/webcore/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/add-feature/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/build-a-cli/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/fix-failing-test/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/make-ci-green/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/make-it-run/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/misleading-error/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/taskflow/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/terminal-bench/db-wal-recovery/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/terminal-bench/extract-elf/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/terminal-bench/feal-differential-cryptanalysis/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/terminal-bench/gcode-to-text/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/terminal-bench/llm-inference-batching-scheduler/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/terminal-bench/raman-fitting/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/terminal-bench/schemelike-metacircular-eval/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "devin/webcore/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/add-feature/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/build-a-cli/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/fix-failing-test/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/make-ci-green/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/make-it-run/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/misleading-error/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/taskflow/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/terminal-bench/db-wal-recovery/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/terminal-bench/extract-elf/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/terminal-bench/feal-differential-cryptanalysis/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/terminal-bench/gcode-to-text/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/terminal-bench/llm-inference-batching-scheduler/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/terminal-bench/raman-fitting/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/terminal-bench/schemelike-metacircular-eval/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "grokbuild/webcore/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/add-feature/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/build-a-cli/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/fix-failing-test/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/make-ci-green/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/make-it-run/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/misleading-error/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/taskflow/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/terminal-bench/db-wal-recovery/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/terminal-bench/extract-elf/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/terminal-bench/feal-differential-cryptanalysis/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/terminal-bench/gcode-to-text/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/terminal-bench/llm-inference-batching-scheduler/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/terminal-bench/raman-fitting/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/terminal-bench/schemelike-metacircular-eval/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "opencode/webcore/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/add-feature/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/build-a-cli/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/fix-failing-test/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/make-ci-green/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/make-it-run/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/misleading-error/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/taskflow/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/terminal-bench/db-wal-recovery/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/terminal-bench/extract-elf/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/terminal-bench/feal-differential-cryptanalysis/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/terminal-bench/gcode-to-text/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/terminal-bench/llm-inference-batching-scheduler/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/terminal-bench/raman-fitting/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/terminal-bench/schemelike-metacircular-eval/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ],
+    "pi/webcore/gpt-5.6-sol": [
+      1,
+      2,
+      3
+    ]
+  },
+  "warnings": []
+}
