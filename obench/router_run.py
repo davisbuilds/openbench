@@ -844,7 +844,11 @@ def _proxy_evidence(
     for row in ledger_rows:
         status = row.get("status")
         if isinstance(status, int) and 400 <= status <= 599:
-            if plan.track == "model_router":
+            if (
+                plan.track == "model_router"
+                and 400 <= status < 500
+                and status not in {401, 403, 407, 429}
+            ):
                 reasons.append("upstream_http_error")
             if status in {401, 403, 407}:
                 auth_failure = True

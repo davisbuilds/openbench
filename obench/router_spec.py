@@ -130,7 +130,6 @@ class Arm:
     fixed_control_arm_id: str | None = None
     cost_quality_tradeoff: int | None = None
     gateway: str | None = None
-    gateway_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result = {
@@ -159,8 +158,6 @@ class Arm:
             result["cost_quality_tradeoff"] = self.cost_quality_tradeoff
         if self.gateway is not None:
             result["gateway"] = self.gateway
-        if self.gateway_id is not None:
-            result["gateway_id"] = self.gateway_id
         return result
 
     @property
@@ -241,7 +238,6 @@ class RoutePlan:
     # Proxy-only controls. They are bound by arm_digest but intentionally
     # omitted from the adapter-facing route-plan JSON.
     gateway: str | None = None
-    gateway_id: str | None = None
     track: str = "gateway_tax"
     model_match: str = "exact_revision"
     router_mode: str | None = None
@@ -324,7 +320,7 @@ _ARM_FIELDS = {
     "canonical_model", "requested_model", "requested_provider", "allowed_models",
     "allowed_providers", "fallback_enabled", "retry_count", "cache_enabled",
     "auth_env", "sampling", "direct_control_arm_id", "router_mode",
-    "fixed_control_arm_id", "cost_quality_tradeoff", "gateway", "gateway_id",
+    "fixed_control_arm_id", "cost_quality_tradeoff", "gateway",
 }
 
 
@@ -545,9 +541,6 @@ def _parse_arm(
     gateway = table.get("gateway")
     if gateway is not None:
         gateway = _string(gateway, f"{path}.gateway")
-    gateway_id = table.get("gateway_id")
-    if gateway_id is not None:
-        gateway_id = _string(gateway_id, f"{path}.gateway_id", _ID_RE)
     arm = Arm(
         arm_id=_string(_required(table, "arm_id", path), f"{path}.arm_id", _ID_RE),
         route_kind=route_kind,
@@ -579,7 +572,6 @@ def _parse_arm(
         fixed_control_arm_id=fixed_control,
         cost_quality_tradeoff=tradeoff,
         gateway=gateway,
-        gateway_id=gateway_id,
     )
     if track == "gateway_tax" and arm.requested_model not in arm.allowed_models:
         raise RouterSpecError(f"{path}.allowed_models must contain requested_model")
@@ -599,13 +591,10 @@ def _parse_arm(
         raise RouterSpecError(f"{path}: gateway arm requires direct_control_arm_id")
     if arm.route_kind == "direct" and "gateway" in table:
         raise RouterSpecError(f"{path}: direct arm must not declare gateway")
-    if arm.route_kind == "direct" and "gateway_id" in table:
-        raise RouterSpecError(f"{path}: direct arm must not declare gateway_id")
     try:
         router_gateways.validate_arm(
             route_kind=arm.route_kind,
             gateway=arm.gateway,
-            gateway_id=arm.gateway_id,
             endpoint=arm.endpoint,
             requested_model=arm.requested_model,
             requested_provider=arm.requested_provider,
@@ -919,7 +908,6 @@ def compile_route_plans(
             private_host_allowlist=experiment.private_host_allowlist,
             private_cidr_allowlist=experiment.private_cidr_allowlist,
             gateway=arm.gateway,
-            gateway_id=arm.gateway_id,
         ))
         secrets.append(_ArmSecret(arm.arm_id, arm.auth_env, value))
     return tuple(plans), SecretPlan(tuple(secrets))

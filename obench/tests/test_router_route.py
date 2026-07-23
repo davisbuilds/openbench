@@ -118,7 +118,6 @@ def route_plan(
     arm_id,
     arm_digest,
     gateway=None,
-    gateway_id=None,
 ):
     return router_spec.RoutePlan(
         schema_version=1,
@@ -142,7 +141,6 @@ def route_plan(
         private_host_allowlist=("127.0.0.1",),
         private_cidr_allowlist=(),
         gateway=gateway or ("openrouter" if route_kind == "gateway" else None),
-        gateway_id=gateway_id,
     )
 
 
@@ -179,7 +177,6 @@ class RouterRouteTests(unittest.TestCase):
         route_kind="gateway",
         path="/gateway",
         gateway=None,
-        gateway_id=None,
     ):
         digest = ("a" if route_kind == "gateway" else "b") * 64
         plan = route_plan(
@@ -188,7 +185,6 @@ class RouterRouteTests(unittest.TestCase):
             arm_id=f"{route_kind}-{token}",
             arm_digest=digest,
             gateway=gateway,
-            gateway_id=gateway_id,
         )
         self.server.register_cell(token)
         self.server.register_route(token, plan, secret_plan(plan.arm_id))

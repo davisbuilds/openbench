@@ -45,7 +45,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
         self.assertNotIn("cache_control", body["messages"][0])
         self.assertEqual(
             router_gateways.request_headers(
-                gateway="openrouter", gateway_id=None, secret="secret"
+                gateway="openrouter", secret="secret"
             ),
             {
                 "Authorization": "Bearer secret",
@@ -71,7 +71,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
         self.assertNotIn("cache_control", body["messages"][0])
         self.assertEqual(
             router_gateways.request_headers(
-                gateway="vercel", gateway_id=None, secret="secret"
+                gateway="vercel", secret="secret"
             ),
             {"Authorization": "Bearer secret"},
         )

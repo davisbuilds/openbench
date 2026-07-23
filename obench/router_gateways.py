@@ -54,7 +54,6 @@ def validate_arm(
     *,
     route_kind: str,
     gateway: str | None,
-    gateway_id: str | None,
     endpoint: str,
     requested_model: str,
     requested_provider: str,
@@ -68,8 +67,6 @@ def validate_arm(
             raise GatewayProfileError("model_router does not permit direct arms")
         if gateway is not None:
             raise GatewayProfileError("direct arm must not declare gateway")
-        if gateway_id is not None:
-            raise GatewayProfileError("direct arm must not declare gateway_id")
         return
     if gateway is None:
         raise GatewayProfileError("gateway arm requires gateway")
@@ -81,8 +78,6 @@ def validate_arm(
         raise GatewayProfileError(
             f"gateway must be one of: {', '.join(sorted(GATEWAYS))}"
         )
-    if gateway_id is not None:
-        raise GatewayProfileError(f"{gateway} arm must not declare gateway_id")
     if track == "model_router":
         if gateway != "openrouter":
             raise GatewayProfileError("model_router supports only openrouter")
@@ -168,7 +163,6 @@ def shape_body(
 def request_headers(
     *,
     gateway: str | None,
-    gateway_id: str | None,
     secret: str,
 ) -> dict[str, str]:
     """Return authoritative auth and gateway control headers."""

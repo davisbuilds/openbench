@@ -802,6 +802,21 @@ direct_control_arm_id = "direct"
         self.assertEqual(integrity["reasons"], ["upstream_http_error"])
         self.assertIsNone(reason)
 
+        for status in (429, 503):
+            with self.subTest(status=status):
+                _calls, integrity, reason = router_run._proxy_evidence(
+                    [{"status": status}],
+                    {auto_plan.canonical_model: router_run.Price(
+                        router_run.Decimal("1"),
+                        router_run.Decimal("1"),
+                        "2026-07-22",
+                    )},
+                    experiment.budget,
+                    auto_plan,
+                )
+                self.assertTrue(integrity["pass"])
+                self.assertIsNone(reason)
+
     def test_docker_fails_closed_in_local_mvp(self):
         with self._runtime():
             with self.assertRaisesRegex(router_run.RouterRunError, "unsupported"):

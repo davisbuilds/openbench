@@ -356,6 +356,10 @@ class RouterExperimentTests(unittest.TestCase):
                 "schema_version = 1", "schema_version = 1\nunexpected = true", 1),
             manifest(budget=manifest_budget() + "\nextra = 1"),
             manifest(gateway_extra='direct_control_arm_id = "direct-openai"\nextra = 1'),
+            manifest(gateway_extra=(
+                'gateway_id = "strict-tax"\n'
+                'direct_control_arm_id = "direct-openai"'
+            )),
             manifest(windows=manifest_windows().replace(
                 'window_id = "morning"', 'window_id = "morning"\nextra = 1', 1)),
             manifest().replace("temperature = 0.0", "temperature = 0.0\nextra = 1", 1),
@@ -481,7 +485,6 @@ class RouterExperimentTests(unittest.TestCase):
                 gateway_auth='auth_env = "CLOUDFLARE_API_TOKEN"',
                 gateway_extra=(
                     'gateway = "cloudflare"\n'
-                    'gateway_id = "strict-tax"\n'
                     'direct_control_arm_id = "direct-openai"'
                 ),
             ))
