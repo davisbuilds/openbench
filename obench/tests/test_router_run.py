@@ -479,6 +479,131 @@ direct_control_arm_id = "direct"
         self.assertIn("requested_model_conflict", reasons)
         self.assertIn("metadata_requested_model_conflict", reasons)
 
+    def test_vercel_reported_cost_is_timestamped_and_separate_from_frozen_price(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = dataclasses.replace(
+            next(item for item in plans if item.route_kind == "gateway"),
+            gateway="vercel",
+        )
+        metrics = {
+            "route": {
+                "requested_model": plan.requested_model,
+                "metadata_requested_model": plan.requested_model,
+                "served_model": plan.requested_model,
+                "provider": plan.requested_provider,
+                "attempts": [{
+                    "provider": plan.requested_provider,
+                    "model": plan.requested_model,
+                    "status": 200,
+                }],
+                "gateway_metadata": {"cost": "0.00125"},
+            },
+            "route_evidence": {"pass": True, "reasons": []},
+            "stream": {"done": True},
+            "usage": {"input_tokens": 5, "output_tokens": 3},
+        }
+        observed_at = "2026-07-22T12:34:56Z"
+        calls, integrity, reason = router_run._proxy_evidence(
+            [{"status": 200, "ts": observed_at, "router_metrics": metrics}],
+            {
+                plan.canonical_model: router_run.Price(
+                    router_run.Decimal("1"),
+                    router_run.Decimal("2"),
+                    "2026-07-01T00:00:00Z",
+                )
+            },
+            experiment.budget,
+            plan,
+        )
+
+        self.assertTrue(integrity["pass"])
+        self.assertIsNone(reason)
+        self.assertEqual(calls[0]["costs"], {
+            "router_reported": {
+                "amount_usd": 0.00125,
+                "currency": "USD",
+                "effective_at": observed_at,
+            },
+            "frozen_list_estimate": {
+                "amount_usd": 0.000011,
+                "currency": "USD",
+                "effective_at": "2026-07-01T00:00:00Z",
+            },
+        })
+        self.assertEqual(
+            router_report._costs(calls[0], 1, 1)["router_reported"],
+            (0.00125, "USD", observed_at),
+        )
+
+    def test_vercel_malformed_or_unstamped_cost_remains_absent(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = dataclasses.replace(
+            next(item for item in plans if item.route_kind == "gateway"),
+            gateway="vercel",
+        )
+        prices = {
+            plan.canonical_model: router_run.Price(
+                router_run.Decimal("1"),
+                router_run.Decimal("2"),
+                "2026-07-01T00:00:00Z",
+            )
+        }
+        invalid = (
+            None,
+            "",
+            " 0.1",
+            "-0.1",
+            "01.2",
+            "1_000",
+            "NaN",
+            "Infinity",
+            "1e9999",
+            -1,
+            float("inf"),
+            True,
+        )
+        for cost in invalid:
+            with self.subTest(cost=cost):
+                metrics = {
+                    "route": {
+                        "gateway_metadata": (
+                            {} if cost is None else {"cost": cost}
+                        ),
+                    },
+                    "usage": {"input_tokens": 5, "output_tokens": 3},
+                }
+                costs, amount = router_run._price_call(
+                    metrics,
+                    prices,
+                    plan,
+                    "2026-07-22T12:34:56Z",
+                )
+                self.assertNotIn("router_reported", costs)
+                self.assertIn("frozen_list_estimate", costs)
+                self.assertEqual(amount, router_run.Decimal("0.000011"))
+
+        costs, _amount = router_run._price_call(
+            {
+                "route": {"gateway_metadata": {"cost": "0.00125"}},
+                "usage": {"input_tokens": 5, "output_tokens": 3},
+            },
+            prices,
+            plan,
+            "not-a-timestamp",
+        )
+        self.assertNotIn("router_reported", costs)
+        self.assertIn("frozen_list_estimate", costs)
+
     def test_price_coverage_and_auth_failures_fail_closed(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)
         with mock.patch.object(router_run.pi, "version", return_value="fake-pi 1.0"):

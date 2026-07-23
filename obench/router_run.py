@@ -10,8 +10,10 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import math
 import os
 import random
+import re
 import signal
 import subprocess
 import sys
@@ -39,6 +41,12 @@ LOCAL_LANE = "local-exploratory-route-isolation"
 DOCKER_LANE = "docker-exploratory-route-isolation"
 _RESULT_SENTINEL = "__BENCH_RESULT__"
 _EMPTY_HASH = hashlib.sha256(b"").hexdigest()
+_DECIMAL_COST_RE = re.compile(
+    r"^(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$"
+)
+_RFC3339_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 _POLICY = {
     "track": "gateway_tax",
     "fallback": False,
@@ -626,12 +634,27 @@ def _price_call(
     metrics: Mapping[str, Any],
     prices: Mapping[str, Price],
     plan: router_spec.RoutePlan,
+    observed_at: Any,
 ) -> tuple[dict[str, Any], Decimal | None]:
-    route = metrics.get("route") if isinstance(metrics.get("route"), dict) else {}
+    evidence = {}
+    if plan.gateway == "vercel":
+        route = metrics.get("route")
+        metadata = route.get("gateway_metadata") if isinstance(route, Mapping) else None
+        reported_amount = _reported_cost(
+            metadata.get("cost") if isinstance(metadata, Mapping) else None
+        )
+        timestamp = _observed_timestamp(observed_at)
+        if reported_amount is not None and timestamp is not None:
+            evidence["router_reported"] = {
+                "amount_usd": reported_amount,
+                "currency": "USD",
+                "effective_at": timestamp,
+            }
+
     usage = metrics.get("usage") if isinstance(metrics.get("usage"), dict) else {}
     price = prices.get(plan.canonical_model)
     if price is None:
-        return {}, None
+        return evidence, None
     input_tokens = usage.get("input_tokens")
     output_tokens = usage.get("output_tokens")
     if (
@@ -640,19 +663,48 @@ def _price_call(
         or not isinstance(output_tokens, int)
         or isinstance(output_tokens, bool)
     ):
-        return {}, None
+        return evidence, None
     amount = (
         Decimal(input_tokens) * price.input_per_million
         + Decimal(output_tokens) * price.output_per_million
     ) / Decimal(1_000_000)
-    evidence = {
-        "frozen_list_estimate": {
-            "amount_usd": float(amount),
-            "currency": "USD",
-            "effective_at": price.effective_at,
-        }
+    evidence["frozen_list_estimate"] = {
+        "amount_usd": float(amount),
+        "currency": "USD",
+        "effective_at": price.effective_at,
     }
     return evidence, amount
+
+
+def _reported_cost(value: Any) -> float | None:
+    if isinstance(value, str):
+        if not _DECIMAL_COST_RE.fullmatch(value):
+            return None
+        text = value
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        text = str(value)
+    else:
+        return None
+    try:
+        amount = Decimal(text)
+    except InvalidOperation:
+        return None
+    if not amount.is_finite() or amount < 0:
+        return None
+    converted = float(amount)
+    return converted if math.isfinite(converted) else None
+
+
+def _observed_timestamp(value: Any) -> str | None:
+    if not isinstance(value, str) or not _RFC3339_RE.fullmatch(value):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return value
 
 
 def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> list[str]:
@@ -772,7 +824,7 @@ def _proxy_evidence(
         output_tokens = usage.get("output_tokens")
         if isinstance(output_tokens, int) and not isinstance(output_tokens, bool):
             total_output += output_tokens
-        costs, amount = _price_call(metrics, prices, plan)
+        costs, amount = _price_call(metrics, prices, plan, row.get("ts"))
         if amount is not None:
             total_cost += amount
             priced_calls += 1

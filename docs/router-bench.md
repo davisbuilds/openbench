@@ -45,6 +45,12 @@ Vercel evidence also retains privacy-safe `generationId`, `cost`, and
 post-run generation lookup. Missing or contradictory provider, model, or
 attempt evidence fails route integrity closed.
 
+A valid nonnegative Vercel `cost` is reported per call under the
+`router_reported` USD cost basis using that sealed ledger row's observation
+timestamp. Missing or malformed cost remains absent rather than becoming zero.
+The independent `frozen_list_estimate` basis remains the budget-enforcement
+source.
+
 `gateway = "cloudflare"` is admission-blocked. The admitted REST profile cannot
 prove provider and served-model integrity because Cloudflare documents the
 relevant response headers only for dynamic routes. Strict Gateway Tax support

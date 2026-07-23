@@ -289,6 +289,28 @@ class RouterReportTests(unittest.TestCase):
         estimate = report["arms"]["gateway"]["costs"]["frozen_list_estimate"]
         self.assertEqual(estimate["cost_per_solve_usd"], 0.24)
 
+    def test_router_reported_cost_has_complete_coverage_and_cost_per_solve(self):
+        rows = self.complete_rows()
+        for row in rows:
+            if row["arm_role"] != "gateway":
+                continue
+            row["proxy_metrics"]["calls"][0]["costs"]["router_reported"] = {
+                "amount_usd": 0.025,
+                "currency": "USD",
+                "effective_at": "2026-07-22T12:34:56Z",
+            }
+
+        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        cost = report["arms"]["gateway"]["costs"]["router_reported"]
+
+        self.assertEqual(cost["basis_coverage"]["covered_calls"], 4)
+        self.assertEqual(cost["basis_coverage"]["total_calls"], 4)
+        self.assertEqual(cost["basis_coverage"]["ratio"], 1.0)
+        self.assertTrue(cost["basis_coverage"]["complete"])
+        self.assertEqual(cost["attempted_cost_usd"]["estimate"], 0.025)
+        self.assertEqual(cost["cost_per_solve_usd"], 0.05)
+        self.assertEqual(cost["effective_at"], ["2026-07-22T12:34:56Z"])
+
     def test_route_distribution_is_task_weighted(self):
         rows = self.complete_rows()
         rows[1]["proxy_metrics"]["calls"].append(
