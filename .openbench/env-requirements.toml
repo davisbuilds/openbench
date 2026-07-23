@@ -1,0 +1,11 @@
+# OpenBench environment resource requirements
+#
+# Minimum resources the Docker daemon must provide for benchmark runs.
+# Checked by `obench doctor --docker-env`.
+#
+# NOTE: This is the floor, not a recommendation. Colima should be started with
+# the pinned config from tools/colima-benchmark.sh to ensure adequate headroom
+# for concurrent container execution (agent container + checker + proxy).
+
+cpus = 4
+memory_gib = 12
