@@ -82,8 +82,8 @@ fixed model.
 [`router-bench-auto.toml`](../obench/examples/router-bench-auto.toml) compares:
 
 - `openrouter/auto-beta`, restricted to exactly
-  `openai/gpt-5-mini` and `anthropic/claude-haiku-4.5`;
-- fixed `openai/gpt-5-mini`, the declared baseline;
+  `openai/gpt-5.1` and `anthropic/claude-haiku-4.5`;
+- fixed `openai/gpt-5.1`, the declared baseline;
 - fixed `anthropic/claude-haiku-4.5`.
 
 Both candidate models support tool-using coding workflows. The auto arm's
@@ -186,19 +186,19 @@ python3 -m obench.cli router validate \
 
 The Auto example needs only the OpenRouter key. Its frozen snapshot must cover
 every model in the declared candidate pool because calls are priced by the
-observed served model. These are illustrative list prices as of 2026-07-22:
+observed served model. These are illustrative list prices as of 2026-07-23:
 
 ```bash
 export OPENBENCH_ROUTER_FROZEN_PRICES_JSON='{
-  "openai/gpt-5-mini": {
-    "input_per_million": "0.25",
-    "output_per_million": "2.00",
-    "effective_at": "2026-07-22"
+  "openai/gpt-5.1": {
+    "input_per_million": "1.25",
+    "output_per_million": "10.00",
+    "effective_at": "2026-07-23"
   },
   "anthropic/claude-haiku-4.5": {
     "input_per_million": "1.00",
     "output_per_million": "5.00",
-    "effective_at": "2026-07-22"
+    "effective_at": "2026-07-23"
   }
 }'
 ```

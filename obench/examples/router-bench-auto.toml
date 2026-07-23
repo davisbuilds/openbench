@@ -39,7 +39,7 @@ canonical_model = "openrouter/auto-beta"
 requested_model = "openrouter/auto-beta"
 requested_provider = "openrouter"
 allowed_models = [
-  "openai/gpt-5-mini",
+  "openai/gpt-5.1",
   "anthropic/claude-haiku-4.5",
 ]
 allowed_providers = ["openai", "anthropic"]
@@ -47,7 +47,7 @@ fallback_enabled = true
 retry_count = 0
 cache_enabled = false
 cost_quality_tradeoff = 7
-fixed_control_arm_id = "fixed-gpt-5-mini"
+fixed_control_arm_id = "fixed-gpt-5-1"
 auth_env = "OPENROUTER_API_KEY"
 
 [arms.sampling]
@@ -56,17 +56,17 @@ top_p = 1.0
 seed = 20260722
 
 [[arms]]
-arm_id = "fixed-gpt-5-mini"
+arm_id = "fixed-gpt-5-1"
 route_kind = "gateway"
 router_mode = "fixed"
 gateway = "openrouter"
 endpoint = "https://openrouter.ai/api/v1/chat/completions"
 protocol = "openai_chat"
 baseline = true
-canonical_model = "openai/gpt-5-mini"
-requested_model = "openai/gpt-5-mini"
+canonical_model = "openai/gpt-5.1"
+requested_model = "openai/gpt-5.1"
 requested_provider = "openai"
-allowed_models = ["openai/gpt-5-mini"]
+allowed_models = ["openai/gpt-5.1"]
 allowed_providers = ["openai"]
 fallback_enabled = false
 retry_count = 0

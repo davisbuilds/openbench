@@ -779,6 +779,29 @@ direct_control_arm_id = "direct"
         self.assertTrue(integrity["pass"])
         self.assertEqual(reason, "upstream_auth_failure")
 
+        auto_plan = dataclasses.replace(
+            plans[1],
+            track="model_router",
+            router_mode="auto",
+            requested_model="openrouter/auto-beta",
+            requested_provider="openrouter",
+            allowed_models=("openai/fake-model",),
+            allowed_providers=("openai",),
+            fallback_enabled=True,
+            cost_quality_tradeoff=7,
+        )
+        _calls, integrity, reason = router_run._proxy_evidence(
+            [{"status": 404}],
+            {auto_plan.canonical_model: router_run.Price(
+                router_run.Decimal("1"), router_run.Decimal("1"), "2026-07-22"
+            )},
+            experiment.budget,
+            auto_plan,
+        )
+        self.assertFalse(integrity["pass"])
+        self.assertEqual(integrity["reasons"], ["upstream_http_error"])
+        self.assertIsNone(reason)
+
     def test_docker_fails_closed_in_local_mvp(self):
         with self._runtime():
             with self.assertRaisesRegex(router_run.RouterRunError, "unsupported"):
