@@ -117,6 +117,113 @@ class GatewayRequestProfileTests(unittest.TestCase):
         ):
             self.assertNotIn(key, body)
 
+    def test_cloudflare_rest_profile_requires_real_account_and_qualified_model(self):
+        endpoint = (
+            "https://api.cloudflare.com/client/v4/accounts/"
+            "0123456789abcdef0123456789abcdef/ai/v1/chat/completions"
+        )
+        router_gateways.validate_arm(
+            route_kind="gateway",
+            gateway="cloudflare",
+            endpoint=endpoint,
+            requested_model="openai/gpt-4o-mini",
+            requested_provider="openai",
+            track="gateway_tax",
+        )
+
+        invalid_endpoints = (
+            endpoint.replace("0123456789abcdef0123456789abcdef", "{account_id}"),
+            endpoint.replace("0123456789abcdef0123456789abcdef", "account-id"),
+            endpoint.replace("/chat/completions", "/responses"),
+            endpoint + "?gateway=other",
+        )
+        for invalid in invalid_endpoints:
+            with self.subTest(endpoint=invalid):
+                with self.assertRaisesRegex(
+                    router_gateways.GatewayProfileError,
+                    "cloudflare endpoint must be",
+                ):
+                    router_gateways.validate_arm(
+                        route_kind="gateway",
+                        gateway="cloudflare",
+                        endpoint=invalid,
+                        requested_model="openai/gpt-4o-mini",
+                        requested_provider="openai",
+                        track="gateway_tax",
+                    )
+
+        with self.assertRaisesRegex(
+            router_gateways.GatewayProfileError,
+            "provider-qualified with requested_provider",
+        ):
+            router_gateways.validate_arm(
+                route_kind="gateway",
+                gateway="cloudflare",
+                endpoint=endpoint,
+                requested_model="anthropic/gpt-4o-mini",
+                requested_provider="openai",
+                track="gateway_tax",
+            )
+        with self.assertRaisesRegex(
+            router_gateways.GatewayProfileError,
+            "model_router supports only openrouter",
+        ):
+            router_gateways.validate_arm(
+                route_kind="gateway",
+                gateway="cloudflare",
+                endpoint=endpoint,
+                requested_model="openai/gpt-4o-mini",
+                requested_provider="openai",
+                track="model_router",
+                router_mode="fixed",
+            )
+
+    def test_cloudflare_overwrites_headers_and_strips_body_controls(self):
+        body = self.base_body()
+        body.update({
+            "providerOptions": {"gateway": {"only": ["attacker"]}},
+            "router": {"strategy": "attacker"},
+            "plugins": [{"id": "attacker"}],
+            "routes": [{"provider": "attacker"}],
+            "fallback": {"model": "attacker/model"},
+        })
+
+        router_gateways.shape_body(
+            body, gateway="cloudflare", requested_provider="openai"
+        )
+
+        for key in (
+            "provider", "providerOptions", "models", "order", "sort", "caching",
+            "router", "plugins", "routes", "fallback", "cache",
+            "prompt_cache_key",
+        ):
+            self.assertNotIn(key, body)
+        self.assertNotIn("cache_control", body["messages"][0])
+        self.assertEqual(
+            router_gateways.request_headers(
+                gateway="cloudflare", secret="secret"
+            ),
+            {
+                "Authorization": "Bearer secret",
+                "cf-aig-skip-cache": "true",
+                "cf-aig-max-attempts": "1",
+                "cf-aig-collect-log-payload": "false",
+            },
+        )
+        for name in (
+            "cf-aig-gateway-id",
+            "CF-AIG-CACHE-TTL",
+            "cf-aig-cache-key",
+            "cf-aig-max-attempts",
+            "cf-aig-retry-delay",
+            "cf-aig-backoff",
+            "cf-aig-collect-log",
+            "cf-aig-collect-log-payload",
+            "cf-aig-metadata",
+        ):
+            with self.subTest(header=name):
+                self.assertTrue(router_gateways.blocked_request_header(name))
+
     def test_model_match_distinguishes_exact_revision_from_rolling_alias(self):
         requested = "openai/gpt-5.6-2026-07-01"
         observed = "openai/gpt-5.6"
@@ -756,6 +863,66 @@ class GatewayEvidenceTests(unittest.TestCase):
         self.assertIn("provider_conflict", result["route_evidence"]["reasons"])
         self.assertIn("multiple_attempts", result["route_evidence"]["reasons"])
         self.assertIn("missing_model_attempts", result["route_evidence"]["reasons"])
+
+    def test_cloudflare_derives_provider_from_request_and_keeps_served_model(self):
+        result = self.parse(
+            sse(
+                {
+                    "model": "gpt-4o-mini-2024-07-18",
+                    "choices": [{"delta": {"content": "x"}}],
+                },
+                "[DONE]",
+            ),
+            gateway="cloudflare",
+            requested_model="openai/gpt-4o-mini",
+            requested_provider="openai",
+            allowed_models=("openai/gpt-4o-mini",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+
+        self.assertTrue(result["route_evidence"]["pass"])
+        self.assertEqual(result["route"]["provider"], "openai")
+        self.assertEqual(
+            result["route"]["served_model"],
+            "gpt-4o-mini-2024-07-18",
+        )
+        self.assertNotIn("gateway_metadata", result["route"])
+
+    def test_cloudflare_rejects_missing_or_wrong_served_model_and_provider(self):
+        cases = (
+            ({}, "openai/gpt-4o-mini", "missing_served_model"),
+            (
+                {"model": "anthropic/gpt-4o-mini"},
+                "openai/gpt-4o-mini",
+                "provider_conflict",
+            ),
+            (
+                {"model": "openai/gpt-4.1-mini"},
+                "openai/gpt-4o-mini",
+                "served_model_not_allowed",
+            ),
+            (
+                {"model": "gpt-4o-mini-2024-08-01"},
+                "openai/gpt-4o-mini-2024-07-18",
+                "served_model_not_allowed",
+            ),
+        )
+        for event, requested_model, expected_reason in cases:
+            with self.subTest(event=event):
+                result = self.parse(
+                    sse(event, "[DONE]"),
+                    gateway="cloudflare",
+                    requested_model=requested_model,
+                    requested_provider="openai",
+                    allowed_models=("openai/gpt-4o-mini",),
+                    allowed_providers=("openai",),
+                    model_match="rolling_alias",
+                )
+                self.assertFalse(result["route_evidence"]["pass"])
+                self.assertIn(
+                    expected_reason, result["route_evidence"]["reasons"]
+                )
 
 if __name__ == "__main__":
     unittest.main()

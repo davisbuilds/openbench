@@ -9,20 +9,19 @@ from collections.abc import Mapping
 from typing import Any
 
 
-GATEWAYS = frozenset({"openrouter", "vercel"})
+GATEWAYS = frozenset({"cloudflare", "openrouter", "vercel"})
 CONCENTRATE_UNSUPPORTED = (
     "Gateway Tax is unsupported for concentrate until its request contract and "
     "response evidence prove the requested model alias, provider lock, attempts, "
     "fallback policy, and cache policy"
 )
-CLOUDFLARE_UNSUPPORTED = (
-    "strict Gateway Tax is unsupported for cloudflare REST because provider and "
-    "served-model response headers are documented only for dynamic routes; "
-    "metadata-only Logs API verification is required"
-)
 
 _OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 _VERCEL_ENDPOINT = "https://ai-gateway.vercel.sh/v1/chat/completions"
+_CLOUDFLARE_ENDPOINT_RE = re.compile(
+    r"https://api\.cloudflare\.com/client/v4/accounts/"
+    r"(?P<account_id>[0-9a-fA-F]{32})/ai/v1/chat/completions"
+)
 _CACHE_KEYS = frozenset({
     "cache",
     "cache_control",
@@ -123,8 +122,6 @@ def validate_arm(
         raise GatewayProfileError("gateway arm requires gateway")
     if gateway == "concentrate":
         raise GatewayProfileError(CONCENTRATE_UNSUPPORTED)
-    if gateway == "cloudflare":
-        raise GatewayProfileError(CLOUDFLARE_UNSUPPORTED)
     if gateway not in GATEWAYS:
         raise GatewayProfileError(
             f"gateway must be one of: {', '.join(sorted(GATEWAYS))}"
@@ -150,6 +147,24 @@ def validate_arm(
             raise GatewayProfileError(
                 "vercel requested_model must be a provider-qualified model ID"
             )
+    if gateway == "cloudflare":
+        if _CLOUDFLARE_ENDPOINT_RE.fullmatch(endpoint) is None:
+            raise GatewayProfileError(
+                "cloudflare endpoint must be "
+                "https://api.cloudflare.com/client/v4/accounts/"
+                "{32-hex-account-id}/ai/v1/chat/completions; metadata-only "
+                "Logs API verification is required for other Cloudflare routes"
+            )
+        if (
+            _model_provider(requested_model) is None
+            or not model_provider_matches(requested_model, requested_provider)
+        ):
+            raise GatewayProfileError(
+                "cloudflare requested_model must be provider-qualified with "
+                "requested_provider"
+            )
+
+
 def _strip_cache_controls(value: Any) -> None:
     if isinstance(value, dict):
         for key in list(value):
@@ -209,6 +224,13 @@ def shape_body(
             "gateway": {"only": [requested_provider]},
         }
         return
+    if gateway == "cloudflare":
+        for key in (
+            "provider", "providerOptions", "models", "order", "sort", "caching",
+            "router", "plugins", "routes", "fallback",
+        ):
+            payload.pop(key, None)
+        return
     raise GatewayProfileError(f"unsupported gateway profile: {gateway}")
 
 
@@ -226,6 +248,12 @@ def request_headers(
             "X-OpenRouter-Metadata": "enabled",
             "X-OpenRouter-Cache": "false",
         })
+    elif gateway == "cloudflare":
+        headers.update({
+            "cf-aig-skip-cache": "true",
+            "cf-aig-max-attempts": "1",
+            "cf-aig-collect-log-payload": "false",
+        })
     elif gateway != "vercel":
         raise GatewayProfileError(f"unsupported gateway profile: {gateway}")
     return headers
@@ -237,6 +265,7 @@ def blocked_request_header(name: str) -> bool:
     return (
         normalized == "x-openrouter-metadata"
         or normalized.startswith("x-openrouter-cache")
+        or normalized.startswith("cf-aig-")
     )
 
 
@@ -320,7 +349,21 @@ class GatewayEvidence:
             return self._observe_openrouter(obj)
         elif self.gateway == "vercel":
             return self._observe_vercel(obj, top_model, top_provider)
+        elif self.gateway == "cloudflare":
+            return self._observe_cloudflare(top_model)
         return False
+
+    def _observe_cloudflare(self, top_model: str | None) -> bool:
+        if top_model is None:
+            return False
+        self.metadata_seen = True
+        requested_provider = _model_provider(self.requested_model)
+        if requested_provider is not None:
+            self._set_provider(requested_provider)
+            if not model_provider_matches(top_model, requested_provider):
+                self.profile_reasons.append("provider_conflict")
+        self._set_model(top_model)
+        return True
 
     def _set_provider(self, value: str) -> None:
         if self.provider is not None and self.provider.casefold() != value.casefold():

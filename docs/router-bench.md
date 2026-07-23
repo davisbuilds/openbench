@@ -26,9 +26,9 @@ A `gateway_tax` experiment has exactly one baseline `direct` arm and one or more
 `gateway` arms. Every gateway arm references the direct arm with
 `direct_control_arm_id` and must match its canonical model, requested provider,
 provider allowlist, protocol, and sampling. Client retries and caching are off,
-and fallbacks are forbidden. This compares the direct, OpenRouter, or Vercel
-serving path around the same rolling model alias instead of measuring provider
-choice or recovery policy.
+and fallbacks are forbidden. This compares the direct, OpenRouter, Vercel, or
+Cloudflare serving path around the same rolling model alias instead of
+measuring provider choice or recovery policy.
 
 [`router-bench-three-way.toml`](../obench/examples/router-bench-three-way.toml)
 is a matched three-way comparison:
@@ -42,6 +42,9 @@ comparison key `openai/gpt-4o-mini`. `model_match = "rolling_alias"` accepts
 that provider-qualified alias or a dated snapshot that a provider reports after
 resolving it. Other model families, conflicting provider qualifications, and
 two different dated snapshots still fail route integrity.
+
+The strict fixed-gateway profiles are OpenRouter, Vercel AI Gateway, and
+Cloudflare AI Gateway REST.
 
 This is intentionally a practical product comparison: it measures the
 end-to-end experience of asking each gateway for the same rolling alias at
@@ -69,6 +72,21 @@ attempt, one provider attempt, and success. `cost` and `marketCost` are retained
 when returned. A valid timestamped `cost` becomes `router_reported` evidence,
 while the independent frozen list-price estimate remains available for
 comparison and budget enforcement in Gateway Tax.
+
+Cloudflare uses its OpenAI-compatible
+`POST https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions`
+REST endpoint and requires a real 32-hex account ID plus a provider-qualified
+requested model such as `openai/gpt-4o-mini`. OpenBench removes caller cache and
+routing controls, blocks caller `cf-aig-*` headers, and forces
+`cf-aig-skip-cache: true`, `cf-aig-max-attempts: 1`, and
+`cf-aig-collect-log-payload: false`. Route evidence combines the provider
+qualifier from the requested model with the served `model` in Cloudflare's
+streamed OpenAI-compatible response. Cloudflare's documented `gpt-4o-mini`
+example currently reports
+`gpt-4o-mini-2024-07-18`; a missing model, another model family, a conflicting
+provider qualifier, or a conflicting dated revision fails route integrity.
+OpenBench does not invent response headers or attempt evidence that this REST
+response does not provide.
 
 Vercel supports routing one requested model across providers, provider filters,
 fallbacks, and explicit model rewrite rules. Its documented cost-aware model
@@ -274,3 +292,7 @@ stratum.
 - [Vercel AI Gateway provider options](https://vercel.com/docs/ai-gateway/models-and-providers/provider-options)
 - [Vercel cost-aware model routing](https://vercel.com/kb/guide/cost-aware-model-routing-with-ai-gateway)
 - [Vercel routing rules](https://vercel.com/changelog/ai-gateway-routing-rules)
+- [Cloudflare AI Gateway REST API](https://developers.cloudflare.com/ai-gateway/usage/rest-api/)
+- [Cloudflare AI Gateway request handling](https://developers.cloudflare.com/ai-gateway/configuration/request-handling/)
+- [Cloudflare AI Gateway caching](https://developers.cloudflare.com/ai-gateway/features/caching/)
+- [Cloudflare `gpt-4o-mini` model](https://developers.cloudflare.com/ai/models/openai/gpt-4o-mini/)
