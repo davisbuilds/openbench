@@ -226,6 +226,7 @@ auth_env = "DIRECT_KEY"
 [[arms]]
 arm_id = "gateway"
 route_kind = "gateway"
+gateway = "openrouter"
 endpoint = "https://127.0.0.1:{port}/gateway/v1/chat/completions"
 baseline = false
 auth_env = "GATEWAY_KEY"

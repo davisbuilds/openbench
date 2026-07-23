@@ -45,7 +45,10 @@ def manifest(**replacements):
             """
         ).strip(),
         "direct_extra": "",
-        "gateway_extra": 'direct_control_arm_id = "direct-openai"',
+        "gateway_extra": (
+            'gateway = "openrouter"\n'
+            'direct_control_arm_id = "direct-openai"'
+        ),
         "direct_auth": 'auth_env = "OPENAI_API_KEY"',
         "gateway_auth": 'auth_env = "OPENROUTER_API_KEY"',
         "direct_controls": textwrap.dedent(
@@ -255,7 +258,10 @@ class RouterExperimentTests(unittest.TestCase):
             (manifest(gateway_extra=""), "direct_control_arm_id"),
             (manifest(direct_extra='direct_control_arm_id = "via-openrouter"'),
              "direct arm"),
-            (manifest(gateway_extra='direct_control_arm_id = "missing"'),
+            (manifest(gateway_extra=(
+                'gateway = "openrouter"\n'
+                'direct_control_arm_id = "missing"'
+            )),
              "unknown direct control"),
             (manifest(gateway_controls=manifest_controls().replace(
                 "fallback_enabled = false", "fallback_enabled = true")), "fallback"),
@@ -280,6 +286,82 @@ class RouterExperimentTests(unittest.TestCase):
             parse_experiment_toml(manifest().replace("https://api.openai.com", "http://api.openai.com"))
         with self.assertRaisesRegex(RouterSpecError, "private_router"):
             parse_experiment_toml(manifest().replace("api.openai.com", "127.0.0.1"))
+
+    def test_gateway_profiles_are_explicit_and_concentrate_is_admission_blocked(self):
+        with self.assertRaisesRegex(RouterSpecError, "requires gateway"):
+            parse_experiment_toml(manifest(gateway_extra=(
+                'direct_control_arm_id = "direct-openai"'
+            )))
+        with self.assertRaisesRegex(RouterSpecError, "must not declare gateway"):
+            parse_experiment_toml(manifest(direct_extra='gateway = "openrouter"'))
+        with self.assertRaisesRegex(
+            RouterSpecError,
+            "strict Gateway Tax is unsupported for concentrate",
+        ):
+            parse_experiment_toml(manifest(gateway_extra=(
+                'gateway = "concentrate"\n'
+                'direct_control_arm_id = "direct-openai"'
+            )))
+
+    def test_vercel_and_cloudflare_profile_fields_are_validated(self):
+        vercel = manifest(
+            gateway_auth='auth_env = "AI_GATEWAY_API_KEY"',
+            gateway_extra=(
+                'gateway = "vercel"\n'
+                'direct_control_arm_id = "direct-openai"'
+            ),
+        ).replace(
+            "https://openrouter.ai/api/v1/chat/completions",
+            "https://ai-gateway.vercel.sh/v1/chat/completions",
+        )
+        vercel = vercel.rsplit(
+            'requested_model = "gpt-test-2026-07-01"',
+            1,
+        )
+        vercel = (
+            'requested_model = "openai/gpt-test-2026-07-01"'
+        ).join(vercel)
+        vercel = vercel.rsplit(
+            'allowed_models = ["gpt-test-2026-07-01"]',
+            1,
+        )
+        vercel = (
+            'allowed_models = ["openai/gpt-test-2026-07-01"]'
+        ).join(vercel)
+        self.assertEqual(parse_experiment_toml(vercel).arms[1].gateway, "vercel")
+
+        cloudflare = manifest(
+            gateway_auth='auth_env = "CLOUDFLARE_API_TOKEN"',
+            gateway_extra=(
+                'gateway = "cloudflare"\n'
+                'gateway_id = "strict-tax"\n'
+                'direct_control_arm_id = "direct-openai"'
+            ),
+        ).replace(
+            "https://openrouter.ai/api/v1/chat/completions",
+            "https://api.cloudflare.com/client/v4/accounts/account123"
+            "/ai/v1/chat/completions",
+        )
+        cloudflare = cloudflare.rsplit(
+            'requested_model = "gpt-test-2026-07-01"',
+            1,
+        )
+        cloudflare = (
+            'requested_model = "openai/gpt-test-2026-07-01"'
+        ).join(cloudflare)
+        cloudflare = cloudflare.rsplit(
+            'allowed_models = ["gpt-test-2026-07-01"]',
+            1,
+        )
+        cloudflare = (
+            'allowed_models = ["openai/gpt-test-2026-07-01"]'
+        ).join(cloudflare)
+        parsed = parse_experiment_toml(cloudflare)
+        self.assertEqual(parsed.arms[1].gateway_id, "strict-tax")
+        with self.assertRaisesRegex(RouterSpecError, "requires nonsecret gateway_id"):
+            parse_experiment_toml(cloudflare.replace(
+                'gateway_id = "strict-tax"\n', ""
+            ))
 
     def test_private_literal_endpoint_must_match_declared_allowlist(self):
         private = manifest().replace(
