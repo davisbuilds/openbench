@@ -67,14 +67,17 @@ def experiment():
             {
                 "arm_id": "gateway",
                 "route_kind": "gateway",
-                "gateway": "openrouter",
-                "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+                "gateway": "vercel",
+                "endpoint": "https://ai-gateway.vercel.sh/v1/chat/completions",
                 "protocol": "openai_chat",
                 "baseline": False,
                 "canonical_model": "openai/gpt-test",
                 "requested_model": "openai/gpt-test",
                 "requested_provider": "OpenAI",
-                "allowed_models": ["openai/gpt-test"],
+                "allowed_models": [
+                    "openai/gpt-test",
+                    "gpt-test-2026-07-22",
+                ],
                 "allowed_providers": ["OpenAI"],
                 "fallback_enabled": False,
                 "retry_count": 0,
@@ -211,7 +214,13 @@ class RouterPublishTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _write_ledger(self, *, allowed_secret=None, partial=False):
+    def _write_ledger(
+        self,
+        *,
+        allowed_secret=None,
+        partial=False,
+        router_metrics=None,
+    ):
         request = {
             "record_type": "request",
             "sequence": 1,
@@ -236,6 +245,8 @@ class RouterPublishTests(unittest.TestCase):
         }
         if partial:
             request["router_metrics"] = None
+        elif router_metrics is not None:
+            request["router_metrics"] = router_metrics
         request["record_hash"] = hashlib.sha256(
             results.canonical_json_bytes({
                 key: value for key, value in request.items() if key != "record_hash"
@@ -309,6 +320,137 @@ class RouterPublishTests(unittest.TestCase):
         self.assertEqual(seal["cell_id"], self.cell_id)
         self.assertEqual(seal["root_hash"], binding["root_hash"])
         self.assertEqual(seal["seal_sha256"], binding["seal_sha256"])
+
+    def test_gateway_route_evidence_is_minimized_and_opaque_in_public_ledger(self):
+        generation_id = "vercel-generation-raw-id"
+        metrics = {
+            "timing": {"ttfb_s": 1.0, "semantic_ttft_s": 2.0, "total_s": 3.0},
+            "usage": {"input_tokens": 11, "output_tokens": 4, "total_tokens": 15},
+            "generation": {
+                "output_tokens": 4,
+                "duration_s": 1.0,
+                "tokens_per_second": 4.0,
+            },
+            "route": {
+                "requested_model": "openai/gpt-test",
+                "metadata_requested_model": "openai/gpt-test",
+                "served_model": "gpt-test-2026-07-22",
+                "provider": "OpenAI",
+                "attempts": [{
+                    "provider": "OpenAI",
+                    "model": "gpt-test-2026-07-22",
+                    "status": 200,
+                }],
+                "gateway_metadata": {
+                    "generationId": generation_id,
+                    "cost": 0.001,
+                    "marketCost": 0.002,
+                    "unnecessary_payload": "must-not-publish",
+                },
+            },
+            "route_evidence": {"pass": True, "verdict": "pass", "reasons": []},
+            "coverage": {
+                "covered": 6,
+                "total": 6,
+                "usage": True,
+                "semantic_ttft": True,
+                "route": True,
+                "attempts": True,
+            },
+            "stream": {"done": True, "malformed_events": 0, "ignored_events": 0},
+        }
+        self._write_ledger(router_metrics=metrics)
+        self.publish()
+
+        public_experiment = json.loads(
+            (self.bundle / "experiment.json").read_text(encoding="utf-8")
+        )
+        public_arm = next(
+            arm for arm in public_experiment["arms"] if arm["arm_id"] == "gateway"
+        )
+        self.assertEqual(public_arm["gateway"], "vercel")
+        self.assertEqual(
+            public_arm["allowed_models"],
+            ["openai/gpt-test", "gpt-test-2026-07-22"],
+        )
+
+        public_row = json.loads((self.bundle / "results.jsonl").read_text())
+        public_ledger = self.bundle / public_row["ledger"]["artifact"]
+        request = json.loads(public_ledger.read_text().splitlines()[0])
+        route = request["router_metrics"]["route"]
+        self.assertEqual(route["served_model"], "gpt-test-2026-07-22")
+        self.assertEqual(route["provider"], "OpenAI")
+        self.assertEqual(route["attempts"], [{
+            "provider": "OpenAI",
+            "model": "gpt-test-2026-07-22",
+            "status": 200,
+        }])
+        self.assertEqual(route["gateway_metadata"], {
+            "generation_id_sha256": hashlib.sha256(
+                generation_id.encode("utf-8")
+            ).hexdigest(),
+            "cost": 0.001,
+            "market_cost": 0.002,
+        })
+        bundle_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in self.bundle.rglob("*")
+            if path.is_file()
+        )
+        for private_value in (
+            generation_id,
+            "unnecessary_payload",
+            "must-not-publish",
+        ):
+            self.assertNotIn(private_value, bundle_text)
+        self.assertEqual(router_publish.verify_bundle(self.bundle), json.loads(
+            (self.bundle / "provenance.json").read_text(encoding="utf-8")
+        ))
+
+    def test_gateway_metadata_projection_rejects_raw_or_malformed_identifiers(self):
+        with self.assertRaisesRegex(
+            router_publish.RouterPublishError,
+            "generationId must be a non-empty string",
+        ):
+            router_publish._gateway_metadata_dto(  # noqa: SLF001
+                {"generationId": ""},
+                "metadata",
+            )
+        self.assertEqual(
+            router_publish._gateway_metadata_dto(  # noqa: SLF001
+                {
+                    "log_id": "opaque-log",
+                    "cache_status": "MISS",
+                    "step": 0,
+                    "raw_payload": "discarded",
+                },
+                "metadata",
+            ),
+            {
+                "log_id_sha256": hashlib.sha256(b"opaque-log").hexdigest(),
+                "cache_status": "MISS",
+                "step": 0,
+            },
+        )
+
+    def test_cloudflare_profile_projection_retains_nonsecret_gateway_id(self):
+        source = self.experiment.to_dict()
+        gateway_arm = source["arms"][1]
+        gateway_arm["gateway"] = "cloudflare"
+        gateway_arm["gateway_id"] = "strict-tax"
+        gateway_arm["endpoint"] = (
+            "https://api.cloudflare.com/client/v4/accounts/account-id/"
+            "ai/v1/chat/completions"
+        )
+
+        public = router_publish._experiment_dto(  # noqa: SLF001
+            source,
+            router_publish._sha256(b"source"),  # noqa: SLF001
+        )
+        public_gateway = public["arms"][1]
+        self.assertEqual(public_gateway["gateway"], "cloudflare")
+        self.assertEqual(public_gateway["gateway_id"], "strict-tax")
+        self.assertNotIn("auth_env", public_gateway)
 
     def test_published_results_round_trip_through_router_report(self):
         direct_identity = dataclasses.replace(

@@ -674,7 +674,17 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
             reasons.append("route_evidence_failed")
     if route.get("requested_model") != plan.requested_model:
         reasons.append("requested_model_conflict")
-    if route.get("served_model") != plan.requested_model:
+    flexible_gateway_model = plan.gateway in {"vercel", "cloudflare"}
+    served_model = route.get("served_model")
+    served_model_matches = (
+        isinstance(served_model, str)
+        and (
+            served_model in plan.allowed_models
+            if flexible_gateway_model
+            else served_model == plan.requested_model
+        )
+    )
+    if not served_model_matches:
         reasons.append("served_model_conflict")
     provider = route.get("provider")
     if (
@@ -701,7 +711,16 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
                     continue
                 if str(attempt.get("provider", "")).casefold() != plan.requested_provider.casefold():
                     reasons.append("attempt_provider_conflict")
-                if attempt.get("model") != plan.requested_model:
+                attempt_model = attempt.get("model")
+                attempt_model_matches = (
+                    isinstance(attempt_model, str)
+                    and (
+                        attempt_model in plan.allowed_models
+                        if flexible_gateway_model
+                        else attempt_model == plan.requested_model
+                    )
+                )
+                if not attempt_model_matches:
                     reasons.append("attempt_model_conflict")
     return sorted(set(reasons))
 
