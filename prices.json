@@ -1,0 +1,4 @@
+{
+  "laguna-s-2.1": {"input_per_mtok": 0.10, "output_per_mtok": 0.20},
+  "inkling": {"input_per_mtok": 1.00, "output_per_mtok": 4.05}
+}

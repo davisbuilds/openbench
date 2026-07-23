@@ -72,6 +72,8 @@ OPEN_MODELS = {
     "deepseek-v4-flash": {"model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek", "proxy_route": "chat/deepseek"},
     "kimi-k2.7-code":    {"model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "proxy_route": "chat/moonshot"},
     "kimi-k3":    {"model_id": "kimi-k3",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi K3", "proxy_route": "chat/moonshot"},
+    "laguna-s-2.1": {"model_id": "poolside/laguna-s-2.1", "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "OpenRouter Poolside Laguna S 2.1", "proxy_route": "chat/openrouter"},
+    "inkling": {"model_id": "thinkingmachines/inkling", "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "OpenRouter Thinking Machines Inkling", "proxy_route": "chat/openrouter"},
     # CLIProxyAPI owns Codex/ChatGPT subscription OAuth and refresh. The value
     # sent to its local ingress is either its optional ingress key or a harmless
     # placeholder; it is never an OpenAI API key.

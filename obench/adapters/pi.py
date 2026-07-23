@@ -143,6 +143,56 @@ def version():
     return f"{out} ({path})" if path else out
 
 
+_DELTA_MARKER = '"type":"message_update"'
+
+
+def _run_streaming(cmd, cwd, timeout_s, env):
+    """Run pi consuming stdout line-by-line, dropping per-token delta events.
+
+    ``--mode json`` re-emits the FULL accumulated partial message inside every
+    ``message_update`` delta event, so a single long reasoning turn produces
+    output quadratic in its token count (observed: GBs on 32k-token turns,
+    OOM-killing the container). The parser only needs ``turn_end``/``agent_end``
+    events, which carry final content and usage — so delta lines are discarded
+    at read time instead of buffered.
+
+    Returns (stdout_text, stderr_text, returncode, timed_out).
+    """
+    import threading
+
+    proc = subprocess.Popen(
+        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, stdin=subprocess.DEVNULL, env=env,
+    )
+    out_lines, err_chunks = [], []
+
+    def _drain_stdout():
+        for line in proc.stdout:
+            if _DELTA_MARKER not in line:
+                out_lines.append(line)
+        proc.stdout.close()
+
+    def _drain_stderr():
+        for chunk in proc.stderr:
+            err_chunks.append(chunk)
+        proc.stderr.close()
+
+    t_out = threading.Thread(target=_drain_stdout, daemon=True)
+    t_err = threading.Thread(target=_drain_stderr, daemon=True)
+    t_out.start()
+    t_err.start()
+    timed_out = False
+    try:
+        proc.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+        proc.wait()
+    t_out.join(timeout=10)
+    t_err.join(timeout=10)
+    return "".join(out_lines), "".join(err_chunks), proc.returncode, timed_out
+
+
 def _err_tail(exc, limit=2000):
     """Last `limit` chars of a TimeoutExpired's captured output, decoding safely.
 
@@ -175,6 +225,8 @@ OPEN_MODELS = {
     "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek",      "thinking": "medium", "compat": {"supportsStore": False, "supportsDeveloperRole": False, "supportsReasoningEffort": False, "thinkingFormat": "deepseek", "requiresReasoningContentOnAssistantMessages": True}, "thinkingLevelMap": {"off": None}},
     "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "thinking": "medium", "compat": {"supportsStore": False, "supportsDeveloperRole": False, "supportsReasoningEffort": False, "maxTokensField": "max_tokens", "supportsStrictMode": False, "thinkingFormat": "deepseek"}, "thinkingLevelMap": {"off": None}},
     "kimi-k3":    {"provider": "moonshot", "model_id": "kimi-k3",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi K3", "thinking": "medium", "compat": {"supportsStore": False, "supportsDeveloperRole": False, "supportsReasoningEffort": False, "maxTokensField": "max_tokens", "supportsStrictMode": False, "thinkingFormat": "deepseek"}, "thinkingLevelMap": {"off": None}},
+    "laguna-s-2.1": {"provider": "openrouter", "context_window": 262144, "max_tokens": 32768, "model_id": "poolside/laguna-s-2.1", "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "OpenRouter Poolside Laguna S 2.1", "thinking": "medium", "compat": {"supportsStore": False, "supportsDeveloperRole": False, "supportsReasoningEffort": True, "supportsStrictMode": False}, "thinkingLevelMap": {"minimal": "minimal", "low": "low", "medium": "medium", "high": "high", "xhigh": "high"}},
+    "inkling": {"provider": "openrouter", "context_window": 524288, "max_tokens": 32768, "model_id": "thinkingmachines/inkling", "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "OpenRouter Thinking Machines Inkling", "thinking": "medium", "compat": {"supportsStore": False, "supportsDeveloperRole": False, "supportsReasoningEffort": True, "supportsStrictMode": False}, "thinkingLevelMap": {"minimal": "minimal", "low": "low", "medium": "medium", "high": "high", "xhigh": "high"}},
 }
 
 
@@ -234,7 +286,7 @@ def _pi_provider_ext(spec):
         f'      compat: {json.dumps(spec["compat"])},\n'
         f'      thinkingLevelMap: {json.dumps(spec["thinkingLevelMap"])},\n'
         "      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },\n"
-        "      contextWindow: 128000, maxTokens: 8192\n"
+        f"      contextWindow: {spec.get('context_window', 128000)}, maxTokens: {spec.get('max_tokens', 8192)}\n"
         "    }]\n"
         "  });\n"
         "}\n"
@@ -411,18 +463,10 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 instruction,
             ]
 
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=workdir,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                stdin=subprocess.DEVNULL,
-                env=env,
-            )
-        except subprocess.TimeoutExpired as e:
-            full_output = _err_tail(e, limit=None)
+        stdout_text, stderr_text, returncode, timed_out = _run_streaming(
+            cmd, workdir, timeout_s, env)
+        if timed_out:
+            full_output = stdout_text + stderr_text
             return {
                 "completed": False,
                 "error": f"timeout after {timeout_s}s",
@@ -434,17 +478,17 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
                 **_empty_token_usage(),
             }
 
-        combined = (proc.stdout or "") + (proc.stderr or "")
+        combined = stdout_text + stderr_text
         try:
-            tokens, turns, tail, token_usage = _parse_json_with_usage(proc.stdout or "")
+            tokens, turns, tail, token_usage = _parse_json_with_usage(stdout_text)
         except Exception:  # noqa: BLE001 - never let usage parsing break a run
             tokens, turns, tail, token_usage = None, None, "", _empty_token_usage()
         if not tail:
             tail = combined[-2000:]
 
         return {
-            "completed": proc.returncode == 0,
-            "error": None if proc.returncode == 0 else f"exit {proc.returncode}",
+            "completed": returncode == 0,
+            "error": None if returncode == 0 else f"exit {returncode}",
             "output_tail": tail,
             # Optional (ADAPTER_SPEC v1): full untruncated stdout+stderr for the
             # runner's local transcript. LOCAL-ONLY; never published unscrubbed.

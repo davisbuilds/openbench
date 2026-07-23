@@ -106,7 +106,7 @@ AUTH_MOUNTS = {
 
 # Model API keys forwarded into the container when set on the host. Passed as
 # bare ``-e VAR`` (no value), so secrets never appear in argv/logged commands.
-API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "ANTHROPIC_API_KEY", "CURSOR_API_KEY", "CLIPROXYAPI_API_KEY")
+API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "ANTHROPIC_API_KEY", "CURSOR_API_KEY", "CLIPROXYAPI_API_KEY", "OPENROUTER_API_KEY")
 
 _MODEL_API_KEY = {
     "glm-5.2": "ZAI_API_KEY",
@@ -116,6 +116,8 @@ _MODEL_API_KEY = {
     "kimi-k3": "MOONSHOT_API_KEY",
     "gpt-5.6": "CLIPROXYAPI_API_KEY",
     "gpt-5.6-sol": "CLIPROXYAPI_API_KEY",
+    "laguna-s-2.1": "OPENROUTER_API_KEY",
+    "inkling": "OPENROUTER_API_KEY",
 }
 _KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")
 
