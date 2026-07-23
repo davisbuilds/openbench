@@ -42,6 +42,7 @@ REPO_ROOT = SOURCE_ROOT
 ENTRY_PATH = os.path.join(HERE, "entry.py")
 CANDIDATES_PATH = os.path.join(HERE, "candidates.py")
 AUTH_PERSIST_PATH = os.path.join(HERE, "auth_persist.py")
+ROUTER_SPEC_PATH = os.path.join(HERE, "router_spec.py")
 DOCKERFILE_DIR = os.path.join(HERE, "docker")
 RESULT_SENTINEL = "__BENCH_RESULT__"
 DEFAULT_IMAGE = "openbench-harness:latest"
@@ -465,6 +466,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-v", f"{os.path.abspath(adapters_dir)}:/bench/adapters:ro",
         "-v", f"{ENTRY_PATH}:/bench/entry.py:ro",
         "-v", f"{AUTH_PERSIST_PATH}:/bench/auth_persist.py:ro",
+        "-v", f"{ROUTER_SPEC_PATH}:/bench/router_spec.py:ro",
         "-v", f"{os.path.abspath(instruction_path)}:/bench/instruction.txt:ro",
     ]
     candidate_arg = None
