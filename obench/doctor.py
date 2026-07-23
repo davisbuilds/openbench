@@ -14,8 +14,10 @@ Docker daemon/image availability is informational. A successfully inspected
 image whose labels drift from the Dockerfile pins fails the preflight.
 
     python3 -m obench.doctor [--harness codex,pi,...] [--model gpt-5.5-medium]
+    python3 -m obench.doctor --docker-env
 
-Exit status is nonzero if any requested harness fails any of CLI/AUTH/MODEL.
+Exit status is nonzero if any requested harness fails any of CLI/AUTH/MODEL, or
+any ``--docker-env`` check fails.
 
 Auth expectations are mirrored from the adapters (read them, don't invent):
   codex     ~/.codex/auth.json exists (adapter uses ~/.codex login as-is)
@@ -42,6 +44,7 @@ import shlex
 import http.client
 import subprocess
 import sys
+import tomllib
 from urllib.parse import urlsplit
 
 from .bump_clis import (image_pin_mismatches, parse_image_pin_labels,
@@ -56,6 +59,9 @@ DEFAULT_IMAGE = "openbench-harness:latest"
 CHECKS = ("CLI", "VERSION", "AUTH", "MODEL")
 # Candidate-only checks appear in Details (and in the matrix when present).
 CANDIDATE_EXTRA_CHECKS = ("CONFIG", "ENV")
+
+# Docker-env check columns
+DOCKER_ENV_CHECKS = ("BUILDX", "CPUS", "MEMORY", "IMAGES", "AUTH")
 
 # M4 open canonical model -> the env key its provider needs. When --model is one
 # of these, the AUTH check becomes "is this key exported?" instead of the
@@ -72,6 +78,11 @@ FRONTIER_MODEL_ENV = {
     "claude-opus-4-8": "ANTHROPIC_API_KEY",
 }
 KEYS_ENV = "~/.openbench/keys.env"
+
+# Default env-requirements path
+ENV_REQUIREMENTS_PATH = ".openbench/env-requirements.toml"
+# Default packs dir for discovering per-task pinned images
+PACKS_DIR = os.path.join(".openbench", "packs")
 
 
 # --------------------------------------------------------------------------- #
@@ -138,6 +149,16 @@ class Probes:
         except OSError:
             return None
 
+    def read_toml(self, path):
+        """Parse TOML at ``path``; None if missing/invalid."""
+        text = self.read_text(path)
+        if text is None:
+            return None
+        try:
+            return tomllib.loads(text)
+        except tomllib.TOMLDecodeError:
+            return None
+
     def import_adapter(self, name):
         """Import ``obench/adapters/<name>.py`` and return the module."""
         ensure_package_path_on_sys_path()
@@ -148,6 +169,21 @@ class Probes:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
+
+    def listdir(self, path):
+        """List directory entries; return empty list on error."""
+        try:
+            return os.listdir(path)
+        except OSError:
+            return []
+
+    def isdir(self, path):
+        """True if path is a directory."""
+        return os.path.isdir(path)
+
+    def isfile(self, path):
+        """True if path is a file."""
+        return os.path.isfile(path)
 
 
 # --------------------------------------------------------------------------- #
@@ -470,6 +506,287 @@ def check_image_versions(p, harnesses, pins, image=DEFAULT_IMAGE):
 
 
 # --------------------------------------------------------------------------- #
+# Docker-environment checks (--docker-env mode)
+# --------------------------------------------------------------------------- #
+_ENV_REQUIREMENTS_DEFAULT = {"cpus": 4, "memory_gib": 12}
+_AUTH_LANES = (
+    ("codex (subscription)", lambda p: _auth_codex(p)),
+    ("pi (subscription)", lambda p: _auth_pi_provider(p, "openai-codex")),
+    ("opencode (subscription)", lambda p: _auth_opencode_provider(p, "openai")),
+    ("cursor (subscription)", lambda p: _auth_cursor(p)),
+    ("devin (subscription)", lambda p: _auth_devin(p)),
+    ("ANTHROPIC_API_KEY", lambda p: check_open_key(p, "ANTHROPIC_API_KEY")),
+    ("OPENAI_API_KEY", lambda p: check_open_key(p, "OPENAI_API_KEY")),
+    ("DEEPSEEK_API_KEY", lambda p: check_open_key(p, "DEEPSEEK_API_KEY")),
+)
+
+
+def load_env_requirements(p, path=ENV_REQUIREMENTS_PATH):
+    """Load resource requirements from TOML; return dict with defaults."""
+    data = p.read_toml(path)
+    if data is None:
+        return dict(_ENV_REQUIREMENTS_DEFAULT)
+    return {
+        "cpus": int(data.get("cpus", _ENV_REQUIREMENTS_DEFAULT["cpus"])),
+        "memory_gib": int(data.get("memory_gib", _ENV_REQUIREMENTS_DEFAULT["memory_gib"])),
+    }
+
+
+def check_buildx(p):
+    """Check BuildKit/buildx plugin is installed and functional."""
+    if not p.which("docker"):
+        return False, "docker not on PATH"
+    code, out = p.run(["docker", "buildx", "version"])
+    if code == 0 and out.strip():
+        ver = out.strip().splitlines()[0]
+        return True, f"buildx plugin present ({ver})"
+    return False, "buildx plugin not found — install: docker buildx install or docker/buildx-bin"
+
+
+def check_docker_resources(p, requirements):
+    """Check docker daemon CPU and memory meet requirements from env-requirements.toml."""
+    if not p.which("docker"):
+        return False, "docker not on PATH"
+
+    # Check CPUs
+    code_cpu, out_cpu = p.run(["docker", "info", "--format", "{{.NCPU}}"])
+    if code_cpu != 0 or not out_cpu.strip():
+        return False, "docker daemon not responding"
+    try:
+        actual_cpus = float(out_cpu.strip())
+    except (ValueError, TypeError):
+        return False, f"unparseable CPU count: {out_cpu.strip()!r}"
+    req_cpus = requirements.get("cpus", 4)
+    cpu_ok = actual_cpus >= req_cpus
+
+    # Check memory (in GiB)
+    code_mem, out_mem = p.run(["docker", "info", "--format", "{{.MemTotal}}"])
+    if code_mem != 0 or not out_mem.strip():
+        return False, "docker daemon not responding"
+    try:
+        mem_bytes = int(out_mem.strip())
+        actual_mem_gib = mem_bytes / (1024 ** 3)
+    except (ValueError, TypeError):
+        return False, f"unparseable memory: {out_mem.strip()!r}"
+    req_mem = requirements.get("memory_gib", 12)
+    mem_ok = actual_mem_gib >= req_mem
+
+    if cpu_ok and mem_ok:
+        return True, (f"CPUs={actual_cpus:.1f} (req >= {req_cpus})  "
+                      f"Memory={actual_mem_gib:.1f} GiB (req >= {req_mem})")
+    parts = []
+    if not cpu_ok:
+        parts.append(f"CPUs={actual_cpus:.1f} < {req_cpus} (required)")
+    if not mem_ok:
+        parts.append(f"Memory={actual_mem_gib:.1f} GiB < {req_mem} GiB (required)")
+    return False, "; ".join(parts)
+
+
+def discover_task_images(p, packs_dir=PACKS_DIR):
+    """Discover per-task pinned Docker images from installed task packs.
+
+    Returns a dict mapping image_ref (with digest) -> [(pack, task_name)].
+    Images are collected from task.toml files under installed packs.
+    """
+    images = {}
+    if not p.isdir(packs_dir):
+        return images
+
+    for org_name in p.listdir(packs_dir):
+        org_path = os.path.join(packs_dir, org_name)
+        if not p.isdir(org_path):
+            continue
+        for pack_name in p.listdir(org_path):
+            pack_path = os.path.join(org_path, pack_name)
+            if not p.isdir(pack_path):
+                continue
+            for version in p.listdir(pack_path):
+                version_path = os.path.join(pack_path, version)
+                pack_toml = os.path.join(version_path, "pack.toml")
+                pack_data = p.read_toml(pack_toml)
+                pack_kind = (pack_data or {}).get("kind", "")
+                if pack_kind != "tasks":
+                    continue
+                # Scan each task subdirectory for task.toml with docker_image.
+                for task_name in p.listdir(version_path):
+                    task_path = os.path.join(version_path, task_name)
+                    task_toml_path = os.path.join(task_path, "task.toml")
+                    if not (p.isdir(task_path) and p.isfile(task_toml_path)):
+                        continue
+                    task_data = p.read_toml(task_toml_path)
+                    if task_data is None:
+                        continue
+                    image_ref = (task_data.get("docker_image") or "").strip()
+                    if not image_ref:
+                        continue
+                    image_key = image_ref.split("@")[0] if "@" in image_ref else image_ref
+                    source = f"{org_name}/{pack_name}:{version}/{task_name}"
+                    images.setdefault(image_key, []).append({
+                        "ref": image_ref,
+                        "source": source,
+                    })
+    return images
+
+
+def check_task_images(p, images):
+    """Check per-task pinned images: present locally AND functionally probed.
+
+    Each image is first inspected for local presence (docker image inspect).
+    If present, a short exec probe validates it can actually run:
+      docker run --rm <image> python3 -c "print('ok')"
+    This catches corrupt or empty images that pass inspect but fail at runtime
+    (a failure mode observed in image save/load corruption across runtimes).
+    """
+    if not p.which("docker"):
+        return False, "docker not on PATH"
+
+    if not images:
+        return None, "no per-task pinned images found in installed packs (n/a)"
+
+    inspected = {}
+    errors = []
+
+    for image_key, sources in images.items():
+        ref = sources[0]["ref"]
+        # Check image exists via inspect (fast).
+        code_inspect, _ = p.run([
+            "docker", "image", "inspect", ref,
+        ])
+        if code_inspect != 0:
+            errors.append(f"{image_key}: not found locally ({ref})")
+            inspected[image_key] = False
+            continue
+
+        # Functional probe: run the image and exec python3 -c print('ok').
+        code_probe, out_probe = p.run([
+            "docker", "run", "--rm", ref, "python3", "-c", "print('ok')",
+        ], timeout=30)
+        if code_probe != 0:
+            errors.append(f"{image_key}: functional probe FAILED (exit {code_probe})")
+            inspected[image_key] = False
+            continue
+        if "ok" not in (out_probe or "").strip():
+            errors.append(f"{image_key}: functional probe produced unexpected output")
+            inspected[image_key] = False
+            continue
+        inspected[image_key] = True
+
+    if not inspected:
+        return None, "no per-task pinned images found (n/a)"
+
+    all_ok = all(inspected.values())
+    n_ok = sum(1 for v in inspected.values() if v)
+    n_total = len(inspected)
+    if all_ok:
+        return True, f"{n_ok}/{n_total} images present and functional"
+    detail = f"{n_ok}/{n_total} images OK; " + "; ".join(errors[:5])
+    if len(errors) > 5:
+        detail += f" (+{len(errors)-5} more)"
+    return False, detail
+
+
+def check_auth_lanes(p, lanes=_AUTH_LANES):
+    """Check auth freshness per configured lane.
+
+    Each lane is (label: str, check_fn: callable). Returns (ok_all, details)
+    where details is a list of (label, ok, detail).
+    """
+    results = []
+    for label, check_fn in lanes:
+        try:
+            ok, detail = check_fn(p)
+        except Exception as exc:  # noqa: BLE001 - never crash on a single lane
+            ok, detail = False, f"probe errored: {exc}"
+        results.append((label, ok, detail))
+    return results
+
+
+def evaluate_docker_env(p, requirements=None, task_images=None):
+    """Run all --docker-env checks; return (rows, ok)."""
+    if requirements is None:
+        requirements = load_env_requirements(p)
+    if task_images is None:
+        task_images = discover_task_images(p)
+
+    rows = []
+    all_ok = True
+
+    # BUILDX
+    buildx_ok, buildx_detail = check_buildx(p)
+    rows.append({"check": "BUILDX", "ok": buildx_ok, "detail": buildx_detail})
+    if buildx_ok is False:
+        all_ok = False
+
+    # CPUS/MEMORY
+    resource_ok, resource_detail = check_docker_resources(p, requirements)
+    rows.append({"check": "CPUS", "ok": resource_ok, "detail": resource_detail})
+    if resource_ok is False:
+        all_ok = False
+
+    # IMAGES (per-task pinned images)
+    images_ok, images_detail = check_task_images(p, task_images)
+    rows.append({"check": "IMAGES", "ok": images_ok, "detail": images_detail})
+    if images_ok is False:
+        all_ok = False
+
+    # AUTH lanes
+    lane_results = check_auth_lanes(p)
+    n_auth_ok = sum(1 for _, ok, _ in lane_results if ok)
+    n_auth_fail = sum(1 for _, ok, _ in lane_results if not ok)
+    n_auth_info = sum(1 for _, ok, _ in lane_results if ok is None)
+    if n_auth_fail == 0:
+        auth_ok = True
+        auth_detail = f"{n_auth_ok}/{n_auth_ok + n_auth_fail + n_auth_info} lanes fresh"
+    else:
+        auth_ok = False
+        failed = [label for label, ok, _ in lane_results if ok is False]
+        auth_detail = f"{n_auth_ok}/{n_auth_ok + n_auth_fail + n_auth_info} lanes fresh; stale: {', '.join(failed)}"
+    rows.append({"check": "AUTH", "ok": auth_ok, "detail": auth_detail})
+    if auth_ok is False:
+        all_ok = False
+
+    return rows, all_ok, lane_results
+
+
+def format_docker_env_report(rows, lane_results, requirements):
+    """Render the PASS/FAIL table for --docker-env mode."""
+    lines = []
+    lines.append("Docker Environment Preflight")
+    lines.append(f"Requirements: CPUs >= {requirements['cpus']}, "
+                 f"Memory >= {requirements['memory_gib']} GiB")
+    lines.append("")
+
+    # Status table.
+    headers = ["check", "status", "detail"]
+    table = []
+    for row in rows:
+        status = "OK" if row["ok"] is True else ("FAIL" if row["ok"] is False else "INFO")
+        table.append([row["check"], status, row["detail"]])
+
+    widths = [len(h) for h in headers]
+    for cells in table:
+        for i, c in enumerate(cells):
+            widths[i] = max(widths[i], len(str(c)))
+
+    def fmt(cells):
+        return "  ".join(str(c).ljust(widths[i]) for i, c in enumerate(cells))
+
+    lines.append(fmt(headers))
+    lines.append(fmt(["-" * w for w in widths]))
+    for cells in table:
+        lines.append(fmt(cells))
+
+    # Auth lane details.
+    lines.append("")
+    lines.append("Auth lanes:")
+    for label, ok, detail in lane_results:
+        status = "OK" if ok is True else ("FAIL" if ok is False else "INFO")
+        lines.append(f"  [{status:>4}] {label:<30} {detail}")
+
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
 # Candidate preflight (manifest / config-variant)
 # --------------------------------------------------------------------------- #
 def check_manifest_version(p, candidate):
@@ -749,7 +1066,26 @@ def main(argv=None):
     parser.add_argument("--adapters-dir", default=ADAPTERS_DIR,
                         help="adapters directory for stock DOCTOR discovery / "
                              "config-variant base checks")
+    parser.add_argument("--docker-env", action="store_true",
+                        help="preflight Docker environment: buildx, daemon resources, "
+                             "per-task image probe, auth freshness. Independent of "
+                             "--harness checks.")
+    parser.add_argument("--env-requirements", default=ENV_REQUIREMENTS_PATH,
+                        help=f"path to env-requirements.toml (default: {ENV_REQUIREMENTS_PATH})")
     args = parser.parse_args(argv)
+
+    # --docker-env mode: standalone docker environment preflight.
+    if args.docker_env:
+        probes = Probes()
+        requirements = load_env_requirements(probes, args.env_requirements)
+        task_images = discover_task_images(probes)
+        rows, ok, lane_results = evaluate_docker_env(
+            probes, requirements, task_images)
+        report = format_docker_env_report(rows, lane_results, requirements)
+        print(report)
+        print()
+        print(f"Docker environment: {'PASS' if ok else 'FAIL'}")
+        return 0 if ok else 1
 
     candidates = {}
     if args.candidate:

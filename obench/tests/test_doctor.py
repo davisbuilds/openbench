@@ -27,11 +27,16 @@ class FakeProbes:
     ``env_map``     : environment variable -> value
     ``text_map``    : path (expanded) -> file text
     ``http_map``    : URL -> (status, body)
+    ``toml_map``    : path (expanded) -> TOML dict (for env-requirements)
+    ``listdir_map`` : path -> [entries]
+    ``isdir_map``   : path -> bool
+    ``isfile_map``  : path -> bool
     """
 
     def __init__(self, which_map=None, run_map=None, exists_set=None,
                  json_map=None, models_map=None, env_map=None, text_map=None,
-                 http_map=None):
+                 http_map=None, toml_map=None, listdir_map=None,
+                 isdir_map=None, isfile_map=None):
         self.which_map = which_map or {}
         self.run_map = run_map or {}
         self.exists_set = set(exists_set or [])
@@ -40,6 +45,10 @@ class FakeProbes:
         self.env_map = env_map or {}
         self.text_map = text_map or {}
         self.http_map = http_map or {}
+        self.toml_map = toml_map or {}
+        self.listdir_map = listdir_map or {}
+        self.isdir_map = isdir_map or {}
+        self.isfile_map = isfile_map or {}
 
     def which(self, cli):
         return self.which_map.get(cli)
@@ -55,6 +64,9 @@ class FakeProbes:
 
     def read_text(self, path):
         return self.text_map.get(os.path.expanduser(path))
+
+    def read_toml(self, path):
+        return self.toml_map.get(os.path.expanduser(path))
 
     def getenv(self, name):
         return self.env_map.get(name)
@@ -72,6 +84,15 @@ class FakeProbes:
         else:
             mod.MODELS = models
         return mod
+
+    def listdir(self, path):
+        return self.listdir_map.get(path, [])
+
+    def isdir(self, path):
+        return self.isdir_map.get(path, False)
+
+    def isfile(self, path):
+        return self.isfile_map.get(path, False)
 
 
 def all_green_probes():
@@ -91,6 +112,8 @@ def all_green_probes():
             ("grok", "--version"): (0, "grok 0.2.103 (hash)"),
             ("devin", "--version"): (0, "devin 1"),
             ("docker", "info", "--format", "{{.ServerVersion}}"): (0, "27.0"),
+            ("docker", "info", "--format", "{{.NCPU}}"): (0, "8"),
+            ("docker", "info", "--format", "{{.MemTotal}}"): (0, "17179869184"),
             ("docker", "inspect", "--format", "{{json .Config.Labels}}",
              "openbench-harness:latest"): (0, json.dumps({
                  "org.openbench.cli.codex": "0.144.5",
@@ -102,6 +125,7 @@ def all_green_probes():
              })),
             ("opencode", "auth", "list"): (0, "OpenAI oauth\n"),
             ("cursor-agent", "status"): (0, "Logged in as x\n"),
+            ("docker", "buildx", "version"): (0, "buildx 0.20.0"),
         },
         exists_set={os.path.join(home, ".codex", "auth.json"),
                     os.path.join(home, ".pi", "agent", "auth.json"),
@@ -111,6 +135,7 @@ def all_green_probes():
         models_map={h: {"gpt-5.5-medium": "x"} for h in doctor.ALL_HARNESSES},
         http_map={"http://127.0.0.1:8317/v1/models":
                   (200, '{"data":[{"id":"gpt-5.6"}]}')},
+        env_map={"ANTHROPIC_API_KEY": "sk-test", "OPENAI_API_KEY": "sk-test"},
     )
 
 
@@ -238,6 +263,7 @@ class TestEvaluate(unittest.TestCase):
 
     def test_frontier_codex_accepts_keys_env_not_container_secret(self):
         p = all_green_probes()
+        p.env_map.pop("ANTHROPIC_API_KEY", None)
         p.models_map["codex"] = ({}, {"claude-opus-4-8": {"model_id": "claude-opus-4-8"}})
         p.text_map[os.path.expanduser("~/.openbench/keys.env")] = "ANTHROPIC_API_KEY=sk-test\n"
         rows, ok = doctor.evaluate(["codex"], "claude-opus-4-8", p)
@@ -312,6 +338,38 @@ class TestExitCode(unittest.TestCase):
             doctor.Probes = original
         self.assertEqual(rc, 1)
 
+    def test_docker_env_main_returns_zero_on_pass(self):
+        p = all_green_probes()
+        p.env_map["DEEPSEEK_API_KEY"] = "sk-ds-test"
+        p.exists_set.add(os.path.expanduser("~/.pi/agent/auth.json"))
+        p.exists_set.add(os.path.expanduser("~/.config/devin"))
+        p.run_map[("opencode", "auth", "list")] = (0, "OpenAI oauth\n")
+        p.run_map[("cursor-agent", "status")] = (0, "Logged in\n")
+        p.json_map[os.path.expanduser("~/.pi/agent/auth.json")] = {"openai-codex": {}}
+        p.run_map[("docker", "info", "--format", "{{.NCPU}}")] = (0, "8")
+        p.run_map[("docker", "image", "inspect", "test-img@sha256:abc")] = (0, "exists")
+        p.run_map[("docker", "run", "--rm", "test-img@sha256:abc", "python3", "-c", "print('ok')")] = (0, "ok\n")
+        original = doctor.Probes
+        doctor.Probes = lambda: p
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = doctor.main(["--docker-env"])
+        finally:
+            doctor.Probes = original
+        self.assertEqual(rc, 0)
+
+    def test_docker_env_main_returns_nonzero_on_fail(self):
+        p = all_green_probes()
+        del p.which_map["docker"]
+        original = doctor.Probes
+        doctor.Probes = lambda: p
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = doctor.main(["--docker-env"])
+        finally:
+            doctor.Probes = original
+        self.assertEqual(rc, 1)
+
 
 class TestDockerInformational(unittest.TestCase):
     def test_image_status_reports_match_and_drift(self):
@@ -375,6 +433,238 @@ class TestDockerInformational(unittest.TestCase):
         ok, detail = doctor.check_docker(p)
         self.assertIsNone(ok)
         self.assertIn("informational", detail)
+
+
+class TestDockerEnv(unittest.TestCase):
+    """Tests for the --docker-env preflight gate."""
+
+    def _docker_env_probes(self, **overrides):
+        """Base FakeProbes with all --docker-env checks passing."""
+        p = FakeProbes(
+            which_map={"docker": "/b/docker"},
+            run_map={
+                ("docker", "buildx", "version"): (0, "buildx 0.20.0 (docker/bundle)"),
+                ("docker", "info", "--format", "{{.ServerVersion}}"): (0, "27.0"),
+                ("docker", "info", "--format", "{{.NCPU}}"): (0, "8"),
+                ("docker", "info", "--format", "{{.MemTotal}}"): (0, "17179869184"),
+                ("opencode", "auth", "list"): (0, "OpenAI oauth\n"),
+                ("cursor-agent", "status"): (0, "Logged in\n"),
+            },
+            exists_set={os.path.expanduser("~/.codex/auth.json"),
+                        os.path.expanduser("~/.pi/agent/auth.json"),
+                        os.path.expanduser("~/.config/devin")},
+            env_map={"ANTHROPIC_API_KEY": "sk-test", "OPENAI_API_KEY": "sk-test",
+                     "DEEPSEEK_API_KEY": "sk-ds-test"},
+            json_map={os.path.expanduser("~/.pi/agent/auth.json"): {"openai-codex": {}}},
+        )
+        for key, val in overrides.items():
+            setattr(p, key, val)
+        return p
+
+    def test_check_buildx_found(self):
+        p = self._docker_env_probes()
+        ok, detail = doctor.check_buildx(p)
+        self.assertTrue(ok)
+        self.assertIn("buildx", detail.lower())
+
+    def test_check_buildx_missing_fails(self):
+        p = self._docker_env_probes()
+        del p.which_map["docker"]
+        ok, detail = doctor.check_buildx(p)
+        self.assertFalse(ok)
+        self.assertIn("not on PATH", detail)
+
+    def test_check_buildx_plugin_not_found(self):
+        p = self._docker_env_probes()
+        p.run_map[("docker", "buildx", "version")] = (1, "")
+        ok, detail = doctor.check_buildx(p)
+        self.assertFalse(ok)
+        self.assertIn("not found", detail)
+
+    def test_check_docker_resources_meets_requirements(self):
+        p = self._docker_env_probes()
+        ok, detail = doctor.check_docker_resources(p, {"cpus": 4, "memory_gib": 12})
+        self.assertTrue(ok)
+        self.assertIn("CPUs=8.0", detail)
+        self.assertIn("Memory=16.0", detail)
+
+    def test_check_docker_resources_below_memory(self):
+        p = self._docker_env_probes()
+        p.run_map[("docker", "info", "--format", "{{.MemTotal}}")] = (0, "4294967296")  # 4 GiB
+        ok, detail = doctor.check_docker_resources(p, {"cpus": 4, "memory_gib": 12})
+        self.assertFalse(ok)
+        self.assertIn("Memory", detail)
+
+    def test_check_docker_resources_below_cpus(self):
+        p = self._docker_env_probes()
+        p.run_map[("docker", "info", "--format", "{{.NCPU}}")] = (0, "2")
+        ok, detail = doctor.check_docker_resources(p, {"cpus": 4, "memory_gib": 12})
+        self.assertFalse(ok)
+        self.assertIn("CPUs", detail)
+
+    def test_check_docker_resources_no_docker(self):
+        p = self._docker_env_probes()
+        del p.which_map["docker"]
+        ok, detail = doctor.check_docker_resources(p, {"cpus": 4, "memory_gib": 12})
+        self.assertFalse(ok)
+        self.assertIn("not on PATH", detail)
+
+    def test_check_task_images_present_and_functional(self):
+        p = self._docker_env_probes()
+        images = {
+            "img1": [{"ref": "img1@sha256:abc", "source": "org/pack:1/task1"}],
+            "img2": [{"ref": "img2@sha256:def", "source": "org/pack:1/task2"}],
+        }
+        p.run_map[("docker", "image", "inspect", "img1@sha256:abc")] = (0, "exists")
+        p.run_map[("docker", "run", "--rm", "img1@sha256:abc", "python3", "-c", "print('ok')")] = (0, "ok\n")
+        p.run_map[("docker", "image", "inspect", "img2@sha256:def")] = (0, "exists")
+        p.run_map[("docker", "run", "--rm", "img2@sha256:def", "python3", "-c", "print('ok')")] = (0, "ok\n")
+        ok, detail = doctor.check_task_images(p, images)
+        self.assertTrue(ok)
+        self.assertIn("2/2", detail)
+
+    def test_check_task_images_missing_image(self):
+        p = self._docker_env_probes()
+        images = {
+            "img1": [{"ref": "img1@sha256:abc", "source": "org/pack:1/task1"}],
+        }
+        p.run_map[("docker", "image", "inspect", "img1@sha256:abc")] = (1, "not found")
+        ok, detail = doctor.check_task_images(p, images)
+        self.assertFalse(ok)
+        self.assertIn("not found locally", detail)
+
+    def test_check_task_images_functional_probe_failure(self):
+        """Functional probe catches corrupt images that inspect passes."""
+        p = self._docker_env_probes()
+        images = {
+            "img1": [{"ref": "img1@sha256:abc", "source": "org/pack:1/task1"}],
+        }
+        p.run_map[("docker", "image", "inspect", "img1@sha256:abc")] = (0, "exists")
+        p.run_map[("docker", "run", "--rm", "img1@sha256:abc", "python3", "-c", "print('ok')")] = (1, "exec format error")
+        ok, detail = doctor.check_task_images(p, images)
+        self.assertFalse(ok)
+        self.assertIn("functional probe FAILED", detail)
+
+    def test_check_task_images_empty(self):
+        p = self._docker_env_probes()
+        ok, detail = doctor.check_task_images(p, {})
+        self.assertIsNone(ok)
+        self.assertIn("n/a", detail)
+
+    def test_check_auth_lanes_all_fresh(self):
+        p = self._docker_env_probes()
+        results = doctor.check_auth_lanes(p)
+        # With env keys set, all lanes should pass
+        all_ok = all(ok for _, ok, _ in results)
+        self.assertTrue(all_ok)
+
+    def test_check_auth_lanes_some_stale(self):
+        p = self._docker_env_probes()
+        p.exists_set.discard(os.path.expanduser("~/.codex/auth.json"))
+        results = doctor.check_auth_lanes(p)
+        codex_result = next((ok for label, ok, _ in results if "codex" in label.lower()), None)
+        self.assertIsNotNone(codex_result)
+        self.assertFalse(codex_result)
+
+    def test_evaluate_docker_env_all_green(self):
+        p = self._docker_env_probes()
+        p.run_map[("docker", "image", "inspect", "test-img@sha256:abc")] = (0, "exists")
+        p.run_map[("docker", "run", "--rm", "test-img@sha256:abc", "python3", "-c", "print('ok')")] = (0, "ok\n")
+        task_images = {"test-img": [{"ref": "test-img@sha256:abc", "source": "test/1/t"}]}
+        rows, ok, lane_results = doctor.evaluate_docker_env(p, task_images=task_images)
+        self.assertTrue(ok)
+        # BUILDX, CPUS, IMAGES, AUTH = 4 rows
+        self.assertEqual(len(rows), 4)
+        for row in rows:
+            self.assertIsNot(row["ok"], False, f"{row['check']} should not be FAIL")
+
+    def test_evaluate_docker_env_buildx_fails(self):
+        p = self._docker_env_probes()
+        p.run_map[("docker", "buildx", "version")] = (1, "")
+        task_images = {}  # No images -> INFO
+        rows, ok, lane_results = doctor.evaluate_docker_env(p, task_images=task_images)
+        self.assertFalse(ok)
+        buildx = next(r for r in rows if r["check"] == "BUILDX")
+        self.assertFalse(buildx["ok"])
+
+    def test_evaluate_docker_env_cpu_fails(self):
+        p = self._docker_env_probes()
+        p.run_map[("docker", "info", "--format", "{{.NCPU}}")] = (0, "2")
+        task_images = {}
+        rows, ok, lane_results = doctor.evaluate_docker_env(p, task_images=task_images)
+        self.assertFalse(ok)
+        cpu_row = next(r for r in rows if r["check"] == "CPUS")
+        self.assertFalse(cpu_row["ok"])
+
+    def test_load_env_requirements_defaults(self):
+        p = FakeProbes()
+        requirements = doctor.load_env_requirements(p, "/nonexistent")
+        self.assertEqual(requirements["cpus"], 4)
+        self.assertEqual(requirements["memory_gib"], 12)
+
+    def test_load_env_requirements_from_file(self):
+        p = FakeProbes()
+        p.toml_map[os.path.expanduser("custom.toml")] = {"cpus": 8, "memory_gib": 24}
+        requirements = doctor.load_env_requirements(p, "custom.toml")
+        self.assertEqual(requirements["cpus"], 8)
+        self.assertEqual(requirements["memory_gib"], 24)
+
+    def test_discover_task_images_no_packs_dir(self):
+        p = self._docker_env_probes()
+        images = doctor.discover_task_images(p, "/nonexistent")
+        self.assertEqual(images, {})
+
+    def test_discover_task_images_finds_task_images(self):
+        p = self._docker_env_probes()
+        packs_dir = "/tmp/packs"
+        p.isdir_map[packs_dir] = True
+        p.isdir_map["/tmp/packs/org"] = True
+        p.listdir_map[packs_dir] = ["org"]
+        p.listdir_map["/tmp/packs/org"] = ["my-pack"]
+        p.isdir_map["/tmp/packs/org/my-pack"] = True
+        p.listdir_map["/tmp/packs/org/my-pack"] = ["1.0.0"]
+        p.isdir_map["/tmp/packs/org/my-pack/1.0.0"] = True
+        p.listdir_map["/tmp/packs/org/my-pack/1.0.0"] = ["task-a", "task-b"]
+        p.isdir_map["/tmp/packs/org/my-pack/1.0.0/task-a"] = True
+        p.isfile_map["/tmp/packs/org/my-pack/1.0.0/task-a/task.toml"] = True
+        p.toml_map["/tmp/packs/org/my-pack/1.0.0/task-a/task.toml"] = {
+            "docker_image": "img1@sha256:abc",
+        }
+        p.isdir_map["/tmp/packs/org/my-pack/1.0.0/task-b"] = True
+        p.isfile_map["/tmp/packs/org/my-pack/1.0.0/task-b/task.toml"] = True
+        p.toml_map["/tmp/packs/org/my-pack/1.0.0/task-b/task.toml"] = {
+            "docker_image": "img2@sha256:def",
+        }
+        # pack.toml for pack_kind filtering
+        p.isfile_map["/tmp/packs/org/my-pack/1.0.0/pack.toml"] = True
+        p.toml_map["/tmp/packs/org/my-pack/1.0.0/pack.toml"] = {
+            "kind": "tasks",
+        }
+        images = doctor.discover_task_images(p, packs_dir)
+        self.assertIn("img1", images)
+        self.assertIn("img2", images)
+        self.assertEqual(len(images["img1"]), 1)
+        self.assertEqual(images["img1"][0]["source"], "org/my-pack:1.0.0/task-a")
+
+    def test_format_docker_env_report_contains_checks(self):
+        rows = [
+            {"check": "BUILDX", "ok": True, "detail": "buildx present"},
+            {"check": "CPUS", "ok": True, "detail": "CPUs >= 4"},
+            {"check": "IMAGES", "ok": None, "detail": "n/a"},
+            {"check": "AUTH", "ok": True, "detail": "8/8 lanes fresh"},
+        ]
+        lane_results = [("codex", True, "path/to/auth")]
+        report = doctor.format_docker_env_report(rows, lane_results, {"cpus": 4, "memory_gib": 12})
+        self.assertIn("BUILDX", report)
+        self.assertIn("CPUS", report)
+        self.assertIn("IMAGES", report)
+        self.assertIn("AUTH", report)
+        self.assertIn("BUILDX", report)
+        self.assertIn("CPUS", report)
+        self.assertIn("IMAGES", report)
+        self.assertIn("AUTH", report)
+        self.assertIn("Auth lanes:", report)
+        self.assertIn("codex", report)
 
 
 class TestRendering(unittest.TestCase):
