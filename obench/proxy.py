@@ -899,14 +899,18 @@ class CountingProxyServer(ThreadingHTTPServer):
             if ledger is None:
                 self._legacy_in_flight[token] = self._legacy_in_flight.get(token, 0) + 1
                 return False
-            if ledger.state != "ACTIVE":
-                raise RuntimeError(f"cell ledger is {ledger.state.lower()}: {token}")
             if ledger.max_calls is not None and ledger.admitted_calls >= ledger.max_calls:
-                record = not ledger.max_calls_exceeded
+                record = (
+                    not ledger.max_calls_exceeded
+                    and ledger.state != "SEALED"
+                    and ledger.write_error is None
+                )
                 ledger.max_calls_exceeded = True
                 if record:
                     ledger.in_flight += 1
                 raise MaxCallsExceeded(ledger.max_calls, record=record)
+            if ledger.state != "ACTIVE":
+                raise RuntimeError(f"cell ledger is {ledger.state.lower()}: {token}")
             ledger.admitted_calls += 1
             ledger.in_flight += 1
             return True

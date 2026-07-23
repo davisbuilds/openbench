@@ -200,6 +200,46 @@ class RouterProxyLedgerTests(unittest.TestCase):
         self.assertEqual(rejection["error"], "max_calls_exceeded")
         self.assertNotIn(SECRET, seal.path.read_text(encoding="utf-8"))
 
+    def test_exhausted_cell_returns_budget_error_while_draining_and_after_seal(self):
+        token = "draining-capped-cell"
+        self.server.register_cell(token, max_calls=1)
+        statuses = []
+        request = threading.Thread(target=lambda: statuses.append(self._post(token)))
+        request.start()
+        self.assertTrue(self.upstream.started.wait(2))
+
+        seals = []
+        sealing = threading.Thread(
+            target=lambda: seals.append(self.server.seal_cell(token, timeout_s=2))
+        )
+        sealing.start()
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            with self.server._ledger_condition:
+                if self.server._cell_ledgers[token].state == "DRAINING":
+                    break
+            time.sleep(0.01)
+        else:
+            self.fail("cell did not begin draining")
+
+        status, body = self._post(token, include_body=True)
+        self.assertEqual(status, 429)
+        self.assertIn(b'"code":"max_calls_exceeded"', body)
+        self.assertEqual(self.upstream.request_count, 1)
+
+        self.upstream.release.set()
+        request.join(2)
+        sealing.join(2)
+        self.assertEqual(statuses, [200])
+        self.assertEqual(len(seals), 1)
+        self.assertEqual(seals[0].record_count, 2)
+
+        status, body = self._post(token, include_body=True)
+        self.assertEqual(status, 429)
+        self.assertIn(b'"code":"max_calls_exceeded"', body)
+        self.assertEqual(self.upstream.request_count, 1)
+        self.assertEqual(self.server.seal_cell(token).record_count, 2)
+
     def test_unregistered_legacy_cell_keeps_plain_append_behavior(self):
         self.upstream.release.set()
         self.assertEqual(self._post("legacy-cell"), 200)
