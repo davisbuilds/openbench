@@ -266,6 +266,100 @@ class GatewayRequestProfileTests(unittest.TestCase):
             with self.subTest(header=name):
                 self.assertTrue(router_gateways.blocked_request_header(name))
 
+    def test_concentrate_requires_exact_responses_route_and_qualified_model(self):
+        valid = {
+            "route_kind": "gateway",
+            "gateway": "concentrate",
+            "endpoint": "https://api.concentrate.ai/v1/responses",
+            "protocol": "openai_responses",
+            "requested_model": "openai/gpt-4o-mini",
+            "requested_provider": "openai",
+            "track": "gateway_tax",
+        }
+        router_gateways.validate_arm(**valid)
+
+        invalid = (
+            ({"endpoint": valid["endpoint"] + "/"}, "supports only"),
+            ({"protocol": "openai_chat"}, "supports only"),
+            ({"requested_model": "gpt-4o-mini"}, "provider-qualified"),
+            ({"requested_model": "azure/gpt-4o-mini"}, "provider-qualified"),
+            (
+                {"track": "model_router", "router_mode": "fixed"},
+                "model_router supports only openrouter",
+            ),
+        )
+        for changes, message in invalid:
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(
+                    router_gateways.GatewayProfileError, message
+                ):
+                    router_gateways.validate_arm(**{**valid, **changes})
+
+    def test_concentrate_replaces_hostile_routing_cache_and_fallback_controls(self):
+        body = self.base_body()
+        body.update({
+            "routing": {
+                "providers": ["attacker"],
+                "models": ["fallback/model"],
+            },
+            "providerOptions": {"gateway": {"only": ["attacker"]}},
+            "router": {"strategy": "attacker"},
+            "plugins": [{"id": "attacker"}],
+            "routes": [{"provider": "attacker"}],
+            "fallback": {"model": "fallback/model"},
+            "fallbacks": ["fallback/model"],
+            "prompt_cache_options": {"mode": "explicit"},
+            "prompt_cache_retention": "24h",
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "configure",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "caching": {"type": "boolean"},
+                            "cache_control": {"type": "string"},
+                        },
+                        "required": ["caching", "cache_control"],
+                    },
+                },
+            }],
+        })
+
+        router_gateways.shape_body(
+            body, gateway="concentrate", requested_provider="openai"
+        )
+
+        self.assertEqual(body["routing"], {
+            "providers": ["openai"],
+            "models": [],
+        })
+        for key in (
+            "provider", "providerOptions", "models", "order", "sort", "caching",
+            "router", "plugins", "routes", "fallback", "fallbacks", "cache",
+            "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention",
+        ):
+            self.assertNotIn(key, body)
+        self.assertNotIn("cache_control", body["messages"][0])
+        self.assertEqual(
+            body["tools"][0]["function"]["parameters"]["required"],
+            ["caching", "cache_control"],
+        )
+        self.assertIn(
+            "caching",
+            body["tools"][0]["function"]["parameters"]["properties"],
+        )
+        self.assertIn(
+            "cache_control",
+            body["tools"][0]["function"]["parameters"]["properties"],
+        )
+        self.assertEqual(
+            router_gateways.request_headers(
+                gateway="concentrate", secret="secret"
+            ),
+            {"Authorization": "Bearer secret"},
+        )
+
     def test_model_match_distinguishes_exact_revision_from_rolling_alias(self):
         requested = "openai/gpt-5.6-2026-07-01"
         observed = "openai/gpt-5.6"
@@ -960,6 +1054,41 @@ class GatewayEvidenceTests(unittest.TestCase):
                     allowed_models=("openai/gpt-4o-mini",),
                     allowed_providers=("openai",),
                     model_match="rolling_alias",
+                )
+                self.assertFalse(result["route_evidence"]["pass"])
+                self.assertIn(
+                    expected_reason, result["route_evidence"]["reasons"]
+                )
+
+    def test_concentrate_requires_provider_qualified_final_model(self):
+        valid = self.parse(
+            sse({"model": "openai/gpt-4o-mini"}, "[DONE]"),
+            gateway="concentrate",
+            requested_model="openai/gpt-4o-mini",
+            requested_provider="openai",
+            allowed_models=("openai/gpt-4o-mini",),
+            allowed_providers=("openai",),
+        )
+        self.assertTrue(valid["route_evidence"]["pass"])
+        self.assertEqual(valid["route"]["provider"], "openai")
+        self.assertIsNone(valid["route"]["metadata_requested_model"])
+        self.assertEqual(valid["route"]["attempts"], [])
+        self.assertFalse(valid["coverage"]["attempt_evidence"])
+
+        cases = (
+            ("gpt-4o-mini", "unqualified_served_model"),
+            ("azure/gpt-4o-mini", "provider_conflict"),
+            ("openai/gpt-4.1-mini", "served_model_not_allowed"),
+        )
+        for observed, expected_reason in cases:
+            with self.subTest(observed=observed):
+                result = self.parse(
+                    sse({"model": observed}, "[DONE]"),
+                    gateway="concentrate",
+                    requested_model="openai/gpt-4o-mini",
+                    requested_provider="openai",
+                    allowed_models=("openai/gpt-4o-mini",),
+                    allowed_providers=("openai",),
                 )
                 self.assertFalse(result["route_evidence"]["pass"])
                 self.assertIn(

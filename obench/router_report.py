@@ -9,7 +9,9 @@ these result fields:
 * ``route_integrity`` with boolean ``pass`` and a list of reason strings;
 * ``proxy_metrics.calls``, where each call may contain ``timing`` (``ttfb_s``
   and ``semantic_ttft_s``), ``generation`` (paired ``output_tokens`` and
-  ``duration_s``), ``route`` (``provider`` and ``served_model``), and ``costs``.
+  ``duration_s``), ``cache`` (``cached_input_tokens`` and
+  ``cache_write_input_tokens``), ``route`` (``provider`` and ``served_model``),
+  and ``costs``.
 
 ``costs`` maps a basis name to an object containing ``amount_usd``, ``currency``
 and ``effective_at``. Missing conditional timing or cost evidence affects only
@@ -37,6 +39,13 @@ _COST_BASES = (
     "invoice_reconciled",
     "frozen_list_estimate",
 )
+_CALL_COVERAGE_FIELDS = {
+    "ttfb_s": "ttfb",
+    "semantic_ttft_s": "ttft",
+    "mean_cached_input_tokens_per_call": "cached_input_tokens",
+    "cache_hit_call_rate": "cached_input_tokens",
+    "mean_cache_write_input_tokens_per_call": "cache_write_input_tokens",
+}
 _ROLES = frozenset({"direct", "gateway"})
 
 
@@ -347,6 +356,11 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
                 generation,
                 f"row {row_number} call {call_number} generation",
             )
+        cache_value = call.get("cache")
+        cache = _object(
+            {} if cache_value is None else cache_value,
+            f"row {row_number} call {call_number} cache",
+        )
         route = _object(
             call.get("route", {}),
             f"row {row_number} call {call_number} route",
@@ -419,6 +433,16 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
                 ),
                 "output_tokens": output_tokens,
                 "generation_duration": generation_duration,
+                "cached_input_tokens": _optional_number(
+                    cache.get("cached_input_tokens"),
+                    f"row {row_number} call {call_number} "
+                    "cache.cached_input_tokens",
+                ),
+                "cache_write_input_tokens": _optional_number(
+                    cache.get("cache_write_input_tokens"),
+                    f"row {row_number} call {call_number} "
+                    "cache.cache_write_input_tokens",
+                ),
                 "route": _route_label(provider, model),
                 "attempts": len(raw_attempts),
                 "attempts_present": attempts_present,
@@ -459,6 +483,17 @@ def _cell_throughput(cell: Mapping[str, Any]) -> float | None:
     if duration <= 0:
         return None
     return sum(item[0] for item in paired) / duration
+
+
+def _cell_cache_hit_rate(cell: Mapping[str, Any]) -> float | None:
+    values = [
+        call["cached_input_tokens"]
+        for call in cell["calls"]
+        if call["cached_input_tokens"] is not None
+    ]
+    if not values:
+        return None
+    return sum(value > 0 for value in values) / len(values)
 
 
 def _cell_cost(cell: Mapping[str, Any], basis: str) -> float | None:
@@ -755,6 +790,13 @@ def aggregate(
             "ttfb_s": lambda cell: _cell_call_metric(cell, "ttfb"),
             "semantic_ttft_s": lambda cell: _cell_call_metric(cell, "ttft"),
             "throughput_tokens_per_s": _cell_throughput,
+            "mean_cached_input_tokens_per_call": lambda cell: _cell_call_metric(
+                cell, "cached_input_tokens"
+            ),
+            "cache_hit_call_rate": _cell_cache_hit_rate,
+            "mean_cache_write_input_tokens_per_call": lambda cell: _cell_call_metric(
+                cell, "cache_write_input_tokens"
+            ),
         }
         metrics = {}
         for name, getter in getters.items():
@@ -767,7 +809,7 @@ def aggregate(
                 replicates=bootstrap_replicates,
                 seed=_seed(bootstrap_seed, f"arm:{arm_id}:{name}"),
             )
-            if name in ("ttfb_s", "semantic_ttft_s", "throughput_tokens_per_s"):
+            if name in _CALL_COVERAGE_FIELDS or name == "throughput_tokens_per_s":
                 call_total = sum(
                     len(cell["calls"])
                     for cells in cells_by_task.values()
@@ -784,7 +826,7 @@ def aggregate(
                         and call["generation_duration"] > 0
                     )
                 else:
-                    call_name = "ttfb" if name == "ttfb_s" else "ttft"
+                    call_name = _CALL_COVERAGE_FIELDS[name]
                     covered_calls = sum(
                         1
                         for cells in cells_by_task.values()
@@ -969,6 +1011,13 @@ def aggregate(
         "ttfb_s": lambda cell: _cell_call_metric(cell, "ttfb"),
         "semantic_ttft_s": lambda cell: _cell_call_metric(cell, "ttft"),
         "throughput_tokens_per_s": _cell_throughput,
+        "mean_cached_input_tokens_per_call": lambda cell: _cell_call_metric(
+            cell, "cached_input_tokens"
+        ),
+        "cache_hit_call_rate": _cell_cache_hit_rate,
+        "mean_cache_write_input_tokens_per_call": lambda cell: _cell_call_metric(
+            cell, "cache_write_input_tokens"
+        ),
         **{
             f"cost:{basis}": (lambda cell, basis=basis: _cell_cost(cell, basis))
             for basis in _COST_BASES

@@ -149,7 +149,7 @@ class OpenAIChatSSEParser:
         self._direct_model_conflict = False
         self._direct_provider_conflict = False
         self._top_level_provider: str | None = None
-        self._usage: dict[str, int] | None = None
+        self._usage: dict[str, Any] | None = None
         self._events = 0
         self._ignored_events = 0
         self._malformed_events = 0
@@ -433,6 +433,21 @@ class OpenAIChatSSEParser:
                     clean["output_tokens"] = completion
                 if total is not None:
                     clean["total_tokens"] = total
+                raw_details = usage.get("input_tokens_details")
+                if raw_details is None:
+                    raw_details = usage.get("prompt_tokens_details")
+                if isinstance(raw_details, Mapping):
+                    details = {}
+                    for key in (
+                        "cached_tokens",
+                        "cache_write_tokens",
+                        "cached_tokens_created",
+                    ):
+                        count = _token_count(raw_details.get(key))
+                        if count is not None:
+                            details[key] = count
+                    if details:
+                        clean["input_tokens_details"] = details
                 if clean:
                     self._usage = clean
                     usage_observed = True

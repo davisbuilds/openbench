@@ -744,6 +744,30 @@ def _observed_timestamp(value: Any) -> str | None:
     return value
 
 
+def _cache_accounting(metrics: Mapping[str, Any]) -> dict[str, int | None]:
+    usage = metrics.get("usage")
+    details = (
+        usage.get("input_tokens_details")
+        if isinstance(usage, Mapping)
+        else None
+    )
+    details = details if isinstance(details, Mapping) else {}
+
+    def count(key: str) -> int | None:
+        value = details.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+        return None
+
+    cache_write = count("cache_write_tokens")
+    if cache_write is None:
+        cache_write = count("cached_tokens_created")
+    return {
+        "cached_input_tokens": count("cached_tokens"),
+        "cache_write_input_tokens": cache_write,
+    }
+
+
 def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> list[str]:
     route = metrics.get("route")
     stream = metrics.get("stream")
@@ -804,7 +828,7 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
     attempts = route.get("attempts")
     if plan.route_kind == "gateway":
         if (
-            plan.gateway != "cloudflare"
+            plan.gateway not in {"cloudflare", "concentrate"}
             and route.get("metadata_requested_model") != plan.requested_model
         ):
             reasons.append("metadata_requested_model_conflict")
@@ -875,6 +899,7 @@ def _proxy_evidence(
                     "provider": plan.requested_provider,
                     "served_model": plan.requested_model,
                 },
+                "cache": None,
                 "costs": None,
             })
             continue
@@ -888,6 +913,7 @@ def _proxy_evidence(
                     "provider": plan.requested_provider,
                     "served_model": plan.requested_model,
                 },
+                "cache": None,
                 "costs": None,
             })
             continue
@@ -917,6 +943,7 @@ def _proxy_evidence(
                 "timing": metrics.get("timing"),
                 "generation": metrics.get("generation"),
                 "route": normalized_route,
+                "cache": _cache_accounting(metrics),
                 "costs": costs,
             }
         )

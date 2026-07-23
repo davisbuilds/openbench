@@ -404,6 +404,10 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
                     "model": "gpt-4o-mini-2024-07-18",
                     "usage": {
                         "input_tokens": 13,
+                        "input_tokens_details": {
+                            "cached_tokens": 0,
+                            "cache_write_tokens": 0,
+                        },
                         "output_tokens": 3,
                         "total_tokens": 16,
                     },
@@ -424,6 +428,10 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertEqual(result["route"]["served_model"], "gpt-4o-mini-2024-07-18")
         self.assertEqual(result["usage"], {
             "input_tokens": 13,
+            "input_tokens_details": {
+                "cached_tokens": 0,
+                "cache_write_tokens": 0,
+            },
             "output_tokens": 3,
             "total_tokens": 16,
         })
@@ -501,6 +509,75 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertEqual(result["route"]["provider"], "openai")
         self.assertEqual(result["route"]["served_model"], "gpt-4o-mini-2024-07-18")
         self.assertTrue(result["route_evidence"]["pass"])
+
+    def test_concentrate_responses_derives_provider_without_fabricating_metadata(self):
+        result = router_metrics.parse_responses_sse(
+            [(1.0, sse(
+                {
+                    "type": "response.created",
+                    "response": {"model": "openai/gpt-4o-mini"},
+                },
+                {"type": "response.output_text.delta", "delta": "ok"},
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "model": "openai/gpt-4o-mini",
+                        "usage": {
+                            "input_tokens": 5,
+                            "input_tokens_details": {"cached_tokens": 0},
+                            "output_tokens": 1,
+                        },
+                    },
+                },
+            ))],
+            requested_model="openai/gpt-4o-mini",
+            started_at=0.0,
+            completed_at=2.0,
+            route_kind="gateway",
+            requested_provider="openai",
+            allowed_models=("openai/gpt-4o-mini",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+            gateway="concentrate",
+        )
+        self.assertEqual(result["route"]["provider"], "openai")
+        self.assertEqual(result["route"]["served_model"], "openai/gpt-4o-mini")
+        self.assertIsNone(result["route"]["metadata_requested_model"])
+        self.assertEqual(result["route"]["attempts"], [])
+        self.assertFalse(result["coverage"]["attempt_evidence"])
+        self.assertTrue(result["route_evidence"]["pass"])
+
+    def test_responses_cache_activity_is_preserved_without_route_invalidation(self):
+        result = router_metrics.parse_responses_sse(
+            [(1.0, sse({
+                "type": "response.completed",
+                "response": {
+                    "model": "gpt-4o-mini",
+                    "usage": {
+                        "input_tokens": 12,
+                        "input_tokens_details": {
+                            "cached_tokens": 8,
+                            "cache_write_tokens": 3,
+                        },
+                        "output_tokens": 2,
+                        "total_tokens": 14,
+                    },
+                },
+            }))],
+            requested_model="gpt-4o-mini",
+            started_at=0.0,
+            completed_at=2.0,
+            route_kind="direct",
+            requested_provider="openai",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("openai",),
+        )
+        self.assertEqual(result["usage"]["input_tokens_details"], {
+            "cached_tokens": 8,
+            "cache_write_tokens": 3,
+        })
+        self.assertTrue(result["route_evidence"]["pass"])
+        self.assertEqual(result["route_evidence"]["reasons"], [])
 
 
 if __name__ == "__main__":

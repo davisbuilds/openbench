@@ -122,6 +122,7 @@ def call(
     costs=True,
     attempts=None,
     attempts_present=False,
+    cache=None,
 ):
     bases = {}
     if costs:
@@ -137,7 +138,7 @@ def call(
                 "effective_at": "2026-07-01T00:00:00Z",
             },
         }
-    return {
+    result = {
         "timing": {"ttfb_s": ttfb, "semantic_ttft_s": ttft},
         "generation": {"output_tokens": tokens, "duration_s": generation_s},
         "route": {
@@ -148,6 +149,9 @@ def call(
         },
         "costs": bases,
     }
+    if cache is not None:
+        result["cache"] = cache
+    return result
 
 
 class RouterReportTests(unittest.TestCase):
@@ -459,6 +463,112 @@ class RouterReportTests(unittest.TestCase):
         coverage = report["arms"]["gateway"]["metrics"]["ttfb_s"]["call_coverage"]
         self.assertEqual(coverage, {"covered": 3, "total": 4, "ratio": 0.75})
 
+    def test_cache_metrics_are_task_weighted_with_paired_contrasts(self):
+        rows = self.complete_rows()
+        gateway_values = {
+            ("task_a", 1): (20, 10),
+            ("task_a", 2): (40, 20),
+            ("task_b", 1): (0, 30),
+            ("task_b", 2): (80, 40),
+        }
+        for row in rows:
+            task = row["identity"]["task"]["name"]
+            repetition = row["identity"]["schedule"]["repetition"]
+            cached, written = (
+                (0, 0)
+                if row["arm_role"] == "direct"
+                else gateway_values[(task, repetition)]
+            )
+            row["proxy_metrics"]["calls"][0]["cache"] = {
+                "cached_input_tokens": cached,
+                "cache_write_input_tokens": written,
+            }
+
+        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        metrics = report["arms"]["gateway"]["metrics"]
+
+        self.assertEqual(
+            metrics["mean_cached_input_tokens_per_call"]["estimate"], 35.0
+        )
+        self.assertEqual(metrics["cache_hit_call_rate"]["estimate"], 0.75)
+        self.assertEqual(
+            metrics["mean_cache_write_input_tokens_per_call"]["estimate"], 25.0
+        )
+        self.assertEqual(
+            report["arms"]["direct"]["metrics"]["cache_hit_call_rate"]["estimate"],
+            0.0,
+        )
+        for name in (
+            "mean_cached_input_tokens_per_call",
+            "cache_hit_call_rate",
+            "mean_cache_write_input_tokens_per_call",
+        ):
+            self.assertEqual(
+                metrics[name]["call_coverage"],
+                {"covered": 4, "total": 4, "ratio": 1.0},
+            )
+            self.assertEqual(
+                metrics[name]["cell_coverage"],
+                {"covered": 4, "total": 4, "ratio": 1.0},
+            )
+            self.assertEqual(
+                metrics[name]["task_coverage"],
+                {"covered": 2, "total": 2, "ratio": 1.0},
+            )
+
+        contrasts = report["paired_contrasts"]["gateway"]["metrics"]
+        self.assertEqual(
+            contrasts["mean_cached_input_tokens_per_call"]["estimate"], 35.0
+        )
+        self.assertEqual(contrasts["cache_hit_call_rate"]["estimate"], 0.75)
+        self.assertEqual(
+            contrasts["mean_cache_write_input_tokens_per_call"]["estimate"], 25.0
+        )
+
+    def test_missing_cache_values_reduce_coverage_without_becoming_zero(self):
+        rows = self.complete_rows()
+        for row in rows:
+            row["proxy_metrics"]["calls"][0]["cache"] = {
+                "cached_input_tokens": 10,
+                "cache_write_input_tokens": 20,
+            }
+        gateway_rows = [row for row in rows if row["arm_role"] == "gateway"]
+        gateway_rows[0]["proxy_metrics"]["calls"][0].pop("cache")
+        gateway_rows[1]["proxy_metrics"]["calls"][0]["cache"].pop(
+            "cache_write_input_tokens"
+        )
+
+        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        metrics = report["arms"]["gateway"]["metrics"]
+        cached = metrics["mean_cached_input_tokens_per_call"]
+        written = metrics["mean_cache_write_input_tokens_per_call"]
+
+        self.assertEqual(cached["estimate"], 10.0)
+        self.assertEqual(
+            cached["call_coverage"], {"covered": 3, "total": 4, "ratio": 0.75}
+        )
+        self.assertEqual(
+            cached["cell_coverage"], {"covered": 3, "total": 4, "ratio": 0.75}
+        )
+        self.assertEqual(
+            cached["task_coverage"], {"covered": 2, "total": 2, "ratio": 1.0}
+        )
+        self.assertEqual(written["estimate"], 20.0)
+        self.assertEqual(
+            written["call_coverage"], {"covered": 2, "total": 4, "ratio": 0.5}
+        )
+        self.assertEqual(
+            written["cell_coverage"], {"covered": 2, "total": 4, "ratio": 0.5}
+        )
+        self.assertEqual(
+            written["task_coverage"], {"covered": 1, "total": 2, "ratio": 0.5}
+        )
+        contrast = report["paired_contrasts"]["gateway"]["metrics"][
+            "mean_cache_write_input_tokens_per_call"
+        ]
+        self.assertEqual(contrast["paired_block_coverage"]["covered"], 2)
+        self.assertEqual(contrast["paired_task_coverage"]["covered"], 1)
+
     def test_bootstrap_and_json_are_deterministic_and_safe(self):
         first = router_report.aggregate(
             self.complete_rows(), bootstrap_replicates=100, bootstrap_seed=99
@@ -525,6 +635,16 @@ class RouterReportTests(unittest.TestCase):
             "currency"
         ] = "EUR"
         with self.assertRaisesRegex(router_report.RouterReportError, "must be USD"):
+            router_report.aggregate(rows, bootstrap_replicates=10)
+
+        rows = self.complete_rows()
+        rows[0]["proxy_metrics"]["calls"][0]["cache"] = {
+            "cached_input_tokens": -1,
+            "cache_write_input_tokens": 0,
+        }
+        with self.assertRaisesRegex(
+            router_report.RouterReportError, "cached_input_tokens"
+        ):
             router_report.aggregate(rows, bootstrap_replicates=10)
 
 

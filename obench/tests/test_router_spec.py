@@ -461,21 +461,68 @@ class RouterExperimentTests(unittest.TestCase):
         with self.assertRaisesRegex(RouterSpecError, "private_router"):
             parse_experiment_toml(manifest().replace("api.openai.com", "127.0.0.1"))
 
-    def test_gateway_profiles_are_explicit_and_concentrate_is_admission_blocked(self):
+    def test_gateway_profiles_are_explicit_and_concentrate_responses_is_admitted(self):
         with self.assertRaisesRegex(RouterSpecError, "requires gateway"):
             parse_experiment_toml(manifest(gateway_extra=(
                 'direct_control_arm_id = "direct-openai"'
             )))
         with self.assertRaisesRegex(RouterSpecError, "must not declare gateway"):
             parse_experiment_toml(manifest(direct_extra='gateway = "openrouter"'))
-        with self.assertRaisesRegex(
-            RouterSpecError,
-            "Gateway Tax is unsupported for concentrate",
-        ):
-            parse_experiment_toml(manifest(gateway_extra=(
+        concentrate = manifest(
+            gateway_auth='auth_env = "CONCENTRATE_API_KEY"',
+            gateway_extra=(
                 'gateway = "concentrate"\n'
                 'direct_control_arm_id = "direct-openai"'
-            )))
+            ),
+        ).replace(
+            'protocol = "openai_chat"', 'protocol = "openai_responses"'
+        ).replace(
+            "https://api.openai.com/v1/chat/completions",
+            "https://api.openai.com/v1/responses",
+        ).replace(
+            "https://openrouter.ai/api/v1/chat/completions",
+            "https://api.concentrate.ai/v1/responses",
+        )
+        concentrate = concentrate.rsplit(
+            'requested_model = "gpt-test-2026-07-01"', 1
+        )
+        concentrate = (
+            'requested_model = "openai/gpt-test-2026-07-01"'
+        ).join(concentrate)
+        concentrate = concentrate.rsplit(
+            'allowed_models = ["gpt-test-2026-07-01"]', 1
+        )
+        concentrate = (
+            'allowed_models = ["openai/gpt-test-2026-07-01"]'
+        ).join(concentrate)
+        parsed = parse_experiment_toml(concentrate)
+        self.assertEqual(parsed.arms[1].gateway, "concentrate")
+
+        invalid = (
+            (
+                concentrate.replace(
+                    "https://api.concentrate.ai/v1/responses",
+                    "https://api.concentrate.ai/v1/chat/completions",
+                ),
+                "endpoint path must end with /responses",
+            ),
+            (
+                concentrate.replace(
+                    'requested_model = "openai/gpt-test-2026-07-01"',
+                    'requested_model = "gpt-test-2026-07-01"',
+                    1,
+                ).replace(
+                    'allowed_models = ["openai/gpt-test-2026-07-01"]',
+                    'allowed_models = ["gpt-test-2026-07-01"]',
+                    1,
+                ),
+                "provider-qualified",
+            ),
+        )
+        for text, message in invalid:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(RouterSpecError, message):
+                    parse_experiment_toml(text)
 
     def test_vercel_is_admitted_and_cloudflare_requires_logs_verification(self):
         vercel = manifest(

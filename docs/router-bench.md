@@ -123,9 +123,10 @@ or harness switch is involved.
 specifies the matched comparison across direct OpenAI, OpenRouter, Vercel,
 Cloudflare, and Concentrate. Every arm uses Pi's native `openai_responses`
 protocol, uses the canonical comparison key `openai/gpt-4o-mini`, targets the
-OpenAI provider, and disables fallback, cache, and client retries. Its one
-`make-it-run` task and ten repetitions form ten matched blocks and 50 cells.
-With `max_calls = 8` per cell, the explicit ceiling is 400 paid model calls.
+OpenAI provider, and disables fallback, client retries, and explicit gateway
+response caches or caller cache controls. Its one `make-it-run` task and ten
+repetitions form ten matched blocks and 50 cells. With `max_calls = 8` per cell,
+the explicit ceiling is 400 paid model calls.
 
 All five arms must run as the same experiment and appear together in each
 complete matched block; separate gateway runs must not be pooled. A missing
@@ -136,7 +137,7 @@ report.
 The proxy recognizes Responses SSE event types, measures semantic TTFT from
 output-text, refusal, or function-call argument deltas, and extracts served
 model and token usage from the nested final `response.completed` object. A
-missing completed event, model, usage, or Cloudflare provider lock fails closed
+missing completed event, model, usage, or required provider lock fails closed
 under the same sealed-ledger rules as Chat.
 
 Responses supports the matched `temperature` and `top_p` controls used here but
@@ -147,15 +148,27 @@ from both direct and gateway requests, Cloudflare receives
 `cf-aig-skip-cache: true` and `cf-aig-max-attempts: 1`, and client retries remain
 zero.
 
+Those controls disable explicit gateway response caching and prevent the caller
+from selecting cache behavior. They do not disable provider-native OpenAI prompt
+caching, which may still occur upstream and is intentionally measured as part
+of each gateway's behavior. Reports expose task-weighted per-arm
+`mean_cached_input_tokens_per_call`, `cache_hit_call_rate`, and
+`mean_cache_write_input_tokens_per_call`, each with call, cell, and task
+coverage. Compare these per-arm metrics across gateways; direct OpenAI and the
+paired gateway-minus-direct contrasts are secondary references for separating
+gateway behavior from the direct serving path. Missing cache values reduce
+coverage rather than being interpreted as zero.
+
 On 2026-07-23 raw streaming probes against OpenRouter, Vercel, and Concentrate
 returned HTTP 200 and a terminal `response.completed` event. Concentrate's
 verified endpoint is `https://api.concentrate.ai/v1/responses`, authenticated
 through `CONCENTRATE_API_KEY`, with requested model
 `openai/gpt-4o-mini`. Its final streamed model is provider-qualified, but the
-response exposes no attempt metadata. The probe establishes wire compatibility,
-not complete Router Bench route evidence; the current runtime therefore remains
-expected to reject the Concentrate arm until its strict gateway profile can
-admit that evidence contract.
+response exposes no attempt metadata. The accepted Concentrate profile pins the
+OpenAI provider in the request and uses that provider-qualified final model as
+the model and provider lock. OpenBench therefore does not claim attempt or
+fallback evidence for Concentrate; missing or conflicting final-model evidence
+still fails route integrity and excludes the complete matched block.
 
 Validate and run it independently:
 

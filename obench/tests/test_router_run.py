@@ -496,6 +496,125 @@ direct_control_arm_id = "direct"
             router_run._route_reasons(cloudflare_metrics, cloudflare),
             [],
         )
+        concentrate = dataclasses.replace(
+            cloudflare,
+            gateway="concentrate",
+            requested_model="openai/fake-model",
+            allowed_models=("openai/fake-model",),
+        )
+        concentrate_metrics = metrics(served="openai/fake-model")
+        concentrate_metrics["route"]["requested_model"] = "openai/fake-model"
+        concentrate_metrics["route"]["metadata_requested_model"] = None
+        concentrate_metrics["route"]["served_model"] = "openai/fake-model"
+        concentrate_metrics["route"]["attempts"] = []
+        self.assertEqual(
+            router_run._route_reasons(concentrate_metrics, concentrate),
+            [],
+        )
+
+    def test_cache_activity_is_reported_without_invalidating_cell(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = plans[0]
+        metrics = {
+            "usage": {
+                "input_tokens": 5,
+                "input_tokens_details": {
+                    "cached_tokens": 4,
+                    "cache_write_tokens": 0,
+                },
+                "output_tokens": 2,
+            },
+            "route": {
+                "requested_model": plan.requested_model,
+                "metadata_requested_model": None,
+                "served_model": plan.requested_model,
+                "provider": plan.requested_provider,
+                "attempts": [],
+            },
+            "stream": {"done": True},
+            "route_evidence": {
+                "pass": True,
+                "reasons": [],
+            },
+        }
+        calls, integrity, infrastructure = router_run._proxy_evidence(
+            [{
+                "status": 200,
+                "ts": "2026-07-22T12:00:00Z",
+                "router_metrics": metrics,
+            }],
+            {plan.canonical_model: router_run.Price(
+                router_run.Decimal("1"),
+                router_run.Decimal("1"),
+                "2026-07-22",
+            )},
+            experiment.budget,
+            plan,
+        )
+        self.assertTrue(integrity["pass"])
+        self.assertEqual(integrity["reasons"], [])
+        self.assertIsNone(infrastructure)
+        self.assertEqual(calls[0]["cache"], {
+            "cached_input_tokens": 4,
+            "cache_write_input_tokens": 0,
+        })
+
+        metrics["usage"]["input_tokens_details"] = {
+            "cached_tokens": 0,
+            "cache_write_tokens": 3,
+        }
+        calls, integrity, infrastructure = router_run._proxy_evidence(
+            [{
+                "status": 200,
+                "ts": "2026-07-22T12:00:00Z",
+                "router_metrics": metrics,
+            }],
+            {plan.canonical_model: router_run.Price(
+                router_run.Decimal("1"),
+                router_run.Decimal("1"),
+                "2026-07-22",
+            )},
+            experiment.budget,
+            plan,
+        )
+        self.assertTrue(integrity["pass"])
+        self.assertEqual(integrity["reasons"], [])
+        self.assertIsNone(infrastructure)
+        self.assertEqual(calls[0]["cache"], {
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 3,
+        })
+
+        metrics["usage"]["input_tokens_details"] = {
+            "cached_tokens": 0,
+            "cached_tokens_created": 7,
+        }
+        calls, integrity, infrastructure = router_run._proxy_evidence(
+            [{
+                "status": 200,
+                "ts": "2026-07-22T12:00:00Z",
+                "router_metrics": metrics,
+            }],
+            {plan.canonical_model: router_run.Price(
+                router_run.Decimal("1"),
+                router_run.Decimal("1"),
+                "2026-07-22",
+            )},
+            experiment.budget,
+            plan,
+        )
+        self.assertTrue(integrity["pass"])
+        self.assertEqual(integrity["reasons"], [])
+        self.assertIsNone(infrastructure)
+        self.assertEqual(calls[0]["cache"], {
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 7,
+        })
 
     def test_vercel_reported_cost_is_timestamped_and_separate_from_frozen_price(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)

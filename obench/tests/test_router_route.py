@@ -9,6 +9,7 @@ import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
 
 from obench import proxy
 from obench import router_spec
@@ -193,6 +194,7 @@ class RouterRouteTests(unittest.TestCase):
                 "top_p": 0.1,
                 "seed": 99,
                 "prompt_cache_key": "client-cache",
+                "safety_identifier": "client-safety",
             },
         )
         self.assertEqual(status, 200)
@@ -203,7 +205,12 @@ class RouterRouteTests(unittest.TestCase):
         self.assertEqual(request["body"]["top_p"], 1.0)
         self.assertNotIn("seed", request["body"])
         self.assertNotIn("prompt_cache_key", request["body"])
-        self.server.seal_cell(token)
+        self.assertEqual(request["body"]["safety_identifier"], "client-safety")
+        rows = self._seal_rows(token)
+        ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
+        self.assertNotIn("client-cache", ledger)
+        self.assertNotIn("client-safety", ledger)
+        self.assertNotIn("client-safety", json.dumps(rows))
 
     def _register(
         self,
@@ -275,6 +282,7 @@ class RouterRouteTests(unittest.TestCase):
                 "provider": {"only": ["attacker"], "allow_fallbacks": True},
                 "cache": True,
                 "prompt_cache_key": "client-cache",
+                "safety_identifier": "client-safety",
                 "temperature": 0.8,
                 "top_p": 0.1,
                 "seed": 99,
@@ -313,6 +321,7 @@ class RouterRouteTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", request["body"])
         self.assertNotIn("cache", request["body"])
         self.assertNotIn("prompt_cache_key", request["body"])
+        self.assertEqual(request["body"]["safety_identifier"], "client-safety")
         self.assertNotIn("cache_control", request["body"]["messages"][0])
         self.assertEqual(request["body"]["provider"], {
             "only": ["openai"],
@@ -446,6 +455,106 @@ class RouterRouteTests(unittest.TestCase):
         for key in ("provider", "models", "order", "sort", "caching"):
             self.assertNotIn(key, request["body"])
         self.assertNotIn("cache_control", request["body"]["messages"][0])
+
+    def test_concentrate_responses_rewrites_routing_and_isolates_secrets(self):
+        token = "concentrate-cell"
+        plan = dataclasses.replace(
+            route_plan(
+                endpoint="https://api.concentrate.ai/v1/responses",
+                route_kind="gateway",
+                arm_id="concentrate",
+                arm_digest="c" * 64,
+                gateway="concentrate",
+                protocol="openai_responses",
+            ),
+            requested_model="openai/gpt-route-test",
+            allowed_models=("openai/gpt-route-test",),
+            private_router=False,
+            private_host_allowlist=(),
+        )
+        self.server.register_cell(token)
+        self.server.register_route(token, plan, secret_plan(plan.arm_id))
+        fixture_host, fixture_port = self.upstream.server_address[:2]
+
+        class FixtureHTTPSConnection(http.client.HTTPConnection):
+            def __init__(self, _host, port=None, timeout=None):
+                super().__init__(fixture_host, fixture_port, timeout=timeout)
+
+        with mock.patch.object(
+            proxy.http.client, "HTTPSConnection", FixtureHTTPSConnection
+        ):
+            statuses = []
+            for call in range(2):
+                status, _ = self._post(
+                    token,
+                    plan.arm_digest,
+                    body={
+                        "model": "attacker/model",
+                        "input": PRIVATE_PROMPT,
+                        "routing": {
+                            "providers": ["attacker"],
+                            "models": ["fallback/model"],
+                        },
+                        "fallback": {"model": "fallback/model"},
+                        "prompt_cache_key": f"client-cache-{call}",
+                        "prompt_cache_options": {"mode": "explicit"},
+                        "cache_control": {"type": "ephemeral"},
+                        "safety_identifier": f"client-safety-{call}",
+                        "seed": 99,
+                    },
+                    headers={
+                        "authorization": f"Bearer {CLIENT_SECRET}",
+                        "x-api-key": CLIENT_SECRET,
+                        "cookie": f"session={CLIENT_SECRET}",
+                    },
+                )
+                statuses.append(status)
+
+        self.assertEqual(statuses, [200, 200])
+        requests = self.upstream.requests[-2:]
+        for call, request in enumerate(requests):
+            self.assertEqual(request["path"], "/v1/responses")
+            self.assertEqual(
+                request["headers"]["authorization"], f"Bearer {HOST_SECRET}"
+            )
+            self.assertNotIn("x-api-key", request["headers"])
+            self.assertNotIn("cookie", request["headers"])
+            self.assertEqual(request["body"]["model"], plan.requested_model)
+            self.assertEqual(request["body"]["routing"], {
+                "providers": ["openai"],
+                "models": [],
+            })
+            for key in (
+                "fallback", "prompt_cache_key", "prompt_cache_options",
+                "cache_control", "seed",
+            ):
+                self.assertNotIn(key, request["body"])
+            self.assertEqual(
+                request["body"]["safety_identifier"], f"client-safety-{call}"
+            )
+
+        rows = self._seal_rows(token)
+        ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
+        request_rows = [
+            row for row in rows if row.get("record_type") != "ledger_seal"
+        ]
+        self.assertEqual(len(request_rows), 2)
+        self.assertEqual(
+            request_rows[0]["router_arm"]["arm_digest"], plan.arm_digest
+        )
+        private_values = (
+            HOST_SECRET,
+            CLIENT_SECRET,
+            PRIVATE_PROMPT,
+            "client-cache-0",
+            "client-cache-1",
+            "client-safety-0",
+            "client-safety-1",
+        )
+        result = json.dumps(rows)
+        for secret in private_values:
+            self.assertNotIn(secret, ledger)
+            self.assertNotIn(secret, result)
 
     def test_redirect_is_rejected_and_recorded_without_following(self):
         token = "redirect-cell"

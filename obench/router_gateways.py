@@ -9,12 +9,7 @@ from collections.abc import Mapping
 from typing import Any
 
 
-GATEWAYS = frozenset({"cloudflare", "openrouter", "vercel"})
-CONCENTRATE_UNSUPPORTED = (
-    "Gateway Tax is unsupported for concentrate until its request contract and "
-    "response evidence prove the requested model alias, provider lock, attempts, "
-    "fallback policy, and cache policy"
-)
+GATEWAYS = frozenset({"cloudflare", "concentrate", "openrouter", "vercel"})
 
 _OPENROUTER_ENDPOINTS = {
     "openai_chat": "https://openrouter.ai/api/v1/chat/completions",
@@ -24,6 +19,7 @@ _VERCEL_ENDPOINTS = {
     "openai_chat": "https://ai-gateway.vercel.sh/v1/chat/completions",
     "openai_responses": "https://ai-gateway.vercel.sh/v1/responses",
 }
+_CONCENTRATE_RESPONSES_ENDPOINT = "https://api.concentrate.ai/v1/responses"
 _CLOUDFLARE_REST_ENDPOINT_RE = re.compile(
     r"https://api\.cloudflare\.com/client/v4/accounts/"
     r"(?P<account_id>[0-9a-fA-F]{32})/ai/v1/"
@@ -38,7 +34,17 @@ _CACHE_KEYS = frozenset({
     "cache",
     "cache_control",
     "cache_key",
+    "caching",
+    "prompt_cache_breakpoint",
     "prompt_cache_key",
+    "prompt_cache_options",
+    "prompt_cache_retention",
+})
+_SCHEMA_KEYS = frozenset({
+    "input_schema",
+    "json_schema",
+    "parameters",
+    "schema",
 })
 _DATED_REVISION_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$")
 
@@ -133,8 +139,6 @@ def validate_arm(
         return
     if gateway is None:
         raise GatewayProfileError("gateway arm requires gateway")
-    if gateway == "concentrate":
-        raise GatewayProfileError(CONCENTRATE_UNSUPPORTED)
     if gateway not in GATEWAYS:
         raise GatewayProfileError(
             f"gateway must be one of: {', '.join(sorted(GATEWAYS))}"
@@ -145,6 +149,21 @@ def validate_arm(
         if router_mode not in {"auto", "fixed"}:
             raise GatewayProfileError(
                 "model_router arm requires router_mode 'auto' or 'fixed'"
+            )
+
+    if gateway == "concentrate":
+        if (
+            endpoint != _CONCENTRATE_RESPONSES_ENDPOINT
+            or protocol != "openai_responses"
+        ):
+            raise GatewayProfileError(
+                "concentrate supports only "
+                f"{_CONCENTRATE_RESPONSES_ENDPOINT} with protocol openai_responses"
+            )
+        if _model_provider(requested_model) != requested_provider.casefold():
+            raise GatewayProfileError(
+                "concentrate requested_model must be provider-qualified with "
+                "requested_provider"
             )
 
     if private_router:
@@ -196,7 +215,7 @@ def _strip_cache_controls(value: Any) -> None:
             normalized = str(key).lower().replace("-", "_")
             if normalized in _CACHE_KEYS:
                 value.pop(key)
-            else:
+            elif normalized not in _SCHEMA_KEYS:
                 _strip_cache_controls(value[key])
     elif isinstance(value, list):
         for item in value:
@@ -204,7 +223,7 @@ def _strip_cache_controls(value: Any) -> None:
 
 
 def strip_cache_controls(payload: dict[str, Any]) -> None:
-    """Remove cache-affecting fields from any managed route request."""
+    """Remove request cache controls without rewriting tool/data schemas."""
     _strip_cache_controls(payload)
 
 
@@ -261,6 +280,17 @@ def shape_body(
         ):
             payload.pop(key, None)
         return
+    if gateway == "concentrate":
+        for key in (
+            "provider", "providerOptions", "models", "order", "sort",
+            "router", "plugins", "routes", "fallback", "fallbacks",
+        ):
+            payload.pop(key, None)
+        payload["routing"] = {
+            "providers": [requested_provider],
+            "models": [],
+        }
+        return
     raise GatewayProfileError(f"unsupported gateway profile: {gateway}")
 
 
@@ -284,7 +314,7 @@ def request_headers(
             "cf-aig-max-attempts": "1",
             "cf-aig-collect-log-payload": "false",
         })
-    elif gateway != "vercel":
+    elif gateway not in {"concentrate", "vercel"}:
         raise GatewayProfileError(f"unsupported gateway profile: {gateway}")
     return headers
 
@@ -381,6 +411,8 @@ class GatewayEvidence:
             return self._observe_vercel(obj, top_model, top_provider)
         elif self.gateway == "cloudflare":
             return self._observe_cloudflare(top_model)
+        elif self.gateway == "concentrate":
+            return self._observe_concentrate(top_model)
         return False
 
     def _observe_cloudflare(self, top_model: str | None) -> bool:
@@ -392,6 +424,18 @@ class GatewayEvidence:
             self._set_provider(requested_provider)
             if not model_provider_matches(top_model, requested_provider):
                 self.profile_reasons.append("provider_conflict")
+        self._set_model(top_model)
+        return True
+
+    def _observe_concentrate(self, top_model: str | None) -> bool:
+        if top_model is None:
+            return False
+        self.metadata_seen = True
+        provider = _model_provider(top_model)
+        if provider is None:
+            self.profile_reasons.append("unqualified_served_model")
+        else:
+            self._set_provider(provider)
         self._set_model(top_model)
         return True
 
