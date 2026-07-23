@@ -407,7 +407,7 @@ class RouterPublishTests(unittest.TestCase):
             (self.bundle / "provenance.json").read_text(encoding="utf-8")
         ))
 
-    def test_gateway_metadata_projection_rejects_raw_or_malformed_identifiers(self):
+    def test_gateway_metadata_projection_rejects_malformed_generation_id(self):
         with self.assertRaisesRegex(
             router_publish.RouterPublishError,
             "generationId must be a non-empty string",
@@ -419,38 +419,17 @@ class RouterPublishTests(unittest.TestCase):
         self.assertEqual(
             router_publish._gateway_metadata_dto(  # noqa: SLF001
                 {
-                    "log_id": "opaque-log",
-                    "cache_status": "MISS",
-                    "step": 0,
+                    "generationId": "opaque-generation",
                     "raw_payload": "discarded",
                 },
                 "metadata",
             ),
             {
-                "log_id_sha256": hashlib.sha256(b"opaque-log").hexdigest(),
-                "cache_status": "MISS",
-                "step": 0,
+                "generation_id_sha256": hashlib.sha256(
+                    b"opaque-generation"
+                ).hexdigest(),
             },
         )
-
-    def test_cloudflare_profile_projection_retains_nonsecret_gateway_id(self):
-        source = self.experiment.to_dict()
-        gateway_arm = source["arms"][1]
-        gateway_arm["gateway"] = "cloudflare"
-        gateway_arm["gateway_id"] = "strict-tax"
-        gateway_arm["endpoint"] = (
-            "https://api.cloudflare.com/client/v4/accounts/account-id/"
-            "ai/v1/chat/completions"
-        )
-
-        public = router_publish._experiment_dto(  # noqa: SLF001
-            source,
-            router_publish._sha256(b"source"),  # noqa: SLF001
-        )
-        public_gateway = public["arms"][1]
-        self.assertEqual(public_gateway["gateway"], "cloudflare")
-        self.assertEqual(public_gateway["gateway_id"], "strict-tax")
-        self.assertNotIn("auth_env", public_gateway)
 
     def test_published_results_round_trip_through_router_report(self):
         direct_identity = dataclasses.replace(

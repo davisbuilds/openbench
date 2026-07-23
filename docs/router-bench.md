@@ -33,21 +33,25 @@ fallback policy, cache hit rate, or retry policy.
 
 ## Gateway profiles
 
-Gateway arms must select one of these strict managed profiles:
+Gateway arms may select one of these admitted strict managed profiles:
 
 | `gateway` | Endpoint and auth | Forced request controls | Required route evidence |
 |---|---|---|---|
 | `openrouter` | `https://openrouter.ai/api/v1/chat/completions`; Bearer token from `auth_env` | `provider.only`, `allow_fallbacks=false`, metadata enabled, cache disabled | OpenRouter requested/served model, selected provider, and strict attempt parsing when attempts are present |
-| `vercel` | `https://ai-gateway.vercel.sh/v1/chat/completions`; Bearer token from `auth_env` (normally `AI_GATEWAY_API_KEY`) | provider-qualified model ID and only `providerOptions.gateway.only`; model fallbacks, order, sort, caching, and cache markers are removed | `finalProvider`, `resolvedProviderApiModelId`, single-attempt counts, and `modelAttempts.providerAttempts` |
-| `cloudflare` | `https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1/chat/completions`; Bearer token from configurable `auth_env` | required nonsecret `gateway_id`, `cf-aig-skip-cache:true`, `cf-aig-max-attempts:1`, metadata-only logging, and an explicit provider/model wire ID | response-header provider and model; step, cache status, and privacy-safe log ID are captured when present |
+| `vercel` | `https://ai-gateway.vercel.sh/v1/chat/completions`; Bearer token from `auth_env` (normally `AI_GATEWAY_API_KEY`) | provider-qualified model ID and only `providerOptions.gateway.only`; model fallbacks, order, sort, caching, and cache markers are removed | requested model, final/resolved provider, canonical served model, single-attempt counts, and successful provider-attempt evidence |
 
 Vercel evidence also retains privacy-safe `generationId`, `cost`, and
 `marketCost` values when returned. This implementation does not make a paid
-post-run generation lookup. Cloudflare does not call the Logs API; the response
-must prove the provider and served model on its own. A requested Cloudflare
-alias may resolve to a different exact revision only when that served revision
-is declared in `allowed_models`. Missing or contradictory provider, model, or
+post-run generation lookup. Missing or contradictory provider, model, or
 attempt evidence fails route integrity closed.
+
+`gateway = "cloudflare"` is admission-blocked. The admitted REST profile cannot
+prove provider and served-model integrity because Cloudflare documents the
+relevant response headers only for dynamic routes. Strict Gateway Tax support
+therefore requires a metadata-only Logs API verification flow with explicit
+secret and lifecycle ownership. That follow-up must keep payload logging
+disabled (`cf-aig-collect-log-payload: false`) so prompts and responses are
+never collected.
 
 `gateway = "concentrate"` is admission-blocked. Concentrate's current Chat
 Completions contract cannot disable or prove fallback, retries, and caching, so

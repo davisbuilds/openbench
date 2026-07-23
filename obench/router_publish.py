@@ -102,9 +102,6 @@ _GATEWAY_METADATA_SCHEMA = {
     "generation_id_sha256": _SCALAR,
     "cost": _SCALAR,
     "market_cost": _SCALAR,
-    "log_id_sha256": _SCALAR,
-    "cache_status": _SCALAR,
-    "step": _SCALAR,
 }
 _ROUTE_SCHEMA = {
     "requested_model": _SCALAR,
@@ -304,7 +301,6 @@ _EXPERIMENT_ARM_SCHEMA = {
     "arm_digest": _SCALAR,
     "route_kind": _SCALAR,
     "gateway": _SCALAR,
-    "gateway_id": _SCALAR,
     "protocol": _SCALAR,
     "baseline": _SCALAR,
     "canonical_model": _SCALAR,
@@ -523,8 +519,6 @@ def _experiment_dto(source: Mapping[str, Any], source_digest: str) -> dict[str, 
         }
         if "gateway" in arm:
             public_arm["gateway"] = arm["gateway"]
-        if "gateway_id" in arm:
-            public_arm["gateway_id"] = arm["gateway_id"]
         arms.append(public_arm)
     return {
         "kind": "experiment",
@@ -653,10 +647,7 @@ def _gateway_metadata_dto(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise RouterPublishError(f"{path} must be an object")
     result = {}
-    opaque_ids = {
-        "generationId": "generation_id_sha256",
-        "log_id": "log_id_sha256",
-    }
+    opaque_ids = {"generationId": "generation_id_sha256"}
     for source_key, public_key in opaque_ids.items():
         if source_key not in value:
             continue
@@ -667,8 +658,6 @@ def _gateway_metadata_dto(value: Any, path: str) -> dict[str, Any]:
     scalar_fields = {
         "cost": "cost",
         "marketCost": "market_cost",
-        "cache_status": "cache_status",
-        "step": "step",
     }
     for source_key, public_key in scalar_fields.items():
         if source_key in value:

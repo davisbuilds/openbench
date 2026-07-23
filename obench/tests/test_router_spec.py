@@ -303,7 +303,7 @@ class RouterExperimentTests(unittest.TestCase):
                 'direct_control_arm_id = "direct-openai"'
             )))
 
-    def test_vercel_and_cloudflare_profile_fields_are_validated(self):
+    def test_vercel_is_admitted_and_cloudflare_requires_logs_verification(self):
         vercel = manifest(
             gateway_auth='auth_env = "AI_GATEWAY_API_KEY"',
             gateway_extra=(
@@ -330,37 +330,17 @@ class RouterExperimentTests(unittest.TestCase):
         ).join(vercel)
         self.assertEqual(parse_experiment_toml(vercel).arms[1].gateway, "vercel")
 
-        cloudflare = manifest(
-            gateway_auth='auth_env = "CLOUDFLARE_API_TOKEN"',
-            gateway_extra=(
-                'gateway = "cloudflare"\n'
-                'gateway_id = "strict-tax"\n'
-                'direct_control_arm_id = "direct-openai"'
-            ),
-        ).replace(
-            "https://openrouter.ai/api/v1/chat/completions",
-            "https://api.cloudflare.com/client/v4/accounts/account123"
-            "/ai/v1/chat/completions",
-        )
-        cloudflare = cloudflare.rsplit(
-            'requested_model = "gpt-test-2026-07-01"',
-            1,
-        )
-        cloudflare = (
-            'requested_model = "openai/gpt-test-2026-07-01"'
-        ).join(cloudflare)
-        cloudflare = cloudflare.rsplit(
-            'allowed_models = ["gpt-test-2026-07-01"]',
-            1,
-        )
-        cloudflare = (
-            'allowed_models = ["openai/gpt-test-2026-07-01"]'
-        ).join(cloudflare)
-        parsed = parse_experiment_toml(cloudflare)
-        self.assertEqual(parsed.arms[1].gateway_id, "strict-tax")
-        with self.assertRaisesRegex(RouterSpecError, "requires nonsecret gateway_id"):
-            parse_experiment_toml(cloudflare.replace(
-                'gateway_id = "strict-tax"\n', ""
+        with self.assertRaisesRegex(
+            RouterSpecError,
+            "metadata-only Logs API verification is required",
+        ):
+            parse_experiment_toml(manifest(
+                gateway_auth='auth_env = "CLOUDFLARE_API_TOKEN"',
+                gateway_extra=(
+                    'gateway = "cloudflare"\n'
+                    'gateway_id = "strict-tax"\n'
+                    'direct_control_arm_id = "direct-openai"'
+                ),
             ))
 
     def test_private_literal_endpoint_must_match_declared_allowlist(self):
