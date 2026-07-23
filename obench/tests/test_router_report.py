@@ -282,6 +282,12 @@ class RouterReportTests(unittest.TestCase):
             distribution["Fallback/gpt-fixed"]["share"], 1 / 6
         )
 
+    def test_route_label_does_not_duplicate_provider_prefix(self):
+        self.assertEqual(
+            router_report._route_label("OpenAI", "openai/gpt-fixed"),
+            "openai/gpt-fixed",
+        )
+
     def test_timeout_caps_end_to_end_latency(self):
         rows = self.complete_rows()
         rows[1]["result"]["duration_s"] = 300

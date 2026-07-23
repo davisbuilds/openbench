@@ -175,6 +175,11 @@ _RESULT_SCHEMA = {
     "result": _CANONICAL_RESULT_SCHEMA,
     "route_integrity": _ROUTE_EVIDENCE_SCHEMA,
     "proxy_metrics": {"calls": [_PROXY_CALL_SCHEMA]},
+    "route_isolation": {
+        "classification": _SCALAR,
+        "lane": _SCALAR,
+        "egress_enforced": _SCALAR,
+    },
 }
 _SAMPLING_SCHEMA = {
     "model": _SCALAR,
@@ -291,6 +296,7 @@ _EXPERIMENT_ARM_SCHEMA = {
     "route_kind": _SCALAR,
     "protocol": _SCALAR,
     "baseline": _SCALAR,
+    "canonical_model": _SCALAR,
     "requested_model": _SCALAR,
     "requested_provider": _SCALAR,
     "allowed_models": [_SCALAR],
@@ -409,7 +415,10 @@ def _require_projected(value: Any, schema: Any, path: str) -> None:
 
 def _require_public_result_shape(value: Mapping[str, Any], path: str) -> None:
     _require_projected(value, _RESULT_SCHEMA, path)
-    required = {"arm_role", "baseline", "result", "route_integrity", "proxy_metrics"}
+    required = {
+        "arm_role", "baseline", "result", "route_integrity", "proxy_metrics",
+        "route_isolation",
+    }
     missing = sorted(required - set(value))
     if missing:
         raise RouterPublishError(f"{path} is missing required fields: {missing!r}")

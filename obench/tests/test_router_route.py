@@ -119,6 +119,7 @@ def route_plan(*, endpoint, route_kind, arm_id, arm_digest):
         route_kind=route_kind,
         endpoint=endpoint,
         protocol="openai_chat",
+        canonical_model="openai/gpt-route-test",
         requested_model="gpt-route-test",
         requested_provider="openai",
         allowed_models=("gpt-route-test",),

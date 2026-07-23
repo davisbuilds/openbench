@@ -86,6 +86,7 @@ def manifest(**replacements):
         endpoint = "https://api.openai.com/v1/chat/completions"
         protocol = "openai_chat"
         baseline = true
+        canonical_model = "openai/gpt-test-2026-07-01"
         requested_model = "gpt-test-2026-07-01"
         requested_provider = "openai"
         allowed_models = ["gpt-test-2026-07-01"]
@@ -105,6 +106,7 @@ def manifest(**replacements):
         endpoint = "https://openrouter.ai/api/v1/chat/completions"
         protocol = "openai_chat"
         baseline = false
+        canonical_model = "openai/gpt-test-2026-07-01"
         requested_model = "gpt-test-2026-07-01"
         requested_provider = "openai"
         allowed_models = ["gpt-test-2026-07-01"]
@@ -234,6 +236,20 @@ class RouterExperimentTests(unittest.TestCase):
                 with self.assertRaisesRegex(RouterSpecError, message):
                     parse_experiment_toml(text)
 
+    def test_gateway_may_use_endpoint_specific_wire_model_id(self):
+        text = manifest().replace(
+            'requested_model = "gpt-test-2026-07-01"',
+            'requested_model = "openai/gpt-test-2026-07-01"',
+            1,
+        ).replace(
+            'allowed_models = ["gpt-test-2026-07-01"]',
+            'allowed_models = ["openai/gpt-test-2026-07-01"]',
+            1,
+        )
+        spec = parse_experiment_toml(text)
+        self.assertEqual(spec.arms[0].canonical_model, spec.arms[1].canonical_model)
+        self.assertNotEqual(spec.arms[0].requested_model, spec.arms[1].requested_model)
+
     def test_gateway_tax_requires_direct_control_and_equal_fixed_conditions(self):
         cases = (
             (manifest(gateway_extra=""), "direct_control_arm_id"),
@@ -248,8 +264,8 @@ class RouterExperimentTests(unittest.TestCase):
             (manifest(gateway_controls=manifest_controls().replace(
                 "cache_enabled = false", "cache_enabled = true")), "cache"),
             (manifest().replace(
-                'requested_model = "gpt-test-2026-07-01"',
-                'requested_model = "other-model"', 1), "requested_model"),
+                'canonical_model = "openai/gpt-test-2026-07-01"',
+                'canonical_model = "openai/other-model"', 1), "canonical_model"),
         )
         for text, message in cases:
             with self.subTest(message=message):

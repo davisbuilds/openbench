@@ -19,6 +19,7 @@ def plan_dict(**updates):
         route_kind="gateway",
         endpoint="https://openrouter.ai/api/v1/chat/completions",
         protocol="openai_chat",
+        canonical_model="provider-a/model-new",
         requested_model="vendor/model-new",
         requested_provider="provider-a",
         allowed_models=("vendor/model-new",),
@@ -91,6 +92,8 @@ class PiRoutedTests(unittest.TestCase):
         self.assertNotIn('"temperature"', extension)
         self.assertNotIn('"top_p"', extension)
         self.assertNotIn('"seed"', extension)
+        self.assertIn('maxTokensField: "max_tokens"', extension)
+        self.assertIn("contextWindow: 128000, maxTokens: 16384", extension)
         self.assertNotIn("router-secret", extension)
         self.assertNotIn("sk-inherited", extension)
 

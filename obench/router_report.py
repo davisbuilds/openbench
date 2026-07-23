@@ -288,6 +288,15 @@ def _costs(
     return parsed
 
 
+def _route_label(provider: str | None, model: str | None) -> str:
+    if provider is None or model is None:
+        return provider or model or "unknown"
+    prefix = provider + "/"
+    if model.casefold().startswith(prefix.casefold()):
+        return model
+    return f"{provider}/{model}"
+
+
 def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
     result = _object(row.get("result"), f"row {row_number} result")
     solved = _bool(result.get("solved"), f"row {row_number} result.solved")
@@ -365,11 +374,7 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
                 ),
                 "output_tokens": output_tokens,
                 "generation_duration": generation_duration,
-                "route": (
-                    f"{provider}/{model}"
-                    if provider is not None and model is not None
-                    else provider or model or "unknown"
-                ),
+                "route": _route_label(provider, model),
                 "costs": _costs(call, row_number, call_number),
             }
         )

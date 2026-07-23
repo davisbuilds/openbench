@@ -88,7 +88,7 @@ _ROUTED_PROVIDER = "openbench-routed"
 _SYNTHETIC_API_KEY = "openbench-routed-synthetic"
 _ROUTE_PLAN_FIELDS = {
     "schema_version", "experiment_digest", "arm_digest", "arm_id",
-    "route_kind", "endpoint", "protocol", "requested_model",
+    "route_kind", "endpoint", "protocol", "canonical_model", "requested_model",
     "requested_provider", "allowed_models", "allowed_providers",
     "fallback_enabled", "retry_count", "cache_enabled", "auth_env",
     "sampling", "private_router", "private_host_allowlist",
@@ -409,6 +409,7 @@ def _load_route_plan(route_plan_path):
     allowed_providers = _route_string_tuple(
         data["allowed_providers"], "allowed_providers", _ID_RE)
     requested_model = _route_string(data["requested_model"], "requested_model")
+    canonical_model = _route_string(data["canonical_model"], "canonical_model")
     requested_provider = _route_string(
         data["requested_provider"], "requested_provider", _ID_RE)
     if requested_model not in allowed_models:
@@ -457,6 +458,7 @@ def _load_route_plan(route_plan_path):
         route_kind=route_kind,
         endpoint=endpoint,
         protocol=protocol,
+        canonical_model=canonical_model,
         requested_model=requested_model,
         requested_provider=requested_provider,
         allowed_models=allowed_models,
@@ -502,11 +504,11 @@ def _routed_provider_ext(plan, proxy_url):
         f"      name: {json.dumps(plan.requested_model)},\n"
         '      reasoning: false, input: ["text"],\n'
         "      compat: {\n"
-        "        supportsStore: false, supportsDeveloperRole: true,\n"
-        "        supportsUsageInStreaming: true\n"
+        "        supportsStore: false, supportsDeveloperRole: false,\n"
+        "        supportsUsageInStreaming: true, maxTokensField: \"max_tokens\"\n"
         "      },\n"
         "      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },\n"
-        "      contextWindow: 1000000, maxTokens: 32768\n"
+        "      contextWindow: 128000, maxTokens: 16384\n"
         "    }]\n"
         "  });\n"
         "}\n"

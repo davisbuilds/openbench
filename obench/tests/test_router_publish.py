@@ -53,6 +53,7 @@ def experiment():
                 "endpoint": "https://direct.example.test/v1/chat/completions",
                 "protocol": "openai_chat",
                 "baseline": True,
+                "canonical_model": "openai/gpt-test",
                 "requested_model": "openai/gpt-test",
                 "requested_provider": "OpenAI",
                 "allowed_models": ["openai/gpt-test"],
@@ -69,6 +70,7 @@ def experiment():
                 "endpoint": "https://router.example.test/private/v1/chat/completions",
                 "protocol": "openai_chat",
                 "baseline": False,
+                "canonical_model": "openai/gpt-test",
                 "requested_model": "openai/gpt-test",
                 "requested_provider": "OpenAI",
                 "allowed_models": ["openai/gpt-test"],
@@ -174,6 +176,11 @@ class RouterPublishTests(unittest.TestCase):
                 "infrastructure_invalid_reason": None,
             },
             "route_integrity": {"pass": True, "reasons": []},
+            "route_isolation": {
+                "classification": "exploratory",
+                "lane": "router-local-v1",
+                "egress_enforced": False,
+            },
             "proxy_metrics": {"calls": [{
                 "timing": {"ttfb_s": 1.0, "semantic_ttft_s": 2.0},
                 "generation": {"output_tokens": 4, "duration_s": 1.0},

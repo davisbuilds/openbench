@@ -117,6 +117,7 @@ class Arm:
     endpoint: str
     protocol: str
     baseline: bool
+    canonical_model: str
     requested_model: str
     requested_provider: str
     allowed_models: tuple[str, ...]
@@ -135,6 +136,7 @@ class Arm:
             "endpoint": self.endpoint,
             "protocol": self.protocol,
             "baseline": self.baseline,
+            "canonical_model": self.canonical_model,
             "requested_model": self.requested_model,
             "requested_provider": self.requested_provider,
             "allowed_models": list(self.allowed_models),
@@ -207,6 +209,7 @@ class RoutePlan:
     route_kind: str
     endpoint: str
     protocol: str
+    canonical_model: str
     requested_model: str
     requested_provider: str
     allowed_models: tuple[str, ...]
@@ -229,6 +232,7 @@ class RoutePlan:
             "route_kind": self.route_kind,
             "endpoint": self.endpoint,
             "protocol": self.protocol,
+            "canonical_model": self.canonical_model,
             "requested_model": self.requested_model,
             "requested_provider": self.requested_provider,
             "allowed_models": list(self.allowed_models),
@@ -293,7 +297,7 @@ _BUDGET_FIELDS = {"timeout_s", "max_calls", "max_output_tokens", "usd_cap"}
 _SAMPLING_FIELDS = {"temperature", "top_p", "seed"}
 _ARM_FIELDS = {
     "arm_id", "route_kind", "endpoint", "protocol", "baseline",
-    "requested_model", "requested_provider", "allowed_models",
+    "canonical_model", "requested_model", "requested_provider", "allowed_models",
     "allowed_providers", "fallback_enabled", "retry_count", "cache_enabled",
     "auth_env", "sampling", "direct_control_arm_id",
 }
@@ -509,6 +513,8 @@ def _parse_arm(
                                     private_hosts, private_cidrs),
         protocol=protocol,
         baseline=_boolean(_required(table, "baseline", path), f"{path}.baseline"),
+        canonical_model=_string(_required(table, "canonical_model", path),
+                                f"{path}.canonical_model"),
         requested_model=_string(_required(table, "requested_model", path),
                                 f"{path}.requested_model"),
         requested_provider=_string(_required(table, "requested_provider", path),
@@ -565,7 +571,7 @@ def _validate_gateway_controls(arms: tuple[Arm, ...]) -> None:
                 f"{arm.direct_control_arm_id!r}"
             )
         comparable = (
-            "protocol", "requested_model", "requested_provider", "allowed_models",
+            "protocol", "canonical_model", "requested_provider",
             "allowed_providers", "sampling",
         )
         for field in comparable:
@@ -735,6 +741,7 @@ def compile_route_plans(
             route_kind=arm.route_kind,
             endpoint=arm.endpoint,
             protocol=arm.protocol,
+            canonical_model=arm.canonical_model,
             requested_model=arm.requested_model,
             requested_provider=arm.requested_provider,
             allowed_models=arm.allowed_models,
