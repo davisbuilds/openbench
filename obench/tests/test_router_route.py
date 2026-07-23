@@ -49,21 +49,44 @@ class RouteFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("content-type", "text/event-stream")
             self.send_header("connection", "close")
             self.end_headers()
-            event = json.dumps({
+            event_body = {
                 "model": "gpt-route-test",
-                "openrouter_metadata": {
-                    "requested": "gpt-route-test",
-                    "attempts": [{
+                "choices": [{"delta": {"content": PRIVATE_CONTENT}}],
+            }
+            metadata = {
+                "requested": "gpt-route-test",
+                "attempts": [{
+                    "provider": "openai",
+                    "model": "gpt-route-test",
+                    "status": 200,
+                }],
+                "endpoints": {
+                    "available": [{"provider": "openai", "selected": True}],
+                },
+            }
+            if self.path.startswith("/sse-wrong-provider"):
+                metadata["attempts"] = []
+                metadata["endpoints"] = {
+                    "available": [{"provider": "different", "selected": True}],
+                }
+            elif self.path.startswith("/sse-no-attempts"):
+                metadata.pop("attempts")
+            elif self.path.startswith("/sse-fallback"):
+                metadata["attempts"] = [
+                    {
+                        "provider": "different",
+                        "model": "gpt-route-test",
+                        "status": 503,
+                    },
+                    {
                         "provider": "openai",
                         "model": "gpt-route-test",
                         "status": 200,
-                    }],
-                    "endpoints": {
-                        "available": [{"provider": "openai", "selected": True}],
                     },
-                },
-                "choices": [{"delta": {"content": PRIVATE_CONTENT}}],
-            }, separators=(",", ":"))
+                ]
+            if not self.path.startswith("/sse-direct"):
+                event_body["openrouter_metadata"] = metadata
+            event = json.dumps(event_body, separators=(",", ":"))
             stream = (
                 f"data: {event}\n\n"
                 'data: {"usage":{"prompt_tokens":5,"completion_tokens":3,'
@@ -211,6 +234,9 @@ class RouterRouteTests(unittest.TestCase):
                 "cookie": f"session={CLIENT_SECRET}",
                 "x-auth-token": CLIENT_SECRET,
                 "x-openrouter-metadata": "false",
+                "x-openrouter-cache": "true",
+                "x-openrouter-cache-key": "client-cache",
+                "x-openrouter-cache-control": "max-age=3600",
             },
         )
         self.assertEqual(status, 200)
@@ -218,6 +244,9 @@ class RouterRouteTests(unittest.TestCase):
         self.assertEqual(request["path"], "/gateway")
         self.assertEqual(request["headers"]["authorization"], f"Bearer {HOST_SECRET}")
         self.assertEqual(request["headers"]["x-openrouter-metadata"], "enabled")
+        self.assertEqual(request["headers"]["x-openrouter-cache"], "false")
+        self.assertNotIn("x-openrouter-cache-key", request["headers"])
+        self.assertNotIn("x-openrouter-cache-control", request["headers"])
         self.assertNotIn("x-api-key", request["headers"])
         self.assertNotIn("x-openrouter-api-key", request["headers"])
         self.assertNotIn("cookie", request["headers"])
@@ -306,6 +335,23 @@ class RouterRouteTests(unittest.TestCase):
         ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
         for secret in (HOST_SECRET, CLIENT_SECRET, PRIVATE_CONTENT, PRIVATE_PROMPT):
             self.assertNotIn(secret, ledger)
+
+    def test_route_plan_constraints_drive_route_kind_aware_evidence(self):
+        cases = (
+            ("direct-pass", "direct", "/sse-direct", True, None),
+            ("wrong-provider", "gateway", "/sse-wrong-provider", False, "provider_conflict"),
+            ("no-attempts", "gateway", "/sse-no-attempts", True, None),
+            ("fallback", "gateway", "/sse-fallback", False, "fallback_attempt"),
+        )
+        for token, route_kind, path, expected_pass, reason in cases:
+            with self.subTest(token=token):
+                plan = self._register(token, route_kind=route_kind, path=path)
+                status, _ = self._post(token, plan.arm_digest)
+                self.assertEqual(status, 200)
+                evidence = self._seal_rows(token)[0]["router_metrics"]["route_evidence"]
+                self.assertEqual(evidence["pass"], expected_pass)
+                if reason is not None:
+                    self.assertIn(reason, evidence["reasons"])
 
 
 if __name__ == "__main__":

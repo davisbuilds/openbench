@@ -40,9 +40,8 @@ class RouterMetricsTests(unittest.TestCase):
                     {"provider": "OpenAI", "model": "openai/gpt-4o-mini", "selected": True},
                 ]},
                 "attempts": [
-                    {"provider": "Other", "model": "openai/gpt-4o-mini", "status": 503,
+                    {"provider": "OpenAI", "model": "openai/gpt-4o-mini", "status": 200,
                      "private_detail": self.secret},
-                    {"provider": "OpenAI", "model": "openai/gpt-4o-mini", "status": 200},
                 ],
                 "summary": self.secret,
             },
@@ -59,6 +58,10 @@ class RouterMetricsTests(unittest.TestCase):
             requested_model="openai/gpt-4o-mini",
             started_at=10.0,
             completed_at=completed_at,
+            route_kind="gateway",
+            requested_provider="OpenAI",
+            allowed_models=("openai/gpt-4o-mini",),
+            allowed_providers=("OpenAI",),
         )
 
     def test_fragmented_and_coalesced_frames_have_identical_evidence(self):
@@ -170,7 +173,6 @@ class RouterMetricsTests(unittest.TestCase):
             "served_model": "openai/gpt-4o-mini",
             "provider": "OpenAI",
             "attempts": [
-                {"provider": "Other", "model": "openai/gpt-4o-mini", "status": 503},
                 {"provider": "OpenAI", "model": "openai/gpt-4o-mini", "status": 200},
             ],
         })
@@ -188,18 +190,58 @@ class RouterMetricsTests(unittest.TestCase):
         self.assertEqual(result["route_evidence"]["verdict"], "fail")
         self.assertIn("missing_openrouter_metadata", result["route_evidence"]["reasons"])
         self.assertIn("missing_metadata_requested_model", result["route_evidence"]["reasons"])
-        self.assertIn("missing_attempts", result["route_evidence"]["reasons"])
 
-    def test_route_evidence_fails_closed_on_conflicting_attempt(self):
+    def test_gateway_missing_optional_attempts_passes(self):
+        final = dict(self.final)
+        final["openrouter_metadata"] = dict(self.final["openrouter_metadata"])
+        final["openrouter_metadata"].pop("attempts")
+        result = self.parse([(11.0, sse(self.token, final, "[DONE]"))])
+        self.assertTrue(result["route_evidence"]["pass"])
+        self.assertEqual(result["route"]["attempts"], [])
+
+    def test_gateway_wrong_selected_provider_fails(self):
+        final = dict(self.final)
+        final["openrouter_metadata"] = dict(self.final["openrouter_metadata"])
+        final["openrouter_metadata"]["endpoints"] = {
+            "available": [{
+                "provider": "Different",
+                "model": "openai/gpt-4o-mini",
+                "selected": True,
+            }],
+        }
+        final["openrouter_metadata"].pop("attempts")
+        token = dict(self.token)
+        token.pop("provider")
+        result = self.parse([(11.0, sse(token, final, "[DONE]"))])
+        self.assertFalse(result["route_evidence"]["pass"])
+        self.assertIn("provider_conflict", result["route_evidence"]["reasons"])
+        self.assertIn("provider_not_allowed", result["route_evidence"]["reasons"])
+
+    def test_gateway_fallback_attempt_fails(self):
         final = dict(self.final)
         final["openrouter_metadata"] = dict(self.final["openrouter_metadata"])
         final["openrouter_metadata"]["attempts"] = [
-            {"provider": "Different", "model": "other/model", "status": 200}
+            {"provider": "Different", "model": "openai/gpt-4o-mini", "status": 503},
+            {"provider": "OpenAI", "model": "openai/gpt-4o-mini", "status": 200},
         ]
         result = self.parse([(11.0, sse(self.token, final, "[DONE]"))])
         self.assertFalse(result["route_evidence"]["pass"])
-        self.assertIn("provider_conflict", result["route_evidence"]["reasons"])
-        self.assertIn("served_model_conflict", result["route_evidence"]["reasons"])
+        self.assertIn("fallback_attempt", result["route_evidence"]["reasons"])
+
+    def test_direct_exact_served_model_and_done_pass_without_gateway_evidence(self):
+        result = router_metrics.parse_chat_sse(
+            [(11.0, sse(self.token, "[DONE]"))],
+            requested_model="openai/gpt-4o-mini",
+            started_at=10.0,
+            completed_at=12.0,
+            route_kind="direct",
+            requested_provider="OpenAI",
+            allowed_models=("openai/gpt-4o-mini",),
+            allowed_providers=("OpenAI",),
+        )
+        self.assertTrue(result["route_evidence"]["pass"])
+        self.assertFalse(result["coverage"]["openrouter_metadata"])
+        self.assertFalse(result["coverage"]["attempts"])
 
     def test_malformed_event_does_not_poison_later_events(self):
         payload = b"data: {not-json}\n\n" + self.payload()

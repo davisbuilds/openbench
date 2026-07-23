@@ -411,6 +411,11 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 router_parser = OpenAIChatSSEParser(
                     requested_model=route.router.plan.requested_model,
                     started_at=started_monotonic,
+                    route_kind=route.router.plan.route_kind,
+                    requested_provider=route.router.plan.requested_provider,
+                    allowed_models=route.router.plan.allowed_models,
+                    allowed_providers=route.router.plan.allowed_providers,
+                    fallback_enabled=route.router.plan.fallback_enabled,
                 )
             self.send_response(resp.status, resp.reason)
             for key, value in resp_headers:
@@ -636,11 +641,13 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             and k.lower() not in {
                 "content-length", "content-encoding", "x-openrouter-metadata",
             }
+            and not k.lower().startswith("x-openrouter-cache")
         }
         headers["Authorization"] = f"Bearer {route.router.secret}"
         headers["Content-Length"] = str(body_length)
         if route.router.plan.route_kind == "gateway":
             headers["X-OpenRouter-Metadata"] = "enabled"
+            headers["X-OpenRouter-Cache"] = "false"
         return headers
 
     def _router_request_body(self, body: bytes, plan: RoutePlan) -> bytes:
