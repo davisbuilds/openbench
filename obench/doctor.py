@@ -65,6 +65,8 @@ OPEN_MODEL_ENV = {
     "glm-4.7-flash": "ZAI_API_KEY",
     "deepseek-v4-flash": "DEEPSEEK_API_KEY",
     "kimi-k2.7-code": "MOONSHOT_API_KEY",
+    "laguna-s-2.1": "OPENROUTER_API_KEY",
+    "inkling": "OPENROUTER_API_KEY",
 }
 FRONTIER_MODEL_ENV = {
     "claude-opus-4-8": "ANTHROPIC_API_KEY",
