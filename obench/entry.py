@@ -45,6 +45,11 @@ WORKDIR = os.environ.get("BENCH_WORKDIR", "/work")
 # must write into their config home work, while the host config stays read-only.
 AUTH_STAGING = os.environ.get("BENCH_AUTH_STAGING", "/bench/auth")
 AUTH_RETURN = os.environ.get("BENCH_AUTH_RETURN", "/bench/auth-return")
+ROUTE_PLAN_PATH = os.environ.get("OPENBENCH_ROUTE_PLAN_PATH")
+_ROUTED_CAPABILITY_FIELDS = {
+    "protocols", "execution_lanes", "streaming", "dynamic_model_ids",
+    "route_plan_transport",
+}
 
 
 def _stage_auth():
@@ -122,6 +127,44 @@ def _load_adapter(name):
     return module
 
 
+def _route_plan_protocol(path):
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    if not isinstance(data, dict) or not isinstance(data.get("protocol"), str):
+        raise ValueError("routed RoutePlan must be a JSON object with a protocol")
+    return data["protocol"]
+
+
+def _validate_routed_adapter(adapter, route_plan_path):
+    version = getattr(adapter, "ADAPTER_API_VERSION", None)
+    if type(version) is not int or version != 2:
+        raise ValueError("routed dispatch requires ADAPTER_API_VERSION=2")
+    capabilities = getattr(adapter, "ROUTED_CAPABILITIES", None)
+    if not isinstance(capabilities, dict) or set(capabilities) != _ROUTED_CAPABILITY_FIELDS:
+        raise ValueError("invalid ROUTED_CAPABILITIES descriptor")
+    protocols = capabilities["protocols"]
+    lanes = capabilities["execution_lanes"]
+    if (not isinstance(protocols, list) or not protocols
+            or any(not isinstance(item, str) for item in protocols)
+            or len(protocols) != len(set(protocols))):
+        raise ValueError("ROUTED_CAPABILITIES.protocols must be unique strings")
+    if (not isinstance(lanes, list) or not lanes
+            or any(item not in {"local", "docker"} for item in lanes)
+            or len(lanes) != len(set(lanes))):
+        raise ValueError("ROUTED_CAPABILITIES.execution_lanes is invalid")
+    if (capabilities["streaming"] is not True
+            or capabilities["dynamic_model_ids"] is not True
+            or capabilities["route_plan_transport"] != "sanitized_file"):
+        raise ValueError("adapter does not meet routed execution requirements")
+    if "docker" not in lanes:
+        raise ValueError("adapter does not support routed docker execution")
+    protocol = _route_plan_protocol(route_plan_path)
+    if protocol not in protocols:
+        raise ValueError(f"adapter does not support routed protocol {protocol!r}")
+    if not callable(getattr(adapter, "run_routed", None)):
+        raise ValueError("routed adapter has no run_routed() function")
+
+
 def _emit(result):
     sys.stdout.flush()
     print(RESULT_SENTINEL + " " + json.dumps(result))
@@ -158,8 +201,18 @@ def main(argv):
 
     candidate_obj = None
     try:
-        _stage_auth()
-        if len(argv) == 5:
+        routed = ROUTE_PLAN_PATH is not None
+        if routed:
+            if len(argv) == 5:
+                raise ValueError("routed dispatch does not support candidate adapters")
+            if harness == "null":
+                raise ValueError("null adapter does not support routed dispatch")
+            adapter = _load_adapter(harness)
+            _validate_routed_adapter(adapter, ROUTE_PLAN_PATH)
+            result = adapter.run_routed(
+                instruction, WORKDIR, ROUTE_PLAN_PATH, timeout_s)
+        elif len(argv) == 5:
+            _stage_auth()
             candidates_path = os.path.dirname(argv[4])
             if candidates_path not in sys.path:
                 sys.path.insert(0, "/bench")
@@ -181,6 +234,7 @@ def main(argv):
         elif harness == "null":
             result = _null_run(instruction, WORKDIR, model, timeout_s)
         else:
+            _stage_auth()
             adapter = _load_adapter(harness)
             result = adapter.run(instruction, WORKDIR, model, timeout_s)
     except Exception:  # noqa: BLE001 - surface as a failed result, never crash
@@ -201,7 +255,8 @@ def main(argv):
             cand_rels = [auth.get("destination", "") for auth in candidate_obj.auth_files
                          if auth.get("destination")]
             relatives = (relatives or []) + cand_rels
-        _return_auth(persist_harness, relatives=relatives)
+        if ROUTE_PLAN_PATH is None:
+            _return_auth(persist_harness, relatives=relatives)
     except OSError as exc:
         result = {
             "completed": False,

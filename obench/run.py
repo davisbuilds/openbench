@@ -1043,7 +1043,7 @@ def _close_pipe(pipe):
         pass
 
 
-def run_checker(task_dir, workdir, timeout_s):
+def run_checker(task_dir, workdir, timeout_s, checker_env=None):
     """Run ``<task_dir>/checker.sh`` with cwd=workdir and TASK_DIR set.
 
     Returns ``(checker_exit, raw_score, stdout, stderr)`` where
@@ -1051,9 +1051,10 @@ def run_checker(task_dir, workdir, timeout_s):
     ``raw_score`` is the float from the checker's last parseable ``SCORE:`` line,
     or None if it printed none. Captured stdout/stderr are bounded tails. The
     checker decides task success (exit 0 == success); the adapter never does.
+    ``checker_env`` may provide a caller-owned sanitized environment.
     """
     checker = os.path.join(task_dir, "checker.sh")
-    env = dict(os.environ)
+    env = dict(os.environ) if checker_env is None else dict(checker_env)
     env["TASK_DIR"] = os.path.abspath(task_dir)
     env.pop("OPENBENCH_SOLUTION_OVERLAY", None)
     stdout_capture = TailCapture()
