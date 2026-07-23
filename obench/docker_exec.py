@@ -486,6 +486,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         cmd += ["-v", f"{host_variant}:{container_variant}:ro"]
     cmd += [
         "-w", container_workdir,
+        "-e", f"BENCH_WORKDIR={container_workdir}",
         "-e", f"HOME={CONTAINER_HOME}",
     ]
     for assignment in _placeholder_env(effective_harness, model):
