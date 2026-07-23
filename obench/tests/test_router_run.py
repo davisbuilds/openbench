@@ -833,6 +833,51 @@ direct_control_arm_id = "direct"
             (0.00125, "USD", observed_at),
         )
 
+    def test_errored_2xx_call_is_not_counted_as_unpriceable_success(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = next(item for item in plans if item.route_kind == "direct")
+        calls, integrity, reason = router_run._proxy_evidence(
+            [{
+                "status": 200,
+                "error": "BrokenPipeError: client disconnected",
+                "router_metrics": {
+                    "route": {
+                        "requested_model": plan.requested_model,
+                        "served_model": plan.requested_model,
+                        "provider": plan.requested_provider,
+                    },
+                    "usage": None,
+                },
+            }],
+            {
+                plan.canonical_model: router_run.Price(
+                    router_run.Decimal("1"),
+                    router_run.Decimal("2"),
+                    "2026-07-01T00:00:00Z",
+                )
+            },
+            experiment.budget,
+            plan,
+        )
+
+        self.assertTrue(integrity["pass"])
+        self.assertIsNone(reason)
+        self.assertEqual(calls, [{
+            "timing": None,
+            "generation": None,
+            "route": {
+                "provider": plan.requested_provider,
+                "served_model": plan.requested_model,
+            },
+            "cache": None,
+            "costs": None,
+        }])
+
     def test_openrouter_streamed_usage_cost_flows_into_call_costs(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)
         plans, _secrets = router_run.router_spec.compile_route_plans(

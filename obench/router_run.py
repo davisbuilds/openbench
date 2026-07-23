@@ -885,6 +885,18 @@ def _proxy_evidence(
         status = row.get("status")
         if _is_max_calls_rejection(row):
             continue
+        if isinstance(status, int) and 200 <= status < 300 and row.get("error"):
+            calls.append({
+                "timing": None,
+                "generation": None,
+                "route": {
+                    "provider": plan.requested_provider,
+                    "served_model": plan.requested_model,
+                },
+                "cache": None,
+                "costs": None,
+            })
+            continue
         if isinstance(status, int) and 400 <= status <= 599:
             if (
                 plan.track == "model_router"
@@ -1104,6 +1116,7 @@ def _run_cell(
     upstream_rows = [row for row in ledger_rows if not _is_max_calls_rejection(row)]
     available = bool(upstream_rows) and all(
         isinstance(row.get("status"), int) and 200 <= row["status"] < 300
+        and not row.get("error")
         for row in upstream_rows
     )
     timed_out = bool(adapter_result.get("entry_timed_out")) or "timeout" in str(
