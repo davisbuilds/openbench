@@ -803,7 +803,10 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
         reasons.append("stream_not_done")
     attempts = route.get("attempts")
     if plan.route_kind == "gateway":
-        if route.get("metadata_requested_model") != plan.requested_model:
+        if (
+            plan.gateway != "cloudflare"
+            and route.get("metadata_requested_model") != plan.requested_model
+        ):
             reasons.append("metadata_requested_model_conflict")
         if attempts is not None:
             if not isinstance(attempts, list):

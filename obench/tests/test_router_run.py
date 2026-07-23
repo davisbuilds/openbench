@@ -484,6 +484,19 @@ direct_control_arm_id = "direct"
         self.assertIn("requested_model_conflict", reasons)
         self.assertIn("metadata_requested_model_conflict", reasons)
 
+        cloudflare = dataclasses.replace(
+            openrouter,
+            gateway="cloudflare",
+            model_match="rolling_alias",
+        )
+        cloudflare_metrics = metrics(served="fake-model-2026-07-22")
+        cloudflare_metrics["route"]["metadata_requested_model"] = None
+        cloudflare_metrics["route"]["attempts"] = []
+        self.assertEqual(
+            router_run._route_reasons(cloudflare_metrics, cloudflare),
+            [],
+        )
+
     def test_vercel_reported_cost_is_timestamped_and_separate_from_frozen_price(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)
         plans, _secrets = router_run.router_spec.compile_route_plans(

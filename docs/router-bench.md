@@ -31,7 +31,7 @@ Cloudflare serving path around the same rolling model alias instead of
 measuring provider choice or recovery policy.
 
 [`router-bench-three-way.toml`](../obench/examples/router-bench-three-way.toml)
-is a matched three-way comparison:
+is the recommended matched comparison:
 
 1. OpenAI directly;
 2. OpenRouter restricted to OpenAI;
@@ -44,7 +44,7 @@ resolving it. Other model families, conflicting provider qualifications, and
 two different dated snapshots still fail route integrity.
 
 The strict fixed-gateway profiles are OpenRouter, Vercel AI Gateway, and
-Cloudflare AI Gateway REST.
+Cloudflare AI Gateway.
 
 This is intentionally a practical product comparison: it measures the
 end-to-end experience of asking each gateway for the same rolling alias at
@@ -73,11 +73,24 @@ when returned. A valid timestamped `cost` becomes `router_reported` evidence,
 while the independent frozen list-price estimate remains available for
 comparison and budget enforcement in Gateway Tax.
 
-Cloudflare uses its OpenAI-compatible
+Cloudflare supports two OpenAI-compatible fixed routes. The documented
 `POST https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions`
-REST endpoint and requires a real 32-hex account ID plus a provider-qualified
-requested model such as `openai/gpt-4o-mini`. OpenBench removes caller cache and
-routing controls, blocks caller `cf-aig-*` headers, and forces
+REST endpoint uses Cloudflare unified billing and an `AI Gateway: Run` API
+token. The named
+`https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/compat/chat/completions`
+route uses the upstream provider key directly; for the OpenAI control, set its
+`auth_env` to the same `OPENAI_API_KEY` as the direct arm and disable
+Authenticated Gateway for that named gateway. Both require a real 32-hex
+account ID plus a provider-qualified requested model such as
+`openai/gpt-4o-mini`.
+
+Cloudflare marks the named compatibility route deprecated. It is therefore
+available only as the explicitly temporary
+[`router-bench-four-way-cloudflare-legacy.toml`](../obench/examples/router-bench-four-way-cloudflare-legacy.toml)
+fallback, not the canonical comparison.
+
+OpenBench removes caller cache and routing controls, blocks caller `cf-aig-*`
+headers, and forces
 `cf-aig-skip-cache: true`, `cf-aig-max-attempts: 1`, and
 `cf-aig-collect-log-payload: false`. Route evidence combines the provider
 qualifier from the requested model with the served `model` in Cloudflare's
@@ -87,6 +100,14 @@ example currently reports
 provider qualifier, or a conflicting dated revision fails route integrity.
 OpenBench does not invent response headers or attempt evidence that this REST
 response does not provide.
+
+On 2026-07-23 the named compatibility route was live-smoked successfully
+against OpenAI and returned `gpt-4o-mini-2024-07-18`, token usage, and a
+successful completion. The newer unified-billing REST route returned
+`401 Authentication error` with both active user-owned and account-owned
+`AI Gateway: Run` tokens on the same account. Treat that route as
+contract-supported but live-unverified until Cloudflare resolves the account
+issue.
 
 Vercel supports routing one requested model across providers, provider filters,
 fallbacks, and explicit model rewrite rules. Its documented cost-aware model
@@ -156,7 +177,7 @@ future windows. Replace them with the intended non-overlapping windows before a
 real run. `run` executes only currently active windows and resumes completed
 blocks from the same results file.
 
-## Three-way commands
+## Recommended commands
 
 Validation reads no secrets and makes no model calls:
 
@@ -203,6 +224,11 @@ python3 -m obench.cli router publish \
 python3 -m obench.cli router verify \
   results/router-gpt-4o-mini-three-way-bundle
 ```
+
+To reproduce the temporary Cloudflare BYOK lane, replace the illustrative
+account and gateway IDs in
+`obench/examples/router-bench-four-way-cloudflare-legacy.toml`, then run the
+same commands against that manifest.
 
 ## Auto Router commands
 
@@ -293,6 +319,7 @@ stratum.
 - [Vercel cost-aware model routing](https://vercel.com/kb/guide/cost-aware-model-routing-with-ai-gateway)
 - [Vercel routing rules](https://vercel.com/changelog/ai-gateway-routing-rules)
 - [Cloudflare AI Gateway REST API](https://developers.cloudflare.com/ai-gateway/usage/rest-api/)
+- [Cloudflare deprecated unified compatibility API](https://developers.cloudflare.com/ai-gateway/usage/unified-api/)
 - [Cloudflare AI Gateway request handling](https://developers.cloudflare.com/ai-gateway/configuration/request-handling/)
 - [Cloudflare AI Gateway caching](https://developers.cloudflare.com/ai-gateway/features/caching/)
 - [Cloudflare `gpt-4o-mini` model](https://developers.cloudflare.com/ai/models/openai/gpt-4o-mini/)

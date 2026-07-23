@@ -18,9 +18,14 @@ CONCENTRATE_UNSUPPORTED = (
 
 _OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 _VERCEL_ENDPOINT = "https://ai-gateway.vercel.sh/v1/chat/completions"
-_CLOUDFLARE_ENDPOINT_RE = re.compile(
+_CLOUDFLARE_REST_ENDPOINT_RE = re.compile(
     r"https://api\.cloudflare\.com/client/v4/accounts/"
     r"(?P<account_id>[0-9a-fA-F]{32})/ai/v1/chat/completions"
+)
+_CLOUDFLARE_COMPAT_ENDPOINT_RE = re.compile(
+    r"https://gateway\.ai\.cloudflare\.com/v1/"
+    r"(?P<account_id>[0-9a-fA-F]{32})/"
+    r"(?P<gateway_id>[A-Za-z0-9][A-Za-z0-9_-]*)/compat/chat/completions"
 )
 _CACHE_KEYS = frozenset({
     "cache",
@@ -148,11 +153,16 @@ def validate_arm(
                 "vercel requested_model must be a provider-qualified model ID"
             )
     if gateway == "cloudflare":
-        if _CLOUDFLARE_ENDPOINT_RE.fullmatch(endpoint) is None:
+        if (
+            _CLOUDFLARE_REST_ENDPOINT_RE.fullmatch(endpoint) is None
+            and _CLOUDFLARE_COMPAT_ENDPOINT_RE.fullmatch(endpoint) is None
+        ):
             raise GatewayProfileError(
-                "cloudflare endpoint must be "
+                "cloudflare endpoint must be either "
                 "https://api.cloudflare.com/client/v4/accounts/"
-                "{32-hex-account-id}/ai/v1/chat/completions; metadata-only "
+                "{32-hex-account-id}/ai/v1/chat/completions or "
+                "https://gateway.ai.cloudflare.com/v1/"
+                "{32-hex-account-id}/{gateway-id}/compat/chat/completions; metadata-only "
                 "Logs API verification is required for other Cloudflare routes"
             )
         if (

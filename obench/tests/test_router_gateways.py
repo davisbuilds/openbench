@@ -117,25 +117,38 @@ class GatewayRequestProfileTests(unittest.TestCase):
         ):
             self.assertNotIn(key, body)
 
-    def test_cloudflare_rest_profile_requires_real_account_and_qualified_model(self):
-        endpoint = (
+    def test_cloudflare_profile_requires_real_account_and_qualified_model(self):
+        rest_endpoint = (
             "https://api.cloudflare.com/client/v4/accounts/"
             "0123456789abcdef0123456789abcdef/ai/v1/chat/completions"
         )
-        router_gateways.validate_arm(
-            route_kind="gateway",
-            gateway="cloudflare",
-            endpoint=endpoint,
-            requested_model="openai/gpt-4o-mini",
-            requested_provider="openai",
-            track="gateway_tax",
+        compat_endpoint = (
+            "https://gateway.ai.cloudflare.com/v1/"
+            "0123456789abcdef0123456789abcdef/"
+            "openbench-router-bench/compat/chat/completions"
         )
+        for endpoint in (rest_endpoint, compat_endpoint):
+            with self.subTest(endpoint=endpoint):
+                router_gateways.validate_arm(
+                    route_kind="gateway",
+                    gateway="cloudflare",
+                    endpoint=endpoint,
+                    requested_model="openai/gpt-4o-mini",
+                    requested_provider="openai",
+                    track="gateway_tax",
+                )
 
         invalid_endpoints = (
-            endpoint.replace("0123456789abcdef0123456789abcdef", "{account_id}"),
-            endpoint.replace("0123456789abcdef0123456789abcdef", "account-id"),
-            endpoint.replace("/chat/completions", "/responses"),
-            endpoint + "?gateway=other",
+            rest_endpoint.replace(
+                "0123456789abcdef0123456789abcdef", "{account_id}"
+            ),
+            rest_endpoint.replace(
+                "0123456789abcdef0123456789abcdef", "account-id"
+            ),
+            rest_endpoint.replace("/chat/completions", "/responses"),
+            rest_endpoint + "?gateway=other",
+            compat_endpoint.replace("openbench-router-bench", "{gateway_id}"),
+            compat_endpoint.replace("/compat/chat/completions", "/openai"),
         )
         for invalid in invalid_endpoints:
             with self.subTest(endpoint=invalid):
@@ -159,7 +172,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             router_gateways.validate_arm(
                 route_kind="gateway",
                 gateway="cloudflare",
-                endpoint=endpoint,
+                endpoint=rest_endpoint,
                 requested_model="anthropic/gpt-4o-mini",
                 requested_provider="openai",
                 track="gateway_tax",
@@ -171,7 +184,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             router_gateways.validate_arm(
                 route_kind="gateway",
                 gateway="cloudflare",
-                endpoint=endpoint,
+                endpoint=rest_endpoint,
                 requested_model="openai/gpt-4o-mini",
                 requested_provider="openai",
                 track="model_router",
