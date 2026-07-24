@@ -80,6 +80,41 @@ call is flagged with its coverage. The **Gateway tax** table shows the paired,
 task-weighted difference of each gateway arm from its direct control arm — an
 interval spanning zero is not a detected effect.
 
+## Design decisions worth keeping
+
+The page is an instrument readout, not a marketing page, so the craft went into
+information design rather than ornament.
+
+- **Type carries the split.** Prose is set in the system sans; every identifier
+  the benchmark *names* and every value it *measures* — harness, model, arm id,
+  rate, latency, digest — is set in mono, because those are readings, not
+  writing. No webfont is loaded: a data-URI face would bloat a committed file
+  and a CDN link would break the no-third-party-assets rule.
+- **One shared interval scale.** Solve-rate intervals plot against the same
+  0–100% track, gridded at 25% steps with the axis labelled once in the column
+  header, so rows compare down the column instead of each bar being its own
+  private scale.
+- **Contrasts diverge about zero.** Gateway-tax deltas plot on a zero-centred
+  axis with a shared per-column domain. An interval covering zero is drawn
+  neutral grey, so "no detected effect" is something you see rather than
+  something you read in a caption.
+- **The diverging pair is validated, not eyeballed.** Better/worse use blue
+  `#2a78d6`/`#3987e5` against orange `#eb6834`/`#d95926` — a warm/cool pair that
+  clears CVD separation, the normal-vision floor, and 3:1 contrast in both
+  modes. Green-vs-red was rejected: it fails deutan separation badly (ΔE 4.1).
+  Direction is also carried by the sign and by which side of zero the bar sits
+  on, so it never depends on colour alone.
+- **Empty columns are dropped, not dashed.** A measure no arm reports (`$/solve`
+  with no configured price) is removed entirely, and the model column only
+  appears when a board compares more than one model.
+- **Amber is reserved.** It marks disclosed caveats, excluded blocks, and
+  partial cost coverage, and always ships with a label.
+
+Both themes are token-level: `:root` holds light, the `prefers-color-scheme`
+block carries the OS preference behind a `:where(:not([data-theme="light"]))`
+guard, and explicit `[data-theme]` scopes let the in-page toggle win in both
+directions — including flipping `color-scheme` back for native form controls.
+
 ## Constraints the page keeps
 
 - **Self-contained.** The data is embedded in the page, so it works from

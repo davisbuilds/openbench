@@ -412,136 +412,334 @@ def build_board(site_dir, community_dir=None, router_dirs=None):
 # --------------------------------------------------------------------------
 
 _CSS = """
+/* ---------------------------------------------------------------------------
+   OpenBench leaderboards — instrument readout.
+
+   Type: prose in sans; every identifier the benchmark names and every value it
+   measures in mono, because they are readings, not writing.
+   Colour: cool-slate neutrals biased toward the accent; one accent (validated
+   categorical slot 1) for interactive chrome and interval marks; a validated
+   blue/orange diverging pair for signed contrasts, with a neutral midpoint when
+   an interval spans zero; amber reserved for provenance warnings and never
+   carrying meaning without a label.
+--------------------------------------------------------------------------- */
 :root{
-  --bg:#f6f7f9; --panel:#ffffff; --ink:#12181f; --muted:#5b6875;
-  --line:#e2e7ee; --head:#eef2f7; --accent:#0b6bcb; --accent-ink:#ffffff;
-  --good:#0f7b4f; --bad:#b4442e; --warn:#8a5a00; --warn-bg:#fff4dd;
-  --bar:#c8d6e6; --bar-fill:#0b6bcb; --chip:#eef2f7;
-  --radius:12px; --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.05);
+  color-scheme:light;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",SFMono-Regular,"JetBrains Mono","Cascadia Mono",
+    Menlo,Consolas,"Liberation Mono",monospace;
+
+  --surface:#eef1f5;
+  --panel:#ffffff;
+  --panel-2:#f6f8fb;
+  --line:#dce3ea;
+  --line-strong:#c3ced9;
+  --ink:#0e1720;
+  --ink-2:#465768;
+  --ink-3:#6d7f92;
+
+  --accent:#2a78d6;
+  --accent-rgb:42,120,214;
+  --pole-better:#2a78d6;
+  --pole-better-rgb:42,120,214;
+  --pole-worse:#eb6834;
+  --pole-worse-rgb:235,104,52;
+  --pole-null:#8494a5;
+  --pole-null-rgb:132,148,165;
+
+  --warn-ink:#8a5300;
+  --warn-bg:#fdf3dd;
+  --warn-line:#e8c98a;
+
+  --track:rgba(14,23,32,.09);
+  --grid:rgba(14,23,32,.10);
+  --shadow:0 1px 1px rgba(14,23,32,.04),0 6px 18px rgba(14,23,32,.05);
+  --radius:10px;
 }
 @media (prefers-color-scheme:dark){
-  :root{
-    --bg:#0d1117; --panel:#151b23; --ink:#e6edf3; --muted:#9aa7b4;
-    --line:#232c37; --head:#1b232d; --accent:#5aa8ff; --accent-ink:#08121d;
-    --good:#4ec98a; --bad:#ff8a70; --warn:#e8b552; --warn-bg:#2a2113;
-    --bar:#2a3440; --bar-fill:#5aa8ff; --chip:#1b232d;
-    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+  :root:where(:not([data-theme="light"])){
+    color-scheme:dark;
+    --surface:#080c11;
+    --panel:#111820;
+    --panel-2:#161f29;
+    --line:#1e2833;
+    --line-strong:#2b3846;
+    --ink:#e6edf5;
+    --ink-2:#9fb1c3;
+    --ink-3:#74879b;
+
+    --accent:#3987e5;
+    --accent-rgb:57,135,229;
+    --pole-better:#3987e5;
+    --pole-better-rgb:57,135,229;
+    --pole-worse:#d95926;
+    --pole-worse-rgb:217,89,38;
+    --pole-null:#74879b;
+    --pole-null-rgb:116,135,155;
+
+    --warn-ink:#fab219;
+    --warn-bg:#2a2113;
+    --warn-line:#5a4715;
+
+    --track:rgba(230,237,245,.10);
+    --grid:rgba(230,237,245,.13);
+    --shadow:0 1px 1px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.35);
   }
 }
-:root[data-theme="light"]{
-  --bg:#f6f7f9; --panel:#ffffff; --ink:#12181f; --muted:#5b6875;
-  --line:#e2e7ee; --head:#eef2f7; --accent:#0b6bcb; --accent-ink:#ffffff;
-  --good:#0f7b4f; --bad:#b4442e; --warn:#8a5a00; --warn-bg:#fff4dd;
-  --bar:#c8d6e6; --bar-fill:#0b6bcb; --chip:#eef2f7;
-  --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.05);
-}
 :root[data-theme="dark"]{
-  --bg:#0d1117; --panel:#151b23; --ink:#e6edf3; --muted:#9aa7b4;
-  --line:#232c37; --head:#1b232d; --accent:#5aa8ff; --accent-ink:#08121d;
-  --good:#4ec98a; --bad:#ff8a70; --warn:#e8b552; --warn-bg:#2a2113;
-  --bar:#2a3440; --bar-fill:#5aa8ff; --chip:#1b232d;
-  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+  color-scheme:dark;
+  --surface:#080c11;
+  --panel:#111820;
+  --panel-2:#161f29;
+  --line:#1e2833;
+  --line-strong:#2b3846;
+  --ink:#e6edf5;
+  --ink-2:#9fb1c3;
+  --ink-3:#74879b;
+
+  --accent:#3987e5;
+  --accent-rgb:57,135,229;
+  --pole-better:#3987e5;
+  --pole-better-rgb:57,135,229;
+  --pole-worse:#d95926;
+  --pole-worse-rgb:217,89,38;
+  --pole-null:#74879b;
+  --pole-null-rgb:116,135,155;
+
+  --warn-ink:#fab219;
+  --warn-bg:#2a2113;
+  --warn-line:#5a4715;
+
+  --track:rgba(230,237,245,.10);
+  --grid:rgba(230,237,245,.13);
+  --shadow:0 1px 1px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.35);
 }
+
+/* Explicit light scope: the toggle must be able to win against an OS set to
+   dark, including flipping color-scheme back for native form controls. */
+:root[data-theme="light"]{
+  color-scheme:light;
+  --surface:#eef1f5;
+  --panel:#ffffff;
+  --panel-2:#f6f8fb;
+  --line:#dce3ea;
+  --line-strong:#c3ced9;
+  --ink:#0e1720;
+  --ink-2:#465768;
+  --ink-3:#6d7f92;
+
+  --accent:#2a78d6;
+  --accent-rgb:42,120,214;
+  --pole-better:#2a78d6;
+  --pole-better-rgb:42,120,214;
+  --pole-worse:#eb6834;
+  --pole-worse-rgb:235,104,52;
+  --pole-null:#8494a5;
+  --pole-null-rgb:132,148,165;
+
+  --warn-ink:#8a5300;
+  --warn-bg:#fdf3dd;
+  --warn-line:#e8c98a;
+
+  --track:rgba(14,23,32,.09);
+  --grid:rgba(14,23,32,.10);
+  --shadow:0 1px 1px rgba(14,23,32,.04),0 6px 18px rgba(14,23,32,.05);
+}
+
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);
-  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
-  -webkit-font-smoothing:antialiased}
-a{color:var(--accent)}
-.wrap{max-width:1240px;margin:0 auto;padding:0 20px}
-header.top{border-bottom:1px solid var(--line);background:var(--panel);
-  position:sticky;top:0;z-index:20}
-.top .wrap{display:flex;align-items:center;gap:18px;height:60px}
-.brand{font-weight:700;letter-spacing:-.01em;font-size:17px;white-space:nowrap}
-.brand span{color:var(--muted);font-weight:500}
-nav.tabs{display:flex;gap:2px;margin-left:auto;flex-wrap:wrap}
-nav.tabs a{padding:7px 13px;border-radius:999px;text-decoration:none;color:var(--muted);
-  font-weight:600;font-size:14px}
-nav.tabs a[aria-current="page"]{background:var(--accent);color:var(--accent-ink)}
-nav.tabs a:hover:not([aria-current]){background:var(--chip);color:var(--ink)}
-button.theme{background:none;border:1px solid var(--line);color:var(--muted);
-  border-radius:8px;width:34px;height:32px;cursor:pointer;padding:0;
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--surface);color:var(--ink);
+  font:15px/1.55 var(--font-sans);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-underline-offset:2px}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
+summary:focus-visible,th.sortable:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;transition-duration:.01ms !important}
+}
+
+.wrap{max-width:1280px;margin:0 auto;padding:0 22px}
+
+/* --- masthead ---------------------------------------------------------- */
+header.top{background:var(--panel);border-bottom:1px solid var(--line);
+  position:sticky;top:0;z-index:30}
+.top .wrap{display:flex;align-items:center;gap:20px;min-height:58px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
+.brand .cmd{font:600 15px/1 var(--font-mono);letter-spacing:-.01em;color:var(--ink)}
+.brand .cmd::before{content:"$ ";color:var(--ink-3);font-weight:400}
+.brand .what{font-size:14px;color:var(--ink-2)}
+nav.tabs{display:flex;gap:1px;margin-left:auto;flex-wrap:wrap}
+nav.tabs a{padding:6px 12px;border-radius:7px;text-decoration:none;color:var(--ink-2);
+  font-weight:600;font-size:13.5px}
+nav.tabs a:hover:not([aria-current]){background:var(--panel-2);color:var(--ink)}
+nav.tabs a[aria-current="page"]{background:var(--ink);color:var(--panel)}
+button.theme{background:none;border:1px solid var(--line-strong);color:var(--ink-2);
+  border-radius:7px;width:32px;height:30px;cursor:pointer;padding:0;
   display:inline-flex;align-items:center;justify-content:center}
-button.theme:hover{color:var(--ink);border-color:var(--muted)}
-button.theme svg{width:16px;height:16px}
-.hero{padding:34px 0 10px}
-.hero h1{margin:0 0 6px;font-size:30px;letter-spacing:-.02em}
-.hero p{margin:0;color:var(--muted);max-width:70ch}
-.stats{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0 4px}
-.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-  padding:12px 16px;min-width:150px}
-.stat b{display:block;font-size:22px;letter-spacing:-.01em}
-.stat span{color:var(--muted);font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
-.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;
-  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-  padding:12px;margin:18px 0}
-.controls input[type=search],.controls select{background:var(--bg);color:var(--ink);
-  border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit;font-size:14px}
-.controls input[type=search]{min-width:210px;flex:1}
-.controls label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:14px}
+button.theme:hover{color:var(--ink);border-color:var(--ink-3)}
+button.theme svg{width:15px;height:15px}
+
+/* --- page intro & summary strip ---------------------------------------- */
+.intro{padding:30px 0 6px;max-width:64ch}
+.intro h1{margin:0 0 8px;font-size:25px;line-height:1.25;letter-spacing:-.02em;
+  text-wrap:balance}
+.intro p{margin:0;color:var(--ink-2)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
+  gap:1px;background:var(--line);border:1px solid var(--line);
+  border-radius:var(--radius);overflow:hidden;margin:22px 0 4px}
+.stat{background:var(--panel);padding:12px 15px}
+.stat b{display:block;font:600 21px/1.15 var(--font-mono);letter-spacing:-.02em}
+.stat span{display:block;margin-top:3px;color:var(--ink-3);font-size:11px;
+  text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+
+/* --- controls ----------------------------------------------------------- */
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:20px 0 14px}
+.controls input[type=search],.controls select{background:var(--panel);color:var(--ink);
+  border:1px solid var(--line-strong);border-radius:7px;padding:7px 10px;
+  font:14px var(--font-sans)}
+.controls input[type=search]{min-width:220px;flex:1;font-family:var(--font-mono);
+  font-size:13px}
+.controls label{display:flex;align-items:center;gap:7px;color:var(--ink-2);font-size:13.5px}
+
+/* --- notes -------------------------------------------------------------- */
+.note{background:var(--panel);border:1px solid var(--line);
+  border-left:2px solid var(--accent);border-radius:var(--radius);
+  padding:13px 16px;margin:14px 0;color:var(--ink-2);font-size:14px;max-width:88ch}
+.note strong{color:var(--ink)}
+
+/* --- board -------------------------------------------------------------- */
 .board{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-  box-shadow:var(--shadow);margin:16px 0;overflow:hidden}
-.board > .head{padding:16px 18px;border-bottom:1px solid var(--line)}
-.board h2{margin:0 0 6px;font-size:18px;letter-spacing:-.01em}
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.chip{background:var(--chip);color:var(--muted);border-radius:999px;padding:3px 9px;
-  font-size:12px;font-weight:600;white-space:nowrap}
-.chip.kind-release{color:var(--accent)}
-.chip.kind-community{color:var(--good)}
-.chip.warn{background:var(--warn-bg);color:var(--warn)}
-.chip.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:500}
-td .chips{flex-wrap:nowrap;justify-content:flex-end}
-details.caveats{margin:10px 0 0;font-size:14px}
-details.caveats summary{cursor:pointer;color:var(--warn);font-weight:600}
-details.caveats ul{margin:8px 0 0;padding-left:20px;color:var(--muted)}
-details.caveats li{margin:5px 0}
+  box-shadow:var(--shadow);margin:14px 0;overflow:hidden}
+.board .head{padding:15px 18px;border-bottom:1px solid var(--line)}
+.board .head:last-child{border-bottom:none;border-top:1px solid var(--line)}
+.board h2{margin:0;font-size:17px;letter-spacing:-.015em;line-height:1.3}
+.board h2 a{text-decoration:none}
+.board h2 a:hover{text-decoration:underline}
+.board .head p{margin:6px 0 0;color:var(--ink-2);font-size:13.5px;max-width:80ch}
+.meta{margin-top:9px;font:12px/1.7 var(--font-mono);color:var(--ink-3);
+  display:flex;flex-wrap:wrap;gap:0 14px}
+.meta b{color:var(--ink-2);font-weight:600}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.chip{border:1px solid var(--line-strong);color:var(--ink-2);background:var(--panel-2);
+  border-radius:5px;padding:2px 7px;font:600 11.5px var(--font-mono);white-space:nowrap}
+.chip.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-ink)}
+.chip.role-direct{border-color:rgba(var(--accent-rgb),.5);color:var(--accent)}
+td .chips{flex-wrap:nowrap;justify-content:flex-end;margin-top:0}
+
+details.caveats{margin-top:10px;font-size:13.5px}
+details.caveats summary{cursor:pointer;color:var(--warn-ink);font-weight:600;
+  list-style:none;display:flex;align-items:center;gap:6px}
+details.caveats summary::-webkit-details-marker{display:none}
+details.caveats summary::before{content:"▸";font-size:11px}
+details.caveats[open] summary::before{content:"▾"}
+details.caveats ul{margin:9px 0 0;padding-left:18px;color:var(--ink-2)}
+details.caveats li{margin:6px 0;max-width:88ch}
+
+/* --- tables ------------------------------------------------------------- */
 .scroll{overflow-x:auto}
-table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
-th,td{padding:10px 12px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+table{border-collapse:collapse;width:100%}
+th,td{padding:9px 10px;text-align:right;white-space:nowrap;
+  border-bottom:1px solid var(--line)}
 th:first-child,td:first-child{text-align:left}
-th:nth-child(2),td:nth-child(2){text-align:left}
-thead th{background:var(--head);font-size:12.5px;text-transform:uppercase;
-  letter-spacing:.04em;color:var(--muted);position:sticky;top:0}
+thead th{background:var(--panel-2);color:var(--ink-3);font:600 11px var(--font-sans);
+  text-transform:uppercase;letter-spacing:.07em;padding-top:11px;padding-bottom:11px;
+  vertical-align:bottom}
 thead th.sortable{cursor:pointer;user-select:none}
 thead th.sortable:hover{color:var(--ink)}
-thead th .arrow{opacity:.35;margin-left:4px}
+thead th .arrow{opacity:.4;margin-left:4px;font-size:10px}
 thead th[aria-sort] .arrow{opacity:1;color:var(--accent)}
-tbody tr:hover{background:var(--head)}
+thead th[aria-sort]{color:var(--ink)}
+tbody td{font:13.5px/1.4 var(--font-mono);font-variant-numeric:tabular-nums;
+  color:var(--ink-2)}
 tbody tr:last-child td{border-bottom:none}
-td.rank{color:var(--muted);font-weight:700;width:1%}
-tr.top td.rank{color:var(--accent)}
-td.name{font-weight:600}
-td.sub{color:var(--muted);font-weight:400}
-.ci{display:flex;align-items:center;gap:8px;justify-content:flex-end}
-.ci .track{position:relative;width:120px;height:7px;background:var(--bar);border-radius:4px}
-.ci .span{position:absolute;top:0;height:7px;background:var(--bar-fill);opacity:.35;border-radius:4px}
-.ci .dot{position:absolute;top:-2px;width:3px;height:11px;background:var(--bar-fill);border-radius:2px}
-.ci .val{min-width:52px;text-align:right;font-weight:600}
-.ci .range{color:var(--muted);font-size:12.5px;min-width:96px;text-align:right}
-.delta.up{color:var(--good)}
-.delta.down{color:var(--bad)}
-.empty{padding:34px 18px;text-align:center;color:var(--muted)}
-.note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
-  border-radius:var(--radius);padding:14px 16px;margin:16px 0;color:var(--muted);font-size:14.5px}
-.note strong{color:var(--ink)}
+tbody tr:hover td{background:var(--panel-2)}
+td.rank{color:var(--ink-3);width:1%;padding-right:2px}
+td.name{color:var(--ink);font-weight:600}
+/* Keep the arm's identity on screen while the measurements scroll. */
+thead th:first-child,tbody td:first-child{position:sticky;left:0;z-index:1;
+  background:var(--panel)}
+thead th:first-child{background:var(--panel-2)}
+tbody tr:hover td:first-child{background:var(--panel-2)}
+
+/* --- interval plot: one shared 0–100% scale across every row ------------ */
+.axis{display:flex;justify-content:space-between;width:var(--plot-w);
+  margin:5px 0 0 auto;font:500 10px var(--font-mono);color:var(--ink-3);
+  letter-spacing:0;text-transform:none}
+.iv{display:flex;align-items:center;gap:9px;justify-content:flex-end}
+.iv .val{flex:0 0 auto;min-width:54px;text-align:right;color:var(--ink);font-weight:600}
+.iv .track{position:relative;flex:0 0 var(--plot-w);width:var(--plot-w);height:9px;
+  background:var(--track);
+  border-radius:2px;
+  background-image:linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:25% 100%;background-position:0 0}
+.iv .span{position:absolute;top:0;height:9px;border-radius:2px;
+  background:rgba(var(--accent-rgb),.34)}
+.iv .dot{position:absolute;top:-2px;width:3px;height:13px;border-radius:1.5px;
+  background:var(--accent);box-shadow:0 0 0 2px var(--panel)}
+.iv .range{flex:0 0 auto;min-width:76px;text-align:right;color:var(--ink-3);font-size:11px}
+
+/* --- signed contrast: diverging, centred on a zero line ----------------- */
+.dv{display:flex;align-items:center;gap:9px;justify-content:flex-end}
+.dv .val{flex:0 0 auto;min-width:58px;text-align:right;font-weight:600}
+.dv .val.better{color:var(--pole-better)}
+.dv .val.worse{color:var(--pole-worse)}
+.dv .val.null{color:var(--ink-2)}
+.dv .track{position:relative;flex:0 0 var(--plot-w);width:var(--plot-w);height:9px;
+  background:var(--track);
+  border-radius:2px}
+.dv .zero{position:absolute;left:50%;top:-3px;width:1px;height:15px;
+  background:var(--line-strong)}
+.dv .span{position:absolute;top:0;height:9px;border-radius:2px}
+.dv .span.better{background:rgba(var(--pole-better-rgb),.34)}
+.dv .span.worse{background:rgba(var(--pole-worse-rgb),.34)}
+.dv .span.null{background:rgba(var(--pole-null-rgb),.30)}
+.dv .dot{position:absolute;top:-2px;width:3px;height:13px;border-radius:1.5px;
+  box-shadow:0 0 0 2px var(--panel)}
+.dv .dot.better{background:var(--pole-better)}
+.dv .dot.worse{background:var(--pole-worse)}
+.dv .dot.null{background:var(--pole-null)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;
+  font:12px var(--font-sans);color:var(--ink-2)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:11px;height:11px;border-radius:2px;display:inline-block}
+.legend i.better{background:var(--pole-better)}
+.legend i.worse{background:var(--pole-worse)}
+.legend i.null{background:var(--pole-null)}
+
+/* --- lists & prose ------------------------------------------------------ */
+.empty{padding:36px 18px;text-align:center;color:var(--ink-2)}
+.empty p{margin:0 0 8px;max-width:60ch;margin-inline:auto}
+.empty code{font-family:var(--font-mono);font-size:12.5px;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+ul.records{list-style:none;margin:0;padding:0}
+ul.records li{padding:11px 0;border-bottom:1px solid var(--line)}
+ul.records li:last-child{border-bottom:none}
+ul.records a,ul.records strong{font-weight:600;text-decoration:none}
+ul.records a:hover{text-decoration:underline}
+ul.records .sub{color:var(--ink-3);font:12px/1.6 var(--font-mono);margin-top:2px}
 .prose{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-  padding:20px 22px;margin:16px 0}
-.prose h2{margin:0 0 8px;font-size:18px}
-.prose h3{margin:20px 0 6px;font-size:15px}
-.prose p,.prose li{color:var(--muted)}
-.prose code{background:var(--chip);padding:1px 5px;border-radius:5px;font-size:13px}
-ul.releases{list-style:none;margin:0;padding:0}
-ul.releases li{padding:12px 0;border-bottom:1px solid var(--line)}
-ul.releases li:last-child{border-bottom:none}
-ul.releases a{font-weight:600;text-decoration:none}
-ul.releases a:hover{text-decoration:underline}
-footer{color:var(--muted);font-size:13.5px;padding:28px 0 40px;text-align:center}
+  box-shadow:var(--shadow);padding:22px 26px;margin:14px 0;max-width:80ch}
+.prose h2{margin:0 0 8px;font-size:17px;letter-spacing:-.015em}
+.prose h2+p{margin-top:0}
+.prose h3{margin:22px 0 6px;font-size:14px;letter-spacing:.01em}
+.prose p,.prose li{color:var(--ink-2);max-width:74ch}
+.prose li{margin:6px 0}
+.prose code{font-family:var(--font-mono);font-size:12.5px;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+footer{color:var(--ink-3);font-size:13px;padding:26px 0 44px;text-align:center}
+footer code{font-family:var(--font-mono)}
 .hidden{display:none}
+
+/* Plot width is a token so the axis header and every row stay locked. */
+:root{--plot-w:104px}
+@media(max-width:900px){:root{--plot-w:96px}}
 @media(max-width:760px){
-  .top .wrap{height:auto;padding-top:10px;padding-bottom:10px;flex-wrap:wrap}
-  nav.tabs{margin-left:0;width:100%}
-  .ci .track{width:64px}
-  .ci .range{display:none}
-  .hero h1{font-size:24px}
+  :root{--plot-w:72px}
+  .top .wrap{min-height:0;padding-top:10px;padding-bottom:10px}
+  nav.tabs{margin-left:0;width:100%;order:3}
+  .iv .range{display:none}
+  .intro h1{font-size:21px}
+  .wrap{padding:0 14px}
 }
 """
 
@@ -599,11 +797,21 @@ _JS = r"""
     });
     return node;
   }
+  var COST_BASIS_LABEL = {
+    invoice_reconciled: "invoice",
+    router_reported: "router",
+    frozen_list_estimate: "list est."
+  };
   function chip(text, cls) { return el("span", { class: "chip " + (cls || ""), text: text }); }
+  function metaField(label, value) {
+    return el("span", null, [el("b", { text: label + " " }), value]);
+  }
 
-  // Confidence-interval cell: value, a scaled bar, and the numeric range.
+  // Interval cell. Every row plots against the same 0–100% track, gridded at
+  // 25% steps by CSS, so rows are comparable down the column rather than each
+  // bar being its own private scale.
   function ciCell(estimate, low, high, fmt) {
-    var wrap = el("div", { class: "ci" });
+    var wrap = el("div", { class: "iv" });
     wrap.appendChild(el("span", { class: "val", text: fmt(estimate) }));
     var track = el("div", { class: "track" });
     if (low !== null && low !== undefined && high !== null && high !== undefined) {
@@ -632,10 +840,27 @@ _JS = r"""
   // columns: [{label, cell(row)->Node|string, sort(row)->number|string|null,
   //            defaultDir, align}]
   var sortState = {};
-  function renderTable(key, columns, rows, defaultSort) {
-    var state = sortState[key] || (sortState[key] = {
-      index: defaultSort === undefined ? null : defaultSort, dir: "desc"
+
+  // A measure every arm leaves blank is noise, not information: drop the whole
+  // column rather than printing a column of em-dashes.
+  function usefulColumns(columns, rows) {
+    return columns.filter(function (col) {
+      if (!col.omitIfEmpty) return true;
+      return rows.some(function (r) {
+        var v = col.present ? col.present(r) : col.sort(r);
+        return v !== null && v !== undefined;
+      });
     });
+  }
+
+  function renderTable(key, allColumns, rows, defaultSortLabel) {
+    var columns = usefulColumns(allColumns, rows);
+    // Sort by column identity, not index, so dropping a column cannot shift it.
+    var defaultSort = null;
+    columns.forEach(function (col, i) {
+      if (col.label === defaultSortLabel) defaultSort = i;
+    });
+    var state = sortState[key] || (sortState[key] = { index: defaultSort, dir: "desc" });
     var body = rows.slice();
     if (state.index !== null && columns[state.index] && columns[state.index].sort) {
       var get = columns[state.index].sort;
@@ -653,10 +878,13 @@ _JS = r"""
       });
     }
 
+    // Columns that draw a signed plot need the column's own domain first.
+    columns.forEach(function (col) { if (col.prepare) col.scale = col.prepare(rows); });
+
     var thead = el("thead");
     var hrow = el("tr");
     columns.forEach(function (col, i) {
-      var attrs = { class: col.sort ? "sortable" : "" };
+      var attrs = { class: col.sort ? "sortable" : "", scope: "col" };
       if (state.index === i) attrs["aria-sort"] = state.dir === "asc" ? "ascending" : "descending";
       var th = el("th", attrs, [col.label]);
       if (col.sort) {
@@ -664,11 +892,22 @@ _JS = r"""
           class: "arrow",
           text: state.index === i ? (state.dir === "asc" ? "↑" : "↓") : "↕"
         }));
-        th.addEventListener("click", function () {
+        th.setAttribute("tabindex", "0");
+        th.setAttribute("role", "button");
+        var resort = function () {
           if (state.index === i) state.dir = state.dir === "asc" ? "desc" : "asc";
           else { state.index = i; state.dir = col.defaultDir || "desc"; }
           render();
+        };
+        th.addEventListener("click", resort);
+        th.addEventListener("keydown", function (ev) {
+          if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); resort(); }
         });
+      }
+      // Axis ticks belong to the column, not to each cell.
+      if (col.axis) {
+        th.appendChild(el("div", { class: "axis" },
+          col.axis.map(function (t) { return el("span", { text: t }); })));
       }
       hrow.appendChild(th);
     });
@@ -744,17 +983,20 @@ _JS = r"""
       : document.createTextNode(bundle.title);
     head.appendChild(el("h2", null, [title]));
 
-    var chips = el("div", { class: "chips" }, [
-      chip(bundle.kind, "kind-" + bundle.kind),
-      bundle.date ? chip(bundle.date) : null,
-      chip(bundle.table === "matched"
-        ? "matched denominators" : "all countable cells"),
-      chip(bundle.countable_rows + " countable cells"),
-      bundle.results_sha256 ? chip("results " + bundle.results_sha256.slice(0, 12), "mono") : null
-    ]);
+    // Provenance reads as one instrument line, not a row of loose chips.
+    head.appendChild(el("div", { class: "meta" }, [
+      metaField("kind", bundle.kind),
+      bundle.date ? metaField("date", bundle.date) : null,
+      metaField("denominators",
+        bundle.table === "matched" ? "matched (task, trial)" : "all countable"),
+      metaField("cells", String(bundle.countable_rows)),
+      bundle.results_sha256 ? metaField("results", bundle.results_sha256.slice(0, 12)) : null,
+      bundle.task_set_digest ? metaField("taskset", bundle.task_set_digest.slice(0, 12)) : null
+    ]));
+    var chips = el("div", { class: "chips" });
     (bundle.models || []).forEach(function (m) { chips.appendChild(chip(m)); });
     if (bundle.has_caveats) chips.appendChild(chip("caveats disclosed", "warn"));
-    head.appendChild(chips);
+    if (chips.childNodes.length) head.appendChild(chips);
 
     if (bundle.has_caveats) {
       var det = el("details", { class: "caveats" }, [
@@ -766,6 +1008,12 @@ _JS = r"""
       head.appendChild(det);
     }
 
+    // The model is a header fact when a board pins one; only worth a column
+    // when a board actually compares more than one.
+    var distinctModels = {};
+    arms.forEach(function (a) { distinctModels[a.model] = 1; });
+    var manyModels = Object.keys(distinctModels).length > 1;
+
     var columns = [
       { label: "#", cls: "rank", cell: function (r, i) { return String(i + 1); } },
       {
@@ -774,12 +1022,8 @@ _JS = r"""
         sort: function (r) { return r.harness; }, defaultDir: "asc"
       },
       {
-        label: "Model", cls: "sub",
-        cell: function (r) { return r.model; },
-        sort: function (r) { return r.model; }, defaultDir: "asc"
-      },
-      {
-        label: "Solve rate (Wilson 95%)",
+        label: "Solve rate · Wilson 95%",
+        axis: ["0", "50", "100%"],
         cell: function (r) {
           return ciCell(r.solve_rate, r.wilson95 && r.wilson95[0], r.wilson95 && r.wilson95[1],
             function (v) { return pct(v); });
@@ -792,22 +1036,22 @@ _JS = r"""
         sort: function (r) { return r.n ? r.solved / r.n : null; }
       },
       {
-        label: "Median wall",
+        label: "Median wall", omitIfEmpty: true,
         cell: function (r) { return secs(r.median_wall_s); },
         sort: function (r) { return r.median_wall_s; }, defaultDir: "asc"
       },
       {
-        label: "Tokens/solve",
+        label: "Tokens/solve", omitIfEmpty: true,
         cell: function (r) { return num(r.total_tokens_per_solve); },
         sort: function (r) { return r.total_tokens_per_solve; }, defaultDir: "asc"
       },
       {
-        label: "$/solve",
+        label: "$/solve", omitIfEmpty: true,
         cell: function (r) { return money(r.cost_per_solve_usd); },
         sort: function (r) { return r.cost_per_solve_usd; }, defaultDir: "asc"
       },
       {
-        label: "Token basis", cls: "sub",
+        label: "Token basis",
         cell: function (r) {
           var box = el("div", { class: "chips" });
           (r.token_bases || []).forEach(function (b) { box.appendChild(chip(b)); });
@@ -816,16 +1060,25 @@ _JS = r"""
         }
       }
     ];
+    if (manyModels) {
+      columns.splice(2, 0, {
+        label: "Model",
+        cell: function (r) { return r.model; },
+        sort: function (r) { return r.model; }, defaultDir: "asc"
+      });
+    }
 
     var foot = el("div", { class: "head" }, [
-      el("span", { class: "chips" }, [
-        bundle.results_path ? el("a", { href: bundle.results_path, text: "results.jsonl" }) : null,
-        bundle.task_set_digest ? chip("taskset " + bundle.task_set_digest.slice(0, 12), "mono") : null
+      el("div", { class: "meta" }, [
+        bundle.results_path
+          ? el("span", null, [el("a", { href: bundle.results_path, text: "results.jsonl" })])
+          : null,
+        bundle.path ? el("span", null, [el("a", { href: bundle.path, text: "release page" })]) : null
       ])
     ]);
 
     return el("section", { class: "board" }, [
-      head, renderTable("h:" + bundle.id, columns, arms, 3), foot
+      head, renderTable("h:" + bundle.id, columns, arms, "Solve rate · Wilson 95%"), foot
     ]);
   }
 
@@ -855,7 +1108,7 @@ _JS = r"""
       ]));
     }
     if ((fam.skipped || []).length) {
-      var ul = el("ul", { class: "releases" });
+      var ul = el("ul", { class: "records" });
       fam.skipped.forEach(function (s) {
         ul.appendChild(el("li", null, [
           el("strong", { text: s.id }), " — " + s.reason
@@ -864,7 +1117,8 @@ _JS = r"""
       host.appendChild(el("section", { class: "board" }, [
         el("div", { class: "head" }, [
           el("h2", { text: "Not ranked (" + fam.skipped.length + ")" }),
-          el("p", { class: "sub", text: "Published pages without machine-verifiable results." })
+          el("p", { text: "Published pages without machine-verifiable results, "
+            + "listed with the reason rather than dropped." })
         ]),
         el("div", { class: "head" }, [ul])
       ]));
@@ -878,19 +1132,25 @@ _JS = r"""
       ? el("a", { href: bundle.path, text: bundle.title })
       : document.createTextNode(bundle.title);
     head.appendChild(el("h2", null, [title]));
-    var chips = el("div", { class: "chips" }, [
-      chip(bundle.track || "gateway_tax"),
-      bundle.harness ? chip("harness " + bundle.harness) : null,
-      bundle.date ? chip(bundle.date) : null,
-      chip(bundle.blocks_included + "/" + bundle.blocks_observed + " blocks included"),
-      chip(bundle.tasks_included + " tasks"),
-      bundle.execution_lane ? chip(bundle.execution_lane) : null,
-      bundle.experiment_digest ? chip("exp " + bundle.experiment_digest.slice(0, 12), "mono") : null
-    ]);
-    Object.keys(bundle.blocks_excluded || {}).forEach(function (reason) {
-      chips.appendChild(chip("excluded " + reason + "=" + bundle.blocks_excluded[reason], "warn"));
-    });
-    head.appendChild(chips);
+    head.appendChild(el("div", { class: "meta" }, [
+      metaField("track", bundle.track || "gateway_tax"),
+      bundle.harness ? metaField("harness", bundle.harness) : null,
+      bundle.date ? metaField("date", bundle.date) : null,
+      metaField("blocks", bundle.blocks_included + "/" + bundle.blocks_observed),
+      metaField("tasks", String(bundle.tasks_included)),
+      bundle.execution_lane ? metaField("lane", bundle.execution_lane) : null,
+      bundle.experiment_digest
+        ? metaField("experiment", bundle.experiment_digest.slice(0, 12)) : null
+    ]));
+    var excluded = Object.keys(bundle.blocks_excluded || {});
+    if (excluded.length) {
+      var chips = el("div", { class: "chips" });
+      excluded.forEach(function (reason) {
+        chips.appendChild(chip(
+          "excluded: " + reason + " × " + bundle.blocks_excluded[reason], "warn"));
+      });
+      head.appendChild(chips);
+    }
 
     var armCols = [
       { label: "#", cls: "rank", cell: function (r, i) { return String(i + 1); } },
@@ -900,17 +1160,18 @@ _JS = r"""
         sort: function (r) { return r.arm_id; }, defaultDir: "asc"
       },
       {
-        label: "Role", cls: "sub",
+        label: "Role",
         cell: function (r) {
           return el("div", { class: "chips" }, [
-            chip(r.role || "—", r.role === "direct" ? "kind-release" : ""),
+            chip(r.role || "—", r.role === "direct" ? "role-direct" : ""),
             r.requested_provider ? chip(r.requested_provider) : null
           ]);
         },
         sort: function (r) { return r.role; }, defaultDir: "asc"
       },
       {
-        label: "Solve rate (95% CI)",
+        label: "Solve rate · 95% CI",
+        axis: ["0", "50", "100%"],
         cell: function (r) {
           return ciCell(r.solve_rate.estimate, r.solve_rate.low, r.solve_rate.high,
             function (v) { return pct(v); });
@@ -936,95 +1197,131 @@ _JS = r"""
         sort: function (r) { return r.latency_s.estimate; }, defaultDir: "asc"
       },
       {
-        label: "$/solve",
+        label: "$/solve", omitIfEmpty: true,
         cell: function (r) { return r.cost ? money(r.cost.cost_per_solve_usd, 4) : "—"; },
         sort: function (r) { return r.cost ? r.cost.cost_per_solve_usd : null; },
         defaultDir: "asc"
       },
       {
-        label: "Cost basis", cls: "sub",
+        label: "Cost basis", omitIfEmpty: true,
+        present: function (r) { return r.cost; },
         cell: function (r) {
           if (!r.cost) return "—";
-          var box = el("div", { class: "chips" }, [chip(r.cost.basis)]);
+          var tag = chip(COST_BASIS_LABEL[r.cost.basis] || r.cost.basis);
+          tag.setAttribute("title", r.cost.basis);
+          var box = el("div", { class: "chips" }, [tag]);
           if (r.cost.coverage_ratio !== null && r.cost.coverage_ratio !== undefined
               && r.cost.coverage_ratio < 1) {
-            box.appendChild(chip(pct(r.cost.coverage_ratio, 0) + " coverage", "warn"));
+            box.appendChild(chip(pct(r.cost.coverage_ratio, 0) + " covered", "warn"));
           }
           return box;
         }
       }
     ];
 
-    var parts = [head, renderTable("r:" + bundle.id, armCols, bundle.arms, 3)];
+    var parts = [head, renderTable("r:" + bundle.id, armCols, bundle.arms, "Solve rate · 95% CI")];
 
     if ((bundle.contrasts || []).length) {
+      var asPct = function (v) { return pct(v); };
+      var asScore = function (v) { return v.toFixed(3); };
+      var asSecs = function (v) { return v.toFixed(2) + "s"; };
       var taxCols = [
         {
           label: "Gateway arm", cls: "name",
           cell: function (r) { return r.arm_id; },
           sort: function (r) { return r.arm_id; }, defaultDir: "asc"
         },
-        {
-          label: "vs direct", cls: "sub",
-          cell: function (r) { return r.direct_arm; }
-        },
-        {
-          label: "Δ solve rate",
-          cell: function (r) { return deltaCell(r.solve_rate, function (v) { return pct(v); }, true); },
-          sort: function (r) { return r.solve_rate.estimate; }
-        },
-        {
-          label: "Δ mean score",
-          cell: function (r) {
-            return deltaCell(r.mean_checker_score, function (v) { return v.toFixed(3); }, true);
-          },
-          sort: function (r) { return r.mean_checker_score.estimate; }
-        },
-        {
-          label: "Δ availability",
-          cell: function (r) { return deltaCell(r.availability, function (v) { return pct(v); }, true); },
-          sort: function (r) { return r.availability.estimate; }
-        },
-        {
-          label: "Δ latency",
-          cell: function (r) {
-            return deltaCell(r.latency_s, function (v) { return v.toFixed(2) + "s"; }, false);
-          },
-          sort: function (r) { return r.latency_s.estimate; }, defaultDir: "asc"
-        }
+        { label: "vs direct", cell: function (r) { return r.direct_arm; } },
+        deltaColumn("Δ solve rate", "solve_rate", asPct, true),
+        deltaColumn("Δ mean score", "mean_checker_score", asScore, true),
+        deltaColumn("Δ availability", "availability", asPct, true),
+        deltaColumn("Δ latency", "latency_s", asSecs, false, "asc")
       ];
       parts.push(el("div", { class: "head" }, [
         el("h2", { text: "Gateway tax" }),
         el("p", {
-          class: "sub",
-          text: "Paired, task-weighted difference from the direct control arm, with "
-            + "bootstrap 95% intervals. An interval spanning zero is not a detected effect."
-        })
+          text: "Paired, task-weighted difference from the direct control arm, "
+            + "with bootstrap 95% intervals. Each column is plotted on its own "
+            + "shared scale about a zero line."
+        }),
+        el("div", { class: "legend" }, [
+          el("span", null, [el("i", { class: "better" }), "Gateway better than direct"]),
+          el("span", null, [el("i", { class: "worse" }), "Gateway worse than direct"]),
+          el("span", null, [el("i", { class: "null" }), "Interval spans zero — no detected effect"])
+        ])
       ]));
-      parts.push(renderTable("t:" + bundle.id, taxCols, bundle.contrasts, 2));
+      parts.push(renderTable("t:" + bundle.id, taxCols, bundle.contrasts, "Δ solve rate"));
     }
 
     return el("section", { class: "board" }, parts);
   }
 
-  // Signed delta with its interval; `higherIsBetter` colours the estimate.
-  function deltaCell(metric, fmt, higherIsBetter) {
+  // Widest bound in a contrast column, so every row shares one signed scale.
+  function deltaDomain(rows, key) {
+    var max = 0;
+    rows.forEach(function (r) {
+      var m = r[key];
+      if (!m) return;
+      ["estimate", "low", "high"].forEach(function (f) {
+        if (m[f] !== null && m[f] !== undefined) max = Math.max(max, Math.abs(m[f]));
+      });
+    });
+    return max || 1;
+  }
+
+  // Signed contrast against a zero line. Direction is carried three ways —
+  // the sign in the text, the pole hue, and which side of zero the bar sits on
+  // — so it never depends on colour alone. An interval covering zero is drawn
+  // neutral, because "spans zero" means no effect was detected.
+  function deltaCell(metric, fmt, higherIsBetter, domain) {
     var v = metric.estimate;
-    var cls = "";
-    if (v !== null && v !== undefined && v !== 0) {
-      var good = higherIsBetter ? v > 0 : v < 0;
-      cls = good ? "delta up" : "delta down";
+    var lo = metric.low, hi = metric.high;
+    var known = lo !== null && lo !== undefined && hi !== null && hi !== undefined;
+    var tone = "null";
+    if (known && lo <= 0 && hi >= 0) tone = "null";
+    else if (v !== null && v !== undefined && v !== 0) {
+      tone = (higherIsBetter ? v > 0 : v < 0) ? "better" : "worse";
     }
-    var wrap = el("div", { class: "ci" }, [
-      el("span", { class: "val " + cls, text: signed(v, fmt) })
+
+    var wrap = el("div", { class: "dv" }, [
+      el("span", { class: "val " + tone, text: signed(v, fmt) })
     ]);
-    var range = "—";
-    if (metric.low !== null && metric.low !== undefined
-        && metric.high !== null && metric.high !== undefined) {
-      range = signed(metric.low, fmt) + " – " + signed(metric.high, fmt);
+    var track = el("div", { class: "track" }, [el("div", { class: "zero" })]);
+    // Map [-domain, +domain] onto the track, zero at the midpoint.
+    var place = function (value) {
+      return (0.5 + (value / domain) * 0.5) * 100;
+    };
+    if (known) {
+      var a = Math.max(0, Math.min(100, place(lo)));
+      var b = Math.max(0, Math.min(100, place(hi)));
+      var span = el("div", { class: "span " + tone });
+      span.style.left = Math.min(a, b) + "%";
+      span.style.width = Math.max(1, Math.abs(b - a)) + "%";
+      track.appendChild(span);
     }
-    wrap.appendChild(el("span", { class: "range", text: range }));
+    if (v !== null && v !== undefined) {
+      var dot = el("div", { class: "dot " + tone });
+      dot.style.left = "calc(" + Math.max(0, Math.min(100, place(v))) + "% - 1px)";
+      track.appendChild(dot);
+    }
+    wrap.appendChild(track);
+    // Four contrast columns with a printed interval each is over-labelling:
+    // the bar carries the interval, the value is the direct label, and the
+    // exact bounds are one hover away.
+    wrap.setAttribute("title", known
+      ? "95% CI " + signed(lo, fmt) + " to " + signed(hi, fmt)
+      : "no interval available");
     return wrap;
+  }
+
+  function deltaColumn(label, key, fmt, higherIsBetter, defaultDir) {
+    return {
+      label: label,
+      prepare: function (rows) { return deltaDomain(rows, key); },
+      cell: function (r) { return deltaCell(r[key], fmt, higherIsBetter, this.scale); },
+      sort: function (r) { return r[key].estimate; },
+      defaultDir: defaultDir || "desc"
+    };
   }
 
   function renderRouter(host) {
@@ -1058,13 +1355,13 @@ _JS = r"""
     host.innerHTML = "";
     function list(title, entries, blurb) {
       if (!entries.length) return;
-      var ul = el("ul", { class: "releases" });
+      var ul = el("ul", { class: "records" });
       entries.forEach(function (e) {
         var line = el("li");
         line.appendChild(e.path
           ? el("a", { href: e.path, text: e.title || e.id })
           : el("strong", { text: e.title || e.id }));
-        var meta = [e.date, (e.models || []).join(", "), e.submitter].filter(Boolean).join(" · ");
+        var meta = [e.date, (e.models || []).join(", "), e.submitter].filter(Boolean).join("  ·  ");
         if (meta) line.appendChild(el("div", { class: "sub", text: meta }));
         if (e.description) line.appendChild(el("div", { class: "sub", text: e.description }));
         ul.appendChild(line);
@@ -1072,7 +1369,7 @@ _JS = r"""
       host.appendChild(el("section", { class: "board" }, [
         el("div", { class: "head" }, [
           el("h2", { text: title }),
-          blurb ? el("p", { class: "sub", text: blurb }) : null
+          blurb ? el("p", { text: blurb }) : null
         ]),
         el("div", { class: "head" }, [ul])
       ]));
@@ -1123,9 +1420,9 @@ def _headline_stats(doc):
     models = {a["model"] for b in harness["bundles"] for a in b["arms"]}
     routes = sum(len(b["arms"]) for b in router["bundles"])
     return [
-        (str(harness["bundle_count"]), "verified harness bundles"),
-        (str(len(harnesses)), "harnesses ranked"),
-        (str(len(models)), "models covered"),
+        (str(harness["bundle_count"]), "harness bundles"),
+        (str(len(harnesses)), "harnesses"),
+        (str(len(models)), "models"),
         (str(arms), "harness arms"),
         (str(router["bundle_count"]), "router bundles"),
         (str(routes), "serving routes"),
@@ -1229,7 +1526,8 @@ def render_board_html(doc):
         'for OpenBench, built from digest-verified result bundles.">'
         f"<style>{_CSS}</style></head><body>"
         '<header class="top"><div class="wrap">'
-        '<div class="brand">OpenBench <span>leaderboards</span></div>'
+        '<div class="brand"><span class="cmd">obench</span>'
+        '<span class="what">leaderboards</span></div>'
         f'<nav class="tabs">{tabs}</nav>'
         '<button class="theme" id="theme" type="button" '
         'aria-label="Toggle colour theme" title="Toggle colour theme">'
@@ -1238,9 +1536,9 @@ def render_board_html(doc):
         "</svg></button>"
         "</div></header>"
         '<div class="wrap">'
-        '<div class="hero"><h1>Same task, different wrapper — and different wire.</h1>'
-        f"<p>{html.escape(doc['cross_family_note'])}</p>"
-        f'<div class="stats">{stat_html}</div></div>'
+        '<div class="intro"><h1>Same task, different wrapper — and different wire.</h1>'
+        f"<p>{html.escape(doc['cross_family_note'])}</p></div>"
+        f'<div class="stats">{stat_html}</div>'
         "<noscript><p class=\"note\">This page renders its tables with JavaScript. "
         'The static fallback is <a href="leaderboard.html">leaderboard.html</a>, '
         'and the same data is in <a href="board.json">board.json</a>.</p></noscript>'

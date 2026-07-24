@@ -228,6 +228,39 @@ class RenderTests(_SiteFixture):
         self.assertEqual(one, two)
 
 
+class DesignContractTests(_SiteFixture):
+    """The page ships one stylesheet; these are the parts easy to break."""
+
+    def setUp(self):
+        super().setUp()
+        self.page = site.render_board_html(site.build_board(self.site_dir))
+
+    def test_both_theme_scopes_are_defined(self):
+        # The media query carries the OS preference; the data-theme scopes carry
+        # the viewer's toggle and must be able to win in both directions.
+        self.assertIn("@media (prefers-color-scheme:dark)", self.page)
+        self.assertIn(':root[data-theme="dark"]', self.page)
+        self.assertIn(':root[data-theme="light"]', self.page)
+        self.assertIn(':root:where(:not([data-theme="light"]))', self.page)
+
+    def test_no_stale_interval_class(self):
+        """`.ci` was renamed to `.iv`; a stale name silently unstyles the bars."""
+        self.assertNotIn('class: "ci"', self.page)
+        self.assertIn('class: "iv"', self.page)
+
+    def test_contrast_legend_names_every_tone(self):
+        self.assertIn("Gateway better than direct", self.page)
+        self.assertIn("Gateway worse than direct", self.page)
+        self.assertIn("no detected effect", self.page)
+
+    def test_reduced_motion_and_focus_are_honoured(self):
+        self.assertIn("prefers-reduced-motion", self.page)
+        self.assertIn(":focus-visible", self.page)
+
+    def test_wide_content_scrolls_inside_its_own_container(self):
+        self.assertIn(".scroll{overflow-x:auto}", self.page)
+
+
 class CliTests(_SiteFixture):
     def test_build_subcommand(self):
         from obench.cli import main as cli_main
