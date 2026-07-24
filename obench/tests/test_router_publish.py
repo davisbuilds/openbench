@@ -347,6 +347,11 @@ class RouterPublishTests(unittest.TestCase):
         )
 
     def test_round_trip_uses_allowlisted_dtos_and_binds_all_artifacts(self):
+        self.row["proxy_metrics"]["calls"][0]["cache"] = {
+            "cached_input_tokens": 7,
+            "cache_write_input_tokens": 3,
+        }
+        self._write_results(self.row)
         provenance = self.publish()
         self.assertEqual(router_publish.verify_bundle(self.bundle), provenance)
 
@@ -376,6 +381,13 @@ class RouterPublishTests(unittest.TestCase):
             self.assertNotIn(forbidden, bundle_text)
 
         public_row = json.loads((self.bundle / "results.jsonl").read_text())
+        self.assertEqual(
+            public_row["proxy_metrics"]["calls"][0]["cache"],
+            {
+                "cached_input_tokens": 7,
+                "cache_write_input_tokens": 3,
+            },
+        )
         binding = public_row["ledger"]
         self.assertEqual(binding, provenance["ledgers"][self.cell_id])
         seal = json.loads(

@@ -158,6 +158,10 @@ _REPORT_GENERATION_SCHEMA = {
     "output_tokens": _SCALAR,
     "duration_s": _SCALAR,
 }
+_REPORT_CACHE_SCHEMA = {
+    "cached_input_tokens": _SCALAR,
+    "cache_write_input_tokens": _SCALAR,
+}
 _REPORT_ROUTE_SCHEMA = {
     "served_model": _SCALAR,
     "provider": _SCALAR,
@@ -168,6 +172,7 @@ _PROXY_CALL_SCHEMA = {
     "timing": _NullableSchema(_REPORT_TIMING_SCHEMA),
     "generation": _NullableSchema(_REPORT_GENERATION_SCHEMA),
     "route": _NullableSchema(_REPORT_ROUTE_SCHEMA),
+    "cache": _NullableSchema(_REPORT_CACHE_SCHEMA),
     "costs": _NullableSchema(_COSTS_SCHEMA),
 }
 _CANONICAL_RESULT_SCHEMA = {

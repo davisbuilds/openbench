@@ -481,10 +481,11 @@ class GatewayEvidence:
             self.metadata_requested_model = requested
         if "attempts" in metadata:
             raw_attempts = metadata.get("attempts")
-            self.attempts_present = True
             if isinstance(raw_attempts, list) and not raw_attempts:
+                self.attempts_present = False
                 self.attempts = []
             else:
+                self.attempts_present = True
                 self.attempts, valid = _clean_openrouter_attempts(raw_attempts)
                 self.attempts_malformed = not valid
                 for attempt in self.attempts:

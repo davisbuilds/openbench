@@ -247,6 +247,7 @@ class RouterMetricsTests(unittest.TestCase):
         final["openrouter_metadata"]["attempts"] = []
         result = self.parse([(11.0, sse(self.token, final, "[DONE]"))])
         self.assertTrue(result["route_evidence"]["pass"])
+        self.assertFalse(result["coverage"]["attempt_evidence"])
 
     def test_gateway_malformed_attempts_fail(self):
         final = dict(self.final)
