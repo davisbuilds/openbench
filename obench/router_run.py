@@ -983,6 +983,28 @@ def _is_max_calls_rejection(row: Mapping[str, Any]) -> bool:
     return row.get("status") == 429 and row.get("error") == "max_calls_exceeded"
 
 
+def _terminal_status(row: Mapping[str, Any]) -> str | None:
+    metrics = row.get("router_metrics")
+    if not isinstance(metrics, Mapping):
+        return None
+    stream = metrics.get("stream")
+    if not isinstance(stream, Mapping):
+        return None
+    status = stream.get("terminal_status")
+    return status if isinstance(status, str) else None
+
+
+def _upstream_row_available(row: Mapping[str, Any]) -> bool:
+    status = row.get("status")
+    terminal_status = _terminal_status(row)
+    return (
+        isinstance(status, int)
+        and 200 <= status < 300
+        and not row.get("error")
+        and terminal_status in {None, "completed"}
+    )
+
+
 def _append_row(path: Path, row: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(
@@ -1118,11 +1140,7 @@ def _run_cell(
     if budget_exhausted_reason is not None:
         checker_score = 0.0
     upstream_rows = [row for row in ledger_rows if not _is_max_calls_rejection(row)]
-    available = bool(upstream_rows) and all(
-        isinstance(row.get("status"), int) and 200 <= row["status"] < 300
-        and not row.get("error")
-        for row in upstream_rows
-    )
+    available = bool(upstream_rows) and all(map(_upstream_row_available, upstream_rows))
     timed_out = bool(adapter_result.get("entry_timed_out")) or "timeout" in str(
         adapter_result.get("error", "")
     ).lower()

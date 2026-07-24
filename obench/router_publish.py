@@ -127,6 +127,7 @@ _COVERAGE_SCHEMA = {
 }
 _STREAM_SCHEMA = {
     "done": _SCALAR,
+    "terminal_status": _SCALAR,
     "malformed_events": _SCALAR,
     "ignored_events": _SCALAR,
 }

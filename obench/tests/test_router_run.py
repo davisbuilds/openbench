@@ -878,6 +878,67 @@ direct_control_arm_id = "direct"
             "costs": None,
         }])
 
+    def test_responses_terminal_outcomes_affect_availability_not_route_integrity(self):
+        base = {
+            "status": 200,
+            "router_metrics": {
+                "stream": {"done": True, "terminal_status": "completed"},
+            },
+        }
+        self.assertTrue(router_run._upstream_row_available(base))
+
+        incomplete = json.loads(json.dumps(base))
+        incomplete["router_metrics"]["stream"]["terminal_status"] = "incomplete"
+        self.assertFalse(router_run._upstream_row_available(incomplete))
+
+        failed = json.loads(json.dumps(base))
+        failed["router_metrics"]["stream"]["terminal_status"] = "failed"
+        self.assertFalse(router_run._upstream_row_available(failed))
+
+        cancelled = json.loads(json.dumps(base))
+        cancelled["router_metrics"]["stream"]["terminal_status"] = "cancelled"
+        self.assertFalse(router_run._upstream_row_available(cancelled))
+
+    def test_failed_terminal_response_still_counts_billable_usage(self):
+        experiment = router_run.router_spec.load_experiment(self.experiment)
+        plans, _secrets = router_run.router_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = next(item for item in plans if item.route_kind == "direct")
+        metrics = {
+            "stream": {"done": True, "terminal_status": "failed"},
+            "usage": {"input_tokens": 5, "output_tokens": 3},
+            "route": {
+                "requested_model": plan.requested_model,
+                "metadata_requested_model": None,
+                "served_model": plan.requested_model,
+                "provider": plan.requested_provider,
+                "attempts": [],
+            },
+            "route_evidence": {"pass": True, "reasons": []},
+        }
+        calls, integrity, reason = router_run._proxy_evidence(
+            [{"status": 200, "router_metrics": metrics}],
+            {
+                plan.canonical_model: router_run.Price(
+                    router_run.Decimal("1"),
+                    router_run.Decimal("2"),
+                    "2026-07-01T00:00:00Z",
+                )
+            },
+            experiment.budget,
+            plan,
+        )
+
+        self.assertTrue(integrity["pass"])
+        self.assertIsNone(reason)
+        self.assertEqual(
+            calls[0]["costs"]["frozen_list_estimate"]["amount_usd"],
+            0.000011,
+        )
+
     def test_openrouter_streamed_usage_cost_flows_into_call_costs(self):
         experiment = router_run.router_spec.load_experiment(self.experiment)
         plans, _secrets = router_run.router_spec.compile_route_plans(

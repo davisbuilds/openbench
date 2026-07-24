@@ -154,6 +154,7 @@ class OpenAIChatSSEParser:
         self._ignored_events = 0
         self._malformed_events = 0
         self._done_seen = False
+        self._terminal_status: str | None = None
         self._finalized = False
 
     def feed(self, chunk: bytes | str, received_at: float) -> None:
@@ -300,6 +301,7 @@ class OpenAIChatSSEParser:
                 "ignored_events": self._ignored_events,
                 "malformed_events": self._malformed_events,
                 "done": self._done_seen,
+                "terminal_status": self._terminal_status,
                 "finalized": self._finalized,
             },
         }
@@ -353,6 +355,7 @@ class OpenAIChatSSEParser:
         if data.strip() == "[DONE]":
             if self._accept_done_marker():
                 self._done_seen = True
+                self._terminal_status = "completed"
             self._events += 1
             return
         try:
@@ -365,6 +368,11 @@ class OpenAIChatSSEParser:
             return
         if self._is_terminal_event(obj):
             self._done_seen = True
+            response = obj.get("response")
+            if isinstance(response, dict) and isinstance(response.get("status"), str):
+                self._terminal_status = response["status"]
+            else:
+                self._terminal_status = obj["type"].removeprefix("response.")
         if self._observe(obj, event_data_at):
             self._events += 1
         else:
@@ -539,6 +547,7 @@ class OpenAIResponsesSSEParser(OpenAIChatSSEParser):
 
     def _is_terminal_event(self, obj: dict[str, Any]) -> bool:
         return obj.get("type") in {
+            "response.cancelled",
             "response.completed",
             "response.incomplete",
             "response.failed",

@@ -437,6 +437,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         })
         self.assertEqual(result["timing"]["semantic_ttft_s"], 0.5)
         self.assertTrue(result["stream"]["done"])
+        self.assertEqual(result["stream"]["terminal_status"], "completed")
         self.assertTrue(result["route_evidence"]["pass"])
         self.assertNotIn(secret, json.dumps(result))
 
@@ -485,6 +486,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         )
 
         self.assertTrue(result["stream"]["done"])
+        self.assertEqual(result["stream"]["terminal_status"], "incomplete")
         self.assertTrue(result["route_evidence"]["pass"])
         self.assertEqual(result["usage"]["output_tokens"], 16_384)
 
@@ -512,6 +514,30 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         )
 
         self.assertTrue(result["stream"]["done"])
+        self.assertEqual(result["stream"]["terminal_status"], "failed")
+        self.assertTrue(result["route_evidence"]["pass"])
+
+    def test_response_cancelled_is_a_terminal_event(self):
+        result = router_metrics.parse_responses_sse(
+            [(1.0, sse({
+                "type": "response.cancelled",
+                "response": {
+                    "status": "cancelled",
+                    "model": "gpt-4o-mini-2024-07-18",
+                },
+            }))],
+            requested_model="gpt-4o-mini",
+            started_at=0.0,
+            completed_at=2.0,
+            route_kind="direct",
+            requested_provider="openai",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+
+        self.assertTrue(result["stream"]["done"])
+        self.assertEqual(result["stream"]["terminal_status"], "cancelled")
         self.assertTrue(result["route_evidence"]["pass"])
 
     def test_done_sentinel_does_not_replace_response_completed(self):
