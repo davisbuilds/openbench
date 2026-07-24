@@ -1,16 +1,15 @@
 schema_version = 1
-experiment_id = "gpt-4o-mini-three-way-gateway-tax"
-track = "gateway_tax"
+experiment_id = "gpt-4o-mini-four-way-gateway-bench"
+track = "fixed_model_provider"
 model_match = "rolling_alias"
 harness = "pi"
 tasks = ["make-ci-green", "add-feature", "misleading-error"]
 repetitions_per_window = 1
-schedule_seed = 20260722
+schedule_seed = 20260723
 execution_lane = "local"
-private_router = false
+allow_private_endpoint = false
 
-# Absolute RFC3339 windows are required by schema v1. Replace these illustrative
-# future windows with the UTC windows for the experiment before running.
+# Replace these illustrative future windows with the UTC windows for the run.
 [[windows]]
 window_id = "window-a"
 start = "2026-08-04T15:00:00Z"
@@ -46,7 +45,7 @@ auth_env = "OPENAI_API_KEY"
 [arms.sampling]
 temperature = 0.0
 top_p = 1.0
-seed = 20260722
+seed = 20260723
 
 [[arms]]
 arm_id = "openrouter-openai"
@@ -69,7 +68,7 @@ direct_control_arm_id = "direct-openai"
 [arms.sampling]
 temperature = 0.0
 top_p = 1.0
-seed = 20260722
+seed = 20260723
 
 [[arms]]
 arm_id = "vercel-openai"
@@ -92,4 +91,28 @@ direct_control_arm_id = "direct-openai"
 [arms.sampling]
 temperature = 0.0
 top_p = 1.0
-seed = 20260722
+seed = 20260723
+
+[[arms]]
+arm_id = "cloudflare-openai"
+route_kind = "gateway"
+gateway = "cloudflare"
+# Replace the illustrative account ID before running.
+endpoint = "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "openai/gpt-4o-mini"
+requested_provider = "openai"
+allowed_models = ["openai/gpt-4o-mini"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "CLOUDFLARE_API_TOKEN"
+direct_control_arm_id = "direct-openai"
+
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260723

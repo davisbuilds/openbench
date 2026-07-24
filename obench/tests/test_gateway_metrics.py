@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Contract tests for protocol-aware, privacy-safe router metrics."""
+"""Contract tests for protocol-aware, privacy-safe gateway metrics."""
 
 import json
 import unittest
 
-from obench import router_metrics
+from obench import gateway_metrics
 
 
 def sse(*objects, newline="\n"):
@@ -15,7 +15,7 @@ def sse(*objects, newline="\n"):
     return "".join(events).encode()
 
 
-class RouterMetricsTests(unittest.TestCase):
+class GatewayMetricsTests(unittest.TestCase):
     def setUp(self):
         self.secret = "RAW_GENERATED_CONTENT_MUST_NOT_SURVIVE"
         self.role = {
@@ -53,7 +53,7 @@ class RouterMetricsTests(unittest.TestCase):
         return prefix.encode() + sse(self.role, empty, self.token, self.final, "[DONE]", newline=newline)
 
     def parse(self, chunks, completed_at=16.0):
-        return router_metrics.parse_chat_sse(
+        return gateway_metrics.parse_chat_sse(
             chunks,
             requested_model="openai/gpt-4o-mini",
             started_at=10.0,
@@ -76,7 +76,7 @@ class RouterMetricsTests(unittest.TestCase):
 
     def test_crlf_delimiters_can_split_between_cr_and_lf(self):
         payload = self.payload(newline="\r\n")
-        parser = router_metrics.OpenAIChatSSEParser(
+        parser = gateway_metrics.OpenAIChatSSEParser(
             requested_model="openai/gpt-4o-mini", started_at=10.0
         )
         for index, byte in enumerate(payload):
@@ -87,7 +87,7 @@ class RouterMetricsTests(unittest.TestCase):
         self.assertTrue(result["route_evidence"]["pass"])
 
     def test_ttfb_and_semantic_ttft_use_observation_timestamps(self):
-        parser = router_metrics.ChatSSEMetricsParser(
+        parser = gateway_metrics.ChatSSEMetricsParser(
             requested_model="openai/gpt-4o-mini", started_at=100.0
         )
         parser.feed(b": comment\n\n", 100.25)
@@ -109,7 +109,7 @@ class RouterMetricsTests(unittest.TestCase):
     def test_ttft_uses_data_timestamp_not_later_event_delimiter(self):
         event = sse(self.token)
         delimiter = event[-1:]
-        parser = router_metrics.OpenAIChatSSEParser(
+        parser = gateway_metrics.OpenAIChatSSEParser(
             requested_model="openai/gpt-4o-mini", started_at=10.0
         )
         parser.feed(event[:-1], 11.25)
@@ -121,7 +121,7 @@ class RouterMetricsTests(unittest.TestCase):
 
     def test_zero_timestamp_is_not_replaced_by_delimiter_timestamp(self):
         event = sse(self.token)
-        parser = router_metrics.OpenAIChatSSEParser(
+        parser = gateway_metrics.OpenAIChatSSEParser(
             requested_model="openai/gpt-4o-mini", started_at=-1.0
         )
         parser.feed(event[:-1], 0.0)
@@ -258,7 +258,7 @@ class RouterMetricsTests(unittest.TestCase):
         self.assertIn("malformed_attempts", result["route_evidence"]["reasons"])
 
     def test_direct_exact_served_model_and_done_pass_without_gateway_evidence(self):
-        result = router_metrics.parse_chat_sse(
+        result = gateway_metrics.parse_chat_sse(
             [(11.0, sse(self.token, "[DONE]"))],
             requested_model="openai/gpt-4o-mini",
             started_at=10.0,
@@ -275,7 +275,7 @@ class RouterMetricsTests(unittest.TestCase):
     def test_direct_rolling_alias_accepts_resolved_dated_snapshot(self):
         token = dict(self.token)
         token["model"] = "gpt-4o-mini-2024-07-18"
-        result = router_metrics.parse_chat_sse(
+        result = gateway_metrics.parse_chat_sse(
             [(11.0, sse(token, "[DONE]"))],
             requested_model="gpt-4o-mini",
             started_at=10.0,
@@ -291,7 +291,7 @@ class RouterMetricsTests(unittest.TestCase):
     def test_direct_rolling_alias_rejects_conflicting_provider_qualification(self):
         token = dict(self.token)
         token["model"] = "anthropic/gpt-4o-mini"
-        result = router_metrics.parse_chat_sse(
+        result = gateway_metrics.parse_chat_sse(
             [(11.0, sse(token, "[DONE]"))],
             requested_model="gpt-4o-mini",
             started_at=10.0,
@@ -310,7 +310,7 @@ class RouterMetricsTests(unittest.TestCase):
         first["model"] = "gpt-4o-mini-2024-07-18"
         second = dict(self.token)
         second["model"] = "gpt-4o-mini-2024-08-01"
-        result = router_metrics.parse_chat_sse(
+        result = gateway_metrics.parse_chat_sse(
             [(11.0, sse(first, second, "[DONE]"))],
             requested_model="gpt-4o-mini",
             started_at=10.0,
@@ -325,7 +325,7 @@ class RouterMetricsTests(unittest.TestCase):
         self.assertIn("served_model_conflict", result["route_evidence"]["reasons"])
 
     def test_direct_rejects_completed_stream_without_served_model(self):
-        result = router_metrics.parse_chat_sse(
+        result = gateway_metrics.parse_chat_sse(
             [(11.0, sse({"choices": [{"delta": {"content": "x"}}]}, "[DONE]"))],
             requested_model="gpt-4o-mini",
             started_at=10.0,
@@ -353,7 +353,7 @@ class RouterMetricsTests(unittest.TestCase):
         self.assertIn("stream_not_done", result["route_evidence"]["reasons"])
 
     def test_no_raw_prompt_or_output_content_is_retained(self):
-        parser = router_metrics.OpenAIChatSSEParser(
+        parser = gateway_metrics.OpenAIChatSSEParser(
             requested_model="openai/gpt-4o-mini", started_at=10.0
         )
         parser.feed(self.payload(), 11.0)
@@ -364,7 +364,7 @@ class RouterMetricsTests(unittest.TestCase):
         self.assertNotIn("private_detail", json.dumps(result, sort_keys=True))
 
     def test_finalize_purges_truncated_raw_event_content(self):
-        parser = router_metrics.OpenAIChatSSEParser(
+        parser = gateway_metrics.OpenAIChatSSEParser(
             requested_model="openai/gpt-4o-mini", started_at=10.0
         )
         parser.feed(("data: " + json.dumps(self.token)).encode(), 11.0)
@@ -374,7 +374,7 @@ class RouterMetricsTests(unittest.TestCase):
         self.assertFalse(result["route_evidence"]["pass"])
 
     def test_rejects_non_monotonic_timestamps_and_feed_after_finalize(self):
-        parser = router_metrics.OpenAIChatSSEParser(requested_model="model", started_at=5.0)
+        parser = gateway_metrics.OpenAIChatSSEParser(requested_model="model", started_at=5.0)
         parser.feed(b"data: ", 6.0)
         parser.feed(b"", 6.5)
         with self.assertRaises(ValueError):
@@ -384,13 +384,13 @@ class RouterMetricsTests(unittest.TestCase):
             parser.feed(b"", 7.0)
 
     def test_rejects_mixed_bytes_and_text_chunks(self):
-        parser = router_metrics.OpenAIChatSSEParser(requested_model="model", started_at=5.0)
+        parser = gateway_metrics.OpenAIChatSSEParser(requested_model="model", started_at=5.0)
         parser.feed(b"data: ", 6.0)
         with self.assertRaises(TypeError):
             parser.feed("{}\n\n", 6.5)
 
 
-class ResponsesRouterMetricsTests(unittest.TestCase):
+class ResponsesGatewayMetricsTests(unittest.TestCase):
     def test_nested_response_model_usage_and_terminal_event_pass(self):
         secret = "RESPONSES_OUTPUT_MUST_NOT_SURVIVE"
         payload = sse(
@@ -415,7 +415,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
                 },
             },
         )
-        result = router_metrics.parse_responses_sse(
+        result = gateway_metrics.parse_responses_sse(
             [(10.5, payload)],
             requested_model="gpt-4o-mini",
             started_at=10.0,
@@ -443,7 +443,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(result))
 
     def test_incomplete_responses_stream_fails_closed(self):
-        result = router_metrics.parse_responses_sse(
+        result = gateway_metrics.parse_responses_sse(
             [(1.0, sse({
                 "type": "response.output_text.delta",
                 "delta": "partial",
@@ -462,7 +462,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertIn("missing_served_model", result["route_evidence"]["reasons"])
 
     def test_response_incomplete_is_a_terminal_event(self):
-        result = router_metrics.parse_responses_sse(
+        result = gateway_metrics.parse_responses_sse(
             [(1.0, sse({
                 "type": "response.incomplete",
                 "response": {
@@ -492,7 +492,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertEqual(result["usage"]["output_tokens"], 16_384)
 
     def test_response_failed_is_a_terminal_event(self):
-        result = router_metrics.parse_responses_sse(
+        result = gateway_metrics.parse_responses_sse(
             [(1.0, sse({
                 "type": "response.failed",
                 "response": {
@@ -519,7 +519,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertTrue(result["route_evidence"]["pass"])
 
     def test_response_cancelled_is_a_terminal_event(self):
-        result = router_metrics.parse_responses_sse(
+        result = gateway_metrics.parse_responses_sse(
             [(1.0, sse({
                 "type": "response.cancelled",
                 "response": {
@@ -542,7 +542,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertTrue(result["route_evidence"]["pass"])
 
     def test_done_sentinel_does_not_replace_response_completed(self):
-        result = router_metrics.parse_responses_sse(
+        result = gateway_metrics.parse_responses_sse(
             [(1.0, sse(
                 {
                     "type": "response.created",
@@ -563,7 +563,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertIn("stream_not_done", result["route_evidence"]["reasons"])
 
     def test_cloudflare_responses_derives_locked_provider(self):
-        result = router_metrics.parse_responses_sse(
+        result = gateway_metrics.parse_responses_sse(
             [(1.0, sse(
                 {
                     "type": "response.created",
@@ -593,7 +593,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertTrue(result["route_evidence"]["pass"])
 
     def test_concentrate_responses_derives_provider_without_fabricating_metadata(self):
-        result = router_metrics.parse_responses_sse(
+        result = gateway_metrics.parse_responses_sse(
             [(1.0, sse(
                 {
                     "type": "response.created",
@@ -630,7 +630,7 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertTrue(result["route_evidence"]["pass"])
 
     def test_responses_cache_activity_is_preserved_without_route_invalidation(self):
-        result = router_metrics.parse_responses_sse(
+        result = gateway_metrics.parse_responses_sse(
             [(1.0, sse({
                 "type": "response.completed",
                 "response": {

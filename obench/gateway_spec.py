@@ -1,4 +1,4 @@
-"""Immutable Router Bench experiment schema and route-plan compilation."""
+"""Immutable Gateway Bench experiment schema and route-plan compilation."""
 
 from __future__ import annotations
 
@@ -18,11 +18,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from . import router_gateways
+from . import gateway_profiles
 
 
 SCHEMA_VERSION = 1
-TRACKS = frozenset({"gateway_tax", "model_router"})
+TRACK = "fixed_model_provider"
 MODEL_MATCHES = frozenset({"exact_revision", "model_family", "rolling_alias"})
 HARNESS = "pi"
 PROTOCOLS = frozenset({"openai_chat", "openai_responses"})
@@ -40,8 +40,8 @@ _RFC3339_RE = re.compile(
 )
 
 
-class RouterSpecError(ValueError):
-    """Raised when a Router Bench experiment is malformed or unsafe."""
+class GatewaySpecError(ValueError):
+    """Raised when a Gateway Bench experiment is malformed or unsafe."""
 
 
 def _canonical_value(value: Any) -> Any:
@@ -49,7 +49,7 @@ def _canonical_value(value: Any) -> Any:
         return value
     if isinstance(value, float):
         if not math.isfinite(value):
-            raise RouterSpecError("canonical JSON does not permit non-finite numbers")
+            raise GatewaySpecError("canonical JSON does not permit non-finite numbers")
         return value
     if isinstance(value, Decimal):
         return _decimal_text(value)
@@ -57,7 +57,7 @@ def _canonical_value(value: Any) -> Any:
         return [_canonical_value(item) for item in value]
     if isinstance(value, Mapping):
         if any(not isinstance(key, str) for key in value):
-            raise RouterSpecError("canonical JSON object keys must be strings")
+            raise GatewaySpecError("canonical JSON object keys must be strings")
         return {key: _canonical_value(item) for key, item in value.items()}
     to_dict = getattr(value, "to_dict", None)
     if callable(to_dict):
@@ -130,9 +130,6 @@ class Arm:
     auth_env: str
     sampling: Sampling
     direct_control_arm_id: str | None = None
-    router_mode: str | None = None
-    fixed_control_arm_id: str | None = None
-    cost_quality_tradeoff: int | None = None
     gateway: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -154,12 +151,6 @@ class Arm:
             "sampling": self.sampling.to_dict(),
             "direct_control_arm_id": self.direct_control_arm_id,
         }
-        if self.router_mode is not None:
-            result["router_mode"] = self.router_mode
-        if self.fixed_control_arm_id is not None:
-            result["fixed_control_arm_id"] = self.fixed_control_arm_id
-        if self.cost_quality_tradeoff is not None:
-            result["cost_quality_tradeoff"] = self.cost_quality_tradeoff
         if self.gateway is not None:
             result["gateway"] = self.gateway
         return result
@@ -170,7 +161,7 @@ class Arm:
 
 
 @dataclass(frozen=True, slots=True)
-class RouterExperiment:
+class GatewayExperiment:
     schema_version: int
     experiment_id: str
     track: str
@@ -180,7 +171,7 @@ class RouterExperiment:
     repetitions_per_window: int
     schedule_seed: int
     execution_lane: str
-    private_router: bool
+    allow_private_endpoint: bool
     private_host_allowlist: tuple[str, ...]
     private_cidr_allowlist: tuple[str, ...]
     windows: tuple[Window, ...]
@@ -198,7 +189,7 @@ class RouterExperiment:
             "repetitions_per_window": self.repetitions_per_window,
             "schedule_seed": self.schedule_seed,
             "execution_lane": self.execution_lane,
-            "private_router": self.private_router,
+            "allow_private_endpoint": self.allow_private_endpoint,
             "private_host_allowlist": list(self.private_host_allowlist),
             "private_cidr_allowlist": list(self.private_cidr_allowlist),
             "windows": [window.to_dict() for window in self.windows],
@@ -236,16 +227,14 @@ class RoutePlan:
     cache_enabled: bool
     auth_env: str
     sampling: Sampling
-    private_router: bool
+    allow_private_endpoint: bool
     private_host_allowlist: tuple[str, ...]
     private_cidr_allowlist: tuple[str, ...]
     # Proxy-only controls. They are bound by arm_digest but intentionally
     # omitted from the adapter-facing route-plan JSON.
     gateway: str | None = None
-    track: str = "gateway_tax"
+    track: str = TRACK
     model_match: str = "exact_revision"
-    router_mode: str | None = None
-    cost_quality_tradeoff: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -266,7 +255,7 @@ class RoutePlan:
             "cache_enabled": self.cache_enabled,
             "auth_env": self.auth_env,
             "sampling": self.sampling.to_dict(),
-            "private_router": self.private_router,
+            "allow_private_endpoint": self.allow_private_endpoint,
             "private_host_allowlist": list(self.private_host_allowlist),
             "private_cidr_allowlist": list(self.private_cidr_allowlist),
         }
@@ -313,7 +302,7 @@ class SecretPlan:
 _ROOT_FIELDS = {
     "schema_version", "experiment_id", "track", "model_match", "harness", "tasks",
     "repetitions_per_window", "schedule_seed", "execution_lane",
-    "private_router", "private_host_allowlist", "private_cidr_allowlist",
+    "allow_private_endpoint", "private_host_allowlist", "private_cidr_allowlist",
     "windows", "budget", "arms",
 }
 _WINDOW_FIELDS = {"window_id", "start", "end"}
@@ -323,57 +312,56 @@ _ARM_FIELDS = {
     "arm_id", "route_kind", "endpoint", "protocol", "baseline",
     "canonical_model", "requested_model", "requested_provider", "allowed_models",
     "allowed_providers", "fallback_enabled", "retry_count", "cache_enabled",
-    "auth_env", "sampling", "direct_control_arm_id", "router_mode",
-    "fixed_control_arm_id", "cost_quality_tradeoff", "gateway",
+    "auth_env", "sampling", "direct_control_arm_id", "gateway",
 }
 
 
 def _table(value: Any, path: str, fields: set[str]) -> dict[str, Any]:
     if not isinstance(value, dict):
-        raise RouterSpecError(f"{path} must be a TOML table")
+        raise GatewaySpecError(f"{path} must be a TOML table")
     unknown = sorted(set(value) - fields)
     if unknown:
         noun = "field" if len(unknown) == 1 else "fields"
-        raise RouterSpecError(f"{path} has unknown {noun}: {', '.join(unknown)}")
+        raise GatewaySpecError(f"{path} has unknown {noun}: {', '.join(unknown)}")
     return value
 
 
 def _required(table: Mapping[str, Any], key: str, path: str) -> Any:
     if key not in table:
-        raise RouterSpecError(f"{path} missing required field: {key}")
+        raise GatewaySpecError(f"{path} missing required field: {key}")
     return table[key]
 
 
 def _string(value: Any, path: str, pattern: re.Pattern[str] | None = None) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise RouterSpecError(f"{path} must be a non-empty string")
+        raise GatewaySpecError(f"{path} must be a non-empty string")
     result = value.strip()
     if pattern is not None and not pattern.fullmatch(result):
-        raise RouterSpecError(f"{path} has invalid format: {result!r}")
+        raise GatewaySpecError(f"{path} has invalid format: {result!r}")
     return result
 
 
 def _integer(value: Any, path: str, *, minimum: int | None = None) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise RouterSpecError(f"{path} must be an integer")
+        raise GatewaySpecError(f"{path} must be an integer")
     if minimum is not None and value < minimum:
-        raise RouterSpecError(f"{path} must be at least {minimum}")
+        raise GatewaySpecError(f"{path} must be at least {minimum}")
     return value
 
 
 def _boolean(value: Any, path: str) -> bool:
     if not isinstance(value, bool):
-        raise RouterSpecError(f"{path} must be a boolean")
+        raise GatewaySpecError(f"{path} must be a boolean")
     return value
 
 
 def _string_tuple(value: Any, path: str, *, pattern: re.Pattern[str] | None = None) -> tuple[str, ...]:
     if not isinstance(value, list) or not value:
-        raise RouterSpecError(f"{path} must be a non-empty array")
+        raise GatewaySpecError(f"{path} must be a non-empty array")
     result = tuple(_string(item, f"{path}[{index}]", pattern)
                    for index, item in enumerate(value))
     if len(set(result)) != len(result):
-        raise RouterSpecError(f"{path} must not contain duplicates")
+        raise GatewaySpecError(f"{path} must not contain duplicates")
     return result
 
 
@@ -384,26 +372,26 @@ def _decimal_text(value: Decimal) -> str:
 
 def _positive_decimal(value: Any, path: str) -> str:
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-        raise RouterSpecError(f"{path} must be a positive decimal")
+        raise GatewaySpecError(f"{path} must be a positive decimal")
     try:
         parsed = Decimal(str(value))
     except InvalidOperation as exc:
-        raise RouterSpecError(f"{path} must be a positive decimal") from exc
+        raise GatewaySpecError(f"{path} must be a positive decimal") from exc
     if not parsed.is_finite() or parsed <= 0:
-        raise RouterSpecError(f"{path} must be greater than zero")
+        raise GatewaySpecError(f"{path} must be greater than zero")
     return _decimal_text(parsed)
 
 
 def _timestamp(value: Any, path: str) -> tuple[str, dt.datetime]:
     text = _string(value, path)
     if not _RFC3339_RE.fullmatch(text):
-        raise RouterSpecError(f"{path} must be an RFC3339 timestamp")
+        raise GatewaySpecError(f"{path} must be an RFC3339 timestamp")
     try:
         parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise RouterSpecError(f"{path} must be an RFC3339 timestamp") from exc
+        raise GatewaySpecError(f"{path} must be an RFC3339 timestamp") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise RouterSpecError(f"{path} must include a UTC offset")
+        raise GatewaySpecError(f"{path} must include a UTC offset")
     utc = parsed.astimezone(dt.timezone.utc)
     normalized = utc.isoformat().replace("+00:00", "Z")
     return normalized, utc
@@ -411,7 +399,7 @@ def _timestamp(value: Any, path: str) -> tuple[str, dt.datetime]:
 
 def _parse_windows(value: Any) -> tuple[Window, ...]:
     if not isinstance(value, list) or not value:
-        raise RouterSpecError("windows must be a non-empty array of tables")
+        raise GatewaySpecError("windows must be a non-empty array of tables")
     parsed: list[tuple[Window, dt.datetime, dt.datetime]] = []
     ids: set[str] = set()
     for index, raw in enumerate(value):
@@ -420,17 +408,17 @@ def _parse_windows(value: Any) -> tuple[Window, ...]:
         window_id = _string(_required(table, "window_id", path),
                             f"{path}.window_id", _ID_RE)
         if window_id in ids:
-            raise RouterSpecError(f"windows has duplicate window_id: {window_id}")
+            raise GatewaySpecError(f"windows has duplicate window_id: {window_id}")
         ids.add(window_id)
         start_text, start = _timestamp(_required(table, "start", path), f"{path}.start")
         end_text, end = _timestamp(_required(table, "end", path), f"{path}.end")
         if start >= end:
-            raise RouterSpecError(f"{path} start must be before end")
+            raise GatewaySpecError(f"{path} start must be before end")
         parsed.append((Window(window_id, start_text, end_text), start, end))
     ordered = sorted(parsed, key=lambda item: item[1])
     for previous, current in zip(ordered, ordered[1:]):
         if current[1] < previous[2]:
-            raise RouterSpecError(
+            raise GatewaySpecError(
                 f"windows overlap: {previous[0].window_id} and {current[0].window_id}"
             )
     return tuple(item[0] for item in parsed)
@@ -452,10 +440,10 @@ def _parse_budget(value: Any) -> Budget:
 
 def _number(value: Any, path: str, minimum: float, maximum: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise RouterSpecError(f"{path} must be a number")
+        raise GatewaySpecError(f"{path} must be a number")
     result = float(value)
     if not math.isfinite(result) or not minimum <= result <= maximum:
-        raise RouterSpecError(f"{path} must be between {minimum} and {maximum}")
+        raise GatewaySpecError(f"{path} must be between {minimum} and {maximum}")
     return result
 
 
@@ -473,50 +461,72 @@ def _parse_sampling(value: Any, path: str) -> Sampling:
 def _validate_endpoint(
     value: Any,
     path: str,
-    private_router: bool,
+    allow_private_endpoint: bool,
     private_hosts: tuple[str, ...],
     private_cidrs: tuple[str, ...],
 ) -> str:
     endpoint = _string(value, path)
     parsed = urllib.parse.urlsplit(endpoint)
     if parsed.scheme != "https" or not parsed.hostname:
-        raise RouterSpecError(f"{path} must be an absolute HTTPS URL")
+        raise GatewaySpecError(f"{path} must be an absolute HTTPS URL")
     if parsed.username or parsed.password or parsed.fragment or parsed.query:
-        raise RouterSpecError(f"{path} must not contain credentials, query, or fragment")
+        raise GatewaySpecError(f"{path} must not contain credentials, query, or fragment")
     try:
         parsed.port
     except ValueError as exc:
-        raise RouterSpecError(f"{path} has an invalid port") from exc
-    hostname = _normalize_hostname(parsed.hostname, path, allow_ip=True)
+        raise GatewaySpecError(f"{path} has an invalid port") from exc
+    _validate_endpoint_target(
+        parsed.hostname,
+        path,
+        allow_private_endpoint,
+        private_hosts,
+        private_cidrs,
+    )
+    return endpoint
+
+
+def _validate_endpoint_target(
+    hostname_value: str,
+    path: str,
+    allow_private_endpoint: bool,
+    private_hosts: tuple[str, ...],
+    private_cidrs: tuple[str, ...],
+) -> None:
+    """Require private-mode destinations to match an explicit host or CIDR."""
+    hostname = _normalize_hostname(hostname_value, path, allow_ip=True)
     try:
         address = ipaddress.ip_address(hostname)
     except ValueError:
         address = None
+    if allow_private_endpoint:
+        networks = tuple(ipaddress.ip_network(cidr) for cidr in private_cidrs)
+        if (
+            hostname not in private_hosts
+            and (
+                address is None
+                or not any(address in network for network in networks)
+            )
+        ):
+            raise GatewaySpecError(
+                f"{path} host is not covered by an explicit endpoint allowlist"
+            )
+        return
     if address is None:
         if (hostname == "localhost" or hostname.endswith(".localhost")
                 or "." not in hostname or hostname.isdigit()):
-            if not private_router or hostname not in private_hosts:
-                raise RouterSpecError(
-                    f"{path} is not a public hostname; set private_router and allow it explicitly"
-                )
+            raise GatewaySpecError(
+                f"{path} is not a public hostname; set allow_private_endpoint and allow it explicitly"
+            )
     elif not address.is_global:
-        if not private_router:
-            raise RouterSpecError(
-                f"{path} targets a non-public address; set private_router with allowlists"
-            )
-        networks = tuple(ipaddress.ip_network(cidr) for cidr in private_cidrs)
-        if hostname not in private_hosts and not any(address in network for network in networks):
-            raise RouterSpecError(
-                f"{path} address is not covered by a private router allowlist"
-            )
-    return endpoint
+        raise GatewaySpecError(
+            f"{path} targets a non-public address; set allow_private_endpoint with allowlists"
+        )
 
 
 def _parse_arm(
     value: Any,
     index: int,
-    track: str,
-    private_router: bool,
+    allow_private_endpoint: bool,
     private_hosts: tuple[str, ...],
     private_cidrs: tuple[str, ...],
 ) -> Arm:
@@ -524,36 +534,25 @@ def _parse_arm(
     table = _table(value, path, _ARM_FIELDS)
     route_kind = _string(_required(table, "route_kind", path), f"{path}.route_kind")
     if route_kind not in {"direct", "gateway"}:
-        raise RouterSpecError(f"{path}.route_kind must be 'direct' or 'gateway'")
+        raise GatewaySpecError(f"{path}.route_kind must be 'direct' or 'gateway'")
     protocol = _string(_required(table, "protocol", path), f"{path}.protocol")
     if protocol not in PROTOCOLS:
-        raise RouterSpecError(
+        raise GatewaySpecError(
             f"{path}.protocol must be one of: {', '.join(sorted(PROTOCOLS))}"
         )
     endpoint = _validate_endpoint(
         _required(table, "endpoint", path),
         f"{path}.endpoint",
-        private_router,
+        allow_private_endpoint,
         private_hosts,
         private_cidrs,
     )
     suffix = PROTOCOL_ENDPOINT_SUFFIXES[protocol]
     if not urllib.parse.urlsplit(endpoint).path.rstrip("/").endswith(suffix):
-        raise RouterSpecError(f"{path}.endpoint path must end with {suffix}")
+        raise GatewaySpecError(f"{path}.endpoint path must end with {suffix}")
     direct_control = table.get("direct_control_arm_id")
     if direct_control is not None:
         direct_control = _string(direct_control, f"{path}.direct_control_arm_id", _ID_RE)
-    router_mode = table.get("router_mode")
-    if router_mode is not None:
-        router_mode = _string(router_mode, f"{path}.router_mode")
-    fixed_control = table.get("fixed_control_arm_id")
-    if fixed_control is not None:
-        fixed_control = _string(fixed_control, f"{path}.fixed_control_arm_id", _ID_RE)
-    tradeoff = table.get("cost_quality_tradeoff")
-    if tradeoff is not None:
-        tradeoff = _integer(tradeoff, f"{path}.cost_quality_tradeoff", minimum=0)
-        if tradeoff > 10:
-            raise RouterSpecError(f"{path}.cost_quality_tradeoff must be at most 10")
     gateway = table.get("gateway")
     if gateway is not None:
         gateway = _string(gateway, f"{path}.gateway")
@@ -582,76 +581,65 @@ def _parse_arm(
         auth_env=_string(_required(table, "auth_env", path), f"{path}.auth_env", _ENV_RE),
         sampling=_parse_sampling(_required(table, "sampling", path), f"{path}.sampling"),
         direct_control_arm_id=direct_control,
-        router_mode=router_mode,
-        fixed_control_arm_id=fixed_control,
-        cost_quality_tradeoff=tradeoff,
         gateway=gateway,
     )
-    if track == "gateway_tax" and arm.requested_model not in arm.allowed_models:
-        raise RouterSpecError(f"{path}.allowed_models must contain requested_model")
-    if track == "gateway_tax" and arm.requested_provider not in arm.allowed_providers:
-        raise RouterSpecError(f"{path}.allowed_providers must contain requested_provider")
-    if track == "gateway_tax" and arm.allowed_providers != (arm.requested_provider,):
-        raise RouterSpecError(
+    if arm.requested_model not in arm.allowed_models:
+        raise GatewaySpecError(f"{path}.allowed_models must contain requested_model")
+    if arm.requested_provider not in arm.allowed_providers:
+        raise GatewaySpecError(f"{path}.allowed_providers must contain requested_provider")
+    if arm.allowed_providers != (arm.requested_provider,):
+        raise GatewaySpecError(
             f"{path}.allowed_providers must contain only requested_provider"
         )
     if arm.route_kind == "direct" and arm.direct_control_arm_id is not None:
-        raise RouterSpecError(f"{path}: direct arm cannot set direct_control_arm_id")
+        raise GatewaySpecError(f"{path}: direct arm cannot set direct_control_arm_id")
     if (
-        track == "gateway_tax"
-        and arm.route_kind == "gateway"
+        arm.route_kind == "gateway"
         and arm.direct_control_arm_id is None
     ):
-        raise RouterSpecError(f"{path}: gateway arm requires direct_control_arm_id")
+        raise GatewaySpecError(f"{path}: gateway arm requires direct_control_arm_id")
     if arm.route_kind == "direct" and "gateway" in table:
-        raise RouterSpecError(f"{path}: direct arm must not declare gateway")
+        raise GatewaySpecError(f"{path}: direct arm must not declare gateway")
     try:
-        router_gateways.validate_arm(
+        gateway_profiles.validate_arm(
             route_kind=arm.route_kind,
             gateway=arm.gateway,
             endpoint=arm.endpoint,
             protocol=arm.protocol,
             requested_model=arm.requested_model,
             requested_provider=arm.requested_provider,
-            private_router=private_router,
-            track=track,
-            router_mode=arm.router_mode,
+            allow_private_endpoint=allow_private_endpoint,
         )
-    except router_gateways.GatewayProfileError as exc:
-        raise RouterSpecError(f"{path}: {exc}") from exc
+    except gateway_profiles.GatewayProfileError as exc:
+        raise GatewaySpecError(f"{path}: {exc}") from exc
     if arm.retry_count != 0:
-        raise RouterSpecError(f"{path}.retry_count must be 0")
+        raise GatewaySpecError(f"{path}.retry_count must be 0")
     if arm.cache_enabled:
-        raise RouterSpecError(f"{path}.cache_enabled must be false")
-    if track == "gateway_tax":
-        if arm.fallback_enabled:
-            raise RouterSpecError(f"{path}.fallback_enabled must be false for gateway_tax")
-        if any((
-            arm.router_mode is not None,
-            arm.fixed_control_arm_id is not None,
-            arm.cost_quality_tradeoff is not None,
-        )):
-            raise RouterSpecError(f"{path}: model router fields require track='model_router'")
+        raise GatewaySpecError(f"{path}.cache_enabled must be false")
+    if arm.fallback_enabled:
+        raise GatewaySpecError(
+            f"{path}.fallback_enabled must be false for {TRACK}"
+        )
     return arm
 
 
 def _validate_gateway_controls(arms: tuple[Arm, ...]) -> None:
     by_id = {arm.arm_id: arm for arm in arms}
     if len(by_id) != len(arms):
-        raise RouterSpecError("arms must have unique arm_id values")
+        raise GatewaySpecError("arms must have unique arm_id values")
     baselines = [arm for arm in arms if arm.baseline]
     if len(baselines) != 1 or baselines[0].route_kind != "direct":
-        raise RouterSpecError("gateway_tax requires exactly one baseline direct arm")
+        raise GatewaySpecError(f"{TRACK} requires exactly one baseline direct arm")
     if not any(arm.route_kind == "gateway" for arm in arms):
-        raise RouterSpecError("gateway_tax requires at least one gateway arm")
+        raise GatewaySpecError(f"{TRACK} requires at least one gateway arm")
     for arm in arms:
         if arm.route_kind == "direct" and not arm.baseline:
-            raise RouterSpecError("gateway_tax direct arm must be the baseline")
+            raise GatewaySpecError(f"{TRACK} direct arm must be the baseline")
         if arm.route_kind != "gateway":
             continue
         control = by_id.get(arm.direct_control_arm_id)
         if control is None or control.route_kind != "direct":
-            raise RouterSpecError(
+            raise GatewaySpecError(
                 f"arm {arm.arm_id!r} references unknown direct control "
                 f"{arm.direct_control_arm_id!r}"
             )
@@ -661,106 +649,35 @@ def _validate_gateway_controls(arms: tuple[Arm, ...]) -> None:
         )
         for field in comparable:
             if getattr(arm, field) != getattr(control, field):
-                raise RouterSpecError(
+                raise GatewaySpecError(
                     f"arm {arm.arm_id!r} {field} must match direct control {control.arm_id!r}"
                 )
 
-
-def _validate_model_router_controls(arms: tuple[Arm, ...]) -> None:
-    by_id = {arm.arm_id: arm for arm in arms}
-    if len(by_id) != len(arms):
-        raise RouterSpecError("arms must have unique arm_id values")
-    auto = [arm for arm in arms if arm.router_mode == "auto"]
-    fixed = [arm for arm in arms if arm.router_mode == "fixed"]
-    if len(auto) != 1:
-        raise RouterSpecError("model_router requires exactly one auto arm")
-    if not fixed:
-        raise RouterSpecError("model_router requires one or more fixed controls")
-    if len([arm for arm in fixed if arm.baseline]) != 1:
-        raise RouterSpecError("model_router requires exactly one baseline fixed control")
-    if any(arm.baseline for arm in auto):
-        raise RouterSpecError("model_router auto arm cannot be the baseline")
-    if len(auto) + len(fixed) != len(arms):
-        raise RouterSpecError("model_router arms require router_mode='auto' or 'fixed'")
-    for arm in arms:
-        if arm.route_kind != "gateway" or arm.gateway != "openrouter":
-            raise RouterSpecError("model_router arms must route through openrouter")
-        if arm.direct_control_arm_id is not None:
-            raise RouterSpecError("model_router arms must not declare direct_control_arm_id")
-    selected = auto[0]
-    if selected.requested_model != "openrouter/auto-beta":
-        raise RouterSpecError(
-            "model_router auto requested_model must be 'openrouter/auto-beta'"
-        )
-    if selected.requested_provider != "openrouter":
-        raise RouterSpecError(
-            "model_router auto requested_provider must be 'openrouter'"
-        )
-    if selected.cost_quality_tradeoff is None:
-        raise RouterSpecError("model_router auto arm requires cost_quality_tradeoff")
-    if not selected.fallback_enabled:
-        raise RouterSpecError("model_router auto arm requires fallback_enabled=true")
-    control = by_id.get(selected.fixed_control_arm_id)
-    if control is None or control.router_mode != "fixed" or not control.baseline:
-        raise RouterSpecError(
-            "model_router auto arm fixed_control_arm_id must reference the baseline fixed control"
-        )
-    fixed_models = {arm.requested_model for arm in fixed}
-    if set(selected.allowed_models) != fixed_models:
-        raise RouterSpecError(
-            "model_router auto allowed_models must exactly match fixed control models"
-        )
-    fixed_providers = {arm.requested_provider.casefold() for arm in fixed}
-    if {provider.casefold() for provider in selected.allowed_providers} != fixed_providers:
-        raise RouterSpecError(
-            "model_router auto allowed_providers must exactly match fixed control providers"
-        )
-    for arm in fixed:
-        if arm.fallback_enabled:
-            raise RouterSpecError("model_router fixed controls require fallback_enabled=false")
-        if arm.cost_quality_tradeoff is not None or arm.fixed_control_arm_id is not None:
-            raise RouterSpecError(
-                "model_router fixed controls must not declare auto-only fields"
-            )
-        if arm.allowed_models != (arm.requested_model,):
-            raise RouterSpecError(
-                "model_router fixed control allowed_models must contain only requested_model"
-            )
-        if arm.allowed_providers != (arm.requested_provider,):
-            raise RouterSpecError(
-                "model_router fixed control allowed_providers must contain only requested_provider"
-            )
-        if arm.sampling != selected.sampling:
-            raise RouterSpecError(
-                f"model_router fixed control {arm.arm_id!r} sampling must match auto arm"
-            )
-
-
-def _parse_allowlists(table: Mapping[str, Any], private_router: bool) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _parse_allowlists(table: Mapping[str, Any], allow_private_endpoint: bool) -> tuple[tuple[str, ...], tuple[str, ...]]:
     hosts_raw = table.get("private_host_allowlist", [])
     cidrs_raw = table.get("private_cidr_allowlist", [])
     if not isinstance(hosts_raw, list) or any(not isinstance(item, str) for item in hosts_raw):
-        raise RouterSpecError("private_host_allowlist must be an array of hostnames")
+        raise GatewaySpecError("private_host_allowlist must be an array of hostnames")
     hosts = tuple(
         _normalize_hostname(item, f"private_host_allowlist[{index}]")
         for index, item in enumerate(hosts_raw)
     )
     if len(set(hosts)) != len(hosts):
-        raise RouterSpecError("private_host_allowlist must not contain duplicates")
+        raise GatewaySpecError("private_host_allowlist must not contain duplicates")
     if not isinstance(cidrs_raw, list) or any(not isinstance(item, str) for item in cidrs_raw):
-        raise RouterSpecError("private_cidr_allowlist must be an array of CIDRs")
+        raise GatewaySpecError("private_cidr_allowlist must be an array of CIDRs")
     cidrs: list[str] = []
     for item in cidrs_raw:
         try:
             cidrs.append(str(ipaddress.ip_network(item, strict=True)))
         except ValueError as exc:
-            raise RouterSpecError(f"invalid private_cidr_allowlist entry: {item!r}") from exc
+            raise GatewaySpecError(f"invalid private_cidr_allowlist entry: {item!r}") from exc
     if len(set(cidrs)) != len(cidrs):
-        raise RouterSpecError("private_cidr_allowlist must not contain duplicates")
-    if private_router and not (hosts or cidrs):
-        raise RouterSpecError("private_router=true requires a hostname or CIDR allowlist")
-    if not private_router and (hosts or cidrs):
-        raise RouterSpecError("private router allowlists require private_router=true")
+        raise GatewaySpecError("private_cidr_allowlist must not contain duplicates")
+    if allow_private_endpoint and not (hosts or cidrs):
+        raise GatewaySpecError("allow_private_endpoint=true requires a hostname or CIDR allowlist")
+    if not allow_private_endpoint and (hosts or cidrs):
+        raise GatewaySpecError("private endpoint allowlists require allow_private_endpoint=true")
     return hosts, tuple(cidrs)
 
 
@@ -773,52 +690,47 @@ def _normalize_hostname(value: str, path: str, *, allow_ip: bool = False) -> str
     else:
         if allow_ip:
             return hostname
-        raise RouterSpecError(f"{path} must use private_cidr_allowlist for IP addresses")
+        raise GatewaySpecError(f"{path} must use private_cidr_allowlist for IP addresses")
     labels = hostname.split(".")
     if (not hostname or len(hostname) > 253 or hostname.isdigit()
             or any(not _HOST_LABEL_RE.fullmatch(label) for label in labels)):
-        raise RouterSpecError(f"{path} must be a bare DNS hostname")
+        raise GatewaySpecError(f"{path} must be a bare DNS hostname")
     return hostname
 
 
-def parse_experiment(data: Mapping[str, Any]) -> RouterExperiment:
+def parse_experiment(data: Mapping[str, Any]) -> GatewayExperiment:
     """Validate an already-decoded TOML experiment mapping."""
     table = _table(data, "experiment", _ROOT_FIELDS)
     schema_version = _integer(_required(table, "schema_version", "experiment"),
                               "schema_version", minimum=1)
     if schema_version != SCHEMA_VERSION:
-        raise RouterSpecError(f"schema_version must be {SCHEMA_VERSION}")
+        raise GatewaySpecError(f"schema_version must be {SCHEMA_VERSION}")
     track = _string(_required(table, "track", "experiment"), "track")
-    if track not in TRACKS:
-        raise RouterSpecError(f"track must be one of: {', '.join(sorted(TRACKS))}")
+    if track != TRACK:
+        raise GatewaySpecError(f"track must be {TRACK!r}")
     model_match = _string(table.get("model_match", "exact_revision"), "model_match")
     if model_match not in MODEL_MATCHES:
-        raise RouterSpecError(
+        raise GatewaySpecError(
             f"model_match must be one of: {', '.join(sorted(MODEL_MATCHES))}"
         )
     harness = _string(_required(table, "harness", "experiment"), "harness")
     if harness != HARNESS:
-        raise RouterSpecError(f"harness must be {HARNESS!r} for the MVP")
-    private_router = _boolean(table.get("private_router", False), "private_router")
-    hosts, cidrs = _parse_allowlists(table, private_router)
+        raise GatewaySpecError(f"harness must be {HARNESS!r} for the MVP")
+    allow_private_endpoint = _boolean(table.get("allow_private_endpoint", False), "allow_private_endpoint")
+    hosts, cidrs = _parse_allowlists(table, allow_private_endpoint)
     tasks = _string_tuple(_required(table, "tasks", "experiment"), "tasks", pattern=_TASK_RE)
     if any(".." in task.split("/") for task in tasks):
-        raise RouterSpecError("tasks must not contain '..' path segments")
+        raise GatewaySpecError("tasks must not contain '..' path segments")
     raw_arms = _required(table, "arms", "experiment")
     if not isinstance(raw_arms, list) or len(raw_arms) < 2:
-        raise RouterSpecError("arms must contain at least two arm tables")
-    arms = tuple(_parse_arm(raw, index, track, private_router, hosts, cidrs)
+        raise GatewaySpecError("arms must contain at least two arm tables")
+    arms = tuple(_parse_arm(raw, index, allow_private_endpoint, hosts, cidrs)
                  for index, raw in enumerate(raw_arms))
-    if track == "gateway_tax":
-        _validate_gateway_controls(arms)
-    else:
-        if any(arm.protocol != "openai_chat" for arm in arms):
-            raise RouterSpecError("model_router supports only protocol='openai_chat'")
-        _validate_model_router_controls(arms)
+    _validate_gateway_controls(arms)
     lane = _string(_required(table, "execution_lane", "experiment"), "execution_lane")
     if lane not in {"local", "docker"}:
-        raise RouterSpecError("execution_lane must be 'local' or 'docker'")
-    return RouterExperiment(
+        raise GatewaySpecError("execution_lane must be 'local' or 'docker'")
+    return GatewayExperiment(
         schema_version=schema_version,
         experiment_id=_string(_required(table, "experiment_id", "experiment"),
                               "experiment_id", _ID_RE),
@@ -833,7 +745,7 @@ def parse_experiment(data: Mapping[str, Any]) -> RouterExperiment:
         schedule_seed=_integer(_required(table, "schedule_seed", "experiment"),
                                "schedule_seed", minimum=0),
         execution_lane=lane,
-        private_router=private_router,
+        allow_private_endpoint=allow_private_endpoint,
         private_host_allowlist=hosts,
         private_cidr_allowlist=cidrs,
         windows=_parse_windows(_required(table, "windows", "experiment")),
@@ -842,61 +754,61 @@ def parse_experiment(data: Mapping[str, Any]) -> RouterExperiment:
     )
 
 
-def parse_experiment_toml(text: str, *, source: str = "<string>") -> RouterExperiment:
-    """Decode and validate Router Bench TOML text."""
+def parse_experiment_toml(text: str, *, source: str = "<string>") -> GatewayExperiment:
+    """Decode and validate Gateway Bench TOML text."""
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     try:
         raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
-        raise RouterSpecError(f"invalid Router Bench TOML in {source}: {exc}") from exc
+        raise GatewaySpecError(f"invalid Gateway Bench TOML in {source}: {exc}") from exc
     try:
         return parse_experiment(raw)
-    except RouterSpecError as exc:
-        raise RouterSpecError(f"invalid Router Bench experiment in {source}: {exc}") from exc
+    except GatewaySpecError as exc:
+        raise GatewaySpecError(f"invalid Gateway Bench experiment in {source}: {exc}") from exc
 
 
-def load_experiment(path: str | os.PathLike[str]) -> RouterExperiment:
-    """Load and validate a Router Bench experiment TOML file."""
+def load_experiment(path: str | os.PathLike[str]) -> GatewayExperiment:
+    """Load and validate a Gateway Bench experiment TOML file."""
     resolved = Path(path)
     try:
         text = resolved.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
-        raise RouterSpecError(f"cannot read Router Bench experiment {resolved}: {exc}") from exc
+        raise GatewaySpecError(f"cannot read Gateway Bench experiment {resolved}: {exc}") from exc
     return parse_experiment_toml(text, source=str(resolved))
 
 
 def compile_route_plans(
-    experiment: RouterExperiment,
+    experiment: GatewayExperiment,
     *,
     environ: Mapping[str, str],
     admitted_auth_envs: set[str] | frozenset[str],
 ) -> tuple[tuple[RoutePlan, ...], SecretPlan]:
     """Compile sanitized route plans and admitted in-memory credentials."""
-    if not isinstance(experiment, RouterExperiment):
-        raise TypeError("experiment must be a RouterExperiment")
+    if not isinstance(experiment, GatewayExperiment):
+        raise TypeError("experiment must be a GatewayExperiment")
     # Public dataclasses are convenient value types, but parsing remains the
     # validation boundary. Reparse here so hand-built instances cannot bypass it.
     experiment = parse_experiment(experiment.to_dict())
     admitted = frozenset(admitted_auth_envs)
     if any(not isinstance(name, str) for name in admitted):
-        raise RouterSpecError("admitted_auth_envs must contain environment variable names")
+        raise GatewaySpecError("admitted_auth_envs must contain environment variable names")
     declared = frozenset(arm.auth_env for arm in experiment.arms)
     unexpected = sorted(admitted - declared)
     if unexpected:
-        raise RouterSpecError(
+        raise GatewaySpecError(
             f"admitted_auth_envs contains undeclared names: {', '.join(unexpected)}"
         )
     plans: list[RoutePlan] = []
     secrets: list[_ArmSecret] = []
     for arm in experiment.arms:
         if arm.auth_env not in admitted:
-            raise RouterSpecError(
+            raise GatewaySpecError(
                 f"auth environment variable {arm.auth_env!r} is not explicitly admitted"
             )
         value = environ.get(arm.auth_env)
         if not isinstance(value, str) or not value:
-            raise RouterSpecError(
+            raise GatewaySpecError(
                 f"auth environment variable {arm.auth_env!r} is missing or empty"
             )
         plans.append(RoutePlan(
@@ -919,9 +831,7 @@ def compile_route_plans(
             cache_enabled=arm.cache_enabled,
             auth_env=arm.auth_env,
             sampling=arm.sampling,
-            router_mode=arm.router_mode,
-            cost_quality_tradeoff=arm.cost_quality_tradeoff,
-            private_router=experiment.private_router,
+            allow_private_endpoint=experiment.allow_private_endpoint,
             private_host_allowlist=experiment.private_host_allowlist,
             private_cidr_allowlist=experiment.private_cidr_allowlist,
             gateway=arm.gateway,
@@ -931,5 +841,5 @@ def compile_route_plans(
 
 
 # Explicit aliases make call sites readable while retaining one parser contract.
-load_router_experiment = load_experiment
-parse_router_experiment = parse_experiment
+load_gateway_experiment = load_experiment
+parse_gateway_experiment = parse_experiment

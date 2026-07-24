@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from obench import router_gateways, router_metrics
+from obench import gateway_profiles, gateway_metrics
 
 
 def sse(*objects):
@@ -40,7 +40,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "conversation_id": "attacker-conversation",
             "providerOptions": {"gateway": {"only": ["attacker"]}},
         })
-        router_gateways.shape_body(
+        gateway_profiles.shape_body(
             body, gateway="openrouter", requested_provider="openai"
         )
         self.assertEqual(body["provider"], {
@@ -56,7 +56,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
         ):
             self.assertNotIn(key, body)
         self.assertEqual(
-            router_gateways.request_headers(
+            gateway_profiles.request_headers(
                 gateway="openrouter", secret="secret"
             ),
             {
@@ -72,7 +72,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "gateway": {"models": ["fallback"], "order": ["other"], "caching": "auto"},
             "openai": {"reasoningEffort": "low"},
         }
-        router_gateways.shape_body(
+        gateway_profiles.shape_body(
             body, gateway="vercel", requested_provider="openai"
         )
         self.assertEqual(body["providerOptions"], {
@@ -82,52 +82,11 @@ class GatewayRequestProfileTests(unittest.TestCase):
             self.assertNotIn(key, body)
         self.assertNotIn("cache_control", body["messages"][0])
         self.assertEqual(
-            router_gateways.request_headers(
+            gateway_profiles.request_headers(
                 gateway="vercel", secret="secret"
             ),
             {"Authorization": "Bearer secret"},
         )
-
-    def test_auto_router_replaces_plugins_routing_session_and_cache_controls(self):
-        body = self.base_body()
-        body.update({
-            "plugins": [{"id": "attacker"}],
-            "router": {"strategy": "attacker"},
-            "session_id": "attacker-session",
-            "conversation_id": "attacker-conversation",
-            "providerOptions": {"gateway": {"only": ["attacker"]}},
-            "models": ["attacker/model"],
-            "order": ["attacker"],
-            "sort": "price",
-            "caching": True,
-        })
-
-        router_gateways.shape_body(
-            body,
-            gateway="openrouter",
-            requested_provider="openrouter",
-            router_mode="auto",
-            allowed_models=("openai/gpt-a", "anthropic/claude-b"),
-            allowed_providers=("OpenAI", "Anthropic"),
-            cost_quality_tradeoff=6,
-            session_id="cell-opaque",
-        )
-
-        self.assertEqual(body["provider"], {
-            "only": ["OpenAI", "Anthropic"],
-            "allow_fallbacks": True,
-        })
-        self.assertEqual(body["plugins"], [{
-            "id": "auto-router",
-            "allowed_models": ["openai/gpt-a", "anthropic/claude-b"],
-            "cost_quality_tradeoff": 6,
-        }])
-        self.assertEqual(body["session_id"], "cell-opaque")
-        for key in (
-            "router", "conversation_id", "providerOptions", "models", "order",
-            "sort", "caching", "cache", "prompt_cache_key",
-        ):
-            self.assertNotIn(key, body)
 
     def test_cloudflare_profile_requires_real_account_and_qualified_model(self):
         rest_endpoint = (
@@ -137,18 +96,17 @@ class GatewayRequestProfileTests(unittest.TestCase):
         compat_endpoint = (
             "https://gateway.ai.cloudflare.com/v1/"
             "0123456789abcdef0123456789abcdef/"
-            "openbench-router-bench/compat/chat/completions"
+            "openbench-gateway-bench/compat/chat/completions"
         )
         for endpoint in (rest_endpoint, compat_endpoint):
             with self.subTest(endpoint=endpoint):
-                router_gateways.validate_arm(
+                gateway_profiles.validate_arm(
                     route_kind="gateway",
                     gateway="cloudflare",
                     endpoint=endpoint,
                     protocol="openai_chat",
                     requested_model="openai/gpt-4o-mini",
                     requested_provider="openai",
-                    track="gateway_tax",
                 )
 
         invalid_endpoints = (
@@ -159,77 +117,58 @@ class GatewayRequestProfileTests(unittest.TestCase):
                 "0123456789abcdef0123456789abcdef", "account-id"
             ),
             rest_endpoint + "?gateway=other",
-            compat_endpoint.replace("openbench-router-bench", "{gateway_id}"),
+            compat_endpoint.replace("openbench-gateway-bench", "{gateway_id}"),
             compat_endpoint.replace("/compat/chat/completions", "/openai"),
         )
         for invalid in invalid_endpoints:
             with self.subTest(endpoint=invalid):
                 with self.assertRaisesRegex(
-                    router_gateways.GatewayProfileError,
+                    gateway_profiles.GatewayProfileError,
                     "cloudflare endpoint must be",
                 ):
-                    router_gateways.validate_arm(
+                    gateway_profiles.validate_arm(
                         route_kind="gateway",
                         gateway="cloudflare",
                         endpoint=invalid,
                         protocol="openai_chat",
                         requested_model="openai/gpt-4o-mini",
                         requested_provider="openai",
-                        track="gateway_tax",
                     )
 
         with self.assertRaisesRegex(
-            router_gateways.GatewayProfileError,
+            gateway_profiles.GatewayProfileError,
             "provider-qualified with requested_provider",
         ):
-            router_gateways.validate_arm(
+            gateway_profiles.validate_arm(
                 route_kind="gateway",
                 gateway="cloudflare",
                 endpoint=rest_endpoint,
                 protocol="openai_chat",
                 requested_model="anthropic/gpt-4o-mini",
                 requested_provider="openai",
-                track="gateway_tax",
             )
-        with self.assertRaisesRegex(
-            router_gateways.GatewayProfileError,
-            "model_router supports only openrouter",
-        ):
-            router_gateways.validate_arm(
-                route_kind="gateway",
-                gateway="cloudflare",
-                endpoint=rest_endpoint,
-                protocol="openai_chat",
-                requested_model="openai/gpt-4o-mini",
-                requested_provider="openai",
-                track="model_router",
-                router_mode="fixed",
-            )
-
         responses_endpoint = rest_endpoint.replace(
             "/chat/completions", "/responses"
         )
-        router_gateways.validate_arm(
+        gateway_profiles.validate_arm(
             route_kind="gateway",
             gateway="cloudflare",
             endpoint=responses_endpoint,
             protocol="openai_responses",
             requested_model="openai/gpt-4o-mini",
             requested_provider="openai",
-            track="gateway_tax",
         )
         with self.assertRaisesRegex(
-            router_gateways.GatewayProfileError,
+            gateway_profiles.GatewayProfileError,
             "cloudflare endpoint must be",
         ):
-            router_gateways.validate_arm(
+            gateway_profiles.validate_arm(
                 route_kind="gateway",
                 gateway="cloudflare",
                 endpoint=responses_endpoint,
                 protocol="openai_chat",
                 requested_model="openai/gpt-4o-mini",
                 requested_provider="openai",
-                track="gateway_tax",
             )
 
     def test_cloudflare_overwrites_headers_and_strips_body_controls(self):
@@ -242,7 +181,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "fallback": {"model": "attacker/model"},
         })
 
-        router_gateways.shape_body(
+        gateway_profiles.shape_body(
             body, gateway="cloudflare", requested_provider="openai"
         )
 
@@ -254,7 +193,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             self.assertNotIn(key, body)
         self.assertNotIn("cache_control", body["messages"][0])
         self.assertEqual(
-            router_gateways.request_headers(
+            gateway_profiles.request_headers(
                 gateway="cloudflare", secret="secret"
             ),
             {
@@ -276,7 +215,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "cf-aig-metadata",
         ):
             with self.subTest(header=name):
-                self.assertTrue(router_gateways.blocked_request_header(name))
+                self.assertTrue(gateway_profiles.blocked_request_header(name))
 
     def test_concentrate_requires_exact_responses_route_and_qualified_model(self):
         valid = {
@@ -286,26 +225,21 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "protocol": "openai_responses",
             "requested_model": "openai/gpt-4o-mini",
             "requested_provider": "openai",
-            "track": "gateway_tax",
         }
-        router_gateways.validate_arm(**valid)
+        gateway_profiles.validate_arm(**valid)
 
         invalid = (
             ({"endpoint": valid["endpoint"] + "/"}, "supports only"),
             ({"protocol": "openai_chat"}, "supports only"),
             ({"requested_model": "gpt-4o-mini"}, "provider-qualified"),
             ({"requested_model": "azure/gpt-4o-mini"}, "provider-qualified"),
-            (
-                {"track": "model_router", "router_mode": "fixed"},
-                "model_router supports only openrouter",
-            ),
         )
         for changes, message in invalid:
             with self.subTest(changes=changes):
                 with self.assertRaisesRegex(
-                    router_gateways.GatewayProfileError, message
+                    gateway_profiles.GatewayProfileError, message
                 ):
-                    router_gateways.validate_arm(**{**valid, **changes})
+                    gateway_profiles.validate_arm(**{**valid, **changes})
 
     def test_concentrate_replaces_hostile_routing_cache_and_fallback_controls(self):
         body = self.base_body()
@@ -338,7 +272,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             }],
         })
 
-        router_gateways.shape_body(
+        gateway_profiles.shape_body(
             body, gateway="concentrate", requested_provider="openai"
         )
 
@@ -366,7 +300,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             body["tools"][0]["function"]["parameters"]["properties"],
         )
         self.assertEqual(
-            router_gateways.request_headers(
+            gateway_profiles.request_headers(
                 gateway="concentrate", secret="secret"
             ),
             {"Authorization": "Bearer secret"},
@@ -376,56 +310,56 @@ class GatewayRequestProfileTests(unittest.TestCase):
         requested = "openai/gpt-5.6-2026-07-01"
         observed = "openai/gpt-5.6"
         self.assertFalse(
-            router_gateways.models_match(requested, observed, "exact_revision")
+            gateway_profiles.models_match(requested, observed, "exact_revision")
         )
         self.assertTrue(
-            router_gateways.models_match(requested, observed, "rolling_alias")
+            gateway_profiles.models_match(requested, observed, "rolling_alias")
         )
         self.assertTrue(
-            router_gateways.models_match(requested, observed, "model_family")
+            gateway_profiles.models_match(requested, observed, "model_family")
         )
         self.assertFalse(
-            router_gateways.models_match(
+            gateway_profiles.models_match(
                 "openai/gpt-4o-mini", "anthropic/claude-haiku-4.5", "rolling_alias"
             )
         )
         self.assertFalse(
-            router_gateways.models_match(
+            gateway_profiles.models_match(
                 "openai/gpt-4o-mini",
                 "anthropic/gpt-4o-mini",
                 "rolling_alias",
             )
         )
         self.assertTrue(
-            router_gateways.models_match(
+            gateway_profiles.models_match(
                 "openai/gpt-4o-mini",
                 "anthropic/gpt-4o-mini",
                 "model_family",
             )
         )
         self.assertFalse(
-            router_gateways.models_match(
+            gateway_profiles.models_match(
                 "gpt-4o-mini-2024-07-18",
                 "gpt-4o-mini-2024-08-01",
                 "rolling_alias",
             )
         )
         self.assertTrue(
-            router_gateways.model_evidence_consistent(
+            gateway_profiles.model_evidence_consistent(
                 "openai/gpt-4o-mini",
                 "gpt-4o-mini-2024-07-18",
                 "rolling_alias",
             )
         )
         self.assertFalse(
-            router_gateways.model_evidence_consistent(
+            gateway_profiles.model_evidence_consistent(
                 "gpt-4o-mini-2024-07-18",
                 "gpt-4o-mini-2024-08-01",
                 "rolling_alias",
             )
         )
         self.assertFalse(
-            router_gateways.model_evidence_consistent(
+            gateway_profiles.model_evidence_consistent(
                 "openai/gpt-4o-mini",
                 "anthropic/gpt-4o-mini-2024-07-18",
                 "rolling_alias",
@@ -434,7 +368,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
 
 class GatewayEvidenceTests(unittest.TestCase):
     def parse(self, payload, **kwargs):
-        return router_metrics.parse_chat_sse(
+        return gateway_metrics.parse_chat_sse(
             [(11.0, payload)],
             requested_model=kwargs.pop("requested_model"),
             requested_provider=kwargs.pop("requested_provider"),
@@ -782,79 +716,6 @@ class GatewayEvidenceTests(unittest.TestCase):
                     allowed_providers=("OpenAI",),
                 )
                 self.assertNotIn("gateway_metadata", result["route"])
-
-    def test_auto_router_allows_documented_in_pool_fallback_attempts(self):
-        result = self.parse(
-            sse(
-                {
-                    "model": "anthropic/claude-b",
-                    "provider": "Anthropic",
-                    "choices": [{"delta": {"content": "x"}}],
-                    "openrouter_metadata": {
-                        "requested": "openrouter/auto-beta",
-                        "attempts": [
-                            {
-                                "provider": "OpenAI",
-                                "model": "openai/gpt-a",
-                                "status": 429,
-                            },
-                            {
-                                "provider": "Anthropic",
-                                "model": "anthropic/claude-b",
-                                "status": 200,
-                            },
-                        ],
-                    },
-                },
-                "[DONE]",
-            ),
-            gateway="openrouter",
-            router_mode="auto",
-            fallback_enabled=True,
-            requested_model="openrouter/auto-beta",
-            requested_provider="openrouter",
-            allowed_models=("openai/gpt-a", "anthropic/claude-b"),
-            allowed_providers=("OpenAI", "Anthropic"),
-        )
-
-        self.assertTrue(result["route_evidence"]["pass"])
-        self.assertEqual(result["route"]["served_model"], "anthropic/claude-b")
-        self.assertEqual(len(result["route"]["attempts"]), 2)
-
-    def test_auto_router_fails_closed_on_out_of_pool_attempt(self):
-        result = self.parse(
-            sse(
-                {
-                    "model": "openai/gpt-a",
-                    "provider": "OpenAI",
-                    "choices": [{"delta": {"content": "x"}}],
-                    "openrouter_metadata": {
-                        "requested": "openrouter/auto-beta",
-                        "attempts": [{
-                            "provider": "Other",
-                            "model": "other/model",
-                            "status": 500,
-                        }],
-                    },
-                },
-                "[DONE]",
-            ),
-            gateway="openrouter",
-            router_mode="auto",
-            fallback_enabled=True,
-            requested_model="openrouter/auto-beta",
-            requested_provider="openrouter",
-            allowed_models=("openai/gpt-a",),
-            allowed_providers=("OpenAI",),
-        )
-
-        self.assertFalse(result["route_evidence"]["pass"])
-        self.assertIn(
-            "attempt_provider_not_allowed", result["route_evidence"]["reasons"]
-        )
-        self.assertIn(
-            "attempt_model_not_allowed", result["route_evidence"]["reasons"]
-        )
 
     def test_vercel_live_delta_routing_shape_passes_without_private_metadata(self):
         result = self.parse(

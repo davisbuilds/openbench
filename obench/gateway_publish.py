@@ -1,4 +1,4 @@
-"""Create and verify sanitized, tamper-evident Router Bench bundles.
+"""Create and verify sanitized, tamper-evident Gateway Bench bundles.
 
 This module is deliberately a pure library.  Source artifacts are validated,
 projected through explicit public DTO allowlists, and written to a new bundle.
@@ -20,7 +20,7 @@ import tempfile
 from typing import Any
 
 from . import results
-from . import router_spec
+from . import gateway_spec
 
 
 BUNDLE_SCHEMA_VERSION = 1
@@ -61,6 +61,7 @@ _FORBIDDEN_EXACT_KEYS = {
     "path", "absolute_path", "env", "environment", "authorization",
     "api_key", "apikey", "password", "secret",
 }
+_SAFE_PUBLIC_KEYS = {"allow_private_endpoint"}
 
 _SCALAR = object()
 
@@ -146,7 +147,7 @@ _COST_ITEM_SCHEMA = {
     "effective_at": _SCALAR,
 }
 _COSTS_SCHEMA = {
-    "router_reported": _COST_ITEM_SCHEMA,
+    "gateway_reported": _COST_ITEM_SCHEMA,
     "invoice_reconciled": _COST_ITEM_SCHEMA,
     "frozen_list_estimate": _COST_ITEM_SCHEMA,
 }
@@ -187,7 +188,6 @@ _CANONICAL_RESULT_SCHEMA = {
 }
 _RESULT_SCHEMA = {
     "arm_role": _SCALAR,
-    "router_mode": _SCALAR,
     "baseline": _SCALAR,
     "model_match": _SCALAR,
     "result": _CANONICAL_RESULT_SCHEMA,
@@ -211,7 +211,7 @@ _SAMPLING_SCHEMA = {
     "stream": _SCALAR,
     "seed": _SCALAR,
 }
-_ROUTER_ARM_SCHEMA = {
+_SERVING_ARM_SCHEMA = {
     "arm_id": _SCALAR,
     "arm_digest": _SCALAR,
     "route_kind": _SCALAR,
@@ -224,8 +224,8 @@ _LEDGER_REQUEST_SCHEMA = {
     "sampling_observed": _SAMPLING_SCHEMA,
     "sampling_source": _SCALAR,
     "duration_ms": _SCALAR,
-    "router_arm": _ROUTER_ARM_SCHEMA,
-    "router_metrics": _NullableSchema(_METRICS_SCHEMA),
+    "serving_arm": _SERVING_ARM_SCHEMA,
+    "gateway_metrics": _NullableSchema(_METRICS_SCHEMA),
     "session_hash": _SCALAR,
     "previous_response_hash": _SCALAR,
     "response_hash": _SCALAR,
@@ -326,9 +326,6 @@ _EXPERIMENT_ARM_SCHEMA = {
     "cache_enabled": _SCALAR,
     "sampling": _SAMPLING_PUBLIC_SCHEMA,
     "direct_control_arm_id": _SCALAR,
-    "router_mode": _SCALAR,
-    "fixed_control_arm_id": _SCALAR,
-    "cost_quality_tradeoff": _SCALAR,
 }
 _EXPERIMENT_PUBLIC_SCHEMA = {
     "kind": _SCALAR,
@@ -342,15 +339,15 @@ _EXPERIMENT_PUBLIC_SCHEMA = {
     "repetitions_per_window": _SCALAR,
     "schedule_seed": _SCALAR,
     "execution_lane": _SCALAR,
-    "private_router": _SCALAR,
+    "allow_private_endpoint": _SCALAR,
     "windows": [_WINDOW_SCHEMA],
     "budget": _BUDGET_SCHEMA,
     "arms": [_EXPERIMENT_ARM_SCHEMA],
 }
 
 
-class RouterPublishError(ValueError):
-    """A Router Bench bundle is unsafe, incomplete, or inconsistent."""
+class GatewayPublishError(ValueError):
+    """A Gateway Bench bundle is unsafe, incomplete, or inconsistent."""
 
 
 def _sha256(data: bytes) -> str:
@@ -361,7 +358,7 @@ def _canonical_bytes(value: Any) -> bytes:
     try:
         return results.canonical_json_bytes(value)
     except (TypeError, ValueError) as exc:
-        raise RouterPublishError(f"value is not canonical JSON: {exc}") from exc
+        raise GatewayPublishError(f"value is not canonical JSON: {exc}") from exc
 
 
 def _artifact_bytes(value: Any) -> bytes:
@@ -372,34 +369,34 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     value: dict[str, Any] = {}
     for key, item in pairs:
         if key in value:
-            raise RouterPublishError(f"duplicate JSON key {key!r}")
+            raise GatewayPublishError(f"duplicate JSON key {key!r}")
         value[key] = item
     return value
 
 
 def _reject_constant(value: str) -> None:
-    raise RouterPublishError(f"non-standard JSON constant {value!r}")
+    raise GatewayPublishError(f"non-standard JSON constant {value!r}")
 
 
 def _decode_json(raw: bytes, source: str) -> Any:
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise RouterPublishError(f"{source} is not valid UTF-8") from exc
+        raise GatewayPublishError(f"{source} is not valid UTF-8") from exc
     try:
         return json.loads(
             text,
             object_pairs_hook=_unique_object,
             parse_constant=_reject_constant,
         )
-    except (json.JSONDecodeError, RouterPublishError) as exc:
-        raise RouterPublishError(f"{source} is corrupt JSON: {exc}") from exc
+    except (json.JSONDecodeError, GatewayPublishError) as exc:
+        raise GatewayPublishError(f"{source} is corrupt JSON: {exc}") from exc
 
 
 def _read_json(path: str | os.PathLike[str]) -> Any:
     source = Path(path)
     if source.is_symlink() or not source.is_file():
-        raise RouterPublishError(f"{source} must be a regular, non-symlink file")
+        raise GatewayPublishError(f"{source} must be a regular, non-symlink file")
     return _decode_json(source.read_bytes(), str(source))
 
 
@@ -408,7 +405,7 @@ def _json_scalar(value: Any, path: str) -> Any:
         return value
     if isinstance(value, float) and math.isfinite(value):
         return value
-    raise RouterPublishError(f"{path} must be a finite JSON scalar")
+    raise GatewayPublishError(f"{path} must be a finite JSON scalar")
 
 
 def _project(value: Any, schema: Any, path: str) -> Any:
@@ -420,11 +417,11 @@ def _project(value: Any, schema: Any, path: str) -> Any:
         return _project(value, schema.schema, path)
     if isinstance(schema, list):
         if not isinstance(value, list):
-            raise RouterPublishError(f"{path} must be an array")
+            raise GatewayPublishError(f"{path} must be an array")
         return [_project(item, schema[0], f"{path}[{index}]")
                 for index, item in enumerate(value)]
     if not isinstance(value, Mapping):
-        raise RouterPublishError(f"{path} must be an object")
+        raise GatewayPublishError(f"{path} must be an object")
     return {
         key: _project(value[key], child_schema, f"{path}.{key}")
         for key, child_schema in schema.items()
@@ -434,7 +431,7 @@ def _project(value: Any, schema: Any, path: str) -> Any:
 
 def _require_projected(value: Any, schema: Any, path: str) -> None:
     if _project(value, schema, path) != value:
-        raise RouterPublishError(f"{path} contains missing or extra public DTO fields")
+        raise GatewayPublishError(f"{path} contains missing or extra public DTO fields")
 
 
 def _require_public_result_shape(value: Mapping[str, Any], path: str) -> None:
@@ -445,20 +442,20 @@ def _require_public_result_shape(value: Mapping[str, Any], path: str) -> None:
     }
     missing = sorted(required - set(value))
     if missing:
-        raise RouterPublishError(f"{path} is missing required fields: {missing!r}")
+        raise GatewayPublishError(f"{path} is missing required fields: {missing!r}")
 
     required_result = {"solved", "checker_score", "available"}
     missing = sorted(required_result - set(value["result"]))
     if missing:
-        raise RouterPublishError(
+        raise GatewayPublishError(
             f"{path}.result is missing required fields: {missing!r}"
         )
     if set(value["route_integrity"]) != {"pass", "reasons"}:
-        raise RouterPublishError(
+        raise GatewayPublishError(
             f"{path}.route_integrity must contain pass and reasons"
         )
     if set(value["proxy_metrics"]) != {"calls"}:
-        raise RouterPublishError(f"{path}.proxy_metrics must contain calls")
+        raise GatewayPublishError(f"{path}.proxy_metrics must contain calls")
 
 
 def _assert_safe(value: Any, artifact: str) -> None:
@@ -466,51 +463,57 @@ def _assert_safe(value: Any, artifact: str) -> None:
         if isinstance(item, Mapping):
             for key, child in item.items():
                 low = str(key).lower()
-                if low in _FORBIDDEN_EXACT_KEYS or any(part in low for part in _FORBIDDEN_KEY_PARTS):
-                    raise RouterPublishError(f"{artifact} contains forbidden field {path}.{key}")
+                if (
+                    low not in _SAFE_PUBLIC_KEYS
+                    and (
+                        low in _FORBIDDEN_EXACT_KEYS
+                        or any(part in low for part in _FORBIDDEN_KEY_PARTS)
+                    )
+                ):
+                    raise GatewayPublishError(f"{artifact} contains forbidden field {path}.{key}")
                 walk(child, f"{path}.{key}")
         elif isinstance(item, list):
             for index, child in enumerate(item):
                 walk(child, f"{path}[{index}]")
         elif isinstance(item, str):
             if _EMAIL_RE.search(item):
-                raise RouterPublishError(f"{artifact} contains an email address at {path}")
+                raise GatewayPublishError(f"{artifact} contains an email address at {path}")
             if (
                 _HOME_PATH_RE.search(item)
                 or _ABSOLUTE_PATH_RE.search(item)
                 or _WINDOWS_PATH_RE.search(item)
             ):
-                raise RouterPublishError(f"{artifact} contains a local absolute path at {path}")
+                raise GatewayPublishError(f"{artifact} contains a local absolute path at {path}")
             if re.search(r"(?i)\bhttps?://", item):
-                raise RouterPublishError(f"{artifact} contains an endpoint URL at {path}")
+                raise GatewayPublishError(f"{artifact} contains an endpoint URL at {path}")
             if any(pattern.search(item) for pattern in _SECRET_PATTERNS):
-                raise RouterPublishError(f"{artifact} contains a credential pattern at {path}")
+                raise GatewayPublishError(f"{artifact} contains a credential pattern at {path}")
 
     walk(value, "$")
 
 
 def _snapshot_source(value: Any, kind: str) -> tuple[Any, str]:
-    if kind == "experiment" and isinstance(value, router_spec.RouterExperiment):
+    if kind == "experiment" and isinstance(value, gateway_spec.GatewayExperiment):
         experiment = value
         return experiment.to_dict(), experiment.digest
     if isinstance(value, (str, os.PathLike)):
         path = Path(value)
         if kind == "experiment" and path.suffix.lower() == ".toml":
             try:
-                experiment = router_spec.load_experiment(path)
-            except (OSError, router_spec.RouterSpecError) as exc:
-                raise RouterPublishError(f"invalid experiment {path}: {exc}") from exc
+                experiment = gateway_spec.load_experiment(path)
+            except (OSError, gateway_spec.GatewaySpecError) as exc:
+                raise GatewayPublishError(f"invalid experiment {path}: {exc}") from exc
             return experiment.to_dict(), experiment.digest
         decoded = _read_json(path)
     else:
         decoded = value
     if not isinstance(decoded, Mapping):
-        raise RouterPublishError(f"{kind} snapshot must be a JSON object")
+        raise GatewayPublishError(f"{kind} snapshot must be a JSON object")
     if kind == "experiment":
         try:
-            experiment = router_spec.parse_experiment(decoded)
-        except router_spec.RouterSpecError as exc:
-            raise RouterPublishError(f"invalid experiment snapshot: {exc}") from exc
+            experiment = gateway_spec.parse_experiment(decoded)
+        except gateway_spec.GatewaySpecError as exc:
+            raise GatewayPublishError(f"invalid experiment snapshot: {exc}") from exc
         return experiment.to_dict(), experiment.digest
     return dict(decoded), results.canonical_digest(decoded)
 
@@ -520,7 +523,7 @@ def _experiment_dto(source: Mapping[str, Any], source_digest: str) -> dict[str, 
     for arm in source["arms"]:
         public_arm = {
             "arm_id": arm["arm_id"],
-            "arm_digest": router_spec.canonical_digest(arm),
+            "arm_digest": gateway_spec.canonical_digest(arm),
             "route_kind": arm["route_kind"],
             "protocol": arm["protocol"],
             "baseline": arm["baseline"],
@@ -534,11 +537,6 @@ def _experiment_dto(source: Mapping[str, Any], source_digest: str) -> dict[str, 
             "sampling": dict(arm["sampling"]),
             "direct_control_arm_id": arm["direct_control_arm_id"],
         }
-        for field in (
-            "router_mode", "fixed_control_arm_id", "cost_quality_tradeoff",
-        ):
-            if field in arm:
-                public_arm[field] = arm[field]
         if "gateway" in arm:
             public_arm["gateway"] = arm["gateway"]
         arms.append(public_arm)
@@ -554,7 +552,7 @@ def _experiment_dto(source: Mapping[str, Any], source_digest: str) -> dict[str, 
         "repetitions_per_window": source["repetitions_per_window"],
         "schedule_seed": source["schedule_seed"],
         "execution_lane": source["execution_lane"],
-        "private_router": source["private_router"],
+        "allow_private_endpoint": source["allow_private_endpoint"],
         "windows": [dict(window) for window in source["windows"]],
         "budget": dict(source["budget"]),
         "arms": arms,
@@ -576,17 +574,17 @@ def _snapshot_dto(kind: str, source: Mapping[str, Any], digest: str) -> dict[str
 
 def _load_jsonl(path: Path, label: str) -> list[dict[str, Any]]:
     if path.is_symlink() or not path.is_file():
-        raise RouterPublishError(f"{label} must be a regular, non-symlink file")
+        raise GatewayPublishError(f"{label} must be a regular, non-symlink file")
     raw = path.read_bytes()
     if not raw or not raw.endswith(b"\n"):
-        raise RouterPublishError(f"{label} must be non-empty JSONL ending in a newline")
+        raise GatewayPublishError(f"{label} must be non-empty JSONL ending in a newline")
     rows = []
     for line_no, line in enumerate(raw.splitlines(), 1):
         if not line.strip():
-            raise RouterPublishError(f"{label} has a blank line at {line_no}")
+            raise GatewayPublishError(f"{label} has a blank line at {line_no}")
         row = _decode_json(line, f"{label} line {line_no}")
         if not isinstance(row, dict):
-            raise RouterPublishError(f"{label} line {line_no} is not an object")
+            raise GatewayPublishError(f"{label} line {line_no} is not an object")
         rows.append(row)
     return rows
 
@@ -596,19 +594,19 @@ def _validate_source_ledger(path: Path) -> tuple[list[dict[str, Any]], dict[str,
     seals = [index for index, row in enumerate(rows)
              if row.get("record_type") == "ledger_seal"]
     if seals != [len(rows) - 1]:
-        raise RouterPublishError(f"ledger {path} must have exactly one terminal seal")
+        raise GatewayPublishError(f"ledger {path} must have exactly one terminal seal")
     requests = rows[:-1]
     seal = rows[-1]
     previous = hashlib.sha256(b"").hexdigest()
     for sequence, row in enumerate(requests, 1):
         if row.get("record_type") != "request" or row.get("sequence") != sequence:
-            raise RouterPublishError(f"ledger {path} has invalid request sequence {sequence}")
+            raise GatewayPublishError(f"ledger {path} has invalid request sequence {sequence}")
         if row.get("previous_hash") != previous:
-            raise RouterPublishError(f"ledger {path} has a broken hash chain")
+            raise GatewayPublishError(f"ledger {path} has a broken hash chain")
         unhashed = {key: value for key, value in row.items() if key != "record_hash"}
         expected = _sha256(_canonical_bytes(unhashed))
         if row.get("record_hash") != expected:
-            raise RouterPublishError(f"ledger {path} has a tampered request record")
+            raise GatewayPublishError(f"ledger {path} has a tampered request record")
         previous = expected
     expected_seal = {
         "record_type": "ledger_seal",
@@ -618,7 +616,7 @@ def _validate_source_ledger(path: Path) -> tuple[list[dict[str, Any]], dict[str,
         "root_hash": previous,
     }
     if seal != expected_seal:
-        raise RouterPublishError(f"ledger {path} has an invalid terminal seal")
+        raise GatewayPublishError(f"ledger {path} has an invalid terminal seal")
     return requests, seal
 
 
@@ -630,8 +628,8 @@ def _public_ledger(
     previous = hashlib.sha256(b"").hexdigest()
     for sequence, source in enumerate(requests, 1):
         projected = _project(source, _LEDGER_REQUEST_SCHEMA, f"ledger[{sequence}]")
-        source_metrics = source.get("router_metrics")
-        public_metrics = projected.get("router_metrics")
+        source_metrics = source.get("gateway_metrics")
+        public_metrics = projected.get("gateway_metrics")
         if isinstance(source_metrics, Mapping) and isinstance(public_metrics, dict):
             source_route = source_metrics.get("route")
             public_route = public_metrics.get("route")
@@ -640,7 +638,7 @@ def _public_ledger(
                 if metadata is not None:
                     public_route["gateway_metadata"] = _gateway_metadata_dto(
                         metadata,
-                        f"ledger[{sequence}].router_metrics.route.gateway_metadata",
+                        f"ledger[{sequence}].gateway_metrics.route.gateway_metadata",
                     )
         row = {
             "record_type": "request",
@@ -668,7 +666,7 @@ def _public_ledger(
 
 def _gateway_metadata_dto(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
-        raise RouterPublishError(f"{path} must be an object")
+        raise GatewayPublishError(f"{path} must be an object")
     result = {}
     opaque_ids = {"generationId": "generation_id_sha256"}
     for source_key, public_key in opaque_ids.items():
@@ -676,7 +674,7 @@ def _gateway_metadata_dto(value: Any, path: str) -> dict[str, Any]:
             continue
         raw = value[source_key]
         if not isinstance(raw, str) or not raw:
-            raise RouterPublishError(f"{path}.{source_key} must be a non-empty string")
+            raise GatewayPublishError(f"{path}.{source_key} must be a non-empty string")
         result[public_key] = _sha256(raw.encode("utf-8"))
     scalar_fields = {
         "cost": "cost",
@@ -699,11 +697,11 @@ def _ledger_mapping(
     else:
         directory = Path(ledgers)
         if directory.is_symlink() or not directory.is_dir():
-            raise RouterPublishError("ledgers must be a mapping or a non-symlink directory")
+            raise GatewayPublishError("ledgers must be a mapping or a non-symlink directory")
         mapping = {path.stem: path for path in directory.iterdir()
                    if path.is_file() and path.suffix == ".jsonl"}
     if len(mapping) != len(set(mapping)):
-        raise RouterPublishError("duplicate ledger cell binding")
+        raise GatewayPublishError("duplicate ledger cell binding")
     return mapping
 
 
@@ -711,7 +709,7 @@ def _result_dto(
     row: Mapping[str, Any],
     ledger_binding: Mapping[str, Any],
 ) -> dict[str, Any]:
-    identity = results.router_identity_from_row(row)
+    identity = results.gateway_identity_from_row(row)
     public_result = _project(row, _RESULT_SCHEMA, "result")
     for call in public_result.get("proxy_metrics", {}).get("calls", []):
         for field in ("timing", "route"):
@@ -719,15 +717,15 @@ def _result_dto(
                 call.pop(field)
     dto = {
         "schema_version": results.CURRENT_SCHEMA_VERSION,
-        "benchmark": results.ROUTER_BENCHMARK,
+        "benchmark": results.GATEWAY_BENCHMARK,
         "identity": identity.as_dict(),
-        "run_id": results.make_router_run_id(identity),
-        "cell_id": results.make_router_cell_id(identity),
+        "run_id": results.make_gateway_run_id(identity),
+        "cell_id": results.make_gateway_cell_id(identity),
         **public_result,
         "ledger": dict(ledger_binding),
     }
     if row.get("run_id") != dto["run_id"] or row.get("cell_id") != dto["cell_id"]:
-        raise RouterPublishError(f"result {dto['cell_id']} has inconsistent IDs")
+        raise GatewayPublishError(f"result {dto['cell_id']} has inconsistent IDs")
     public_fields = {key: dto[key] for key in _RESULT_SCHEMA if key in dto}
     _require_public_result_shape(public_fields, f"result {dto['cell_id']}")
     _assert_safe(dto, f"result {dto['cell_id']}")
@@ -758,27 +756,27 @@ def publish_bundle(
     """
     destination = Path(bundle_dir)
     if destination.exists() or destination.is_symlink():
-        raise RouterPublishError(f"bundle destination already exists: {destination}")
+        raise GatewayPublishError(f"bundle destination already exists: {destination}")
 
     try:
         resume = results.read_jsonl_for_resume(results_path)
     except results.ResultsLogError as exc:
-        raise RouterPublishError(str(exc)) from exc
+        raise GatewayPublishError(str(exc)) from exc
     if not resume.rows:
-        raise RouterPublishError("results JSONL is empty")
+        raise GatewayPublishError("results JSONL is empty")
     for row in resume.rows:
         if results.result_kind(row) != (
             results.CURRENT_SCHEMA_VERSION,
-            results.ROUTER_BENCHMARK,
+            results.GATEWAY_BENCHMARK,
         ):
-            raise RouterPublishError("bundle accepts only schema-v2 router results")
+            raise GatewayPublishError("bundle accepts only schema-v2 gateway results")
 
     ledger_sources = _ledger_mapping(ledgers)
     cell_ids = set(resume.cell_ids)
     if set(ledger_sources) != cell_ids:
         missing = sorted(cell_ids - set(ledger_sources))
         extra = sorted(set(ledger_sources) - cell_ids)
-        raise RouterPublishError(
+        raise GatewayPublishError(
             f"cell/ledger bindings mismatch; missing={missing!r} extra={extra!r}"
         )
 
@@ -793,7 +791,7 @@ def publish_bundle(
         "price": price_digest,
     }
 
-    identities = [results.router_identity_from_row(row) for row in resume.rows]
+    identities = [results.gateway_identity_from_row(row) for row in resume.rows]
     for identity in identities:
         expected = {
             "experiment": identity.experiment_digest,
@@ -802,8 +800,8 @@ def publish_bundle(
             "price": identity.price_digest,
         }
         if expected != snapshot_digests:
-            raise RouterPublishError(
-                f"result {results.make_router_cell_id(identity)} snapshot digests do not match"
+            raise GatewayPublishError(
+                f"result {results.make_gateway_cell_id(identity)} snapshot digests do not match"
             )
 
     parent = destination.parent
@@ -820,27 +818,27 @@ def publish_bundle(
             source_path = ledger_sources[cell_id]
             requests, source_seal = _validate_source_ledger(source_path)
             source_row = rows_by_cell[cell_id]
-            identity = results.router_identity_from_row(source_row)
+            identity = results.gateway_identity_from_row(source_row)
             expected_seal = source_row.get("ledger_seal")
             if not isinstance(expected_seal, Mapping):
-                raise RouterPublishError(f"result {cell_id} is missing ledger_seal")
+                raise GatewayPublishError(f"result {cell_id} is missing ledger_seal")
             for field in ("record_count", "last_sequence", "root_hash"):
                 if expected_seal.get(field) != source_seal.get(field):
-                    raise RouterPublishError(
+                    raise GatewayPublishError(
                         f"result {cell_id} ledger_seal.{field} does not match source ledger"
                     )
             if expected_seal.get("ledger_file") != source_path.name:
-                raise RouterPublishError(
+                raise GatewayPublishError(
                     f"result {cell_id} ledger file does not match source ledger"
                 )
             for request in requests:
-                arm = request.get("router_arm")
+                arm = request.get("serving_arm")
                 if (
                     not isinstance(arm, Mapping)
                     or arm.get("arm_id") != identity.arm_id
                     or arm.get("arm_digest") != identity.arm_digest
                 ):
-                    raise RouterPublishError(
+                    raise GatewayPublishError(
                         f"result {cell_id} arm identity does not match source ledger"
                     )
             raw, seal = _public_ledger(cell_id, requests)
@@ -875,7 +873,7 @@ def publish_bundle(
 
         provenance = {
             "schema_version": BUNDLE_SCHEMA_VERSION,
-            "bundle_kind": "router_bench",
+            "bundle_kind": "gateway_bench",
             "result_schema_version": results.CURRENT_SCHEMA_VERSION,
             "result_count": len(public_rows),
             "snapshot_digests": snapshot_digests,
@@ -893,7 +891,7 @@ def publish_bundle(
 
 def _require_digest(value: Any, label: str) -> str:
     if not isinstance(value, str) or not _DIGEST_RE.fullmatch(value):
-        raise RouterPublishError(f"{label} must be a lowercase SHA-256 digest")
+        raise GatewayPublishError(f"{label} must be a lowercase SHA-256 digest")
     return value
 
 
@@ -902,12 +900,12 @@ def _verify_public_ledger(
     artifact: str,
     expected_cell_id: str,
 ) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="router_bundle_verify_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="gateway_bundle_verify_") as tmp:
         path = Path(tmp) / "ledger.jsonl"
         path.write_bytes(raw)
         rows = _load_jsonl(path, artifact)
     if rows[-1].get("record_type") != "ledger_seal":
-        raise RouterPublishError(f"{artifact} has no terminal seal")
+        raise GatewayPublishError(f"{artifact} has no terminal seal")
     requests = rows[:-1]
     previous = hashlib.sha256(b"").hexdigest()
     for sequence, row in enumerate(requests, 1):
@@ -916,20 +914,20 @@ def _verify_public_ledger(
             *_LEDGER_REQUEST_SCHEMA,
         }
         if set(row) - expected_keys:
-            raise RouterPublishError(f"{artifact} request {sequence} has extra fields")
+            raise GatewayPublishError(f"{artifact} request {sequence} has extra fields")
         public_fields = {
             key: value for key, value in row.items()
             if key not in {"record_type", "sequence", "previous_hash", "record_hash"}
         }
         _require_projected(public_fields, _LEDGER_REQUEST_SCHEMA, f"{artifact}[{sequence}]")
         if row.get("record_type") != "request" or row.get("sequence") != sequence:
-            raise RouterPublishError(f"{artifact} has invalid sequence {sequence}")
+            raise GatewayPublishError(f"{artifact} has invalid sequence {sequence}")
         if row.get("previous_hash") != previous:
-            raise RouterPublishError(f"{artifact} has a broken hash chain")
+            raise GatewayPublishError(f"{artifact} has a broken hash chain")
         unhashed = {key: value for key, value in row.items() if key != "record_hash"}
         expected_hash = _sha256(_canonical_bytes(unhashed))
         if row.get("record_hash") != expected_hash:
-            raise RouterPublishError(f"{artifact} request {sequence} is tampered")
+            raise GatewayPublishError(f"{artifact} request {sequence} is tampered")
         previous = expected_hash
     seal = rows[-1]
     expected_body = {
@@ -945,7 +943,7 @@ def _verify_public_ledger(
         seal_sha256=_sha256(_canonical_bytes(expected_body)),
     )
     if seal != expected_seal:
-        raise RouterPublishError(f"{artifact} has an invalid seal or cell binding")
+        raise GatewayPublishError(f"{artifact} has an invalid seal or cell binding")
     _assert_safe(rows, artifact)
     return seal
 
@@ -954,63 +952,63 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     """Verify a complete bundle, returning provenance or raising on any failure."""
     root = Path(bundle_dir)
     if root.is_symlink() or not root.is_dir():
-        raise RouterPublishError(f"bundle is not a non-symlink directory: {root}")
+        raise GatewayPublishError(f"bundle is not a non-symlink directory: {root}")
     provenance = _read_json(root / PROVENANCE_FILE)
     if not isinstance(provenance, dict):
-        raise RouterPublishError("provenance must be an object")
+        raise GatewayPublishError("provenance must be an object")
     expected_provenance_keys = {
         "schema_version", "bundle_kind", "result_schema_version",
         "result_count", "snapshot_digests", "artifacts", "ledgers",
     }
     if set(provenance) != expected_provenance_keys:
-        raise RouterPublishError("provenance has missing or extra fields")
+        raise GatewayPublishError("provenance has missing or extra fields")
     if (
         provenance["schema_version"] != BUNDLE_SCHEMA_VERSION
-        or provenance["bundle_kind"] != "router_bench"
+        or provenance["bundle_kind"] != "gateway_bench"
         or provenance["result_schema_version"] != results.CURRENT_SCHEMA_VERSION
     ):
-        raise RouterPublishError("unsupported bundle schema")
+        raise GatewayPublishError("unsupported bundle schema")
     artifacts = provenance["artifacts"]
     if not isinstance(artifacts, dict) or not artifacts:
-        raise RouterPublishError("provenance artifacts must be a non-empty object")
+        raise GatewayPublishError("provenance artifacts must be a non-empty object")
     required = {RESULTS_FILE, *SNAPSHOT_FILES.values()}
     if not required.issubset(artifacts):
-        raise RouterPublishError("provenance is missing required artifacts")
+        raise GatewayPublishError("provenance is missing required artifacts")
 
     actual_files = set()
     for path in root.rglob("*"):
         if path.is_symlink():
-            raise RouterPublishError(f"bundle contains symlink: {path}")
+            raise GatewayPublishError(f"bundle contains symlink: {path}")
         if path.is_file():
             actual_files.add(path.relative_to(root).as_posix())
     expected_files = set(artifacts) | {PROVENANCE_FILE}
     if actual_files != expected_files:
-        raise RouterPublishError(
+        raise GatewayPublishError(
             f"bundle artifact set mismatch; missing={sorted(expected_files - actual_files)!r} "
             f"extra={sorted(actual_files - expected_files)!r}"
         )
     for relative, expected_digest in artifacts.items():
         _require_digest(expected_digest, f"artifacts[{relative!r}]")
         if Path(relative).is_absolute() or ".." in Path(relative).parts:
-            raise RouterPublishError(f"unsafe artifact path: {relative!r}")
+            raise GatewayPublishError(f"unsafe artifact path: {relative!r}")
         actual = _sha256((root / relative).read_bytes())
         if actual != expected_digest:
-            raise RouterPublishError(f"artifact digest mismatch: {relative}")
+            raise GatewayPublishError(f"artifact digest mismatch: {relative}")
 
     snapshot_digests = provenance["snapshot_digests"]
     if not isinstance(snapshot_digests, dict) or set(snapshot_digests) != set(SNAPSHOT_FILES):
-        raise RouterPublishError("invalid snapshot digest provenance")
+        raise GatewayPublishError("invalid snapshot digest provenance")
     for kind, relative in SNAPSHOT_FILES.items():
         expected = _require_digest(snapshot_digests[kind], f"{kind} source digest")
         snapshot = _read_json(root / relative)
         if not isinstance(snapshot, dict) or snapshot.get("source_digest") != expected:
-            raise RouterPublishError(f"{kind} snapshot digest binding mismatch")
+            raise GatewayPublishError(f"{kind} snapshot digest binding mismatch")
         if kind == "experiment":
             _require_projected(snapshot, _EXPERIMENT_PUBLIC_SCHEMA, kind)
         else:
             expected_keys = {"kind", "source_digest", "data"}
             if set(snapshot) != expected_keys or snapshot.get("kind") != kind:
-                raise RouterPublishError(f"{kind} snapshot has an invalid public DTO")
+                raise GatewayPublishError(f"{kind} snapshot has an invalid public DTO")
             schemas = {
                 "policy": _POLICY_SCHEMA,
                 "catalog": _CATALOG_SCHEMA,
@@ -1021,17 +1019,17 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
 
     result_rows = _load_jsonl(root / RESULTS_FILE, RESULTS_FILE)
     if provenance["result_count"] != len(result_rows):
-        raise RouterPublishError("result count does not match provenance")
+        raise GatewayPublishError("result count does not match provenance")
     ledger_meta = provenance["ledgers"]
     if not isinstance(ledger_meta, dict):
-        raise RouterPublishError("ledger provenance must be an object")
+        raise GatewayPublishError("ledger provenance must be an object")
     seen_cells = set()
     for row in result_rows:
         if set(row) - {
             "schema_version", "benchmark", "identity", "run_id", "cell_id",
             *_RESULT_SCHEMA, "ledger",
         }:
-            raise RouterPublishError("public result has extra fields")
+            raise GatewayPublishError("public result has extra fields")
         public_fields = {
             key: value for key, value in row.items()
             if key in _RESULT_SCHEMA
@@ -1040,11 +1038,11 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         try:
             cell_id = results.result_cell_id(row)
         except results.ResultError as exc:
-            raise RouterPublishError(f"invalid public result identity: {exc}") from exc
+            raise GatewayPublishError(f"invalid public result identity: {exc}") from exc
         if cell_id in seen_cells:
-            raise RouterPublishError(f"duplicate public result cell: {cell_id}")
+            raise GatewayPublishError(f"duplicate public result cell: {cell_id}")
         seen_cells.add(cell_id)
-        identity = results.router_identity_from_row(row)
+        identity = results.gateway_identity_from_row(row)
         expected_snapshots = {
             "experiment": identity.experiment_digest,
             "policy": identity.policy_digest,
@@ -1052,23 +1050,23 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             "price": identity.price_digest,
         }
         if expected_snapshots != snapshot_digests:
-            raise RouterPublishError(f"result {cell_id} snapshot binding mismatch")
+            raise GatewayPublishError(f"result {cell_id} snapshot binding mismatch")
         binding = row.get("ledger")
         meta = ledger_meta.get(cell_id)
         if not isinstance(binding, dict) or binding != meta:
-            raise RouterPublishError(f"result {cell_id} ledger binding mismatch")
+            raise GatewayPublishError(f"result {cell_id} ledger binding mismatch")
         _assert_safe(row, f"result {cell_id}")
     if seen_cells != set(ledger_meta):
-        raise RouterPublishError("result and ledger cell sets do not match")
+        raise GatewayPublishError("result and ledger cell sets do not match")
 
     for cell_id, binding in ledger_meta.items():
         if not isinstance(binding, dict) or set(binding) != {
             "artifact", "root_hash", "seal_sha256", "record_count",
         }:
-            raise RouterPublishError(f"invalid ledger provenance for {cell_id}")
+            raise GatewayPublishError(f"invalid ledger provenance for {cell_id}")
         artifact = binding["artifact"]
         if not isinstance(artifact, str) or artifact not in artifacts:
-            raise RouterPublishError(f"missing ledger artifact for {cell_id}")
+            raise GatewayPublishError(f"missing ledger artifact for {cell_id}")
         seal = _verify_public_ledger(
             (root / artifact).read_bytes(),
             artifact,
@@ -1081,10 +1079,7 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             "record_count": seal["record_count"],
         }
         if binding != expected_binding:
-            raise RouterPublishError(f"ledger root/seal mismatch for {cell_id}")
+            raise GatewayPublishError(f"ledger root/seal mismatch for {cell_id}")
 
     _assert_safe(provenance, "provenance")
     return provenance
-
-
-PublishError = RouterPublishError

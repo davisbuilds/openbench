@@ -1,4 +1,4 @@
-"""Focused local Gateway Tax runner and CLI integration tests."""
+"""Focused local Gateway Bench runner and CLI integration tests."""
 
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
 
-from obench import cli, proxy, results, router_metrics, router_report, router_run
+from obench import cli, proxy, results, gateway_metrics, gateway_report, gateway_run
 
 
-SECRET = "gateway-tax-secret-that-must-not-persist"
+SECRET = "gateway-bench-secret-that-must-not-persist"
 PRICE_JSON = json.dumps({
     "openai/fake-model": {
         "input_per_million": "1.00",
@@ -131,9 +131,9 @@ def run_routed(_instruction, workdir, route_plan_path, _timeout_s):
 '''
 
 
-class RouterRunE2ETests(unittest.TestCase):
+class GatewayRunE2ETests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="router_run_test_")
+        self.temp = tempfile.TemporaryDirectory(prefix="gateway_run_test_")
         self.root = Path(self.temp.name)
         self.tasks = self.root / "tasks"
         self.task = self.tasks / "fake-task"
@@ -163,12 +163,12 @@ class RouterRunE2ETests(unittest.TestCase):
         port = self.upstream.server_address[1]
         self.experiment = self.root / "experiment.toml"
         self.experiment.write_text(self._experiment_toml(port))
-        self.results = self.root / "router-results.jsonl"
+        self.results = self.root / "gateway-results.jsonl"
         self.env = {
             "DIRECT_KEY": SECRET,
             "GATEWAY_KEY": SECRET,
-            router_run.FROZEN_PRICES_ENV: PRICE_JSON,
-            router_run.ADAPTERS_DIR_ENV: str(self.adapters),
+            gateway_run.FROZEN_PRICES_ENV: PRICE_JSON,
+            gateway_run.ADAPTERS_DIR_ENV: str(self.adapters),
         }
 
     def tearDown(self):
@@ -197,14 +197,14 @@ seed = 7
 '''
         return f'''\
 schema_version = 1
-experiment_id = "fake-gateway-tax"
-track = "gateway_tax"
+experiment_id = "fake-gateway-bench"
+track = "fixed_model_provider"
 harness = "pi"
 tasks = ["fake-task"]
 repetitions_per_window = 1
 schedule_seed = 11
 execution_lane = "local"
-private_router = true
+allow_private_endpoint = true
 private_cidr_allowlist = ["127.0.0.1/32"]
 
 [[windows]]
@@ -246,7 +246,7 @@ direct_control_arm_id = "direct"
 
         with (
             mock.patch.object(proxy.http.client, "HTTPSConnection", PlainHTTPSConnection),
-            mock.patch.object(router_run.pi, "version", return_value="fake-pi 1.0"),
+            mock.patch.object(gateway_run.pi, "version", return_value="fake-pi 1.0"),
             mock.patch.dict(os.environ, self.env, clear=False),
         ):
             yield
@@ -261,21 +261,21 @@ direct_control_arm_id = "direct"
     def test_local_cli_vertical_slice_resume_seal_and_treatment_denominator(self):
         with self._runtime():
             code, out, err = self._cli([
-                "router", "validate", str(self.experiment),
+                "gateway", "validate", str(self.experiment),
                 "--tasks-dir", str(self.tasks),
             ])
             self.assertEqual((code, err), (0, ""))
-            self.assertIn("valid experiment=fake-gateway-tax", out)
+            self.assertIn("valid experiment=fake-gateway-bench", out)
 
             code, out, err = self._cli([
-                "router", "doctor", str(self.experiment),
+                "gateway", "doctor", str(self.experiment),
                 "--tasks-dir", str(self.tasks),
             ])
             self.assertEqual((code, err), (0, ""))
             self.assertTrue(json.loads(out)["usd_cap_enforceable"])
 
             code, out, err = self._cli([
-                "router", "run", str(self.experiment),
+                "gateway", "run", str(self.experiment),
                 "--results", str(self.results),
                 "--tasks-dir", str(self.tasks),
                 "--exec", "local",
@@ -301,21 +301,21 @@ direct_control_arm_id = "direct"
             self.assertTrue(gateway["result"]["adapter_completed"])
             self.assertFalse(gateway["result"]["available"])
             self.assertEqual(
-                router_report.aggregate(first_rows)["arms"]["gateway"]["attempted_cells"],
+                gateway_report.aggregate(first_rows)["arms"]["gateway"]["attempted_cells"],
                 1,
             )
 
             bundle = self.root / "bundle"
             self.assertTrue(
-                (self.root / ".router-results.router-prices.json").is_file()
+                (self.root / ".gateway-results.gateway-prices.json").is_file()
             )
             with mock.patch.dict(os.environ, {}, clear=True):
                 code, out, err = self._cli([
-                    "router", "publish", str(self.results), str(self.experiment), str(bundle),
+                    "gateway", "publish", str(self.results), str(self.experiment), str(bundle),
                 ])
             self.assertEqual((code, err), (0, ""))
             self.assertEqual(json.loads(out)["result_count"], 2)
-            code, out, err = self._cli(["router", "verify", str(bundle)])
+            code, out, err = self._cli(["gateway", "verify", str(bundle)])
             self.assertEqual((code, err), (0, ""))
             self.assertEqual(json.loads(out)["result_count"], 2)
             published = results.read_jsonl_for_resume(bundle / "results.jsonl").rows
@@ -325,7 +325,7 @@ direct_control_arm_id = "direct"
             )
 
             # A fully valid block is skipped on resume.
-            resumed = router_run.run_experiment(
+            resumed = gateway_run.run_experiment(
                 self.experiment,
                 results_path=self.results,
                 tasks_dir=self.tasks,
@@ -338,7 +338,7 @@ direct_control_arm_id = "direct"
             # A partial attempt is preserved; resume starts a fresh all-arm attempt.
             partial = self.root / "partial.jsonl"
             partial.write_text(json.dumps(first_rows[0], sort_keys=True) + "\n")
-            replacement = router_run.run_experiment(
+            replacement = gateway_run.run_experiment(
                 self.experiment,
                 results_path=partial,
                 tasks_dir=self.tasks,
@@ -353,7 +353,7 @@ direct_control_arm_id = "direct"
                 [0, 1, 1],
             )
 
-            code, out, err = self._cli(["router", "report", str(partial), "--json"])
+            code, out, err = self._cli(["gateway", "report", str(partial), "--json"])
             self.assertEqual((code, err), (0, ""))
             report = json.loads(out)
             self.assertEqual(report["blocks"], {
@@ -367,7 +367,7 @@ direct_control_arm_id = "direct"
         persisted = self.results.read_text()
         ledgers = "".join(
             path.read_text()
-            for path in (self.root / ".router-results.router-ledgers").glob("*.jsonl")
+            for path in (self.root / ".gateway-results.gateway-ledgers").glob("*.jsonl")
         )
         self.assertNotIn(SECRET, persisted + ledgers)
         self.assertEqual(
@@ -376,12 +376,12 @@ direct_control_arm_id = "direct"
         )
 
     def test_active_schedule_respects_declared_window(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        schedule = router_run.build_schedule(experiment)
-        inside = router_run.datetime.fromisoformat("2026-07-15T00:00:00+00:00")
-        outside = router_run.datetime.fromisoformat("2026-08-02T00:00:00+00:00")
-        self.assertEqual(len(router_run._active_schedule(experiment, schedule, inside)), 1)
-        self.assertEqual(router_run._active_schedule(experiment, schedule, outside), ())
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        schedule = gateway_run.build_schedule(experiment)
+        inside = gateway_run.datetime.fromisoformat("2026-07-15T00:00:00+00:00")
+        outside = gateway_run.datetime.fromisoformat("2026-08-02T00:00:00+00:00")
+        self.assertEqual(len(gateway_run._active_schedule(experiment, schedule, inside)), 1)
+        self.assertEqual(gateway_run._active_schedule(experiment, schedule, outside), ())
 
     def test_budget_violation_never_retries_paid_block_automatically(self):
         limited = self.root / "limited.toml"
@@ -390,8 +390,8 @@ direct_control_arm_id = "direct"
         )
         limited_results = self.root / "limited.jsonl"
         with self._runtime():
-            with self.assertRaisesRegex(router_run.RouterRunError, "explicit rerun"):
-                router_run.run_experiment(
+            with self.assertRaisesRegex(gateway_run.GatewayRunError, "explicit rerun"):
+                gateway_run.run_experiment(
                     limited,
                     results_path=limited_results,
                     tasks_dir=self.tasks,
@@ -434,9 +434,9 @@ direct_control_arm_id = "direct"
             return {"completed": False, "error": "budget rejection"}
 
         with self._runtime(), mock.patch.object(
-            router_run, "_invoke_local", side_effect=invoke_many
+            gateway_run, "_invoke_local", side_effect=invoke_many
         ):
-            summary = router_run.run_experiment(
+            summary = gateway_run.run_experiment(
                 self.experiment,
                 results_path=capped_results,
                 tasks_dir=self.tasks,
@@ -445,7 +445,7 @@ direct_control_arm_id = "direct"
                 adapters_dir=self.adapters,
             )
             upstream_after_first_run = len(self.upstream.requests)
-            resumed = router_run.run_experiment(
+            resumed = gateway_run.run_experiment(
                 self.experiment,
                 results_path=capped_results,
                 tasks_dir=self.tasks,
@@ -481,7 +481,7 @@ direct_control_arm_id = "direct"
             row["proxy_metrics"]["calls"][0]["route"] is not None
             for row in rows
         ))
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
         self.assertEqual(report["blocks"], {
             "excluded": 0,
             "excluded_by_reason": {},
@@ -495,14 +495,14 @@ direct_control_arm_id = "direct"
         ))
         ledgers = "".join(
             path.read_text()
-            for path in (self.root / ".capped.router-ledgers").glob("*.jsonl")
+            for path in (self.root / ".capped.gateway-ledgers").glob("*.jsonl")
         )
         self.assertEqual(ledgers.count('"error":"max_calls_exceeded"'), len(rows))
         self.assertNotIn(SECRET, capped_results.read_text() + ledgers)
 
     def test_proxy_evidence_honors_parser_integrity_verdict(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        plans, _secrets = router_run.router_spec.compile_route_plans(
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
             experiment,
             environ=self.env,
             admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
@@ -522,11 +522,11 @@ direct_control_arm_id = "direct"
                 "reasons": ["malformed_sse_event"],
             },
         }
-        self.assertIn("malformed_sse_event", router_run._route_reasons(metrics, plan))
+        self.assertIn("malformed_sse_event", gateway_run._route_reasons(metrics, plan))
 
     def test_posthoc_caps_override_combined_max_calls_exhaustion(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        plans, _secrets = router_run.router_spec.compile_route_plans(
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
             experiment,
             environ=self.env,
             admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
@@ -546,9 +546,9 @@ direct_control_arm_id = "direct"
         }
         rejection = {"status": 429, "error": "max_calls_exceeded"}
         price = {
-            plan.canonical_model: router_run.Price(
-                router_run.Decimal("1"),
-                router_run.Decimal("1"),
+            plan.canonical_model: gateway_run.Price(
+                gateway_run.Decimal("1"),
+                gateway_run.Decimal("1"),
                 "2026-07-22",
             )
         }
@@ -574,8 +574,8 @@ direct_control_arm_id = "direct"
         )
         for budget, call_metrics, expected in cases:
             with self.subTest(expected=expected):
-                calls, integrity, reason = router_run._proxy_evidence(
-                    [{"status": 200, "router_metrics": call_metrics}, rejection],
+                calls, integrity, reason = gateway_run._proxy_evidence(
+                    [{"status": 200, "gateway_metrics": call_metrics}, rejection],
                     price,
                     budget,
                     plan,
@@ -585,8 +585,8 @@ direct_control_arm_id = "direct"
                 self.assertEqual(len(calls), 1)
 
     def test_profile_specific_served_and_attempt_model_integrity(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        plans, _secrets = router_run.router_spec.compile_route_plans(
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
             experiment,
             environ=self.env,
             admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
@@ -616,7 +616,7 @@ direct_control_arm_id = "direct"
                 "route_evidence": {"pass": True, "reasons": []},
             }
 
-        openrouter_reasons = router_run._route_reasons(metrics(), openrouter)
+        openrouter_reasons = gateway_run._route_reasons(metrics(), openrouter)
         self.assertIn("served_model_conflict", openrouter_reasons)
         self.assertIn("attempt_model_conflict", openrouter_reasons)
 
@@ -625,8 +625,8 @@ direct_control_arm_id = "direct"
             gateway="vercel",
             model_match="model_family",
         )
-        self.assertEqual(router_run._route_reasons(metrics(), vercel), [])
-        undeclared = router_run._route_reasons(
+        self.assertEqual(gateway_run._route_reasons(metrics(), vercel), [])
+        undeclared = gateway_run._route_reasons(
             metrics(served="undeclared", attempt="undeclared"),
             vercel,
         )
@@ -636,7 +636,7 @@ direct_control_arm_id = "direct"
         wrong_request = metrics()
         wrong_request["route"]["requested_model"] = revision
         wrong_request["route"]["metadata_requested_model"] = revision
-        reasons = router_run._route_reasons(wrong_request, vercel)
+        reasons = gateway_run._route_reasons(wrong_request, vercel)
         self.assertIn("requested_model_conflict", reasons)
         self.assertIn("metadata_requested_model_conflict", reasons)
 
@@ -649,7 +649,7 @@ direct_control_arm_id = "direct"
         cloudflare_metrics["route"]["metadata_requested_model"] = None
         cloudflare_metrics["route"]["attempts"] = []
         self.assertEqual(
-            router_run._route_reasons(cloudflare_metrics, cloudflare),
+            gateway_run._route_reasons(cloudflare_metrics, cloudflare),
             [],
         )
         concentrate = dataclasses.replace(
@@ -664,13 +664,13 @@ direct_control_arm_id = "direct"
         concentrate_metrics["route"]["served_model"] = "openai/fake-model"
         concentrate_metrics["route"]["attempts"] = []
         self.assertEqual(
-            router_run._route_reasons(concentrate_metrics, concentrate),
+            gateway_run._route_reasons(concentrate_metrics, concentrate),
             [],
         )
 
     def test_cache_activity_is_reported_without_invalidating_cell(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        plans, _secrets = router_run.router_spec.compile_route_plans(
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
             experiment,
             environ=self.env,
             admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
@@ -698,15 +698,15 @@ direct_control_arm_id = "direct"
                 "reasons": [],
             },
         }
-        calls, integrity, infrastructure = router_run._proxy_evidence(
+        calls, integrity, infrastructure = gateway_run._proxy_evidence(
             [{
                 "status": 200,
                 "ts": "2026-07-22T12:00:00Z",
-                "router_metrics": metrics,
+                "gateway_metrics": metrics,
             }],
-            {plan.canonical_model: router_run.Price(
-                router_run.Decimal("1"),
-                router_run.Decimal("1"),
+            {plan.canonical_model: gateway_run.Price(
+                gateway_run.Decimal("1"),
+                gateway_run.Decimal("1"),
                 "2026-07-22",
             )},
             experiment.budget,
@@ -724,15 +724,15 @@ direct_control_arm_id = "direct"
             "cached_tokens": 0,
             "cache_write_tokens": 3,
         }
-        calls, integrity, infrastructure = router_run._proxy_evidence(
+        calls, integrity, infrastructure = gateway_run._proxy_evidence(
             [{
                 "status": 200,
                 "ts": "2026-07-22T12:00:00Z",
-                "router_metrics": metrics,
+                "gateway_metrics": metrics,
             }],
-            {plan.canonical_model: router_run.Price(
-                router_run.Decimal("1"),
-                router_run.Decimal("1"),
+            {plan.canonical_model: gateway_run.Price(
+                gateway_run.Decimal("1"),
+                gateway_run.Decimal("1"),
                 "2026-07-22",
             )},
             experiment.budget,
@@ -750,15 +750,15 @@ direct_control_arm_id = "direct"
             "cached_tokens": 0,
             "cached_tokens_created": 7,
         }
-        calls, integrity, infrastructure = router_run._proxy_evidence(
+        calls, integrity, infrastructure = gateway_run._proxy_evidence(
             [{
                 "status": 200,
                 "ts": "2026-07-22T12:00:00Z",
-                "router_metrics": metrics,
+                "gateway_metrics": metrics,
             }],
-            {plan.canonical_model: router_run.Price(
-                router_run.Decimal("1"),
-                router_run.Decimal("1"),
+            {plan.canonical_model: gateway_run.Price(
+                gateway_run.Decimal("1"),
+                gateway_run.Decimal("1"),
                 "2026-07-22",
             )},
             experiment.budget,
@@ -773,8 +773,8 @@ direct_control_arm_id = "direct"
         })
 
     def test_vercel_reported_cost_is_timestamped_and_separate_from_frozen_price(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        plans, _secrets = router_run.router_spec.compile_route_plans(
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
             experiment,
             environ=self.env,
             admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
@@ -801,12 +801,12 @@ direct_control_arm_id = "direct"
             "usage": {"input_tokens": 5, "output_tokens": 3},
         }
         observed_at = "2026-07-22T12:34:56Z"
-        calls, integrity, reason = router_run._proxy_evidence(
-            [{"status": 200, "ts": observed_at, "router_metrics": metrics}],
+        calls, integrity, reason = gateway_run._proxy_evidence(
+            [{"status": 200, "ts": observed_at, "gateway_metrics": metrics}],
             {
-                plan.canonical_model: router_run.Price(
-                    router_run.Decimal("1"),
-                    router_run.Decimal("2"),
+                plan.canonical_model: gateway_run.Price(
+                    gateway_run.Decimal("1"),
+                    gateway_run.Decimal("2"),
                     "2026-07-01T00:00:00Z",
                 )
             },
@@ -817,7 +817,7 @@ direct_control_arm_id = "direct"
         self.assertTrue(integrity["pass"])
         self.assertIsNone(reason)
         self.assertEqual(calls[0]["costs"], {
-            "router_reported": {
+            "gateway_reported": {
                 "amount_usd": 0.00125,
                 "currency": "USD",
                 "effective_at": observed_at,
@@ -829,23 +829,23 @@ direct_control_arm_id = "direct"
             },
         })
         self.assertEqual(
-            router_report._costs(calls[0], 1, 1)["router_reported"],
+            gateway_report._costs(calls[0], 1, 1)["gateway_reported"],
             (0.00125, "USD", observed_at),
         )
 
     def test_errored_2xx_call_is_not_counted_as_unpriceable_success(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        plans, _secrets = router_run.router_spec.compile_route_plans(
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
             experiment,
             environ=self.env,
             admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
         )
         plan = next(item for item in plans if item.route_kind == "direct")
-        calls, integrity, reason = router_run._proxy_evidence(
+        calls, integrity, reason = gateway_run._proxy_evidence(
             [{
                 "status": 200,
                 "error": "BrokenPipeError: client disconnected",
-                "router_metrics": {
+                "gateway_metrics": {
                     "route": {
                         "requested_model": plan.requested_model,
                         "served_model": plan.requested_model,
@@ -855,9 +855,9 @@ direct_control_arm_id = "direct"
                 },
             }],
             {
-                plan.canonical_model: router_run.Price(
-                    router_run.Decimal("1"),
-                    router_run.Decimal("2"),
+                plan.canonical_model: gateway_run.Price(
+                    gateway_run.Decimal("1"),
+                    gateway_run.Decimal("2"),
                     "2026-07-01T00:00:00Z",
                 )
             },
@@ -881,27 +881,27 @@ direct_control_arm_id = "direct"
     def test_responses_terminal_outcomes_affect_availability_not_route_integrity(self):
         base = {
             "status": 200,
-            "router_metrics": {
+            "gateway_metrics": {
                 "stream": {"done": True, "terminal_status": "completed"},
             },
         }
-        self.assertTrue(router_run._upstream_row_available(base))
+        self.assertTrue(gateway_run._upstream_row_available(base))
 
         incomplete = json.loads(json.dumps(base))
-        incomplete["router_metrics"]["stream"]["terminal_status"] = "incomplete"
-        self.assertFalse(router_run._upstream_row_available(incomplete))
+        incomplete["gateway_metrics"]["stream"]["terminal_status"] = "incomplete"
+        self.assertFalse(gateway_run._upstream_row_available(incomplete))
 
         failed = json.loads(json.dumps(base))
-        failed["router_metrics"]["stream"]["terminal_status"] = "failed"
-        self.assertFalse(router_run._upstream_row_available(failed))
+        failed["gateway_metrics"]["stream"]["terminal_status"] = "failed"
+        self.assertFalse(gateway_run._upstream_row_available(failed))
 
         cancelled = json.loads(json.dumps(base))
-        cancelled["router_metrics"]["stream"]["terminal_status"] = "cancelled"
-        self.assertFalse(router_run._upstream_row_available(cancelled))
+        cancelled["gateway_metrics"]["stream"]["terminal_status"] = "cancelled"
+        self.assertFalse(gateway_run._upstream_row_available(cancelled))
 
     def test_failed_terminal_response_still_counts_billable_usage(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        plans, _secrets = router_run.router_spec.compile_route_plans(
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
             experiment,
             environ=self.env,
             admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
@@ -919,12 +919,12 @@ direct_control_arm_id = "direct"
             },
             "route_evidence": {"pass": True, "reasons": []},
         }
-        calls, integrity, reason = router_run._proxy_evidence(
-            [{"status": 200, "router_metrics": metrics}],
+        calls, integrity, reason = gateway_run._proxy_evidence(
+            [{"status": 200, "gateway_metrics": metrics}],
             {
-                plan.canonical_model: router_run.Price(
-                    router_run.Decimal("1"),
-                    router_run.Decimal("2"),
+                plan.canonical_model: gateway_run.Price(
+                    gateway_run.Decimal("1"),
+                    gateway_run.Decimal("2"),
                     "2026-07-01T00:00:00Z",
                 )
             },
@@ -940,8 +940,8 @@ direct_control_arm_id = "direct"
         )
 
     def test_openrouter_streamed_usage_cost_flows_into_call_costs(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        plans, _secrets = router_run.router_spec.compile_route_plans(
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
             experiment,
             environ=self.env,
             admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
@@ -966,7 +966,7 @@ direct_control_arm_id = "direct"
             f"data: {json.dumps(final, separators=(',', ':'))}\n\n"
             "data: [DONE]\n\n"
         ).encode()
-        metrics = router_metrics.parse_chat_sse(
+        metrics = gateway_metrics.parse_chat_sse(
             [(11.0, payload)],
             requested_model=plan.requested_model,
             requested_provider=plan.requested_provider,
@@ -977,12 +977,12 @@ direct_control_arm_id = "direct"
             completed_at=12.0,
         )
         observed_at = "2026-07-22T12:34:56Z"
-        calls, integrity, reason = router_run._proxy_evidence(
-            [{"status": 200, "ts": observed_at, "router_metrics": metrics}],
+        calls, integrity, reason = gateway_run._proxy_evidence(
+            [{"status": 200, "ts": observed_at, "gateway_metrics": metrics}],
             {
-                plan.canonical_model: router_run.Price(
-                    router_run.Decimal("1"),
-                    router_run.Decimal("2"),
+                plan.canonical_model: gateway_run.Price(
+                    gateway_run.Decimal("1"),
+                    gateway_run.Decimal("2"),
                     "2026-07-01T00:00:00Z",
                 )
             },
@@ -993,15 +993,15 @@ direct_control_arm_id = "direct"
         self.assertTrue(integrity["pass"])
         self.assertIsNone(reason)
         self.assertEqual(calls[0]["route"]["gateway_metadata"], {"cost": 0.00125})
-        self.assertEqual(calls[0]["costs"]["router_reported"], {
+        self.assertEqual(calls[0]["costs"]["gateway_reported"], {
             "amount_usd": 0.00125,
             "currency": "USD",
             "effective_at": observed_at,
         })
 
     def test_vercel_malformed_or_unstamped_cost_remains_absent(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        plans, _secrets = router_run.router_spec.compile_route_plans(
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
             experiment,
             environ=self.env,
             admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
@@ -1011,9 +1011,9 @@ direct_control_arm_id = "direct"
             gateway="vercel",
         )
         prices = {
-            plan.canonical_model: router_run.Price(
-                router_run.Decimal("1"),
-                router_run.Decimal("2"),
+            plan.canonical_model: gateway_run.Price(
+                gateway_run.Decimal("1"),
+                gateway_run.Decimal("2"),
                 "2026-07-01T00:00:00Z",
             )
         }
@@ -1041,17 +1041,17 @@ direct_control_arm_id = "direct"
                     },
                     "usage": {"input_tokens": 5, "output_tokens": 3},
                 }
-                costs, amount = router_run._price_call(
+                costs, amount = gateway_run._price_call(
                     metrics,
                     prices,
                     plan,
                     "2026-07-22T12:34:56Z",
                 )
-                self.assertNotIn("router_reported", costs)
+                self.assertNotIn("gateway_reported", costs)
                 self.assertIn("frozen_list_estimate", costs)
-                self.assertEqual(amount, router_run.Decimal("0.000011"))
+                self.assertEqual(amount, gateway_run.Decimal("0.000011"))
 
-        costs, _amount = router_run._price_call(
+        costs, _amount = gateway_run._price_call(
             {
                 "route": {"gateway_metadata": {"cost": "0.00125"}},
                 "usage": {"input_tokens": 5, "output_tokens": 3},
@@ -1060,71 +1060,18 @@ direct_control_arm_id = "direct"
             plan,
             "not-a-timestamp",
         )
-        self.assertNotIn("router_reported", costs)
+        self.assertNotIn("gateway_reported", costs)
         self.assertIn("frozen_list_estimate", costs)
 
-    def test_model_router_prices_each_call_by_observed_served_model(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        plans, _secrets = router_run.router_spec.compile_route_plans(
-            experiment,
-            environ=self.env,
-            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
-        )
-        plan = dataclasses.replace(
-            next(item for item in plans if item.route_kind == "gateway"),
-            track="model_router",
-            router_mode="auto",
-            requested_model="openrouter/auto-beta",
-            allowed_models=("openai/model-a", "anthropic/model-b"),
-            allowed_providers=("openai", "anthropic"),
-            fallback_enabled=True,
-            cost_quality_tradeoff=5,
-        )
-        prices = {
-            "openai/model-a": router_run.Price(
-                router_run.Decimal("1"),
-                router_run.Decimal("1"),
-                "2026-07-01T00:00:00Z",
-            ),
-            "anthropic/model-b": router_run.Price(
-                router_run.Decimal("3"),
-                router_run.Decimal("5"),
-                "2026-07-01T00:00:00Z",
-            ),
-        }
-        metrics = {
-            "route": {
-                "served_model": "anthropic/model-b",
-                "gateway_metadata": {},
-            },
-            "usage": {"input_tokens": 2, "output_tokens": 4},
-        }
-
-        costs, amount = router_run._price_call(
-            metrics, prices, plan, "2026-07-22T12:34:56Z"
-        )
-
-        self.assertEqual(
-            costs["frozen_list_estimate"]["amount_usd"], 0.000026
-        )
-        self.assertEqual(amount, router_run.Decimal("0.000026"))
-
-        metrics["route"]["gateway_metadata"]["cost"] = "0.000019"
-        costs, amount = router_run._price_call(
-            metrics, prices, plan, "2026-07-22T12:34:56Z"
-        )
-        self.assertEqual(costs["router_reported"]["amount_usd"], 0.000019)
-        self.assertEqual(amount, router_run.Decimal("0.000019"))
-
     def test_price_coverage_and_auth_failures_fail_closed(self):
-        experiment = router_run.router_spec.load_experiment(self.experiment)
-        with mock.patch.object(router_run.pi, "version", return_value="fake-pi 1.0"):
-            report = router_run.doctor_experiment(
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        with mock.patch.object(gateway_run.pi, "version", return_value="fake-pi 1.0"):
+            report = gateway_run.doctor_experiment(
                 self.experiment,
                 tasks_dir=self.tasks,
                 environ={
                     **self.env,
-                    router_run.FROZEN_PRICES_ENV: json.dumps({
+                    gateway_run.FROZEN_PRICES_ENV: json.dumps({
                         "other/model": {
                             "input_per_million": "1",
                             "output_per_million": "1",
@@ -1137,7 +1084,7 @@ direct_control_arm_id = "direct"
         self.assertEqual(report["missing_price_models"], ["openai/fake-model"])
         incomplete_env = {
             **self.env,
-            router_run.FROZEN_PRICES_ENV: json.dumps({
+            gateway_run.FROZEN_PRICES_ENV: json.dumps({
                 "other/model": {
                     "input_per_million": "1",
                     "output_per_million": "1",
@@ -1145,9 +1092,9 @@ direct_control_arm_id = "direct"
                 }
             }),
         }
-        with mock.patch.object(router_run.pi, "version", return_value="fake-pi 1.0"):
-            with self.assertRaisesRegex(router_run.RouterRunError, "missing"):
-                router_run.run_experiment(
+        with mock.patch.object(gateway_run.pi, "version", return_value="fake-pi 1.0"):
+            with self.assertRaisesRegex(gateway_run.GatewayRunError, "missing"):
+                gateway_run.run_experiment(
                     self.experiment,
                     results_path=self.results,
                     tasks_dir=self.tasks,
@@ -1157,16 +1104,16 @@ direct_control_arm_id = "direct"
                 )
         self.assertFalse(self.results.exists())
 
-        plans, _secrets = router_run.router_spec.compile_route_plans(
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
             experiment,
             environ=self.env,
             admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
         )
         plan = plans[0]
-        _calls, integrity, reason = router_run._proxy_evidence(
+        _calls, integrity, reason = gateway_run._proxy_evidence(
             [{"status": 401}],
-            {plan.canonical_model: router_run.Price(
-                router_run.Decimal("1"), router_run.Decimal("1"), "2026-07-22"
+            {plan.canonical_model: gateway_run.Price(
+                gateway_run.Decimal("1"), gateway_run.Decimal("1"), "2026-07-22"
             )},
             experiment.budget,
             plan,
@@ -1174,48 +1121,25 @@ direct_control_arm_id = "direct"
         self.assertTrue(integrity["pass"])
         self.assertEqual(reason, "upstream_auth_failure")
 
-        auto_plan = dataclasses.replace(
-            plans[1],
-            track="model_router",
-            router_mode="auto",
-            requested_model="openrouter/auto-beta",
-            requested_provider="openrouter",
-            allowed_models=("openai/fake-model",),
-            allowed_providers=("openai",),
-            fallback_enabled=True,
-            cost_quality_tradeoff=7,
-        )
-        _calls, integrity, reason = router_run._proxy_evidence(
-            [{"status": 404}],
-            {auto_plan.canonical_model: router_run.Price(
-                router_run.Decimal("1"), router_run.Decimal("1"), "2026-07-22"
-            )},
-            experiment.budget,
-            auto_plan,
-        )
-        self.assertFalse(integrity["pass"])
-        self.assertEqual(integrity["reasons"], ["upstream_http_error"])
-        self.assertIsNone(reason)
-
         for status in (429, 503):
             with self.subTest(status=status):
-                _calls, integrity, reason = router_run._proxy_evidence(
+                _calls, integrity, reason = gateway_run._proxy_evidence(
                     [{"status": status}],
-                    {auto_plan.canonical_model: router_run.Price(
-                        router_run.Decimal("1"),
-                        router_run.Decimal("1"),
+                    {plan.canonical_model: gateway_run.Price(
+                        gateway_run.Decimal("1"),
+                        gateway_run.Decimal("1"),
                         "2026-07-22",
                     )},
                     experiment.budget,
-                    auto_plan,
+                    plan,
                 )
                 self.assertTrue(integrity["pass"])
                 self.assertIsNone(reason)
 
     def test_docker_fails_closed_in_local_mvp(self):
         with self._runtime():
-            with self.assertRaisesRegex(router_run.RouterRunError, "unsupported"):
-                router_run.run_experiment(
+            with self.assertRaisesRegex(gateway_run.GatewayRunError, "unsupported"):
+                gateway_run.run_experiment(
                     self.experiment,
                     results_path=self.results,
                     tasks_dir=self.tasks,

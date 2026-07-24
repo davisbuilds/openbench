@@ -7,14 +7,11 @@ from unittest import mock
 
 from obench import entry
 from obench.adapters import pi
-from obench.router_spec import (
+from obench.gateway_spec import (
     RoutePlan,
-    RouterSpecError,
+    GatewaySpecError,
     Sampling,
-    compile_route_plans,
-    parse_experiment_toml,
 )
-from obench.tests.test_router_spec import model_router_manifest
 
 
 def plan_dict(**updates):
@@ -34,9 +31,9 @@ def plan_dict(**updates):
         fallback_enabled=False,
         retry_count=0,
         cache_enabled=False,
-        auth_env="ROUTER_API_KEY",
+        auth_env="GATEWAY_API_KEY",
         sampling=Sampling(0.25, 0.9, 42),
-        private_router=False,
+        allow_private_endpoint=False,
         private_host_allowlist=(),
         private_cidr_allowlist=(),
     ).to_dict()
@@ -44,7 +41,7 @@ def plan_dict(**updates):
     return plan
 
 
-class PiRoutedTests(unittest.TestCase):
+class PiGatewayTests(unittest.TestCase):
     def _write_plan(self, directory, data=None):
         path = Path(directory, "route-plan.json")
         path.write_text(json.dumps(data or plan_dict()), encoding="utf-8")
@@ -76,7 +73,7 @@ class PiRoutedTests(unittest.TestCase):
                 "OPENBENCH_PROXY_CELL_TOKEN": "cell-1",
                 "PATH": os.environ.get("PATH", ""),
                 "OPENAI_API_KEY": "sk-inherited",
-                "ROUTER_API_KEY": "router-secret",
+                "GATEWAY_API_KEY": "gateway-secret",
                 "AWS_SECRET_ACCESS_KEY": "aws-secret",
             }
             with mock.patch.dict(os.environ, env, clear=True), \
@@ -87,7 +84,7 @@ class PiRoutedTests(unittest.TestCase):
         self.assertIn("vendor/model-new", captured["cmd"])
         self.assertEqual(captured["cwd"], tmp)
         self.assertNotIn("OPENAI_API_KEY", captured["env"])
-        self.assertNotIn("ROUTER_API_KEY", captured["env"])
+        self.assertNotIn("GATEWAY_API_KEY", captured["env"])
         self.assertNotIn("AWS_SECRET_ACCESS_KEY", captured["env"])
         extension = captured["extension"]
         self.assertIn(
@@ -101,7 +98,7 @@ class PiRoutedTests(unittest.TestCase):
         self.assertNotIn('"seed"', extension)
         self.assertIn('maxTokensField: "max_tokens"', extension)
         self.assertIn("contextWindow: 128000, maxTokens: 16384", extension)
-        self.assertNotIn("router-secret", extension)
+        self.assertNotIn("gateway-secret", extension)
         self.assertNotIn("sk-inherited", extension)
 
     def test_responses_route_uses_native_pi_responses_provider(self):
@@ -149,67 +146,18 @@ class PiRoutedTests(unittest.TestCase):
             for path in (malformed, unsupported):
                 with self.subTest(path=path), \
                         mock.patch.object(pi, "_run_streaming") as launch:
-                    with self.assertRaises(RouterSpecError):
+                    with self.assertRaises(GatewaySpecError):
                         pi.run_routed("x", tmp, path, 1)
                     launch.assert_not_called()
 
-    def test_loads_compiled_model_router_auto_plan(self):
-        experiment = parse_experiment_toml(model_router_manifest())
-        plans, _ = compile_route_plans(
-            experiment,
-            environ={"OPENROUTER_API_KEY": "secret"},
-            admitted_auth_envs={"OPENROUTER_API_KEY"},
-        )
-        auto = plans[0]
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp, "route-plan.json")
-            path.write_text(auto.canonical_json + "\n", encoding="utf-8")
-            loaded = pi._load_route_plan(path)
-
-        self.assertEqual(loaded.requested_model, "openrouter/auto-beta")
-        self.assertEqual(loaded.allowed_models, ("openai/gpt-fixed",))
-        self.assertEqual(loaded.allowed_providers, ("openai",))
-        self.assertTrue(loaded.fallback_enabled)
-
-    def test_rejects_invalid_auto_and_preserves_fixed_pool_membership(self):
+    def test_rejects_fallback_and_preserves_fixed_route_membership(self):
         cases = (
             (
                 {
                     **plan_dict(),
                     "fallback_enabled": True,
-                    "requested_model": "openrouter/not-auto",
                 },
-                "openrouter/auto-beta",
-            ),
-            (
-                {
-                    **plan_dict(),
-                    "fallback_enabled": True,
-                    "requested_model": "openrouter/auto-beta",
-                    "requested_provider": "not-openrouter",
-                },
-                "provider 'openrouter'",
-            ),
-            (
-                {
-                    **plan_dict(),
-                    "fallback_enabled": True,
-                    "requested_model": "openrouter/auto-beta",
-                    "requested_provider": "openrouter",
-                    "allowed_models": [],
-                },
-                "allowed_models must be a non-empty array",
-            ),
-            (
-                {
-                    **plan_dict(),
-                    "fallback_enabled": True,
-                    "requested_model": "openrouter/auto-beta",
-                    "requested_provider": "openrouter",
-                    "allowed_providers": [],
-                },
-                "allowed_providers must be a non-empty array",
+                "fallback must be disabled",
             ),
             (
                 {**plan_dict(), "requested_model": "vendor/not-allowed"},
@@ -225,7 +173,7 @@ class PiRoutedTests(unittest.TestCase):
                 with self.subTest(message=message):
                     path = Path(tmp, f"route-plan-{index}.json")
                     path.write_text(json.dumps(data), encoding="utf-8")
-                    with self.assertRaisesRegex(RouterSpecError, message):
+                    with self.assertRaisesRegex(GatewaySpecError, message):
                         pi._load_route_plan(path)
 
     def test_entry_rejects_incompatible_capabilities_before_dispatch(self):

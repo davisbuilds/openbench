@@ -1,10 +1,10 @@
-"""Contract tests for the schema-v2 Gateway Tax report."""
+"""Contract tests for the schema-v2 Gateway Bench report."""
 
 import copy
 import json
 import unittest
 
-from obench import results, router_report
+from obench import results, gateway_report
 
 
 DIGESTS = {
@@ -14,8 +14,6 @@ DIGESTS = {
             "experiment",
             "direct_arm",
             "gateway_arm",
-            "auto_arm",
-            "fixed_arm",
             "policy",
             "catalog",
             "price",
@@ -47,12 +45,11 @@ def make_row(
     infrastructure_reason=None,
     route_pass=True,
     route_reasons=None,
-    track="gateway_tax",
-    router_mode=None,
+    track="fixed_model_provider",
     model_match="exact_revision",
 ):
     block_id = f"{task}-{window}-{repetition}-a{block_attempt}"
-    identity = results.CellIdentity.for_router(
+    identity = results.CellIdentity.for_gateway(
         track=track,
         experiment_id=f"{track}-fixture",
         experiment_digest=DIGESTS["experiment"],
@@ -92,9 +89,9 @@ def make_row(
     }
     row = {
         "schema_version": 2,
-        "benchmark": "router",
-        "run_id": results.make_router_run_id(identity),
-        "cell_id": results.make_router_cell_id(identity),
+        "benchmark": "gateway",
+        "run_id": results.make_gateway_run_id(identity),
+        "cell_id": results.make_gateway_cell_id(identity),
         "identity": identity.as_dict(),
         "arm_role": role,
         "model_match": model_match,
@@ -106,8 +103,6 @@ def make_row(
         },
         "proxy_metrics": {"calls": [] if calls is None else calls},
     }
-    if router_mode is not None:
-        row["router_mode"] = router_mode
     return row
 
 
@@ -127,7 +122,7 @@ def call(
     bases = {}
     if costs:
         bases = {
-            "router_reported": {
+            "gateway_reported": {
                 "amount_usd": 0.10,
                 "currency": "USD",
                 "effective_at": "2026-07-01T00:00:00Z",
@@ -154,7 +149,7 @@ def call(
     return result
 
 
-class RouterReportTests(unittest.TestCase):
+class GatewayReportTests(unittest.TestCase):
     def complete_rows(self):
         rows = []
         for task in ("task_a", "task_b"):
@@ -195,7 +190,7 @@ class RouterReportTests(unittest.TestCase):
         return rows
 
     def test_aggregates_cells_to_tasks_then_weights_tasks_equally(self):
-        report = router_report.aggregate(
+        report = gateway_report.aggregate(
             self.complete_rows(), bootstrap_replicates=200, bootstrap_seed=7
         )
         direct = report["arms"]["direct"]
@@ -226,82 +221,7 @@ class RouterReportTests(unittest.TestCase):
         self.assertFalse(report["analysis"]["wilson_intervals"])
         self.assertFalse(report["analysis"]["composite_score"])
 
-    def test_model_router_reports_auto_minus_fixed_and_attempt_coverage(self):
-        rows = []
-        for task in ("task_a", "task_b"):
-            rows.extend([
-                make_row(
-                    task=task,
-                    arm_id="fixed",
-                    role="gateway",
-                    router_mode="fixed",
-                    baseline=True,
-                    track="model_router",
-                    calls=[call(
-                        provider="OpenAI",
-                        model="openai/gpt-fixed",
-                    )],
-                ),
-                make_row(
-                    task=task,
-                    arm_id="auto",
-                    role="gateway",
-                    router_mode="auto",
-                    baseline=False,
-                    track="model_router",
-                    solved=task == "task_a",
-                    score=1.0 if task == "task_a" else 0.0,
-                    calls=[call(
-                        provider="Anthropic",
-                        model="anthropic/claude-routed",
-                        attempts=[
-                            {
-                                "provider": "OpenAI",
-                                "model": "openai/gpt-fixed",
-                                "status": 429,
-                            },
-                            {
-                                "provider": "Anthropic",
-                                "model": "anthropic/claude-routed",
-                                "status": 200,
-                            },
-                        ],
-                        attempts_present=True,
-                    )],
-                ),
-            ])
-
-        report = router_report.aggregate(
-            rows, bootstrap_replicates=50, bootstrap_seed=9
-        )
-
-        self.assertEqual(report["track"], "model_router")
-        self.assertEqual(report["model_match"], "exact_revision")
-        self.assertEqual(report["baseline_arm"], "fixed")
-        self.assertEqual(
-            report["paired_contrasts"]["auto"]["direction"],
-            "auto_minus_fixed",
-        )
-        self.assertNotIn("fixed", report["paired_contrasts"])
-        self.assertEqual(
-            report["arms"]["auto"]["routing"]["fallback_call_rate"]["estimate"],
-            1.0,
-        )
-        self.assertEqual(
-            report["arms"]["auto"]["routing"]["mean_attempts_per_call"]["estimate"],
-            2.0,
-        )
-        self.assertEqual(
-            report["arms"]["auto"]["primary_cost_basis"], "router_reported"
-        )
-        self.assertEqual(
-            report["arms"]["auto"]["actual_cost"]["cost_per_solve_usd"], 0.2
-        )
-        rendered = router_report.render_text(report)
-        self.assertIn("auto_minus_fixed", rendered)
-        self.assertNotIn("gateway tax", rendered.lower())
-
-    def test_router_provider_failure_stays_in_attempted_denominator(self):
+    def test_gateway_provider_failure_stays_in_attempted_denominator(self):
         rows = self.complete_rows()
         failed = rows[-1]
         failed["result"].update(
@@ -309,11 +229,11 @@ class RouterReportTests(unittest.TestCase):
             checker_score=0.0,
             available=False,
             duration_s=30.0,
-            failure_origin="router",
+            failure_origin="gateway",
         )
         failed["proxy_metrics"]["calls"] = []
 
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
 
         gateway = report["arms"]["gateway"]
         self.assertEqual(report["blocks"]["included"], 4)
@@ -335,7 +255,7 @@ class RouterReportTests(unittest.TestCase):
                 ("gateway", "gateway", False),
             )
         ]
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
         self.assertEqual(report["blocks"]["observed"], 1)
         self.assertEqual(report["arms"]["direct"]["attempted_cells"], 1)
         self.assertEqual(
@@ -352,7 +272,7 @@ class RouterReportTests(unittest.TestCase):
         }
         rows.pop()
 
-        report = router_report.aggregate(
+        report = gateway_report.aggregate(
             rows,
             expected_arm_ids=("direct", "gateway"),
             bootstrap_replicates=20,
@@ -370,10 +290,10 @@ class RouterReportTests(unittest.TestCase):
 
     def test_cost_per_solve_requires_complete_call_coverage(self):
         rows = self.complete_rows()
-        rows[-1]["proxy_metrics"]["calls"][0]["costs"].pop("router_reported")
+        rows[-1]["proxy_metrics"]["calls"][0]["costs"].pop("gateway_reported")
 
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
-        cost = report["arms"]["gateway"]["costs"]["router_reported"]
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
+        cost = report["arms"]["gateway"]["costs"]["gateway_reported"]
 
         self.assertEqual(cost["basis_coverage"]["covered_calls"], 3)
         self.assertEqual(cost["basis_coverage"]["total_calls"], 4)
@@ -383,19 +303,19 @@ class RouterReportTests(unittest.TestCase):
         estimate = report["arms"]["gateway"]["costs"]["frozen_list_estimate"]
         self.assertEqual(estimate["cost_per_solve_usd"], 0.24)
 
-    def test_router_reported_cost_has_complete_coverage_and_cost_per_solve(self):
+    def test_gateway_reported_cost_has_complete_coverage_and_cost_per_solve(self):
         rows = self.complete_rows()
         for row in rows:
             if row["arm_role"] != "gateway":
                 continue
-            row["proxy_metrics"]["calls"][0]["costs"]["router_reported"] = {
+            row["proxy_metrics"]["calls"][0]["costs"]["gateway_reported"] = {
                 "amount_usd": 0.025,
                 "currency": "USD",
                 "effective_at": "2026-07-22T12:34:56Z",
             }
 
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
-        cost = report["arms"]["gateway"]["costs"]["router_reported"]
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
+        cost = report["arms"]["gateway"]["costs"]["gateway_reported"]
 
         self.assertEqual(cost["basis_coverage"]["covered_calls"], 4)
         self.assertEqual(cost["basis_coverage"]["total_calls"], 4)
@@ -410,7 +330,7 @@ class RouterReportTests(unittest.TestCase):
         rows[1]["proxy_metrics"]["calls"].append(
             call(provider="Fallback", costs=False)
         )
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
         distribution = report["arms"]["gateway"]["route_distribution"]
 
         self.assertAlmostEqual(
@@ -422,14 +342,14 @@ class RouterReportTests(unittest.TestCase):
 
     def test_route_label_does_not_duplicate_provider_prefix(self):
         self.assertEqual(
-            router_report._route_label("OpenAI", "openai/gpt-fixed"),
+            gateway_report._route_label("OpenAI", "openai/gpt-fixed"),
             "openai/gpt-fixed",
         )
 
     def test_timeout_caps_end_to_end_latency(self):
         rows = self.complete_rows()
         rows[1]["result"]["duration_s"] = 300
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
 
         self.assertEqual(
             report["arms"]["gateway"]["metrics"]["latency_s"]["estimate"], 26.25
@@ -439,7 +359,7 @@ class RouterReportTests(unittest.TestCase):
         rows = self.complete_rows()
         rows[1]["result"]["duration_s"] = None
         rows[1]["result"]["timed_out"] = True
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
 
         self.assertEqual(
             report["arms"]["gateway"]["metrics"]["latency_s"]["estimate"], 26.25
@@ -452,7 +372,7 @@ class RouterReportTests(unittest.TestCase):
         rows[2]["proxy_metrics"]["calls"][0]["timing"]["ttfb_s"] = 3
         rows[3]["proxy_metrics"]["calls"][0]["timing"]["ttfb_s"] = 5
 
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
 
         # task_a contributes the paired block delta 5 - 3 = 2. task_b
         # contributes 2 - 1 = 1, so tasks equally produce 1.5.
@@ -484,7 +404,7 @@ class RouterReportTests(unittest.TestCase):
                 "cache_write_input_tokens": written,
             }
 
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
         metrics = report["arms"]["gateway"]["metrics"]
 
         self.assertEqual(
@@ -537,7 +457,7 @@ class RouterReportTests(unittest.TestCase):
             "cache_write_input_tokens"
         )
 
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
         metrics = report["arms"]["gateway"]["metrics"]
         cached = metrics["mean_cached_input_tokens_per_call"]
         written = metrics["mean_cache_write_input_tokens_per_call"]
@@ -569,10 +489,10 @@ class RouterReportTests(unittest.TestCase):
         self.assertEqual(contrast["paired_task_coverage"]["covered"], 1)
 
     def test_bootstrap_and_json_are_deterministic_and_safe(self):
-        first = router_report.aggregate(
+        first = gateway_report.aggregate(
             self.complete_rows(), bootstrap_replicates=100, bootstrap_seed=99
         )
-        second = router_report.aggregate(
+        second = gateway_report.aggregate(
             reversed(self.complete_rows()), bootstrap_replicates=100, bootstrap_seed=99
         )
 
@@ -583,10 +503,10 @@ class RouterReportTests(unittest.TestCase):
     def test_text_renderer_is_concise_and_names_exclusions(self):
         rows = self.complete_rows()
         rows[0]["route_integrity"] = {"pass": False, "reasons": ["ledger_gap"]}
-        report = router_report.aggregate(rows, bootstrap_replicates=20)
-        text = router_report.render_text(report)
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
+        text = gateway_report.render_text(report)
 
-        self.assertIn("Router Bench: gateway_tax", text)
+        self.assertIn("Gateway Bench: fixed_model_provider", text)
         self.assertIn("route_integrity:ledger_gap=1", text)
         self.assertIn("gateway - direct", text)
         self.assertLessEqual(len(text.splitlines()), 12)
@@ -600,41 +520,41 @@ class RouterReportTests(unittest.TestCase):
         for mutate in mutators:
             rows = self.complete_rows()
             mutate(rows[-1])
-            identity = results.validate_router_identity(rows[-1]["identity"])
-            rows[-1]["run_id"] = results.make_router_run_id(identity)
-            rows[-1]["cell_id"] = results.make_router_cell_id(identity)
+            identity = results.validate_gateway_identity(rows[-1]["identity"])
+            rows[-1]["run_id"] = results.make_gateway_run_id(identity)
+            rows[-1]["cell_id"] = results.make_gateway_cell_id(identity)
             with self.subTest(mutate=mutate), self.assertRaises(
-                router_report.RouterReportError
+                gateway_report.GatewayReportError
             ):
-                router_report.aggregate(rows, bootstrap_replicates=10)
+                gateway_report.aggregate(rows, bootstrap_replicates=10)
 
     def test_rejects_duplicate_cells_and_inconsistent_arm_metadata(self):
         rows = self.complete_rows()
-        with self.assertRaisesRegex(router_report.RouterReportError, "duplicate cell_id"):
-            router_report.aggregate(rows + [copy.deepcopy(rows[0])], bootstrap_replicates=10)
+        with self.assertRaisesRegex(gateway_report.GatewayReportError, "duplicate cell_id"):
+            gateway_report.aggregate(rows + [copy.deepcopy(rows[0])], bootstrap_replicates=10)
 
         rows = self.complete_rows()
         rows[-1]["baseline"] = True
-        with self.assertRaisesRegex(router_report.RouterReportError, "metadata"):
-            router_report.aggregate(rows, bootstrap_replicates=10)
+        with self.assertRaisesRegex(gateway_report.GatewayReportError, "metadata"):
+            gateway_report.aggregate(rows, bootstrap_replicates=10)
 
     def test_rejects_malformed_metric_and_route_evidence(self):
         rows = self.complete_rows()
         rows[0]["proxy_metrics"]["calls"][0]["generation"].pop("duration_s")
-        with self.assertRaisesRegex(router_report.RouterReportError, "must pair"):
-            router_report.aggregate(rows, bootstrap_replicates=10)
+        with self.assertRaisesRegex(gateway_report.GatewayReportError, "must pair"):
+            gateway_report.aggregate(rows, bootstrap_replicates=10)
 
         rows = self.complete_rows()
         rows[0]["route_integrity"] = {"pass": True, "reasons": ["contradiction"]}
-        with self.assertRaisesRegex(router_report.RouterReportError, "passes"):
-            router_report.aggregate(rows, bootstrap_replicates=10)
+        with self.assertRaisesRegex(gateway_report.GatewayReportError, "passes"):
+            gateway_report.aggregate(rows, bootstrap_replicates=10)
 
         rows = self.complete_rows()
-        rows[0]["proxy_metrics"]["calls"][0]["costs"]["router_reported"][
+        rows[0]["proxy_metrics"]["calls"][0]["costs"]["gateway_reported"][
             "currency"
         ] = "EUR"
-        with self.assertRaisesRegex(router_report.RouterReportError, "must be USD"):
-            router_report.aggregate(rows, bootstrap_replicates=10)
+        with self.assertRaisesRegex(gateway_report.GatewayReportError, "must be USD"):
+            gateway_report.aggregate(rows, bootstrap_replicates=10)
 
         rows = self.complete_rows()
         rows[0]["proxy_metrics"]["calls"][0]["cache"] = {
@@ -642,9 +562,9 @@ class RouterReportTests(unittest.TestCase):
             "cache_write_input_tokens": 0,
         }
         with self.assertRaisesRegex(
-            router_report.RouterReportError, "cached_input_tokens"
+            gateway_report.GatewayReportError, "cached_input_tokens"
         ):
-            router_report.aggregate(rows, bootstrap_replicates=10)
+            gateway_report.aggregate(rows, bootstrap_replicates=10)
 
 
 if __name__ == "__main__":

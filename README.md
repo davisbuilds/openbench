@@ -21,7 +21,7 @@ To pull Harbor-format tasks into OpenBench, see
 Versioned packs (`org/name@version`, tasks or harness manifests) are covered in
 [`docs/task-packs.md`](docs/task-packs.md) (`obench pack install …`).
 To compare a fixed coding harness and model over direct and gateway serving
-routes, see [`docs/router-bench.md`](docs/router-bench.md) (`obench router
+routes, see [`docs/gateway-bench.md`](docs/gateway-bench.md) (`obench gateway
 validate|doctor|run|report|publish|verify`).
 
 **Live results:** https://minghinmatthewlam.github.io/openbench/
@@ -34,12 +34,16 @@ credit), never by the harness's own claim of success.
 
 OpenBench has two separate benchmark families. **Harness Bench**, described
 throughout this README, varies the coding-agent harness while holding the model
-and task fixed. **Router Bench** holds the Pi harness, model, provider, sampling,
-and task fixed while varying the serving route. Its implemented tracks are the
-direct-vs-gateway **Gateway Tax** comparison and OpenRouter Auto Beta
-**Model Router** comparison; Provider Router remains deferred. See
-[`docs/router-bench.md`](docs/router-bench.md) for its methodology, exploratory
-eligibility limits, example TOML, and separate `obench router` command group.
+and task fixed. **Gateway Bench** holds the Pi harness, model, inference
+provider, sampling, and task fixed while varying the API gateway. It uses the
+`fixed_model_provider` track and compares each gateway with the provider's
+direct API under matched blocks. See
+[`docs/gateway-bench.md`](docs/gateway-bench.md) for its methodology, metrics,
+examples, and separate `obench gateway` command group.
+
+Automatic model or provider selection is a different product surface. A future
+**Router Bench** will own that work under `obench router`; Gateway Bench does
+not make routing decisions.
 
 Current Harness Bench tiers:
 
@@ -170,7 +174,7 @@ pip install "git+https://github.com/minghinmatthewlam/openbench.git"
 Then use the umbrella CLI: `obench init`, `obench run`, `obench report`,
 `obench doctor`, `obench validate`, `obench gate`, `obench compare`,
 `obench publish`, `obench verify`, `obench pack`, `obench export`,
-`obench import`, and `obench router validate|doctor|run|report|publish|verify`. Legacy
+`obench import`, and `obench gateway validate|doctor|run|report|publish|verify`. Legacy
 `python3 bench/run.py` (and friends) still forward with a deprecation note.
 Versioned packs (`org/name@version`) are documented in
 [`docs/task-packs.md`](docs/task-packs.md).

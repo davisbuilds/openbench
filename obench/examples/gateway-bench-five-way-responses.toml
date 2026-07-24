@@ -1,13 +1,13 @@
 schema_version = 1
-experiment_id = "gpt-4o-mini-five-way-responses-gateway-tax"
-track = "gateway_tax"
+experiment_id = "gpt-4o-mini-five-way-responses-gateway-bench"
+track = "fixed_model_provider"
 model_match = "rolling_alias"
 harness = "pi"
 tasks = ["make-it-run"]
 repetitions_per_window = 10
 schedule_seed = 20260723
 execution_lane = "local"
-private_router = false
+allow_private_endpoint = false
 
 # Replace this illustrative future window with the UTC window for the run.
 [[windows]]

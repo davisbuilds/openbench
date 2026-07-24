@@ -1,4 +1,4 @@
-"""Tests for sanitized Router Bench publishing and verification."""
+"""Tests for sanitized Gateway Bench publishing and verification."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ import tempfile
 import unittest
 
 from obench import results
-from obench import router_publish
-from obench import router_report
-from obench import router_spec
+from obench import gateway_publish
+from obench import gateway_report
+from obench import gateway_spec
 
 
 def digest(label):
@@ -25,16 +25,16 @@ def canonical_line(value):
 
 
 def experiment():
-    return router_spec.parse_experiment({
+    return gateway_spec.parse_experiment({
         "schema_version": 1,
-        "experiment_id": "gateway-tax-publish",
-        "track": "gateway_tax",
+        "experiment_id": "gateway-bench-publish",
+        "track": "fixed_model_provider",
         "harness": "pi",
         "tasks": ["make-it-run"],
         "repetitions_per_window": 1,
         "schedule_seed": 17,
         "execution_lane": "docker",
-        "private_router": False,
+        "allow_private_endpoint": False,
         "windows": [{
             "window_id": "morning",
             "start": "2026-07-22T08:00:00Z",
@@ -82,7 +82,7 @@ def experiment():
                 "fallback_enabled": False,
                 "retry_count": 0,
                 "cache_enabled": False,
-                "auth_env": "VERY_PRIVATE_ROUTER_KEY",
+                "auth_env": "VERY_PRIVATE_GATEWAY_KEY",
                 "sampling": {"temperature": 0.0, "top_p": 1.0, "seed": 17},
                 "direct_control_arm_id": "direct",
             },
@@ -90,73 +90,9 @@ def experiment():
     })
 
 
-def model_router_experiment():
-    common = {
-        "route_kind": "gateway",
-        "gateway": "openrouter",
-        "endpoint": "https://openrouter.ai/api/v1/chat/completions",
-        "protocol": "openai_chat",
-        "retry_count": 0,
-        "cache_enabled": False,
-        "auth_env": "VERY_PRIVATE_ROUTER_KEY",
-        "sampling": {"temperature": 0.0, "top_p": 1.0, "seed": 17},
-    }
-    return router_spec.parse_experiment({
-        "schema_version": 1,
-        "experiment_id": "model-router-publish",
-        "track": "model_router",
-        "model_match": "exact_revision",
-        "harness": "pi",
-        "tasks": ["make-it-run"],
-        "repetitions_per_window": 1,
-        "schedule_seed": 17,
-        "execution_lane": "docker",
-        "private_router": False,
-        "windows": [{
-            "window_id": "morning",
-            "start": "2026-07-22T08:00:00Z",
-            "end": "2026-07-22T09:00:00Z",
-        }],
-        "budget": {
-            "timeout_s": 300,
-            "max_calls": 8,
-            "max_output_tokens": 16000,
-            "usd_cap": "2.5",
-        },
-        "arms": [
-            {
-                **common,
-                "arm_id": "auto",
-                "router_mode": "auto",
-                "baseline": False,
-                "canonical_model": "openrouter/auto-beta",
-                "requested_model": "openrouter/auto-beta",
-                "requested_provider": "openrouter",
-                "allowed_models": ["openai/gpt-test"],
-                "allowed_providers": ["OpenAI"],
-                "fallback_enabled": True,
-                "cost_quality_tradeoff": 6,
-                "fixed_control_arm_id": "fixed",
-            },
-            {
-                **common,
-                "arm_id": "fixed",
-                "router_mode": "fixed",
-                "baseline": True,
-                "canonical_model": "openai/gpt-test",
-                "requested_model": "openai/gpt-test",
-                "requested_provider": "OpenAI",
-                "allowed_models": ["openai/gpt-test"],
-                "allowed_providers": ["OpenAI"],
-                "fallback_enabled": False,
-            },
-        ],
-    })
-
-
-class RouterPublishTests(unittest.TestCase):
+class GatewayPublishTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="router_publish_test_")
+        self.tmp = tempfile.TemporaryDirectory(prefix="gateway_publish_test_")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.results_path = self.root / "source-results.jsonl"
@@ -194,8 +130,8 @@ class RouterPublishTests(unittest.TestCase):
                 "account_id": "123456789012",
             }],
         }
-        self.identity = results.CellIdentity.for_router(
-            track="gateway_tax",
+        self.identity = results.CellIdentity.for_gateway(
+            track="fixed_model_provider",
             experiment_id=self.experiment.experiment_id,
             experiment_digest=self.experiment.digest,
             arm_id="gateway",
@@ -225,12 +161,12 @@ class RouterPublishTests(unittest.TestCase):
             block_id="block-001",
             block_attempt=0,
         )
-        self.cell_id = results.make_router_cell_id(self.identity)
+        self.cell_id = results.make_gateway_cell_id(self.identity)
         self.row = {
             "schema_version": 2,
-            "benchmark": "router",
+            "benchmark": "gateway",
             "identity": self.identity.as_dict(),
-            "run_id": results.make_router_run_id(self.identity),
+            "run_id": results.make_gateway_run_id(self.identity),
             "cell_id": self.cell_id,
             "expected_arm_ids": ["direct", "gateway"],
             "arm_role": "gateway",
@@ -246,7 +182,7 @@ class RouterPublishTests(unittest.TestCase):
             "route_integrity": {"pass": True, "reasons": []},
             "route_isolation": {
                 "classification": "exploratory",
-                "lane": "router-local-v1",
+                "lane": "gateway-local-v1",
                 "egress_enforced": False,
             },
             "proxy_metrics": {"calls": [{
@@ -283,7 +219,7 @@ class RouterPublishTests(unittest.TestCase):
         *,
         allowed_secret=None,
         partial=False,
-        router_metrics=None,
+        gateway_metrics=None,
     ):
         request = {
             "record_type": "request",
@@ -300,7 +236,7 @@ class RouterPublishTests(unittest.TestCase):
                 if partial
                 else {"input_tokens": 11, "output_tokens": 4, "total_tokens": 15}
             ),
-            "router_arm": {
+            "serving_arm": {
                 "arm_id": "gateway",
                 "arm_digest": self.identity.arm_digest,
                 "route_kind": "gateway",
@@ -308,9 +244,9 @@ class RouterPublishTests(unittest.TestCase):
             "error": "request body and credentials must never publish",
         }
         if partial:
-            request["router_metrics"] = None
-        elif router_metrics is not None:
-            request["router_metrics"] = router_metrics
+            request["gateway_metrics"] = None
+        elif gateway_metrics is not None:
+            request["gateway_metrics"] = gateway_metrics
         request["record_hash"] = hashlib.sha256(
             results.canonical_json_bytes({
                 key: value for key, value in request.items() if key != "record_hash"
@@ -336,7 +272,7 @@ class RouterPublishTests(unittest.TestCase):
         self._write_results(self.row)
 
     def publish(self):
-        return router_publish.publish_bundle(
+        return gateway_publish.publish_bundle(
             self.results_path,
             self.bundle,
             experiment=self.experiment,
@@ -353,7 +289,7 @@ class RouterPublishTests(unittest.TestCase):
         }
         self._write_results(self.row)
         provenance = self.publish()
-        self.assertEqual(router_publish.verify_bundle(self.bundle), provenance)
+        self.assertEqual(gateway_publish.verify_bundle(self.bundle), provenance)
 
         files = {
             path.relative_to(self.bundle).as_posix()
@@ -375,7 +311,7 @@ class RouterPublishTests(unittest.TestCase):
         for forbidden in (
             "raw_headers", "source-result-secret", "private prompt",
             "private answer", "transcript_path", "/Users/private",
-            "VERY_PRIVATE_ROUTER_KEY", "/private/v1", "account_id",
+            "VERY_PRIVATE_GATEWAY_KEY", "/private/v1", "account_id",
             "123456789012", "credentials must never publish",
         ):
             self.assertNotIn(forbidden, bundle_text)
@@ -435,7 +371,7 @@ class RouterPublishTests(unittest.TestCase):
             },
             "stream": {"done": True, "malformed_events": 0, "ignored_events": 0},
         }
-        self._write_ledger(router_metrics=metrics)
+        self._write_ledger(gateway_metrics=metrics)
         self.publish()
 
         public_experiment = json.loads(
@@ -453,7 +389,7 @@ class RouterPublishTests(unittest.TestCase):
         public_row = json.loads((self.bundle / "results.jsonl").read_text())
         public_ledger = self.bundle / public_row["ledger"]["artifact"]
         request = json.loads(public_ledger.read_text().splitlines()[0])
-        route = request["router_metrics"]["route"]
+        route = request["gateway_metrics"]["route"]
         self.assertEqual(route["served_model"], "gpt-test-2026-07-22")
         self.assertEqual(route["provider"], "OpenAI")
         self.assertEqual(route["attempts"], [{
@@ -479,21 +415,21 @@ class RouterPublishTests(unittest.TestCase):
             "must-not-publish",
         ):
             self.assertNotIn(private_value, bundle_text)
-        self.assertEqual(router_publish.verify_bundle(self.bundle), json.loads(
+        self.assertEqual(gateway_publish.verify_bundle(self.bundle), json.loads(
             (self.bundle / "provenance.json").read_text(encoding="utf-8")
         ))
 
     def test_gateway_metadata_projection_rejects_malformed_generation_id(self):
         with self.assertRaisesRegex(
-            router_publish.RouterPublishError,
+            gateway_publish.GatewayPublishError,
             "generationId must be a non-empty string",
         ):
-            router_publish._gateway_metadata_dto(  # noqa: SLF001
+            gateway_publish._gateway_metadata_dto(  # noqa: SLF001
                 {"generationId": ""},
                 "metadata",
             )
         self.assertEqual(
-            router_publish._gateway_metadata_dto(  # noqa: SLF001
+            gateway_publish._gateway_metadata_dto(  # noqa: SLF001
                 {
                     "generationId": "opaque-generation",
                     "raw_payload": "discarded",
@@ -507,7 +443,7 @@ class RouterPublishTests(unittest.TestCase):
             },
         )
 
-    def test_published_results_round_trip_through_router_report(self):
+    def test_published_results_round_trip_through_gateway_report(self):
         direct_identity = dataclasses.replace(
             self.identity,
             arm_id="direct",
@@ -515,8 +451,8 @@ class RouterPublishTests(unittest.TestCase):
         )
         direct = copy.deepcopy(self.row)
         direct["identity"] = direct_identity.as_dict()
-        direct["run_id"] = results.make_router_run_id(direct_identity)
-        direct["cell_id"] = results.make_router_cell_id(direct_identity)
+        direct["run_id"] = results.make_gateway_run_id(direct_identity)
+        direct["cell_id"] = results.make_gateway_cell_id(direct_identity)
         direct["arm_role"] = "direct"
         direct["baseline"] = True
         direct["result"]["duration_s"] = 10.0
@@ -525,7 +461,7 @@ class RouterPublishTests(unittest.TestCase):
         direct["proxy_metrics"]["calls"][0]["route"]["provider"] = "Direct"
         direct_ledger = self.root / "direct-ledger.jsonl"
         request = json.loads(self.source_ledger.read_text().splitlines()[0])
-        request["router_arm"] = {
+        request["serving_arm"] = {
             "arm_id": "direct",
             "arm_digest": direct_identity.arm_digest,
             "route_kind": "direct",
@@ -554,7 +490,7 @@ class RouterPublishTests(unittest.TestCase):
 
         source_rows = [direct, self.row]
         self._write_results(*source_rows)
-        router_publish.publish_bundle(
+        gateway_publish.publish_bundle(
             self.results_path,
             self.bundle,
             experiment=self.experiment,
@@ -571,10 +507,10 @@ class RouterPublishTests(unittest.TestCase):
             for line in (self.bundle / "results.jsonl").read_text().splitlines()
         ]
 
-        expected = router_report.aggregate(
+        expected = gateway_report.aggregate(
             source_rows, bootstrap_replicates=20, bootstrap_seed=7
         )
-        actual = router_report.aggregate(
+        actual = gateway_report.aggregate(
             public_rows, bootstrap_replicates=20, bootstrap_seed=7
         )
         self.assertEqual(actual, expected)
@@ -590,7 +526,7 @@ class RouterPublishTests(unittest.TestCase):
 
         provenance = self.publish()
 
-        self.assertEqual(router_publish.verify_bundle(self.bundle), provenance)
+        self.assertEqual(gateway_publish.verify_bundle(self.bundle), provenance)
         public_row = json.loads((self.bundle / "results.jsonl").read_text())
         self.assertEqual(
             public_row["result"]["budget_exhausted_reason"],
@@ -599,132 +535,6 @@ class RouterPublishTests(unittest.TestCase):
         self.assertIsNone(public_row["result"]["infrastructure_invalid_reason"])
         self.assertFalse(public_row["result"]["solved"])
         self.assertTrue(public_row["result"]["available"])
-
-    def test_model_router_track_policy_and_attempts_survive_publish_round_trip(self):
-        experiment_value = model_router_experiment()
-        policy = {
-            "schema_version": 1,
-            "policy_id": "model-router-v1",
-            "track": "model_router",
-            "model_match": "exact_revision",
-            "allowed_models": ["openai/gpt-test"],
-            "allowed_providers": ["OpenAI"],
-            "fallback_enabled": True,
-            "retry_count": 0,
-            "cache_enabled": False,
-        }
-        rows = []
-        ledgers = {}
-        for arm in experiment_value.arms:
-            identity = dataclasses.replace(
-                self.identity,
-                track="model_router",
-                experiment_id=experiment_value.experiment_id,
-                experiment_digest=experiment_value.digest,
-                arm_id=arm.arm_id,
-                arm_digest=arm.digest,
-                policy_digest=results.canonical_digest(policy),
-                block_id="model-router-block",
-            )
-            cell_id = results.make_router_cell_id(identity)
-            row = copy.deepcopy(self.row)
-            row.update({
-                "identity": identity.as_dict(),
-                "run_id": results.make_router_run_id(identity),
-                "cell_id": cell_id,
-                "expected_arm_ids": ["auto", "fixed"],
-                "arm_role": "gateway",
-                "router_mode": arm.router_mode,
-                "baseline": arm.baseline,
-                "model_match": "exact_revision",
-            })
-            row["proxy_metrics"]["calls"][0]["route"] = {
-                "provider": "OpenAI",
-                "served_model": "openai/gpt-test",
-                "attempts": [{
-                    "provider": "OpenAI",
-                    "model": "openai/gpt-test",
-                    "status": 200,
-                }],
-                "attempts_present": True,
-            }
-            ledger_path = self.root / f"{arm.arm_id}.jsonl"
-            request = json.loads(self.source_ledger.read_text().splitlines()[0])
-            request.pop("session_hash", None)
-            request["router_arm"] = {
-                "arm_id": arm.arm_id,
-                "arm_digest": arm.digest,
-                "route_kind": "gateway",
-            }
-            request["record_hash"] = hashlib.sha256(
-                results.canonical_json_bytes({
-                    key: value
-                    for key, value in request.items()
-                    if key != "record_hash"
-                })
-            ).hexdigest()
-            seal = {
-                "record_type": "ledger_seal",
-                "state": "SEALED",
-                "record_count": 1,
-                "last_sequence": 1,
-                "root_hash": request["record_hash"],
-            }
-            ledger_path.write_text(
-                canonical_line(request) + canonical_line(seal),
-                encoding="utf-8",
-            )
-            row["ledger_seal"] = {
-                "record_count": 1,
-                "last_sequence": 1,
-                "root_hash": request["record_hash"],
-                "ledger_file": ledger_path.name,
-            }
-            rows.append(row)
-            ledgers[cell_id] = ledger_path
-
-        self._write_results(*rows)
-        router_publish.publish_bundle(
-            self.results_path,
-            self.bundle,
-            experiment=experiment_value,
-            policy=policy,
-            catalog=self.catalog,
-            prices=self.prices,
-            ledgers=ledgers,
-        )
-        self.assertTrue(router_publish.verify_bundle(self.bundle))
-        public_experiment = json.loads(
-            (self.bundle / "experiment.json").read_text(encoding="utf-8")
-        )
-        public_policy = json.loads(
-            (self.bundle / "policy.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(public_experiment["track"], "model_router")
-        self.assertEqual(public_experiment["model_match"], "exact_revision")
-        self.assertEqual(
-            public_experiment["arms"][0]["cost_quality_tradeoff"], 6
-        )
-        self.assertEqual(
-            public_policy["data"]["model_match"], "exact_revision"
-        )
-        public_rows = [
-            json.loads(line)
-            for line in (self.bundle / "results.jsonl").read_text().splitlines()
-        ]
-        report = router_report.aggregate(
-            public_rows, bootstrap_replicates=20, bootstrap_seed=7
-        )
-        self.assertEqual(
-            report["paired_contrasts"]["auto"]["direction"],
-            "auto_minus_fixed",
-        )
-        bundle_text = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in self.bundle.rglob("*")
-            if path.is_file()
-        )
-        self.assertNotIn("session_id", bundle_text)
 
     def test_partial_failed_call_with_nullable_evidence_is_published(self):
         call = self.row["proxy_metrics"]["calls"][0]
@@ -743,7 +553,7 @@ class RouterPublishTests(unittest.TestCase):
         self._write_ledger(partial=True)
 
         provenance = self.publish()
-        self.assertEqual(router_publish.verify_bundle(self.bundle), provenance)
+        self.assertEqual(gateway_publish.verify_bundle(self.bundle), provenance)
         public_row = json.loads((self.bundle / "results.jsonl").read_text())
         public_call = public_row["proxy_metrics"]["calls"][0]
         self.assertNotIn("timing", public_call)
@@ -753,39 +563,39 @@ class RouterPublishTests(unittest.TestCase):
         public_ledger = self.bundle / public_row["ledger"]["artifact"]
         request = json.loads(public_ledger.read_text().splitlines()[0])
         self.assertIsNone(request["usage"])
-        self.assertIsNone(request["router_metrics"])
+        self.assertIsNone(request["gateway_metrics"])
 
     def test_partial_call_shape_validation_remains_fail_closed(self):
         self.row["proxy_metrics"]["calls"][0]["generation"] = "unknown"
         self._write_results(self.row)
 
         with self.assertRaisesRegex(
-            router_publish.RouterPublishError,
+            gateway_publish.GatewayPublishError,
             "generation must be an object",
         ):
             self.publish()
 
     def test_publish_rejects_corrupt_jsonl_and_cell_ledger_mismatch(self):
         self.results_path.write_bytes(self.results_path.read_bytes()[:-1])
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "newline"):
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "newline"):
             self.publish()
 
         self._write_results(self.row)
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "bindings mismatch"):
-            router_publish.publish_bundle(
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "bindings mismatch"):
+            gateway_publish.publish_bundle(
                 self.results_path,
                 self.bundle,
                 experiment=self.experiment,
                 policy=self.policy,
                 catalog=self.catalog,
                 prices=self.prices,
-                ledgers={"router-cell-v2-wrong": self.source_ledger},
+                ledgers={"gateway-cell-v2-wrong": self.source_ledger},
             )
 
     def test_publish_rejects_unsealed_or_tampered_source_ledger(self):
         lines = self.source_ledger.read_text().splitlines()
         self.source_ledger.write_text(lines[0] + "\n", encoding="utf-8")
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "terminal seal"):
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "terminal seal"):
             self.publish()
 
         self._write_ledger()
@@ -797,13 +607,13 @@ class RouterPublishTests(unittest.TestCase):
             canonical_line(request) + canonical_line(seal),
             encoding="utf-8",
         )
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "tampered"):
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "tampered"):
             self.publish()
 
     def test_publish_rejects_source_ledger_not_bound_to_result(self):
         self.row["ledger_seal"]["root_hash"] = "0" * 64
         self._write_results(self.row)
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "does not match"):
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "does not match"):
             self.publish()
 
     def test_verify_rejects_tamper_extra_artifact_and_binding_mismatch(self):
@@ -815,11 +625,11 @@ class RouterPublishTests(unittest.TestCase):
                 b'"checker_score":0.0',
             )
         )
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "digest mismatch"):
-            router_publish.verify_bundle(self.bundle)
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "digest mismatch"):
+            gateway_publish.verify_bundle(self.bundle)
 
         results_path.write_text(canonical_line(
-            router_publish._decode_json(  # noqa: SLF001 - restore test fixture
+            gateway_publish._decode_json(  # noqa: SLF001 - restore test fixture
                 self.results_path.read_bytes().splitlines()[0], "fixture"
             )
         ), encoding="utf-8")
@@ -833,15 +643,15 @@ class RouterPublishTests(unittest.TestCase):
         self.bundle.rmdir()
         self.publish()
         (self.bundle / "unexpected.txt").write_text("extra", encoding="utf-8")
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "artifact set mismatch"):
-            router_publish.verify_bundle(self.bundle)
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "artifact set mismatch"):
+            gateway_publish.verify_bundle(self.bundle)
 
         (self.bundle / "unexpected.txt").unlink()
         price_path = self.bundle / "prices.json"
         price_raw = price_path.read_bytes()
         price_path.unlink()
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "artifact set mismatch"):
-            router_publish.verify_bundle(self.bundle)
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "artifact set mismatch"):
+            gateway_publish.verify_bundle(self.bundle)
         price_path.write_bytes(price_raw)
 
         public_rows = [
@@ -855,8 +665,8 @@ class RouterPublishTests(unittest.TestCase):
         provenance = json.loads(provenance_path.read_text())
         provenance["artifacts"]["results.jsonl"] = hashlib.sha256(raw).hexdigest()
         provenance_path.write_text(canonical_line(provenance), encoding="utf-8")
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "ledger binding mismatch"):
-            router_publish.verify_bundle(self.bundle)
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "ledger binding mismatch"):
+            gateway_publish.verify_bundle(self.bundle)
 
     def test_verify_rejects_corrupt_jsonl_even_when_artifact_hash_is_updated(self):
         self.publish()
@@ -867,12 +677,12 @@ class RouterPublishTests(unittest.TestCase):
         provenance = json.loads(provenance_path.read_text())
         provenance["artifacts"]["results.jsonl"] = hashlib.sha256(raw).hexdigest()
         provenance_path.write_text(canonical_line(provenance), encoding="utf-8")
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "newline"):
-            router_publish.verify_bundle(self.bundle)
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "newline"):
+            gateway_publish.verify_bundle(self.bundle)
 
     def test_secret_in_allowlisted_value_is_rejected_on_publish_and_verify(self):
         self._write_ledger(allowed_secret="sk-abcdefghijklmnopqrstuvwxyz")
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "credential pattern"):
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "credential pattern"):
             self.publish()
 
         self._write_ledger()
@@ -886,18 +696,18 @@ class RouterPublishTests(unittest.TestCase):
         provenance = json.loads(provenance_path.read_text())
         provenance["artifacts"]["catalog.json"] = hashlib.sha256(raw).hexdigest()
         provenance_path.write_text(canonical_line(provenance), encoding="utf-8")
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "email"):
-            router_publish.verify_bundle(self.bundle)
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "email"):
+            gateway_publish.verify_bundle(self.bundle)
 
     def test_snapshot_digest_mismatch_fails_closed(self):
         wrong = dataclasses.replace(self.identity, policy_digest=digest("wrong-policy"))
         row = dict(self.row)
         row["identity"] = wrong.as_dict()
-        row["run_id"] = results.make_router_run_id(wrong)
-        row["cell_id"] = results.make_router_cell_id(wrong)
+        row["run_id"] = results.make_gateway_run_id(wrong)
+        row["cell_id"] = results.make_gateway_cell_id(wrong)
         self._write_results(row)
-        with self.assertRaisesRegex(router_publish.RouterPublishError, "snapshot digests"):
-            router_publish.publish_bundle(
+        with self.assertRaisesRegex(gateway_publish.GatewayPublishError, "snapshot digests"):
+            gateway_publish.publish_bundle(
                 self.results_path,
                 self.bundle,
                 experiment=self.experiment,

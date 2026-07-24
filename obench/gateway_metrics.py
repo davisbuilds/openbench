@@ -14,7 +14,7 @@ import math
 from collections.abc import Mapping
 from typing import Any, Iterable
 
-from . import router_gateways
+from . import gateway_profiles
 
 
 _SEMANTIC_DELTA_KEYS = ("content", "reasoning_content", "reasoning", "refusal")
@@ -96,7 +96,6 @@ class OpenAIChatSSEParser:
         allowed_models: Iterable[str] = (),
         allowed_providers: Iterable[str] = (),
         fallback_enabled: bool = False,
-        router_mode: str | None = None,
         model_match: str = "exact_revision",
         gateway: str | None = None,
         response_headers: Mapping[str, str] | None = None,
@@ -116,17 +115,15 @@ class OpenAIChatSSEParser:
             if (provider := _identifier(value)) is not None
         )
         self._fallback_enabled = bool(fallback_enabled)
-        self._router_mode = router_mode
         self._model_match = model_match
         self._gateway = gateway or ("openrouter" if route_kind == "gateway" else None)
         self._gateway_evidence = (
-            router_gateways.GatewayEvidence(
+            gateway_profiles.GatewayEvidence(
                 gateway=self._gateway,
                 requested_model=self._requested_model or "",
                 requested_provider=self._requested_provider or "",
                 allowed_models=self._allowed_models,
                 allowed_providers=self._allowed_providers,
-                router_mode=self._router_mode,
                 model_match=model_match,
                 response_headers=response_headers or {},
             )
@@ -402,14 +399,14 @@ class OpenAIChatSSEParser:
             model = _identifier(metric_obj.get("model"))
             if model is not None:
                 if self._route_kind == "direct" and self._model_match == "rolling_alias":
-                    revision = router_gateways.concrete_model_revision(model)
+                    revision = gateway_profiles.concrete_model_revision(model)
                     if revision is not None:
                         self._direct_dated_model_ids.add(revision)
                         if len(self._direct_dated_model_ids) > 1:
                             self._direct_model_conflict = True
                     if (
                         self._requested_provider
-                        and not router_gateways.model_provider_matches(
+                        and not gateway_profiles.model_provider_matches(
                             model, self._requested_provider
                         )
                     ):
@@ -492,7 +489,7 @@ class OpenAIChatSSEParser:
                 reasons.append("missing_gateway_profile")
             else:
                 reasons.extend(self._gateway_evidence.route_reasons())
-            if self._fallback_enabled and self._router_mode != "auto":
+            if self._fallback_enabled:
                 reasons.append("fallback_enabled")
         else:
             if self._direct_model_conflict:
@@ -501,12 +498,12 @@ class OpenAIChatSSEParser:
                 self._requested_model
                 and isinstance(served_model, str)
                 and (
-                    not router_gateways.models_match(
+                    not gateway_profiles.models_match(
                         self._requested_model, served_model, self._model_match
                     )
                     or (
                         self._requested_provider
-                        and not router_gateways.model_provider_matches(
+                        and not gateway_profiles.model_provider_matches(
                             served_model, self._requested_provider
                         )
                     )
@@ -558,12 +555,12 @@ class OpenAIResponsesSSEParser(OpenAIChatSSEParser):
 
 
 def sse_parser(protocol: str, **kwargs: Any) -> OpenAIChatSSEParser:
-    """Construct the strict parser for a Router Bench wire protocol."""
+    """Construct the strict parser for a Gateway Bench wire protocol."""
     if protocol == "openai_chat":
         return OpenAIChatSSEParser(**kwargs)
     if protocol == "openai_responses":
         return OpenAIResponsesSSEParser(**kwargs)
-    raise ValueError(f"unsupported router protocol: {protocol}")
+    raise ValueError(f"unsupported gateway protocol: {protocol}")
 
 
 def parse_chat_sse(
@@ -577,7 +574,6 @@ def parse_chat_sse(
     allowed_models: Iterable[str] = (),
     allowed_providers: Iterable[str] = (),
     fallback_enabled: bool = False,
-    router_mode: str | None = None,
     model_match: str = "exact_revision",
     gateway: str | None = None,
     response_headers: Mapping[str, str] | None = None,
@@ -591,7 +587,6 @@ def parse_chat_sse(
         allowed_models=allowed_models,
         allowed_providers=allowed_providers,
         fallback_enabled=fallback_enabled,
-        router_mode=router_mode,
         model_match=model_match,
         gateway=gateway,
         response_headers=response_headers,
@@ -612,7 +607,6 @@ def parse_responses_sse(
     allowed_models: Iterable[str] = (),
     allowed_providers: Iterable[str] = (),
     fallback_enabled: bool = False,
-    router_mode: str | None = None,
     model_match: str = "exact_revision",
     gateway: str | None = None,
     response_headers: Mapping[str, str] | None = None,
@@ -626,7 +620,6 @@ def parse_responses_sse(
         allowed_models=allowed_models,
         allowed_providers=allowed_providers,
         fallback_enabled=fallback_enabled,
-        router_mode=router_mode,
         model_match=model_match,
         gateway=gateway,
         response_headers=response_headers,

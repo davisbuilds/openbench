@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lifecycle, durability, and compatibility tests for router proxy ledgers."""
+"""Lifecycle, durability, and compatibility tests for gateway proxy ledgers."""
 
 import hashlib
 import http.client
@@ -14,7 +14,7 @@ from unittest import mock
 from obench import proxy
 
 
-SECRET = "ROUTER_LEDGER_SECRET"
+SECRET = "GATEWAY_LEDGER_SECRET"
 
 
 class BlockingUpstream(ThreadingHTTPServer):
@@ -43,7 +43,7 @@ class BlockingHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
-class RouterProxyLedgerTests(unittest.TestCase):
+class GatewayProxyLedgerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="router_proxy_test_")
         self.upstream = BlockingUpstream(("127.0.0.1", 0), BlockingHandler)
@@ -95,7 +95,7 @@ class RouterProxyLedgerTests(unittest.TestCase):
             return [json.loads(line) for line in fh]
 
     def test_registered_cell_drains_seals_and_rejects_new_or_late_writes(self):
-        token = "router-cell"
+        token = "gateway-cell"
         self.server.register_cell(token)
         statuses = []
         request = threading.Thread(target=lambda: statuses.append(self._post(token)))

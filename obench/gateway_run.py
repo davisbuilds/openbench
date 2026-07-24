@@ -1,4 +1,4 @@
-"""Gateway Tax experiment runner.
+"""Gateway Bench experiment runner.
 
 Every routed cell gets a fresh task workspace, a sanitized adapter subprocess,
 and a lifecycle-managed proxy ledger.  The ledger is sealed before the checker
@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 from datetime import datetime, timezone
 
-from . import proxy, results, router_gateways, router_spec
+from . import proxy, results, gateway_profiles, gateway_spec
 from .adapters import pi
 from .publish import task_content_digest
 from .run import read_instruction, run_checker
@@ -35,8 +35,8 @@ from .workspace import WorkspaceError, materialize_workspace
 
 
 CHECKER_TIMEOUT_S = 120
-FROZEN_PRICES_ENV = "OPENBENCH_ROUTER_FROZEN_PRICES_JSON"
-ADAPTERS_DIR_ENV = "OPENBENCH_ROUTER_ADAPTERS_DIR"
+FROZEN_PRICES_ENV = "OPENBENCH_GATEWAY_FROZEN_PRICES_JSON"
+ADAPTERS_DIR_ENV = "OPENBENCH_GATEWAY_ADAPTERS_DIR"
 LOCAL_LANE = "local-exploratory-route-isolation"
 DOCKER_LANE = "docker-exploratory-route-isolation"
 _RESULT_SENTINEL = "__BENCH_RESULT__"
@@ -48,7 +48,7 @@ _RFC3339_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 )
 _POLICY = {
-    "track": "gateway_tax",
+    "track": gateway_spec.TRACK,
     "fallback": False,
     "retries": 0,
     "cache": False,
@@ -57,7 +57,7 @@ _POLICY = {
 }
 
 
-class RouterRunError(RuntimeError):
+class GatewayRunError(RuntimeError):
     """Raised when an experiment cannot be run without ambiguous evidence."""
 
 
@@ -111,7 +111,7 @@ def _tree_digest(root: Path) -> str:
     for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
         relative = path.relative_to(root).as_posix()
         if path.is_symlink():
-            raise RouterRunError(f"workspace contains a symlink: {relative}")
+            raise GatewayRunError(f"workspace contains a symlink: {relative}")
         if path.is_dir():
             continue
         encoded = relative.encode("utf-8")
@@ -129,30 +129,30 @@ def _task_path(tasks_dir: str | os.PathLike[str], task: str) -> Path:
     try:
         path.relative_to(root)
     except ValueError as exc:
-        raise RouterRunError(f"task escapes --tasks-dir: {task!r}") from exc
+        raise GatewayRunError(f"task escapes --tasks-dir: {task!r}") from exc
     if not path.is_dir():
-        raise RouterRunError(f"task directory does not exist: {path}")
+        raise GatewayRunError(f"task directory does not exist: {path}")
     if (path / "DROPPED.md").exists():
-        raise RouterRunError(f"task {task!r} is dropped")
+        raise GatewayRunError(f"task {task!r} is dropped")
     for name in ("instruction.md", "checker.sh"):
         if not (path / name).is_file():
-            raise RouterRunError(f"task {task!r} is missing {name}")
+            raise GatewayRunError(f"task {task!r} is missing {name}")
     return path
 
 
 def inspect_tasks(
-    experiment: router_spec.RouterExperiment,
+    experiment: gateway_spec.GatewayExperiment,
     tasks_dir: str | os.PathLike[str],
 ) -> dict[str, TaskProvenance]:
     """Validate task inputs and freeze provenance before scheduling."""
     inspected = {}
     for task in experiment.tasks:
         path = _task_path(tasks_dir, task)
-        with tempfile.TemporaryDirectory(prefix="obench_router_probe_") as temp:
+        with tempfile.TemporaryDirectory(prefix="obench_gateway_probe_") as temp:
             try:
                 materialize_workspace(str(path), temp)
             except WorkspaceError as exc:
-                raise RouterRunError(
+                raise GatewayRunError(
                     f"task {task!r} workspace materialization failed: {exc}"
                 ) from exc
             workspace_sha = _tree_digest(Path(temp))
@@ -166,7 +166,7 @@ def inspect_tasks(
     return inspected
 
 
-def build_schedule(experiment: router_spec.RouterExperiment) -> tuple[ScheduleBlock, ...]:
+def build_schedule(experiment: gateway_spec.GatewayExperiment) -> tuple[ScheduleBlock, ...]:
     """Return deterministic complete blocks with cyclic arm counterbalancing."""
     arm_ids = [arm.arm_id for arm in experiment.arms]
     rng = random.Random(experiment.schedule_seed)
@@ -188,7 +188,7 @@ def build_schedule(experiment: router_spec.RouterExperiment) -> tuple[ScheduleBl
 
 
 def _active_schedule(
-    experiment: router_spec.RouterExperiment,
+    experiment: gateway_spec.GatewayExperiment,
     schedule: Sequence[ScheduleBlock],
     now: datetime | None = None,
 ) -> tuple[ScheduleBlock, ...]:
@@ -212,14 +212,14 @@ def _load_prices(environ: Mapping[str, str]) -> tuple[dict[str, Price], dict[str
     try:
         decoded = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise RouterRunError(f"{FROZEN_PRICES_ENV} is not valid JSON: {exc}") from exc
+        raise GatewayRunError(f"{FROZEN_PRICES_ENV} is not valid JSON: {exc}") from exc
     if not isinstance(decoded, dict) or not decoded:
-        raise RouterRunError(f"{FROZEN_PRICES_ENV} must be a non-empty JSON object")
+        raise GatewayRunError(f"{FROZEN_PRICES_ENV} must be a non-empty JSON object")
     prices = {}
     canonical = []
     for key, item in sorted(decoded.items()):
         if not isinstance(key, str) or "/" not in key or not isinstance(item, dict):
-            raise RouterRunError(
+            raise GatewayRunError(
                 f"{FROZEN_PRICES_ENV} entries must be provider/model objects"
             )
         try:
@@ -227,7 +227,7 @@ def _load_prices(environ: Mapping[str, str]) -> tuple[dict[str, Price], dict[str
             output_rate = Decimal(str(item["output_per_million"]))
             effective_at = item["effective_at"]
         except (KeyError, InvalidOperation) as exc:
-            raise RouterRunError(f"invalid frozen price for {key!r}") from exc
+            raise GatewayRunError(f"invalid frozen price for {key!r}") from exc
         if (
             not input_rate.is_finite()
             or not output_rate.is_finite()
@@ -236,7 +236,7 @@ def _load_prices(environ: Mapping[str, str]) -> tuple[dict[str, Price], dict[str
             or not isinstance(effective_at, str)
             or not effective_at
         ):
-            raise RouterRunError(f"invalid frozen price for {key!r}")
+            raise GatewayRunError(f"invalid frozen price for {key!r}")
         prices[key] = Price(input_rate, output_rate, effective_at)
         canonical.append({
             "model": key,
@@ -260,23 +260,15 @@ def load_frozen_prices(
 
 
 def _missing_price_models(
-    experiment: router_spec.RouterExperiment,
+    experiment: gateway_spec.GatewayExperiment,
     prices: Mapping[str, Price],
 ) -> list[str]:
-    required = (
-        {
-            model
-            for arm in experiment.arms
-            for model in arm.allowed_models
-        }
-        if experiment.track == "model_router"
-        else {arm.canonical_model for arm in experiment.arms}
-    )
+    required = {arm.canonical_model for arm in experiment.arms}
     return sorted(required - set(prices))
 
 
 def _price_snapshot_path(results_path: Path) -> Path:
-    return results_path.parent / f".{results_path.stem}.router-prices.json"
+    return results_path.parent / f".{results_path.stem}.gateway-prices.json"
 
 
 def persist_price_snapshot(results_path: Path, snapshot: Mapping[str, Any]) -> Path:
@@ -284,7 +276,7 @@ def persist_price_snapshot(results_path: Path, snapshot: Mapping[str, Any]) -> P
     raw = results.canonical_json(snapshot) + "\n"
     if path.exists():
         if path.read_text(encoding="utf-8") != raw:
-            raise RouterRunError("persisted frozen price snapshot does not match this run")
+            raise GatewayRunError("persisted frozen price snapshot does not match this run")
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8") as handle:
@@ -304,34 +296,30 @@ def load_persisted_price_snapshot(results_path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise RouterRunError(f"cannot load persisted frozen prices from {path}: {exc}") from exc
+        raise GatewayRunError(f"cannot load persisted frozen prices from {path}: {exc}") from exc
     if not isinstance(value, dict):
-        raise RouterRunError(f"persisted frozen prices in {path} are malformed")
+        raise GatewayRunError(f"persisted frozen prices in {path} are malformed")
     return value
 
 
 def policy_snapshot(
-    experiment: router_spec.RouterExperiment | None = None,
+    experiment: gateway_spec.GatewayExperiment | None = None,
 ) -> dict[str, Any]:
     policy = dict(_POLICY)
     if experiment is not None:
         policy.update({
             "track": experiment.track,
             "model_match": experiment.model_match,
-            "fallback": (
-                "in_pool_router_attempts"
-                if experiment.track == "model_router"
-                else False
-            ),
+            "fallback": False,
         })
     return policy
 
 
-def catalog_snapshot(experiment: router_spec.RouterExperiment) -> dict[str, Any]:
+def catalog_snapshot(experiment: gateway_spec.GatewayExperiment) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "catalog_id": experiment.digest,
-        "name": "frozen-router-arm-catalog",
+        "name": "frozen-gateway-arm-catalog",
         "entries": [
             {
                 "model": arm.canonical_model,
@@ -344,7 +332,7 @@ def catalog_snapshot(experiment: router_spec.RouterExperiment) -> dict[str, Any]
 
 
 def _comparison_digests(
-    experiment: router_spec.RouterExperiment,
+    experiment: gateway_spec.GatewayExperiment,
     schedule: Sequence[ScheduleBlock],
     price_snapshot: Mapping[str, Any],
 ) -> dict[str, str]:
@@ -370,8 +358,8 @@ def _lane(exec_mode: str) -> str:
 
 def _identity(
     *,
-    experiment: router_spec.RouterExperiment,
-    arm: router_spec.Arm,
+    experiment: gateway_spec.GatewayExperiment,
+    arm: gateway_spec.Arm,
     task: TaskProvenance,
     block: ScheduleBlock,
     attempt: int,
@@ -387,8 +375,8 @@ def _identity(
         "repetition": block.repetition,
         "attempt": attempt,
     }
-    block_id = "router-block-" + results.canonical_digest(block_data)
-    return results.CellIdentity.for_router(
+    block_id = "gateway-block-" + results.canonical_digest(block_data)
+    return results.CellIdentity.for_gateway(
         track=experiment.track,
         experiment_id=experiment.experiment_id,
         experiment_digest=experiment.digest,
@@ -419,33 +407,33 @@ def _identity(
 
 def _existing_attempts(
     state: results.ResumeState,
-    experiment: router_spec.RouterExperiment,
+    experiment: gateway_spec.GatewayExperiment,
     expected_arms: set[str],
 ) -> dict[tuple[str, str, int], dict[int, list[dict[str, Any]]]]:
     attempts: dict[tuple[str, str, int], dict[int, list[dict[str, Any]]]] = defaultdict(
         lambda: defaultdict(list)
     )
     for row in state.rows:
-        identity = results.router_identity_from_row(row)
+        identity = results.gateway_identity_from_row(row)
         if identity.experiment_digest != experiment.digest:
-            raise RouterRunError(
-                "results file contains a different Router Bench experiment"
+            raise GatewayRunError(
+                "results file contains a different Gateway Bench experiment"
             )
         coordinate = (identity.task, identity.window_id, identity.repetition)
         attempts[coordinate][identity.block_attempt].append(row)
     for coordinate, by_attempt in attempts.items():
         numbers = sorted(by_attempt)
         if numbers != list(range(numbers[-1] + 1)):
-            raise RouterRunError(
+            raise GatewayRunError(
                 f"results have non-contiguous block attempts for {coordinate}"
             )
         for attempt, rows_for_attempt in by_attempt.items():
             arm_ids = {
-                results.router_identity_from_row(row).arm_id
+                results.gateway_identity_from_row(row).arm_id
                 for row in rows_for_attempt
             }
             if not arm_ids <= expected_arms:
-                raise RouterRunError(
+                raise GatewayRunError(
                     f"results contain unknown arms for {coordinate} attempt {attempt}"
                 )
     return attempts
@@ -454,10 +442,10 @@ def _existing_attempts(
 def _validate_resume_identities(
     state: results.ResumeState,
     *,
-    experiment: router_spec.RouterExperiment,
+    experiment: gateway_spec.GatewayExperiment,
     schedule: Sequence[ScheduleBlock],
     tasks: Mapping[str, TaskProvenance],
-    arms: Mapping[str, router_spec.Arm],
+    arms: Mapping[str, gateway_spec.Arm],
     digests: Mapping[str, str],
     harness_version: str,
     exec_mode: str,
@@ -465,7 +453,7 @@ def _validate_resume_identities(
 ) -> None:
     blocks = {block.coordinate: block for block in schedule}
     for row in state.rows:
-        actual = results.router_identity_from_row(row)
+        actual = results.gateway_identity_from_row(row)
         coordinate = (actual.task, actual.window_id, actual.repetition)
         try:
             expected = _identity(
@@ -480,11 +468,11 @@ def _validate_resume_identities(
                 image_digest=image_digest,
             )
         except KeyError as exc:
-            raise RouterRunError(
+            raise GatewayRunError(
                 f"results contain an unscheduled cell: {coordinate} arm={actual.arm_id}"
             ) from exc
         if actual != expected:
-            raise RouterRunError(
+            raise GatewayRunError(
                 f"results identity does not match the current run for "
                 f"{coordinate} arm={actual.arm_id} attempt={actual.block_attempt}"
             )
@@ -494,7 +482,7 @@ def _attempt_complete_and_valid(
     rows_for_attempt: Sequence[Mapping[str, Any]], expected_arms: set[str]
 ) -> bool:
     if {
-        results.router_identity_from_row(row).arm_id for row in rows_for_attempt
+        results.gateway_identity_from_row(row).arm_id for row in rows_for_attempt
     } != expected_arms:
         return False
     return all(
@@ -552,11 +540,11 @@ def _parse_entry_result(stdout: str) -> dict[str, Any]:
             try:
                 value = json.loads(line[len(_RESULT_SENTINEL):].strip())
             except json.JSONDecodeError as exc:
-                raise RouterRunError("routed entry emitted invalid result JSON") from exc
+                raise GatewayRunError("routed entry emitted invalid result JSON") from exc
             if not isinstance(value, dict):
-                raise RouterRunError("routed entry result must be an object")
+                raise GatewayRunError("routed entry result must be an object")
             return value
-    raise RouterRunError("routed entry emitted no result sentinel")
+    raise GatewayRunError("routed entry emitted no result sentinel")
 
 
 def _invoke_local(
@@ -604,7 +592,7 @@ def _invoke_local(
             "entry_timed_out": True,
         }
     if proc.returncode != 0:
-        raise RouterRunError(
+        raise GatewayRunError(
             f"routed entry exited {proc.returncode}: {(stderr or stdout)[-1000:]}"
         )
     return _parse_entry_result(stdout)
@@ -618,9 +606,9 @@ def _read_sealed_ledger(seal: proxy.LedgerSeal, arm_digest: str) -> list[dict[st
             if line.strip()
         ]
     except (OSError, json.JSONDecodeError) as exc:
-        raise RouterRunError(f"cannot read sealed proxy ledger: {exc}") from exc
+        raise GatewayRunError(f"cannot read sealed proxy ledger: {exc}") from exc
     if not rows or rows[-1].get("record_type") != "ledger_seal":
-        raise RouterRunError("proxy ledger has no terminal seal")
+        raise GatewayRunError("proxy ledger has no terminal seal")
     terminal = rows[-1]
     if (
         terminal.get("record_count") != seal.record_count
@@ -628,7 +616,7 @@ def _read_sealed_ledger(seal: proxy.LedgerSeal, arm_digest: str) -> list[dict[st
         or terminal.get("root_hash") != seal.root_hash
         or len(rows) != seal.record_count + 1
     ):
-        raise RouterRunError("proxy ledger terminal seal does not match")
+        raise GatewayRunError("proxy ledger terminal seal does not match")
     previous = _EMPTY_HASH
     for sequence, row in enumerate(rows[:-1], 1):
         record = dict(row)
@@ -637,24 +625,24 @@ def _read_sealed_ledger(seal: proxy.LedgerSeal, arm_digest: str) -> list[dict[st
             record.get("record_type") != "request"
             or record.get("sequence") != sequence
             or record.get("previous_hash") != previous
-            or row.get("router_arm", {}).get("arm_digest") != arm_digest
+            or row.get("serving_arm", {}).get("arm_digest") != arm_digest
         ):
-            raise RouterRunError("proxy ledger chain or arm binding is invalid")
+            raise GatewayRunError("proxy ledger chain or arm binding is invalid")
         expected = _digest_bytes(
             json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
         )
         if record_hash != expected:
-            raise RouterRunError("proxy ledger record hash is invalid")
+            raise GatewayRunError("proxy ledger record hash is invalid")
         previous = record_hash
     if previous != seal.root_hash:
-        raise RouterRunError("proxy ledger root hash is invalid")
+        raise GatewayRunError("proxy ledger root hash is invalid")
     return rows[:-1]
 
 
 def _price_call(
     metrics: Mapping[str, Any],
     prices: Mapping[str, Price],
-    plan: router_spec.RoutePlan,
+    plan: gateway_spec.RoutePlan,
     observed_at: Any,
 ) -> tuple[dict[str, Any], Decimal | None]:
     evidence = {}
@@ -666,24 +654,15 @@ def _price_call(
         )
         timestamp = _observed_timestamp(observed_at)
         if reported_amount is not None and timestamp is not None:
-            evidence["router_reported"] = {
+            evidence["gateway_reported"] = {
                 "amount_usd": reported_amount,
                 "currency": "USD",
                 "effective_at": timestamp,
             }
 
     usage = metrics.get("usage") if isinstance(metrics.get("usage"), dict) else {}
-    route = metrics.get("route")
-    observed_model = (
-        route.get("served_model")
-        if plan.track == "model_router" and isinstance(route, Mapping)
-        else plan.canonical_model
-    )
-    price = prices.get(observed_model) if isinstance(observed_model, str) else None
+    price = prices.get(plan.canonical_model)
     if price is None:
-        reported = evidence.get("router_reported")
-        if plan.track == "model_router" and isinstance(reported, Mapping):
-            return evidence, Decimal(str(reported["amount_usd"]))
         return evidence, None
     input_tokens = usage.get("input_tokens")
     output_tokens = usage.get("output_tokens")
@@ -693,9 +672,6 @@ def _price_call(
         or not isinstance(output_tokens, int)
         or isinstance(output_tokens, bool)
     ):
-        reported = evidence.get("router_reported")
-        if plan.track == "model_router" and isinstance(reported, Mapping):
-            return evidence, Decimal(str(reported["amount_usd"]))
         return evidence, None
     amount = (
         Decimal(input_tokens) * price.input_per_million
@@ -706,10 +682,6 @@ def _price_call(
         "currency": "USD",
         "effective_at": price.effective_at,
     }
-    if plan.track == "model_router":
-        reported = evidence.get("router_reported")
-        if isinstance(reported, Mapping):
-            return evidence, Decimal(str(reported["amount_usd"]))
     return evidence, amount
 
 
@@ -768,7 +740,7 @@ def _cache_accounting(metrics: Mapping[str, Any]) -> dict[str, int | None]:
     }
 
 
-def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> list[str]:
+def _route_reasons(metrics: Mapping[str, Any], plan: gateway_spec.RoutePlan) -> list[str]:
     route = metrics.get("route")
     stream = metrics.get("stream")
     if not isinstance(route, Mapping):
@@ -790,12 +762,8 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
     served_model = route.get("served_model")
     served_model_matches = (
         isinstance(served_model, str)
-        and (
-            served_model in plan.allowed_models
-            if plan.router_mode == "auto"
-            else router_gateways.models_match(
-                plan.requested_model, served_model, plan.model_match
-            )
+        and gateway_profiles.models_match(
+            plan.requested_model, served_model, plan.model_match
         )
     )
     if not served_model_matches:
@@ -804,16 +772,12 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
     if plan.route_kind == "gateway":
         if not isinstance(provider, str):
             reasons.append("provider_conflict")
-        elif plan.router_mode == "auto":
-            allowed = {item.casefold() for item in plan.allowed_providers}
-            if provider.casefold() not in allowed:
-                reasons.append("provider_conflict")
         elif provider.casefold() != plan.requested_provider.casefold():
             reasons.append("provider_conflict")
     else:
         if (
             isinstance(served_model, str)
-            and not router_gateways.model_provider_matches(
+            and not gateway_profiles.model_provider_matches(
                 served_model, plan.requested_provider
             )
         ):
@@ -841,26 +805,15 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
                     reasons.append("malformed_attempt")
                     continue
                 attempt_provider = str(attempt.get("provider", "")).casefold()
-                allowed_providers = {
-                    item.casefold() for item in plan.allowed_providers
-                }
-                if (
-                    attempt_provider not in allowed_providers
-                    if plan.router_mode == "auto"
-                    else attempt_provider != plan.requested_provider.casefold()
-                ):
+                if attempt_provider != plan.requested_provider.casefold():
                     reasons.append("attempt_provider_conflict")
                 attempt_model = attempt.get("model")
                 attempt_model_matches = (
                     isinstance(attempt_model, str)
-                    and (
-                        attempt_model in plan.allowed_models
-                        if plan.router_mode == "auto"
-                        else router_gateways.models_match(
-                            plan.requested_model,
-                            attempt_model,
-                            plan.model_match,
-                        )
+                    and gateway_profiles.models_match(
+                        plan.requested_model,
+                        attempt_model,
+                        plan.model_match,
                     )
                 )
                 if not attempt_model_matches:
@@ -871,8 +824,8 @@ def _route_reasons(metrics: Mapping[str, Any], plan: router_spec.RoutePlan) -> l
 def _proxy_evidence(
     ledger_rows: Sequence[Mapping[str, Any]],
     prices: Mapping[str, Price],
-    budget: router_spec.Budget,
-    plan: router_spec.RoutePlan,
+    budget: gateway_spec.Budget,
+    plan: gateway_spec.RoutePlan,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str | None]:
     calls = []
     reasons = []
@@ -898,12 +851,6 @@ def _proxy_evidence(
             })
             continue
         if isinstance(status, int) and 400 <= status <= 599:
-            if (
-                plan.track == "model_router"
-                and 400 <= status < 500
-                and status not in {401, 403, 407, 429}
-            ):
-                reasons.append("upstream_http_error")
             if status in {401, 403, 407}:
                 auth_failure = True
             calls.append({
@@ -917,9 +864,9 @@ def _proxy_evidence(
                 "costs": None,
             })
             continue
-        metrics = row.get("router_metrics")
+        metrics = row.get("gateway_metrics")
         if not isinstance(metrics, dict):
-            reasons.append("missing_router_metrics")
+            reasons.append("missing_gateway_metrics")
             calls.append({
                 "timing": None,
                 "generation": None,
@@ -944,12 +891,6 @@ def _proxy_evidence(
         normalized_route = metrics.get("route")
         if isinstance(normalized_route, dict):
             normalized_route = dict(normalized_route)
-            if plan.track == "model_router":
-                coverage = metrics.get("coverage")
-                normalized_route["attempts_present"] = bool(
-                    isinstance(coverage, Mapping)
-                    and coverage.get("attempt_evidence") is True
-                )
             if plan.route_kind == "direct" and not normalized_route.get("provider"):
                 normalized_route["provider"] = plan.requested_provider
         calls.append(
@@ -984,7 +925,7 @@ def _is_max_calls_rejection(row: Mapping[str, Any]) -> bool:
 
 
 def _terminal_status(row: Mapping[str, Any]) -> str | None:
-    metrics = row.get("router_metrics")
+    metrics = row.get("gateway_metrics")
     if not isinstance(metrics, Mapping):
         return None
     stream = metrics.get("stream")
@@ -1023,10 +964,10 @@ def _append_row(path: Path, row: Mapping[str, Any]) -> None:
 
 def _run_cell(
     *,
-    experiment: router_spec.RouterExperiment,
-    arm: router_spec.Arm,
-    plan: router_spec.RoutePlan,
-    secret_plan: router_spec.SecretPlan,
+    experiment: gateway_spec.GatewayExperiment,
+    arm: gateway_spec.Arm,
+    plan: gateway_spec.RoutePlan,
+    secret_plan: gateway_spec.SecretPlan,
     task: TaskProvenance,
     block: ScheduleBlock,
     attempt: int,
@@ -1038,7 +979,7 @@ def _run_cell(
     adapters_dir: Path,
 ) -> dict[str, Any]:
     token = "cell-" + hashlib.sha256(
-        f"{results.make_router_cell_id(identity)}:{time.time_ns()}".encode()
+        f"{results.make_gateway_cell_id(identity)}:{time.time_ns()}".encode()
     ).hexdigest()[:32]
     server.register_cell(token, max_calls=experiment.budget.max_calls)
     server.register_route(token, plan, secret_plan)
@@ -1054,7 +995,7 @@ def _run_cell(
     checker_score = 0.0
     checker_stdout = ""
     checker_stderr = ""
-    with tempfile.TemporaryDirectory(prefix="obench_router_cell_") as temp:
+    with tempfile.TemporaryDirectory(prefix="obench_gateway_cell_") as temp:
         cell_root = Path(temp)
         workdir = cell_root / "workspace"
         workdir.mkdir()
@@ -1066,8 +1007,8 @@ def _run_cell(
         try:
             materialize_workspace(str(task.path), str(workdir))
             if _tree_digest(workdir) != task.workspace_source_sha:
-                raise RouterRunError("materialized workspace differs from frozen provenance")
-        except (WorkspaceError, RouterRunError) as exc:
+                raise GatewayRunError("materialized workspace differs from frozen provenance")
+        except (WorkspaceError, GatewayRunError) as exc:
             infrastructure_reason = "workspace_materialization"
             adapter_result = {"completed": False, "error": str(exc)}
         else:
@@ -1156,13 +1097,12 @@ def _run_cell(
     expected_arm_ids = [item.arm_id for item in experiment.arms]
     row = {
         "schema_version": results.CURRENT_SCHEMA_VERSION,
-        "benchmark": results.ROUTER_BENCHMARK,
-        "run_id": results.make_router_run_id(identity),
-        "cell_id": results.make_router_cell_id(identity),
+        "benchmark": results.GATEWAY_BENCHMARK,
+        "run_id": results.make_gateway_run_id(identity),
+        "cell_id": results.make_gateway_cell_id(identity),
         "identity": identity.as_dict(),
         "expected_arm_ids": expected_arm_ids,
         "arm_role": arm.route_kind,
-        "router_mode": arm.router_mode,
         "baseline": arm.baseline,
         "model_match": experiment.model_match,
         "result": {
@@ -1210,8 +1150,8 @@ def validate_experiment(
     experiment_path: str | os.PathLike[str],
     *,
     tasks_dir: str | os.PathLike[str],
-) -> tuple[router_spec.RouterExperiment, dict[str, TaskProvenance]]:
-    experiment = router_spec.load_experiment(experiment_path)
+) -> tuple[gateway_spec.GatewayExperiment, dict[str, TaskProvenance]]:
+    experiment = gateway_spec.load_experiment(experiment_path)
     tasks = inspect_tasks(experiment, tasks_dir)
     build_schedule(experiment)
     return experiment, tasks
@@ -1226,14 +1166,14 @@ def doctor_experiment(
     environ = os.environ if environ is None else environ
     experiment, tasks = validate_experiment(experiment_path, tasks_dir=tasks_dir)
     admitted = {arm.auth_env for arm in experiment.arms}
-    router_spec.compile_route_plans(
+    gateway_spec.compile_route_plans(
         experiment, environ=environ, admitted_auth_envs=admitted
     )
     prices, price_snapshot = _load_prices(environ)
     missing_prices = _missing_price_models(experiment, prices)
     version = pi.version()
     if not version:
-        raise RouterRunError("Pi CLI is unavailable or did not report a version")
+        raise GatewayRunError("Pi CLI is unavailable or did not report a version")
     return {
         "experiment_id": experiment.experiment_id,
         "experiment_digest": experiment.digest,
@@ -1257,35 +1197,35 @@ def run_experiment(
     environ: Mapping[str, str] | None = None,
     adapters_dir: str | os.PathLike[str] | None = None,
 ) -> RunSummary:
-    """Run or safely resume one Gateway Tax experiment."""
+    """Run or safely resume one Gateway Bench experiment."""
     environ = os.environ if environ is None else environ
     experiment, tasks = validate_experiment(experiment_path, tasks_dir=tasks_dir)
     exec_mode = exec_mode or experiment.execution_lane
     if exec_mode not in {"local", "docker"}:
-        raise RouterRunError("exec_mode must be 'local' or 'docker'")
+        raise GatewayRunError("exec_mode must be 'local' or 'docker'")
     if exec_mode == "docker":
-        raise RouterRunError(
-            "Docker Gateway Tax execution is exploratory and unsupported in this MVP"
+        raise GatewayRunError(
+            "Docker Gateway Bench execution is exploratory and unsupported in this MVP"
         )
     admitted = {arm.auth_env for arm in experiment.arms}
-    plans, secret_plan = router_spec.compile_route_plans(
+    plans, secret_plan = gateway_spec.compile_route_plans(
         experiment, environ=environ, admitted_auth_envs=admitted
     )
     prices, price_snapshot = _load_prices(environ)
     if not prices:
-        raise RouterRunError(
+        raise GatewayRunError(
             f"USD cap cannot be enforced without {FROZEN_PRICES_ENV}; refusing to run"
         )
     missing_prices = _missing_price_models(experiment, prices)
     if missing_prices:
-        raise RouterRunError(
+        raise GatewayRunError(
             "USD cap cannot be enforced; frozen prices are missing: "
             + ", ".join(missing_prices)
         )
     full_schedule = build_schedule(experiment)
     schedule = _active_schedule(experiment, full_schedule)
     if not schedule:
-        raise RouterRunError("no experiment window is currently active")
+        raise GatewayRunError("no experiment window is currently active")
     digests = _comparison_digests(experiment, full_schedule, price_snapshot)
     path = Path(results_path).resolve()
     persist_price_snapshot(path, price_snapshot)
@@ -1314,9 +1254,9 @@ def run_experiment(
         .resolve()
     )
     if not (adapters / "pi.py").is_file():
-        raise RouterRunError(f"Pi adapter not found in {adapters}")
+        raise GatewayRunError(f"Pi adapter not found in {adapters}")
 
-    ledger_dir = path.parent / f".{path.stem}.router-ledgers"
+    ledger_dir = path.parent / f".{path.stem}.gateway-ledgers"
     server, thread = proxy.start_in_thread(
         "127.0.0.1",
         0,
@@ -1375,7 +1315,7 @@ def run_experiment(
             if _attempt_complete_and_valid(block_rows, expected_arms):
                 blocks_completed += 1
             else:
-                raise RouterRunError(
+                raise GatewayRunError(
                     f"block {block.coordinate} attempt {attempt} is invalid; "
                     "paid replacement requires an explicit rerun"
                 )

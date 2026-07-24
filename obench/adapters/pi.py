@@ -37,10 +37,10 @@ from urllib.parse import urlsplit
 
 try:
     from obench.auth_persist import try_persist_auth_file
-    from obench import router_spec as _router_spec
+    from obench import gateway_spec as _gateway_spec
 except ImportError:  # file-path / Docker mount layout
     from auth_persist import try_persist_auth_file
-    import router_spec as _router_spec
+    import gateway_spec as _gateway_spec
 
 NAME = "pi"
 ADAPTER_API_VERSION = 2
@@ -91,7 +91,7 @@ _ROUTE_PLAN_FIELDS = {
     "route_kind", "endpoint", "protocol", "canonical_model", "requested_model",
     "requested_provider", "allowed_models", "allowed_providers",
     "fallback_enabled", "retry_count", "cache_enabled", "auth_env",
-    "sampling", "private_router", "private_host_allowlist",
+    "sampling", "allow_private_endpoint", "private_host_allowlist",
     "private_cidr_allowlist",
 }
 _SAMPLING_FIELDS = {"temperature", "top_p", "seed"}
@@ -326,7 +326,7 @@ def _pi_provider_ext(spec):
 
 
 def _route_error(message):
-    raise _router_spec.RouterSpecError(f"invalid sanitized RoutePlan: {message}")
+    raise _gateway_spec.GatewaySpecError(f"invalid sanitized RoutePlan: {message}")
 
 
 def _strict_keys(value, expected, path):
@@ -389,20 +389,20 @@ def _load_route_plan(route_plan_path):
         if path.stat().st_size > 1024 * 1024:
             _route_error("file exceeds 1 MiB")
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except _router_spec.RouterSpecError:
+    except _gateway_spec.GatewaySpecError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         _route_error(f"cannot load {path}: {exc}")
 
     data = _strict_keys(raw, _ROUTE_PLAN_FIELDS, "route plan")
     schema_version = _route_int(data["schema_version"], "schema_version", 1)
-    if schema_version != _router_spec.SCHEMA_VERSION:
-        _route_error(f"schema_version must be {_router_spec.SCHEMA_VERSION}")
+    if schema_version != _gateway_spec.SCHEMA_VERSION:
+        _route_error(f"schema_version must be {_gateway_spec.SCHEMA_VERSION}")
     protocol = _route_string(data["protocol"], "protocol")
-    if protocol not in _router_spec.PROTOCOLS:
+    if protocol not in _gateway_spec.PROTOCOLS:
         _route_error(
             "protocol must be one of: "
-            + ", ".join(sorted(_router_spec.PROTOCOLS))
+            + ", ".join(sorted(_gateway_spec.PROTOCOLS))
         )
     route_kind = _route_string(data["route_kind"], "route_kind")
     if route_kind not in {"direct", "gateway"}:
@@ -419,51 +419,43 @@ def _load_route_plan(route_plan_path):
     fallback_enabled = _route_bool(data["fallback_enabled"], "fallback_enabled")
     retry_count = _route_int(data["retry_count"], "retry_count")
     cache_enabled = _route_bool(data["cache_enabled"], "cache_enabled")
-    # Adapter plans omit track/router_mode; validated auto arms are the only
-    # plans allowed to enable fallback.
     if fallback_enabled:
-        if requested_model != "openrouter/auto-beta":
-            _route_error(
-                "fallback-enabled auto routes must request 'openrouter/auto-beta'")
-        if requested_provider != "openrouter":
-            _route_error(
-                "fallback-enabled auto routes must request provider 'openrouter'")
-    else:
-        if requested_model not in allowed_models:
-            _route_error("allowed_models must contain requested_model")
-        if requested_provider not in allowed_providers:
-            _route_error("allowed_providers must contain requested_provider")
+        _route_error("fallback must be disabled")
+    if requested_model not in allowed_models:
+        _route_error("allowed_models must contain requested_model")
+    if requested_provider not in allowed_providers:
+        _route_error("allowed_providers must contain requested_provider")
     if retry_count != 0 or cache_enabled:
         _route_error("retries and cache must be disabled")
 
     sampling_data = _strict_keys(data["sampling"], _SAMPLING_FIELDS, "sampling")
-    sampling = _router_spec.Sampling(
+    sampling = _gateway_spec.Sampling(
         temperature=_route_number(
             sampling_data["temperature"], "sampling.temperature", 0.0, 2.0),
         top_p=_route_number(sampling_data["top_p"], "sampling.top_p", 0.0, 1.0),
         seed=_route_int(sampling_data["seed"], "sampling.seed"),
     )
 
-    private_router = _route_bool(data["private_router"], "private_router")
+    allow_private_endpoint = _route_bool(data["allow_private_endpoint"], "allow_private_endpoint")
     hosts_raw = data["private_host_allowlist"]
     cidrs_raw = data["private_cidr_allowlist"]
     try:
-        hosts, cidrs = _router_spec._parse_allowlists(  # noqa: SLF001
+        hosts, cidrs = _gateway_spec._parse_allowlists(  # noqa: SLF001
             {
                 "private_host_allowlist": hosts_raw,
                 "private_cidr_allowlist": cidrs_raw,
             },
-            private_router,
+            allow_private_endpoint,
         )
-        endpoint = _router_spec._validate_endpoint(  # noqa: SLF001
-            data["endpoint"], "endpoint", private_router, hosts, cidrs)
-    except _router_spec.RouterSpecError as exc:
+        endpoint = _gateway_spec._validate_endpoint(  # noqa: SLF001
+            data["endpoint"], "endpoint", allow_private_endpoint, hosts, cidrs)
+    except _gateway_spec.GatewaySpecError as exc:
         _route_error(str(exc))
-    suffix = _router_spec.PROTOCOL_ENDPOINT_SUFFIXES[protocol]
+    suffix = _gateway_spec.PROTOCOL_ENDPOINT_SUFFIXES[protocol]
     if not urlsplit(endpoint).path.rstrip("/").endswith(suffix):
         _route_error(f"endpoint path must end with {suffix}")
 
-    return _router_spec.RoutePlan(
+    return _gateway_spec.RoutePlan(
         schema_version=schema_version,
         experiment_digest=_route_string(
             data["experiment_digest"], "experiment_digest", _DIGEST_RE),
@@ -482,7 +474,7 @@ def _load_route_plan(route_plan_path):
         cache_enabled=cache_enabled,
         auth_env=_route_string(data["auth_env"], "auth_env", _ENV_RE),
         sampling=sampling,
-        private_router=private_router,
+        allow_private_endpoint=allow_private_endpoint,
         private_host_allowlist=hosts,
         private_cidr_allowlist=cidrs,
     )

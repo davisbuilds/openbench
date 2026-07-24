@@ -1,4 +1,4 @@
-"""Strict Router Bench gateway profiles and privacy-safe route evidence."""
+"""Strict Gateway Bench profiles and privacy-safe route evidence."""
 
 from __future__ import annotations
 
@@ -126,14 +126,10 @@ def validate_arm(
     protocol: str,
     requested_model: str,
     requested_provider: str,
-    private_router: bool = False,
-    track: str = "gateway_tax",
-    router_mode: str | None = None,
+    allow_private_endpoint: bool = False,
 ) -> None:
     """Validate profile-specific, nonsecret arm fields."""
     if route_kind == "direct":
-        if track != "gateway_tax":
-            raise GatewayProfileError("model_router does not permit direct arms")
         if gateway is not None:
             raise GatewayProfileError("direct arm must not declare gateway")
         return
@@ -143,14 +139,6 @@ def validate_arm(
         raise GatewayProfileError(
             f"gateway must be one of: {', '.join(sorted(GATEWAYS))}"
         )
-    if track == "model_router":
-        if gateway != "openrouter":
-            raise GatewayProfileError("model_router supports only openrouter")
-        if router_mode not in {"auto", "fixed"}:
-            raise GatewayProfileError(
-                "model_router arm requires router_mode 'auto' or 'fixed'"
-            )
-
     if gateway == "concentrate":
         if (
             endpoint != _CONCENTRATE_RESPONSES_ENDPOINT
@@ -166,7 +154,7 @@ def validate_arm(
                 "requested_provider"
             )
 
-    if private_router:
+    if allow_private_endpoint:
         return
     if gateway == "openrouter" and endpoint != _OPENROUTER_ENDPOINTS.get(protocol):
         raise GatewayProfileError(
@@ -232,11 +220,6 @@ def shape_body(
     *,
     gateway: str,
     requested_provider: str,
-    router_mode: str | None = None,
-    allowed_models: tuple[str, ...] = (),
-    allowed_providers: tuple[str, ...] = (),
-    cost_quality_tradeoff: int | None = None,
-    session_id: str | None = None,
 ) -> None:
     """Replace caller-controlled gateway routing and cache policy in-place."""
     strip_cache_controls(payload)
@@ -248,18 +231,6 @@ def shape_body(
         )
         for key in routing_keys:
             payload.pop(key, None)
-        if router_mode == "auto":
-            payload["provider"] = {
-                "only": list(allowed_providers),
-                "allow_fallbacks": True,
-            }
-            payload["plugins"] = [{
-                "id": "auto-router",
-                "allowed_models": list(allowed_models),
-                "cost_quality_tradeoff": cost_quality_tradeoff,
-            }]
-            payload["session_id"] = session_id
-            return
         payload["provider"] = {
             "only": [requested_provider],
             "allow_fallbacks": False,
@@ -382,7 +353,6 @@ class GatewayEvidence:
     requested_provider: str
     allowed_models: tuple[str, ...]
     allowed_providers: tuple[str, ...]
-    router_mode: str | None = None
     model_match: str = "exact_revision"
     response_headers: Mapping[str, str] = dataclasses.field(default_factory=dict)
     metadata_seen: bool = False
@@ -456,7 +426,7 @@ class GatewayEvidence:
         self.served_model = value
 
     def _record_model(self, value: str) -> None:
-        if self.model_match != "rolling_alias" or self.router_mode == "auto":
+        if self.model_match != "rolling_alias":
             return
         revision = concrete_model_revision(value)
         if revision is not None:
@@ -503,11 +473,8 @@ class GatewayEvidence:
                     model = _identifier(endpoint.get("model"))
                     if model is not None:
                         self._record_model(model)
-                        if (
-                            self.router_mode != "auto"
-                            and not models_match(
-                                self.requested_model, model, self.model_match
-                            )
+                        if not models_match(
+                            self.requested_model, model, self.model_match
                         ):
                             self.profile_reasons.append("served_model_conflict")
                     break
@@ -571,11 +538,8 @@ class GatewayEvidence:
             if model is None:
                 continue
             self._record_model(model)
-            if (
-                self.router_mode != "auto"
-                and not models_match(
-                    self.requested_model, model, self.model_match
-                )
+            if not models_match(
+                self.requested_model, model, self.model_match
             ):
                 self.profile_reasons.append("served_model_conflict")
         resolved_model = canonical_model or provider_api_model
@@ -722,18 +686,13 @@ class GatewayEvidence:
         reasons.extend(reason for value, reason in required if not value)
         if (
             self.served_model
-            and (
-                self.served_model not in self.allowed_models
-                if self.router_mode == "auto"
-                else not models_match(
-                    self.requested_model, self.served_model, self.model_match
-                )
+            and not models_match(
+                self.requested_model, self.served_model, self.model_match
             )
         ):
             reasons.append("served_model_not_allowed")
         if (
-            self.router_mode != "auto"
-            and self.provider
+            self.provider
             and self.requested_provider
             and self.provider.casefold() != self.requested_provider.casefold()
         ):
@@ -767,8 +726,7 @@ class GatewayEvidence:
             if provider is None:
                 reasons.append("missing_attempt_provider")
             elif (
-                self.router_mode != "auto"
-                and self.provider
+                self.provider
                 and provider.casefold() != self.provider.casefold()
             ):
                 reasons.append("fallback_attempt")
@@ -776,20 +734,12 @@ class GatewayEvidence:
                 reasons.append("attempt_provider_not_allowed")
             if model is None:
                 reasons.append("missing_attempt_model")
-            elif (
-                model not in self.allowed_models
-                if self.router_mode == "auto"
-                else not models_match(
-                    self.requested_model, model, self.model_match
-                )
+            elif not models_match(
+                self.requested_model, model, self.model_match
             ):
-                reasons.append(
-                    "attempt_model_not_allowed"
-                    if self.router_mode == "auto"
-                    else "fallback_attempt"
-                )
+                reasons.append("fallback_attempt")
             if status is None:
                 reasons.append("missing_attempt_status")
-            elif not 200 <= status < 300 and self.router_mode != "auto":
+            elif not 200 <= status < 300:
                 reasons.append("unsuccessful_attempt")
         return list(dict.fromkeys(reasons))

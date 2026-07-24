@@ -1,13 +1,13 @@
 schema_version = 1
-experiment_id = "gpt-4o-mini-openrouter-gateway-tax"
-track = "gateway_tax"
+experiment_id = "gpt-4o-mini-openrouter-gateway-bench"
+track = "fixed_model_provider"
 model_match = "rolling_alias"
 harness = "pi"
 tasks = ["make-ci-green", "add-feature", "misleading-error"]
 repetitions_per_window = 1
 schedule_seed = 20260722
 execution_lane = "local"
-private_router = false
+allow_private_endpoint = false
 
 [[windows]]
 window_id = "morning-utc"

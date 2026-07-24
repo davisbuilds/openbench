@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end tests for managed Router Bench proxy routes."""
+"""End-to-end tests for managed Gateway Bench proxy routes."""
 
 import dataclasses
 import http.client
@@ -12,10 +12,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 from obench import proxy
-from obench import router_spec
+from obench import gateway_spec
 
 
-HOST_SECRET = "HOST_ROUTER_SECRET_MUST_NOT_PERSIST"
+HOST_SECRET = "HOST_GATEWAY_SECRET_MUST_NOT_PERSIST"
 CLIENT_SECRET = "CLIENT_CREDENTIAL_MUST_NOT_FORWARD"
 PRIVATE_CONTENT = "PRIVATE_STREAM_CONTENT_MUST_NOT_PERSIST"
 PRIVATE_PROMPT = "PRIVATE_PROMPT_MUST_NOT_PERSIST"
@@ -121,7 +121,7 @@ def route_plan(
     gateway=None,
     protocol="openai_chat",
 ):
-    return router_spec.RoutePlan(
+    return gateway_spec.RoutePlan(
         schema_version=1,
         experiment_digest="e" * 64,
         arm_digest=arm_digest,
@@ -137,9 +137,9 @@ def route_plan(
         fallback_enabled=False,
         retry_count=0,
         cache_enabled=False,
-        auth_env="ROUTER_TEST_KEY",
-        sampling=router_spec.Sampling(temperature=0.0, top_p=1.0, seed=1234),
-        private_router=True,
+        auth_env="GATEWAY_TEST_KEY",
+        sampling=gateway_spec.Sampling(temperature=0.0, top_p=1.0, seed=1234),
+        allow_private_endpoint=True,
         private_host_allowlist=("127.0.0.1",),
         private_cidr_allowlist=(),
         gateway=gateway or ("openrouter" if route_kind == "gateway" else None),
@@ -147,12 +147,12 @@ def route_plan(
 
 
 def secret_plan(arm_id):
-    return router_spec.SecretPlan((
-        router_spec._ArmSecret(arm_id, "ROUTER_TEST_KEY", HOST_SECRET),
+    return gateway_spec.SecretPlan((
+        gateway_spec._ArmSecret(arm_id, "GATEWAY_TEST_KEY", HOST_SECRET),
     ))
 
 
-class RouterRouteTests(unittest.TestCase):
+class GatewayRouteTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="router_route_test_")
         self.upstream = RouteFixtureServer(("127.0.0.1", 0), RouteFixtureHandler)
@@ -211,6 +211,19 @@ class RouterRouteTests(unittest.TestCase):
         self.assertNotIn("client-cache", ledger)
         self.assertNotIn("client-safety", ledger)
         self.assertNotIn("client-safety", json.dumps(rows))
+
+    def test_programmatic_route_rejects_host_outside_explicit_allowlist(self):
+        token = "unlisted-host"
+        plan = route_plan(
+            endpoint="https://attacker.example/v1/chat/completions",
+            route_kind="gateway",
+            arm_id="unlisted-host",
+            arm_digest="f" * 64,
+        )
+        self.server.register_cell(token)
+
+        with self.assertRaisesRegex(ValueError, "explicit endpoint allowlist"):
+            self.server.register_route(token, plan, secret_plan(plan.arm_id))
 
     def _register(
         self,
@@ -330,63 +343,9 @@ class RouterRouteTests(unittest.TestCase):
 
         rows = self._seal_rows(token)
         ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
-        self.assertEqual(rows[0]["router_arm"]["arm_digest"], plan.arm_digest)
+        self.assertEqual(rows[0]["serving_arm"]["arm_digest"], plan.arm_digest)
         for secret in (HOST_SECRET, CLIENT_SECRET, PRIVATE_PROMPT):
             self.assertNotIn(secret, ledger)
-
-    def test_auto_router_session_is_stable_authoritative_and_not_persisted(self):
-        token = "auto-cell"
-        base = route_plan(
-            endpoint=self.upstream_base + "/auto",
-            route_kind="gateway",
-            arm_id="auto",
-            arm_digest="c" * 64,
-        )
-        plan = dataclasses.replace(
-            base,
-            track="model_router",
-            router_mode="auto",
-            requested_model="openrouter/auto-beta",
-            requested_provider="openrouter",
-            allowed_models=("openai/gpt-route-test",),
-            allowed_providers=("openai",),
-            fallback_enabled=True,
-            cost_quality_tradeoff=7,
-        )
-        self.server.register_cell(token)
-        self.server.register_route(token, plan, secret_plan(plan.arm_id))
-        body = {
-            "messages": [{"role": "user", "content": PRIVATE_PROMPT}],
-            "plugins": [{"id": "attacker"}],
-            "router": {"strategy": "attacker"},
-            "provider": {"only": ["attacker"]},
-            "session_id": "attacker-session",
-            "cache": True,
-        }
-
-        for _ in range(2):
-            status, _ = self._post(token, plan.arm_digest, body=body)
-            self.assertEqual(status, 200)
-
-        first, second = (request["body"] for request in self.upstream.requests)
-        self.assertEqual(first["session_id"], token)
-        self.assertEqual(second["session_id"], token)
-        self.assertEqual(first["plugins"], [{
-            "id": "auto-router",
-            "allowed_models": ["openai/gpt-route-test"],
-            "cost_quality_tradeoff": 7,
-        }])
-        self.assertEqual(first["provider"], {
-            "only": ["openai"],
-            "allow_fallbacks": True,
-        })
-        self.assertNotIn("router", first)
-        self.assertNotIn("cache", first)
-        rows = self._seal_rows(token)
-        serialized = json.dumps(rows, sort_keys=True)
-        self.assertNotIn(token, serialized)
-        self.assertNotIn("attacker-session", serialized)
-        self.assertNotIn("session_hash", rows[0])
 
     def test_direct_openai_forces_model_and_sampling_without_gateway_metadata(self):
         token = "direct-cell"
@@ -469,7 +428,7 @@ class RouterRouteTests(unittest.TestCase):
             ),
             requested_model="openai/gpt-route-test",
             allowed_models=("openai/gpt-route-test",),
-            private_router=False,
+            allow_private_endpoint=False,
             private_host_allowlist=(),
         )
         self.server.register_cell(token)
@@ -540,7 +499,7 @@ class RouterRouteTests(unittest.TestCase):
         ]
         self.assertEqual(len(request_rows), 2)
         self.assertEqual(
-            request_rows[0]["router_arm"]["arm_digest"], plan.arm_digest
+            request_rows[0]["serving_arm"]["arm_digest"], plan.arm_digest
         )
         private_values = (
             HOST_SECRET,
@@ -575,7 +534,7 @@ class RouterRouteTests(unittest.TestCase):
 
         rows = self._seal_rows(token)
         request = rows[0]
-        metrics = request["router_metrics"]
+        metrics = request["gateway_metrics"]
         self.assertEqual(metrics["usage"], {
             "input_tokens": 5,
             "output_tokens": 3,
@@ -590,7 +549,7 @@ class RouterRouteTests(unittest.TestCase):
         self.assertGreaterEqual(metrics["timing"]["ttfb_s"], 0)
         self.assertGreaterEqual(metrics["timing"]["semantic_ttft_s"], 0)
         self.assertGreaterEqual(metrics["timing"]["total_s"], 0)
-        self.assertEqual(request["router_arm"]["arm_digest"], plan.arm_digest)
+        self.assertEqual(request["serving_arm"]["arm_digest"], plan.arm_digest)
 
         ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
         for secret in (HOST_SECRET, CLIENT_SECRET, PRIVATE_CONTENT, PRIVATE_PROMPT):
@@ -608,7 +567,7 @@ class RouterRouteTests(unittest.TestCase):
                 plan = self._register(token, route_kind=route_kind, path=path)
                 status, _ = self._post(token, plan.arm_digest)
                 self.assertEqual(status, 200)
-                evidence = self._seal_rows(token)[0]["router_metrics"]["route_evidence"]
+                evidence = self._seal_rows(token)[0]["gateway_metrics"]["route_evidence"]
                 self.assertEqual(evidence["pass"], expected_pass)
                 if reason is not None:
                     self.assertIn(reason, evidence["reasons"])
