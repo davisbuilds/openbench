@@ -14,7 +14,11 @@ import tempfile
 import tomllib
 
 
-from .paths import ensure_package_path_on_sys_path
+try:
+    from .paths import ensure_package_path_on_sys_path
+except ImportError:  # file-path / Docker mount layout: no package context
+    def ensure_package_path_on_sys_path():
+        return None
 
 try:
     from .auth_persist import try_persist_auth_file
