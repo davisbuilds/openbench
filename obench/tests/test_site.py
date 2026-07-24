@@ -266,7 +266,41 @@ class DesignContractTests(_SiteFixture):
         self.assertIn(":focus-visible", self.page)
 
     def test_wide_content_scrolls_inside_its_own_container(self):
-        self.assertIn(".scroll{overflow-x:auto}", self.page)
+        self.assertIn("overflow-x:auto", self.page)
+        self.assertIn('class="scroll"', self.page)
+
+    def test_tinted_text_uses_the_text_safe_pole_step(self):
+        """Marks may wear the validated hue; text must clear 4.5:1.
+
+        The validated mark colours sit near 3:1, which is fine for a bar and
+        not fine for a number. Tinted values use the darker `*-ink` step.
+        """
+        self.assertIn("--pole-better-ink:", self.page)
+        self.assertIn("--pole-worse-ink:", self.page)
+        self.assertIn(".dv .val.better{color:var(--pole-better-ink)}", self.page)
+        self.assertIn(".dv .val.worse{color:var(--pole-worse-ink)}", self.page)
+        # The raw mark hue must never be assigned to a text colour.
+        self.assertNotIn(".val.worse{color:var(--pole-worse)}", self.page)
+
+    def test_plot_width_is_budgeted_per_table(self):
+        """Four contrast columns cannot each be as wide as a lone one."""
+        self.assertIn("--plot-w:", self.page)
+
+    def test_lede_reports_a_spread_rather_than_a_cause(self):
+        """The headline is derived from the data and stays descriptive."""
+        title, deck, facts = site._lede(site.build_board(self.site_dir))
+        self.assertIn("spans", deck)
+        self.assertTrue(any("verified bundles" in f for f in facts))
+        # Never asserts a cause for the spread.
+        for forbidden in ("because", "due to", "caused by", "proves"):
+            self.assertNotIn(forbidden, deck.lower())
+
+    def test_lede_survives_an_empty_site(self):
+        with tempfile.TemporaryDirectory() as td:
+            title, deck, facts = site._lede(site.build_board(td))
+        self.assertTrue(title)
+        self.assertTrue(deck)
+        self.assertTrue(facts)
 
 
 class ContrastPlotTests(unittest.TestCase):

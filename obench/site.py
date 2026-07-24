@@ -423,333 +423,363 @@ def build_board(site_dir, community_dir=None, router_dirs=None):
 
 _CSS = """
 /* ---------------------------------------------------------------------------
-   OpenBench leaderboards — instrument readout.
+   OpenBench leaderboards.
 
-   Type: prose in sans; every identifier the benchmark names and every value it
-   measures in mono, because they are readings, not writing.
-   Colour: cool-slate neutrals biased toward the accent; one accent (validated
-   categorical slot 1) for interactive chrome and interval marks; a validated
-   blue/orange diverging pair for signed contrasts, with a neutral midpoint when
-   an interval spans zero; amber reserved for provenance warnings and never
-   carrying meaning without a label.
+   Treated as a published measurement rather than a dashboard.
+
+   Type      three roles. A serif display face carries headlines and board
+             titles; a sans carries prose and small labels; a mono carries
+             every identifier the benchmark names and every value it measures,
+             because those are readings rather than writing.
+   Colour    the page is ink on paper. Colour is reserved for data: the
+             interval marks, and the validated blue/orange diverging pair on
+             signed contrasts. Chrome never spends it. Marks carry the
+             validated hue; any text tinted by a pole uses the darker
+             `*-ink` step, so no reading depends on a sub-4.5:1 colour.
+   Structure rules, not boxes. Boards are records separated by hairlines, so
+             the data sits on the page instead of inside a card.
 --------------------------------------------------------------------------- */
 :root{
   color-scheme:light;
-  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  --font-mono:ui-monospace,"SF Mono",SFMono-Regular,"JetBrains Mono","Cascadia Mono",
-    Menlo,Consolas,"Liberation Mono",monospace;
+  --font-display:"Iowan Old Style","Palatino Linotype",Palatino,Charter,
+    "Bitstream Charter",Georgia,"Liberation Serif",serif;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
+    "Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",SFMono-Regular,"JetBrains Mono",
+    "Cascadia Mono",Menlo,Consolas,"Liberation Mono",monospace;
 
-  --surface:#eef1f5;
-  --panel:#ffffff;
-  --panel-2:#f6f8fb;
-  --line:#dce3ea;
-  --line-strong:#c3ced9;
-  --ink:#0e1720;
-  --ink-2:#465768;
-  --ink-3:#6d7f92;
+  --paper:#ffffff;
+  --ground:#f2f2f0;
+  --ink:#0f1113;
+  --ink-2:#54595f;
+  --ink-3:#6b7280;
+  --rule:#dfe0dd;
+  --rule-strong:#b9bcb8;
+  --wash:#f7f7f5;
 
-  --accent:#2a78d6;
-  --accent-rgb:42,120,214;
+  --data:#2a78d6;
+  --data-rgb:42,120,214;
   --pole-better:#2a78d6;
   --pole-better-rgb:42,120,214;
   --pole-worse:#eb6834;
   --pole-worse-rgb:235,104,52;
-  --pole-null:#8494a5;
-  --pole-null-rgb:132,148,165;
+  --pole-better-ink:#1f66bd;
+  --pole-worse-ink:#ad4218;
+  --pole-null:#6b7280;
+  --pole-null-rgb:107,114,128;
 
   --warn-ink:#8a5300;
-  --warn-bg:#fdf3dd;
-  --warn-line:#e8c98a;
+  --warn-bg:#fbf1dc;
+  --warn-rule:#e0c58a;
 
-  --track:rgba(14,23,32,.09);
-  --grid:rgba(14,23,32,.10);
-  --shadow:0 1px 1px rgba(14,23,32,.04),0 6px 18px rgba(14,23,32,.05);
-  --radius:10px;
+  --track:rgba(15,17,19,.08);
+  --grid:rgba(15,17,19,.14);
+  --plot-w:140px;
 }
 @media (prefers-color-scheme:dark){
   :root:where(:not([data-theme="light"])){
     color-scheme:dark;
-    --surface:#080c11;
-    --panel:#111820;
-    --panel-2:#161f29;
-    --line:#1e2833;
-    --line-strong:#2b3846;
-    --ink:#e6edf5;
-    --ink-2:#9fb1c3;
-    --ink-3:#74879b;
+    --paper:#101215;
+    --ground:#08090b;
+    --ink:#eceef1;
+    --ink-2:#a2a9b2;
+    --ink-3:#8b939d;
+    --rule:#22262b;
+    --rule-strong:#39404a;
+    --wash:#161a1f;
 
-    --accent:#3987e5;
-    --accent-rgb:57,135,229;
+    --data:#3987e5;
+    --data-rgb:57,135,229;
     --pole-better:#3987e5;
     --pole-better-rgb:57,135,229;
     --pole-worse:#d95926;
     --pole-worse-rgb:217,89,38;
-    --pole-null:#74879b;
-    --pole-null-rgb:116,135,155;
+    --pole-better-ink:#3987e5;
+    --pole-worse-ink:#e06a3c;
+    --pole-null:#8b939d;
+    --pole-null-rgb:139,147,157;
 
-    --warn-ink:#fab219;
-    --warn-bg:#2a2113;
-    --warn-line:#5a4715;
+    --warn-ink:#f0b545;
+    --warn-bg:#241d10;
+    --warn-rule:#4b3c17;
 
-    --track:rgba(230,237,245,.10);
-    --grid:rgba(230,237,245,.13);
-    --shadow:0 1px 1px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.35);
+    --track:rgba(236,238,241,.10);
+    --grid:rgba(236,238,241,.16);
   }
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --surface:#080c11;
-  --panel:#111820;
-  --panel-2:#161f29;
-  --line:#1e2833;
-  --line-strong:#2b3846;
-  --ink:#e6edf5;
-  --ink-2:#9fb1c3;
-  --ink-3:#74879b;
+  --paper:#101215;
+  --ground:#08090b;
+  --ink:#eceef1;
+  --ink-2:#a2a9b2;
+  --ink-3:#8b939d;
+  --rule:#22262b;
+  --rule-strong:#39404a;
+  --wash:#161a1f;
 
-  --accent:#3987e5;
-  --accent-rgb:57,135,229;
+  --data:#3987e5;
+  --data-rgb:57,135,229;
   --pole-better:#3987e5;
   --pole-better-rgb:57,135,229;
   --pole-worse:#d95926;
   --pole-worse-rgb:217,89,38;
-  --pole-null:#74879b;
-  --pole-null-rgb:116,135,155;
+  --pole-better-ink:#3987e5;
+  --pole-worse-ink:#e06a3c;
+  --pole-null:#8b939d;
+  --pole-null-rgb:139,147,157;
 
-  --warn-ink:#fab219;
-  --warn-bg:#2a2113;
-  --warn-line:#5a4715;
+  --warn-ink:#f0b545;
+  --warn-bg:#241d10;
+  --warn-rule:#4b3c17;
 
-  --track:rgba(230,237,245,.10);
-  --grid:rgba(230,237,245,.13);
-  --shadow:0 1px 1px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.35);
+  --track:rgba(236,238,241,.10);
+  --grid:rgba(236,238,241,.16);
 }
-
-/* Explicit light scope: the toggle must be able to win against an OS set to
-   dark, including flipping color-scheme back for native form controls. */
 :root[data-theme="light"]{
   color-scheme:light;
-  --surface:#eef1f5;
-  --panel:#ffffff;
-  --panel-2:#f6f8fb;
-  --line:#dce3ea;
-  --line-strong:#c3ced9;
-  --ink:#0e1720;
-  --ink-2:#465768;
-  --ink-3:#6d7f92;
+  --paper:#ffffff;
+  --ground:#f2f2f0;
+  --ink:#0f1113;
+  --ink-2:#54595f;
+  --ink-3:#6b7280;
+  --rule:#dfe0dd;
+  --rule-strong:#b9bcb8;
+  --wash:#f7f7f5;
 
-  --accent:#2a78d6;
-  --accent-rgb:42,120,214;
+  --data:#2a78d6;
+  --data-rgb:42,120,214;
   --pole-better:#2a78d6;
   --pole-better-rgb:42,120,214;
   --pole-worse:#eb6834;
   --pole-worse-rgb:235,104,52;
-  --pole-null:#8494a5;
-  --pole-null-rgb:132,148,165;
+  --pole-better-ink:#1f66bd;
+  --pole-worse-ink:#ad4218;
+  --pole-null:#6b7280;
+  --pole-null-rgb:107,114,128;
 
   --warn-ink:#8a5300;
-  --warn-bg:#fdf3dd;
-  --warn-line:#e8c98a;
+  --warn-bg:#fbf1dc;
+  --warn-rule:#e0c58a;
 
-  --track:rgba(14,23,32,.09);
-  --grid:rgba(14,23,32,.10);
-  --shadow:0 1px 1px rgba(14,23,32,.04),0 6px 18px rgba(14,23,32,.05);
+  --track:rgba(15,17,19,.08);
+  --grid:rgba(15,17,19,.14);
 }
 
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--surface);color:var(--ink);
-  font:15px/1.55 var(--font-sans);-webkit-font-smoothing:antialiased}
-a{color:var(--accent);text-underline-offset:2px}
-a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
-summary:focus-visible,th.sortable:focus-visible{
-  outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:16px/1.6 var(--font-sans);-webkit-font-smoothing:antialiased;
+  font-variant-numeric:tabular-nums}
+[hidden]{display:none !important}
+a{color:inherit;text-decoration-color:var(--rule-strong);text-underline-offset:3px}
+a:hover{text-decoration-color:currentColor}
+:focus-visible{outline:2px solid var(--data);outline-offset:3px;border-radius:2px}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms !important;transition-duration:.01ms !important}
 }
 
-.wrap{max-width:1280px;margin:0 auto;padding:0 22px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 32px}
 
-/* --- masthead ---------------------------------------------------------- */
-header.top{background:var(--panel);border-bottom:1px solid var(--line);
+/* --- masthead ----------------------------------------------------------- */
+header.top{border-bottom:1px solid var(--ink);background:var(--paper);
   position:sticky;top:0;z-index:30}
-.top .wrap{display:flex;align-items:center;gap:20px;min-height:58px;flex-wrap:wrap}
-.brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
-.brand .cmd{font:600 15px/1 var(--font-mono);letter-spacing:-.01em;color:var(--ink)}
-.brand .cmd::before{content:"$ ";color:var(--ink-3);font-weight:400}
-.brand .what{font-size:14px;color:var(--ink-2)}
-nav.tabs{display:flex;gap:1px;margin-left:auto;flex-wrap:wrap}
-nav.tabs a{padding:6px 12px;border-radius:7px;text-decoration:none;color:var(--ink-2);
-  font-weight:600;font-size:13.5px}
-nav.tabs a:hover:not([aria-current]){background:var(--panel-2);color:var(--ink)}
-nav.tabs a[aria-current="page"]{background:var(--ink);color:var(--panel)}
-button.theme{background:none;border:1px solid var(--line-strong);color:var(--ink-2);
-  border-radius:7px;width:32px;height:30px;cursor:pointer;padding:0;
-  display:inline-flex;align-items:center;justify-content:center}
-button.theme:hover{color:var(--ink);border-color:var(--ink-3)}
+.top .wrap{display:flex;align-items:center;gap:26px;min-height:56px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:9px;white-space:nowrap;
+  margin-right:auto}
+.brand .cmd{font:600 13px/1 var(--font-mono);letter-spacing:.16em;
+  text-transform:uppercase}
+.brand .what{font:italic 15px/1 var(--font-display);color:var(--ink-2)}
+nav.tabs{display:flex;gap:24px;flex-wrap:wrap}
+nav.tabs a{font:600 13px/1 var(--font-sans);letter-spacing:.03em;
+  text-decoration:none;color:var(--ink-3);padding:19px 0;
+  border-bottom:2px solid transparent;margin-bottom:-1px}
+nav.tabs a:hover{color:var(--ink)}
+nav.tabs a[aria-current="page"]{color:var(--ink);border-bottom-color:var(--ink)}
+button.theme{background:none;border:0;color:var(--ink-3);cursor:pointer;
+  padding:6px;display:inline-flex;align-items:center}
+button.theme:hover{color:var(--ink)}
 button.theme svg{width:15px;height:15px}
 
-/* --- page intro & summary strip ---------------------------------------- */
-.intro{padding:30px 0 6px;max-width:64ch}
-.intro h1{margin:0 0 8px;font-size:25px;line-height:1.25;letter-spacing:-.02em;
-  text-wrap:balance}
-.intro p{margin:0;color:var(--ink-2)}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
-  gap:1px;background:var(--line);border:1px solid var(--line);
-  border-radius:var(--radius);overflow:hidden;margin:22px 0 4px}
-.stat{background:var(--panel);padding:12px 15px}
-.stat b{display:block;font:600 21px/1.15 var(--font-mono);letter-spacing:-.02em}
-.stat span{display:block;margin-top:3px;color:var(--ink-3);font-size:11px;
-  text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+/* --- the lede ----------------------------------------------------------- */
+.lede{padding:64px 0 40px;border-bottom:1px solid var(--rule)}
+.lede h1{margin:0;max-width:19ch;font:400 clamp(38px,5.4vw,62px)/1.04
+  var(--font-display);letter-spacing:-.022em;text-wrap:balance}
+.lede h1 em{font-style:italic;color:var(--ink-2)}
+.lede .deck{margin:22px 0 0;max-width:56ch;font-size:18.5px;line-height:1.55;
+  color:var(--ink-2)}
+.lede .dateline{margin-top:30px;padding-top:14px;border-top:1px solid var(--rule);
+  font:11.5px/1.7 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink-3);display:flex;flex-wrap:wrap;gap:0 22px}
 
 /* --- controls ----------------------------------------------------------- */
-.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:20px 0 14px}
-.controls input[type=search],.controls select{background:var(--panel);color:var(--ink);
-  border:1px solid var(--line-strong);border-radius:7px;padding:7px 10px;
-  font:14px var(--font-sans)}
-.controls input[type=search]{min-width:220px;flex:1;font-family:var(--font-mono);
-  font-size:13px}
-.controls label{display:flex;align-items:center;gap:7px;color:var(--ink-2);font-size:13.5px}
+.controls{display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+  padding:20px 0;border-bottom:1px solid var(--rule)}
+.controls input[type=search],.controls select{background:transparent;
+  color:var(--ink);border:0;border-bottom:1px solid var(--rule-strong);
+  padding:6px 2px;font:13px var(--font-mono);border-radius:0}
+.controls input[type=search]{min-width:230px;flex:1}
+.controls select{font-family:var(--font-sans);font-size:13.5px;cursor:pointer}
+.controls label{display:flex;align-items:center;gap:8px;color:var(--ink-2);
+  font-size:13.5px}
 
-/* --- notes -------------------------------------------------------------- */
-.note{background:var(--panel);border:1px solid var(--line);
-  border-left:2px solid var(--accent);border-radius:var(--radius);
-  padding:13px 16px;margin:14px 0;color:var(--ink-2);font-size:14px;max-width:88ch}
-.note strong{color:var(--ink)}
+/* --- asides ------------------------------------------------------------- */
+.note{margin:22px 0 0;padding:0;color:var(--ink-2);font-size:15px;max-width:78ch}
+.note strong{color:var(--ink);font-weight:600}
 
-/* --- board -------------------------------------------------------------- */
-.board{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-  box-shadow:var(--shadow);margin:14px 0;overflow:hidden}
-.board .head{padding:15px 18px;border-bottom:1px solid var(--line)}
-.board .head:last-child{border-bottom:none;border-top:1px solid var(--line)}
-.board h2{margin:0;font-size:17px;letter-spacing:-.015em;line-height:1.3}
+/* --- boards, as records rather than cards ------------------------------- */
+.board{padding:52px 0 8px;border-bottom:1px solid var(--rule)}
+.board .head{padding:0 0 18px}
+.board .head:last-child{padding:16px 0 0;border-top:1px solid var(--rule)}
+.scroll+.head{padding-top:40px}
+.board h2{margin:0;font:400 27px/1.2 var(--font-display);letter-spacing:-.012em;
+  max-width:70ch;text-wrap:balance;hyphens:none}
 .board h2 a{text-decoration:none}
 .board h2 a:hover{text-decoration:underline}
-.board .head p{margin:6px 0 0;color:var(--ink-2);font-size:13.5px;max-width:80ch}
-.meta{margin-top:9px;font:12px/1.7 var(--font-mono);color:var(--ink-3);
-  display:flex;flex-wrap:wrap;gap:0 14px}
-.meta b{color:var(--ink-2);font-weight:600}
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
-.chip{border:1px solid var(--line-strong);color:var(--ink-2);background:var(--panel-2);
-  border-radius:5px;padding:2px 7px;font:600 11.5px var(--font-mono);white-space:nowrap}
-.chip.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-ink)}
-.chip.role-direct{border-color:rgba(var(--accent-rgb),.5);color:var(--accent)}
+.board .head p{margin:10px 0 0;color:var(--ink-2);font-size:14.5px;max-width:74ch}
+.meta{margin-top:11px;font:11.5px/1.9 var(--font-mono);letter-spacing:.05em;
+  color:var(--ink-3);display:flex;flex-wrap:wrap;gap:0 20px;
+  text-transform:uppercase}
+.meta b{font-weight:400;color:var(--ink-3);opacity:.65}
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+.chip{border:1px solid var(--rule-strong);color:var(--ink-2);
+  padding:2px 8px;font:500 11px/1.6 var(--font-mono);white-space:nowrap;
+  letter-spacing:.02em}
+.chip.warn{background:var(--warn-bg);border-color:var(--warn-rule);
+  color:var(--warn-ink)}
+.chip.role-direct{border-color:var(--ink);color:var(--ink)}
 td .chips{flex-wrap:nowrap;justify-content:flex-end;margin-top:0}
 
-details.caveats{margin-top:10px;font-size:13.5px}
+details.caveats{margin-top:14px;font-size:14.5px}
 details.caveats summary{cursor:pointer;color:var(--warn-ink);font-weight:600;
-  list-style:none;display:flex;align-items:center;gap:6px}
+  list-style:none;display:flex;align-items:center;gap:7px;font-size:13.5px}
 details.caveats summary::-webkit-details-marker{display:none}
-details.caveats summary::before{content:"▸";font-size:11px}
-details.caveats[open] summary::before{content:"▾"}
-details.caveats ul{margin:9px 0 0;padding-left:18px;color:var(--ink-2)}
-details.caveats li{margin:6px 0;max-width:88ch}
+details.caveats summary::before{content:"+";font:600 15px var(--font-mono)}
+details.caveats[open] summary::before{content:"\\2212"}
+details.caveats ul{margin:12px 0 0;padding-left:19px;color:var(--ink-2)}
+details.caveats li{margin:8px 0;max-width:80ch}
 
 /* --- tables ------------------------------------------------------------- */
-.scroll{overflow-x:auto}
+.scroll{overflow-x:auto;margin:0 -4px;padding:0 4px}
 table{border-collapse:collapse;width:100%}
-th,td{padding:9px 10px;text-align:right;white-space:nowrap;
-  border-bottom:1px solid var(--line)}
-th:first-child,td:first-child{text-align:left}
-thead th{background:var(--panel-2);color:var(--ink-3);font:600 11px var(--font-sans);
-  text-transform:uppercase;letter-spacing:.07em;padding-top:11px;padding-bottom:11px;
-  vertical-align:bottom}
+th,td{padding:13px 11px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left;padding-left:0}
+th:last-child,td:last-child{padding-right:0}
+thead th{color:var(--ink-3);font:600 10.5px/1.4 var(--font-sans);
+  text-transform:uppercase;letter-spacing:.1em;vertical-align:bottom;
+  padding-bottom:11px;border-bottom:1px solid var(--ink)}
 thead th.sortable{cursor:pointer;user-select:none}
 thead th.sortable:hover{color:var(--ink)}
-thead th .arrow{opacity:.4;margin-left:4px;font-size:10px}
-thead th[aria-sort] .arrow{opacity:1;color:var(--accent)}
+thead th .arrow{opacity:.35;margin-left:5px;font-size:9px;vertical-align:1px}
 thead th[aria-sort]{color:var(--ink)}
-tbody td{font:13.5px/1.4 var(--font-mono);font-variant-numeric:tabular-nums;
-  color:var(--ink-2)}
-tbody tr:last-child td{border-bottom:none}
-tbody tr:hover td{background:var(--panel-2)}
-td.rank{color:var(--ink-3);width:1%;padding-right:2px}
-td.name{color:var(--ink);font-weight:600}
-/* Keep the arm's identity on screen while the measurements scroll. */
+thead th[aria-sort] .arrow{opacity:1}
+tbody td{font:14px/1.4 var(--font-mono);color:var(--ink-2);
+  border-bottom:1px solid var(--rule)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--wash)}
+td.rank{width:1%;padding-right:6px;font:400 19px/1 var(--font-display);
+  color:var(--ink-3)}
+td.name{color:var(--ink);font-weight:600;letter-spacing:-.01em}
+/* The leading row of the current sort carries the emphasis. */
+tbody tr:first-child td{border-bottom-color:var(--rule-strong)}
+tbody tr:first-child td.rank{color:var(--ink)}
+tbody tr:first-child td.name{font-size:15px}
+tbody tr:first-child .iv .val{font-size:16px;color:var(--ink)}
+/* Identity stays put while the measures scroll. */
 thead th:first-child,tbody td:first-child{position:sticky;left:0;z-index:1;
-  background:var(--panel)}
-thead th:first-child{background:var(--panel-2)}
-tbody tr:hover td:first-child{background:var(--panel-2)}
+  background:var(--paper)}
+tbody tr:hover td:first-child{background:var(--wash)}
 
-/* --- interval plot: one shared 0–100% scale across every row ------------ */
+/* --- interval plot: one shared 0-100% scale for the whole column -------- */
+.scroll[data-dense="1"] .iv .range{display:none}
+.scroll[data-dense="1"] th,.scroll[data-dense="1"] td{padding-left:9px;
+  padding-right:9px}
 .axis{display:flex;justify-content:space-between;width:var(--plot-w);
-  margin:5px 0 0 auto;font:500 10px var(--font-mono);color:var(--ink-3);
-  letter-spacing:0;text-transform:none}
-.iv{display:flex;align-items:center;gap:9px;justify-content:flex-end}
-.iv .val{flex:0 0 auto;min-width:54px;text-align:right;color:var(--ink);font-weight:600}
-.iv .track{position:relative;flex:0 0 var(--plot-w);width:var(--plot-w);height:9px;
-  background:var(--track);
-  border-radius:2px;
+  margin:7px 0 0 auto;font:400 9.5px/1 var(--font-mono);color:var(--ink-3);
+  letter-spacing:.02em;text-transform:none}
+.iv{display:flex;align-items:center;gap:11px;justify-content:flex-end}
+.iv .val{flex:0 0 auto;min-width:56px;text-align:right;color:var(--ink);
+  font-weight:600;font-size:14.5px}
+.iv .track{flex:0 0 var(--plot-w);position:relative;width:var(--plot-w);
+  height:5px;background:var(--track);border-radius:1px;
   background-image:linear-gradient(90deg,var(--grid) 1px,transparent 1px);
-  background-size:25% 100%;background-position:0 0}
-.iv .span{position:absolute;top:0;height:9px;border-radius:2px;
-  background:rgba(var(--accent-rgb),.34)}
-.iv .dot{position:absolute;top:-2px;width:3px;height:13px;border-radius:1.5px;
-  background:var(--accent);box-shadow:0 0 0 2px var(--panel)}
-.iv .range{flex:0 0 auto;min-width:76px;text-align:right;color:var(--ink-3);font-size:11px}
+  background-size:25% 100%}
+.iv .span{position:absolute;top:0;height:5px;border-radius:1px;
+  background:rgba(var(--data-rgb),.40)}
+.iv .dot{position:absolute;top:-3px;width:3px;height:11px;border-radius:1px;
+  background:var(--data)}
+.iv .range{flex:0 0 auto;min-width:84px;text-align:right;color:var(--ink-3);
+  font-size:11.5px}
 
-/* --- signed contrast: diverging, centred on a zero line ----------------- */
-.dv{display:flex;align-items:center;gap:9px;justify-content:flex-end}
-.dv .val{flex:0 0 auto;min-width:58px;text-align:right;font-weight:600}
-.dv .val.better{color:var(--pole-better)}
-.dv .val.worse{color:var(--pole-worse)}
+/* --- signed contrast: diverging about a zero line ----------------------- */
+.dv{display:flex;align-items:center;gap:11px;justify-content:flex-end}
+.dv .val{flex:0 0 auto;min-width:62px;text-align:right;font-weight:600;
+  font-size:14.5px}
+.dv .val.better{color:var(--pole-better-ink)}
+.dv .val.worse{color:var(--pole-worse-ink)}
 .dv .val.null{color:var(--ink-2)}
-.dv .track{position:relative;flex:0 0 var(--plot-w);width:var(--plot-w);height:9px;
-  background:var(--track);
-  border-radius:2px}
-.dv .zero{position:absolute;left:50%;top:-3px;width:1px;height:15px;
-  background:var(--line-strong)}
-.dv .span{position:absolute;top:0;height:9px;border-radius:2px}
-.dv .span.better{background:rgba(var(--pole-better-rgb),.34)}
-.dv .span.worse{background:rgba(var(--pole-worse-rgb),.34)}
-.dv .span.null{background:rgba(var(--pole-null-rgb),.30)}
-.dv .dot{position:absolute;top:-2px;width:3px;height:13px;border-radius:1.5px;
-  box-shadow:0 0 0 2px var(--panel)}
+.dv .track{flex:0 0 var(--plot-w);position:relative;width:var(--plot-w);
+  height:5px;background:var(--track);border-radius:1px}
+.dv .zero{position:absolute;left:50%;top:-4px;width:1px;height:13px;
+  background:var(--rule-strong)}
+.dv .span{position:absolute;top:0;height:5px;border-radius:1px}
+.dv .span.better{background:rgba(var(--pole-better-rgb),.40)}
+.dv .span.worse{background:rgba(var(--pole-worse-rgb),.40)}
+.dv .span.null{background:rgba(var(--pole-null-rgb),.34)}
+.dv .dot{position:absolute;top:-3px;width:3px;height:11px;border-radius:1px}
 .dv .dot.better{background:var(--pole-better)}
 .dv .dot.worse{background:var(--pole-worse)}
 .dv .dot.null{background:var(--pole-null)}
-.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;
-  font:12px var(--font-sans);color:var(--ink-2)}
-.legend span{display:flex;align-items:center;gap:6px}
-.legend i{width:11px;height:11px;border-radius:2px;display:inline-block}
+.legend{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;
+  font-size:13px;color:var(--ink-2)}
+.legend span{display:flex;align-items:center;gap:8px}
+.legend i{width:16px;height:5px;border-radius:1px;display:inline-block}
 .legend i.better{background:var(--pole-better)}
 .legend i.worse{background:var(--pole-worse)}
 .legend i.null{background:var(--pole-null)}
 
-/* --- lists & prose ------------------------------------------------------ */
-.empty{padding:36px 18px;text-align:center;color:var(--ink-2)}
-.empty p{margin:0 0 8px;max-width:60ch;margin-inline:auto}
-.empty code{font-family:var(--font-mono);font-size:12.5px;background:var(--panel-2);
-  border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+/* --- lists and prose ---------------------------------------------------- */
+.empty{padding:56px 0;color:var(--ink-2);max-width:62ch}
+.empty p{margin:0 0 10px}
+code{font-family:var(--font-mono);font-size:.86em}
 ul.records{list-style:none;margin:0;padding:0}
-ul.records li{padding:11px 0;border-bottom:1px solid var(--line)}
-ul.records li:last-child{border-bottom:none}
-ul.records a,ul.records strong{font-weight:600;text-decoration:none}
+ul.records li{padding:16px 0;border-bottom:1px solid var(--rule)}
+ul.records li:last-child{border-bottom:0}
+ul.records a,ul.records strong{font:500 17px/1.35 var(--font-display);
+  text-decoration:none}
 ul.records a:hover{text-decoration:underline}
-ul.records .sub{color:var(--ink-3);font:12px/1.6 var(--font-mono);margin-top:2px}
-.prose{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-  box-shadow:var(--shadow);padding:22px 26px;margin:14px 0;max-width:80ch}
-.prose h2{margin:0 0 8px;font-size:17px;letter-spacing:-.015em}
-.prose h2+p{margin-top:0}
-.prose h3{margin:22px 0 6px;font-size:14px;letter-spacing:.01em}
-.prose p,.prose li{color:var(--ink-2);max-width:74ch}
-.prose li{margin:6px 0}
-.prose code{font-family:var(--font-mono);font-size:12.5px;background:var(--panel-2);
-  border:1px solid var(--line);border-radius:4px;padding:1px 5px}
-footer{color:var(--ink-3);font-size:13px;padding:26px 0 44px;text-align:center}
-footer code{font-family:var(--font-mono)}
-[hidden]{display:none !important}
+ul.records .sub{color:var(--ink-3);font:11.5px/1.8 var(--font-mono);
+  letter-spacing:.04em;margin-top:3px}
+.prose{padding:52px 0;max-width:70ch}
+.prose h2{margin:0 0 10px;font:400 27px/1.2 var(--font-display);
+  letter-spacing:-.012em}
+.prose h3{margin:34px 0 8px;font:600 11px/1.4 var(--font-sans);
+  text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)}
+.prose p,.prose li{color:var(--ink-2);font-size:15.5px}
+.prose li{margin:9px 0}
+.prose strong{color:var(--ink)}
+footer{color:var(--ink-3);font-size:12.5px;padding:40px 0 60px;
+  border-top:1px solid var(--rule);margin-top:40px}
 
-/* Plot width is a token so the axis header and every row stay locked. */
-:root{--plot-w:104px}
-@media(max-width:900px){:root{--plot-w:96px}}
-@media(max-width:760px){
-  :root{--plot-w:72px}
-  .top .wrap{min-height:0;padding-top:10px;padding-bottom:10px}
-  nav.tabs{margin-left:0;width:100%;order:3}
+@media(max-width:1080px){:root{--plot-w:112px}}
+@media(max-width:860px){
+  :root{--plot-w:96px}
   .iv .range{display:none}
-  .intro h1{font-size:21px}
-  .wrap{padding:0 14px}
+  .wrap{padding:0 20px}
+  .lede{padding:44px 0 30px}
+  nav.tabs{gap:18px}
+}
+@media(max-width:680px){
+  :root{--plot-w:70px}
+  .top .wrap{min-height:0;padding-top:10px;padding-bottom:0;gap:12px}
+  nav.tabs{order:3;width:100%;gap:20px;overflow-x:auto}
+  nav.tabs a{padding:10px 0}
+  .brand{margin-right:0}
+  .lede h1{font-size:31px}
+  .lede .deck{font-size:16.5px}
+  .board{padding:34px 0 8px}
+  .board h2{font-size:22px}
+  th,td{padding:11px 10px}
 }
 """
 
@@ -888,22 +918,65 @@ _JS = r"""
 })();
 """
 
-def _headline_stats(doc):
+def _lede(doc):
+    """The page's opening claim, derived from the data rather than asserted.
+
+    Leads with the widest board's actual spread. The wording stays descriptive
+    — a spread is reported, never attributed to a cause — because the page's
+    whole argument is that it does not overclaim.
+    """
+    bundles = doc["harness"]["bundles"]
+    boards = [b for b in bundles if len(b["arms"]) >= 2]
+    board = max(boards, key=lambda b: len(b["arms"]), default=None)
+
+    title, deck = "Same task, different wrapper.", (
+        "Two benchmark families: one varies the coding-agent harness around a "
+        "fixed model, the other varies the serving route. They answer "
+        "different questions and share no denominators."
+    )
+    if board is not None:
+        rates = [a["solve_rate"] for a in board["arms"] if a["solve_rate"] is not None]
+        walls = [a["median_wall_s"] for a in board["arms"]
+                 if a.get("median_wall_s")]
+        spread = (max(rates) - min(rates)) * 100 if len(rates) >= 2 else None
+        ratio = (max(walls) / min(walls)) if len(walls) >= 2 and min(walls) > 0 else None
+        models = ", ".join(board.get("models") or []) or "one model"
+        count = len(board["arms"])
+
+        facts = []
+        if spread is not None:
+            facts.append(f"solve rate spans {spread:.1f} points")
+        if ratio is not None:
+            facts.append(f"median wall time spans {ratio:.1f}\u00d7")
+        if spread is not None and spread >= 15:
+            title = "The harness moves <em>correctness</em>."
+        elif spread is not None and ratio is not None and ratio >= 1.8:
+            # Correctness is tight but the clock is not: say exactly that.
+            title = "Correctness clusters. <em>Speed doesn\u2019t.</em>"
+        if facts:
+            deck = (f"Across {count} harnesses on {models}, "
+                    + " and ".join(facts) + ". Every board below is one "
+                    "verified bundle, shown with its interval and its "
+                    "provenance.")
+
     harness = doc["harness"]
     router = doc["router"]
-    arms = sum(len(b["arms"]) for b in harness["bundles"])
-    harnesses = {a["harness"] for b in harness["bundles"] for a in b["arms"]}
-    models = {a["model"] for b in harness["bundles"] for a in b["arms"]}
-    routes = sum(len(b["arms"]) for b in router["bundles"])
-    return [
-        (str(harness["bundle_count"]), "harness bundles"),
-        (str(len(harnesses)), "harnesses"),
-        (str(len(models)), "models"),
-        (str(arms), "harness arms"),
-        (str(router["bundle_count"]), "router bundles"),
-        (str(routes), "serving routes"),
-    ]
+    harnesses = {a["harness"] for b in bundles for a in b["arms"]}
+    models = {a["model"] for b in bundles for a in b["arms"]}
+    cells = sum(b.get("countable_rows") or 0 for b in bundles)
+    dates = sorted(b["date"] for b in bundles if b.get("date"))
 
+    facts = [
+        f"{len(harnesses)} harnesses",
+        f"{len(models)} models",
+        f"{harness['bundle_count']} verified bundles",
+        f"{cells:,} countable cells",
+    ]
+    if router["bundle_count"]:
+        facts.append(f"{router['bundle_count']} router bundles")
+    if dates:
+        facts.append(f"updated {dates[-1]}")
+    return title, deck, facts
 
 
 _METHODOLOGY = """
@@ -1171,7 +1244,17 @@ def _render_table(columns, rows, sort_index, row_attrs=None):
         attrs.update(keys)
         body_rows += _tag("tr", attrs, cells)
 
-    return _tag("div", {"class": "scroll"}, _tag(
+    # Plot width is a per-table budget: four contrast columns cannot each be as
+    # wide as a single solve-rate column. Dense tables also drop the printed
+    # interval, which the bar already carries.
+    plots = sum(1 for col in columns if col.get("plot"))
+    plot_w = {0: 140, 1: 148, 2: 116, 3: 100}.get(plots, 84)
+    if len(columns) > 7:
+        plot_w = min(plot_w, 116)
+    attrs = {"class": "scroll", "style": f"--plot-w:{plot_w}px"}
+    if len(columns) > 6 or plots > 2:
+        attrs["data-dense"] = "1"
+    return _tag(attrs.pop("_tag", "div"), attrs, _tag(
         "table", {},
         _tag("thead", {}, _tag("tr", {}, _tag("th", {"scope": "col"}, "#") + heads))
         + _tag("tbody", {}, body_rows)))
@@ -1227,7 +1310,7 @@ def _harness_board(bundle):
             {"label": "Model", "type": "str", "dir": "asc",
              "cell": lambda a: _esc(a["model"]), "key": lambda a: a["model"]})
     columns += [
-        {"label": "Solve rate · Wilson 95%", "axis": ["0", "50", "100%"],
+        {"label": "Solve rate · Wilson 95%", "axis": ["0", "50", "100%"], "plot": True,
          "cell": lambda a: _interval_cell(
              a["solve_rate"], (a.get("wilson95") or [None, None])[0],
              (a.get("wilson95") or [None, None])[1], _fmt_pct),
@@ -1317,7 +1400,7 @@ def _router_board(bundle):
                                 + (_chip(a["requested_provider"])
                                    if a.get("requested_provider") else "")),
          "key": lambda a: a.get("role") or ""},
-        {"label": "Solve rate · 95% CI", "axis": ["0", "50", "100%"],
+        {"label": "Solve rate · 95% CI", "axis": ["0", "50", "100%"], "plot": True,
          "cell": lambda a: _interval_cell(
              a["solve_rate"]["estimate"], a["solve_rate"]["low"],
              a["solve_rate"]["high"], _fmt_pct),
@@ -1345,7 +1428,7 @@ def _router_board(bundle):
         def delta_column(label, key, fmt, higher_is_better, direction="desc"):
             domain = _delta_domain(contrasts, key)
             return {
-                "label": label, "dir": direction,
+                "label": label, "dir": direction, "plot": True,
                 "cell": lambda r: _delta_cell(r[key], fmt, higher_is_better, domain),
                 "key": lambda r: r[key]["estimate"],
             }
@@ -1382,13 +1465,14 @@ def _router_board(bundle):
 
 def _skipped_board(title, blurb, entries):
     items = "".join(
-        _tag("li", {}, _tag("strong", {}, _esc(e["id"])) + " — " + _esc(e["reason"]))
+        _tag("li", {},
+             _tag("strong", {}, _esc(e["id"]))
+             + _tag("div", {"class": "sub"}, _esc(e["reason"])))
         for e in entries)
     return _tag("section", {"class": "board", "data-caveats": "0"},
                 _tag("div", {"class": "head"},
                      _tag("h2", {}, _esc(title)) + _tag("p", {}, _esc(blurb)))
-                + _tag("div", {"class": "head"},
-                       _tag("ul", {"class": "records"}, items)))
+                + _tag("ul", {"class": "records"}, items))
 
 
 def _records_section(title, blurb, items, anchor=None):
@@ -1541,11 +1625,12 @@ def _releases_view(doc):
 
 def render_board_html(doc):
     """The whole page: content rendered here, behaviour layered on top."""
-    stat_html = "".join(
-        _tag("div", {"class": "stat"},
-             _tag("b", {}, _esc(value)) + _tag("span", {}, _esc(label)))
-        for value, label in _headline_stats(doc)
-    )
+    title, deck, facts = _lede(doc)
+    lede = _tag("div", {"class": "lede"},
+                _tag("h1", {}, title)          # the only markup we author
+                + _tag("p", {"class": "deck"}, _esc(deck))
+                + _tag("div", {"class": "dateline"},
+                       "".join(_tag("span", {}, _esc(f)) for f in facts)))
     tabs = "".join(
         _tag("a", {"href": "#" + slug}, _esc(label))
         for slug, label in (
@@ -1570,11 +1655,6 @@ def render_board_html(doc):
         + _tag("nav", {"class": "tabs"}, tabs)
         + theme_button))
 
-    intro = _tag("div", {"class": "intro"},
-                 _tag("h1", {}, "Same task, different wrapper "
-                                "&mdash; and different wire.")
-                 + _tag("p", {}, _esc(doc["cross_family_note"])))
-
     # Every view ships expanded. The script collapses them into tabs; without
     # it the nav degrades to jump links over one continuous page.
     views = (
@@ -1598,8 +1678,7 @@ def render_board_html(doc):
         f"<style>{_CSS}</style></head><body>"
         + masthead
         + '<div class="wrap">'
-        + intro
-        + _tag("div", {"class": "stats"}, stat_html)
+        + lede
         + views
         + footer
         + "</div>"

@@ -92,28 +92,45 @@ interval spanning zero is not a detected effect.
 
 ## Design decisions worth keeping
 
-The page is an instrument readout, not a marketing page, so the craft went into
-information design rather than ornament.
+The page is treated as a **published measurement**, not a dashboard — it is
+meant to be read, shared, and cited, so it gets an editorial treatment rather
+than an admin-panel one.
 
-- **Type carries the split.** Prose is set in the system sans; every identifier
-  the benchmark *names* and every value it *measures* — harness, model, arm id,
-  rate, latency, digest — is set in mono, because those are readings, not
-  writing. No webfont is loaded: a data-URI face would bloat a committed file
-  and a CDN link would break the no-third-party-assets rule.
+- **Three type roles.** A serif display face carries the headline and board
+  titles; a sans carries prose and small labels; a mono carries every
+  identifier the benchmark names and every value it measures, because those
+  are readings rather than writing. No webfont is loaded — a CDN link would
+  break the no-third-party-assets rule and a data-URI face would commit a
+  licensed asset to the repo. If that trade is ever worth making, embedding a
+  subsetted SIL OFL face is the intended route.
+- **Ink on paper; colour is reserved for data.** Chrome is ink and hairlines
+  only. Colour appears exclusively on the interval marks and the diverging
+  contrast poles, so a coloured pixel always means something measured.
+- **Rules, not boxes.** Boards are records separated by hairlines rather than
+  cards with borders and shadows, so the data sits on the page.
+- **The lede is derived, not asserted.** The headline and deck are computed
+  from the widest board's actual spread (`_lede`). The wording stays
+  descriptive — a spread is reported, never attributed to a cause — because
+  the page's whole argument is that it does not overclaim. There is no
+  stat-tile strip; the summary is a single typographic dateline.
 - **One shared interval scale.** Solve-rate intervals plot against the same
   0–100% track, gridded at 25% steps with the axis labelled once in the column
   header, so rows compare down the column instead of each bar being its own
   private scale.
 - **Contrasts diverge about zero.** Gateway-tax deltas plot on a zero-centred
   axis with a shared per-column domain. An interval covering zero is drawn
-  neutral grey, so "no detected effect" is something you see rather than
-  something you read in a caption.
+  neutral, so "no detected effect" is something you see rather than something
+  you read in a caption.
 - **The diverging pair is validated, not eyeballed.** Better/worse use blue
   `#2a78d6`/`#3987e5` against orange `#eb6834`/`#d95926` — a warm/cool pair that
   clears CVD separation, the normal-vision floor, and 3:1 contrast in both
   modes. Green-vs-red was rejected: it fails deutan separation badly (ΔE 4.1).
   Direction is also carried by the sign and by which side of zero the bar sits
   on, so it never depends on colour alone.
+- **Plot width is a per-table budget.** A table with four contrast columns
+  cannot give each the width a lone solve-rate column gets, so `_render_table`
+  sizes `--plot-w` from the number of plot columns and drops the printed
+  interval on dense tables, where the bar already carries it.
 - **Empty columns are dropped, not dashed.** A measure no arm reports (`$/solve`
   with no configured price) is removed entirely, and the model column only
   appears when a board compares more than one model.
@@ -127,7 +144,7 @@ directions — including flipping `color-scheme` back for native form controls.
 
 ## Constraints the page keeps
 
-- **Self-contained.** The data is embedded in the page, so it works from
+- **Self-contained.** Content is rendered into the page, so it works from
   `file://`. No CDN, no fonts, no network fetches, no build step.
 - **Never blends bundles.** Each board is one bundle. There is no cross-bundle
   or cross-family aggregate score, and the two families share no denominators.
