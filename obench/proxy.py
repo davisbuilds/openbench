@@ -790,6 +790,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
 class CountingProxyServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = 128
 
     def register_cell(self, token: str, *, max_calls: int | None = None) -> None:
         """Opt a gateway cell into lifecycle-managed, sealed ledger writes."""
