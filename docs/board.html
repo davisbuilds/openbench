@@ -1,0 +1,767 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenBench leaderboards</title><meta name="description" content="Harness and serving-route leaderboards for OpenBench, built from digest-verified result bundles."><style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#12181f; --muted:#5b6875;
+  --line:#e2e7ee; --head:#eef2f7; --accent:#0b6bcb; --accent-ink:#ffffff;
+  --good:#0f7b4f; --bad:#b4442e; --warn:#8a5a00; --warn-bg:#fff4dd;
+  --bar:#c8d6e6; --bar-fill:#0b6bcb; --chip:#eef2f7;
+  --radius:12px; --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.05);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0d1117; --panel:#151b23; --ink:#e6edf3; --muted:#9aa7b4;
+    --line:#232c37; --head:#1b232d; --accent:#5aa8ff; --accent-ink:#08121d;
+    --good:#4ec98a; --bad:#ff8a70; --warn:#e8b552; --warn-bg:#2a2113;
+    --bar:#2a3440; --bar-fill:#5aa8ff; --chip:#1b232d;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#12181f; --muted:#5b6875;
+  --line:#e2e7ee; --head:#eef2f7; --accent:#0b6bcb; --accent-ink:#ffffff;
+  --good:#0f7b4f; --bad:#b4442e; --warn:#8a5a00; --warn-bg:#fff4dd;
+  --bar:#c8d6e6; --bar-fill:#0b6bcb; --chip:#eef2f7;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.05);
+}
+:root[data-theme="dark"]{
+  --bg:#0d1117; --panel:#151b23; --ink:#e6edf3; --muted:#9aa7b4;
+  --line:#232c37; --head:#1b232d; --accent:#5aa8ff; --accent-ink:#08121d;
+  --good:#4ec98a; --bad:#ff8a70; --warn:#e8b552; --warn-bg:#2a2113;
+  --bar:#2a3440; --bar-fill:#5aa8ff; --chip:#1b232d;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+.wrap{max-width:1240px;margin:0 auto;padding:0 20px}
+header.top{border-bottom:1px solid var(--line);background:var(--panel);
+  position:sticky;top:0;z-index:20}
+.top .wrap{display:flex;align-items:center;gap:18px;height:60px}
+.brand{font-weight:700;letter-spacing:-.01em;font-size:17px;white-space:nowrap}
+.brand span{color:var(--muted);font-weight:500}
+nav.tabs{display:flex;gap:2px;margin-left:auto;flex-wrap:wrap}
+nav.tabs a{padding:7px 13px;border-radius:999px;text-decoration:none;color:var(--muted);
+  font-weight:600;font-size:14px}
+nav.tabs a[aria-current="page"]{background:var(--accent);color:var(--accent-ink)}
+nav.tabs a:hover:not([aria-current]){background:var(--chip);color:var(--ink)}
+button.theme{background:none;border:1px solid var(--line);color:var(--muted);
+  border-radius:8px;width:34px;height:32px;cursor:pointer;padding:0;
+  display:inline-flex;align-items:center;justify-content:center}
+button.theme:hover{color:var(--ink);border-color:var(--muted)}
+button.theme svg{width:16px;height:16px}
+.hero{padding:34px 0 10px}
+.hero h1{margin:0 0 6px;font-size:30px;letter-spacing:-.02em}
+.hero p{margin:0;color:var(--muted);max-width:70ch}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0 4px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:12px 16px;min-width:150px}
+.stat b{display:block;font-size:22px;letter-spacing:-.01em}
+.stat span{color:var(--muted);font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:12px;margin:18px 0}
+.controls input[type=search],.controls select{background:var(--bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit;font-size:14px}
+.controls input[type=search]{min-width:210px;flex:1}
+.controls label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:14px}
+.board{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);margin:16px 0;overflow:hidden}
+.board > .head{padding:16px 18px;border-bottom:1px solid var(--line)}
+.board h2{margin:0 0 6px;font-size:18px;letter-spacing:-.01em}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chip{background:var(--chip);color:var(--muted);border-radius:999px;padding:3px 9px;
+  font-size:12px;font-weight:600;white-space:nowrap}
+.chip.kind-release{color:var(--accent)}
+.chip.kind-community{color:var(--good)}
+.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:500}
+td .chips{flex-wrap:nowrap;justify-content:flex-end}
+details.caveats{margin:10px 0 0;font-size:14px}
+details.caveats summary{cursor:pointer;color:var(--warn);font-weight:600}
+details.caveats ul{margin:8px 0 0;padding-left:20px;color:var(--muted)}
+details.caveats li{margin:5px 0}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:10px 12px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th:nth-child(2),td:nth-child(2){text-align:left}
+thead th{background:var(--head);font-size:12.5px;text-transform:uppercase;
+  letter-spacing:.04em;color:var(--muted);position:sticky;top:0}
+thead th.sortable{cursor:pointer;user-select:none}
+thead th.sortable:hover{color:var(--ink)}
+thead th .arrow{opacity:.35;margin-left:4px}
+thead th[aria-sort] .arrow{opacity:1;color:var(--accent)}
+tbody tr:hover{background:var(--head)}
+tbody tr:last-child td{border-bottom:none}
+td.rank{color:var(--muted);font-weight:700;width:1%}
+tr.top td.rank{color:var(--accent)}
+td.name{font-weight:600}
+td.sub{color:var(--muted);font-weight:400}
+.ci{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.ci .track{position:relative;width:120px;height:7px;background:var(--bar);border-radius:4px}
+.ci .span{position:absolute;top:0;height:7px;background:var(--bar-fill);opacity:.35;border-radius:4px}
+.ci .dot{position:absolute;top:-2px;width:3px;height:11px;background:var(--bar-fill);border-radius:2px}
+.ci .val{min-width:52px;text-align:right;font-weight:600}
+.ci .range{color:var(--muted);font-size:12.5px;min-width:96px;text-align:right}
+.delta.up{color:var(--good)}
+.delta.down{color:var(--bad)}
+.empty{padding:34px 18px;text-align:center;color:var(--muted)}
+.note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:var(--radius);padding:14px 16px;margin:16px 0;color:var(--muted);font-size:14.5px}
+.note strong{color:var(--ink)}
+.prose{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:20px 22px;margin:16px 0}
+.prose h2{margin:0 0 8px;font-size:18px}
+.prose h3{margin:20px 0 6px;font-size:15px}
+.prose p,.prose li{color:var(--muted)}
+.prose code{background:var(--chip);padding:1px 5px;border-radius:5px;font-size:13px}
+ul.releases{list-style:none;margin:0;padding:0}
+ul.releases li{padding:12px 0;border-bottom:1px solid var(--line)}
+ul.releases li:last-child{border-bottom:none}
+ul.releases a{font-weight:600;text-decoration:none}
+ul.releases a:hover{text-decoration:underline}
+footer{color:var(--muted);font-size:13.5px;padding:28px 0 40px;text-align:center}
+.hidden{display:none}
+@media(max-width:760px){
+  .top .wrap{height:auto;padding-top:10px;padding-bottom:10px;flex-wrap:wrap}
+  nav.tabs{margin-left:0;width:100%}
+  .ci .track{width:64px}
+  .ci .range{display:none}
+  .hero h1{font-size:24px}
+}
+</style></head><body><header class="top"><div class="wrap"><div class="brand">OpenBench <span>leaderboards</span></div><nav class="tabs"><a href="#harness">Harness Bench</a><a href="#router">Router Bench</a><a href="#releases">Releases</a><a href="#methodology">Methodology</a></nav><button class="theme" id="theme" type="button" aria-label="Toggle colour theme" title="Toggle colour theme"><svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm0 1.5V14.5a6.5 6.5 0 0 1 0-13z"/></svg></button></div></header><div class="wrap"><div class="hero"><h1>Same task, different wrapper — and different wire.</h1><p>The two families answer different questions and share no denominators. Do not read a Router Bench arm as another harness, or compare a solve rate across families.</p><div class="stats"><div class="stat"><b>2</b><span>verified harness bundles</span></div><div class="stat"><b>8</b><span>harnesses ranked</span></div><div class="stat"><b>2</b><span>models covered</span></div><div class="stat"><b>10</b><span>harness arms</span></div><div class="stat"><b>0</b><span>router bundles</span></div><div class="stat"><b>0</b><span>serving routes</span></div></div></div><noscript><p class="note">This page renders its tables with JavaScript. The static fallback is <a href="leaderboard.html">leaderboard.html</a>, and the same data is in <a href="board.json">board.json</a>.</p></noscript><main id="view-harness"></main><main id="view-router" class="hidden"></main><main id="view-releases" class="hidden"></main><main id="view-methodology" class="hidden">
+<section class="prose">
+  <h2>What is being measured</h2>
+  <p>OpenBench runs two benchmark families. They share a task contract and a
+  checker, and nothing else. Never compare a number across them.</p>
+
+  <h3>Harness Bench</h3>
+  <p>Varies the coding-agent harness — the CLI that wraps a model in a run loop,
+  tool set, and permission policy — while holding the model and task fixed. An
+  arm is <code>(harness, model)</code>. A task is solved when its
+  <code>checker.sh</code> exits 0; the harness's own claim of success is never
+  trusted.</p>
+
+  <h3>Router Bench</h3>
+  <p>Holds the harness, model, provider, sampling, task, and budget fixed while
+  varying the serving route. An arm is a route. The implemented track is
+  <strong>Gateway Tax</strong>: a direct baseline against one or more gateway
+  arms on the same canonical model revision, with fallbacks, gateway retries,
+  and caching disabled, so the measurement is the gateway path itself rather
+  than its model choice or cache hit rate.</p>
+
+  <h2>Denominators and intervals</h2>
+  <ul>
+    <li>Denominators are countable cells. Infrastructure and rate-limit failures
+    are excluded; other failures, including timeouts, stay in the denominator.</li>
+    <li>Harness Bench uses Wilson 95% intervals over matched
+    <code>(task, trial)</code> cells whenever a bundle has two or more arms.</li>
+    <li>Router Bench uses task-weighted estimates with bootstrap 95% intervals,
+    and includes a block only when every expected arm is present,
+    infrastructure-valid, and passes route integrity.</li>
+    <li>A gateway-tax interval that spans zero is not a detected effect.</li>
+  </ul>
+
+  <h2>Efficiency and cost</h2>
+  <ul>
+    <li>Median wall time is taken among solved cells only.</li>
+    <li>Tokens per solve use split fields — uncached input, output, and cache
+    reads — never a vendor aggregate. The token basis chip records whether a
+    figure was proxy-metered, vendor-split, or self-reported by the CLI. These
+    bases are not interchangeable.</li>
+    <li>Harness <code>$/solve</code> appears only for models with a configured
+    price. Router cost prefers invoice reconciliation, then the router's own
+    reported cost, then a frozen list-price estimate, and shows coverage when a
+    basis does not cover every call.</li>
+    <li>Harness defaults are deliberately not clamped: they are part of the
+    product being evaluated.</li>
+  </ul>
+
+  <h2>Comparability</h2>
+  <ul>
+    <li>Cells from different bundles are never blended. Each board is one
+    bundle; cross-bundle ranking on different task sets is not supported.</li>
+    <li>Every ranked bundle ships <code>results.jsonl</code> plus a provenance
+    digest and is re-verified before it appears here. Digests prove
+    tamper-evidence, not that runs were not cherry-picked — which is why
+    disclosed caveats are shown next to the scores rather than in a footnote.</li>
+    <li>Results cover only the included tasks, trials, model deployments,
+    harness versions, and timeout caps. They do not establish a universal
+    ranking.</li>
+  </ul>
+
+  <h2>Reproducing a board</h2>
+  <p>Every board links its <code>results.jsonl</code>. Re-check a bundle with
+  <code>obench verify &lt;bundle&gt;</code> (harness) or
+  <code>obench router verify &lt;bundle&gt;</code> (router), and rebuild this
+  page with <code>obench site build</code>.</p>
+</section>
+</main><footer>Generated by <code>obench site</code> · static, self-contained, no third-party assets · <a href="board.json">board.json</a> · <a href="index.html">all releases</a></footer></div><script id="board-data" type="application/json">{"community":[{"claim":"Seed community submission: the verified aider showcase bundle (same artifact as docs/releases/2026-07-20-aider-showcase).","date":"2026-07-20","id":"openbench-aider-showcase","link":"https://github.com/minghinmatthewlam/openbench/tree/main/docs/releases/2026-07-20-aider-showcase","path":"community/openbench-aider-showcase/index.html","submitter":"openbench","title":"OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"}],"cross_family_note":"The two families answer different questions and share no denominators. Do not read a Router Bench arm as another harness, or compare a solve rate across families.","generated_by":"obench site","harness":{"bundle_count":2,"bundles":[{"also_seen_as":[],"arms":[{"cost_per_solve_usd":null,"harness":"cursor","median_wall_s":42.908500000000004,"model":"gpt-5.6-sol","n":41,"solve_rate":0.8780487804878049,"solved":36,"token_bases":["self-reported"],"total_tokens_per_solve":407404.55555555556,"wilson95":[0.7445549235115514,0.9467674200265918]},{"cost_per_solve_usd":null,"harness":"devin","median_wall_s":65.144,"model":"gpt-5.6-sol","n":41,"solve_rate":0.8048780487804879,"solved":33,"token_bases":["self-reported"],"total_tokens_per_solve":null,"wilson95":[0.6598611764744329,0.8976568425079408]},{"cost_per_solve_usd":null,"harness":"grokbuild","median_wall_s":86.087,"model":"gpt-5.6-sol","n":41,"solve_rate":0.8048780487804879,"solved":33,"token_bases":["self-reported"],"total_tokens_per_solve":394809.1818181818,"wilson95":[0.6598611764744329,0.8976568425079408]},{"cost_per_solve_usd":null,"harness":"opencode","median_wall_s":60.137,"model":"gpt-5.6-sol","n":41,"solve_rate":0.8048780487804879,"solved":33,"token_bases":["self-reported"],"total_tokens_per_solve":351618.36363636365,"wilson95":[0.6598611764744329,0.8976568425079408]},{"cost_per_solve_usd":null,"harness":"claude","median_wall_s":57.282,"model":"gpt-5.6-sol","n":41,"solve_rate":0.7560975609756098,"solved":31,"token_bases":["self-reported"],"total_tokens_per_solve":181456.51612903227,"wilson95":[0.6065636934554182,0.8617514424897756]},{"cost_per_solve_usd":null,"harness":"codex","median_wall_s":94.603,"model":"gpt-5.6-sol","n":41,"solve_rate":0.7560975609756098,"solved":31,"token_bases":["proxy-measured","self-reported"],"total_tokens_per_solve":null,"wilson95":[0.6065636934554182,0.8617514424897756]},{"cost_per_solve_usd":null,"harness":"pi","median_wall_s":37.942,"model":"gpt-5.6-sol","n":41,"solve_rate":0.7560975609756098,"solved":31,"token_bases":["self-reported"],"total_tokens_per_solve":144650.5806451613,"wilson95":[0.6065636934554182,0.8617514424897756]}],"caveats":[],"claim":null,"countable_rows":311,"date":"2026-07-21","excluded_counts":{"infra":2,"rate_limited":2},"family":"harness","has_caveats":false,"id":"2026-07-21-gpt56","kind":"release","link":null,"matched":{"duplicate_cells_excluded":0,"duplicate_rows_excluded":0,"groups_compared":7,"matched_cells_per_group":41,"matched_rows":287,"unmatched_countable_rows":24},"models":["gpt-5.6-sol"],"path":"releases/2026-07-21-gpt56/index.html","raw_rows":315,"results_path":"releases/2026-07-21-gpt56/results.jsonl","results_sha256":"546f167576aac07d8d4c889d559ac86d9f9ad427c5fa53e5a421059f9db498b6","submitter":null,"table":"matched","task_set_digest":"d949d46e8aae81489a91d1925ec14f91e4667f5c69ccb314e8fdc611d966c059","title":"OpenBench: gpt-5.6 across 7 harnesses"},{"also_seen_as":[{"id":"openbench-aider-showcase","kind":"community","path":"community/openbench-aider-showcase/index.html","results_path":"community/openbench-aider-showcase/results.jsonl"}],"arms":[{"cost_per_solve_usd":null,"harness":"aider","median_wall_s":39.0355,"model":"deepseek-v4-flash","n":8,"solve_rate":1.0,"solved":8,"token_bases":["proxy-measured"],"total_tokens_per_solve":6192.0,"wilson95":[0.6755843804891231,1.0]},{"cost_per_solve_usd":null,"harness":"opencode","median_wall_s":31.720999999999997,"model":"deepseek-v4-flash","n":8,"solve_rate":1.0,"solved":8,"token_bases":["self-reported"],"total_tokens_per_solve":105269.375,"wilson95":[0.6755843804891231,1.0]},{"cost_per_solve_usd":null,"harness":"pi","median_wall_s":26.444,"model":"deepseek-v4-flash","n":8,"solve_rate":1.0,"solved":8,"token_bases":["self-reported"],"total_tokens_per_solve":43198.25,"wilson95":[0.6755843804891231,1.0]}],"caveats":["Harness mode is not apples-to-apples: aider ran as a one-shot --message invocation, while pi and opencode ran full agentic loops. Token comparison reflects that difference in harness mode, not a pure like-for-like agent loop contest.","One aider cell excluded: 1 of 9 aider cells was infrastructure-classified and is excluded from solve-rate denominators (aider reported as 8/8). pi and opencode are 9/9.","Uniform total-token basis: totals include uncached input, output, and cache reads from split fields; the vendor aggregate is never used. Values are 6,192 vs 48,262 vs 111,380 tokens/solve (aider vs pi vs opencode).","Verifiable bundle: this release includes results.jsonl and provenance.json. Re-check digests with obench verify docs/releases/2026-07-20-aider-showcase."],"claim":null,"countable_rows":26,"date":"2026-07-20","excluded_counts":{"infra":1},"family":"harness","has_caveats":true,"id":"2026-07-20-aider-showcase","kind":"release","link":null,"matched":{"duplicate_cells_excluded":0,"duplicate_rows_excluded":0,"groups_compared":3,"matched_cells_per_group":8,"matched_rows":24,"unmatched_countable_rows":2},"models":["deepseek-v4-flash"],"path":"releases/2026-07-20-aider-showcase/index.html","raw_rows":27,"results_path":"releases/2026-07-20-aider-showcase/results.jsonl","results_sha256":"677642cc0649ecfd42231dbdf49fc5aa0b2c2a8161ccb879358bfeec40e45192","submitter":null,"table":"matched","task_set_digest":"8b757f8abf3816cac2ddc80e5ceaefa3f4a323c47c2431258a655d4d3b7f2e43","title":"OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"}],"note":"Harness Bench varies the coding-agent harness while holding the model and task fixed. Each board below is one verified publish bundle. Scores are never mixed across bundles: different task sets, trial counts, timeout caps, or run conditions make cross-bundle rankings non-comparable. Within a bundle, arms are (harness, model) and — when two or more arms exist — use matched (task, trial) denominators.","skipped":[{"id":"2026-07-02-m3","kind":"release","path":"releases/2026-07-02-m3/index.html","reason":"no results.jsonl (HTML-only release page)"},{"id":"2026-07-20-deepseek","kind":"release","path":"releases/2026-07-20-deepseek/index.html","reason":"no results.jsonl (HTML-only release page)"},{"id":"2026-07-20-grok45","kind":"release","path":"releases/2026-07-20-grok45/index.html","reason":"no results.jsonl (HTML-only release page)"},{"id":"2026-07-20-kimi-k3","kind":"release","path":"releases/2026-07-20-kimi-k3/index.html","reason":"no results.jsonl (HTML-only release page)"}]},"packs":[{"content_sha256":"7f4a9d273763ec6d90f676771f41ebb12da42dc0197102cbf196b4c0bb6ac0d4","description":"BYO Aider candidate manifest (DeepSeek proxy route)","id":"openbench/aider","kind":"harness","latest":"1.0.0","license":"Apache-2.0","manifests":["aider.toml"],"name":"aider","org":"openbench","source":"data/packs/openbench-aider"},{"content_sha256":"3b1e576398a8c8f6d42a514ce83ec610f81742edd79f733453bbff681dbeca58","description":"Tiny polarity-checked smoke tasks (make-it-run, fix-failing-test)","id":"openbench/core-smoke","kind":"tasks","latest":"1.0.0","license":"Apache-2.0","name":"core-smoke","org":"openbench","source":"data/packs/openbench-core-smoke","tasks":["make-it-run","fix-failing-test"]}],"releases":[{"date":"2026-07-02","id":"2026-07-02-m3","models":["gpt-5.5-medium"],"path":"releases/2026-07-02-m3/index.html","title":"OpenBench M3 — Harness Comparison"},{"date":"2026-07-20","id":"2026-07-20-grok45","models":["grok-4.5"],"path":"releases/2026-07-20-grok45/index.html","title":"OpenBench: grok-4.5 across 4 harnesses"},{"date":"2026-07-20","id":"2026-07-20-kimi-k3","models":["kimi-k3"],"path":"releases/2026-07-20-kimi-k3/index.html","title":"OpenBench: kimi-k3 across 3 harnesses"},{"date":"2026-07-20","id":"2026-07-20-deepseek","models":["deepseek-v4-flash"],"path":"releases/2026-07-20-deepseek/index.html","title":"OpenBench: deepseek across 5 harnesses"},{"date":"2026-07-20","id":"2026-07-20-aider-showcase","models":["deepseek-v4-flash"],"path":"releases/2026-07-20-aider-showcase/index.html","title":"OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"},{"date":"2026-07-21","id":"2026-07-21-gpt56","models":["gpt-5.6-sol"],"path":"releases/2026-07-21-gpt56/index.html","title":"OpenBench: gpt-5.6 across 7 harnesses"}],"router":{"bundle_count":0,"bundles":[],"note":"Router Bench holds the harness, model, provider, sampling, task, and budget fixed while varying the serving route. The implemented track is Gateway Tax: one direct baseline arm against one or more gateway arms on the same canonical model revision, with fallbacks, gateway retries, and caching disabled. A block counts only when every expected arm is present, infrastructure-valid, and passes route integrity. Intervals are task-bootstrap, not Wilson.","skipped":[]},"schema_version":1}</script><script>
+(function () {
+  "use strict";
+  var DATA = JSON.parse(document.getElementById("board-data").textContent);
+  var root = document.documentElement;
+
+  // ---- theme -------------------------------------------------------------
+  try {
+    var saved = localStorage.getItem("obench-theme");
+    if (saved) root.setAttribute("data-theme", saved);
+  } catch (e) { /* storage disabled */ }
+  document.getElementById("theme").addEventListener("click", function () {
+    var now = root.getAttribute("data-theme");
+    if (!now) {
+      now = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    var next = now === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("obench-theme", next); } catch (e) { /* ignore */ }
+  });
+
+  // ---- formatting --------------------------------------------------------
+  function pct(v, digits) {
+    if (v === null || v === undefined) return "—";
+    return (v * 100).toFixed(digits === undefined ? 1 : digits) + "%";
+  }
+  function num(v, digits) {
+    if (v === null || v === undefined) return "—";
+    return v.toLocaleString(undefined, {
+      minimumFractionDigits: digits || 0, maximumFractionDigits: digits || 0
+    });
+  }
+  function secs(v) { return v === null || v === undefined ? "—" : v.toFixed(1) + "s"; }
+  function money(v, digits) {
+    if (v === null || v === undefined) return "—";
+    return "$" + v.toFixed(digits === undefined ? 3 : digits);
+  }
+  function signed(v, fmt) {
+    if (v === null || v === undefined) return "—";
+    return (v > 0 ? "+" : "") + fmt(v);
+  }
+  function el(tag, attrs, kids) {
+    var node = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      if (k === "class") node.className = attrs[k];
+      else if (k === "text") node.textContent = attrs[k];
+      else if (k === "html") node.innerHTML = attrs[k];
+      else if (attrs[k] !== null && attrs[k] !== undefined) node.setAttribute(k, attrs[k]);
+    });
+    (kids || []).forEach(function (kid) {
+      if (kid) node.appendChild(typeof kid === "string" ? document.createTextNode(kid) : kid);
+    });
+    return node;
+  }
+  function chip(text, cls) { return el("span", { class: "chip " + (cls || ""), text: text }); }
+
+  // Confidence-interval cell: value, a scaled bar, and the numeric range.
+  function ciCell(estimate, low, high, fmt) {
+    var wrap = el("div", { class: "ci" });
+    wrap.appendChild(el("span", { class: "val", text: fmt(estimate) }));
+    var track = el("div", { class: "track" });
+    if (low !== null && low !== undefined && high !== null && high !== undefined) {
+      var lo = Math.max(0, Math.min(1, low));
+      var hi = Math.max(0, Math.min(1, high));
+      var span = el("div", { class: "span" });
+      span.style.left = (lo * 100) + "%";
+      span.style.width = Math.max(1, (hi - lo) * 100) + "%";
+      track.appendChild(span);
+    }
+    if (estimate !== null && estimate !== undefined) {
+      var dot = el("div", { class: "dot" });
+      dot.style.left = "calc(" + (Math.max(0, Math.min(1, estimate)) * 100) + "% - 1px)";
+      track.appendChild(dot);
+    }
+    wrap.appendChild(track);
+    var range = "—";
+    if (low !== null && low !== undefined && high !== null && high !== undefined) {
+      range = fmt(low) + "–" + fmt(high);
+    }
+    wrap.appendChild(el("span", { class: "range", text: range }));
+    return wrap;
+  }
+
+  // ---- sortable table ----------------------------------------------------
+  // columns: [{label, cell(row)->Node|string, sort(row)->number|string|null,
+  //            defaultDir, align}]
+  var sortState = {};
+  function renderTable(key, columns, rows, defaultSort) {
+    var state = sortState[key] || (sortState[key] = {
+      index: defaultSort === undefined ? null : defaultSort, dir: "desc"
+    });
+    var body = rows.slice();
+    if (state.index !== null && columns[state.index] && columns[state.index].sort) {
+      var get = columns[state.index].sort;
+      var dir = state.dir === "asc" ? 1 : -1;
+      body.sort(function (a, b) {
+        var x = get(a), y = get(b);
+        var xn = x === null || x === undefined, yn = y === null || y === undefined;
+        if (xn && yn) return 0;
+        if (xn) return 1;          // nulls always sink
+        if (yn) return -1;
+        if (typeof x === "string" || typeof y === "string") {
+          return String(x).localeCompare(String(y)) * dir;
+        }
+        return (x - y) * dir;
+      });
+    }
+
+    var thead = el("thead");
+    var hrow = el("tr");
+    columns.forEach(function (col, i) {
+      var attrs = { class: col.sort ? "sortable" : "" };
+      if (state.index === i) attrs["aria-sort"] = state.dir === "asc" ? "ascending" : "descending";
+      var th = el("th", attrs, [col.label]);
+      if (col.sort) {
+        th.appendChild(el("span", {
+          class: "arrow",
+          text: state.index === i ? (state.dir === "asc" ? "↑" : "↓") : "↕"
+        }));
+        th.addEventListener("click", function () {
+          if (state.index === i) state.dir = state.dir === "asc" ? "desc" : "asc";
+          else { state.index = i; state.dir = col.defaultDir || "desc"; }
+          render();
+        });
+      }
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+
+    var tbody = el("tbody");
+    body.forEach(function (row, i) {
+      var tr = el("tr", i === 0 && state.index === defaultSort ? { class: "top" } : null);
+      columns.forEach(function (col) {
+        var value = col.cell(row, i);
+        var td = el("td", { class: col.cls || "" });
+        td.appendChild(typeof value === "string" ? document.createTextNode(value) : value);
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    return el("div", { class: "scroll" }, [el("table", null, [thead, tbody])]);
+  }
+
+  // ---- filters -----------------------------------------------------------
+  var filters = { q: "", model: "", harness: "", hideCaveats: false };
+
+  function matchesArm(arm) {
+    var hay = ((arm.harness || arm.arm_id || "") + " " + (arm.model || arm.requested_model || "")).toLowerCase();
+    if (filters.q && hay.indexOf(filters.q) === -1) return false;
+    if (filters.model && (arm.model || arm.requested_model) !== filters.model) return false;
+    if (filters.harness && arm.harness && arm.harness !== filters.harness) return false;
+    return true;
+  }
+
+  function buildControls(models, harnesses, onChange) {
+    var box = el("div", { class: "controls" });
+    var search = el("input", {
+      type: "search", placeholder: "Filter by harness or model…", value: filters.q
+    });
+    search.addEventListener("input", function () {
+      filters.q = search.value.trim().toLowerCase(); onChange();
+    });
+    box.appendChild(search);
+
+    function select(label, values, current, apply) {
+      var sel = el("select");
+      sel.appendChild(el("option", { value: "", text: label }));
+      values.forEach(function (v) {
+        var opt = el("option", { value: v, text: v });
+        if (v === current) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener("change", function () { apply(sel.value); onChange(); });
+      return sel;
+    }
+    if (models.length) {
+      box.appendChild(select("All models", models, filters.model, function (v) { filters.model = v; }));
+    }
+    if (harnesses.length) {
+      box.appendChild(select("All harnesses", harnesses, filters.harness, function (v) { filters.harness = v; }));
+    }
+    var cb = el("input", { type: "checkbox" });
+    cb.checked = filters.hideCaveats;
+    cb.addEventListener("change", function () { filters.hideCaveats = cb.checked; onChange(); });
+    box.appendChild(el("label", null, [cb, "Hide boards with disclosed caveats"]));
+    return box;
+  }
+
+  // ---- harness view ------------------------------------------------------
+  function harnessBoard(bundle) {
+    var arms = bundle.arms.filter(matchesArm);
+    if (!arms.length) return null;
+
+    var head = el("div", { class: "head" });
+    var title = bundle.path
+      ? el("a", { href: bundle.path, text: bundle.title })
+      : document.createTextNode(bundle.title);
+    head.appendChild(el("h2", null, [title]));
+
+    var chips = el("div", { class: "chips" }, [
+      chip(bundle.kind, "kind-" + bundle.kind),
+      bundle.date ? chip(bundle.date) : null,
+      chip(bundle.table === "matched"
+        ? "matched denominators" : "all countable cells"),
+      chip(bundle.countable_rows + " countable cells"),
+      bundle.results_sha256 ? chip("results " + bundle.results_sha256.slice(0, 12), "mono") : null
+    ]);
+    (bundle.models || []).forEach(function (m) { chips.appendChild(chip(m)); });
+    if (bundle.has_caveats) chips.appendChild(chip("caveats disclosed", "warn"));
+    head.appendChild(chips);
+
+    if (bundle.has_caveats) {
+      var det = el("details", { class: "caveats" }, [
+        el("summary", { text: bundle.caveats.length + " caveat(s) from the release page" })
+      ]);
+      var ul = el("ul");
+      bundle.caveats.forEach(function (c) { ul.appendChild(el("li", { text: c })); });
+      det.appendChild(ul);
+      head.appendChild(det);
+    }
+
+    var columns = [
+      { label: "#", cls: "rank", cell: function (r, i) { return String(i + 1); } },
+      {
+        label: "Harness", cls: "name",
+        cell: function (r) { return r.harness; },
+        sort: function (r) { return r.harness; }, defaultDir: "asc"
+      },
+      {
+        label: "Model", cls: "sub",
+        cell: function (r) { return r.model; },
+        sort: function (r) { return r.model; }, defaultDir: "asc"
+      },
+      {
+        label: "Solve rate (Wilson 95%)",
+        cell: function (r) {
+          return ciCell(r.solve_rate, r.wilson95 && r.wilson95[0], r.wilson95 && r.wilson95[1],
+            function (v) { return pct(v); });
+        },
+        sort: function (r) { return r.solve_rate; }
+      },
+      {
+        label: "Solved",
+        cell: function (r) { return r.solved + "/" + r.n; },
+        sort: function (r) { return r.n ? r.solved / r.n : null; }
+      },
+      {
+        label: "Median wall",
+        cell: function (r) { return secs(r.median_wall_s); },
+        sort: function (r) { return r.median_wall_s; }, defaultDir: "asc"
+      },
+      {
+        label: "Tokens/solve",
+        cell: function (r) { return num(r.total_tokens_per_solve); },
+        sort: function (r) { return r.total_tokens_per_solve; }, defaultDir: "asc"
+      },
+      {
+        label: "$/solve",
+        cell: function (r) { return money(r.cost_per_solve_usd); },
+        sort: function (r) { return r.cost_per_solve_usd; }, defaultDir: "asc"
+      },
+      {
+        label: "Token basis", cls: "sub",
+        cell: function (r) {
+          var box = el("div", { class: "chips" });
+          (r.token_bases || []).forEach(function (b) { box.appendChild(chip(b)); });
+          if (!(r.token_bases || []).length) box.appendChild(chip("unknown"));
+          return box;
+        }
+      }
+    ];
+
+    var foot = el("div", { class: "head" }, [
+      el("span", { class: "chips" }, [
+        bundle.results_path ? el("a", { href: bundle.results_path, text: "results.jsonl" }) : null,
+        bundle.task_set_digest ? chip("taskset " + bundle.task_set_digest.slice(0, 12), "mono") : null
+      ])
+    ]);
+
+    return el("section", { class: "board" }, [
+      head, renderTable("h:" + bundle.id, columns, arms, 3), foot
+    ]);
+  }
+
+  function renderHarness(host) {
+    host.innerHTML = "";
+    var fam = DATA.harness;
+    var models = {}, harnesses = {};
+    fam.bundles.forEach(function (b) {
+      b.arms.forEach(function (a) { models[a.model] = 1; harnesses[a.harness] = 1; });
+    });
+    host.appendChild(buildControls(
+      Object.keys(models).sort(), Object.keys(harnesses).sort(), render
+    ));
+    host.appendChild(el("div", { class: "note" }, [
+      el("strong", { text: "How to read this. " }), fam.note
+    ]));
+
+    var shown = 0;
+    fam.bundles.forEach(function (b) {
+      if (filters.hideCaveats && b.has_caveats) return;
+      var board = harnessBoard(b);
+      if (board) { host.appendChild(board); shown++; }
+    });
+    if (!shown) {
+      host.appendChild(el("section", { class: "board" }, [
+        el("div", { class: "empty", text: "No boards match the current filters." })
+      ]));
+    }
+    if ((fam.skipped || []).length) {
+      var ul = el("ul", { class: "releases" });
+      fam.skipped.forEach(function (s) {
+        ul.appendChild(el("li", null, [
+          el("strong", { text: s.id }), " — " + s.reason
+        ]));
+      });
+      host.appendChild(el("section", { class: "board" }, [
+        el("div", { class: "head" }, [
+          el("h2", { text: "Not ranked (" + fam.skipped.length + ")" }),
+          el("p", { class: "sub", text: "Published pages without machine-verifiable results." })
+        ]),
+        el("div", { class: "head" }, [ul])
+      ]));
+    }
+  }
+
+  // ---- router view -------------------------------------------------------
+  function routerBoard(bundle) {
+    var head = el("div", { class: "head" });
+    var title = bundle.path
+      ? el("a", { href: bundle.path, text: bundle.title })
+      : document.createTextNode(bundle.title);
+    head.appendChild(el("h2", null, [title]));
+    var chips = el("div", { class: "chips" }, [
+      chip(bundle.track || "gateway_tax"),
+      bundle.harness ? chip("harness " + bundle.harness) : null,
+      bundle.date ? chip(bundle.date) : null,
+      chip(bundle.blocks_included + "/" + bundle.blocks_observed + " blocks included"),
+      chip(bundle.tasks_included + " tasks"),
+      bundle.execution_lane ? chip(bundle.execution_lane) : null,
+      bundle.experiment_digest ? chip("exp " + bundle.experiment_digest.slice(0, 12), "mono") : null
+    ]);
+    Object.keys(bundle.blocks_excluded || {}).forEach(function (reason) {
+      chips.appendChild(chip("excluded " + reason + "=" + bundle.blocks_excluded[reason], "warn"));
+    });
+    head.appendChild(chips);
+
+    var armCols = [
+      { label: "#", cls: "rank", cell: function (r, i) { return String(i + 1); } },
+      {
+        label: "Route", cls: "name",
+        cell: function (r) { return r.arm_id; },
+        sort: function (r) { return r.arm_id; }, defaultDir: "asc"
+      },
+      {
+        label: "Role", cls: "sub",
+        cell: function (r) {
+          return el("div", { class: "chips" }, [
+            chip(r.role || "—", r.role === "direct" ? "kind-release" : ""),
+            r.requested_provider ? chip(r.requested_provider) : null
+          ]);
+        },
+        sort: function (r) { return r.role; }, defaultDir: "asc"
+      },
+      {
+        label: "Solve rate (95% CI)",
+        cell: function (r) {
+          return ciCell(r.solve_rate.estimate, r.solve_rate.low, r.solve_rate.high,
+            function (v) { return pct(v); });
+        },
+        sort: function (r) { return r.solve_rate.estimate; }
+      },
+      {
+        label: "Mean score",
+        cell: function (r) {
+          var m = r.mean_checker_score.estimate;
+          return m === null || m === undefined ? "—" : m.toFixed(3);
+        },
+        sort: function (r) { return r.mean_checker_score.estimate; }
+      },
+      {
+        label: "Availability",
+        cell: function (r) { return pct(r.availability.estimate); },
+        sort: function (r) { return r.availability.estimate; }
+      },
+      {
+        label: "Latency",
+        cell: function (r) { return secs(r.latency_s.estimate); },
+        sort: function (r) { return r.latency_s.estimate; }, defaultDir: "asc"
+      },
+      {
+        label: "$/solve",
+        cell: function (r) { return r.cost ? money(r.cost.cost_per_solve_usd, 4) : "—"; },
+        sort: function (r) { return r.cost ? r.cost.cost_per_solve_usd : null; },
+        defaultDir: "asc"
+      },
+      {
+        label: "Cost basis", cls: "sub",
+        cell: function (r) {
+          if (!r.cost) return "—";
+          var box = el("div", { class: "chips" }, [chip(r.cost.basis)]);
+          if (r.cost.coverage_ratio !== null && r.cost.coverage_ratio !== undefined
+              && r.cost.coverage_ratio < 1) {
+            box.appendChild(chip(pct(r.cost.coverage_ratio, 0) + " coverage", "warn"));
+          }
+          return box;
+        }
+      }
+    ];
+
+    var parts = [head, renderTable("r:" + bundle.id, armCols, bundle.arms, 3)];
+
+    if ((bundle.contrasts || []).length) {
+      var taxCols = [
+        {
+          label: "Gateway arm", cls: "name",
+          cell: function (r) { return r.arm_id; },
+          sort: function (r) { return r.arm_id; }, defaultDir: "asc"
+        },
+        {
+          label: "vs direct", cls: "sub",
+          cell: function (r) { return r.direct_arm; }
+        },
+        {
+          label: "Δ solve rate",
+          cell: function (r) { return deltaCell(r.solve_rate, function (v) { return pct(v); }, true); },
+          sort: function (r) { return r.solve_rate.estimate; }
+        },
+        {
+          label: "Δ mean score",
+          cell: function (r) {
+            return deltaCell(r.mean_checker_score, function (v) { return v.toFixed(3); }, true);
+          },
+          sort: function (r) { return r.mean_checker_score.estimate; }
+        },
+        {
+          label: "Δ availability",
+          cell: function (r) { return deltaCell(r.availability, function (v) { return pct(v); }, true); },
+          sort: function (r) { return r.availability.estimate; }
+        },
+        {
+          label: "Δ latency",
+          cell: function (r) {
+            return deltaCell(r.latency_s, function (v) { return v.toFixed(2) + "s"; }, false);
+          },
+          sort: function (r) { return r.latency_s.estimate; }, defaultDir: "asc"
+        }
+      ];
+      parts.push(el("div", { class: "head" }, [
+        el("h2", { text: "Gateway tax" }),
+        el("p", {
+          class: "sub",
+          text: "Paired, task-weighted difference from the direct control arm, with "
+            + "bootstrap 95% intervals. An interval spanning zero is not a detected effect."
+        })
+      ]));
+      parts.push(renderTable("t:" + bundle.id, taxCols, bundle.contrasts, 2));
+    }
+
+    return el("section", { class: "board" }, parts);
+  }
+
+  // Signed delta with its interval; `higherIsBetter` colours the estimate.
+  function deltaCell(metric, fmt, higherIsBetter) {
+    var v = metric.estimate;
+    var cls = "";
+    if (v !== null && v !== undefined && v !== 0) {
+      var good = higherIsBetter ? v > 0 : v < 0;
+      cls = good ? "delta up" : "delta down";
+    }
+    var wrap = el("div", { class: "ci" }, [
+      el("span", { class: "val " + cls, text: signed(v, fmt) })
+    ]);
+    var range = "—";
+    if (metric.low !== null && metric.low !== undefined
+        && metric.high !== null && metric.high !== undefined) {
+      range = signed(metric.low, fmt) + " – " + signed(metric.high, fmt);
+    }
+    wrap.appendChild(el("span", { class: "range", text: range }));
+    return wrap;
+  }
+
+  function renderRouter(host) {
+    host.innerHTML = "";
+    var fam = DATA.router;
+    host.appendChild(el("div", { class: "note" }, [
+      el("strong", { text: "How to read this. " }), fam.note
+    ]));
+    if (!fam.bundles.length) {
+      host.appendChild(el("section", { class: "board" }, [
+        el("div", { class: "empty" }, [
+          el("p", { text: "No verified Router Bench bundles are published yet." }),
+          el("p", {
+            html: "Produce one with <code>obench router run</code> then "
+              + "<code>obench router publish &lt;results&gt; &lt;experiment&gt; "
+              + "docs/router/&lt;id&gt;</code>, and re-run <code>obench site build</code>."
+          })
+        ])
+      ]));
+    }
+    fam.bundles.forEach(function (b) { host.appendChild(routerBoard(b)); });
+    (fam.skipped || []).forEach(function (s) {
+      host.appendChild(el("section", { class: "board" }, [
+        el("div", { class: "empty", text: s.id + " — " + s.reason })
+      ]));
+    });
+  }
+
+  // ---- releases view -----------------------------------------------------
+  function renderReleases(host) {
+    host.innerHTML = "";
+    function list(title, entries, blurb) {
+      if (!entries.length) return;
+      var ul = el("ul", { class: "releases" });
+      entries.forEach(function (e) {
+        var line = el("li");
+        line.appendChild(e.path
+          ? el("a", { href: e.path, text: e.title || e.id })
+          : el("strong", { text: e.title || e.id }));
+        var meta = [e.date, (e.models || []).join(", "), e.submitter].filter(Boolean).join(" · ");
+        if (meta) line.appendChild(el("div", { class: "sub", text: meta }));
+        if (e.description) line.appendChild(el("div", { class: "sub", text: e.description }));
+        ul.appendChild(line);
+      });
+      host.appendChild(el("section", { class: "board" }, [
+        el("div", { class: "head" }, [
+          el("h2", { text: title }),
+          blurb ? el("p", { class: "sub", text: blurb }) : null
+        ]),
+        el("div", { class: "head" }, [ul])
+      ]));
+    }
+    list("Releases", DATA.releases, "First-party published comparison bundles.");
+    list("Community", DATA.community,
+      "Third-party bundles re-verified by CI. Digests prove tamper-evidence, not that runs were not cherry-picked.");
+    list("Packs", DATA.packs, "Versioned task and harness packs.");
+  }
+
+  // ---- routing -----------------------------------------------------------
+  var VIEWS = {
+    harness: renderHarness,
+    router: renderRouter,
+    releases: renderReleases,
+    methodology: null
+  };
+
+  function currentView() {
+    var hash = (location.hash || "").replace("#", "");
+    return VIEWS.hasOwnProperty(hash) ? hash : "harness";
+  }
+
+  function render() {
+    var view = currentView();
+    Object.keys(VIEWS).forEach(function (name) {
+      var host = document.getElementById("view-" + name);
+      host.classList.toggle("hidden", name !== view);
+    });
+    document.querySelectorAll("nav.tabs a").forEach(function (a) {
+      if (a.getAttribute("href") === "#" + view) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+    if (VIEWS[view]) VIEWS[view](document.getElementById("view-" + view));
+  }
+
+  window.addEventListener("hashchange", render);
+  render();
+})();
+</script></body></html>

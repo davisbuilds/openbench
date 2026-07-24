@@ -2,7 +2,8 @@
 """Umbrella CLI for the OpenBench harness benchmarking framework.
 
     obench run | report | doctor | validate | router | gate | compare | init |
-         publish | verify | community | leaderboard | pack | export | import [args...]
+         publish | verify | community | leaderboard | site | pack | export | import
+         [args...]
 """
 
 from __future__ import annotations
@@ -44,6 +45,11 @@ def main(argv=None):
         add_help=False,
     )
     sub.add_parser(
+        "site",
+        help="build the unified harness+router leaderboard site (docs/board.html)",
+        add_help=False,
+    )
+    sub.add_parser(
         "pack",
         help="install and manage versioned packs (tasks or harness manifests)",
         add_help=False,
@@ -67,14 +73,14 @@ def main(argv=None):
 
     known = {
         "run", "report", "doctor", "validate", "router", "gate", "compare", "init",
-        "publish", "verify", "community", "leaderboard", "pack", "export",
+        "publish", "verify", "community", "leaderboard", "site", "pack", "export",
         "import",
     }
     if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, report, doctor, "
             "validate, router, gate, compare, init, publish, verify, community, "
-            "leaderboard, pack, export, import"
+            "leaderboard, site, pack, export, import"
         )
 
     if command == "run":
@@ -113,6 +119,9 @@ def main(argv=None):
     if command == "leaderboard":
         from .leaderboard import main as leaderboard_main
         return leaderboard_main(rest)
+    if command == "site":
+        from .site import main as site_main
+        return site_main(rest)
     if command == "pack":
         from .packs import main as pack_main
         return pack_main(rest)

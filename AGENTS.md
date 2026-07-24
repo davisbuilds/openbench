@@ -55,6 +55,7 @@ run loop, tool set, and permission policy. Tasks are self-contained
 | Candidate / BYO harness gate | `obench/candidate_gate.py`, `obench/candidates.py` |
 | Report / stats / compare | `obench/report.py`, `obench/stats.py`, `obench/compare.py` |
 | Publish / verify digests | `obench/publish.py` |
+| Leaderboard site (harness + router) | `obench/site.py`, `obench/leaderboard.py`, `docs/site.md` |
 | Counting proxy | `obench/proxy.py` |
 | Harbor export | `obench/export_harbor.py` |
 | Versioned packs (tasks + harness) | `obench/packs.py`, `docs/task-packs.md`, `docs/packs.json` |

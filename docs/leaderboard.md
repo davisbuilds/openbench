@@ -59,3 +59,9 @@ Per arm inside a bundle:
 
 Regenerate after adding or updating a verified bundle so the Pages site stays
 in sync.
+
+## See also
+
+`obench site build` ([`docs/site.md`](site.md)) renders the same harness
+aggregation as a browsable, sortable page alongside the Router Bench boards.
+This page stays as the no-JavaScript fallback.

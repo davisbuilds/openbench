@@ -1,0 +1,397 @@
+{
+  "community": [
+    {
+      "claim": "Seed community submission: the verified aider showcase bundle (same artifact as docs/releases/2026-07-20-aider-showcase).",
+      "date": "2026-07-20",
+      "id": "openbench-aider-showcase",
+      "link": "https://github.com/minghinmatthewlam/openbench/tree/main/docs/releases/2026-07-20-aider-showcase",
+      "path": "community/openbench-aider-showcase/index.html",
+      "submitter": "openbench",
+      "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
+    }
+  ],
+  "cross_family_note": "The two families answer different questions and share no denominators. Do not read a Router Bench arm as another harness, or compare a solve rate across families.",
+  "generated_by": "obench site",
+  "harness": {
+    "bundle_count": 2,
+    "bundles": [
+      {
+        "also_seen_as": [],
+        "arms": [
+          {
+            "cost_per_solve_usd": null,
+            "harness": "cursor",
+            "median_wall_s": 42.908500000000004,
+            "model": "gpt-5.6-sol",
+            "n": 41,
+            "solve_rate": 0.8780487804878049,
+            "solved": 36,
+            "token_bases": [
+              "self-reported"
+            ],
+            "total_tokens_per_solve": 407404.55555555556,
+            "wilson95": [
+              0.7445549235115514,
+              0.9467674200265918
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "harness": "devin",
+            "median_wall_s": 65.144,
+            "model": "gpt-5.6-sol",
+            "n": 41,
+            "solve_rate": 0.8048780487804879,
+            "solved": 33,
+            "token_bases": [
+              "self-reported"
+            ],
+            "total_tokens_per_solve": null,
+            "wilson95": [
+              0.6598611764744329,
+              0.8976568425079408
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "harness": "grokbuild",
+            "median_wall_s": 86.087,
+            "model": "gpt-5.6-sol",
+            "n": 41,
+            "solve_rate": 0.8048780487804879,
+            "solved": 33,
+            "token_bases": [
+              "self-reported"
+            ],
+            "total_tokens_per_solve": 394809.1818181818,
+            "wilson95": [
+              0.6598611764744329,
+              0.8976568425079408
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "harness": "opencode",
+            "median_wall_s": 60.137,
+            "model": "gpt-5.6-sol",
+            "n": 41,
+            "solve_rate": 0.8048780487804879,
+            "solved": 33,
+            "token_bases": [
+              "self-reported"
+            ],
+            "total_tokens_per_solve": 351618.36363636365,
+            "wilson95": [
+              0.6598611764744329,
+              0.8976568425079408
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "harness": "claude",
+            "median_wall_s": 57.282,
+            "model": "gpt-5.6-sol",
+            "n": 41,
+            "solve_rate": 0.7560975609756098,
+            "solved": 31,
+            "token_bases": [
+              "self-reported"
+            ],
+            "total_tokens_per_solve": 181456.51612903227,
+            "wilson95": [
+              0.6065636934554182,
+              0.8617514424897756
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "harness": "codex",
+            "median_wall_s": 94.603,
+            "model": "gpt-5.6-sol",
+            "n": 41,
+            "solve_rate": 0.7560975609756098,
+            "solved": 31,
+            "token_bases": [
+              "proxy-measured",
+              "self-reported"
+            ],
+            "total_tokens_per_solve": null,
+            "wilson95": [
+              0.6065636934554182,
+              0.8617514424897756
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "harness": "pi",
+            "median_wall_s": 37.942,
+            "model": "gpt-5.6-sol",
+            "n": 41,
+            "solve_rate": 0.7560975609756098,
+            "solved": 31,
+            "token_bases": [
+              "self-reported"
+            ],
+            "total_tokens_per_solve": 144650.5806451613,
+            "wilson95": [
+              0.6065636934554182,
+              0.8617514424897756
+            ]
+          }
+        ],
+        "caveats": [],
+        "claim": null,
+        "countable_rows": 311,
+        "date": "2026-07-21",
+        "excluded_counts": {
+          "infra": 2,
+          "rate_limited": 2
+        },
+        "family": "harness",
+        "has_caveats": false,
+        "id": "2026-07-21-gpt56",
+        "kind": "release",
+        "link": null,
+        "matched": {
+          "duplicate_cells_excluded": 0,
+          "duplicate_rows_excluded": 0,
+          "groups_compared": 7,
+          "matched_cells_per_group": 41,
+          "matched_rows": 287,
+          "unmatched_countable_rows": 24
+        },
+        "models": [
+          "gpt-5.6-sol"
+        ],
+        "path": "releases/2026-07-21-gpt56/index.html",
+        "raw_rows": 315,
+        "results_path": "releases/2026-07-21-gpt56/results.jsonl",
+        "results_sha256": "546f167576aac07d8d4c889d559ac86d9f9ad427c5fa53e5a421059f9db498b6",
+        "submitter": null,
+        "table": "matched",
+        "task_set_digest": "d949d46e8aae81489a91d1925ec14f91e4667f5c69ccb314e8fdc611d966c059",
+        "title": "OpenBench: gpt-5.6 across 7 harnesses"
+      },
+      {
+        "also_seen_as": [
+          {
+            "id": "openbench-aider-showcase",
+            "kind": "community",
+            "path": "community/openbench-aider-showcase/index.html",
+            "results_path": "community/openbench-aider-showcase/results.jsonl"
+          }
+        ],
+        "arms": [
+          {
+            "cost_per_solve_usd": null,
+            "harness": "aider",
+            "median_wall_s": 39.0355,
+            "model": "deepseek-v4-flash",
+            "n": 8,
+            "solve_rate": 1.0,
+            "solved": 8,
+            "token_bases": [
+              "proxy-measured"
+            ],
+            "total_tokens_per_solve": 6192.0,
+            "wilson95": [
+              0.6755843804891231,
+              1.0
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "harness": "opencode",
+            "median_wall_s": 31.720999999999997,
+            "model": "deepseek-v4-flash",
+            "n": 8,
+            "solve_rate": 1.0,
+            "solved": 8,
+            "token_bases": [
+              "self-reported"
+            ],
+            "total_tokens_per_solve": 105269.375,
+            "wilson95": [
+              0.6755843804891231,
+              1.0
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "harness": "pi",
+            "median_wall_s": 26.444,
+            "model": "deepseek-v4-flash",
+            "n": 8,
+            "solve_rate": 1.0,
+            "solved": 8,
+            "token_bases": [
+              "self-reported"
+            ],
+            "total_tokens_per_solve": 43198.25,
+            "wilson95": [
+              0.6755843804891231,
+              1.0
+            ]
+          }
+        ],
+        "caveats": [
+          "Harness mode is not apples-to-apples: aider ran as a one-shot --message invocation, while pi and opencode ran full agentic loops. Token comparison reflects that difference in harness mode, not a pure like-for-like agent loop contest.",
+          "One aider cell excluded: 1 of 9 aider cells was infrastructure-classified and is excluded from solve-rate denominators (aider reported as 8/8). pi and opencode are 9/9.",
+          "Uniform total-token basis: totals include uncached input, output, and cache reads from split fields; the vendor aggregate is never used. Values are 6,192 vs 48,262 vs 111,380 tokens/solve (aider vs pi vs opencode).",
+          "Verifiable bundle: this release includes results.jsonl and provenance.json. Re-check digests with obench verify docs/releases/2026-07-20-aider-showcase."
+        ],
+        "claim": null,
+        "countable_rows": 26,
+        "date": "2026-07-20",
+        "excluded_counts": {
+          "infra": 1
+        },
+        "family": "harness",
+        "has_caveats": true,
+        "id": "2026-07-20-aider-showcase",
+        "kind": "release",
+        "link": null,
+        "matched": {
+          "duplicate_cells_excluded": 0,
+          "duplicate_rows_excluded": 0,
+          "groups_compared": 3,
+          "matched_cells_per_group": 8,
+          "matched_rows": 24,
+          "unmatched_countable_rows": 2
+        },
+        "models": [
+          "deepseek-v4-flash"
+        ],
+        "path": "releases/2026-07-20-aider-showcase/index.html",
+        "raw_rows": 27,
+        "results_path": "releases/2026-07-20-aider-showcase/results.jsonl",
+        "results_sha256": "677642cc0649ecfd42231dbdf49fc5aa0b2c2a8161ccb879358bfeec40e45192",
+        "submitter": null,
+        "table": "matched",
+        "task_set_digest": "8b757f8abf3816cac2ddc80e5ceaefa3f4a323c47c2431258a655d4d3b7f2e43",
+        "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
+      }
+    ],
+    "note": "Harness Bench varies the coding-agent harness while holding the model and task fixed. Each board below is one verified publish bundle. Scores are never mixed across bundles: different task sets, trial counts, timeout caps, or run conditions make cross-bundle rankings non-comparable. Within a bundle, arms are (harness, model) and — when two or more arms exist — use matched (task, trial) denominators.",
+    "skipped": [
+      {
+        "id": "2026-07-02-m3",
+        "kind": "release",
+        "path": "releases/2026-07-02-m3/index.html",
+        "reason": "no results.jsonl (HTML-only release page)"
+      },
+      {
+        "id": "2026-07-20-deepseek",
+        "kind": "release",
+        "path": "releases/2026-07-20-deepseek/index.html",
+        "reason": "no results.jsonl (HTML-only release page)"
+      },
+      {
+        "id": "2026-07-20-grok45",
+        "kind": "release",
+        "path": "releases/2026-07-20-grok45/index.html",
+        "reason": "no results.jsonl (HTML-only release page)"
+      },
+      {
+        "id": "2026-07-20-kimi-k3",
+        "kind": "release",
+        "path": "releases/2026-07-20-kimi-k3/index.html",
+        "reason": "no results.jsonl (HTML-only release page)"
+      }
+    ]
+  },
+  "packs": [
+    {
+      "content_sha256": "7f4a9d273763ec6d90f676771f41ebb12da42dc0197102cbf196b4c0bb6ac0d4",
+      "description": "BYO Aider candidate manifest (DeepSeek proxy route)",
+      "id": "openbench/aider",
+      "kind": "harness",
+      "latest": "1.0.0",
+      "license": "Apache-2.0",
+      "manifests": [
+        "aider.toml"
+      ],
+      "name": "aider",
+      "org": "openbench",
+      "source": "data/packs/openbench-aider"
+    },
+    {
+      "content_sha256": "3b1e576398a8c8f6d42a514ce83ec610f81742edd79f733453bbff681dbeca58",
+      "description": "Tiny polarity-checked smoke tasks (make-it-run, fix-failing-test)",
+      "id": "openbench/core-smoke",
+      "kind": "tasks",
+      "latest": "1.0.0",
+      "license": "Apache-2.0",
+      "name": "core-smoke",
+      "org": "openbench",
+      "source": "data/packs/openbench-core-smoke",
+      "tasks": [
+        "make-it-run",
+        "fix-failing-test"
+      ]
+    }
+  ],
+  "releases": [
+    {
+      "date": "2026-07-02",
+      "id": "2026-07-02-m3",
+      "models": [
+        "gpt-5.5-medium"
+      ],
+      "path": "releases/2026-07-02-m3/index.html",
+      "title": "OpenBench M3 — Harness Comparison"
+    },
+    {
+      "date": "2026-07-20",
+      "id": "2026-07-20-grok45",
+      "models": [
+        "grok-4.5"
+      ],
+      "path": "releases/2026-07-20-grok45/index.html",
+      "title": "OpenBench: grok-4.5 across 4 harnesses"
+    },
+    {
+      "date": "2026-07-20",
+      "id": "2026-07-20-kimi-k3",
+      "models": [
+        "kimi-k3"
+      ],
+      "path": "releases/2026-07-20-kimi-k3/index.html",
+      "title": "OpenBench: kimi-k3 across 3 harnesses"
+    },
+    {
+      "date": "2026-07-20",
+      "id": "2026-07-20-deepseek",
+      "models": [
+        "deepseek-v4-flash"
+      ],
+      "path": "releases/2026-07-20-deepseek/index.html",
+      "title": "OpenBench: deepseek across 5 harnesses"
+    },
+    {
+      "date": "2026-07-20",
+      "id": "2026-07-20-aider-showcase",
+      "models": [
+        "deepseek-v4-flash"
+      ],
+      "path": "releases/2026-07-20-aider-showcase/index.html",
+      "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
+    },
+    {
+      "date": "2026-07-21",
+      "id": "2026-07-21-gpt56",
+      "models": [
+        "gpt-5.6-sol"
+      ],
+      "path": "releases/2026-07-21-gpt56/index.html",
+      "title": "OpenBench: gpt-5.6 across 7 harnesses"
+    }
+  ],
+  "router": {
+    "bundle_count": 0,
+    "bundles": [],
+    "note": "Router Bench holds the harness, model, provider, sampling, task, and budget fixed while varying the serving route. The implemented track is Gateway Tax: one direct baseline arm against one or more gateway arms on the same canonical model revision, with fallbacks, gateway retries, and caching disabled. A block counts only when every expected arm is present, infrastructure-valid, and passes route integrity. Intervals are task-bootstrap, not Wilson.",
+    "skipped": []
+  },
+  "schema_version": 1
+}

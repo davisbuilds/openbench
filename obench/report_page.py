@@ -613,7 +613,10 @@ def _site_index(releases, community=None, packs=None):
             'content="width=device-width,initial-scale=1"><title>OpenBench releases</title><style>'
             + css + '</style></head><body><header><div>OPENBENCH</div><h1>Benchmark releases</h1>'
             '<p>Static, reproducible harness comparison reports.</p>'
-            '<p class="lead"><a href="leaderboard.html">Leaderboard</a>'
+            '<p class="lead"><a href="board.html">Leaderboards</a>'
+            ' — browse Harness Bench and Router Bench boards, sortable, with '
+            'confidence intervals and the gateway-tax contrast.</p>'
+            '<p class="lead"><a href="leaderboard.html">Static leaderboard</a>'
             ' — per-bundle ranks from verified <code>results.jsonl</code> bundles '
             '(not a cross-task global ranking).</p></header><main><ul>' + listing
             + '</ul></main><main id="community"><h2>Community results</h2>'

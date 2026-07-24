@@ -83,6 +83,9 @@ Pricing changes over time; review and deliberately update this snapshot before
 each experiment. The example values are illustrative, not a current price
 claim.
 
+Published Gateway Tax bundles appear on the site's Router Bench tab; see
+[`docs/site.md`](site.md) for the layout and `obench site build`.
+
 ## Commands
 
 Validate the experiment structure, task paths, workspace materialization, and

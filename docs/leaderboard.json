@@ -1,6 +1,148 @@
 {
-  "bundle_count": 1,
+  "bundle_count": 2,
   "bundles": [
+    {
+      "also_seen_as": [],
+      "arms": [
+        {
+          "harness": "cursor",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.8780487804878049,
+          "solved": 36,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 407404.55555555556,
+          "wilson95": [
+            0.7445549235115514,
+            0.9467674200265918
+          ]
+        },
+        {
+          "harness": "devin",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.8048780487804879,
+          "solved": 33,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": null,
+          "wilson95": [
+            0.6598611764744329,
+            0.8976568425079408
+          ]
+        },
+        {
+          "harness": "grokbuild",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.8048780487804879,
+          "solved": 33,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 394809.1818181818,
+          "wilson95": [
+            0.6598611764744329,
+            0.8976568425079408
+          ]
+        },
+        {
+          "harness": "opencode",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.8048780487804879,
+          "solved": 33,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 351618.36363636365,
+          "wilson95": [
+            0.6598611764744329,
+            0.8976568425079408
+          ]
+        },
+        {
+          "harness": "claude",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.7560975609756098,
+          "solved": 31,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 181456.51612903227,
+          "wilson95": [
+            0.6065636934554182,
+            0.8617514424897756
+          ]
+        },
+        {
+          "harness": "codex",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.7560975609756098,
+          "solved": 31,
+          "token_bases": [
+            "proxy-measured",
+            "self-reported"
+          ],
+          "total_tokens_per_solve": null,
+          "wilson95": [
+            0.6065636934554182,
+            0.8617514424897756
+          ]
+        },
+        {
+          "harness": "pi",
+          "model": "gpt-5.6-sol",
+          "n": 41,
+          "solve_rate": 0.7560975609756098,
+          "solved": 31,
+          "token_bases": [
+            "self-reported"
+          ],
+          "total_tokens_per_solve": 144650.5806451613,
+          "wilson95": [
+            0.6065636934554182,
+            0.8617514424897756
+          ]
+        }
+      ],
+      "caveats": [],
+      "claim": null,
+      "countable_rows": 311,
+      "date": "2026-07-21",
+      "excluded_counts": {
+        "infra": 2,
+        "rate_limited": 2
+      },
+      "has_caveats": false,
+      "id": "2026-07-21-gpt56",
+      "kind": "release",
+      "link": null,
+      "matched": {
+        "duplicate_cells_excluded": 0,
+        "duplicate_rows_excluded": 0,
+        "groups_compared": 7,
+        "matched_cells_per_group": 41,
+        "matched_rows": 287,
+        "unmatched_countable_rows": 24
+      },
+      "models": [
+        "gpt-5.6-sol"
+      ],
+      "path": "releases/2026-07-21-gpt56/index.html",
+      "raw_rows": 315,
+      "results_path": "releases/2026-07-21-gpt56/results.jsonl",
+      "results_sha256": "546f167576aac07d8d4c889d559ac86d9f9ad427c5fa53e5a421059f9db498b6",
+      "submitter": null,
+      "table": "matched",
+      "task_set_digest": "d949d46e8aae81489a91d1925ec14f91e4667f5c69ccb314e8fdc611d966c059",
+      "title": "OpenBench: gpt-5.6 across 7 harnesses"
+    },
     {
       "also_seen_as": [
         {
@@ -120,12 +262,6 @@
       "kind": "release",
       "path": "releases/2026-07-20-kimi-k3/index.html",
       "reason": "no results.jsonl (HTML-only release page)"
-    },
-    {
-      "id": "2026-07-21-gpt56",
-      "kind": "release",
-      "path": "releases/2026-07-21-gpt56/index.html",
-      "reason": "missing provenance.json (results are not verified)"
     }
   ]
 }
