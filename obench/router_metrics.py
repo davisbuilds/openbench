@@ -538,7 +538,11 @@ class OpenAIResponsesSSEParser(OpenAIChatSSEParser):
         return False
 
     def _is_terminal_event(self, obj: dict[str, Any]) -> bool:
-        return obj.get("type") == "response.completed"
+        return obj.get("type") in {
+            "response.completed",
+            "response.incomplete",
+            "response.failed",
+        }
 
     def _has_semantic_content(self, obj: dict[str, Any]) -> bool:
         return _has_responses_semantic_delta(obj)

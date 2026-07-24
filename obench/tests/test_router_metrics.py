@@ -459,6 +459,61 @@ class ResponsesRouterMetricsTests(unittest.TestCase):
         self.assertIn("stream_not_done", result["route_evidence"]["reasons"])
         self.assertIn("missing_served_model", result["route_evidence"]["reasons"])
 
+    def test_response_incomplete_is_a_terminal_event(self):
+        result = router_metrics.parse_responses_sse(
+            [(1.0, sse({
+                "type": "response.incomplete",
+                "response": {
+                    "status": "incomplete",
+                    "model": "gpt-4o-mini-2024-07-18",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": {
+                        "input_tokens": 13,
+                        "output_tokens": 16_384,
+                        "total_tokens": 16_397,
+                    },
+                },
+            }))],
+            requested_model="gpt-4o-mini",
+            started_at=0.0,
+            completed_at=2.0,
+            route_kind="direct",
+            requested_provider="openai",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+
+        self.assertTrue(result["stream"]["done"])
+        self.assertTrue(result["route_evidence"]["pass"])
+        self.assertEqual(result["usage"]["output_tokens"], 16_384)
+
+    def test_response_failed_is_a_terminal_event(self):
+        result = router_metrics.parse_responses_sse(
+            [(1.0, sse({
+                "type": "response.failed",
+                "response": {
+                    "status": "failed",
+                    "model": "gpt-4o-mini-2024-07-18",
+                    "error": {
+                        "code": "server_error",
+                        "message": "generation failed",
+                    },
+                },
+            }))],
+            requested_model="gpt-4o-mini",
+            started_at=0.0,
+            completed_at=2.0,
+            route_kind="direct",
+            requested_provider="openai",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+
+        self.assertTrue(result["stream"]["done"])
+        self.assertTrue(result["route_evidence"]["pass"])
+
     def test_done_sentinel_does_not_replace_response_completed(self):
         result = router_metrics.parse_responses_sse(
             [(1.0, sse(
