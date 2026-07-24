@@ -1063,7 +1063,10 @@ def _run_cell(
                 infrastructure_reason = "adapter_entry_failure"
                 adapter_result = {"completed": False, "error": str(exc)}
         try:
-            seal = server.seal_cell(token, timeout_s=10)
+            seal = server.seal_cell(
+                token,
+                timeout_s=experiment.budget.timeout_s,
+            )
             ledger_rows = _read_sealed_ledger(seal, arm.digest)
             calls, route_integrity, budget_reason = _proxy_evidence(
                 ledger_rows, prices, experiment.budget, plan
@@ -1074,7 +1077,8 @@ def _run_cell(
                 infrastructure_reason = infrastructure_reason or budget_reason
         except Exception as exc:  # noqa: BLE001 - sealing is evidence-critical
             infrastructure_reason = infrastructure_reason or "ledger_seal_failure"
-            adapter_result.setdefault("error", str(exc))
+            if not adapter_result.get("error"):
+                adapter_result["error"] = str(exc)
 
         if not ledger_rows and infrastructure_reason is None:
             infrastructure_reason = "adapter_no_routed_calls"
