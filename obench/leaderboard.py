@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Static leaderboard for verified OpenBench publish bundles.
+"""Harness Bench aggregation over verified OpenBench publish bundles.
 
 Aggregates ``results.jsonl`` bundles from the GitHub Pages site
-(``docs/releases/*/``, ``docs/community/*/``) and optional
-``data/community/*/`` into ``docs/leaderboard.html`` + ``leaderboard.json``.
+(``docs/releases/*/``, ``docs/community/*/``) and optional ``data/community/*/``
+into the ranked boards that :mod:`obench.site` renders. This module owns the
+comparability rules; it no longer renders a page of its own.
 
 Comparability rule (the product): never blend cells from different bundles
 into one score. Each bundle is its own ranked table. Cross-bundle rankings
@@ -487,155 +488,21 @@ def _fmt_tokens(value):
     return f"{value:.1f}"
 
 
-def render_leaderboard_html(doc):
-    """Self-contained static HTML matching the release-page visual language."""
-    sections = []
-    sections.append(
-        '<section class="note" id="methodology"><h2>Comparability</h2><p>'
-        + html.escape(doc["methodology_note"])
-        + "</p><p class=\"tag\">Ranks are per bundle only. There is no global "
-        "cross-bundle harness ranking on this page.</p></section>"
-    )
-
-    for bundle in doc.get("bundles") or []:
-        title = html.escape(bundle.get("title") or bundle.get("id") or "")
-        kind = html.escape(bundle.get("kind") or "")
-        date_s = html.escape(bundle.get("date") or "")
-        table = html.escape(bundle.get("table") or "")
-        models = html.escape(", ".join(bundle.get("models") or []) or "—")
-        links = []
-        if bundle.get("path"):
-            links.append(
-                f'<a href="{html.escape(bundle["path"], quote=True)}">bundle card</a>'
-            )
-        if bundle.get("results_path"):
-            links.append(
-                f'<a href="{html.escape(bundle["results_path"], quote=True)}">'
-                "results.jsonl</a>"
-            )
-        for alias in bundle.get("also_seen_as") or []:
-            label = f'{alias.get("kind")}/{alias.get("id")}'
-            if alias.get("path"):
-                links.append(
-                    f'<a href="{html.escape(alias["path"], quote=True)}">'
-                    + html.escape(label) + "</a>"
-                )
-            else:
-                links.append(html.escape(label))
-        link_html = " · ".join(links) if links else ""
-
-        caveat_block = ""
-        if bundle.get("has_caveats"):
-            items = "".join(
-                f"<li>{html.escape(c)}</li>" for c in (bundle.get("caveats") or [])
-            )
-            caveat_block = (
-                '<p class="warning"><strong class="caveat-flag">Caveats</strong>'
-                f"<ul>{items}</ul></p>"
-            )
-
-        digest = bundle.get("task_set_digest") or "—"
-        meta = (
-            f'<p class="tag">{kind} · {date_s} · model(s): {models} · '
-            f"table: {table} · task_set_digest: "
-            f"<code>{html.escape(str(digest)[:16])}…</code>"
-            + (f" · {link_html}" if link_html else "")
-            + "</p>"
-        )
-
-        rows_html = []
-        for rank, arm in enumerate(bundle.get("arms") or [], 1):
-            bases = ", ".join(arm.get("token_bases") or []) or "—"
-            caveat_cell = (
-                '<span class="caveat-flag">yes</span>'
-                if bundle.get("has_caveats") else "—"
-            )
-            rows_html.append(
-                "<tr>"
-                f"<td>{rank}</td>"
-                f"<td>{html.escape(arm.get('harness') or '')} × "
-                f"{html.escape(arm.get('model') or '')}</td>"
-                f"<td>{arm.get('solved', 0)}/{arm.get('n', 0)}</td>"
-                f"<td>{html.escape(_fmt_pct(arm.get('solve_rate')))}</td>"
-                f"<td>{html.escape(_fmt_wilson(arm.get('wilson95')))}</td>"
-                f"<td>{html.escape(_fmt_tokens(arm.get('total_tokens_per_solve')))}</td>"
-                f"<td>{html.escape(bases)}</td>"
-                f"<td>{caveat_cell}</td>"
-                "</tr>"
-            )
-        body = "".join(rows_html) or (
-            "<tr><td colspan=\"8\">No countable arms in this bundle.</td></tr>"
-        )
-        table_html = (
-            '<div class="scroll"><table><thead><tr>'
-            "<th>#</th><th>Arm (harness × model)</th><th>Solved/n</th>"
-            "<th>Solve rate</th><th>Wilson 95% CI</th>"
-            "<th>Total tokens/solve (incl. cache reads)</th><th>Token basis</th><th>Caveat</th>"
-            "</tr></thead><tbody>" + body + "</tbody></table></div>"
-        )
-        sections.append(
-            f"<section id=\"{html.escape(bundle.get('id') or '', quote=True)}\">"
-            f"<h2>{title}</h2>{meta}{caveat_block}{table_html}</section>"
-        )
-
-    if doc.get("skipped"):
-        items = "".join(
-            "<li><code>" + html.escape(s.get("id") or "") + "</code> — "
-            + html.escape(s.get("reason") or "") + "</li>"
-            for s in doc["skipped"]
-        )
-        sections.append(
-            "<section><h2>Skipped (not verified)</h2>"
-            "<p class=\"tag\">These bundles are missing machine-readable results "
-            "or failed provenance verification, so they cannot appear in the ranked "
-            f"tables.</p><ul>{items}</ul></section>"
-        )
-
-    if not (doc.get("bundles") or []):
-        sections.append(
-            "<section><p>No verified bundles with "
-            "<code>results.jsonl</code> were found.</p></section>"
-        )
-
-    n = doc.get("bundle_count", 0)
-    headline = (
-        f"{n} verified bundle{'s' if n != 1 else ''} with machine-readable "
-        "results · ranks are per bundle only"
-    )
-    return (
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>OpenBench leaderboard</title><style>"
-        + _CSS
-        + "</style></head><body><header><div class=\"tag\">OPENBENCH</div>"
-        "<h1>Leaderboard</h1><p>"
-        + html.escape(headline)
-        + "</p></header>"
-        + "".join(sections)
-        + "<footer>Generated by OpenBench · static, self-contained HTML · "
-        "<a href=\"index.html\">all releases</a></footer></body></html>\n"
-    )
-
-
 def write_leaderboard(site_dir, community_dir=None, *, refresh_index=True):
-    """Build and write ``leaderboard.json`` + ``leaderboard.html`` under site_dir."""
-    site_dir = os.path.abspath(site_dir)
-    doc = build_leaderboard(site_dir, community_dir=community_dir)
-    json_path = os.path.join(site_dir, "leaderboard.json")
-    html_path = os.path.join(site_dir, "leaderboard.html")
-    json_text = json.dumps(doc, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
-    _write_text(json_path, json_text)
-    _write_text(html_path, render_leaderboard_html(doc))
-    index_path = None
-    if refresh_index:
-        from .community import write_site_index
-        index_path = write_site_index(site_dir)
+    """Deprecated shim: the leaderboard is now the site landing page.
+
+    Kept so existing scripts keep working; it builds the same artifacts as
+    ``obench site build``.
+    """
+    del refresh_index
+    from . import site
+    info = site.write_board(site_dir, community_dir=community_dir)
     return {
-        "json_path": json_path,
-        "html_path": html_path,
-        "index_path": index_path,
-        "bundle_count": doc["bundle_count"],
-        "skipped_count": len(doc.get("skipped") or []),
+        "json_path": info["json_path"],
+        "html_path": info["html_path"],
+        "index_path": info["html_path"],
+        "bundle_count": info["harness_bundles"],
+        "skipped_count": info["skipped"],
     }
 
 
@@ -658,7 +525,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command")
     build = sub.add_parser(
         "build",
-        help="scan release/community bundles and write leaderboard.html + .json",
+        help="alias for `obench site build` (kept for existing scripts)",
     )
     build.add_argument(
         "--site-dir",
@@ -696,14 +563,10 @@ def main(argv=None):
             community_dir=community_dir,
             refresh_index=not args.no_refresh_index,
         )
-        print(f"leaderboard.html  {info['html_path']}")
-        print(f"leaderboard.json  {info['json_path']}")
-        if info.get("index_path"):
-            print(f"index.html        {info['index_path']}")
-        print(
-            f"bundles={info['bundle_count']} "
-            f"skipped={info['skipped_count']}"
-        )
+        print("note: `obench leaderboard build` is now `obench site build`")
+        print(f"index.html  {info['html_path']}")
+        print(f"board.json  {info['json_path']}")
+        print(f"bundles={info['bundle_count']} skipped={info['skipped_count']}")
         return 0
     parser.error(f"unknown command {args.command!r}")
     return 2

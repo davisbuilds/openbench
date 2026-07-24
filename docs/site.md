@@ -1,8 +1,9 @@
 # Leaderboard site (`obench site`)
 
-`obench site build` writes the browsable leaderboard front end for the GitHub
-Pages site: **`docs/board.html`** plus the machine-readable **`docs/board.json`**
-behind it. It covers both benchmark families in one page, with a tab each:
+`obench site build` writes the GitHub Pages site: **`docs/index.html`** — the
+landing page *is* the leaderboard — plus the machine-readable
+**`docs/board.json`** alongside it. It covers both benchmark families in one
+page, with a tab each:
 
 - **Harness Bench** — verified `results.jsonl` publish bundles, aggregated
   exactly as [`obench leaderboard`](leaderboard.md) does, then enriched with
@@ -13,15 +14,24 @@ behind it. It covers both benchmark families in one page, with a tab each:
 - **Methodology** — denominators, intervals, token bases, and the
   comparability rules, in one place next to the numbers.
 
-`docs/leaderboard.html` remains as the no-JavaScript fallback and is linked from
-the page's `<noscript>` block. Both are generated; neither is edited by hand.
+Every table is rendered in Python at build time; the page's script only
+*enhances* what is already there — it re-orders rows, hides them, and switches
+tabs. With JavaScript off the page is a single scrolling document containing
+every board, and the tab bar degrades to jump links. There is one renderer, and
+no separate fallback page.
+
+The page is generated, never edited by hand.
 
 ## Build
 
 ```bash
-obench leaderboard build   # refreshes leaderboard.html/.json and index.html
-obench site build          # writes board.html + board.json
+obench site build          # writes docs/index.html + docs/board.json
 ```
+
+`obench leaderboard build` is kept as an alias so existing scripts keep working;
+it builds exactly the same artifacts. Publishing a release
+(`obench publish --site-dir`), accepting a community bundle, and updating the
+pack index all rebuild the landing page automatically.
 
 | Flag | Effect |
 |------|--------|

@@ -41,12 +41,12 @@ def main(argv=None):
     )
     sub.add_parser(
         "leaderboard",
-        help="build the static verified-bundle leaderboard for the docs site",
+        help="alias for `site` (kept for existing scripts)",
         add_help=False,
     )
     sub.add_parser(
         "site",
-        help="build the unified harness+router leaderboard site (docs/board.html)",
+        help="build the harness+router leaderboard site (docs/index.html)",
         add_help=False,
     )
     sub.add_parser(

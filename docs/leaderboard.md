@@ -1,9 +1,10 @@
-# Static leaderboard (verified bundles)
+# Leaderboard aggregation (verified bundles)
 
-The GitHub Pages site includes a quick-view **leaderboard** built from
-machine-readable publish bundles — directories that ship `results.jsonl` plus
-`provenance.json` under `docs/releases/*/` and `docs/community/*/` (and,
-when present, `data/community/*/`).
+The **Harness Bench** boards are built from machine-readable publish bundles —
+directories that ship `results.jsonl` plus `provenance.json` under
+`docs/releases/*/` and `docs/community/*/` (and, when present,
+`data/community/*/`). This page documents that aggregation; for the site it
+renders into, see [`docs/site.md`](site.md).
 
 ## Comparability is the product
 
@@ -21,10 +22,11 @@ The page **does not** produce a global cross-bundle harness ranking.
 ## Build
 
 ```bash
-obench leaderboard build
-# writes docs/leaderboard.html + docs/leaderboard.json
-# and refreshes docs/index.html (leaderboard link via _site_index)
+obench site build
+# writes docs/index.html (the leaderboard) + docs/board.json
 ```
+
+`obench leaderboard build` remains as an alias for the same thing.
 
 Useful flags:
 
@@ -33,7 +35,6 @@ Useful flags:
 | `--site-dir PATH` | Pages root (default: `docs/`) |
 | `--community-dir PATH` | Extra scan root (default: `data/community` when present) |
 | `--no-community-dir` | Only scan `site-dir/releases` + `site-dir/community` |
-| `--no-refresh-index` | Do not regenerate `index.html` |
 
 ## Caveats
 
@@ -62,6 +63,5 @@ in sync.
 
 ## See also
 
-`obench site build` ([`docs/site.md`](site.md)) renders the same harness
-aggregation as a browsable, sortable page alongside the Router Bench boards.
-This page stays as the no-JavaScript fallback.
+[`docs/site.md`](site.md) — the page this aggregation renders into, alongside
+the Router Bench boards.

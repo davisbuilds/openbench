@@ -1,1 +1,531 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenBench releases</title><style>body{font:16px/1.5 system-ui,sans-serif;color:#17202a;max-width:800px;margin:auto;padding:2rem;background:#f7f8fa}header,main{background:white;padding:1.5rem;border-radius:10px;margin-bottom:1rem}h1,h2{margin:.1rem 0}li{margin:1rem 0}a{color:#075985}time{color:#52606d}.tag{color:#52606d;font-size:.9rem}.lead a{font-weight:600}code{font-size:.85em}</style></head><body><header><div>OPENBENCH</div><h1>Benchmark releases</h1><p>Static, reproducible harness comparison reports.</p><p class="lead"><a href="board.html">Leaderboards</a> — browse Harness Bench and Router Bench boards, sortable, with confidence intervals and the gateway-tax contrast.</p><p class="lead"><a href="leaderboard.html">Static leaderboard</a> — per-bundle ranks from verified <code>results.jsonl</code> bundles (not a cross-task global ranking).</p></header><main><ul><li><a href="releases/2026-07-21-gpt56/index.html"><strong>OpenBench: gpt-5.6 across 7 harnesses</strong></a><br><time datetime="2026-07-21">2026-07-21</time> · gpt-5.6-sol</li><li><a href="releases/2026-07-20-aider-showcase/index.html"><strong>OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)</strong></a><br><time datetime="2026-07-20">2026-07-20</time> · deepseek-v4-flash</li><li><a href="releases/2026-07-20-deepseek/index.html"><strong>OpenBench: deepseek across 5 harnesses</strong></a><br><time datetime="2026-07-20">2026-07-20</time> · deepseek-v4-flash</li><li><a href="releases/2026-07-20-kimi-k3/index.html"><strong>OpenBench: kimi-k3 across 3 harnesses</strong></a><br><time datetime="2026-07-20">2026-07-20</time> · kimi-k3</li><li><a href="releases/2026-07-20-grok45/index.html"><strong>OpenBench: grok-4.5 across 4 harnesses</strong></a><br><time datetime="2026-07-20">2026-07-20</time> · grok-4.5</li><li><a href="releases/2026-07-02-m3/index.html"><strong>OpenBench M3 — Harness Comparison</strong></a><br><time datetime="2026-07-02">2026-07-02</time> · gpt-5.5-medium</li></ul></main><main id="community"><h2>Community results</h2><p class="tag">Third-party publish bundles re-verified by CI (<code>obench verify</code>). Digests prove tamper-evidence, not that runs were not cherry-picked.</p><ul><li><a href="community/openbench-aider-showcase/index.html"><strong>OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)</strong></a><br><time datetime="2026-07-20">2026-07-20</time> · @openbench · Seed community submission: the verified aider showcase bundle (same artifact as docs/releases/2026-07-20-aider-showcase). · <a href="https://github.com/minghinmatthewlam/openbench/tree/main/docs/releases/2026-07-20-aider-showcase">source</a></li></ul></main><main id="packs"><h2>Packs</h2><p class="tag">Versioned task and harness packs (<code>obench pack install org/name@version --from …</code>). Index maintained via <code>obench pack publish-index</code>.</p><ul><li><strong>openbench/aider@1.0.0</strong> · harness<br>BYO Aider candidate manifest (DeepSeek proxy route)<br><span class="tag">openbench/aider · <code>data/packs/openbench-aider</code> · <code>7f4a9d273763…</code></span></li><li><strong>openbench/core-smoke@1.0.0</strong> · tasks<br>Tiny polarity-checked smoke tasks (make-it-run, fix-failing-test)<br><span class="tag">openbench/core-smoke · <code>data/packs/openbench-core-smoke</code> · <code>3b1e576398a8…</code></span></li></ul></main></body></html>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenBench leaderboards</title><meta name="description" content="Harness and serving-route leaderboards for OpenBench, built from digest-verified result bundles."><style>
+/* ---------------------------------------------------------------------------
+   OpenBench leaderboards — instrument readout.
+
+   Type: prose in sans; every identifier the benchmark names and every value it
+   measures in mono, because they are readings, not writing.
+   Colour: cool-slate neutrals biased toward the accent; one accent (validated
+   categorical slot 1) for interactive chrome and interval marks; a validated
+   blue/orange diverging pair for signed contrasts, with a neutral midpoint when
+   an interval spans zero; amber reserved for provenance warnings and never
+   carrying meaning without a label.
+--------------------------------------------------------------------------- */
+:root{
+  color-scheme:light;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",SFMono-Regular,"JetBrains Mono","Cascadia Mono",
+    Menlo,Consolas,"Liberation Mono",monospace;
+
+  --surface:#eef1f5;
+  --panel:#ffffff;
+  --panel-2:#f6f8fb;
+  --line:#dce3ea;
+  --line-strong:#c3ced9;
+  --ink:#0e1720;
+  --ink-2:#465768;
+  --ink-3:#6d7f92;
+
+  --accent:#2a78d6;
+  --accent-rgb:42,120,214;
+  --pole-better:#2a78d6;
+  --pole-better-rgb:42,120,214;
+  --pole-worse:#eb6834;
+  --pole-worse-rgb:235,104,52;
+  --pole-null:#8494a5;
+  --pole-null-rgb:132,148,165;
+
+  --warn-ink:#8a5300;
+  --warn-bg:#fdf3dd;
+  --warn-line:#e8c98a;
+
+  --track:rgba(14,23,32,.09);
+  --grid:rgba(14,23,32,.10);
+  --shadow:0 1px 1px rgba(14,23,32,.04),0 6px 18px rgba(14,23,32,.05);
+  --radius:10px;
+}
+@media (prefers-color-scheme:dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme:dark;
+    --surface:#080c11;
+    --panel:#111820;
+    --panel-2:#161f29;
+    --line:#1e2833;
+    --line-strong:#2b3846;
+    --ink:#e6edf5;
+    --ink-2:#9fb1c3;
+    --ink-3:#74879b;
+
+    --accent:#3987e5;
+    --accent-rgb:57,135,229;
+    --pole-better:#3987e5;
+    --pole-better-rgb:57,135,229;
+    --pole-worse:#d95926;
+    --pole-worse-rgb:217,89,38;
+    --pole-null:#74879b;
+    --pole-null-rgb:116,135,155;
+
+    --warn-ink:#fab219;
+    --warn-bg:#2a2113;
+    --warn-line:#5a4715;
+
+    --track:rgba(230,237,245,.10);
+    --grid:rgba(230,237,245,.13);
+    --shadow:0 1px 1px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --surface:#080c11;
+  --panel:#111820;
+  --panel-2:#161f29;
+  --line:#1e2833;
+  --line-strong:#2b3846;
+  --ink:#e6edf5;
+  --ink-2:#9fb1c3;
+  --ink-3:#74879b;
+
+  --accent:#3987e5;
+  --accent-rgb:57,135,229;
+  --pole-better:#3987e5;
+  --pole-better-rgb:57,135,229;
+  --pole-worse:#d95926;
+  --pole-worse-rgb:217,89,38;
+  --pole-null:#74879b;
+  --pole-null-rgb:116,135,155;
+
+  --warn-ink:#fab219;
+  --warn-bg:#2a2113;
+  --warn-line:#5a4715;
+
+  --track:rgba(230,237,245,.10);
+  --grid:rgba(230,237,245,.13);
+  --shadow:0 1px 1px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.35);
+}
+
+/* Explicit light scope: the toggle must be able to win against an OS set to
+   dark, including flipping color-scheme back for native form controls. */
+:root[data-theme="light"]{
+  color-scheme:light;
+  --surface:#eef1f5;
+  --panel:#ffffff;
+  --panel-2:#f6f8fb;
+  --line:#dce3ea;
+  --line-strong:#c3ced9;
+  --ink:#0e1720;
+  --ink-2:#465768;
+  --ink-3:#6d7f92;
+
+  --accent:#2a78d6;
+  --accent-rgb:42,120,214;
+  --pole-better:#2a78d6;
+  --pole-better-rgb:42,120,214;
+  --pole-worse:#eb6834;
+  --pole-worse-rgb:235,104,52;
+  --pole-null:#8494a5;
+  --pole-null-rgb:132,148,165;
+
+  --warn-ink:#8a5300;
+  --warn-bg:#fdf3dd;
+  --warn-line:#e8c98a;
+
+  --track:rgba(14,23,32,.09);
+  --grid:rgba(14,23,32,.10);
+  --shadow:0 1px 1px rgba(14,23,32,.04),0 6px 18px rgba(14,23,32,.05);
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--surface);color:var(--ink);
+  font:15px/1.55 var(--font-sans);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-underline-offset:2px}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
+summary:focus-visible,th.sortable:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;transition-duration:.01ms !important}
+}
+
+.wrap{max-width:1280px;margin:0 auto;padding:0 22px}
+
+/* --- masthead ---------------------------------------------------------- */
+header.top{background:var(--panel);border-bottom:1px solid var(--line);
+  position:sticky;top:0;z-index:30}
+.top .wrap{display:flex;align-items:center;gap:20px;min-height:58px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
+.brand .cmd{font:600 15px/1 var(--font-mono);letter-spacing:-.01em;color:var(--ink)}
+.brand .cmd::before{content:"$ ";color:var(--ink-3);font-weight:400}
+.brand .what{font-size:14px;color:var(--ink-2)}
+nav.tabs{display:flex;gap:1px;margin-left:auto;flex-wrap:wrap}
+nav.tabs a{padding:6px 12px;border-radius:7px;text-decoration:none;color:var(--ink-2);
+  font-weight:600;font-size:13.5px}
+nav.tabs a:hover:not([aria-current]){background:var(--panel-2);color:var(--ink)}
+nav.tabs a[aria-current="page"]{background:var(--ink);color:var(--panel)}
+button.theme{background:none;border:1px solid var(--line-strong);color:var(--ink-2);
+  border-radius:7px;width:32px;height:30px;cursor:pointer;padding:0;
+  display:inline-flex;align-items:center;justify-content:center}
+button.theme:hover{color:var(--ink);border-color:var(--ink-3)}
+button.theme svg{width:15px;height:15px}
+
+/* --- page intro & summary strip ---------------------------------------- */
+.intro{padding:30px 0 6px;max-width:64ch}
+.intro h1{margin:0 0 8px;font-size:25px;line-height:1.25;letter-spacing:-.02em;
+  text-wrap:balance}
+.intro p{margin:0;color:var(--ink-2)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
+  gap:1px;background:var(--line);border:1px solid var(--line);
+  border-radius:var(--radius);overflow:hidden;margin:22px 0 4px}
+.stat{background:var(--panel);padding:12px 15px}
+.stat b{display:block;font:600 21px/1.15 var(--font-mono);letter-spacing:-.02em}
+.stat span{display:block;margin-top:3px;color:var(--ink-3);font-size:11px;
+  text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+
+/* --- controls ----------------------------------------------------------- */
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:20px 0 14px}
+.controls input[type=search],.controls select{background:var(--panel);color:var(--ink);
+  border:1px solid var(--line-strong);border-radius:7px;padding:7px 10px;
+  font:14px var(--font-sans)}
+.controls input[type=search]{min-width:220px;flex:1;font-family:var(--font-mono);
+  font-size:13px}
+.controls label{display:flex;align-items:center;gap:7px;color:var(--ink-2);font-size:13.5px}
+
+/* --- notes -------------------------------------------------------------- */
+.note{background:var(--panel);border:1px solid var(--line);
+  border-left:2px solid var(--accent);border-radius:var(--radius);
+  padding:13px 16px;margin:14px 0;color:var(--ink-2);font-size:14px;max-width:88ch}
+.note strong{color:var(--ink)}
+
+/* --- board -------------------------------------------------------------- */
+.board{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);margin:14px 0;overflow:hidden}
+.board .head{padding:15px 18px;border-bottom:1px solid var(--line)}
+.board .head:last-child{border-bottom:none;border-top:1px solid var(--line)}
+.board h2{margin:0;font-size:17px;letter-spacing:-.015em;line-height:1.3}
+.board h2 a{text-decoration:none}
+.board h2 a:hover{text-decoration:underline}
+.board .head p{margin:6px 0 0;color:var(--ink-2);font-size:13.5px;max-width:80ch}
+.meta{margin-top:9px;font:12px/1.7 var(--font-mono);color:var(--ink-3);
+  display:flex;flex-wrap:wrap;gap:0 14px}
+.meta b{color:var(--ink-2);font-weight:600}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.chip{border:1px solid var(--line-strong);color:var(--ink-2);background:var(--panel-2);
+  border-radius:5px;padding:2px 7px;font:600 11.5px var(--font-mono);white-space:nowrap}
+.chip.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-ink)}
+.chip.role-direct{border-color:rgba(var(--accent-rgb),.5);color:var(--accent)}
+td .chips{flex-wrap:nowrap;justify-content:flex-end;margin-top:0}
+
+details.caveats{margin-top:10px;font-size:13.5px}
+details.caveats summary{cursor:pointer;color:var(--warn-ink);font-weight:600;
+  list-style:none;display:flex;align-items:center;gap:6px}
+details.caveats summary::-webkit-details-marker{display:none}
+details.caveats summary::before{content:"▸";font-size:11px}
+details.caveats[open] summary::before{content:"▾"}
+details.caveats ul{margin:9px 0 0;padding-left:18px;color:var(--ink-2)}
+details.caveats li{margin:6px 0;max-width:88ch}
+
+/* --- tables ------------------------------------------------------------- */
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th,td{padding:9px 10px;text-align:right;white-space:nowrap;
+  border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+thead th{background:var(--panel-2);color:var(--ink-3);font:600 11px var(--font-sans);
+  text-transform:uppercase;letter-spacing:.07em;padding-top:11px;padding-bottom:11px;
+  vertical-align:bottom}
+thead th.sortable{cursor:pointer;user-select:none}
+thead th.sortable:hover{color:var(--ink)}
+thead th .arrow{opacity:.4;margin-left:4px;font-size:10px}
+thead th[aria-sort] .arrow{opacity:1;color:var(--accent)}
+thead th[aria-sort]{color:var(--ink)}
+tbody td{font:13.5px/1.4 var(--font-mono);font-variant-numeric:tabular-nums;
+  color:var(--ink-2)}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--panel-2)}
+td.rank{color:var(--ink-3);width:1%;padding-right:2px}
+td.name{color:var(--ink);font-weight:600}
+/* Keep the arm's identity on screen while the measurements scroll. */
+thead th:first-child,tbody td:first-child{position:sticky;left:0;z-index:1;
+  background:var(--panel)}
+thead th:first-child{background:var(--panel-2)}
+tbody tr:hover td:first-child{background:var(--panel-2)}
+
+/* --- interval plot: one shared 0–100% scale across every row ------------ */
+.axis{display:flex;justify-content:space-between;width:var(--plot-w);
+  margin:5px 0 0 auto;font:500 10px var(--font-mono);color:var(--ink-3);
+  letter-spacing:0;text-transform:none}
+.iv{display:flex;align-items:center;gap:9px;justify-content:flex-end}
+.iv .val{flex:0 0 auto;min-width:54px;text-align:right;color:var(--ink);font-weight:600}
+.iv .track{position:relative;flex:0 0 var(--plot-w);width:var(--plot-w);height:9px;
+  background:var(--track);
+  border-radius:2px;
+  background-image:linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:25% 100%;background-position:0 0}
+.iv .span{position:absolute;top:0;height:9px;border-radius:2px;
+  background:rgba(var(--accent-rgb),.34)}
+.iv .dot{position:absolute;top:-2px;width:3px;height:13px;border-radius:1.5px;
+  background:var(--accent);box-shadow:0 0 0 2px var(--panel)}
+.iv .range{flex:0 0 auto;min-width:76px;text-align:right;color:var(--ink-3);font-size:11px}
+
+/* --- signed contrast: diverging, centred on a zero line ----------------- */
+.dv{display:flex;align-items:center;gap:9px;justify-content:flex-end}
+.dv .val{flex:0 0 auto;min-width:58px;text-align:right;font-weight:600}
+.dv .val.better{color:var(--pole-better)}
+.dv .val.worse{color:var(--pole-worse)}
+.dv .val.null{color:var(--ink-2)}
+.dv .track{position:relative;flex:0 0 var(--plot-w);width:var(--plot-w);height:9px;
+  background:var(--track);
+  border-radius:2px}
+.dv .zero{position:absolute;left:50%;top:-3px;width:1px;height:15px;
+  background:var(--line-strong)}
+.dv .span{position:absolute;top:0;height:9px;border-radius:2px}
+.dv .span.better{background:rgba(var(--pole-better-rgb),.34)}
+.dv .span.worse{background:rgba(var(--pole-worse-rgb),.34)}
+.dv .span.null{background:rgba(var(--pole-null-rgb),.30)}
+.dv .dot{position:absolute;top:-2px;width:3px;height:13px;border-radius:1.5px;
+  box-shadow:0 0 0 2px var(--panel)}
+.dv .dot.better{background:var(--pole-better)}
+.dv .dot.worse{background:var(--pole-worse)}
+.dv .dot.null{background:var(--pole-null)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;
+  font:12px var(--font-sans);color:var(--ink-2)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:11px;height:11px;border-radius:2px;display:inline-block}
+.legend i.better{background:var(--pole-better)}
+.legend i.worse{background:var(--pole-worse)}
+.legend i.null{background:var(--pole-null)}
+
+/* --- lists & prose ------------------------------------------------------ */
+.empty{padding:36px 18px;text-align:center;color:var(--ink-2)}
+.empty p{margin:0 0 8px;max-width:60ch;margin-inline:auto}
+.empty code{font-family:var(--font-mono);font-size:12.5px;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+ul.records{list-style:none;margin:0;padding:0}
+ul.records li{padding:11px 0;border-bottom:1px solid var(--line)}
+ul.records li:last-child{border-bottom:none}
+ul.records a,ul.records strong{font-weight:600;text-decoration:none}
+ul.records a:hover{text-decoration:underline}
+ul.records .sub{color:var(--ink-3);font:12px/1.6 var(--font-mono);margin-top:2px}
+.prose{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:22px 26px;margin:14px 0;max-width:80ch}
+.prose h2{margin:0 0 8px;font-size:17px;letter-spacing:-.015em}
+.prose h2+p{margin-top:0}
+.prose h3{margin:22px 0 6px;font-size:14px;letter-spacing:.01em}
+.prose p,.prose li{color:var(--ink-2);max-width:74ch}
+.prose li{margin:6px 0}
+.prose code{font-family:var(--font-mono);font-size:12.5px;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+footer{color:var(--ink-3);font-size:13px;padding:26px 0 44px;text-align:center}
+footer code{font-family:var(--font-mono)}
+[hidden]{display:none !important}
+
+/* Plot width is a token so the axis header and every row stay locked. */
+:root{--plot-w:104px}
+@media(max-width:900px){:root{--plot-w:96px}}
+@media(max-width:760px){
+  :root{--plot-w:72px}
+  .top .wrap{min-height:0;padding-top:10px;padding-bottom:10px}
+  nav.tabs{margin-left:0;width:100%;order:3}
+  .iv .range{display:none}
+  .intro h1{font-size:21px}
+  .wrap{padding:0 14px}
+}
+</style></head><body><header class="top"><div class="wrap"><div class="brand"><span class="cmd">obench</span><span class="what">leaderboards</span></div><nav class="tabs"><a href="#harness">Harness Bench</a><a href="#router">Router Bench</a><a href="#releases">Releases</a><a href="#methodology">Methodology</a></nav><button class="theme" id="theme" type="button" aria-label="Toggle colour theme" title="Toggle colour theme"><svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm0 1.5V14.5a6.5 6.5 0 0 1 0-13z"/></svg></button></div></header><div class="wrap"><div class="intro"><h1>Same task, different wrapper &mdash; and different wire.</h1><p>The two families answer different questions and share no denominators. Do not read a Router Bench arm as another harness, or compare a solve rate across families.</p></div><div class="stats"><div class="stat"><b>2</b><span>harness bundles</span></div><div class="stat"><b>8</b><span>harnesses</span></div><div class="stat"><b>2</b><span>models</span></div><div class="stat"><b>10</b><span>harness arms</span></div><div class="stat"><b>0</b><span>router bundles</span></div><div class="stat"><b>0</b><span>serving routes</span></div></div><main id="view-harness"><div class="controls" id="controls"><input type="search" id="q" placeholder="Filter by harness or model…" aria-label="Filter by harness or model"></input><select id="f-model" aria-label="All models"><option value="">All models</option><option value="deepseek-v4-flash">deepseek-v4-flash</option><option value="gpt-5.6-sol">gpt-5.6-sol</option></select><select id="f-harness" aria-label="All harnesses"><option value="">All harnesses</option><option value="aider">aider</option><option value="claude">claude</option><option value="codex">codex</option><option value="cursor">cursor</option><option value="devin">devin</option><option value="grokbuild">grokbuild</option><option value="opencode">opencode</option><option value="pi">pi</option></select><label><input type="checkbox" id="f-caveats"></input>Hide boards with disclosed caveats</label></div><div class="note"><strong>How to read this. </strong>Harness Bench varies the coding-agent harness while holding the model and task fixed. Each board below is one verified publish bundle. Scores are never mixed across bundles: different task sets, trial counts, timeout caps, or run conditions make cross-bundle rankings non-comparable. Within a bundle, arms are (harness, model) and — when two or more arms exist — use matched (task, trial) denominators.</div><section class="board" data-models="gpt-5.6-sol" data-harnesses="claude,codex,cursor,devin,grokbuild,opencode,pi" data-caveats="0"><div class="head"><h2><a href="releases/2026-07-21-gpt56/index.html">OpenBench: gpt-5.6 across 7 harnesses</a></h2><div class="meta"><span><b>kind </b>release</span><span><b>date </b>2026-07-21</span><span><b>denominators </b>matched (task, trial)</span><span><b>cells </b>311</span><span><b>results </b>546f167576aa</span><span><b>taskset </b>d949d46e8aae</span></div><div class="chips"><span class="chip">gpt-5.6-sol</span></div></div><div class="scroll"><table><thead><tr><th scope="col">#</th><th scope="col" class="sortable" data-type="str" data-col="0" tabindex="0" role="button">Harness<span class="arrow">↕</span></th><th scope="col" class="sortable" data-type="num" data-col="1" tabindex="0" role="button" aria-sort="descending">Solve rate · Wilson 95%<span class="arrow">↓</span><div class="axis"><span>0</span><span>50</span><span>100%</span></div></th><th scope="col" class="sortable" data-type="num" data-col="2" tabindex="0" role="button">Solved<span class="arrow">↕</span></th><th scope="col" class="sortable" data-type="num" data-col="3" tabindex="0" role="button">Median wall<span class="arrow">↕</span></th><th scope="col" class="sortable" data-type="num" data-col="4" tabindex="0" role="button">Tokens/solve<span class="arrow">↕</span></th><th scope="col">Token basis</th></tr></thead><tbody><tr data-harness="cursor" data-model="gpt-5.6-sol" data-search="cursor gpt-5.6-sol" data-s0="cursor" data-s1="0.8780487804878049" data-s2="0.8780487804878049" data-s3="42.908500000000004" data-s4="407404.55555555556"><td class="rank">1</td><td class="name">cursor</td><td><div class="iv"><span class="val">87.8%</span><div class="track"><div class="span" style="left:74.4555%;width:20.2212%"></div><div class="dot" style="left:calc(87.8049% - 1px)"></div></div><span class="range">74.5%–94.7%</span></div></td><td>36/41</td><td>42.9s</td><td>407,405</td><td><div class="chips"><span class="chip">self-reported</span></div></td></tr><tr data-harness="devin" data-model="gpt-5.6-sol" data-search="devin gpt-5.6-sol" data-s0="devin" data-s1="0.8048780487804879" data-s2="0.8048780487804879" data-s3="65.144" data-s4=""><td class="rank">2</td><td class="name">devin</td><td><div class="iv"><span class="val">80.5%</span><div class="track"><div class="span" style="left:65.9861%;width:23.7796%"></div><div class="dot" style="left:calc(80.4878% - 1px)"></div></div><span class="range">66.0%–89.8%</span></div></td><td>33/41</td><td>65.1s</td><td>—</td><td><div class="chips"><span class="chip">self-reported</span></div></td></tr><tr data-harness="grokbuild" data-model="gpt-5.6-sol" data-search="grokbuild gpt-5.6-sol" data-s0="grokbuild" data-s1="0.8048780487804879" data-s2="0.8048780487804879" data-s3="86.087" data-s4="394809.1818181818"><td class="rank">3</td><td class="name">grokbuild</td><td><div class="iv"><span class="val">80.5%</span><div class="track"><div class="span" style="left:65.9861%;width:23.7796%"></div><div class="dot" style="left:calc(80.4878% - 1px)"></div></div><span class="range">66.0%–89.8%</span></div></td><td>33/41</td><td>86.1s</td><td>394,809</td><td><div class="chips"><span class="chip">self-reported</span></div></td></tr><tr data-harness="opencode" data-model="gpt-5.6-sol" data-search="opencode gpt-5.6-sol" data-s0="opencode" data-s1="0.8048780487804879" data-s2="0.8048780487804879" data-s3="60.137" data-s4="351618.36363636365"><td class="rank">4</td><td class="name">opencode</td><td><div class="iv"><span class="val">80.5%</span><div class="track"><div class="span" style="left:65.9861%;width:23.7796%"></div><div class="dot" style="left:calc(80.4878% - 1px)"></div></div><span class="range">66.0%–89.8%</span></div></td><td>33/41</td><td>60.1s</td><td>351,618</td><td><div class="chips"><span class="chip">self-reported</span></div></td></tr><tr data-harness="claude" data-model="gpt-5.6-sol" data-search="claude gpt-5.6-sol" data-s0="claude" data-s1="0.7560975609756098" data-s2="0.7560975609756098" data-s3="57.282" data-s4="181456.51612903227"><td class="rank">5</td><td class="name">claude</td><td><div class="iv"><span class="val">75.6%</span><div class="track"><div class="span" style="left:60.6564%;width:25.5188%"></div><div class="dot" style="left:calc(75.6098% - 1px)"></div></div><span class="range">60.7%–86.2%</span></div></td><td>31/41</td><td>57.3s</td><td>181,457</td><td><div class="chips"><span class="chip">self-reported</span></div></td></tr><tr data-harness="codex" data-model="gpt-5.6-sol" data-search="codex gpt-5.6-sol" data-s0="codex" data-s1="0.7560975609756098" data-s2="0.7560975609756098" data-s3="94.603" data-s4=""><td class="rank">6</td><td class="name">codex</td><td><div class="iv"><span class="val">75.6%</span><div class="track"><div class="span" style="left:60.6564%;width:25.5188%"></div><div class="dot" style="left:calc(75.6098% - 1px)"></div></div><span class="range">60.7%–86.2%</span></div></td><td>31/41</td><td>94.6s</td><td>—</td><td><div class="chips"><span class="chip">proxy-measured</span><span class="chip">self-reported</span></div></td></tr><tr data-harness="pi" data-model="gpt-5.6-sol" data-search="pi gpt-5.6-sol" data-s0="pi" data-s1="0.7560975609756098" data-s2="0.7560975609756098" data-s3="37.942" data-s4="144650.5806451613"><td class="rank">7</td><td class="name">pi</td><td><div class="iv"><span class="val">75.6%</span><div class="track"><div class="span" style="left:60.6564%;width:25.5188%"></div><div class="dot" style="left:calc(75.6098% - 1px)"></div></div><span class="range">60.7%–86.2%</span></div></td><td>31/41</td><td>37.9s</td><td>144,651</td><td><div class="chips"><span class="chip">self-reported</span></div></td></tr></tbody></table></div><div class="head"><div class="meta"><span><a href="releases/2026-07-21-gpt56/results.jsonl">results.jsonl</a></span><span><a href="releases/2026-07-21-gpt56/index.html">release page</a></span></div></div></section><section class="board" data-models="deepseek-v4-flash" data-harnesses="aider,opencode,pi" data-caveats="1"><div class="head"><h2><a href="releases/2026-07-20-aider-showcase/index.html">OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)</a></h2><div class="meta"><span><b>kind </b>release</span><span><b>date </b>2026-07-20</span><span><b>denominators </b>matched (task, trial)</span><span><b>cells </b>26</span><span><b>results </b>677642cc0649</span><span><b>taskset </b>8b757f8abf38</span></div><div class="chips"><span class="chip">deepseek-v4-flash</span><span class="chip warn">caveats disclosed</span></div><details class="caveats"><summary>4 caveat(s) from the release page</summary><ul><li>Harness mode is not apples-to-apples: aider ran as a one-shot --message invocation, while pi and opencode ran full agentic loops. Token comparison reflects that difference in harness mode, not a pure like-for-like agent loop contest.</li><li>One aider cell excluded: 1 of 9 aider cells was infrastructure-classified and is excluded from solve-rate denominators (aider reported as 8/8). pi and opencode are 9/9.</li><li>Uniform total-token basis: totals include uncached input, output, and cache reads from split fields; the vendor aggregate is never used. Values are 6,192 vs 48,262 vs 111,380 tokens/solve (aider vs pi vs opencode).</li><li>Verifiable bundle: this release includes results.jsonl and provenance.json. Re-check digests with obench verify docs/releases/2026-07-20-aider-showcase.</li></ul></details></div><div class="scroll"><table><thead><tr><th scope="col">#</th><th scope="col" class="sortable" data-type="str" data-col="0" tabindex="0" role="button">Harness<span class="arrow">↕</span></th><th scope="col" class="sortable" data-type="num" data-col="1" tabindex="0" role="button" aria-sort="descending">Solve rate · Wilson 95%<span class="arrow">↓</span><div class="axis"><span>0</span><span>50</span><span>100%</span></div></th><th scope="col" class="sortable" data-type="num" data-col="2" tabindex="0" role="button">Solved<span class="arrow">↕</span></th><th scope="col" class="sortable" data-type="num" data-col="3" tabindex="0" role="button">Median wall<span class="arrow">↕</span></th><th scope="col" class="sortable" data-type="num" data-col="4" tabindex="0" role="button">Tokens/solve<span class="arrow">↕</span></th><th scope="col">Token basis</th></tr></thead><tbody><tr data-harness="aider" data-model="deepseek-v4-flash" data-search="aider deepseek-v4-flash" data-s0="aider" data-s1="1.0" data-s2="1.0" data-s3="39.0355" data-s4="6192.0"><td class="rank">1</td><td class="name">aider</td><td><div class="iv"><span class="val">100.0%</span><div class="track"><div class="span" style="left:67.5584%;width:32.4416%"></div><div class="dot" style="left:calc(100.0000% - 1px)"></div></div><span class="range">67.6%–100.0%</span></div></td><td>8/8</td><td>39.0s</td><td>6,192</td><td><div class="chips"><span class="chip">proxy-measured</span></div></td></tr><tr data-harness="opencode" data-model="deepseek-v4-flash" data-search="opencode deepseek-v4-flash" data-s0="opencode" data-s1="1.0" data-s2="1.0" data-s3="31.720999999999997" data-s4="105269.375"><td class="rank">2</td><td class="name">opencode</td><td><div class="iv"><span class="val">100.0%</span><div class="track"><div class="span" style="left:67.5584%;width:32.4416%"></div><div class="dot" style="left:calc(100.0000% - 1px)"></div></div><span class="range">67.6%–100.0%</span></div></td><td>8/8</td><td>31.7s</td><td>105,269</td><td><div class="chips"><span class="chip">self-reported</span></div></td></tr><tr data-harness="pi" data-model="deepseek-v4-flash" data-search="pi deepseek-v4-flash" data-s0="pi" data-s1="1.0" data-s2="1.0" data-s3="26.444" data-s4="43198.25"><td class="rank">3</td><td class="name">pi</td><td><div class="iv"><span class="val">100.0%</span><div class="track"><div class="span" style="left:67.5584%;width:32.4416%"></div><div class="dot" style="left:calc(100.0000% - 1px)"></div></div><span class="range">67.6%–100.0%</span></div></td><td>8/8</td><td>26.4s</td><td>43,198</td><td><div class="chips"><span class="chip">self-reported</span></div></td></tr></tbody></table></div><div class="head"><div class="meta"><span><a href="releases/2026-07-20-aider-showcase/results.jsonl">results.jsonl</a></span><span><a href="releases/2026-07-20-aider-showcase/index.html">release page</a></span></div></div></section><section class="board" id="no-matches" hidden><div class="empty"><p>No boards match the current filters.</p></div></section><section class="board" data-caveats="0"><div class="head"><h2>Not ranked (4)</h2><p>Published pages without machine-verifiable results, listed with the reason rather than dropped.</p></div><div class="head"><ul class="records"><li><strong>2026-07-02-m3</strong> — no results.jsonl (HTML-only release page)</li><li><strong>2026-07-20-deepseek</strong> — no results.jsonl (HTML-only release page)</li><li><strong>2026-07-20-grok45</strong> — no results.jsonl (HTML-only release page)</li><li><strong>2026-07-20-kimi-k3</strong> — no results.jsonl (HTML-only release page)</li></ul></div></section></main><main id="view-router"><div class="note"><strong>How to read this. </strong>Router Bench holds the harness, model, provider, sampling, task, and budget fixed while varying the serving route. The implemented track is Gateway Tax: one direct baseline arm against one or more gateway arms on the same canonical model revision, with fallbacks, gateway retries, and caching disabled. A block counts only when every expected arm is present, infrastructure-valid, and passes route integrity. Intervals are task-bootstrap, not Wilson.</div><section class="board"><div class="empty"><p>No verified Router Bench bundles are published yet.</p><p>Produce one with <code>obench router run</code>, publish it with <code>obench router publish &lt;results&gt; &lt;experiment&gt; docs/router/&lt;id&gt;</code>, then rebuild with <code>obench site build</code>.</p></div></section></main><main id="view-releases"><section class="board"><div class="head"><h2>Releases</h2><p>First-party published comparison bundles.</p></div><div class="head"><ul class="records"><li><a href="releases/2026-07-02-m3/index.html">OpenBench M3 — Harness Comparison</a><div class="sub">2026-07-02  ·  gpt-5.5-medium</div></li><li><a href="releases/2026-07-20-grok45/index.html">OpenBench: grok-4.5 across 4 harnesses</a><div class="sub">2026-07-20  ·  grok-4.5</div></li><li><a href="releases/2026-07-20-kimi-k3/index.html">OpenBench: kimi-k3 across 3 harnesses</a><div class="sub">2026-07-20  ·  kimi-k3</div></li><li><a href="releases/2026-07-20-deepseek/index.html">OpenBench: deepseek across 5 harnesses</a><div class="sub">2026-07-20  ·  deepseek-v4-flash</div></li><li><a href="releases/2026-07-20-aider-showcase/index.html">OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)</a><div class="sub">2026-07-20  ·  deepseek-v4-flash</div></li><li><a href="releases/2026-07-21-gpt56/index.html">OpenBench: gpt-5.6 across 7 harnesses</a><div class="sub">2026-07-21  ·  gpt-5.6-sol</div></li></ul></div></section><section class="board" id="community"><div class="head"><h2>Community</h2><p>Third-party bundles re-verified by CI. Digests prove tamper-evidence, not that runs were not cherry-picked.</p></div><div class="head"><ul class="records"><li><a href="community/openbench-aider-showcase/index.html">OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)</a><div class="sub">2026-07-20  ·  @openbench</div><div class="sub">Seed community submission: the verified aider showcase bundle (same artifact as docs/releases/2026-07-20-aider-showcase).</div><div class="sub"><a href="https://github.com/minghinmatthewlam/openbench/tree/main/docs/releases/2026-07-20-aider-showcase" rel="nofollow noopener">source</a></div></li></ul></div></section><section class="board" id="packs"><div class="head"><h2>Packs</h2><p>Versioned task and harness packs (obench pack install org/name@version).</p></div><div class="head"><ul class="records"><li><strong>openbench/aider@1.0.0</strong> <span class="chip">harness</span><div class="sub">Apache-2.0  ·  data/packs/openbench-aider  ·  7f4a9d273763</div><div class="sub">BYO Aider candidate manifest (DeepSeek proxy route)</div></li><li><strong>openbench/core-smoke@1.0.0</strong> <span class="chip">tasks</span><div class="sub">Apache-2.0  ·  data/packs/openbench-core-smoke  ·  3b1e576398a8</div><div class="sub">Tiny polarity-checked smoke tasks (make-it-run, fix-failing-test)</div></li></ul></div></section></main><main id="view-methodology">
+<section class="prose">
+  <h2>What is being measured</h2>
+  <p>OpenBench runs two benchmark families. They share a task contract and a
+  checker, and nothing else. Never compare a number across them.</p>
+
+  <h3>Harness Bench</h3>
+  <p>Varies the coding-agent harness — the CLI that wraps a model in a run loop,
+  tool set, and permission policy — while holding the model and task fixed. An
+  arm is <code>(harness, model)</code>. A task is solved when its
+  <code>checker.sh</code> exits 0; the harness's own claim of success is never
+  trusted.</p>
+
+  <h3>Router Bench</h3>
+  <p>Holds the harness, model, provider, sampling, task, and budget fixed while
+  varying the serving route. An arm is a route. The implemented track is
+  <strong>Gateway Tax</strong>: a direct baseline against one or more gateway
+  arms on the same canonical model revision, with fallbacks, gateway retries,
+  and caching disabled, so the measurement is the gateway path itself rather
+  than its model choice or cache hit rate.</p>
+
+  <h2>Denominators and intervals</h2>
+  <ul>
+    <li>Denominators are countable cells. Infrastructure and rate-limit failures
+    are excluded; other failures, including timeouts, stay in the denominator.</li>
+    <li>Harness Bench uses Wilson 95% intervals over matched
+    <code>(task, trial)</code> cells whenever a bundle has two or more arms.</li>
+    <li>Router Bench uses task-weighted estimates with bootstrap 95% intervals,
+    and includes a block only when every expected arm is present,
+    infrastructure-valid, and passes route integrity.</li>
+    <li>A gateway-tax interval that spans zero is not a detected effect.</li>
+  </ul>
+
+  <h2>Efficiency and cost</h2>
+  <ul>
+    <li>Median wall time is taken among solved cells only.</li>
+    <li>Tokens per solve use split fields — uncached input, output, and cache
+    reads — never a vendor aggregate. The token basis chip records whether a
+    figure was proxy-metered, vendor-split, or self-reported by the CLI. These
+    bases are not interchangeable.</li>
+    <li>Harness <code>$/solve</code> appears only for models with a configured
+    price. Router cost prefers invoice reconciliation, then the router's own
+    reported cost, then a frozen list-price estimate, and shows coverage when a
+    basis does not cover every call.</li>
+    <li>Harness defaults are deliberately not clamped: they are part of the
+    product being evaluated.</li>
+  </ul>
+
+  <h2>Comparability</h2>
+  <ul>
+    <li>Cells from different bundles are never blended. Each board is one
+    bundle; cross-bundle ranking on different task sets is not supported.</li>
+    <li>Every ranked bundle ships <code>results.jsonl</code> plus a provenance
+    digest and is re-verified before it appears here. Digests prove
+    tamper-evidence, not that runs were not cherry-picked — which is why
+    disclosed caveats are shown next to the scores rather than in a footnote.</li>
+    <li>Results cover only the included tasks, trials, model deployments,
+    harness versions, and timeout caps. They do not establish a universal
+    ranking.</li>
+  </ul>
+
+  <h2>Reproducing a board</h2>
+  <p>Every board links its <code>results.jsonl</code>. Re-check a bundle with
+  <code>obench verify &lt;bundle&gt;</code> (harness) or
+  <code>obench router verify &lt;bundle&gt;</code> (router), and rebuild this
+  page with <code>obench site build</code>.</p>
+</section>
+</main><footer>Generated by <code>obench site</code> &middot; static, self-contained, no third-party assets &middot; <a href="board.json">board.json</a></footer></div><script>
+(function () {
+  "use strict";
+  // Progressive enhancement only. Every table is already in the document;
+  // this re-orders rows, hides them, and switches tabs. Nothing is built here.
+  var root = document.documentElement;
+
+  try {
+    var saved = localStorage.getItem("obench-theme");
+    if (saved) root.setAttribute("data-theme", saved);
+  } catch (e) { /* storage disabled */ }
+
+  document.getElementById("theme").addEventListener("click", function () {
+    var now = root.getAttribute("data-theme")
+      || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    var next = now === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("obench-theme", next); } catch (e) { /* ignore */ }
+  });
+
+  // --- sorting ------------------------------------------------------------
+  function renumber(tbody) {
+    var n = 0;
+    Array.prototype.forEach.call(tbody.rows, function (tr) {
+      if (tr.hidden) return;
+      n += 1;
+      tr.cells[0].textContent = String(n);
+    });
+  }
+
+  function sortBy(table, th) {
+    var col = th.getAttribute("data-col");
+    var numeric = th.getAttribute("data-type") !== "str";
+    var was = th.getAttribute("aria-sort");
+    var dir = was === "descending" ? "ascending" : "descending";
+    var sign = dir === "ascending" ? 1 : -1;
+
+    table.querySelectorAll("thead th").forEach(function (other) {
+      other.removeAttribute("aria-sort");
+      var arrow = other.querySelector(".arrow");
+      if (arrow) arrow.textContent = "↕";
+    });
+    th.setAttribute("aria-sort", dir);
+    var arrow = th.querySelector(".arrow");
+    if (arrow) arrow.textContent = dir === "ascending" ? "↑" : "↓";
+
+    var tbody = table.tBodies[0];
+    var rows = Array.prototype.slice.call(tbody.rows);
+    rows.sort(function (a, b) {
+      var x = a.getAttribute("data-s" + col);
+      var y = b.getAttribute("data-s" + col);
+      // Rows with no value for this measure always sink, either direction.
+      if (x === "" && y === "") return 0;
+      if (x === "") return 1;
+      if (y === "") return -1;
+      if (numeric) return (parseFloat(x) - parseFloat(y)) * sign;
+      return x.localeCompare(y) * sign;
+    });
+    rows.forEach(function (tr) { tbody.appendChild(tr); });
+    renumber(tbody);
+  }
+
+  document.querySelectorAll("table").forEach(function (table) {
+    table.querySelectorAll("thead th.sortable").forEach(function (th) {
+      th.addEventListener("click", function () { sortBy(table, th); });
+      th.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); sortBy(table, th); }
+      });
+    });
+  });
+
+  // --- filtering ----------------------------------------------------------
+  var controls = document.getElementById("controls");
+  if (controls) {
+    var q = document.getElementById("q");
+    var fModel = document.getElementById("f-model");
+    var fHarness = document.getElementById("f-harness");
+    var fCaveats = document.getElementById("f-caveats");
+    var noMatches = document.getElementById("no-matches");
+    var boards = document.querySelectorAll("#view-harness .board[data-models]");
+
+    function applyFilters() {
+      var text = (q.value || "").trim().toLowerCase();
+      var model = fModel ? fModel.value : "";
+      var harness = fHarness ? fHarness.value : "";
+      var hideCaveats = fCaveats && fCaveats.checked;
+      var shown = 0;
+
+      boards.forEach(function (board) {
+        if (hideCaveats && board.getAttribute("data-caveats") === "1") {
+          board.hidden = true;
+          return;
+        }
+        var visible = 0;
+        board.querySelectorAll("tbody tr").forEach(function (tr) {
+          var hit = (!text || tr.getAttribute("data-search").indexOf(text) !== -1)
+            && (!model || tr.getAttribute("data-model") === model)
+            && (!harness || tr.getAttribute("data-harness") === harness);
+          tr.hidden = !hit;
+          if (hit) visible += 1;
+        });
+        board.hidden = visible === 0;
+        if (visible) shown += 1;
+        var tbody = board.querySelector("tbody");
+        if (tbody) renumber(tbody);
+      });
+      if (noMatches) noMatches.hidden = shown !== 0;
+    }
+
+    [q, fModel, fHarness, fCaveats].forEach(function (el) {
+      if (!el) return;
+      el.addEventListener(el.tagName === "INPUT" && el.type === "search"
+        ? "input" : "change", applyFilters);
+    });
+  }
+
+  // --- tabs ---------------------------------------------------------------
+  var VIEWS = ["harness", "router", "releases", "methodology"];
+
+  function showView() {
+    var hash = (location.hash || "").replace("#", "");
+    var view = VIEWS.indexOf(hash) === -1 ? "harness" : hash;
+    VIEWS.forEach(function (name) {
+      document.getElementById("view-" + name).hidden = name !== view;
+    });
+    document.querySelectorAll("nav.tabs a").forEach(function (a) {
+      if (a.getAttribute("href") === "#" + view) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+  }
+  window.addEventListener("hashchange", showView);
+  showView();
+})();
+</script></body></html>

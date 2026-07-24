@@ -24,10 +24,9 @@ To compare a fixed coding harness and model over direct and gateway serving
 routes, see [`docs/router-bench.md`](docs/router-bench.md) (`obench router
 validate|doctor|run|report|publish|verify`).
 
-**Live results:** https://minghinmatthewlam.github.io/openbench/ — the
-browsable Harness Bench and Router Bench boards are at
-[`board.html`](https://minghinmatthewlam.github.io/openbench/board.html)
-(built by `obench site build`; see [`docs/site.md`](docs/site.md)).
+**Live results:** https://minghinmatthewlam.github.io/openbench/ — the landing
+page is the leaderboard itself, with a tab each for Harness Bench and Router
+Bench (built by `obench site build`; see [`docs/site.md`](docs/site.md)).
 
 ## What this measures
 

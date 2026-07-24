@@ -10,7 +10,7 @@ import tempfile
 import textwrap
 import unittest
 
-from obench import leaderboard
+from obench import leaderboard, site
 from obench import publish
 from obench import report_page
 
@@ -218,13 +218,14 @@ class BuildLeaderboardTests(unittest.TestCase):
         self.assertTrue(by_id["bundle-a"]["has_caveats"])
         self.assertIn("fixture caveat", by_id["bundle-a"]["caveats"])
 
-        html_page = leaderboard.render_leaderboard_html(doc)
-        self.assertIn("Comparability", html_page)
-        self.assertIn("never mixed", html_page.lower() + doc["methodology_note"].lower())
-        self.assertIn("bundle-a", html_page)
-        self.assertIn("bundle-b", html_page)
-        self.assertIn("pi × model-x", html_page)
-        self.assertIn("Total tokens/solve (incl. cache reads)", html_page)
+        page = site.render_board_html(site.build_board(self.site))
+        self.assertIn("Comparability", page)
+        self.assertIn("never mixed", page.lower() + doc["methodology_note"].lower())
+        self.assertIn("bundle-a", page)
+        self.assertIn("bundle-b", page)
+        self.assertIn("Tokens/solve", page)
+        # Each bundle keeps its own board rather than merging into one table.
+        self.assertEqual(page.count('data-harness="pi"'), 2)
 
     def test_dedupes_identical_results_sha(self):
         rows = [
@@ -299,9 +300,9 @@ class BuildLeaderboardTests(unittest.TestCase):
         doc = leaderboard.build_leaderboard(self.site)
         self.assertEqual(doc["bundle_count"], 0)
         self.assertIn("missing provenance.json", doc["skipped"][0]["reason"])
-        page = leaderboard.render_leaderboard_html(doc)
-        self.assertIn("Skipped (not verified)", page)
-        self.assertIn("failed provenance verification", page)
+        page = site.render_board_html(site.build_board(self.site))
+        self.assertIn("Not ranked", page)
+        self.assertIn("missing provenance.json", page)
 
     def test_write_leaderboard_and_index_link(self):
         rows = [
@@ -314,15 +315,15 @@ class BuildLeaderboardTests(unittest.TestCase):
             json.dumps([rel], indent=2) + "\n",
         )
         _write(os.path.join(self.site, "community.json"), "[]\n")
+        # Kept as a shim: it now builds the same artifacts as `obench site build`.
         info = leaderboard.write_leaderboard(self.site, refresh_index=True)
+        self.assertEqual(info["html_path"], os.path.join(self.site, "index.html"))
         self.assertTrue(os.path.isfile(info["html_path"]))
         self.assertTrue(os.path.isfile(info["json_path"]))
-        with open(os.path.join(self.site, "index.html"), encoding="utf-8") as fh:
-            index = fh.read()
-        self.assertIn("leaderboard.html", index)
         with open(info["json_path"], encoding="utf-8") as fh:
             doc = json.load(fh)
-        self.assertEqual(doc["bundle_count"], 1)
+        self.assertEqual(doc["harness"]["bundle_count"], 1)
+        self.assertEqual(info["bundle_count"], 1)
 
     def test_deterministic_json(self):
         rows = [
@@ -346,11 +347,14 @@ class BuildLeaderboardTests(unittest.TestCase):
         self.assertEqual(a, b)
 
 
-class SiteIndexLeaderboardLinkTests(unittest.TestCase):
-    def test_site_index_links_leaderboard(self):
-        html = report_page._site_index([])
-        self.assertIn('href="leaderboard.html"', html)
-        self.assertIn("Leaderboard", html)
+class LandingPageTests(unittest.TestCase):
+    def test_landing_page_is_the_board(self):
+        """There is no separate leaderboard page: index.html is the board."""
+        with tempfile.TemporaryDirectory() as td:
+            page = site.render_board_html(site.build_board(td))
+        self.assertIn('id="view-harness"', page)
+        self.assertIn('id="view-router"', page)
+        self.assertNotIn("leaderboard.html", page)
 
 
 if __name__ == "__main__":

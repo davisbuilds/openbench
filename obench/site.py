@@ -7,13 +7,16 @@
   (verified ``results.jsonl`` publish bundles, aggregated by
   :mod:`obench.leaderboard`) and **Router Bench** (verified ``router_bench``
   evidence bundles, aggregated by :mod:`obench.router_report`).
-* ``board.html`` — a self-contained browsing UI over that document: family
+* ``index.html`` — the site's landing page, which *is* the leaderboard: family
   tabs, per-board sortable tables, model/harness filters, Wilson and bootstrap
   confidence intervals drawn as bars, and the Gateway Tax contrast table.
 
-The page embeds its own data, so it works from ``file://`` with no server, no
-build step, and no third-party assets — the same constraints as every other
-page this repo publishes.
+Every table is rendered here, in Python, at build time. The page's script only
+enhances what is already in the document — it re-orders rows, hides them, and
+switches tabs — so the page is complete with JavaScript switched off and there
+is exactly one renderer to keep honest. No server, no build step, and no
+third-party assets, the same constraints as every other page this repo
+publishes.
 
 Comparability rule, unchanged from ``obench leaderboard``: cells from different
 bundles are never blended into one score. Each bundle is its own ranked board.
@@ -68,6 +71,13 @@ COST_BASIS_PREFERENCE = (
     "router_reported",
     "frozen_list_estimate",
 )
+
+# Short column labels; the full basis name stays available on hover.
+COST_BASIS_LABELS = {
+    "invoice_reconciled": "invoice",
+    "router_reported": "router",
+    "frozen_list_estimate": "list est.",
+}
 
 
 # --------------------------------------------------------------------------
@@ -728,7 +738,7 @@ ul.records .sub{color:var(--ink-3);font:12px/1.6 var(--font-mono);margin-top:2px
   border:1px solid var(--line);border-radius:4px;padding:1px 5px}
 footer{color:var(--ink-3);font-size:13px;padding:26px 0 44px;text-align:center}
 footer code{font-family:var(--font-mono)}
-.hidden{display:none}
+[hidden]{display:none !important}
 
 /* Plot width is a token so the axis header and every row stay locked. */
 :root{--plot-w:104px}
@@ -746,671 +756,137 @@ footer code{font-family:var(--font-mono)}
 _JS = r"""
 (function () {
   "use strict";
-  var DATA = JSON.parse(document.getElementById("board-data").textContent);
+  // Progressive enhancement only. Every table is already in the document;
+  // this re-orders rows, hides them, and switches tabs. Nothing is built here.
   var root = document.documentElement;
 
-  // ---- theme -------------------------------------------------------------
   try {
     var saved = localStorage.getItem("obench-theme");
     if (saved) root.setAttribute("data-theme", saved);
   } catch (e) { /* storage disabled */ }
+
   document.getElementById("theme").addEventListener("click", function () {
-    var now = root.getAttribute("data-theme");
-    if (!now) {
-      now = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    }
+    var now = root.getAttribute("data-theme")
+      || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
     var next = now === "dark" ? "light" : "dark";
     root.setAttribute("data-theme", next);
     try { localStorage.setItem("obench-theme", next); } catch (e) { /* ignore */ }
   });
 
-  // ---- formatting --------------------------------------------------------
-  function pct(v, digits) {
-    if (v === null || v === undefined) return "—";
-    return (v * 100).toFixed(digits === undefined ? 1 : digits) + "%";
-  }
-  function num(v, digits) {
-    if (v === null || v === undefined) return "—";
-    return v.toLocaleString(undefined, {
-      minimumFractionDigits: digits || 0, maximumFractionDigits: digits || 0
+  // --- sorting ------------------------------------------------------------
+  function renumber(tbody) {
+    var n = 0;
+    Array.prototype.forEach.call(tbody.rows, function (tr) {
+      if (tr.hidden) return;
+      n += 1;
+      tr.cells[0].textContent = String(n);
     });
   }
-  function secs(v) { return v === null || v === undefined ? "—" : v.toFixed(1) + "s"; }
-  function money(v, digits) {
-    if (v === null || v === undefined) return "—";
-    return "$" + v.toFixed(digits === undefined ? 3 : digits);
-  }
-  function signed(v, fmt) {
-    if (v === null || v === undefined) return "—";
-    return (v > 0 ? "+" : "") + fmt(v);
-  }
-  function el(tag, attrs, kids) {
-    var node = document.createElement(tag);
-    if (attrs) Object.keys(attrs).forEach(function (k) {
-      if (k === "class") node.className = attrs[k];
-      else if (k === "text") node.textContent = attrs[k];
-      else if (k === "html") node.innerHTML = attrs[k];
-      else if (attrs[k] !== null && attrs[k] !== undefined) node.setAttribute(k, attrs[k]);
+
+  function sortBy(table, th) {
+    var col = th.getAttribute("data-col");
+    var numeric = th.getAttribute("data-type") !== "str";
+    var was = th.getAttribute("aria-sort");
+    var dir = was === "descending" ? "ascending" : "descending";
+    var sign = dir === "ascending" ? 1 : -1;
+
+    table.querySelectorAll("thead th").forEach(function (other) {
+      other.removeAttribute("aria-sort");
+      var arrow = other.querySelector(".arrow");
+      if (arrow) arrow.textContent = "↕";
     });
-    (kids || []).forEach(function (kid) {
-      if (kid) node.appendChild(typeof kid === "string" ? document.createTextNode(kid) : kid);
+    th.setAttribute("aria-sort", dir);
+    var arrow = th.querySelector(".arrow");
+    if (arrow) arrow.textContent = dir === "ascending" ? "↑" : "↓";
+
+    var tbody = table.tBodies[0];
+    var rows = Array.prototype.slice.call(tbody.rows);
+    rows.sort(function (a, b) {
+      var x = a.getAttribute("data-s" + col);
+      var y = b.getAttribute("data-s" + col);
+      // Rows with no value for this measure always sink, either direction.
+      if (x === "" && y === "") return 0;
+      if (x === "") return 1;
+      if (y === "") return -1;
+      if (numeric) return (parseFloat(x) - parseFloat(y)) * sign;
+      return x.localeCompare(y) * sign;
     });
-    return node;
-  }
-  var COST_BASIS_LABEL = {
-    invoice_reconciled: "invoice",
-    router_reported: "router",
-    frozen_list_estimate: "list est."
-  };
-  function chip(text, cls) { return el("span", { class: "chip " + (cls || ""), text: text }); }
-  function metaField(label, value) {
-    return el("span", null, [el("b", { text: label + " " }), value]);
+    rows.forEach(function (tr) { tbody.appendChild(tr); });
+    renumber(tbody);
   }
 
-  // Interval cell. Every row plots against the same 0–100% track, gridded at
-  // 25% steps by CSS, so rows are comparable down the column rather than each
-  // bar being its own private scale.
-  function ciCell(estimate, low, high, fmt) {
-    var wrap = el("div", { class: "iv" });
-    wrap.appendChild(el("span", { class: "val", text: fmt(estimate) }));
-    var track = el("div", { class: "track" });
-    if (low !== null && low !== undefined && high !== null && high !== undefined) {
-      var lo = Math.max(0, Math.min(1, low));
-      var hi = Math.max(0, Math.min(1, high));
-      var span = el("div", { class: "span" });
-      span.style.left = (lo * 100) + "%";
-      span.style.width = Math.max(1, (hi - lo) * 100) + "%";
-      track.appendChild(span);
-    }
-    if (estimate !== null && estimate !== undefined) {
-      var dot = el("div", { class: "dot" });
-      dot.style.left = "calc(" + (Math.max(0, Math.min(1, estimate)) * 100) + "% - 1px)";
-      track.appendChild(dot);
-    }
-    wrap.appendChild(track);
-    var range = "—";
-    if (low !== null && low !== undefined && high !== null && high !== undefined) {
-      range = fmt(low) + "–" + fmt(high);
-    }
-    wrap.appendChild(el("span", { class: "range", text: range }));
-    return wrap;
-  }
-
-  // ---- sortable table ----------------------------------------------------
-  // columns: [{label, cell(row)->Node|string, sort(row)->number|string|null,
-  //            defaultDir, align}]
-  var sortState = {};
-
-  // A measure every arm leaves blank is noise, not information: drop the whole
-  // column rather than printing a column of em-dashes.
-  function usefulColumns(columns, rows) {
-    return columns.filter(function (col) {
-      if (!col.omitIfEmpty) return true;
-      return rows.some(function (r) {
-        var v = col.present ? col.present(r) : col.sort(r);
-        return v !== null && v !== undefined;
+  document.querySelectorAll("table").forEach(function (table) {
+    table.querySelectorAll("thead th.sortable").forEach(function (th) {
+      th.addEventListener("click", function () { sortBy(table, th); });
+      th.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); sortBy(table, th); }
       });
     });
-  }
+  });
 
-  function renderTable(key, allColumns, rows, defaultSortLabel) {
-    var columns = usefulColumns(allColumns, rows);
-    // Sort by column identity, not index, so dropping a column cannot shift it.
-    var defaultSort = null;
-    columns.forEach(function (col, i) {
-      if (col.label === defaultSortLabel) defaultSort = i;
-    });
-    var state = sortState[key] || (sortState[key] = { index: defaultSort, dir: "desc" });
-    var body = rows.slice();
-    if (state.index !== null && columns[state.index] && columns[state.index].sort) {
-      var get = columns[state.index].sort;
-      var dir = state.dir === "asc" ? 1 : -1;
-      body.sort(function (a, b) {
-        var x = get(a), y = get(b);
-        var xn = x === null || x === undefined, yn = y === null || y === undefined;
-        if (xn && yn) return 0;
-        if (xn) return 1;          // nulls always sink
-        if (yn) return -1;
-        if (typeof x === "string" || typeof y === "string") {
-          return String(x).localeCompare(String(y)) * dir;
+  // --- filtering ----------------------------------------------------------
+  var controls = document.getElementById("controls");
+  if (controls) {
+    var q = document.getElementById("q");
+    var fModel = document.getElementById("f-model");
+    var fHarness = document.getElementById("f-harness");
+    var fCaveats = document.getElementById("f-caveats");
+    var noMatches = document.getElementById("no-matches");
+    var boards = document.querySelectorAll("#view-harness .board[data-models]");
+
+    function applyFilters() {
+      var text = (q.value || "").trim().toLowerCase();
+      var model = fModel ? fModel.value : "";
+      var harness = fHarness ? fHarness.value : "";
+      var hideCaveats = fCaveats && fCaveats.checked;
+      var shown = 0;
+
+      boards.forEach(function (board) {
+        if (hideCaveats && board.getAttribute("data-caveats") === "1") {
+          board.hidden = true;
+          return;
         }
-        return (x - y) * dir;
-      });
-    }
-
-    // Columns that draw a signed plot need the column's own domain first.
-    columns.forEach(function (col) { if (col.prepare) col.scale = col.prepare(rows); });
-
-    var thead = el("thead");
-    var hrow = el("tr");
-    columns.forEach(function (col, i) {
-      var attrs = { class: col.sort ? "sortable" : "", scope: "col" };
-      if (state.index === i) attrs["aria-sort"] = state.dir === "asc" ? "ascending" : "descending";
-      var th = el("th", attrs, [col.label]);
-      if (col.sort) {
-        th.appendChild(el("span", {
-          class: "arrow",
-          text: state.index === i ? (state.dir === "asc" ? "↑" : "↓") : "↕"
-        }));
-        th.setAttribute("tabindex", "0");
-        th.setAttribute("role", "button");
-        var resort = function () {
-          if (state.index === i) state.dir = state.dir === "asc" ? "desc" : "asc";
-          else { state.index = i; state.dir = col.defaultDir || "desc"; }
-          render();
-        };
-        th.addEventListener("click", resort);
-        th.addEventListener("keydown", function (ev) {
-          if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); resort(); }
+        var visible = 0;
+        board.querySelectorAll("tbody tr").forEach(function (tr) {
+          var hit = (!text || tr.getAttribute("data-search").indexOf(text) !== -1)
+            && (!model || tr.getAttribute("data-model") === model)
+            && (!harness || tr.getAttribute("data-harness") === harness);
+          tr.hidden = !hit;
+          if (hit) visible += 1;
         });
-      }
-      // Axis ticks belong to the column, not to each cell.
-      if (col.axis) {
-        th.appendChild(el("div", { class: "axis" },
-          col.axis.map(function (t) { return el("span", { text: t }); })));
-      }
-      hrow.appendChild(th);
-    });
-    thead.appendChild(hrow);
-
-    var tbody = el("tbody");
-    body.forEach(function (row, i) {
-      var tr = el("tr", i === 0 && state.index === defaultSort ? { class: "top" } : null);
-      columns.forEach(function (col) {
-        var value = col.cell(row, i);
-        var td = el("td", { class: col.cls || "" });
-        td.appendChild(typeof value === "string" ? document.createTextNode(value) : value);
-        tr.appendChild(td);
+        board.hidden = visible === 0;
+        if (visible) shown += 1;
+        var tbody = board.querySelector("tbody");
+        if (tbody) renumber(tbody);
       });
-      tbody.appendChild(tr);
-    });
-    return el("div", { class: "scroll" }, [el("table", null, [thead, tbody])]);
-  }
-
-  // ---- filters -----------------------------------------------------------
-  var filters = { q: "", model: "", harness: "", hideCaveats: false };
-
-  function matchesArm(arm) {
-    var hay = ((arm.harness || arm.arm_id || "") + " " + (arm.model || arm.requested_model || "")).toLowerCase();
-    if (filters.q && hay.indexOf(filters.q) === -1) return false;
-    if (filters.model && (arm.model || arm.requested_model) !== filters.model) return false;
-    if (filters.harness && arm.harness && arm.harness !== filters.harness) return false;
-    return true;
-  }
-
-  function buildControls(models, harnesses, onChange) {
-    var box = el("div", { class: "controls" });
-    var search = el("input", {
-      type: "search", placeholder: "Filter by harness or model…", value: filters.q
-    });
-    search.addEventListener("input", function () {
-      filters.q = search.value.trim().toLowerCase(); onChange();
-    });
-    box.appendChild(search);
-
-    function select(label, values, current, apply) {
-      var sel = el("select");
-      sel.appendChild(el("option", { value: "", text: label }));
-      values.forEach(function (v) {
-        var opt = el("option", { value: v, text: v });
-        if (v === current) opt.selected = true;
-        sel.appendChild(opt);
-      });
-      sel.addEventListener("change", function () { apply(sel.value); onChange(); });
-      return sel;
-    }
-    if (models.length) {
-      box.appendChild(select("All models", models, filters.model, function (v) { filters.model = v; }));
-    }
-    if (harnesses.length) {
-      box.appendChild(select("All harnesses", harnesses, filters.harness, function (v) { filters.harness = v; }));
-    }
-    var cb = el("input", { type: "checkbox" });
-    cb.checked = filters.hideCaveats;
-    cb.addEventListener("change", function () { filters.hideCaveats = cb.checked; onChange(); });
-    box.appendChild(el("label", null, [cb, "Hide boards with disclosed caveats"]));
-    return box;
-  }
-
-  // ---- harness view ------------------------------------------------------
-  function harnessBoard(bundle) {
-    var arms = bundle.arms.filter(matchesArm);
-    if (!arms.length) return null;
-
-    var head = el("div", { class: "head" });
-    var title = bundle.path
-      ? el("a", { href: bundle.path, text: bundle.title })
-      : document.createTextNode(bundle.title);
-    head.appendChild(el("h2", null, [title]));
-
-    // Provenance reads as one instrument line, not a row of loose chips.
-    head.appendChild(el("div", { class: "meta" }, [
-      metaField("kind", bundle.kind),
-      bundle.date ? metaField("date", bundle.date) : null,
-      metaField("denominators",
-        bundle.table === "matched" ? "matched (task, trial)" : "all countable"),
-      metaField("cells", String(bundle.countable_rows)),
-      bundle.results_sha256 ? metaField("results", bundle.results_sha256.slice(0, 12)) : null,
-      bundle.task_set_digest ? metaField("taskset", bundle.task_set_digest.slice(0, 12)) : null
-    ]));
-    var chips = el("div", { class: "chips" });
-    (bundle.models || []).forEach(function (m) { chips.appendChild(chip(m)); });
-    if (bundle.has_caveats) chips.appendChild(chip("caveats disclosed", "warn"));
-    if (chips.childNodes.length) head.appendChild(chips);
-
-    if (bundle.has_caveats) {
-      var det = el("details", { class: "caveats" }, [
-        el("summary", { text: bundle.caveats.length + " caveat(s) from the release page" })
-      ]);
-      var ul = el("ul");
-      bundle.caveats.forEach(function (c) { ul.appendChild(el("li", { text: c })); });
-      det.appendChild(ul);
-      head.appendChild(det);
+      if (noMatches) noMatches.hidden = shown !== 0;
     }
 
-    // The model is a header fact when a board pins one; only worth a column
-    // when a board actually compares more than one.
-    var distinctModels = {};
-    arms.forEach(function (a) { distinctModels[a.model] = 1; });
-    var manyModels = Object.keys(distinctModels).length > 1;
-
-    var columns = [
-      { label: "#", cls: "rank", cell: function (r, i) { return String(i + 1); } },
-      {
-        label: "Harness", cls: "name",
-        cell: function (r) { return r.harness; },
-        sort: function (r) { return r.harness; }, defaultDir: "asc"
-      },
-      {
-        label: "Solve rate · Wilson 95%",
-        axis: ["0", "50", "100%"],
-        cell: function (r) {
-          return ciCell(r.solve_rate, r.wilson95 && r.wilson95[0], r.wilson95 && r.wilson95[1],
-            function (v) { return pct(v); });
-        },
-        sort: function (r) { return r.solve_rate; }
-      },
-      {
-        label: "Solved",
-        cell: function (r) { return r.solved + "/" + r.n; },
-        sort: function (r) { return r.n ? r.solved / r.n : null; }
-      },
-      {
-        label: "Median wall", omitIfEmpty: true,
-        cell: function (r) { return secs(r.median_wall_s); },
-        sort: function (r) { return r.median_wall_s; }, defaultDir: "asc"
-      },
-      {
-        label: "Tokens/solve", omitIfEmpty: true,
-        cell: function (r) { return num(r.total_tokens_per_solve); },
-        sort: function (r) { return r.total_tokens_per_solve; }, defaultDir: "asc"
-      },
-      {
-        label: "$/solve", omitIfEmpty: true,
-        cell: function (r) { return money(r.cost_per_solve_usd); },
-        sort: function (r) { return r.cost_per_solve_usd; }, defaultDir: "asc"
-      },
-      {
-        label: "Token basis",
-        cell: function (r) {
-          var box = el("div", { class: "chips" });
-          (r.token_bases || []).forEach(function (b) { box.appendChild(chip(b)); });
-          if (!(r.token_bases || []).length) box.appendChild(chip("unknown"));
-          return box;
-        }
-      }
-    ];
-    if (manyModels) {
-      columns.splice(2, 0, {
-        label: "Model",
-        cell: function (r) { return r.model; },
-        sort: function (r) { return r.model; }, defaultDir: "asc"
-      });
-    }
-
-    var foot = el("div", { class: "head" }, [
-      el("div", { class: "meta" }, [
-        bundle.results_path
-          ? el("span", null, [el("a", { href: bundle.results_path, text: "results.jsonl" })])
-          : null,
-        bundle.path ? el("span", null, [el("a", { href: bundle.path, text: "release page" })]) : null
-      ])
-    ]);
-
-    return el("section", { class: "board" }, [
-      head, renderTable("h:" + bundle.id, columns, arms, "Solve rate · Wilson 95%"), foot
-    ]);
-  }
-
-  function renderHarness(host) {
-    host.innerHTML = "";
-    var fam = DATA.harness;
-    var models = {}, harnesses = {};
-    fam.bundles.forEach(function (b) {
-      b.arms.forEach(function (a) { models[a.model] = 1; harnesses[a.harness] = 1; });
-    });
-    host.appendChild(buildControls(
-      Object.keys(models).sort(), Object.keys(harnesses).sort(), render
-    ));
-    host.appendChild(el("div", { class: "note" }, [
-      el("strong", { text: "How to read this. " }), fam.note
-    ]));
-
-    var shown = 0;
-    fam.bundles.forEach(function (b) {
-      if (filters.hideCaveats && b.has_caveats) return;
-      var board = harnessBoard(b);
-      if (board) { host.appendChild(board); shown++; }
-    });
-    if (!shown) {
-      host.appendChild(el("section", { class: "board" }, [
-        el("div", { class: "empty", text: "No boards match the current filters." })
-      ]));
-    }
-    if ((fam.skipped || []).length) {
-      var ul = el("ul", { class: "records" });
-      fam.skipped.forEach(function (s) {
-        ul.appendChild(el("li", null, [
-          el("strong", { text: s.id }), " — " + s.reason
-        ]));
-      });
-      host.appendChild(el("section", { class: "board" }, [
-        el("div", { class: "head" }, [
-          el("h2", { text: "Not ranked (" + fam.skipped.length + ")" }),
-          el("p", { text: "Published pages without machine-verifiable results, "
-            + "listed with the reason rather than dropped." })
-        ]),
-        el("div", { class: "head" }, [ul])
-      ]));
-    }
-  }
-
-  // ---- router view -------------------------------------------------------
-  function routerBoard(bundle) {
-    var head = el("div", { class: "head" });
-    var title = bundle.path
-      ? el("a", { href: bundle.path, text: bundle.title })
-      : document.createTextNode(bundle.title);
-    head.appendChild(el("h2", null, [title]));
-    head.appendChild(el("div", { class: "meta" }, [
-      metaField("track", bundle.track || "gateway_tax"),
-      bundle.harness ? metaField("harness", bundle.harness) : null,
-      bundle.date ? metaField("date", bundle.date) : null,
-      metaField("blocks", bundle.blocks_included + "/" + bundle.blocks_observed),
-      metaField("tasks", String(bundle.tasks_included)),
-      bundle.execution_lane ? metaField("lane", bundle.execution_lane) : null,
-      bundle.experiment_digest
-        ? metaField("experiment", bundle.experiment_digest.slice(0, 12)) : null
-    ]));
-    var excluded = Object.keys(bundle.blocks_excluded || {});
-    if (excluded.length) {
-      var chips = el("div", { class: "chips" });
-      excluded.forEach(function (reason) {
-        chips.appendChild(chip(
-          "excluded: " + reason + " × " + bundle.blocks_excluded[reason], "warn"));
-      });
-      head.appendChild(chips);
-    }
-
-    var armCols = [
-      { label: "#", cls: "rank", cell: function (r, i) { return String(i + 1); } },
-      {
-        label: "Route", cls: "name",
-        cell: function (r) { return r.arm_id; },
-        sort: function (r) { return r.arm_id; }, defaultDir: "asc"
-      },
-      {
-        label: "Role",
-        cell: function (r) {
-          return el("div", { class: "chips" }, [
-            chip(r.role || "—", r.role === "direct" ? "role-direct" : ""),
-            r.requested_provider ? chip(r.requested_provider) : null
-          ]);
-        },
-        sort: function (r) { return r.role; }, defaultDir: "asc"
-      },
-      {
-        label: "Solve rate · 95% CI",
-        axis: ["0", "50", "100%"],
-        cell: function (r) {
-          return ciCell(r.solve_rate.estimate, r.solve_rate.low, r.solve_rate.high,
-            function (v) { return pct(v); });
-        },
-        sort: function (r) { return r.solve_rate.estimate; }
-      },
-      {
-        label: "Mean score",
-        cell: function (r) {
-          var m = r.mean_checker_score.estimate;
-          return m === null || m === undefined ? "—" : m.toFixed(3);
-        },
-        sort: function (r) { return r.mean_checker_score.estimate; }
-      },
-      {
-        label: "Availability",
-        cell: function (r) { return pct(r.availability.estimate); },
-        sort: function (r) { return r.availability.estimate; }
-      },
-      {
-        label: "Latency",
-        cell: function (r) { return secs(r.latency_s.estimate); },
-        sort: function (r) { return r.latency_s.estimate; }, defaultDir: "asc"
-      },
-      {
-        label: "$/solve", omitIfEmpty: true,
-        cell: function (r) { return r.cost ? money(r.cost.cost_per_solve_usd, 4) : "—"; },
-        sort: function (r) { return r.cost ? r.cost.cost_per_solve_usd : null; },
-        defaultDir: "asc"
-      },
-      {
-        label: "Cost basis", omitIfEmpty: true,
-        present: function (r) { return r.cost; },
-        cell: function (r) {
-          if (!r.cost) return "—";
-          var tag = chip(COST_BASIS_LABEL[r.cost.basis] || r.cost.basis);
-          tag.setAttribute("title", r.cost.basis);
-          var box = el("div", { class: "chips" }, [tag]);
-          if (r.cost.coverage_ratio !== null && r.cost.coverage_ratio !== undefined
-              && r.cost.coverage_ratio < 1) {
-            box.appendChild(chip(pct(r.cost.coverage_ratio, 0) + " covered", "warn"));
-          }
-          return box;
-        }
-      }
-    ];
-
-    var parts = [head, renderTable("r:" + bundle.id, armCols, bundle.arms, "Solve rate · 95% CI")];
-
-    if ((bundle.contrasts || []).length) {
-      var asPct = function (v) { return pct(v); };
-      var asScore = function (v) { return v.toFixed(3); };
-      var asSecs = function (v) { return v.toFixed(2) + "s"; };
-      var taxCols = [
-        {
-          label: "Gateway arm", cls: "name",
-          cell: function (r) { return r.arm_id; },
-          sort: function (r) { return r.arm_id; }, defaultDir: "asc"
-        },
-        { label: "vs direct", cell: function (r) { return r.direct_arm; } },
-        deltaColumn("Δ solve rate", "solve_rate", asPct, true),
-        deltaColumn("Δ mean score", "mean_checker_score", asScore, true),
-        deltaColumn("Δ availability", "availability", asPct, true),
-        deltaColumn("Δ latency", "latency_s", asSecs, false, "asc")
-      ];
-      parts.push(el("div", { class: "head" }, [
-        el("h2", { text: "Gateway tax" }),
-        el("p", {
-          text: "Paired, task-weighted difference from the direct control arm, "
-            + "with bootstrap 95% intervals. Each column is plotted on its own "
-            + "shared scale about a zero line."
-        }),
-        el("div", { class: "legend" }, [
-          el("span", null, [el("i", { class: "better" }), "Gateway better than direct"]),
-          el("span", null, [el("i", { class: "worse" }), "Gateway worse than direct"]),
-          el("span", null, [el("i", { class: "null" }), "Interval spans zero — no detected effect"])
-        ])
-      ]));
-      parts.push(renderTable("t:" + bundle.id, taxCols, bundle.contrasts, "Δ solve rate"));
-    }
-
-    return el("section", { class: "board" }, parts);
-  }
-
-  // Widest bound in a contrast column, so every row shares one signed scale.
-  function deltaDomain(rows, key) {
-    var max = 0;
-    rows.forEach(function (r) {
-      var m = r[key];
-      if (!m) return;
-      ["estimate", "low", "high"].forEach(function (f) {
-        if (m[f] !== null && m[f] !== undefined) max = Math.max(max, Math.abs(m[f]));
-      });
-    });
-    return max || 1;
-  }
-
-  // Signed contrast against a zero line. Direction is carried three ways —
-  // the sign in the text, the pole hue, and which side of zero the bar sits on
-  // — so it never depends on colour alone. An interval covering zero is drawn
-  // neutral, because "spans zero" means no effect was detected.
-  function deltaCell(metric, fmt, higherIsBetter, domain) {
-    var v = metric.estimate;
-    var lo = metric.low, hi = metric.high;
-    var known = lo !== null && lo !== undefined && hi !== null && hi !== undefined;
-    var tone = "null";
-    if (known && lo <= 0 && hi >= 0) tone = "null";
-    else if (v !== null && v !== undefined && v !== 0) {
-      tone = (higherIsBetter ? v > 0 : v < 0) ? "better" : "worse";
-    }
-
-    var wrap = el("div", { class: "dv" }, [
-      el("span", { class: "val " + tone, text: signed(v, fmt) })
-    ]);
-    var track = el("div", { class: "track" }, [el("div", { class: "zero" })]);
-    // Map [-domain, +domain] onto the track, zero at the midpoint.
-    var place = function (value) {
-      return (0.5 + (value / domain) * 0.5) * 100;
-    };
-    if (known) {
-      var a = Math.max(0, Math.min(100, place(lo)));
-      var b = Math.max(0, Math.min(100, place(hi)));
-      var span = el("div", { class: "span " + tone });
-      span.style.left = Math.min(a, b) + "%";
-      span.style.width = Math.max(1, Math.abs(b - a)) + "%";
-      track.appendChild(span);
-    }
-    if (v !== null && v !== undefined) {
-      var dot = el("div", { class: "dot " + tone });
-      dot.style.left = "calc(" + Math.max(0, Math.min(100, place(v))) + "% - 1px)";
-      track.appendChild(dot);
-    }
-    wrap.appendChild(track);
-    // Four contrast columns with a printed interval each is over-labelling:
-    // the bar carries the interval, the value is the direct label, and the
-    // exact bounds are one hover away.
-    wrap.setAttribute("title", known
-      ? "95% CI " + signed(lo, fmt) + " to " + signed(hi, fmt)
-      : "no interval available");
-    return wrap;
-  }
-
-  function deltaColumn(label, key, fmt, higherIsBetter, defaultDir) {
-    return {
-      label: label,
-      prepare: function (rows) { return deltaDomain(rows, key); },
-      cell: function (r) { return deltaCell(r[key], fmt, higherIsBetter, this.scale); },
-      sort: function (r) { return r[key].estimate; },
-      defaultDir: defaultDir || "desc"
-    };
-  }
-
-  function renderRouter(host) {
-    host.innerHTML = "";
-    var fam = DATA.router;
-    host.appendChild(el("div", { class: "note" }, [
-      el("strong", { text: "How to read this. " }), fam.note
-    ]));
-    if (!fam.bundles.length) {
-      host.appendChild(el("section", { class: "board" }, [
-        el("div", { class: "empty" }, [
-          el("p", { text: "No verified Router Bench bundles are published yet." }),
-          el("p", {
-            html: "Produce one with <code>obench router run</code> then "
-              + "<code>obench router publish &lt;results&gt; &lt;experiment&gt; "
-              + "docs/router/&lt;id&gt;</code>, and re-run <code>obench site build</code>."
-          })
-        ])
-      ]));
-    }
-    fam.bundles.forEach(function (b) { host.appendChild(routerBoard(b)); });
-    (fam.skipped || []).forEach(function (s) {
-      host.appendChild(el("section", { class: "board" }, [
-        el("div", { class: "empty", text: s.id + " — " + s.reason })
-      ]));
+    [q, fModel, fHarness, fCaveats].forEach(function (el) {
+      if (!el) return;
+      el.addEventListener(el.tagName === "INPUT" && el.type === "search"
+        ? "input" : "change", applyFilters);
     });
   }
 
-  // ---- releases view -----------------------------------------------------
-  function renderReleases(host) {
-    host.innerHTML = "";
-    function list(title, entries, blurb) {
-      if (!entries.length) return;
-      var ul = el("ul", { class: "records" });
-      entries.forEach(function (e) {
-        var line = el("li");
-        line.appendChild(e.path
-          ? el("a", { href: e.path, text: e.title || e.id })
-          : el("strong", { text: e.title || e.id }));
-        var meta = [e.date, (e.models || []).join(", "), e.submitter].filter(Boolean).join("  ·  ");
-        if (meta) line.appendChild(el("div", { class: "sub", text: meta }));
-        if (e.description) line.appendChild(el("div", { class: "sub", text: e.description }));
-        ul.appendChild(line);
-      });
-      host.appendChild(el("section", { class: "board" }, [
-        el("div", { class: "head" }, [
-          el("h2", { text: title }),
-          blurb ? el("p", { text: blurb }) : null
-        ]),
-        el("div", { class: "head" }, [ul])
-      ]));
-    }
-    list("Releases", DATA.releases, "First-party published comparison bundles.");
-    list("Community", DATA.community,
-      "Third-party bundles re-verified by CI. Digests prove tamper-evidence, not that runs were not cherry-picked.");
-    list("Packs", DATA.packs, "Versioned task and harness packs.");
-  }
+  // --- tabs ---------------------------------------------------------------
+  var VIEWS = ["harness", "router", "releases", "methodology"];
 
-  // ---- routing -----------------------------------------------------------
-  var VIEWS = {
-    harness: renderHarness,
-    router: renderRouter,
-    releases: renderReleases,
-    methodology: null
-  };
-
-  function currentView() {
+  function showView() {
     var hash = (location.hash || "").replace("#", "");
-    return VIEWS.hasOwnProperty(hash) ? hash : "harness";
-  }
-
-  function render() {
-    var view = currentView();
-    Object.keys(VIEWS).forEach(function (name) {
-      var host = document.getElementById("view-" + name);
-      host.classList.toggle("hidden", name !== view);
+    var view = VIEWS.indexOf(hash) === -1 ? "harness" : hash;
+    VIEWS.forEach(function (name) {
+      document.getElementById("view-" + name).hidden = name !== view;
     });
     document.querySelectorAll("nav.tabs a").forEach(function (a) {
       if (a.getAttribute("href") === "#" + view) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     });
-    if (VIEWS[view]) VIEWS[view](document.getElementById("view-" + view));
   }
-
-  window.addEventListener("hashchange", render);
-  render();
+  window.addEventListener("hashchange", showView);
+  showView();
 })();
 """
-
 
 def _headline_stats(doc):
     harness = doc["harness"]
@@ -1427,6 +903,7 @@ def _headline_stats(doc):
         (str(router["bundle_count"]), "router bundles"),
         (str(routes), "serving routes"),
     ]
+
 
 
 _METHODOLOGY = """
@@ -1499,24 +976,618 @@ _METHODOLOGY = """
 """
 
 
-def render_board_html(doc):
-    """Render the self-contained board page for a built document."""
-    payload = json.dumps(doc, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    # `</script>` inside JSON would close the host element early.
-    payload = payload.replace("</", "<\\/")
 
+# --------------------------------------------------------------------------
+# Page — rendered here, enhanced in the browser
+# --------------------------------------------------------------------------
+#
+# Every table is written as real HTML at build time. The script below only
+# *enhances* what is already on the page: it re-orders rows, hides rows and
+# boards, and switches tabs. Nothing is built client-side, so the page is
+# complete with JavaScript switched off and there is exactly one renderer to
+# keep honest.
+
+
+def _esc(value):
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def _attrs(mapping):
+    out = []
+    for key, value in mapping.items():
+        if value is None or value is False:
+            continue
+        if value is True:
+            out.append(f" {key}")
+        else:
+            out.append(f' {key}="{_esc(value)}"')
+    return "".join(out)
+
+
+def _tag(name, attrs=None, body=""):
+    return f"<{name}{_attrs(attrs or {})}>{body}</{name}>"
+
+
+def _fmt_pct(value, digits=1):
+    return "—" if value is None else f"{value * 100:.{digits}f}%"
+
+
+def _fmt_num(value):
+    return "—" if value is None else f"{round(value):,}"
+
+
+def _fmt_secs(value):
+    return "—" if value is None else f"{value:.1f}s"
+
+
+def _fmt_money(value, digits=3):
+    return "—" if value is None else f"${value:.{digits}f}"
+
+
+def _fmt_score(value):
+    return "—" if value is None else f"{value:.3f}"
+
+
+def _signed(value, fmt):
+    if value is None:
+        return "—"
+    return ("+" if value > 0 else "") + fmt(value)
+
+
+def _chip(text, cls="", title=None):
+    return _tag("span", {"class": ("chip " + cls).strip(), "title": title}, _esc(text))
+
+
+def _meta_field(label, value):
+    return _tag("span", {}, _tag("b", {}, _esc(label) + " ") + _esc(value))
+
+
+def _clamp01(value):
+    return max(0.0, min(1.0, value))
+
+
+def _interval_cell(estimate, low, high, fmt):
+    """Value, a bar on the shared 0–100% track, and the numeric range."""
+    marks = ""
+    if low is not None and high is not None:
+        lo, hi = _clamp01(low), _clamp01(high)
+        marks += _tag("div", {
+            "class": "span",
+            "style": f"left:{lo * 100:.4f}%;width:{max(0.8, (hi - lo) * 100):.4f}%",
+        })
+    if estimate is not None:
+        marks += _tag("div", {
+            "class": "dot",
+            "style": f"left:calc({_clamp01(estimate) * 100:.4f}% - 1px)",
+        })
+    range_text = "—" if low is None or high is None else f"{fmt(low)}–{fmt(high)}"
+    return _tag("div", {"class": "iv"},
+                _tag("span", {"class": "val"}, _esc(fmt(estimate)))
+                + _tag("div", {"class": "track"}, marks)
+                + _tag("span", {"class": "range"}, _esc(range_text)))
+
+
+def _delta_cell(metric, fmt, higher_is_better, domain):
+    """Signed contrast on a zero-centred axis shared by the whole column.
+
+    Direction is carried by the sign, by the pole hue, and by which side of
+    zero the bar sits on, so it never rests on colour alone. An interval
+    covering zero is drawn neutral: no effect was detected.
+    """
+    estimate, low, high = metric["estimate"], metric["low"], metric["high"]
+    known = low is not None and high is not None
+    if known and low <= 0 <= high:
+        tone = "null"
+    elif estimate is not None and estimate != 0:
+        better = estimate > 0 if higher_is_better else estimate < 0
+        tone = "better" if better else "worse"
+    else:
+        tone = "null"
+
+    def place(value):
+        return max(0.0, min(100.0, (0.5 + (value / domain) * 0.5) * 100))
+
+    marks = _tag("div", {"class": "zero"})
+    if known:
+        a, b = place(low), place(high)
+        marks += _tag("div", {
+            "class": "span " + tone,
+            "style": f"left:{min(a, b):.4f}%;width:{max(0.8, abs(b - a)):.4f}%",
+        })
+    if estimate is not None:
+        marks += _tag("div", {
+            "class": "dot " + tone,
+            "style": f"left:calc({place(estimate):.4f}% - 1px)",
+        })
+    title = ("95% CI " + _signed(low, fmt) + " to " + _signed(high, fmt)
+             if known else "no interval available")
+    return _tag("div", {"class": "dv", "title": title},
+                _tag("span", {"class": "val " + tone}, _esc(_signed(estimate, fmt)))
+                + _tag("div", {"class": "track"}, marks))
+
+
+def _delta_domain(rows, key):
+    """Widest bound in a contrast column, so its rows share one signed scale."""
+    widest = 0.0
+    for row in rows:
+        metric = row.get(key) or {}
+        for field in ("estimate", "low", "high"):
+            value = metric.get(field)
+            if value is not None:
+                widest = max(widest, abs(value))
+    return widest or 1.0
+
+
+def _render_table(columns, rows, sort_index, row_attrs=None):
+    """One table. ``columns`` entries are dicts:
+
+    ``label``  header text
+    ``cell``   row -> cell HTML
+    ``key``    row -> sort key (omit for an unsortable column)
+    ``type``   ``num`` or ``str`` (how the browser compares the key)
+    ``dir``    default direction when the column is first clicked
+    ``axis``   optional tick labels drawn under the header
+    ``cls``    optional cell class
+    ``skip_if_empty``  drop the column when no row has a key
+    """
+    columns = [
+        col for col in columns
+        if not col.get("skip_if_empty")
+        or any(col["key"](row) is not None for row in rows)
+    ]
+
+    heads = ""
+    for index, col in enumerate(columns):
+        sortable = "key" in col
+        attrs = {
+            "scope": "col",
+            "class": "sortable" if sortable else None,
+            "data-type": col.get("type", "num") if sortable else None,
+            "data-col": str(index) if sortable else None,
+            "tabindex": "0" if sortable else None,
+            "role": "button" if sortable else None,
+        }
+        if index == sort_index:
+            attrs["aria-sort"] = "descending"
+        body = _esc(col["label"])
+        if sortable:
+            arrow = "↓" if index == sort_index else "↕"
+            body += _tag("span", {"class": "arrow"}, arrow)
+        if col.get("axis"):
+            body += _tag("div", {"class": "axis"},
+                         "".join(_tag("span", {}, _esc(t)) for t in col["axis"]))
+        heads += _tag("th", attrs, body)
+
+    body_rows = ""
+    for position, row in enumerate(rows, 1):
+        cells = _tag("td", {"class": "rank"}, str(position))
+        keys = {}
+        for index, col in enumerate(columns):
+            cells += _tag("td", {"class": col.get("cls")}, col["cell"](row))
+            if "key" in col:
+                value = col["key"](row)
+                keys[f"data-s{index}"] = "" if value is None else str(value)
+        attrs = dict(row_attrs(row) if row_attrs else {})
+        attrs.update(keys)
+        body_rows += _tag("tr", attrs, cells)
+
+    return _tag("div", {"class": "scroll"}, _tag(
+        "table", {},
+        _tag("thead", {}, _tag("tr", {}, _tag("th", {"scope": "col"}, "#") + heads))
+        + _tag("tbody", {}, body_rows)))
+
+
+def _harness_board(bundle):
+    arms = bundle["arms"]
+    title = _esc(bundle["title"])
+    if bundle.get("path"):
+        title = _tag("a", {"href": bundle["path"]}, title)
+
+    meta = "".join(filter(None, [
+        _meta_field("kind", bundle["kind"]),
+        _meta_field("date", bundle["date"]) if bundle.get("date") else None,
+        _meta_field("denominators",
+                    "matched (task, trial)" if bundle["table"] == "matched"
+                    else "all countable"),
+        _meta_field("cells", bundle["countable_rows"]),
+        _meta_field("results", (bundle.get("results_sha256") or "")[:12])
+        if bundle.get("results_sha256") else None,
+        _meta_field("taskset", (bundle.get("task_set_digest") or "")[:12])
+        if bundle.get("task_set_digest") else None,
+    ]))
+
+    chips = "".join(_chip(m) for m in bundle.get("models") or [])
+    if bundle.get("has_caveats"):
+        chips += _chip("caveats disclosed", "warn")
+
+    caveats = ""
+    if bundle.get("has_caveats"):
+        items = "".join(_tag("li", {}, _esc(c)) for c in bundle["caveats"])
+        caveats = _tag("details", {"class": "caveats"},
+                       _tag("summary", {},
+                            f"{len(bundle['caveats'])} caveat(s) from the release page")
+                       + _tag("ul", {}, items))
+
+    head = _tag("div", {"class": "head"},
+                _tag("h2", {}, title)
+                + _tag("div", {"class": "meta"}, meta)
+                + (_tag("div", {"class": "chips"}, chips) if chips else "")
+                + caveats)
+
+    # The model is a header fact when a board pins one; only worth a column
+    # when a board actually compares more than one.
+    many_models = len({a["model"] for a in arms}) > 1
+
+    columns = [
+        {"label": "Harness", "cls": "name", "type": "str", "dir": "asc",
+         "cell": lambda a: _esc(a["harness"]), "key": lambda a: a["harness"]},
+    ]
+    if many_models:
+        columns.append(
+            {"label": "Model", "type": "str", "dir": "asc",
+             "cell": lambda a: _esc(a["model"]), "key": lambda a: a["model"]})
+    columns += [
+        {"label": "Solve rate · Wilson 95%", "axis": ["0", "50", "100%"],
+         "cell": lambda a: _interval_cell(
+             a["solve_rate"], (a.get("wilson95") or [None, None])[0],
+             (a.get("wilson95") or [None, None])[1], _fmt_pct),
+         "key": lambda a: a["solve_rate"]},
+        {"label": "Solved",
+         "cell": lambda a: f"{a['solved']}/{a['n']}",
+         "key": lambda a: (a["solved"] / a["n"]) if a["n"] else None},
+        {"label": "Median wall", "dir": "asc", "skip_if_empty": True,
+         "cell": lambda a: _fmt_secs(a.get("median_wall_s")),
+         "key": lambda a: a.get("median_wall_s")},
+        {"label": "Tokens/solve", "dir": "asc", "skip_if_empty": True,
+         "cell": lambda a: _fmt_num(a.get("total_tokens_per_solve")),
+         "key": lambda a: a.get("total_tokens_per_solve")},
+        {"label": "$/solve", "dir": "asc", "skip_if_empty": True,
+         "cell": lambda a: _fmt_money(a.get("cost_per_solve_usd")),
+         "key": lambda a: a.get("cost_per_solve_usd")},
+        {"label": "Token basis",
+         "cell": lambda a: _tag("div", {"class": "chips"}, "".join(
+             _chip(b) for b in (a.get("token_bases") or ["unknown"])))},
+    ]
+
+    sort_index = next(i for i, c in enumerate(columns)
+                      if c["label"].startswith("Solve rate"))
+    table = _render_table(columns, arms, sort_index, row_attrs=lambda a: {
+        "data-harness": a["harness"],
+        "data-model": a["model"],
+        "data-search": f"{a['harness']} {a['model']}".lower(),
+    })
+
+    links = "".join(filter(None, [
+        _tag("span", {}, _tag("a", {"href": bundle["results_path"]}, "results.jsonl"))
+        if bundle.get("results_path") else None,
+        _tag("span", {}, _tag("a", {"href": bundle["path"]}, "release page"))
+        if bundle.get("path") else None,
+    ]))
+    foot = _tag("div", {"class": "head"}, _tag("div", {"class": "meta"}, links))
+
+    return _tag("section", {
+        "class": "board",
+        "data-models": ",".join(sorted({a["model"] for a in arms})),
+        "data-harnesses": ",".join(sorted({a["harness"] for a in arms})),
+        "data-caveats": "1" if bundle.get("has_caveats") else "0",
+    }, head + table + foot)
+
+
+def _router_board(bundle):
+    title = _esc(bundle["title"])
+    if bundle.get("path"):
+        title = _tag("a", {"href": bundle["path"]}, title)
+
+    meta = "".join(filter(None, [
+        _meta_field("track", bundle.get("track") or "gateway_tax"),
+        _meta_field("harness", bundle["harness"]) if bundle.get("harness") else None,
+        _meta_field("date", bundle["date"]) if bundle.get("date") else None,
+        _meta_field("blocks", f"{bundle['blocks_included']}/{bundle['blocks_observed']}"),
+        _meta_field("tasks", bundle["tasks_included"]),
+        _meta_field("lane", bundle["execution_lane"]) if bundle.get("execution_lane") else None,
+        _meta_field("experiment", (bundle.get("experiment_digest") or "")[:12])
+        if bundle.get("experiment_digest") else None,
+    ]))
+    excluded = bundle.get("blocks_excluded") or {}
+    chips = "".join(_chip(f"excluded: {reason} × {count}", "warn")
+                    for reason, count in sorted(excluded.items()))
+    head = _tag("div", {"class": "head"},
+                _tag("h2", {}, title)
+                + _tag("div", {"class": "meta"}, meta)
+                + (_tag("div", {"class": "chips"}, chips) if chips else ""))
+
+    def cost_cell(arm):
+        cost = arm.get("cost")
+        if not cost:
+            return "—"
+        label = COST_BASIS_LABELS.get(cost["basis"], cost["basis"])
+        body = _chip(label, title=cost["basis"])
+        ratio = cost.get("coverage_ratio")
+        if ratio is not None and ratio < 1:
+            body += _chip(f"{_fmt_pct(ratio, 0)} covered", "warn")
+        return _tag("div", {"class": "chips"}, body)
+
+    columns = [
+        {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
+         "cell": lambda a: _esc(a["arm_id"]), "key": lambda a: a["arm_id"]},
+        {"label": "Role", "type": "str", "dir": "asc",
+         "cell": lambda a: _tag("div", {"class": "chips"},
+                                _chip(a.get("role") or "—",
+                                      "role-direct" if a.get("role") == "direct" else "")
+                                + (_chip(a["requested_provider"])
+                                   if a.get("requested_provider") else "")),
+         "key": lambda a: a.get("role") or ""},
+        {"label": "Solve rate · 95% CI", "axis": ["0", "50", "100%"],
+         "cell": lambda a: _interval_cell(
+             a["solve_rate"]["estimate"], a["solve_rate"]["low"],
+             a["solve_rate"]["high"], _fmt_pct),
+         "key": lambda a: a["solve_rate"]["estimate"]},
+        {"label": "Mean score",
+         "cell": lambda a: _fmt_score(a["mean_checker_score"]["estimate"]),
+         "key": lambda a: a["mean_checker_score"]["estimate"]},
+        {"label": "Availability",
+         "cell": lambda a: _fmt_pct(a["availability"]["estimate"]),
+         "key": lambda a: a["availability"]["estimate"]},
+        {"label": "Latency", "dir": "asc",
+         "cell": lambda a: _fmt_secs(a["latency_s"]["estimate"]),
+         "key": lambda a: a["latency_s"]["estimate"]},
+        {"label": "$/solve", "dir": "asc", "skip_if_empty": True,
+         "cell": lambda a: _fmt_money((a.get("cost") or {}).get("cost_per_solve_usd"), 4),
+         "key": lambda a: (a.get("cost") or {}).get("cost_per_solve_usd")},
+        {"label": "Cost basis", "skip_if_empty": True,
+         "cell": cost_cell,
+         "key": lambda a: a.get("cost") and a["cost"]["basis"]},
+    ]
+    parts = head + _render_table(columns, bundle["arms"], 2)
+
+    contrasts = bundle.get("contrasts") or []
+    if contrasts:
+        def delta_column(label, key, fmt, higher_is_better, direction="desc"):
+            domain = _delta_domain(contrasts, key)
+            return {
+                "label": label, "dir": direction,
+                "cell": lambda r: _delta_cell(r[key], fmt, higher_is_better, domain),
+                "key": lambda r: r[key]["estimate"],
+            }
+
+        tax_columns = [
+            {"label": "Gateway arm", "cls": "name", "type": "str", "dir": "asc",
+             "cell": lambda r: _esc(r["arm_id"]), "key": lambda r: r["arm_id"]},
+            {"label": "vs direct", "cell": lambda r: _esc(r["direct_arm"])},
+            delta_column("Δ solve rate", "solve_rate", _fmt_pct, True),
+            delta_column("Δ mean score", "mean_checker_score", _fmt_score, True),
+            delta_column("Δ availability", "availability", _fmt_pct, True),
+            delta_column("Δ latency", "latency_s",
+                         lambda v: f"{v:.2f}s", False, "asc"),
+        ]
+        legend = "".join(
+            _tag("span", {}, _tag("i", {"class": tone}, "") + _esc(text))
+            for tone, text in (
+                ("better", "Gateway better than direct"),
+                ("worse", "Gateway worse than direct"),
+                ("null", "Interval spans zero — no detected effect"),
+            ))
+        parts += _tag("div", {"class": "head"},
+                      _tag("h2", {}, "Gateway tax")
+                      + _tag("p", {},
+                             "Paired, task-weighted difference from the direct "
+                             "control arm, with bootstrap 95% intervals. Each "
+                             "column is plotted on its own shared scale about a "
+                             "zero line.")
+                      + _tag("div", {"class": "legend"}, legend))
+        parts += _render_table(tax_columns, contrasts, 2)
+
+    return _tag("section", {"class": "board", "data-caveats": "0"}, parts)
+
+
+def _skipped_board(title, blurb, entries):
+    items = "".join(
+        _tag("li", {}, _tag("strong", {}, _esc(e["id"])) + " — " + _esc(e["reason"]))
+        for e in entries)
+    return _tag("section", {"class": "board", "data-caveats": "0"},
+                _tag("div", {"class": "head"},
+                     _tag("h2", {}, _esc(title)) + _tag("p", {}, _esc(blurb)))
+                + _tag("div", {"class": "head"},
+                       _tag("ul", {"class": "records"}, items)))
+
+
+def _records_section(title, blurb, items, anchor=None):
+    if not items:
+        return ""
+    return _tag("section", {"class": "board", "id": anchor},
+                _tag("div", {"class": "head"},
+                     _tag("h2", {}, _esc(title)) + _tag("p", {}, _esc(blurb)))
+                + _tag("div", {"class": "head"},
+                       _tag("ul", {"class": "records"}, "".join(items))))
+
+
+def _record(name_html, meta_parts, sub=None, extra=""):
+    body = name_html
+    meta = "  ·  ".join(str(p) for p in meta_parts if p)
+    if meta:
+        body += _tag("div", {"class": "sub"}, _esc(meta))
+    if sub:
+        body += _tag("div", {"class": "sub"}, _esc(sub))
+    return _tag("li", {}, body + extra)
+
+
+def _linked_title(entry):
+    name = _esc(entry.get("title") or entry.get("id") or "")
+    return (_tag("a", {"href": entry["path"]}, name) if entry.get("path")
+            else _tag("strong", {}, name))
+
+
+def _releases_section(entries):
+    return _records_section(
+        "Releases", "First-party published comparison bundles.",
+        [_record(_linked_title(e),
+                 [e.get("date"), ", ".join(e.get("models") or [])])
+         for e in entries])
+
+
+def _community_section(entries):
+    items = []
+    for entry in entries:
+        extra = ""
+        if entry.get("link"):
+            extra = _tag("div", {"class": "sub"},
+                         _tag("a", {"href": entry["link"], "rel": "nofollow noopener"},
+                              "source"))
+        items.append(_record(
+            _linked_title(entry),
+            [entry.get("date"),
+             "@" + entry["submitter"] if entry.get("submitter") else None],
+            sub=entry.get("claim") or entry.get("description"),
+            extra=extra))
+    return _records_section(
+        "Community",
+        "Third-party bundles re-verified by CI. Digests prove tamper-evidence, "
+        "not that runs were not cherry-picked.",
+        items, anchor="community")
+
+
+def _packs_section(entries):
+    items = []
+    for entry in entries:
+        name = entry.get("id") or ""
+        if entry.get("latest"):
+            name = f"{name}@{entry['latest']}"
+        head = _tag("strong", {}, _esc(name))
+        if entry.get("kind"):
+            head += " " + _chip(entry["kind"])
+        items.append(_record(
+            head,
+            [entry.get("license"), entry.get("source"),
+             (entry.get("content_sha256") or "")[:12] or None],
+            sub=entry.get("description")))
+    return _records_section(
+        "Packs",
+        "Versioned task and harness packs "
+        "(obench pack install org/name@version).",
+        items, anchor="packs")
+
+
+def _controls(doc):
+    models, harnesses = set(), set()
+    for bundle in doc["harness"]["bundles"]:
+        for arm in bundle["arms"]:
+            models.add(arm["model"])
+            harnesses.add(arm["harness"])
+
+    def select(control_id, label, values):
+        options = _tag("option", {"value": ""}, _esc(label))
+        options += "".join(_tag("option", {"value": v}, _esc(v)) for v in sorted(values))
+        return _tag("select", {"id": control_id, "aria-label": label}, options)
+
+    body = _tag("input", {
+        "type": "search", "id": "q", "placeholder": "Filter by harness or model…",
+        "aria-label": "Filter by harness or model",
+    })
+    if models:
+        body += select("f-model", "All models", models)
+    if harnesses:
+        body += select("f-harness", "All harnesses", harnesses)
+    body += _tag("label", {},
+                 _tag("input", {"type": "checkbox", "id": "f-caveats"})
+                 + "Hide boards with disclosed caveats")
+    return _tag("div", {"class": "controls", "id": "controls"}, body)
+
+
+def _harness_view(doc):
+    family = doc["harness"]
+    body = _controls(doc)
+    body += _tag("div", {"class": "note"},
+                 _tag("strong", {}, "How to read this. ") + _esc(family["note"]))
+    body += "".join(_harness_board(b) for b in family["bundles"])
+    body += _tag("section", {"class": "board", "id": "no-matches", "hidden": True},
+                 _tag("div", {"class": "empty"},
+                      _tag("p", {}, "No boards match the current filters.")))
+    if family.get("skipped"):
+        body += _skipped_board(
+            f"Not ranked ({len(family['skipped'])})",
+            "Published pages without machine-verifiable results, listed with the "
+            "reason rather than dropped.",
+            family["skipped"])
+    return body
+
+
+def _router_view(doc):
+    family = doc["router"]
+    body = _tag("div", {"class": "note"},
+                _tag("strong", {}, "How to read this. ") + _esc(family["note"]))
+    if not family["bundles"]:
+        body += _tag("section", {"class": "board"}, _tag(
+            "div", {"class": "empty"},
+            _tag("p", {}, "No verified Router Bench bundles are published yet.")
+            + _tag("p", {},
+                   "Produce one with <code>obench router run</code>, publish it "
+                   "with <code>obench router publish &lt;results&gt; "
+                   "&lt;experiment&gt; docs/router/&lt;id&gt;</code>, then "
+                   "rebuild with <code>obench site build</code>.")))
+    body += "".join(_router_board(b) for b in family["bundles"])
+    if family.get("skipped"):
+        body += _skipped_board(
+            f"Not ranked ({len(family['skipped'])})",
+            "Directories under the router root that did not verify.",
+            family["skipped"])
+    return body
+
+
+def _releases_view(doc):
+    return (_releases_section(doc["releases"])
+            + _community_section(doc["community"])
+            + _packs_section(doc["packs"]))
+
+
+def render_board_html(doc):
+    """The whole page: content rendered here, behaviour layered on top."""
     stat_html = "".join(
-        f'<div class="stat"><b>{html.escape(value)}</b>'
-        f'<span>{html.escape(label)}</span></div>'
+        _tag("div", {"class": "stat"},
+             _tag("b", {}, _esc(value)) + _tag("span", {}, _esc(label)))
         for value, label in _headline_stats(doc)
     )
-
-    tabs = (
-        '<a href="#harness">Harness Bench</a>'
-        '<a href="#router">Router Bench</a>'
-        '<a href="#releases">Releases</a>'
-        '<a href="#methodology">Methodology</a>'
+    tabs = "".join(
+        _tag("a", {"href": "#" + slug}, _esc(label))
+        for slug, label in (
+            ("harness", "Harness Bench"),
+            ("router", "Router Bench"),
+            ("releases", "Releases"),
+            ("methodology", "Methodology"),
+        )
     )
+    theme_button = _tag("button", {
+        "class": "theme", "id": "theme", "type": "button",
+        "aria-label": "Toggle colour theme", "title": "Toggle colour theme",
+    }, '<svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">'
+       '<path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm0 1.5V14.5a6.5 6.5 0 0 1 0-13z"/>'
+       "</svg>")
+
+    masthead = _tag("header", {"class": "top"}, _tag(
+        "div", {"class": "wrap"},
+        _tag("div", {"class": "brand"},
+             _tag("span", {"class": "cmd"}, "obench")
+             + _tag("span", {"class": "what"}, "leaderboards"))
+        + _tag("nav", {"class": "tabs"}, tabs)
+        + theme_button))
+
+    intro = _tag("div", {"class": "intro"},
+                 _tag("h1", {}, "Same task, different wrapper "
+                                "&mdash; and different wire.")
+                 + _tag("p", {}, _esc(doc["cross_family_note"])))
+
+    # Every view ships expanded. The script collapses them into tabs; without
+    # it the nav degrades to jump links over one continuous page.
+    views = (
+        _tag("main", {"id": "view-harness"}, _harness_view(doc))
+        + _tag("main", {"id": "view-router"}, _router_view(doc))
+        + _tag("main", {"id": "view-releases"}, _releases_view(doc))
+        + _tag("main", {"id": "view-methodology"}, _METHODOLOGY)
+    )
+
+    footer = _tag("footer", {},
+                  "Generated by " + _tag("code", {}, "obench site")
+                  + " &middot; static, self-contained, no third-party assets "
+                  "&middot; " + _tag("a", {"href": "board.json"}, "board.json"))
 
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -1525,43 +1596,24 @@ def render_board_html(doc):
         '<meta name="description" content="Harness and serving-route leaderboards '
         'for OpenBench, built from digest-verified result bundles.">'
         f"<style>{_CSS}</style></head><body>"
-        '<header class="top"><div class="wrap">'
-        '<div class="brand"><span class="cmd">obench</span>'
-        '<span class="what">leaderboards</span></div>'
-        f'<nav class="tabs">{tabs}</nav>'
-        '<button class="theme" id="theme" type="button" '
-        'aria-label="Toggle colour theme" title="Toggle colour theme">'
-        '<svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">'
-        '<path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm0 1.5V14.5a6.5 6.5 0 0 1 0-13z"/>'
-        "</svg></button>"
-        "</div></header>"
-        '<div class="wrap">'
-        '<div class="intro"><h1>Same task, different wrapper — and different wire.</h1>'
-        f"<p>{html.escape(doc['cross_family_note'])}</p></div>"
-        f'<div class="stats">{stat_html}</div>'
-        "<noscript><p class=\"note\">This page renders its tables with JavaScript. "
-        'The static fallback is <a href="leaderboard.html">leaderboard.html</a>, '
-        'and the same data is in <a href="board.json">board.json</a>.</p></noscript>'
-        '<main id="view-harness"></main>'
-        '<main id="view-router" class="hidden"></main>'
-        '<main id="view-releases" class="hidden"></main>'
-        f'<main id="view-methodology" class="hidden">{_METHODOLOGY}</main>'
-        "<footer>Generated by <code>obench site</code> · static, self-contained, "
-        'no third-party assets · <a href="board.json">board.json</a> · '
-        '<a href="index.html">all releases</a></footer>'
-        "</div>"
-        f'<script id="board-data" type="application/json">{payload}</script>'
-        f"<script>{_JS}</script>"
-        "</body></html>\n"
+        + masthead
+        + '<div class="wrap">'
+        + intro
+        + _tag("div", {"class": "stats"}, stat_html)
+        + views
+        + footer
+        + "</div>"
+        + f"<script>{_JS}</script>"
+        + "</body></html>\n"
     )
 
 
 def write_board(site_dir, community_dir=None, router_dirs=None):
-    """Build and write ``board.json`` + ``board.html`` under ``site_dir``."""
+    """Build and write ``index.html`` + ``board.json`` under ``site_dir``."""
     site_dir = os.path.abspath(site_dir)
     doc = build_board(site_dir, community_dir=community_dir, router_dirs=router_dirs)
     json_path = os.path.join(site_dir, "board.json")
-    html_path = os.path.join(site_dir, "board.html")
+    html_path = os.path.join(site_dir, "index.html")
     leaderboard._write_text(
         json_path,
         json.dumps(doc, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
@@ -1582,7 +1634,7 @@ def main(argv=None):
         description="Build the unified static leaderboard site (harness + router).",
     )
     sub = parser.add_subparsers(dest="command")
-    build = sub.add_parser("build", help="write board.html + board.json")
+    build = sub.add_parser("build", help="write index.html + board.json")
     build.add_argument(
         "--site-dir",
         default=leaderboard._default_site_dir(),
@@ -1620,7 +1672,7 @@ def main(argv=None):
             community_dir=community_dir,
             router_dirs=args.router_dir,
         )
-        print(f"board.html  {info['html_path']}")
+        print(f"index.html  {info['html_path']}")
         print(f"board.json  {info['json_path']}")
         print(
             f"harness_bundles={info['harness_bundles']} "

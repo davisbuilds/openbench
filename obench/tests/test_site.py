@@ -186,20 +186,28 @@ class RenderTests(_SiteFixture):
         for forbidden in ("http://", "https://", "fetch(", "cdn."):
             self.assertNotIn(forbidden, page)
 
-    def test_embedded_payload_cannot_close_the_script_element(self):
+    def test_bundle_supplied_text_is_escaped(self):
+        """Titles and caveats come from bundles; they are content, not markup."""
         doc = site.build_board(self.site_dir)
-        doc["harness"]["bundles"][0]["title"] = "</script><img src=x onerror=alert(1)>"
+        bundle = doc["harness"]["bundles"][0]
+        bundle["title"] = '<img src=x onerror="alert(1)">'
+        bundle["caveats"] = ["</table><script>alert(2)</script>"]
+        bundle["has_caveats"] = True
         page = site.render_board_html(doc)
-        start = page.index('id="board-data"')
-        end = page.index("</script>", start)
-        payload = page[page.index(">", start) + 1:end]
-        self.assertNotIn("</script>", payload)
-        # The escaped payload still parses back to the original string.
-        parsed = json.loads(payload.replace("<\\/", "</"))
-        self.assertEqual(
-            parsed["harness"]["bundles"][0]["title"],
-            "</script><img src=x onerror=alert(1)>",
-        )
+        self.assertNotIn("<img src=x", page)
+        self.assertNotIn("<script>alert(2)", page)
+        self.assertIn("&lt;img src=x", page)
+
+    def test_tables_are_rendered_without_javascript(self):
+        """The script only enhances; the data must be in the document."""
+        page = site.render_board_html(site.build_board(self.site_dir))
+        head, _, script = page.partition("<script>")
+        self.assertIn("<tbody>", head)
+        self.assertIn('data-harness="fast"', head)
+        self.assertIn('data-harness="slow"', head)
+        # Two arms rendered as two real rows, before any JS runs.
+        self.assertEqual(head.count("<tr data-harness="), 2)
+        self.assertNotIn("<tbody>", script)
 
     def test_both_families_and_methodology_are_present(self):
         page = site.render_board_html(site.build_board(self.site_dir))
@@ -208,8 +216,9 @@ class RenderTests(_SiteFixture):
         self.assertIn('id="view-methodology"', page)
         self.assertIn("Gateway Tax", page)
 
-    def test_write_board_emits_both_artifacts(self):
+    def test_write_board_emits_the_landing_page_and_data(self):
         info = site.write_board(self.site_dir)
+        self.assertEqual(info["html_path"], os.path.join(self.site_dir, "index.html"))
         self.assertTrue(os.path.isfile(info["json_path"]))
         self.assertTrue(os.path.isfile(info["html_path"]))
         with open(info["json_path"], encoding="utf-8") as fh:
@@ -243,15 +252,14 @@ class DesignContractTests(_SiteFixture):
         self.assertIn(':root[data-theme="light"]', self.page)
         self.assertIn(':root:where(:not([data-theme="light"]))', self.page)
 
-    def test_no_stale_interval_class(self):
-        """`.ci` was renamed to `.iv`; a stale name silently unstyles the bars."""
-        self.assertNotIn('class: "ci"', self.page)
-        self.assertIn('class: "iv"', self.page)
+    def test_interval_marks_are_styled_and_placed(self):
+        """A class rename that misses the markup silently unstyles the bars."""
+        self.assertIn('class="iv"', self.page)
+        self.assertIn('.iv .track{', self.page)
+        self.assertIn('class="span"', self.page)
 
-    def test_contrast_legend_names_every_tone(self):
-        self.assertIn("Gateway better than direct", self.page)
-        self.assertIn("Gateway worse than direct", self.page)
-        self.assertIn("no detected effect", self.page)
+    def test_no_separate_leaderboard_page_is_referenced(self):
+        self.assertNotIn("leaderboard.html", self.page)
 
     def test_reduced_motion_and_focus_are_honoured(self):
         self.assertIn("prefers-reduced-motion", self.page)
@@ -261,13 +269,55 @@ class DesignContractTests(_SiteFixture):
         self.assertIn(".scroll{overflow-x:auto}", self.page)
 
 
+class ContrastPlotTests(unittest.TestCase):
+    """The gateway-tax cell is the page's only inferential graphic."""
+
+    def _metric(self, estimate, low, high):
+        return {"estimate": estimate, "low": low, "high": high}
+
+    def test_interval_spanning_zero_reads_as_no_effect(self):
+        cell = site._delta_cell(
+            self._metric(-0.028, -0.111, 0.056), site._fmt_pct, True, 0.2)
+        self.assertIn("val null", cell)
+        self.assertNotIn("better", cell)
+        self.assertNotIn("worse", cell)
+
+    def test_direction_uses_the_diverging_poles(self):
+        better = site._delta_cell(
+            self._metric(0.08, 0.02, 0.14), site._fmt_pct, True, 0.2)
+        self.assertIn("val better", better)
+        # Lower latency is better, so a positive delta is the "worse" pole.
+        worse = site._delta_cell(
+            self._metric(3.45, 1.10, 5.90), lambda v: f"{v:.2f}s", False, 6.0)
+        self.assertIn("val worse", worse)
+
+    def test_sign_and_interval_survive_without_colour(self):
+        cell = site._delta_cell(
+            self._metric(3.45, 1.10, 5.90), lambda v: f"{v:.2f}s", False, 6.0)
+        self.assertIn("+3.45s", cell)
+        self.assertIn("95% CI +1.10s to +5.90s", cell)
+
+    def test_domain_is_shared_across_a_column(self):
+        rows = [
+            {"d": self._metric(1.0, 0.5, 2.0)},
+            {"d": self._metric(-4.0, -6.0, -2.0)},
+        ]
+        self.assertEqual(site._delta_domain(rows, "d"), 6.0)
+
+    def test_empty_column_domain_never_divides_by_zero(self):
+        self.assertEqual(site._delta_domain([], "d"), 1.0)
+        self.assertEqual(
+            site._delta_domain([{"d": self._metric(None, None, None)}], "d"), 1.0)
+
+
 class CliTests(_SiteFixture):
     def test_build_subcommand(self):
         from obench.cli import main as cli_main
         code = cli_main(["site", "build", "--site-dir", self.site_dir,
                          "--no-community-dir"])
         self.assertEqual(code, 0)
-        self.assertTrue(os.path.isfile(os.path.join(self.site_dir, "board.html")))
+        self.assertTrue(os.path.isfile(os.path.join(self.site_dir, "index.html")))
+        self.assertTrue(os.path.isfile(os.path.join(self.site_dir, "board.json")))
 
 
 if __name__ == "__main__":

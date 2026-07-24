@@ -255,19 +255,16 @@ def load_packs_manifest(site_dir):
 
 
 def write_site_index(site_dir, releases=None, community=None, packs=None):
-    """Regenerate ``docs/index.html`` from release + community + packs manifests."""
-    if releases is None:
-        releases = load_releases_manifest(site_dir)
-    if community is None:
-        community = load_community_manifest(site_dir)
-    if packs is None:
-        packs = load_packs_manifest(site_dir)
-    index_path = os.path.join(site_dir, "index.html")
-    text = report_page._site_index(releases, community=community, packs=packs)
-    os.makedirs(site_dir, exist_ok=True)
-    with open(index_path, "w", encoding="utf-8") as fh:
-        fh.write(text)
-    return index_path
+    """Regenerate the site landing page (``docs/index.html``).
+
+    The landing page *is* the leaderboard, so this rebuilds the whole board.
+    Callers write their manifest JSON before calling, and the board reads those
+    files back, which is why the manifest arguments are accepted for
+    compatibility but no longer consulted.
+    """
+    del releases, community, packs
+    from . import site
+    return site.write_board(site_dir)["html_path"]
 
 
 def sync_community_to_site(community_dir, site_dir):
