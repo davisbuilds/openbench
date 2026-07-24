@@ -241,13 +241,14 @@ def shape_body(
     """Replace caller-controlled gateway routing and cache policy in-place."""
     strip_cache_controls(payload)
     if gateway == "openrouter":
+        routing_keys = (
+            "provider", "providerOptions", "plugins", "router",
+            "session_id", "conversation_id", "models", "order", "sort",
+            "caching",
+        )
+        for key in routing_keys:
+            payload.pop(key, None)
         if router_mode == "auto":
-            for key in (
-                "provider", "providerOptions", "plugins", "router",
-                "session_id", "conversation_id", "models", "order", "sort",
-                "caching",
-            ):
-                payload.pop(key, None)
             payload["provider"] = {
                 "only": list(allowed_providers),
                 "allow_fallbacks": True,
@@ -263,7 +264,6 @@ def shape_body(
             "only": [requested_provider],
             "allow_fallbacks": False,
         }
-        payload.pop("providerOptions", None)
         return
     if gateway == "vercel":
         payload.pop("provider", None)

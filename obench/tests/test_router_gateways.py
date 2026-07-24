@@ -31,8 +31,15 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "prompt_cache_key": "attacker-key",
         }
 
-    def test_openrouter_request_contract_is_unchanged(self):
+    def test_openrouter_fixed_profile_replaces_routing_and_session_controls(self):
         body = self.base_body()
+        body.update({
+            "plugins": [{"id": "auto-router"}],
+            "router": {"strategy": "attacker"},
+            "session_id": "attacker-session",
+            "conversation_id": "attacker-conversation",
+            "providerOptions": {"gateway": {"only": ["attacker"]}},
+        })
         router_gateways.shape_body(
             body, gateway="openrouter", requested_provider="openai"
         )
@@ -43,6 +50,11 @@ class GatewayRequestProfileTests(unittest.TestCase):
         self.assertNotIn("cache", body)
         self.assertNotIn("prompt_cache_key", body)
         self.assertNotIn("cache_control", body["messages"][0])
+        for key in (
+            "plugins", "router", "session_id", "conversation_id",
+            "providerOptions", "models", "order", "sort", "caching",
+        ):
+            self.assertNotIn(key, body)
         self.assertEqual(
             router_gateways.request_headers(
                 gateway="openrouter", secret="secret"
