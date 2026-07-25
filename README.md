@@ -22,7 +22,10 @@ Versioned packs (`org/name@version`, tasks or harness manifests) are covered in
 [`docs/task-packs.md`](docs/task-packs.md) (`obench pack install …`).
 To compare a fixed coding harness and model over direct and gateway serving
 routes, see [`docs/gateway-bench.md`](docs/gateway-bench.md) (`obench gateway
-validate|doctor|run|report|publish|verify`).
+validate|doctor|run|report|publish|verify`). For direct request latency,
+accounting, and route-integrity probes without a coding harness, see
+[`docs/gateway-probe.md`](docs/gateway-probe.md) (`obench gateway probe
+validate|doctor|run|report`).
 
 **Live results:** https://minghinmatthewlam.github.io/openbench/ — the landing
 page is the leaderboard itself, with a tab each for Harness Bench and Gateway
@@ -41,7 +44,9 @@ provider, sampling, and task fixed while varying the API gateway. It uses the
 `fixed_model_provider` track and compares each gateway with the provider's
 direct API under matched blocks. See
 [`docs/gateway-bench.md`](docs/gateway-bench.md) for its methodology, metrics,
-examples, and separate `obench gateway` command group.
+examples, and separate `obench gateway` command group. **Gateway Probe** is the
+request-level companion: it compares cold and verified warm same-socket
+requests without Pi, tasks, checkers, or correctness scores.
 
 Automatic model or provider selection is a different product surface. A future
 **Router Bench** will own that work under `obench router`; Gateway Bench does

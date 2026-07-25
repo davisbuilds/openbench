@@ -1,0 +1,58 @@
+schema_version = 1
+experiment_id = "gpt-4o-mini-responses-probe"
+track = "request_probe"
+model_match = "rolling_alias"
+repetitions = 5
+schedule_seed = 20260725
+allow_private_endpoint = false
+
+[budget]
+timeout_s = 60
+max_output_tokens = 64
+usd_cap = 0.05
+
+[[cases]]
+case_id = "short-text"
+prompt = "Reply with one short sentence describing a blue circle."
+
+[[arms]]
+arm_id = "direct-openai"
+route_kind = "direct"
+endpoint = "https://api.openai.com/v1/responses"
+protocol = "openai_responses"
+baseline = true
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "gpt-4o-mini"
+requested_provider = "openai"
+allowed_models = ["gpt-4o-mini"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "OPENAI_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260725
+
+[[arms]]
+arm_id = "openrouter-openai"
+route_kind = "gateway"
+gateway = "openrouter"
+direct_control_arm_id = "direct-openai"
+endpoint = "https://openrouter.ai/api/v1/responses"
+protocol = "openai_responses"
+baseline = false
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "openai/gpt-4o-mini"
+requested_provider = "openai"
+allowed_models = ["openai/gpt-4o-mini"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "OPENROUTER_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260725
