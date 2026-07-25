@@ -1,7 +1,9 @@
 import dataclasses
 import http.client
 import json
+import socket
 import threading
+import time
 import unittest
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -247,6 +249,104 @@ class GatewayProbeHttpTests(unittest.TestCase):
         )
         self.assertTrue(result["reuse_evidence"]["socket_reused"])
         self.assertTrue(result["outcome"]["success"])
+
+    def test_slow_dns_is_bounded_by_one_request_deadline(self):
+        exp = experiment(self.endpoint)
+        exp = dataclasses.replace(
+            exp,
+            budget=dataclasses.replace(exp.budget, timeout_s=0.1),
+        )
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "cold", 1, ("direct",)
+        )
+        original_getaddrinfo = socket.getaddrinfo
+
+        def slow_dns(*args, **kwargs):
+            time.sleep(0.35)
+            return original_getaddrinfo(*args, **kwargs)
+
+        started = time.monotonic()
+        with mock.patch.object(
+            gateway_probe_http.socket,
+            "getaddrinfo",
+            side_effect=slow_dns,
+        ):
+            result = gateway_probe_http.execute_request(
+                experiment=exp,
+                case=exp.cases[0],
+                block=block,
+                plan=route_plan(exp, self.endpoint),
+                secret="test-secret",
+                prices=prices(),
+            )
+        elapsed = time.monotonic() - started
+        self.assertTrue(result["outcome"]["timed_out"], result)
+        self.assertGreaterEqual(elapsed, 0.08)
+        self.assertLess(elapsed, 0.25)
+        time.sleep(0.3)
+        self.assertEqual(_SSEHandler.requests, [])
+
+    def test_multiple_address_attempts_share_one_request_deadline(self):
+        exp = experiment(self.endpoint)
+        exp = dataclasses.replace(
+            exp,
+            budget=dataclasses.replace(exp.budget, timeout_s=0.2),
+        )
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "cold", 1, ("direct",)
+        )
+        sockets = []
+
+        class SlowFailingSocket:
+            def __init__(self, *_args):
+                self.index = len(sockets)
+                self.timeout = None
+                sockets.append(self)
+
+            def settimeout(self, value):
+                self.timeout = value
+
+            def connect(self, _sockaddr):
+                if self.index == 0:
+                    time.sleep(0.08)
+                    raise ConnectionRefusedError
+                time.sleep(self.timeout)
+                raise socket.timeout
+
+            def close(self):
+                return None
+
+        addresses = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 1)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 2)),
+        ]
+        started = time.monotonic()
+        with (
+            mock.patch.object(
+                gateway_probe_http.socket,
+                "getaddrinfo",
+                return_value=addresses,
+            ),
+            mock.patch.object(
+                gateway_probe_http.socket,
+                "socket",
+                SlowFailingSocket,
+            ),
+        ):
+            result = gateway_probe_http.execute_request(
+                experiment=exp,
+                case=exp.cases[0],
+                block=block,
+                plan=route_plan(exp, self.endpoint),
+                secret="test-secret",
+                prices=prices(),
+            )
+        elapsed = time.monotonic() - started
+        self.assertTrue(result["outcome"]["timed_out"], result)
+        self.assertEqual(len(sockets), 2)
+        self.assertLess(sockets[1].timeout, sockets[0].timeout)
+        self.assertGreaterEqual(elapsed, 0.16)
+        self.assertLess(elapsed, 0.26)
 
     def test_gateway_body_shaping_is_authoritative(self):
         plan = gateway_spec.RoutePlan(

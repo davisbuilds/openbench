@@ -7,8 +7,10 @@ import hashlib
 import http.client
 import ipaddress
 import json
+import queue
 import socket
 import ssl
+import threading
 import time
 import urllib.parse
 from collections.abc import Mapping
@@ -74,7 +76,21 @@ class _TimedConnection(http.client.HTTPConnection):
         self._allow_private = allow_private
         self._private_hosts = private_hosts
         self._private_networks = tuple(ipaddress.ip_network(item) for item in private_cidrs)
+        self._request_deadline: float | None = None
         self.phase_s = {"dns_s": None, "tcp_s": None, "tls_s": None}
+
+    def set_request_deadline(self, deadline: float) -> None:
+        self._request_deadline = deadline
+        if self.sock is not None:
+            self.sock.settimeout(self._remaining_timeout())
+
+    def _remaining_timeout(self) -> float:
+        if self._request_deadline is None:
+            return float(self.timeout)
+        remaining = self._request_deadline - time.monotonic()
+        if remaining <= 0:
+            raise socket.timeout("probe request exceeded its total timeout")
+        return max(0.001, remaining)
 
     def _address_allowed(self, address: str) -> bool:
         parsed = ipaddress.ip_address(address)
@@ -84,11 +100,34 @@ class _TimedConnection(http.client.HTTPConnection):
             return True
         return any(parsed in network for network in self._private_networks)
 
+    def _resolve(self) -> list[tuple[Any, ...]]:
+        results: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+        host, port = self.host, self.port
+
+        def resolve() -> None:
+            try:
+                value = socket.getaddrinfo(
+                    host, port, type=socket.SOCK_STREAM
+                )
+            except Exception as exc:  # noqa: BLE001 - returned to request thread
+                results.put_nowait((False, exc))
+            else:
+                results.put_nowait((True, value))
+
+        threading.Thread(target=resolve, daemon=True).start()
+        try:
+            ok, value = results.get(timeout=self._remaining_timeout())
+        except queue.Empty as exc:
+            raise socket.timeout(
+                "probe request exceeded its total timeout"
+            ) from exc
+        if not ok:
+            raise value
+        return value
+
     def _connect_tcp(self) -> socket.socket:
         started = time.monotonic()
-        addresses = socket.getaddrinfo(
-            self.host, self.port, type=socket.SOCK_STREAM
-        )
+        addresses = self._resolve()
         self.phase_s["dns_s"] = time.monotonic() - started
         allowed = [item for item in addresses if self._address_allowed(item[4][0])]
         if not allowed:
@@ -99,8 +138,8 @@ class _TimedConnection(http.client.HTTPConnection):
         started = time.monotonic()
         for family, socktype, proto, _canonname, sockaddr in allowed:
             candidate = socket.socket(family, socktype, proto)
-            candidate.settimeout(self.timeout)
             try:
+                candidate.settimeout(self._remaining_timeout())
                 candidate.connect(sockaddr)
                 self.phase_s["tcp_s"] = time.monotonic() - started
                 return candidate
@@ -111,6 +150,12 @@ class _TimedConnection(http.client.HTTPConnection):
 
     def connect(self) -> None:
         self.sock = self._connect_tcp()
+        self.sock.settimeout(self._remaining_timeout())
+
+    def send(self, data: Any) -> None:
+        if self.sock is not None:
+            self.sock.settimeout(self._remaining_timeout())
+        super().send(data)
 
 
 class _TimedHTTPSConnection(_TimedConnection):
@@ -124,11 +169,13 @@ class _TimedHTTPSConnection(_TimedConnection):
         raw = self._connect_tcp()
         started = time.monotonic()
         try:
+            raw.settimeout(self._remaining_timeout())
             self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
         except Exception:
             raw.close()
             raise
         self.phase_s["tls_s"] = time.monotonic() - started
+        self.sock.settimeout(self._remaining_timeout())
 
 
 def nonce(experiment_digest: str, block: ProbeBlock, role: str) -> str:
@@ -223,9 +270,10 @@ def _consume(
 ) -> tuple[int, dict[str, Any] | None, bool]:
     started = time.monotonic()
     deadline = started + float(connection.timeout)
+    connection.set_request_deadline(deadline)
     connection.request("POST", path, body=body, headers=dict(headers))
     if connection.sock is not None:
-        connection.sock.settimeout(max(0.001, deadline - time.monotonic()))
+        connection.sock.settimeout(connection._remaining_timeout())
     response = connection.getresponse()
     response_headers = {key.lower(): value for key, value in response.getheaders()}
     parser = None
@@ -249,7 +297,7 @@ def _consume(
         if time.monotonic() >= deadline:
             raise TimeoutError("probe request exceeded its total timeout")
         if connection.sock is not None:
-            connection.sock.settimeout(max(0.001, deadline - time.monotonic()))
+            connection.sock.settimeout(connection._remaining_timeout())
         chunk = response.read1(65536)
         if not chunk:
             break
