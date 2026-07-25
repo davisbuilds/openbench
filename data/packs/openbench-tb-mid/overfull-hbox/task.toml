@@ -1,3 +1,3 @@
-docker_image = "openbench-tb2-overfull-hbox@sha256:b30720af09e1818e4c906be3414edad593d3d271992c5257532d4f06f2ec1e05"
+docker_image = "openbench-tb2-overfull-hbox@sha256:94acdcba6b33e3783b6c38a405fac08b247afa3566aa35dec395fab3fba5ed8e"
 docker_image_tag = "openbench-tb2-overfull-hbox:pinned"
 docker_workdir = "/app"
