@@ -1,7 +1,8 @@
-schema_version = 1
+schema_version = 2
 experiment_id = "gpt-4o-mini-four-way-gateway-bench"
 track = "fixed_model_provider"
 model_match = "rolling_alias"
+provider_prompt_mode = "provider_default"
 harness = "pi"
 tasks = ["make-ci-green", "add-feature", "misleading-error"]
 repetitions_per_window = 1

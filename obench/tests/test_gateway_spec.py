@@ -69,9 +69,10 @@ def manifest(**replacements):
     values.update(replacements)
     return textwrap.dedent(
         f"""
-        schema_version = 1
+        schema_version = 2
         experiment_id = "gateway-bench-smoke"
         track = "{values['track']}"
+        provider_prompt_mode = "provider_default"
         harness = "{values['harness']}"
         tasks = {values['tasks']}
         repetitions_per_window = {values['repetitions']}
@@ -159,6 +160,63 @@ class GatewayExperimentTests(unittest.TestCase):
                 )
             )
 
+    def test_provider_prompt_mode_is_required_and_isolation_is_responses_only(self):
+        natural = parse_experiment_toml(manifest())
+        self.assertEqual(natural.provider_prompt_mode, "provider_default")
+
+        responses = (
+            manifest()
+            .replace(
+                'provider_prompt_mode = "provider_default"',
+                'provider_prompt_mode = "isolated_per_call_v1"',
+            )
+            .replace("/chat/completions", "/responses")
+            .replace('protocol = "openai_chat"', 'protocol = "openai_responses"')
+        )
+        cold = parse_experiment_toml(responses)
+        self.assertEqual(cold.provider_prompt_mode, "isolated_per_call_v1")
+        self.assertNotEqual(natural.digest, cold.digest)
+
+        non_openai_direct = responses.replace(
+            'requested_provider = "openai"',
+            'requested_provider = "anthropic"',
+        ).replace(
+            'allowed_providers = ["openai"]',
+            'allowed_providers = ["anthropic"]',
+        )
+        with self.assertRaisesRegex(GatewaySpecError, "direct OpenAI"):
+            parse_experiment_toml(non_openai_direct)
+
+        non_openai_endpoint = responses.replace(
+            "https://api.openai.com",
+            "https://api.example.com",
+            1,
+        )
+        with self.assertRaisesRegex(GatewaySpecError, "direct OpenAI"):
+            parse_experiment_toml(non_openai_endpoint)
+
+        with self.assertRaisesRegex(GatewaySpecError, "requires openai_responses"):
+            parse_experiment_toml(
+                manifest().replace(
+                    'provider_prompt_mode = "provider_default"',
+                    'provider_prompt_mode = "isolated_per_call_v1"',
+                )
+            )
+        with self.assertRaisesRegex(GatewaySpecError, "provider_prompt_mode"):
+            parse_experiment_toml(
+                manifest().replace(
+                    'provider_prompt_mode = "provider_default"',
+                    'provider_prompt_mode = "disabled"',
+                )
+            )
+        with self.assertRaisesRegex(GatewaySpecError, "provider_prompt_mode"):
+            parse_experiment_toml(
+                manifest().replace(
+                    'provider_prompt_mode = "provider_default"\n',
+                    "",
+                )
+            )
+
     def test_rejects_router_track_and_auto_only_fields(self):
         with self.assertRaisesRegex(GatewaySpecError, "track must be"):
             parse_experiment_toml(
@@ -213,6 +271,7 @@ class GatewayExperimentTests(unittest.TestCase):
         self.assertIn("OPENAI_API_KEY", persisted)
         self.assertNotIn("direct-secret-value", persisted)
         self.assertNotIn("gateway-secret-value", persisted)
+        self.assertEqual(plans[0].provider_prompt_mode, "provider_default")
         self.assertEqual(secrets.value_for("direct-openai"), "direct-secret-value")
         self.assertNotIn("direct-secret-value", repr(secrets))
         with self.assertRaises(TypeError):
@@ -246,7 +305,7 @@ class GatewayExperimentTests(unittest.TestCase):
     def test_rejects_unknown_keys_at_every_level(self):
         cases = (
             manifest().replace(
-                "schema_version = 1", "schema_version = 1\nunexpected = true", 1),
+                "schema_version = 2", "schema_version = 2\nunexpected = true", 1),
             manifest(budget=manifest_budget() + "\nextra = 1"),
             manifest(gateway_extra='direct_control_arm_id = "direct-openai"\nextra = 1'),
             manifest(gateway_extra=(

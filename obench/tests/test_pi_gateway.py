@@ -16,7 +16,7 @@ from obench.gateway_spec import (
 
 def plan_dict(**updates):
     plan = RoutePlan(
-        schema_version=1,
+        schema_version=2,
         experiment_digest="a" * 64,
         arm_digest="b" * 64,
         arm_id="gateway",

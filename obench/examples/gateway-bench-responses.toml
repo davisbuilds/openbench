@@ -1,7 +1,8 @@
-schema_version = 1
+schema_version = 2
 experiment_id = "gpt-4o-mini-responses-gateway-bench"
 track = "fixed_model_provider"
 model_match = "rolling_alias"
+provider_prompt_mode = "provider_default"
 harness = "pi"
 tasks = ["make-it-run"]
 repetitions_per_window = 5

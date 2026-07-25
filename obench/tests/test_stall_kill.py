@@ -59,11 +59,11 @@ class ProxyLivenessTrackingTests(unittest.TestCase):
 
     def test_stale_cell_reports_large_age(self):
         """A cell with old last_activity reports age >= the stall window."""
-        stale_ts = time.monotonic() - 700  # 700s ago (>600s default stall)
-        with self.server._ledger_condition:
-            ledger = self.server._cell_ledgers.get("test-cell-1")
-            ledger.last_activity_monotonic = stale_ts
-        age = self.server.cell_last_activity_age("test-cell-1")
+        with mock.patch("obench.proxy.time.monotonic", return_value=1000.0):
+            with self.server._ledger_condition:
+                ledger = self.server._cell_ledgers.get("test-cell-1")
+                ledger.last_activity_monotonic = 300.0
+            age = self.server.cell_last_activity_age("test-cell-1")
         self.assertIsNotNone(age)
         self.assertGreaterEqual(age, 700)
 

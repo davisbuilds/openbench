@@ -9,9 +9,9 @@ these result fields:
 * ``route_integrity`` with boolean ``pass`` and a list of reason strings;
 * ``proxy_metrics.calls``, where each call may contain ``timing`` (``ttfb_s``
   and ``semantic_ttft_s``), ``generation`` (paired ``output_tokens`` and
-  ``duration_s``), ``cache`` (``cached_input_tokens`` and
-  ``cache_write_input_tokens``), ``route`` (``provider`` and ``served_model``),
-  and ``costs``.
+  ``duration_s``), ``tokens`` (input, output, and total), ``cache``
+  (``cached_input_tokens`` and ``cache_write_input_tokens``), ``route``
+  (``provider`` and ``served_model``), and ``costs``.
 
 ``costs`` maps a basis name to an object containing ``amount_usd``, ``currency``
 and ``effective_at``. Missing conditional timing or cost evidence affects only
@@ -42,6 +42,9 @@ _COST_BASES = (
 _CALL_COVERAGE_FIELDS = {
     "ttfb_s": "ttfb",
     "semantic_ttft_s": "ttft",
+    "mean_input_tokens_per_call": "input_tokens",
+    "mean_output_tokens_per_call": "token_output_tokens",
+    "mean_total_tokens_per_call": "total_tokens",
     "mean_cached_input_tokens_per_call": "cached_input_tokens",
     "mean_cache_write_input_tokens_per_call": "cache_write_input_tokens",
 }
@@ -356,6 +359,11 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
             {} if cache_value is None else cache_value,
             f"row {row_number} call {call_number} cache",
         )
+        tokens_value = call.get("tokens")
+        tokens = _object(
+            {} if tokens_value is None else tokens_value,
+            f"row {row_number} call {call_number} tokens",
+        )
         route = _object(
             call.get("route", {}),
             f"row {row_number} call {call_number} route",
@@ -427,6 +435,18 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
                     f"row {row_number} call {call_number} timing.semantic_ttft_s",
                 ),
                 "output_tokens": output_tokens,
+                "input_tokens": _optional_number(
+                    tokens.get("input_tokens"),
+                    f"row {row_number} call {call_number} tokens.input_tokens",
+                ),
+                "token_output_tokens": _optional_number(
+                    tokens.get("output_tokens"),
+                    f"row {row_number} call {call_number} tokens.output_tokens",
+                ),
+                "total_tokens": _optional_number(
+                    tokens.get("total_tokens"),
+                    f"row {row_number} call {call_number} tokens.total_tokens",
+                ),
                 "generation_duration": generation_duration,
                 "cached_input_tokens": _optional_number(
                     cache.get("cached_input_tokens"),
@@ -478,6 +498,32 @@ def _cell_throughput(cell: Mapping[str, Any]) -> float | None:
     if duration <= 0:
         return None
     return sum(item[0] for item in paired) / duration
+
+
+def _cell_cache_hit_rate(cell: Mapping[str, Any]) -> float | None:
+    values = [
+        call["cached_input_tokens"]
+        for call in cell["calls"]
+        if call["cached_input_tokens"] is not None
+    ]
+    if not values:
+        return None
+    return sum(value > 0 for value in values) / len(values)
+
+
+def _cell_cached_input_fraction(cell: Mapping[str, Any]) -> float | None:
+    paired = [
+        (call["cached_input_tokens"], call["input_tokens"])
+        for call in cell["calls"]
+        if call["cached_input_tokens"] is not None
+        and call["input_tokens"] is not None
+    ]
+    if not paired:
+        return None
+    total_input = sum(item[1] for item in paired)
+    if total_input <= 0:
+        return None
+    return sum(item[0] for item in paired) / total_input
 
 
 def _cell_cost(cell: Mapping[str, Any], basis: str) -> float | None:
@@ -539,6 +585,7 @@ def aggregate(
     logical_cells = {}
     arm_metadata: dict[str, tuple[str, bool, str]] = {}
     model_matches = set()
+    provider_prompt_modes = set()
     task_metadata: dict[str, tuple[str, str, str]] = {}
     block_coordinates: dict[str, tuple[Any, ...]] = {}
     coordinate_block_ids: dict[tuple[Any, ...], str] = {}
@@ -557,6 +604,16 @@ def aggregate(
                 f"row {row_number} has invalid model_match"
             )
         model_matches.add(model_match)
+        provider_prompt_mode = row.get("provider_prompt_mode")
+        if provider_prompt_mode not in gateway_spec.PROVIDER_PROMPT_MODES:
+            raise GatewayReportError(
+                f"row {row_number} has invalid provider_prompt_mode"
+            )
+        if provider_prompt_mode != identity.provider_prompt_mode:
+            raise GatewayReportError(
+                f"row {row_number} provider_prompt_mode conflicts with identity"
+            )
+        provider_prompt_modes.add(provider_prompt_mode)
         experiment_ids.add(identity.experiment_id)
         experiment_digests.add(identity.experiment_digest)
         strata.add(_stratum(identity))
@@ -626,6 +683,9 @@ def aggregate(
     if len(model_matches) != 1:
         raise GatewayReportError("rows mix model_match policies")
     model_match = next(iter(model_matches))
+    if len(provider_prompt_modes) != 1:
+        raise GatewayReportError("rows mix provider cache modes")
+    provider_prompt_mode = next(iter(provider_prompt_modes))
     if len(strata) != 1:
         raise GatewayReportError("rows mix comparison strata")
 
@@ -742,6 +802,17 @@ def aggregate(
             "ttfb_s": lambda cell: _cell_call_metric(cell, "ttfb"),
             "semantic_ttft_s": lambda cell: _cell_call_metric(cell, "ttft"),
             "throughput_tokens_per_s": _cell_throughput,
+            "mean_input_tokens_per_call": lambda cell: _cell_call_metric(
+                cell, "input_tokens"
+            ),
+            "mean_output_tokens_per_call": lambda cell: _cell_call_metric(
+                cell, "token_output_tokens"
+            ),
+            "mean_total_tokens_per_call": lambda cell: _cell_call_metric(
+                cell, "total_tokens"
+            ),
+            "cache_hit_call_rate": _cell_cache_hit_rate,
+            "cached_input_fraction": _cell_cached_input_fraction,
             "mean_cached_input_tokens_per_call": lambda cell: _cell_call_metric(
                 cell, "cached_input_tokens"
             ),
@@ -925,6 +996,17 @@ def aggregate(
         "ttfb_s": lambda cell: _cell_call_metric(cell, "ttfb"),
         "semantic_ttft_s": lambda cell: _cell_call_metric(cell, "ttft"),
         "throughput_tokens_per_s": _cell_throughput,
+        "mean_input_tokens_per_call": lambda cell: _cell_call_metric(
+            cell, "input_tokens"
+        ),
+        "mean_output_tokens_per_call": lambda cell: _cell_call_metric(
+            cell, "token_output_tokens"
+        ),
+        "mean_total_tokens_per_call": lambda cell: _cell_call_metric(
+            cell, "total_tokens"
+        ),
+        "cache_hit_call_rate": _cell_cache_hit_rate,
+        "cached_input_fraction": _cell_cached_input_fraction,
         "mean_cached_input_tokens_per_call": lambda cell: _cell_call_metric(
             cell, "cached_input_tokens"
         ),
@@ -987,6 +1069,7 @@ def aggregate(
         "benchmark": results.GATEWAY_BENCHMARK,
         "track": track,
         "model_match": model_match,
+        "provider_prompt_mode": provider_prompt_mode,
         "experiment_id": next(iter(experiment_ids)),
         "experiment_digest": next(iter(experiment_digests)),
         "analysis": {
@@ -1017,6 +1100,7 @@ def render_text(report: Mapping[str, Any]) -> str:
     blocks = report["blocks"]
     lines = [
         f"Gateway Bench: {report['track']} ({report['experiment_digest'][:12]})",
+        f"Provider prompt mode: {report['provider_prompt_mode']}",
         (
             f"Blocks: {blocks['included']}/{blocks['observed']} included; "
             f"tasks: {report['tasks']['included']}"

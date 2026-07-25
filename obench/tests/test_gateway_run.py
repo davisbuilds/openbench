@@ -27,6 +27,13 @@ PRICE_JSON = json.dumps({
         "effective_at": "2026-07-22T00:00:00Z",
     }
 })
+PROVIDER_DEFAULT_EVIDENCE = {
+    "mode": "provider_default",
+    "transform_id": None,
+    "prefix_injected": False,
+    "scope": None,
+    "nonce_commitment": None,
+}
 
 
 class _UpstreamHandler(BaseHTTPRequestHandler):
@@ -196,9 +203,10 @@ top_p = 1.0
 seed = 7
 '''
         return f'''\
-schema_version = 1
+schema_version = 2
 experiment_id = "fake-gateway-bench"
 track = "fixed_model_provider"
+provider_prompt_mode = "provider_default"
 harness = "pi"
 tasks = ["fake-task"]
 repetitions_per_window = 1
@@ -524,6 +532,61 @@ direct_control_arm_id = "direct"
         }
         self.assertIn("malformed_sse_event", gateway_run._route_reasons(metrics, plan))
 
+    def test_cold_prefix_evidence_fails_closed_on_missing_or_cached_usage(self):
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = dataclasses.replace(
+            next(item for item in plans if item.route_kind == "direct"),
+            protocol="openai_responses",
+            provider_prompt_mode="isolated_per_call_v1",
+        )
+        base = {
+            "route": {
+                "requested_model": plan.requested_model,
+                "served_model": plan.requested_model,
+                "provider": plan.requested_provider,
+            },
+            "stream": {"done": True},
+            "route_evidence": {"pass": True, "reasons": []},
+        }
+        evidence = {
+            "mode": "isolated_per_call_v1",
+            "transform_id": gateway_run.gateway_spec.COLD_PREFIX_TRANSFORM_ID,
+            "prefix_injected": True,
+            "scope": "forwarded_request",
+            "nonce_commitment": "a" * 64,
+        }
+        self.assertEqual(
+            gateway_run._provider_cache_reasons(
+                {"provider_cache": evidence}, base, plan
+            ),
+            ["cold_cache_usage_missing"],
+        )
+        cached = {
+            **base,
+            "usage": {"input_tokens_details": {"cached_tokens": 128}},
+        }
+        self.assertEqual(
+            gateway_run._provider_cache_reasons(
+                {"provider_cache": evidence}, cached, plan
+            ),
+            ["cold_cache_hit"],
+        )
+        uncached = {
+            **base,
+            "usage": {"input_tokens_details": {"cached_tokens": 0}},
+        }
+        self.assertEqual(
+            gateway_run._provider_cache_reasons(
+                {"provider_cache": evidence}, uncached, plan
+            ),
+            [],
+        )
+
     def test_posthoc_caps_override_combined_max_calls_exhaustion(self):
         experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
         plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
@@ -575,7 +638,11 @@ direct_control_arm_id = "direct"
         for budget, call_metrics, expected in cases:
             with self.subTest(expected=expected):
                 calls, integrity, reason = gateway_run._proxy_evidence(
-                    [{"status": 200, "gateway_metrics": call_metrics}, rejection],
+                    [{
+                        "status": 200,
+                        "gateway_metrics": call_metrics,
+                        "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
+                    }, rejection],
                     price,
                     budget,
                     plan,
@@ -703,6 +770,7 @@ direct_control_arm_id = "direct"
                 "status": 200,
                 "ts": "2026-07-22T12:00:00Z",
                 "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
             }],
             {plan.canonical_model: gateway_run.Price(
                 gateway_run.Decimal("1"),
@@ -729,6 +797,7 @@ direct_control_arm_id = "direct"
                 "status": 200,
                 "ts": "2026-07-22T12:00:00Z",
                 "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
             }],
             {plan.canonical_model: gateway_run.Price(
                 gateway_run.Decimal("1"),
@@ -755,6 +824,7 @@ direct_control_arm_id = "direct"
                 "status": 200,
                 "ts": "2026-07-22T12:00:00Z",
                 "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
             }],
             {plan.canonical_model: gateway_run.Price(
                 gateway_run.Decimal("1"),
@@ -802,7 +872,12 @@ direct_control_arm_id = "direct"
         }
         observed_at = "2026-07-22T12:34:56Z"
         calls, integrity, reason = gateway_run._proxy_evidence(
-            [{"status": 200, "ts": observed_at, "gateway_metrics": metrics}],
+            [{
+                "status": 200,
+                "ts": observed_at,
+                "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
+            }],
             {
                 plan.canonical_model: gateway_run.Price(
                     gateway_run.Decimal("1"),
@@ -868,12 +943,14 @@ direct_control_arm_id = "direct"
         self.assertTrue(integrity["pass"])
         self.assertIsNone(reason)
         self.assertEqual(calls, [{
+            "request_ordinal": None,
             "timing": None,
             "generation": None,
             "route": {
                 "provider": plan.requested_provider,
                 "served_model": plan.requested_model,
             },
+            "tokens": None,
             "cache": None,
             "costs": None,
         }])
@@ -920,7 +997,11 @@ direct_control_arm_id = "direct"
             "route_evidence": {"pass": True, "reasons": []},
         }
         calls, integrity, reason = gateway_run._proxy_evidence(
-            [{"status": 200, "gateway_metrics": metrics}],
+            [{
+                "status": 200,
+                "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
+            }],
             {
                 plan.canonical_model: gateway_run.Price(
                     gateway_run.Decimal("1"),
@@ -978,7 +1059,12 @@ direct_control_arm_id = "direct"
         )
         observed_at = "2026-07-22T12:34:56Z"
         calls, integrity, reason = gateway_run._proxy_evidence(
-            [{"status": 200, "ts": observed_at, "gateway_metrics": metrics}],
+            [{
+                "status": 200,
+                "ts": observed_at,
+                "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
+            }],
             {
                 plan.canonical_model: gateway_run.Price(
                     gateway_run.Decimal("1"),
