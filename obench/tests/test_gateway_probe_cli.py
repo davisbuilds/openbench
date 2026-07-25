@@ -1,12 +1,19 @@
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from obench import gateway_cli, gateway_probe_cli, gateway_probe_run
+from obench import (
+    gateway_cli,
+    gateway_probe_cli,
+    gateway_probe_results,
+    gateway_probe_run,
+    gateway_probe_spec,
+)
 from obench.gateway_probe_models import RunSummary
 from obench.tests.test_gateway_probe_report import row
 from obench.tests.test_gateway_probe_spec import manifest
@@ -119,7 +126,237 @@ class GatewayProbeCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Gateway Probe (exploratory)", stdout.getvalue())
         self.assertIn("| Arm | Condition |", stdout.getvalue())
-        self.assertIn("| Gateway | Condition | Median delta TTFT |", stdout.getvalue())
+        self.assertIn("| Gateway | Condition | Phase metric |", stdout.getvalue())
+
+    def test_benchmark_writes_self_contained_resumable_bundle(self):
+        prices = json.dumps({
+            "openai/gpt-4o-mini": {
+                "input_per_million": "1",
+                "output_per_million": "2",
+                "effective_at": "2026-07-25T00:00:00Z",
+            }
+        })
+        environ = {
+            "OPENAI_API_KEY": "direct-secret",
+            "OPENROUTER_API_KEY": "gateway-secret",
+            gateway_probe_run.FROZEN_PRICES_ENV: prices,
+        }
+
+        def fake_run(_experiment, *, results_path, **_kwargs):
+            experiment = gateway_probe_spec.load_experiment(_experiment)
+            arms = {arm.arm_id: arm for arm in experiment.arms}
+            rows = [
+                row("direct", "cold", 1, baseline=True),
+                row("gateway", "cold", 1),
+                row("direct", "warm", 1, baseline=True),
+                row("gateway", "warm", 1),
+            ]
+            for item in rows:
+                item["scheduled_blocks_per_condition"] = 1
+                item["identity"]["experiment"] = {
+                    "id": experiment.experiment_id,
+                    "digest": experiment.digest,
+                }
+                arm_id = item["identity"]["arm"]["id"]
+                item["identity"]["arm"]["digest"] = arms[arm_id].digest
+                item["model_match"] = experiment.model_match
+                item["cell_id"] = gateway_probe_results.cell_id(
+                    item["identity"]
+                )
+            path = Path(results_path)
+            path.write_text(
+                "".join(json.dumps(item, sort_keys=True) + "\n" for item in rows),
+                encoding="utf-8",
+            )
+            return RunSummary(path, 4, 2, 0, 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp, "probe.toml")
+            output = Path(tmp, "bundle")
+            source = manifest()
+            spec.write_text(source, encoding="utf-8")
+            with mock.patch.object(
+                gateway_probe_run,
+                "run_experiment",
+                side_effect=fake_run,
+            ) as run:
+                with mock.patch.dict(os.environ, environ, clear=True):
+                    code = gateway_probe_cli.main([
+                        "benchmark",
+                        str(spec),
+                        "--output-dir",
+                        str(output),
+                    ])
+                resume_environ = {
+                    "OPENAI_API_KEY": "direct-secret",
+                    "OPENROUTER_API_KEY": "gateway-secret",
+                }
+                with mock.patch.dict(
+                    os.environ,
+                    resume_environ,
+                    clear=True,
+                ):
+                    resumed_code = gateway_probe_cli.main([
+                        "benchmark",
+                        str(spec),
+                        "--output-dir",
+                        str(output),
+                    ])
+            self.assertEqual(code, 0)
+            self.assertEqual(resumed_code, 0)
+            self.assertEqual(
+                {path.name for path in output.iterdir()},
+                {
+                    "experiment.toml",
+                    "prices.json",
+                    "results.jsonl",
+                    "report.md",
+                    "report.json",
+                    "manifest.json",
+                },
+            )
+            self.assertEqual((output / "experiment.toml").read_text(), source)
+            bundle_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in output.iterdir()
+            )
+            self.assertNotIn("direct-secret", bundle_text)
+            self.assertNotIn("gateway-secret", bundle_text)
+            self.assertIn(
+                "Request to response headers",
+                (output / "report.md").read_text(),
+            )
+            manifest_data = json.loads((output / "manifest.json").read_text())
+            self.assertEqual(manifest_data["result_schema_version"], 3)
+            self.assertEqual(set(manifest_data["files"]), {
+                "experiment.toml",
+                "prices.json",
+                "results.jsonl",
+                "report.md",
+                "report.json",
+            })
+            self.assertTrue(
+                Path(run.call_args.args[0]).samefile(
+                    output / "experiment.toml"
+                )
+            )
+            self.assertEqual(run.call_count, 2)
+            self.assertIn(
+                gateway_probe_run.FROZEN_PRICES_ENV,
+                run.call_args.kwargs["environ"],
+            )
+            stderr = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, environ, clear=True),
+                mock.patch.object(
+                    gateway_probe_run,
+                    "run_experiment",
+                    side_effect=OSError("simulated run failure"),
+                ),
+                contextlib.redirect_stderr(stderr),
+            ):
+                failed_code = gateway_probe_cli.main([
+                    "benchmark",
+                    str(spec),
+                    "--output-dir",
+                    str(output),
+                ])
+            self.assertEqual(failed_code, 2)
+            self.assertTrue((output / "results.jsonl").exists())
+            self.assertTrue((output / "experiment.toml").exists())
+            self.assertTrue((output / "prices.json").exists())
+            self.assertFalse((output / "report.md").exists())
+            self.assertFalse((output / "report.json").exists())
+            self.assertFalse((output / "manifest.json").exists())
+
+    def test_benchmark_doctor_failure_creates_no_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp, "probe.toml")
+            output = Path(tmp, "bundle")
+            spec.write_text(manifest(), encoding="utf-8")
+            stderr = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                contextlib.redirect_stderr(stderr),
+            ):
+                code = gateway_probe_cli.main([
+                    "benchmark",
+                    str(spec),
+                    "--output-dir",
+                    str(output),
+                ])
+            self.assertEqual(code, 2)
+            self.assertFalse(output.exists())
+            self.assertIn("doctor failed", stderr.getvalue())
+
+    def test_benchmark_reports_a_valid_first_block_partial_stop(self):
+        environ = {
+            "OPENAI_API_KEY": "direct-secret",
+            "OPENROUTER_API_KEY": "gateway-secret",
+            gateway_probe_run.FROZEN_PRICES_ENV: json.dumps({
+                "openai/gpt-4o-mini": {
+                    "input_per_million": "1",
+                    "output_per_million": "2",
+                    "effective_at": "2026-07-25T00:00:00Z",
+                }
+            }),
+        }
+
+        def partial_run(experiment_path, *, results_path, **_kwargs):
+            experiment = gateway_probe_spec.load_experiment(experiment_path)
+            direct = next(
+                arm for arm in experiment.arms if arm.arm_id == "direct"
+            )
+            item = row("direct", "cold", 1, baseline=True)
+            item["identity"]["experiment"] = {
+                "id": experiment.experiment_id,
+                "digest": experiment.digest,
+            }
+            item["identity"]["arm"]["digest"] = direct.digest
+            item["model_match"] = experiment.model_match
+            item["billing"]["stop_required"] = True
+            item["outcome"]["budget_exhausted_reason"] = "usd_cap_reached"
+            item["cell_id"] = gateway_probe_results.cell_id(item["identity"])
+            path = Path(results_path)
+            path.write_text(
+                json.dumps(item, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            return RunSummary(path, 1, 0, 0, 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp, "probe.toml")
+            output = Path(tmp, "bundle")
+            spec.write_text(manifest(), encoding="utf-8")
+            with (
+                mock.patch.dict(os.environ, environ, clear=True),
+                mock.patch.object(
+                    gateway_probe_run,
+                    "run_experiment",
+                    side_effect=partial_run,
+                ),
+            ):
+                code = gateway_probe_cli.main([
+                    "benchmark",
+                    str(spec),
+                    "--output-dir",
+                    str(output),
+                ])
+            self.assertEqual(code, 0)
+            report = json.loads((output / "report.json").read_text())
+            self.assertEqual(
+                report["arms"]["gateway"]["conditions"]["cold"][
+                    "denominators"
+                ]["attempted"],
+                0,
+            )
+            self.assertEqual(
+                report["paired_contrasts"]["gateway"]["cold"][
+                    "request_stream_total_s"
+                ]["coverage"],
+                {"covered": 0, "ratio": 0.0, "total": 0},
+            )
+            self.assertTrue((output / "manifest.json").exists())
 
 
 if __name__ == "__main__":
