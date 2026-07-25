@@ -27,6 +27,13 @@ PRICE_JSON = json.dumps({
         "effective_at": "2026-07-22T00:00:00Z",
     }
 })
+PROVIDER_DEFAULT_EVIDENCE = {
+    "mode": "provider_default",
+    "transform_id": None,
+    "prefix_injected": False,
+    "scope": None,
+    "nonce_commitment": None,
+}
 
 
 class _UpstreamHandler(BaseHTTPRequestHandler):
@@ -631,7 +638,11 @@ direct_control_arm_id = "direct"
         for budget, call_metrics, expected in cases:
             with self.subTest(expected=expected):
                 calls, integrity, reason = gateway_run._proxy_evidence(
-                    [{"status": 200, "gateway_metrics": call_metrics}, rejection],
+                    [{
+                        "status": 200,
+                        "gateway_metrics": call_metrics,
+                        "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
+                    }, rejection],
                     price,
                     budget,
                     plan,
@@ -759,6 +770,7 @@ direct_control_arm_id = "direct"
                 "status": 200,
                 "ts": "2026-07-22T12:00:00Z",
                 "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
             }],
             {plan.canonical_model: gateway_run.Price(
                 gateway_run.Decimal("1"),
@@ -785,6 +797,7 @@ direct_control_arm_id = "direct"
                 "status": 200,
                 "ts": "2026-07-22T12:00:00Z",
                 "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
             }],
             {plan.canonical_model: gateway_run.Price(
                 gateway_run.Decimal("1"),
@@ -811,6 +824,7 @@ direct_control_arm_id = "direct"
                 "status": 200,
                 "ts": "2026-07-22T12:00:00Z",
                 "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
             }],
             {plan.canonical_model: gateway_run.Price(
                 gateway_run.Decimal("1"),
@@ -858,7 +872,12 @@ direct_control_arm_id = "direct"
         }
         observed_at = "2026-07-22T12:34:56Z"
         calls, integrity, reason = gateway_run._proxy_evidence(
-            [{"status": 200, "ts": observed_at, "gateway_metrics": metrics}],
+            [{
+                "status": 200,
+                "ts": observed_at,
+                "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
+            }],
             {
                 plan.canonical_model: gateway_run.Price(
                     gateway_run.Decimal("1"),
@@ -978,7 +997,11 @@ direct_control_arm_id = "direct"
             "route_evidence": {"pass": True, "reasons": []},
         }
         calls, integrity, reason = gateway_run._proxy_evidence(
-            [{"status": 200, "gateway_metrics": metrics}],
+            [{
+                "status": 200,
+                "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
+            }],
             {
                 plan.canonical_model: gateway_run.Price(
                     gateway_run.Decimal("1"),
@@ -1036,7 +1059,12 @@ direct_control_arm_id = "direct"
         )
         observed_at = "2026-07-22T12:34:56Z"
         calls, integrity, reason = gateway_run._proxy_evidence(
-            [{"status": 200, "ts": observed_at, "gateway_metrics": metrics}],
+            [{
+                "status": 200,
+                "ts": observed_at,
+                "gateway_metrics": metrics,
+                "provider_cache": PROVIDER_DEFAULT_EVIDENCE,
+            }],
             {
                 plan.canonical_model: gateway_run.Price(
                     gateway_run.Decimal("1"),

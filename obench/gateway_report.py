@@ -9,9 +9,9 @@ these result fields:
 * ``route_integrity`` with boolean ``pass`` and a list of reason strings;
 * ``proxy_metrics.calls``, where each call may contain ``timing`` (``ttfb_s``
   and ``semantic_ttft_s``), ``generation`` (paired ``output_tokens`` and
-  ``duration_s``), ``tokens`` (input, output, and total), ``cache`` (``cached_input_tokens`` and
-  ``cache_write_input_tokens``), ``route`` (``provider`` and ``served_model``),
-  and ``costs``.
+  ``duration_s``), ``tokens`` (input, output, and total), ``cache``
+  (``cached_input_tokens`` and ``cache_write_input_tokens``), ``route``
+  (``provider`` and ``served_model``), and ``costs``.
 
 ``costs`` maps a basis name to an object containing ``amount_usd``, ``currency``
 and ``effective_at``. Missing conditional timing or cost evidence affects only

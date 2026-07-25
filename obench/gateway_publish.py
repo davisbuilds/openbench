@@ -71,6 +71,11 @@ class _NullableSchema:
         self.schema = schema
 
 
+_INPUT_TOKEN_DETAILS_SCHEMA = {
+    "cached_tokens": _SCALAR,
+    "cache_write_tokens": _SCALAR,
+    "cached_tokens_created": _SCALAR,
+}
 _USAGE_SCHEMA = {
     "input_tokens": _SCALAR,
     "output_tokens": _SCALAR,
@@ -82,6 +87,7 @@ _USAGE_SCHEMA = {
     "cache_creation_input_tokens": _SCALAR,
     "reasoning_output_tokens": _SCALAR,
     "cost_usd": _SCALAR,
+    "input_tokens_details": _NullableSchema(_INPUT_TOKEN_DETAILS_SCHEMA),
 }
 _TIMING_SCHEMA = {
     "ttfb_s": _SCALAR,
@@ -240,7 +246,8 @@ _LEDGER_REQUEST_SCHEMA = {
     "sampling_source": _SCALAR,
     "duration_ms": _SCALAR,
     "serving_arm": _SERVING_ARM_SCHEMA,
-    "provider_cache": _PROVIDER_CACHE_SCHEMA,
+    "provider_cache": _NullableSchema(_PROVIDER_CACHE_SCHEMA),
+    "forwarded_upstream": _SCALAR,
     "gateway_metrics": _NullableSchema(_METRICS_SCHEMA),
     "session_hash": _SCALAR,
     "previous_response_hash": _SCALAR,
@@ -630,16 +637,20 @@ def _require_complete_schedule(
         for window in windows
         if isinstance(window, Mapping)
     }
-    arm_ids = {
-        arm.get("arm_id")
-        for arm in arms
-        if isinstance(arm, Mapping)
-    }
+    arm_digests = {}
+    for arm in arms:
+        if not isinstance(arm, Mapping):
+            continue
+        arm_id = arm.get("arm_id")
+        arm_digest = arm.get("arm_digest")
+        if arm_digest is None:
+            arm_digest = gateway_spec.canonical_digest(arm)
+        if isinstance(arm_id, str) and isinstance(arm_digest, str):
+            arm_digests[arm_id] = arm_digest
     if (
         len(window_ids) != len(windows)
         or None in window_ids
-        or len(arm_ids) != len(arms)
-        or None in arm_ids
+        or len(arm_digests) != len(arms)
     ):
         raise GatewayPublishError("experiment has invalid schedule identifiers")
     expected = {
@@ -648,9 +659,17 @@ def _require_complete_schedule(
         for window_id in window_ids
         for repetition in range(1, repetitions + 1)
     }
-    observed: dict[tuple[str, str, int], dict[int, list[str]]] = {}
+    observed: dict[
+        tuple[str, str, int],
+        dict[int, list[results.CellIdentity]],
+    ] = {}
     for row in rows:
         identity = results.gateway_identity_from_row(row)
+        if arm_digests.get(identity.arm_id) != identity.arm_digest:
+            raise GatewayPublishError(
+                f"result {results.make_gateway_cell_id(identity)} "
+                "arm digest does not match experiment"
+            )
         coordinate = (
             identity.task,
             identity.window_id,
@@ -658,7 +677,7 @@ def _require_complete_schedule(
         )
         observed.setdefault(coordinate, {}).setdefault(
             identity.block_attempt, []
-        ).append(identity.arm_id)
+        ).append(identity)
     if set(observed) != expected:
         missing = sorted(expected - set(observed))
         extra = sorted(set(observed) - expected)
@@ -671,11 +690,125 @@ def _require_complete_schedule(
             raise GatewayPublishError(
                 f"result schedule has non-contiguous attempts for {coordinate!r}"
             )
+        for attempt, identities in attempts.items():
+            block_ids = {identity.block_id for identity in identities}
+            arm_ids = [identity.arm_id for identity in identities]
+            if len(block_ids) != 1:
+                raise GatewayPublishError(
+                    f"matched block has conflicting block IDs for "
+                    f"{coordinate!r} attempt {attempt}"
+                )
+            if len(arm_ids) != len(set(arm_ids)):
+                raise GatewayPublishError(
+                    f"matched block has duplicate arms for "
+                    f"{coordinate!r} attempt {attempt}"
+                )
         latest = attempts[attempt_numbers[-1]]
-        if len(latest) != len(arm_ids) or set(latest) != arm_ids:
+        latest_arm_ids = {identity.arm_id for identity in latest}
+        if len(latest) != len(arm_digests) or latest_arm_ids != set(arm_digests):
             raise GatewayPublishError(
                 f"latest matched block is incomplete for {coordinate!r}"
             )
+
+
+def _require_provider_prompt_mode_binding(
+    experiment: Mapping[str, Any],
+    policy: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+) -> None:
+    mode = experiment.get("provider_prompt_mode")
+    if mode not in gateway_spec.PROVIDER_PROMPT_MODES:
+        raise GatewayPublishError("experiment has invalid provider_prompt_mode")
+    if policy.get("provider_prompt_mode") != mode:
+        raise GatewayPublishError(
+            "policy provider_prompt_mode does not match experiment"
+        )
+    for row in rows:
+        try:
+            identity = results.gateway_identity_from_row(row)
+        except results.ResultError as exc:
+            raise GatewayPublishError(
+                f"result has invalid provider_prompt_mode binding: {exc}"
+            ) from exc
+        if (
+            identity.provider_prompt_mode != mode
+            or row.get("provider_prompt_mode") != mode
+        ):
+            raise GatewayPublishError(
+                f"result {results.make_gateway_cell_id(identity)} "
+                "provider_prompt_mode does not match experiment"
+            )
+
+
+def _provider_prompt_commitments(
+    requests: Sequence[Mapping[str, Any]],
+    mode: str,
+    label: str,
+) -> set[str]:
+    commitments = set()
+    for sequence, request in enumerate(requests, 1):
+        forwarded = request.get("forwarded_upstream")
+        if not isinstance(forwarded, bool):
+            raise GatewayPublishError(
+                f"{label} request {sequence} lacks forwarding evidence"
+            )
+        if not forwarded:
+            continue
+        evidence = request.get("provider_cache")
+        if mode == "provider_default":
+            if (
+                not isinstance(evidence, Mapping)
+                or evidence.get("mode") != "provider_default"
+                or evidence.get("prefix_injected") is not False
+                or evidence.get("transform_id") is not None
+                or evidence.get("scope") is not None
+                or evidence.get("nonce_commitment") is not None
+            ):
+                raise GatewayPublishError(
+                    f"{label} request {sequence} lacks provider-default evidence"
+                )
+            continue
+        if (
+            not isinstance(evidence, Mapping)
+            or evidence.get("mode") != "isolated_per_call_v1"
+            or evidence.get("transform_id") != gateway_spec.COLD_PREFIX_TRANSFORM_ID
+            or evidence.get("prefix_injected") is not True
+            or evidence.get("scope") != "forwarded_request"
+        ):
+            raise GatewayPublishError(
+                f"{label} request {sequence} lacks cold-prefix evidence"
+            )
+        commitment = evidence.get("nonce_commitment")
+        if not isinstance(commitment, str) or not _DIGEST_RE.fullmatch(commitment):
+            raise GatewayPublishError(
+                f"{label} request {sequence} has an invalid nonce commitment"
+            )
+        if commitment in commitments:
+            raise GatewayPublishError(f"{label} reuses a cold-prefix commitment")
+        commitments.add(commitment)
+        status = request.get("status")
+        if isinstance(status, int) and not isinstance(status, bool) and 200 <= status < 300:
+            metrics = request.get("gateway_metrics")
+            usage = metrics.get("usage") if isinstance(metrics, Mapping) else None
+            details = (
+                usage.get("input_tokens_details")
+                if isinstance(usage, Mapping)
+                else None
+            )
+            cached_tokens = (
+                details.get("cached_tokens")
+                if isinstance(details, Mapping)
+                else None
+            )
+            if (
+                not isinstance(cached_tokens, int)
+                or isinstance(cached_tokens, bool)
+                or cached_tokens != 0
+            ):
+                raise GatewayPublishError(
+                    f"{label} request {sequence} lacks zero cached-token evidence"
+                )
+    return commitments
 
 
 def _validate_source_ledger(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -903,6 +1036,7 @@ def publish_bundle(
         rows_by_cell = {
             results.result_cell_id(row): row for row in resume.rows
         }
+        provider_prompt_commitments: set[str] = set()
         for cell_id in sorted(cell_ids):
             source_path = ledger_sources[cell_id]
             requests, source_seal = _validate_source_ledger(source_path)
@@ -930,6 +1064,16 @@ def publish_bundle(
                     raise GatewayPublishError(
                         f"result {cell_id} arm identity does not match source ledger"
                     )
+            cell_commitments = _provider_prompt_commitments(
+                requests,
+                identity.provider_prompt_mode,
+                f"result {cell_id}",
+            )
+            if provider_prompt_commitments & cell_commitments:
+                raise GatewayPublishError(
+                    "bundle reuses a cold-prefix commitment across cells"
+                )
+            provider_prompt_commitments.update(cell_commitments)
             raw, seal = _public_ledger(cell_id, requests)
             relative = f"ledgers/{cell_id}.jsonl"
             artifacts[relative] = _write_file(temporary, relative, raw)
@@ -943,6 +1087,11 @@ def publish_bundle(
             ledger_provenance[cell_id] = dict(binding)
 
         _require_complete_schedule(experiment_source, resume.rows)
+        _require_provider_prompt_mode_binding(
+            experiment_source,
+            policy_source,
+            resume.rows,
+        )
         public_rows = [
             _result_dto(row, bindings[results.result_cell_id(row)])
             for row in resume.rows
@@ -989,7 +1138,7 @@ def _verify_public_ledger(
     raw: bytes,
     artifact: str,
     expected_cell_id: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     with tempfile.TemporaryDirectory(prefix="gateway_bundle_verify_") as tmp:
         path = Path(tmp) / "ledger.jsonl"
         path.write_bytes(raw)
@@ -1035,7 +1184,7 @@ def _verify_public_ledger(
     if seal != expected_seal:
         raise GatewayPublishError(f"{artifact} has an invalid seal or cell binding")
     _assert_safe(rows, artifact)
-    return seal
+    return seal, requests
 
 
 def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
@@ -1089,6 +1238,7 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     if not isinstance(snapshot_digests, dict) or set(snapshot_digests) != set(SNAPSHOT_FILES):
         raise GatewayPublishError("invalid snapshot digest provenance")
     experiment_snapshot = None
+    policy_snapshot = None
     for kind, relative in SNAPSHOT_FILES.items():
         expected = _require_digest(snapshot_digests[kind], f"{kind} source digest")
         snapshot = _read_json(root / relative)
@@ -1107,14 +1257,21 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 "price": _PRICE_SCHEMA,
             }
             _require_projected(snapshot["data"], schemas[kind], f"{kind}.data")
+            if kind == "policy":
+                policy_snapshot = snapshot["data"]
         _assert_safe(snapshot, f"{kind} snapshot")
 
     result_rows = _load_jsonl(root / RESULTS_FILE, RESULTS_FILE)
     if provenance["result_count"] != len(result_rows):
         raise GatewayPublishError("result count does not match provenance")
-    if experiment_snapshot is None:
-        raise GatewayPublishError("experiment snapshot is missing")
+    if experiment_snapshot is None or policy_snapshot is None:
+        raise GatewayPublishError("experiment or policy snapshot is missing")
     _require_complete_schedule(experiment_snapshot, result_rows)
+    _require_provider_prompt_mode_binding(
+        experiment_snapshot,
+        policy_snapshot,
+        result_rows,
+    )
     ledger_meta = provenance["ledgers"]
     if not isinstance(ledger_meta, dict):
         raise GatewayPublishError("ledger provenance must be an object")
@@ -1154,6 +1311,8 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     if seen_cells != set(ledger_meta):
         raise GatewayPublishError("result and ledger cell sets do not match")
 
+    provider_prompt_commitments: set[str] = set()
+    rows_by_cell = {row["cell_id"]: row for row in result_rows}
     for cell_id, binding in ledger_meta.items():
         if not isinstance(binding, dict) or set(binding) != {
             "artifact", "root_hash", "seal_sha256", "record_count",
@@ -1162,11 +1321,22 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         artifact = binding["artifact"]
         if not isinstance(artifact, str) or artifact not in artifacts:
             raise GatewayPublishError(f"missing ledger artifact for {cell_id}")
-        seal = _verify_public_ledger(
+        seal, requests = _verify_public_ledger(
             (root / artifact).read_bytes(),
             artifact,
             cell_id,
         )
+        identity = results.gateway_identity_from_row(rows_by_cell[cell_id])
+        cell_commitments = _provider_prompt_commitments(
+            requests,
+            identity.provider_prompt_mode,
+            f"ledger {cell_id}",
+        )
+        if provider_prompt_commitments & cell_commitments:
+            raise GatewayPublishError(
+                "bundle reuses a cold-prefix commitment across cells"
+            )
+        provider_prompt_commitments.update(cell_commitments)
         expected_binding = {
             "artifact": artifact,
             "root_hash": seal["root_hash"],

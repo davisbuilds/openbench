@@ -260,8 +260,8 @@ class CellIdentity:
             "price_digest": self.price_digest,
             "sampling_digest": self.sampling_digest,
             "schedule_digest": self.schedule_digest,
+            "provider_prompt_mode": self.provider_prompt_mode,
         }
-        comparison["provider_prompt_mode"] = self.provider_prompt_mode
         return {
             "schema_version": self.schema_version,
             "benchmark": {"name": self.benchmark, "track": self.track},
@@ -381,9 +381,7 @@ def gateway_identity_from_row(row: Mapping[str, Any]) -> CellIdentity:
         raise ResultIdentityError("gateway row schema_version conflicts with its identity")
     if row.get("benchmark") != identity.benchmark:
         raise ResultIdentityError("gateway row benchmark conflicts with its identity")
-    if (
-        row.get("provider_prompt_mode") != identity.provider_prompt_mode
-    ):
+    if row.get("provider_prompt_mode") != identity.provider_prompt_mode:
         raise ResultIdentityError(
             "gateway row provider_prompt_mode conflicts with its identity"
         )

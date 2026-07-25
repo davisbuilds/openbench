@@ -103,6 +103,7 @@ class GatewayPublishTests(unittest.TestCase):
         self.policy = {
             "schema_version": 1,
             "policy_id": "strict",
+            "provider_prompt_mode": "provider_default",
             "allowed_models": ["openai/gpt-test"],
             "allowed_providers": ["OpenAI"],
             "fallback_enabled": False,
@@ -211,6 +212,35 @@ class GatewayPublishTests(unittest.TestCase):
         }
         self._write_ledger()
 
+    def test_provider_prompt_mode_is_bound_across_publication_artifacts(self):
+        gateway_publish._require_provider_prompt_mode_binding(  # noqa: SLF001
+            self.experiment.to_dict(),
+            self.policy,
+            [self.row],
+        )
+
+        wrong_policy = dict(self.policy, provider_prompt_mode="isolated_per_call_v1")
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "policy provider_prompt_mode",
+        ):
+            gateway_publish._require_provider_prompt_mode_binding(  # noqa: SLF001
+                self.experiment.to_dict(),
+                wrong_policy,
+                [self.row],
+            )
+
+        wrong_row = dict(self.row, provider_prompt_mode="isolated_per_call_v1")
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "result .* provider_prompt_mode",
+        ):
+            gateway_publish._require_provider_prompt_mode_binding(  # noqa: SLF001
+                self.experiment.to_dict(),
+                self.policy,
+                [wrong_row],
+            )
+
     def _write_results(self, *rows):
         self.results_path.write_text(
             "".join(canonical_line(row) for row in rows),
@@ -244,6 +274,14 @@ class GatewayPublishTests(unittest.TestCase):
                 "arm_digest": self.identity.arm_digest,
                 "route_kind": "gateway",
             },
+            "provider_cache": {
+                "mode": "provider_default",
+                "transform_id": None,
+                "prefix_injected": False,
+                "scope": None,
+                "nonce_commitment": None,
+            },
+            "forwarded_upstream": True,
             "error": "request body and credentials must never publish",
         }
         if partial:
@@ -433,6 +471,128 @@ class GatewayPublishTests(unittest.TestCase):
             gateway_publish._require_complete_schedule(
                 self.experiment.to_dict(),
                 [self.row],
+            )
+
+    def test_publication_binds_rows_to_one_declared_matched_block(self):
+        direct_identity = dataclasses.replace(
+            self.identity,
+            arm_id="direct",
+            arm_digest=self.experiment.arms[0].digest,
+        )
+        direct_row = copy.deepcopy(self.row)
+        direct_row["identity"] = direct_identity.as_dict()
+        direct_row["cell_id"] = results.make_gateway_cell_id(direct_identity)
+        direct_row["run_id"] = results.make_gateway_run_id(direct_identity)
+        rows = [self.row, direct_row]
+        gateway_publish._require_complete_schedule(  # noqa: SLF001
+            self.experiment.to_dict(),
+            rows,
+        )
+
+        wrong_block = dataclasses.replace(direct_identity, block_id="other-block")
+        direct_row["identity"] = wrong_block.as_dict()
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "conflicting block IDs",
+        ):
+            gateway_publish._require_complete_schedule(  # noqa: SLF001
+                self.experiment.to_dict(),
+                rows,
+            )
+
+        wrong_arm = dataclasses.replace(direct_identity, arm_digest=digest("wrong-arm"))
+        direct_row["identity"] = wrong_arm.as_dict()
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "arm digest does not match",
+        ):
+            gateway_publish._require_complete_schedule(  # noqa: SLF001
+                self.experiment.to_dict(),
+                rows,
+            )
+
+    def test_publication_rejects_reused_cold_prefix_commitment(self):
+        evidence = {
+            "mode": "isolated_per_call_v1",
+            "transform_id": gateway_spec.COLD_PREFIX_TRANSFORM_ID,
+            "prefix_injected": True,
+            "scope": "forwarded_request",
+            "nonce_commitment": "a" * 64,
+        }
+        cache_metrics = {
+            "usage": {"input_tokens_details": {"cached_tokens": 0}},
+        }
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "reuses a cold-prefix commitment",
+        ):
+            gateway_publish._provider_prompt_commitments(
+                [
+                    {
+                        "status": 200,
+                        "forwarded_upstream": True,
+                        "provider_cache": evidence,
+                        "gateway_metrics": cache_metrics,
+                    },
+                    {
+                        "status": 200,
+                        "forwarded_upstream": True,
+                        "provider_cache": evidence,
+                        "gateway_metrics": cache_metrics,
+                    },
+                ],
+                "isolated_per_call_v1",
+                "fixture",
+            )
+
+    def test_publication_requires_zero_cached_tokens_in_isolated_mode(self):
+        evidence = {
+            "mode": "isolated_per_call_v1",
+            "transform_id": gateway_spec.COLD_PREFIX_TRANSFORM_ID,
+            "prefix_injected": True,
+            "scope": "forwarded_request",
+            "nonce_commitment": "a" * 64,
+        }
+        for details in (None, {"cached_tokens": 1}):
+            with self.subTest(details=details), self.assertRaisesRegex(
+                gateway_publish.GatewayPublishError,
+                "zero cached-token evidence",
+            ):
+                gateway_publish._provider_prompt_commitments(
+                    [{
+                        "status": 200,
+                        "forwarded_upstream": True,
+                        "provider_cache": evidence,
+                        "gateway_metrics": {
+                            "usage": {"input_tokens_details": details},
+                        },
+                    }],
+                    "isolated_per_call_v1",
+                    "fixture",
+                )
+
+    def test_publication_requires_mode_evidence_only_after_forwarding(self):
+        gateway_publish._provider_prompt_commitments(  # noqa: SLF001
+            [{
+                "status": 502,
+                "forwarded_upstream": False,
+                "provider_cache": None,
+            }],
+            "isolated_per_call_v1",
+            "fixture",
+        )
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "provider-default evidence",
+        ):
+            gateway_publish._provider_prompt_commitments(  # noqa: SLF001
+                [{
+                    "status": 200,
+                    "forwarded_upstream": True,
+                    "provider_cache": None,
+                }],
+                "provider_default",
+                "fixture",
             )
 
     def test_gateway_route_evidence_is_minimized_and_opaque_in_public_ledger(self):

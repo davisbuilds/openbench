@@ -183,7 +183,7 @@ class GatewayExperiment:
     arms: tuple[Arm, ...]
 
     def to_dict(self) -> dict[str, Any]:
-        result = {
+        return {
             "schema_version": self.schema_version,
             "experiment_id": self.experiment_id,
             "track": self.track,
@@ -201,7 +201,6 @@ class GatewayExperiment:
             "budget": self.budget.to_dict(),
             "arms": [arm.to_dict() for arm in self.arms],
         }
-        return result
 
     @property
     def canonical_json(self) -> str:
@@ -758,6 +757,18 @@ def parse_experiment(data: Mapping[str, Any]) -> GatewayExperiment:
         raise GatewaySpecError(
             "provider_prompt_mode='isolated_per_call_v1' is admitted only for "
             "OpenRouter, Vercel, and Concentrate gateway arms"
+        )
+    if provider_prompt_mode == "isolated_per_call_v1" and any(
+        arm.route_kind == "direct"
+        and (
+            arm.requested_provider.casefold() != "openai"
+            or urllib.parse.urlsplit(arm.endpoint).hostname != "api.openai.com"
+        )
+        for arm in arms
+    ):
+        raise GatewaySpecError(
+            "provider_prompt_mode='isolated_per_call_v1' requires the direct "
+            "OpenAI API arm"
         )
     lane = _string(_required(table, "execution_lane", "experiment"), "execution_lane")
     if lane not in {"local", "docker"}:

@@ -177,6 +177,24 @@ class GatewayExperimentTests(unittest.TestCase):
         self.assertEqual(cold.provider_prompt_mode, "isolated_per_call_v1")
         self.assertNotEqual(natural.digest, cold.digest)
 
+        non_openai_direct = responses.replace(
+            'requested_provider = "openai"',
+            'requested_provider = "anthropic"',
+        ).replace(
+            'allowed_providers = ["openai"]',
+            'allowed_providers = ["anthropic"]',
+        )
+        with self.assertRaisesRegex(GatewaySpecError, "direct OpenAI"):
+            parse_experiment_toml(non_openai_direct)
+
+        non_openai_endpoint = responses.replace(
+            "https://api.openai.com",
+            "https://api.example.com",
+            1,
+        )
+        with self.assertRaisesRegex(GatewaySpecError, "direct OpenAI"):
+            parse_experiment_toml(non_openai_endpoint)
+
         with self.assertRaisesRegex(GatewaySpecError, "requires openai_responses"):
             parse_experiment_toml(
                 manifest().replace(

@@ -852,14 +852,17 @@ def _provider_cache_reasons(
 ) -> list[str]:
     evidence = row.get("provider_cache")
     if plan.provider_prompt_mode == "provider_default":
-        if evidence is None:
-            return []
         if (
             not isinstance(evidence, Mapping)
             or evidence.get("mode") != "provider_default"
         ):
             return ["provider_prompt_mode_unverified"]
-        if evidence.get("prefix_injected") is not False:
+        if (
+            evidence.get("prefix_injected") is not False
+            or evidence.get("transform_id") is not None
+            or evidence.get("scope") is not None
+            or evidence.get("nonce_commitment") is not None
+        ):
             return ["unexpected_cache_prefix"]
         return []
     if (

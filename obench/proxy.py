@@ -393,6 +393,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         gateway_parser = None
         gateway_metrics = None
         cache_control = None
+        forwarded_upstream = False
         try:
             route = self._route_request()
             token = route.token
@@ -444,6 +445,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 raise RuntimeError("upstream URL missing host")
             conn = conn_cls(route.upstream.hostname, port=route.upstream.port, timeout=self.server.timeout_s)  # type: ignore[attr-defined]
             conn.request(self.command, route.upstream_path, body=body, headers=headers)
+            forwarded_upstream = True
             resp = conn.getresponse()
             status = resp.status
             resp_headers = resp.getheaders()
@@ -549,6 +551,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                         "route_kind": route.gateway_route.plan.route_kind,
                     }
                     rec["provider_cache"] = cache_control
+                    rec["forwarded_upstream"] = forwarded_upstream
             if gateway_metrics is not None:
                 rec["gateway_metrics"] = gateway_metrics
             if "session" in links:

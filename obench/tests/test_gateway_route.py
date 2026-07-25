@@ -245,6 +245,7 @@ class GatewayRouteTests(unittest.TestCase):
 
         rows = self._seal_rows(token)
         call_rows = [row for row in rows if row.get("record_type") != "ledger_seal"]
+        self.assertTrue(all(row["forwarded_upstream"] is True for row in call_rows))
         cache_evidence = [row["provider_cache"] for row in call_rows]
         self.assertTrue(all(
             item["mode"] == "isolated_per_call_v1"
@@ -283,6 +284,12 @@ class GatewayRouteTests(unittest.TestCase):
         self.assertEqual(first, 200)
         self.assertEqual(second, 502)
         self.assertEqual(len(self.upstream.requests), 1)
+        rows = self._seal_rows(token)
+        call_rows = [row for row in rows if row.get("record_type") != "ledger_seal"]
+        self.assertEqual(
+            [row["forwarded_upstream"] for row in call_rows],
+            [True, False],
+        )
 
     def test_programmatic_route_rejects_host_outside_explicit_allowlist(self):
         token = "unlisted-host"
