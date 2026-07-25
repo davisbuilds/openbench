@@ -29,8 +29,8 @@ the model's ability to solve the task.
 
 import re
 
-FAILURE_CLASSES = ("solved", "wrong_answer", "timeout", "rate_limited", "infra")
-EXCLUDED_FROM_SOLVE_RATE = ("rate_limited", "infra")
+FAILURE_CLASSES = ("solved", "wrong_answer", "timeout", "rate_limited", "infra", "stalled")
+EXCLUDED_FROM_SOLVE_RATE = ("rate_limited", "infra", "stalled")
 NEAR_ZERO_TOKEN_LIMIT = 100
 _TOKEN_FIELDS = (
     "tokens", "tokens_fresh", "tokens_input_uncached", "tokens_cache_read",
