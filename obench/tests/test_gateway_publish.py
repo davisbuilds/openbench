@@ -412,6 +412,25 @@ class GatewayPublishTests(unittest.TestCase):
             if row["identity"]["arm"]["id"] == "gateway"
         )
 
+    def _rewrite_public_gateway_row(self, update):
+        results_path = self.bundle / "results.jsonl"
+        rows = [
+            json.loads(line)
+            for line in results_path.read_text(encoding="utf-8").splitlines()
+        ]
+        gateway_row = next(
+            row for row in rows
+            if row["identity"]["arm"]["id"] == "gateway"
+        )
+        update(gateway_row)
+        raw = "".join(canonical_line(row) for row in rows).encode()
+        results_path.write_bytes(raw)
+
+        provenance_path = self.bundle / "provenance.json"
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        provenance["artifacts"]["results.jsonl"] = hashlib.sha256(raw).hexdigest()
+        provenance_path.write_text(canonical_line(provenance), encoding="utf-8")
+
     def test_round_trip_uses_allowlisted_dtos_and_binds_all_artifacts(self):
         self.row["proxy_metrics"]["calls"][0]["cache"] = {
             "cached_input_tokens": 7,
@@ -472,6 +491,76 @@ class GatewayPublishTests(unittest.TestCase):
                 self.experiment.to_dict(),
                 [self.row],
             )
+
+    def _complete_schedule_rows(self):
+        direct_identity = dataclasses.replace(
+            self.identity,
+            arm_id="direct",
+            arm_digest=self.experiment.arms[0].digest,
+        )
+        direct_row = copy.deepcopy(self.row)
+        direct_row["identity"] = direct_identity.as_dict()
+        direct_row["cell_id"] = results.make_gateway_cell_id(direct_identity)
+        direct_row["run_id"] = results.make_gateway_run_id(direct_identity)
+        return [self.row, direct_row]
+
+    def test_publication_accepts_valid_latest_block(self):
+        gateway_publish._require_complete_schedule(  # noqa: SLF001
+            self.experiment.to_dict(),
+            self._complete_schedule_rows(),
+        )
+
+    def test_publication_rejects_infrastructure_invalid_latest_cell(self):
+        self.row["result"]["infrastructure_invalid_reason"] = "upstream_auth_failure"
+        self._write_results(self.row)
+
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "latest matched block has infrastructure-invalid cell",
+        ):
+            self.publish()
+
+    def test_publication_rejects_route_integrity_invalid_latest_cell(self):
+        self.row["route_integrity"] = {
+            "pass": False,
+            "reasons": ["provider_conflict"],
+        }
+        self._write_results(self.row)
+
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "latest matched block has route-integrity-invalid cell",
+        ):
+            self.publish()
+
+    def test_verify_rejects_infrastructure_invalid_latest_cell(self):
+        self.publish()
+        self._rewrite_public_gateway_row(
+            lambda row: row["result"].update(
+                infrastructure_invalid_reason="upstream_auth_failure"
+            )
+        )
+
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "latest matched block has infrastructure-invalid cell",
+        ):
+            gateway_publish.verify_bundle(self.bundle)
+
+    def test_verify_rejects_route_integrity_invalid_latest_cell(self):
+        self.publish()
+        self._rewrite_public_gateway_row(
+            lambda row: row["route_integrity"].update({
+                "pass": False,
+                "reasons": ["provider_conflict"],
+            })
+        )
+
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "latest matched block has route-integrity-invalid cell",
+        ):
+            gateway_publish.verify_bundle(self.bundle)
 
     def test_publication_binds_rows_to_one_declared_matched_block(self):
         direct_identity = dataclasses.replace(
