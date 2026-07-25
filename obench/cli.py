@@ -52,6 +52,7 @@ def main(argv=None):
         help="install and manage versioned packs (tasks or harness manifests)",
         add_help=False,
     )
+    sub.add_parser("matrix", help="retry-aware queue-based benchmark runner", add_help=False)
     sub.add_parser("export", help="export tasks to external formats (harbor)", add_help=False)
     sub.add_parser("import", help="import tasks from external formats (harbor)", add_help=False)
 
@@ -71,7 +72,7 @@ def main(argv=None):
 
     known = {
         "run", "report", "doctor", "validate", "gateway", "gate", "compare", "init",
-        "publish", "verify", "community", "leaderboard", "pack", "export",
+        "matrix", "publish", "verify", "community", "leaderboard", "pack", "export",
         "import",
     }
     if command not in known:
@@ -81,6 +82,9 @@ def main(argv=None):
             "leaderboard, pack, export, import"
         )
 
+    if command == "matrix":
+        from .matrix_queue import main as matrix_main
+        return matrix_main(rest)
     if command == "run":
         from .run import main as run_main
         return run_main(rest)

@@ -275,6 +275,11 @@ def preflight(image, retries=3, delay_s=5):
         f"docker build -t {image} {DOCKERFILE_DIR})")
 
 
+def force_remove_container(name, attempts=3, delay_s=2):
+    """Public alias for _force_remove_container. Force-remove a named container."""
+    return _force_remove_container(name, attempts=attempts, delay_s=delay_s)
+
+
 def _force_remove_container(name, attempts=3, delay_s=2):
     """Force-remove a container and VERIFY it is gone; retry if not.
 

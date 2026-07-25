@@ -95,7 +95,13 @@ ROW_FIELDS = (
     "harness_version_source", "failure_class", "failure_reason", "workspace_changed", "checker_stdout", "checker_stderr", "checker_workspace_files",
     "image_digest", "candidate_provenance", "version_drift", "timeout_s",
     "workspace_source",
+    "last_activity_age_s",
 )
+
+
+# Stall-kill watchdog state (set before cell invocation, cleared after).
+_STALLED_EVENT: threading.Event | None = None
+_ACTIVE_CELL_CONTEXT: dict | None = None
 
 
 class VersionDriftError(RuntimeError):
@@ -1493,12 +1499,45 @@ def _populate_proxy_row(row, proxy_ctx, cell_token, wait_s=0.0):
         row, read_proxy_ledger(proxy_ctx.get("ledger_dir"), cell_token, wait_s=wait_s))
 
 
+def _stall_watchdog_loop(proxy_server, cell_token, stall_timeout, kill_callback, poll_interval=10.0):
+    """Daemon watchdog: monitor proxy liveness and kill on stall.
+
+    Polls the proxy's cell_last_activity_age(cell_token) every
+    poll_interval seconds.  If age >= stall_timeout (meaning no proxied
+    model call arrived within the window), invokes kill_callback() and
+    sets the global _STALLED_EVENT so the caller can reclassify the row.
+
+    Liveness is defined as model-call ARRIVAL, not completion.  Every
+    proxied HTTP request bumps last_activity_monotonic on the cell's
+    ledger, so a legitimately long model turn (minutes of streaming) does
+    NOT trigger the watchdog.
+    """
+    while True:
+        time.sleep(poll_interval)
+        event = _STALLED_EVENT
+        if event is None or event.is_set():
+            return
+        try:
+            age = proxy_server.cell_last_activity_age(cell_token)
+        except Exception:
+            continue
+        if age is not None and age >= stall_timeout:
+            event.set()
+            try:
+                kill_callback()
+            except Exception:
+                pass
+            return
+
+
 def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              checker_timeout_s, exec_mode="local",
              docker_image=None, docker_fallback=False, harness_version=None,
              container_versions_reader=read_container_cli_versions,
              transcripts_dir=None, results_stem="", proxy_ctx=None,
-             candidate=None, version_drift=False, workspace_observer=None):
+             candidate=None, version_drift=False, workspace_observer=None,
+             stall_timeout=None):
+    global _STALLED_EVENT, _ACTIVE_CELL_CONTEXT
     """Execute one (task, harness, trial) cell and return its results row.
 
     Materializes the task workspace into a temp dir (snapshot ``workspace/``
@@ -1598,6 +1637,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "version_drift": bool(version_drift),
         "timeout_s": timeout_s,
         "workspace_source": None,
+        "last_activity_age_s": None,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
@@ -1647,6 +1687,32 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["t_env_setup_s"] = round(time.monotonic() - env_setup_start, 3)
 
         start = time.monotonic()
+
+        # Stall-kill watchdog: only active when proxy provides a liveness signal.
+        # Liveness is model-call ARRIVAL, so a legitimately long streaming turn
+        # does NOT trigger the kill.
+        stalled = False
+        if stall_timeout and active_proxy_ctx and cell_token and proxy_ctx:
+            proxy_server = proxy_ctx.get('_proxy_server')
+            if proxy_server is not None:
+                cell_ctx = {}
+                _ACTIVE_CELL_CONTEXT = cell_ctx
+                stall_event = threading.Event()
+                _STALLED_EVENT = stall_event
+
+                def _docker_kill():
+                    cname = cell_ctx.get('container_name')
+                    if cname:
+                        from .docker_exec import force_remove_container
+                        force_remove_container(cname)
+
+                kill_fn = _docker_kill if exec_mode == 'docker' else (lambda: None)
+                watchdog_thread = threading.Thread(
+                    target=_stall_watchdog_loop,
+                    args=(proxy_server, cell_token, stall_timeout, kill_fn, 10.0),
+                    daemon=True,
+                )
+                watchdog_thread.start()
         try:
             result, exec_used = invoke_adapter(
                 exec_mode, harness, instruction, workdir, model, timeout_s,
@@ -1654,6 +1720,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 proxy_ctx=active_proxy_ctx, cell_token=cell_token,
                 candidate=candidate, container_workdir=task_workdir,
             )
+            if _STALLED_EVENT is not None and _STALLED_EVENT.is_set():
+                stalled = True
         except Exception as exc:  # noqa: BLE001 - never crash the loop on an adapter
             exec_used = getattr(exc, "bench_exec_used", exec_mode)
             row["error"] = traceback.format_exc(limit=4).strip()
@@ -1671,7 +1739,13 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 version_harness, exec_used, harness_version, docker_image, None,
                 container_versions_reader,
             )
-            row["failure_class"] = classify_failure(row, "", timeout_s)
+            if stalled and proxy_ctx:
+                row["last_activity_age_s"] = round(
+                    proxy_ctx.get("_proxy_server", proxy_ctx).cell_last_activity_age(cell_token) or 0, 1
+                ) if hasattr(proxy_ctx.get("_proxy_server", proxy_ctx), "cell_last_activity_age") else None
+                row["failure_class"] = "stalled"
+            else:
+                row["failure_class"] = classify_failure(row, "", timeout_s)
             return _populate_proxy_row(row, active_proxy_ctx, cell_token, wait_s=2.0)
         row["wall_time_s"] = _adapter_wall_time_s(start, result, exec_used)
         row["t_agent_s"] = _agent_wall_time_s(start, result, exec_used)
@@ -1713,6 +1787,14 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         full_output = result.get("full_output")
         classifier_output = full_output if full_output is not None else row["output_tail"]
         _populate_proxy_row(row, active_proxy_ctx, cell_token, wait_s=2.0)
+
+        # Stall detection: if the watchdog fired, reclassify and skip checker.
+        if stalled and proxy_ctx:
+            ps = proxy_ctx.get("_proxy_server", proxy_ctx)
+            if hasattr(ps, "cell_last_activity_age"):
+                row["last_activity_age_s"] = round(ps.cell_last_activity_age(cell_token) or 0, 1)
+            row["failure_class"] = "stalled"
+            return _populate_proxy_row(row, active_proxy_ctx, cell_token)
 
         # Persist the full agent transcript LOCAL-ONLY (prefer the untruncated
         # full_output; fall back to the ~2000-char output_tail). Never let a
@@ -1833,6 +1915,10 @@ def main(argv=None):
                              "first runnable task) into a sidecar before main cells")
     parser.add_argument("--allow-preflight-failure", action="store_true",
                         help="start main cells even if the requested preflight smoke fails")
+    parser.add_argument("--stall-timeout", type=int, default=None,
+                        help="kill stalled cells after N seconds of zero proxied model calls; "
+                             "disabled when --proxy is off (no liveness signal); "
+                             "default comes from OPENBENCH_STALL_TIMEOUT env or 600s")
     parser.add_argument("--proxy", action="store_true",
                         help="start one owned counting proxy and inject it into "
                              "supported harness/model cells (Cursor and Devin are unsupported)")
@@ -1940,6 +2026,11 @@ def main(argv=None):
     transcripts_dir = args.transcripts_dir or default_transcripts_dir(args.results_path)
     results_stem = os.path.splitext(os.path.basename(args.results_path))[0]
 
+    stall_timeout = args.stall_timeout if args.stall_timeout is not None else (
+        int(os.environ.get("OPENBENCH_STALL_TIMEOUT", "0")) or None
+    )
+    if args.proxy and stall_timeout is None:
+        stall_timeout = 600
     try:
         existing = set() if args.force else load_existing_run_ids(args.results_path)
     except ResultsLogError as exc:
@@ -1983,6 +2074,7 @@ def main(argv=None):
             "ledger_dir": ledger_parent,
             "local_base_url": f"http://127.0.0.1:{port}",
             "docker_base_url": f"http://host.docker.internal:{port}",
+            "_proxy_server": proxy_server,
         }
         proxy_names = {h: (candidates[h].proxy_adapter if h in candidates else h)
                        for h in harnesses}
@@ -2029,6 +2121,7 @@ def main(argv=None):
                 proxy_ctx=proxy_ctx,
                 candidate=smoke_candidate,
                 version_drift=bool(drift),
+                stall_timeout=stall_timeout,
             )
             smoke_path = preflight_results_path(args.results_path)
             append_row(smoke_path, smoke_row)
@@ -2066,6 +2159,7 @@ def main(argv=None):
                         proxy_ctx=proxy_ctx,
                         candidate=candidate,
                         version_drift=bool(drift),
+                        stall_timeout=stall_timeout,
                     )
                     # Fail-closed on mixed lanes: a mid-run docker→local fallback
                     # must not land in the same results file as docker cells.

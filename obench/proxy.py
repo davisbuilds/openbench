@@ -98,6 +98,7 @@ class _CellLedger:
     seal: LedgerSeal | None = None
     write_error: str | None = None
     terminal_written: bool = False
+    last_activity_monotonic: float = 0.0
 
 
 @dataclass(frozen=True, repr=False)
@@ -879,6 +880,22 @@ class CountingProxyServer(ThreadingHTTPServer):
         with self._ledger_condition:
             return token in self._cell_ledgers
 
+    def cell_last_activity(self, token: str) -> float | None:
+        """Return the monotonic ts of the most recent proxied request, or None."""
+        with self._ledger_condition:
+            ledger = self._cell_ledgers.get(token)
+            if ledger is None:
+                return None
+            ts = ledger.last_activity_monotonic
+            return ts if ts > 0 else None
+
+    def cell_last_activity_age(self, token: str) -> float | None:
+        """Return seconds since last proxied request, or None if no activity."""
+        ts = self.cell_last_activity(token)
+        if ts is None:
+            return None
+        return time.monotonic() - ts
+
     def admit_cell_request(self, token: str) -> bool:
         """Atomically admit a request, returning False for a legacy cell."""
         with self._ledger_condition:
@@ -934,6 +951,7 @@ class CountingProxyServer(ThreadingHTTPServer):
                 ledger.write_error = f"{type(exc).__name__}: {exc}"
                 raise
             finally:
+                ledger.last_activity_monotonic = time.monotonic()
                 ledger.in_flight -= 1
                 self._ledger_condition.notify_all()
 
