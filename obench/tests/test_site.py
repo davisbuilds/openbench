@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from obench import publish, site
 
@@ -294,6 +295,30 @@ class RenderTests(_SiteFixture):
         self.assertEqual(info["harness_bundles"], 1)
         self.assertEqual(info["gateway_bundles"], 0)
 
+    def test_write_board_rolls_back_both_outputs_on_replace_failure(self):
+        info = site.write_board(self.site_dir)
+        with open(info["html_path"], "rb") as fh:
+            html_before = fh.read()
+        with open(info["json_path"], "rb") as fh:
+            json_before = fh.read()
+        real_replace = os.replace
+        calls = 0
+
+        def fail_second_replace(source, destination):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("synthetic board publish failure")
+            return real_replace(source, destination)
+
+        with mock.patch.object(site.os, "replace", side_effect=fail_second_replace):
+            with self.assertRaisesRegex(OSError, "synthetic board publish failure"):
+                site.write_board(self.site_dir)
+        with open(info["html_path"], "rb") as fh:
+            self.assertEqual(fh.read(), html_before)
+        with open(info["json_path"], "rb") as fh:
+            self.assertEqual(fh.read(), json_before)
+
     def test_build_is_deterministic(self):
         first = site.write_board(self.site_dir)
         with open(first["json_path"], encoding="utf-8") as fh:
@@ -374,6 +399,12 @@ class DesignContractTests(_SiteFixture):
         self.assertTrue(title)
         self.assertTrue(deck)
         self.assertTrue(facts)
+
+    def test_lede_updated_date_includes_gateway_bundles(self):
+        doc = site.build_board(self.site_dir)
+        doc["gateway"]["bundles"] = [{"date": "2026-07-25"}]
+        _, _, facts = site._lede(doc)
+        self.assertIn("updated 2026-07-25", facts)
 
 
 class TableOrderingTests(_SiteFixture):

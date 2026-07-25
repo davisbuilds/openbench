@@ -912,7 +912,12 @@ def _lede(doc):
     harnesses = {a["harness"] for b in bundles for a in b["arms"]}
     models = {a["model"] for b in bundles for a in b["arms"]}
     cells = sum(b.get("countable_rows") or 0 for b in bundles)
-    dates = sorted(b["date"] for b in bundles if b.get("date"))
+    dates = sorted(
+        b["date"]
+        for family in (bundles, gateway["bundles"])
+        for b in family
+        if b.get("date")
+    )
 
     facts = [
         f"{len(harnesses)} harnesses",
@@ -1719,11 +1724,41 @@ def write_board(site_dir, community_dir=None, gateway_dirs=None):
     doc = build_board(site_dir, community_dir=community_dir, gateway_dirs=gateway_dirs)
     json_path = os.path.join(site_dir, "board.json")
     html_path = os.path.join(site_dir, "index.html")
-    leaderboard._write_text(
-        json_path,
-        json.dumps(doc, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+    outputs = (
+        (json_path, json.dumps(
+            doc, indent=2, ensure_ascii=False, sort_keys=True) + "\n"),
+        (html_path, render_board_html(doc)),
     )
-    leaderboard._write_text(html_path, render_board_html(doc))
+    originals = {}
+    pending = []
+    for path, _ in outputs:
+        try:
+            with open(path, "rb") as fh:
+                originals[path] = fh.read()
+        except FileNotFoundError:
+            originals[path] = None
+    try:
+        for path, content in outputs:
+            pending.append((report_page._temporary_text(path, content), path))
+        for temporary, path in pending:
+            os.replace(temporary, path)
+    except BaseException:
+        for path, _ in reversed(outputs):
+            original = originals[path]
+            if original is None:
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+            else:
+                temporary = report_page._temporary_text(
+                    path, original.decode("utf-8"))
+                os.replace(temporary, path)
+        raise
+    finally:
+        for temporary, _ in pending:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
     return {
         "json_path": json_path,
         "html_path": html_path,
