@@ -334,3 +334,48 @@ class CoverageSummaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FirstAttemptIsNotARetryTests(unittest.TestCase):
+    """A cell with no prior row must be RUN, not declared exhausted.
+
+    Regression: on the queue's first live use it reported 0/9 satisfied,
+    marking every cell "EXHAUSTED (fc=None attempts=0 budget=0)" before any
+    of them executed. A fresh cell has no failure class, retry_budget(None)
+    is 0 by design, and the check was ``attempts >= budget`` -- so 0 >= 0
+    exhausted the cell up front. Retry budgets govern RETRIES only.
+    """
+
+    def test_fresh_cell_is_not_exhausted(self):
+        arm = mq.ArmState("pi x laguna-s-2.1")
+        self.assertFalse(arm.should_exhaust(None, 0),
+                         "a cell that has never run must get its first attempt")
+
+    def test_retry_budget_still_bounds_retries(self):
+        arm = mq.ArmState("pi x m", {"rate_limited": 2})
+        self.assertFalse(arm.should_exhaust("rate_limited", 1))
+        self.assertTrue(arm.should_exhaust("rate_limited", 2))
+
+    def test_unknown_failure_class_exhausts_after_one_attempt(self):
+        arm = mq.ArmState("pi x m", {"rate_limited": 3})
+        self.assertTrue(arm.should_exhaust("wrong_answer", 1),
+                        "no budget for a class means no retry after attempt 1")
+        self.assertTrue(arm.should_exhaust(None, 1))
+
+
+class ArmIdentityIncludesModelTests(unittest.TestCase):
+    """Arms must be keyed by (harness, model), not harness alone.
+
+    Regression: pi x laguna and pi x inkling collapsed to one arm named "pi",
+    so they shared pause state and their coverage lines were printed twice as
+    indistinguishable "pi: 0/6".
+    """
+
+    def test_same_harness_different_models_are_distinct_arms(self):
+        arms = [{"harness": "pi", "model": "laguna-s-2.1"},
+                {"harness": "pi", "model": "inkling"}]
+        cells = mq.expand_cells(arms, ["webcore"], 1)
+        names = {c["arm"] for c in cells}
+        self.assertEqual(len(names), 2, f"expected two distinct arms, got {names}")
+        self.assertIn("pi x laguna-s-2.1", names)
+        self.assertIn("pi x inkling", names)

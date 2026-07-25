@@ -141,7 +141,7 @@ def expand_cells(
             for trial_num in range(1, trials + 1):
                 run_id = bench_run.make_run_id(harness, task, model, trial_num)
                 cells.append({
-                    "arm": harness,
+                    "arm": f"{harness} x {model}",
                     "arm_idx": arms.index(arm),
                     "harness": harness,
                     "model": model,
@@ -209,9 +209,26 @@ class ArmState:
         self.exhausted_cells: list[str] = []
 
     def retry_budget(self, failure_class: str | None) -> int:
+        """Re-queues allowed for a cell that failed with ``failure_class``.
+
+        This governs RETRIES only. A cell with no prior row has no failure class
+        and is not retrying, so callers must let the first attempt through
+        without consulting this budget (see ``should_exhaust``).
+        """
         if failure_class is None:
             return 0
         return self.budgets.get(failure_class, 0)
+
+    def should_exhaust(self, failure_class: str | None, attempts: int) -> bool:
+        """True when a cell has used up its retries for this failure class.
+
+        ``attempts == 0`` is the first run of the cell, never an exhaustion:
+        charging it against a retry budget marked every cell EXHAUSTED before
+        it ever executed (observed on first live use: 0/9 satisfied).
+        """
+        if attempts == 0:
+            return False
+        return attempts >= self.retry_budget(failure_class)
 
     def record_excluded(self) -> None:
         self.consecutive_excluded += 1
@@ -402,7 +419,7 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     arm_states_raw = state.get("arm_states", {})
     arm_states: dict[str, ArmState] = {}
     for arm in arms:
-        name = arm["harness"]
+        name = f"{arm['harness']} x {arm['model']}"
         if name in arm_states_raw:
             arm_states[name] = ArmState.from_dict(arm_states_raw[name])
         else:
@@ -458,7 +475,7 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         attempt = retry_counts.get(run_id, 0)
         fc = row_failure_class(row)
         budget = as_.retry_budget(fc)
-        if attempt >= budget:
+        if as_.should_exhaust(fc, attempt):
             as_.exhausted_cells.append(run_id)
             print(f"    EXHAUSTED {run_id} (fc={fc} attempts={attempt} budget={budget})")
             state.set("arm_states", {n: a.to_dict() for n, a in arm_states.items()})
@@ -530,7 +547,7 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     print("MATRIX COVERAGE REPORT")
     print("=" * 60)
     for arm in arms:
-        name = arm["harness"]
+        name = f"{arm['harness']} x {arm['model']}"
         as_ = arm_states[name]
         pct = (as_.satisfied / as_.planned * 100) if as_.planned > 0 else 0
         marker = " [PAUSED]" if as_.paused else ""
