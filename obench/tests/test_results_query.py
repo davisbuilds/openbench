@@ -23,10 +23,10 @@ def _write(rows):
     return path
 
 
-def _row(harness, model, task, trial, fc, success=False):
+def _row(harness, model, task, trial, fc, success=False, ts=None):
     return {"harness": harness, "model": model, "task": task, "trial": trial,
             "run_id": f"{harness}:{task}:{model}:trial{trial}",
-            "failure_class": fc, "success": success}
+            "failure_class": fc, "success": success, "ts_iso": ts}
 
 
 def _run(command, path, *extra):
@@ -43,6 +43,27 @@ class ResultsQueryTests(unittest.TestCase):
         out = _run("summary", _write(rows))
         # 1 solved, 1 judged, 1 planned, 100% coverage -- not 2 rows.
         self.assertRegex(out, r"pi x m\s+1\s+1\s+1\s+100%\s+100%")
+
+    def test_force_rerun_latest_verdict_wins_regardless_of_file_order(self):
+        # Two judged attempts at the same cell (a --force rerun after a
+        # wrong_answer). The published rate must NOT depend on which line comes
+        # first in the file: the chronologically-later attempt supersedes.
+        early = _row("pi", "m", "t", 1, "wrong_answer", False, ts="2026-01-01T00:00")
+        late = _row("pi", "m", "t", 1, "solved", True, ts="2026-01-02T00:00")
+        for order in ([early, late], [late, early]):
+            out = _run("summary", _write(order))
+            line = [l for l in out.splitlines() if l.startswith("pi x m")][0]
+            # latest attempt (solved) wins both ways: 1 solved / 1 judged.
+            self.assertRegex(line, r"pi x m\s+1\s+1\s+1\s+100%")
+
+    def test_judged_beats_excluded_even_when_excluded_is_later(self):
+        # A real verdict must not be erased by a later infra-family rerun.
+        verdict = _row("pi", "m", "t", 1, "wrong_answer", False, ts="2026-01-01T00:00")
+        later_infra = _row("pi", "m", "t", 1, "rate_limited", False, ts="2026-01-09T00:00")
+        out = _run("summary", _write([verdict, later_infra]))
+        line = [l for l in out.splitlines() if l.startswith("pi x m")][0]
+        # judged=1 (the wrong_answer), planned=1, 100% coverage.
+        self.assertRegex(line, r"pi x m\s+0\s+1\s+1\s+0%\s+100%")
 
     def test_low_coverage_warns_and_names_missing_cells(self):
         rows = [_row("pi", "m", "t", 1, "solved", True),

@@ -84,13 +84,21 @@ def _filter(rows, args):
     return out
 
 
+def _rank(row):
+    """Preference key for choosing one row per cell: a judged verdict always
+    beats an excluded attempt; among rows of equal judged-ness the latest
+    ts_iso wins, so a --force rerun deterministically supersedes the attempt it
+    replaced instead of the winner depending on line order in the file."""
+    return (is_judged(row), row.get("ts_iso") or "")
+
+
 def _arm_cells(rows):
-    """arm -> {cell: best_row} where a judged row beats excluded attempts."""
+    """arm -> {cell: chosen row}: judged beats excluded, then latest ts wins."""
     cells = collections.defaultdict(dict)
     for r in rows:
         key, cell = arm_of(r), cell_of(r)
         prev = cells[key].get(cell)
-        if prev is None or (is_judged(r) and not is_judged(prev)):
+        if prev is None or _rank(r) > _rank(prev):
             cells[key][cell] = r
     return cells
 
@@ -111,7 +119,8 @@ def cmd_summary(rows, args):
               f"{(s / n if n else 0):>7.0%}{cov:>9.0%}{flag:<2} [{lo:.2f},{hi:.2f}]")
     srcs = sorted({r['_src'].split(':')[0] for r in rows})
     print(f"\nevidence: {sum(1 for _ in rows)} rows from {', '.join(srcs)}; "
-          f"excluded classes = {EXCLUDED}; a cell counts once (best row wins).")
+          f"excluded classes = {EXCLUDED}; a cell counts once "
+          f"(judged beats excluded, then latest ts_iso wins).")
     _warn_low_coverage(cells)
 
 
