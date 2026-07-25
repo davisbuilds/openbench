@@ -11,6 +11,12 @@
     }
   ],
   "cross_family_note": "Each board is one verified bundle, shown with its interval and its provenance. The two families share no denominators.",
+  "gateway": {
+    "bundle_count": 0,
+    "bundles": [],
+    "note": "Each board is one Gateway Tax experiment: a direct control arm against gateway arms on the same model revision. Intervals are task-bootstrap.",
+    "skipped": []
+  },
   "generated_by": "obench site",
   "harness": {
     "bundle_count": 2,
@@ -387,11 +393,5 @@
       "title": "OpenBench: gpt-5.6 across 7 harnesses"
     }
   ],
-  "router": {
-    "bundle_count": 0,
-    "bundles": [],
-    "note": "Each board is one Gateway Tax experiment: a direct control arm against gateway arms on the same model revision. Intervals are task-bootstrap.",
-    "skipped": []
-  },
   "schema_version": 1
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end tests for managed Router Bench proxy routes."""
+"""End-to-end tests for managed Gateway Bench proxy routes."""
 
 import http.client
 import json

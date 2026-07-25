@@ -365,7 +365,7 @@ class RouterReportTests(unittest.TestCase):
         report = router_report.aggregate(rows, bootstrap_replicates=20)
         text = router_report.render_text(report)
 
-        self.assertIn("Router Bench: gateway_tax", text)
+        self.assertIn("Gateway Bench: gateway_tax", text)
         self.assertIn("route_integrity:ledger_gap=1", text)
         self.assertIn("gateway - direct", text)
         self.assertLessEqual(len(text.splitlines()), 12)

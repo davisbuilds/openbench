@@ -5,7 +5,7 @@
 
 * ``board.json`` — one machine-readable document covering **Harness Bench**
   (verified ``results.jsonl`` publish bundles, aggregated by
-  :mod:`obench.leaderboard`) and **Router Bench** (verified ``router_bench``
+  :mod:`obench.leaderboard`) and **Gateway Bench** (verified ``router_bench``
   evidence bundles, aggregated by :mod:`obench.router_report`).
 * ``index.html`` — the site's landing page, which *is* the leaderboard: family
   tabs, per-board sortable tables, model/harness filters, Wilson and bootstrap
@@ -20,7 +20,7 @@ publishes.
 
 Comparability rule, unchanged from ``obench leaderboard``: cells from different
 bundles are never blended into one score. Each bundle is its own ranked board.
-The two families are never merged either — a Router Bench arm is a serving
+The two families are never merged either — a Gateway Bench arm is a serving
 route, not a harness.
 """
 
@@ -43,7 +43,7 @@ HARNESS_NOTE = (
     "timeout caps differ."
 )
 
-ROUTER_NOTE = (
+GATEWAY_NOTE = (
     "Each board is one Gateway Tax experiment: a direct control arm against "
     "gateway arms on the same model revision. Intervals are task-bootstrap."
 )
@@ -168,15 +168,15 @@ def _bundle_dir_for(site_dir, community_dir, bundle):
 
 
 # --------------------------------------------------------------------------
-# Router Bench
+# Gateway Bench
 # --------------------------------------------------------------------------
 
 
-def router_verification_error(bundle_dir):
-    """Return why a directory is not a verified router bundle, else ``None``."""
+def gateway_verification_error(bundle_dir):
+    """Return why a directory is not a verified gateway bundle, else ``None``."""
     provenance_path = os.path.join(bundle_dir, "provenance.json")
     if not os.path.isfile(provenance_path):
-        return "no provenance.json (not a router evidence bundle)"
+        return "no provenance.json (not a gateway evidence bundle)"
     try:
         with open(provenance_path, encoding="utf-8") as fh:
             provenance = json.load(fh)
@@ -235,11 +235,11 @@ def _metric_dto(metric):
     }
 
 
-def aggregate_router_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
-    """Aggregate one verified router bundle, or ``None`` when unusable."""
+def aggregate_gateway_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
+    """Aggregate one verified gateway bundle, or ``None`` when unusable."""
     from . import router_report
 
-    if router_verification_error(bundle_dir) is not None:
+    if gateway_verification_error(bundle_dir) is not None:
         return None
     results_path = os.path.join(bundle_dir, "results.jsonl")
     try:
@@ -302,7 +302,7 @@ def aggregate_router_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
     bundle_id = entry.get("id") or os.path.basename(os.path.normpath(bundle_dir))
     blocks = report.get("blocks") or {}
     return {
-        "family": "router",
+        "family": "gateway",
         "id": bundle_id,
         "kind": entry.get("kind") or "release",
         "title": entry.get("title") or bundle_id,
@@ -327,19 +327,21 @@ def aggregate_router_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
     }
 
 
-def build_router_family(site_dir, router_dirs=None):
-    """Scan router bundle roots and aggregate every verified bundle."""
+def build_gateway_family(site_dir, gateway_dirs=None):
+    """Scan gateway bundle roots and aggregate every verified bundle."""
     site_dir = os.path.abspath(site_dir)
-    roots = list(router_dirs or [])
-    default_root = os.path.join(site_dir, "router")
-    if not roots and os.path.isdir(default_root):
-        roots = [default_root]
+    roots = list(gateway_dirs or [])
+    if not roots:
+        # ``router`` is the pre-rename directory name; still read if present.
+        roots = [d for d in (os.path.join(site_dir, "gateway"),
+                             os.path.join(site_dir, "router"))
+                 if os.path.isdir(d)]
 
-    manifest = {
-        e["id"]: e
-        for e in leaderboard._load_manifest_list(os.path.join(site_dir, "router.json"))
-        if isinstance(e, dict) and e.get("id")
-    }
+    manifest = {}
+    for name in ("router.json", "gateway.json"):
+        for e in leaderboard._load_manifest_list(os.path.join(site_dir, name)):
+            if isinstance(e, dict) and e.get("id"):
+                manifest[e["id"]] = e
 
     bundles = []
     skipped = []
@@ -356,17 +358,17 @@ def build_router_family(site_dir, router_dirs=None):
             if real in seen:
                 continue
             seen.add(real)
-            error = router_verification_error(bundle_dir)
+            error = gateway_verification_error(bundle_dir)
             if error:
-                skipped.append({"id": name, "kind": "router", "reason": error})
+                skipped.append({"id": name, "kind": "gateway", "reason": error})
                 continue
-            aggregated = aggregate_router_bundle(
+            aggregated = aggregate_gateway_bundle(
                 bundle_dir, site_dir=site_dir, manifest_entry=manifest.get(name)
             )
             if aggregated is None:
                 skipped.append({
                     "id": name,
-                    "kind": "router",
+                    "kind": "gateway",
                     "reason": "rows did not aggregate into a Gateway Tax report",
                 })
                 continue
@@ -375,7 +377,7 @@ def build_router_family(site_dir, router_dirs=None):
     bundles.sort(key=lambda b: (-leaderboard._date_key(b.get("date")), b.get("id") or ""))
     skipped.sort(key=lambda s: s.get("id") or "")
     return {
-        "note": ROUTER_NOTE,
+        "note": GATEWAY_NOTE,
         "bundle_count": len(bundles),
         "bundles": bundles,
         "skipped": skipped,
@@ -387,11 +389,11 @@ def build_router_family(site_dir, router_dirs=None):
 # --------------------------------------------------------------------------
 
 
-def build_board(site_dir, community_dir=None, router_dirs=None):
+def build_board(site_dir, community_dir=None, gateway_dirs=None):
     """Build the combined two-family board document."""
     site_dir = os.path.abspath(site_dir)
     harness = build_harness_family(site_dir, community_dir=community_dir)
-    router = build_router_family(site_dir, router_dirs=router_dirs)
+    gateway = build_gateway_family(site_dir, gateway_dirs=gateway_dirs)
     releases = leaderboard._load_manifest_list(os.path.join(site_dir, "releases.json"))
     community = leaderboard._load_manifest_list(os.path.join(site_dir, "community.json"))
     packs = leaderboard._load_manifest_list(os.path.join(site_dir, "packs.json"))
@@ -400,7 +402,7 @@ def build_board(site_dir, community_dir=None, router_dirs=None):
         "schema_version": SCHEMA_VERSION,
         "cross_family_note": CROSS_FAMILY_NOTE,
         "harness": harness,
-        "router": router,
+        "gateway": gateway,
         "releases": [e for e in releases if isinstance(e, dict)],
         "community": [e for e in community if isinstance(e, dict)],
         "packs": [e for e in packs if isinstance(e, dict)],
@@ -894,7 +896,7 @@ _JS = r"""
   }
 
   // --- tabs ---------------------------------------------------------------
-  var VIEWS = ["harness", "router", "releases", "methodology"];
+  var VIEWS = ["harness", "gateway", "releases", "methodology"];
 
   function showView() {
     var hash = (location.hash || "").replace("#", "");
@@ -929,7 +931,7 @@ def _lede(doc):
     """
     bundles = doc["harness"]["bundles"]
     harness = doc["harness"]
-    router = doc["router"]
+    gateway = doc["gateway"]
     harnesses = {a["harness"] for b in bundles for a in b["arms"]}
     models = {a["model"] for b in bundles for a in b["arms"]}
     cells = sum(b.get("countable_rows") or 0 for b in bundles)
@@ -941,8 +943,8 @@ def _lede(doc):
         f"{harness['bundle_count']} verified bundles",
         f"{cells:,} countable cells",
     ]
-    if router["bundle_count"]:
-        facts.append(f"{router['bundle_count']} router bundles")
+    if gateway["bundle_count"]:
+        facts.append(f"{gateway['bundle_count']} gateway bundles")
     if dates:
         facts.append(f"updated {dates[-1]}")
     return (
@@ -965,7 +967,7 @@ _METHODOLOGY = """
   <code>checker.sh</code> exits 0; the harness's own claim of success is never
   trusted.</p>
 
-  <h3>Router Bench</h3>
+  <h3>Gateway Bench</h3>
   <p>Holds the harness, model, provider, sampling, task, and budget fixed while
   varying the serving route. An arm is a route. The implemented track is
   <strong>Gateway Tax</strong>: a direct baseline against one or more gateway
@@ -978,7 +980,7 @@ _METHODOLOGY = """
     are excluded; other failures, including timeouts, stay in the denominator.</li>
     <li>Harness Bench uses Wilson 95% intervals over matched
     <code>(task, trial)</code> cells whenever a bundle has two or more arms.</li>
-    <li>Router Bench uses task-weighted estimates with bootstrap 95% intervals,
+    <li>Gateway Bench uses task-weighted estimates with bootstrap 95% intervals,
     and includes a block only when every expected arm is present,
     infrastructure-valid, and passes route integrity.</li>
     <li>A gateway-tax interval that spans zero is not a detected effect.</li>
@@ -992,7 +994,7 @@ _METHODOLOGY = """
     figure was proxy-metered, vendor-split, or self-reported by the CLI. These
     bases are not interchangeable.</li>
     <li>Harness <code>$/solve</code> appears only for models with a configured
-    price. Router cost prefers invoice reconciliation, then the router's own
+    price. Gateway cost prefers invoice reconciliation, then the router's own
     reported cost, then a frozen list-price estimate, and shows coverage when a
     basis does not cover every call.</li>
     <li>Harness defaults are not clamped.</li>
@@ -1369,7 +1371,7 @@ def _harness_board(bundle):
     }, head + table + foot)
 
 
-def _router_board(bundle):
+def _gateway_board(bundle):
     title = _esc(bundle["title"])
     if bundle.get("path"):
         title = _tag("a", {"href": bundle["path"]}, title)
@@ -1603,14 +1605,14 @@ def _harness_view(doc):
     return body
 
 
-def _router_view(doc):
-    family = doc["router"]
+def _gateway_view(doc):
+    family = doc["gateway"]
     body = _tag("p", {"class": "note"}, _esc(family["note"]))
     if not family["bundles"]:
         body += _tag("section", {"class": "board"}, _tag(
             "div", {"class": "empty"},
-            _tag("p", {}, "No verified Router Bench bundles published yet.")))
-    body += "".join(_router_board(b) for b in family["bundles"])
+            _tag("p", {}, "No verified Gateway Bench bundles published yet.")))
+    body += "".join(_gateway_board(b) for b in family["bundles"])
     if family.get("skipped"):
         body += _skipped_board(
             f"Not ranked ({len(family['skipped'])})",
@@ -1637,7 +1639,7 @@ def render_board_html(doc):
         _tag("a", {"href": "#" + slug}, _esc(label))
         for slug, label in (
             ("harness", "Harness Bench"),
-            ("router", "Router Bench"),
+            ("gateway", "Gateway Bench"),
             ("releases", "Releases"),
             ("methodology", "Methodology"),
         )
@@ -1661,7 +1663,7 @@ def render_board_html(doc):
     # it the nav degrades to jump links over one continuous page.
     views = (
         _tag("main", {"id": "view-harness"}, _harness_view(doc))
-        + _tag("main", {"id": "view-router"}, _router_view(doc))
+        + _tag("main", {"id": "view-gateway"}, _gateway_view(doc))
         + _tag("main", {"id": "view-releases"}, _releases_view(doc))
         + _tag("main", {"id": "view-methodology"}, _METHODOLOGY)
     )
@@ -1689,10 +1691,10 @@ def render_board_html(doc):
     )
 
 
-def write_board(site_dir, community_dir=None, router_dirs=None):
+def write_board(site_dir, community_dir=None, gateway_dirs=None):
     """Build and write ``index.html`` + ``board.json`` under ``site_dir``."""
     site_dir = os.path.abspath(site_dir)
-    doc = build_board(site_dir, community_dir=community_dir, router_dirs=router_dirs)
+    doc = build_board(site_dir, community_dir=community_dir, gateway_dirs=gateway_dirs)
     json_path = os.path.join(site_dir, "board.json")
     html_path = os.path.join(site_dir, "index.html")
     leaderboard._write_text(
@@ -1704,15 +1706,15 @@ def write_board(site_dir, community_dir=None, router_dirs=None):
         "json_path": json_path,
         "html_path": html_path,
         "harness_bundles": doc["harness"]["bundle_count"],
-        "router_bundles": doc["router"]["bundle_count"],
-        "skipped": len(doc["harness"]["skipped"]) + len(doc["router"]["skipped"]),
+        "gateway_bundles": doc["gateway"]["bundle_count"],
+        "skipped": len(doc["harness"]["skipped"]) + len(doc["gateway"]["skipped"]),
     }
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="obench site",
-        description="Build the unified static leaderboard site (harness + router).",
+        description="Build the unified static leaderboard site (harness + gateway).",
     )
     sub = parser.add_subparsers(dest="command")
     build = sub.add_parser("build", help="write index.html + board.json")
@@ -1732,10 +1734,10 @@ def main(argv=None):
         help="do not scan data/community",
     )
     build.add_argument(
-        "--router-dir",
+        "--gateway-dir",
         action="append",
         default=None,
-        help="router bundle root (repeatable; default: <site-dir>/router)",
+        help="gateway bundle root (repeatable; default: <site-dir>/gateway)",
     )
 
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
@@ -1751,13 +1753,13 @@ def main(argv=None):
         info = write_board(
             args.site_dir,
             community_dir=community_dir,
-            router_dirs=args.router_dir,
+            gateway_dirs=args.gateway_dir,
         )
         print(f"index.html  {info['html_path']}")
         print(f"board.json  {info['json_path']}")
         print(
             f"harness_bundles={info['harness_bundles']} "
-            f"router_bundles={info['router_bundles']} "
+            f"gateway_bundles={info['gateway_bundles']} "
             f"skipped={info['skipped']}"
         )
         return 0

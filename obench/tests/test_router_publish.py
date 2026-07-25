@@ -1,4 +1,4 @@
-"""Tests for sanitized Router Bench publishing and verification."""
+"""Tests for sanitized Gateway Bench publishing and verification."""
 
 from __future__ import annotations
 

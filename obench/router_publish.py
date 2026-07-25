@@ -1,4 +1,4 @@
-"""Create and verify sanitized, tamper-evident Router Bench bundles.
+"""Create and verify sanitized, tamper-evident Gateway Bench bundles.
 
 This module is deliberately a pure library.  Source artifacts are validated,
 projected through explicit public DTO allowlists, and written to a new bundle.
@@ -326,7 +326,7 @@ _EXPERIMENT_PUBLIC_SCHEMA = {
 
 
 class RouterPublishError(ValueError):
-    """A Router Bench bundle is unsafe, incomplete, or inconsistent."""
+    """A Gateway Bench bundle is unsafe, incomplete, or inconsistent."""
 
 
 def _sha256(data: bytes) -> str:

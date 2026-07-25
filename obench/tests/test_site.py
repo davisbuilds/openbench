@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the unified harness + router leaderboard site."""
+"""Tests for the unified harness + gateway leaderboard site."""
 
 from __future__ import annotations
 
@@ -119,21 +119,21 @@ class HarnessFamilyTests(_SiteFixture):
         self.assertIn("html-only", [s["id"] for s in doc["harness"]["skipped"]])
 
 
-class RouterFamilyTests(_SiteFixture):
-    def test_missing_router_root_is_empty_not_an_error(self):
+class GatewayFamilyTests(_SiteFixture):
+    def test_missing_gateway_root_is_empty_not_an_error(self):
         doc = site.build_board(self.site_dir)
-        self.assertEqual(doc["router"]["bundle_count"], 0)
-        self.assertEqual(doc["router"]["bundles"], [])
+        self.assertEqual(doc["gateway"]["bundle_count"], 0)
+        self.assertEqual(doc["gateway"]["bundles"], [])
 
-    def test_non_router_directory_is_reported_as_skipped(self):
+    def test_non_gateway_directory_is_reported_as_skipped(self):
         bundle = os.path.join(self.site_dir, "router", "not-a-bundle")
         _write(os.path.join(bundle, "provenance.json"),
                json.dumps({"bundle_kind": "harness"}))
         doc = site.build_board(self.site_dir)
-        self.assertEqual(doc["router"]["bundle_count"], 0)
+        self.assertEqual(doc["gateway"]["bundle_count"], 0)
         self.assertEqual(
-            [s["reason"] for s in doc["router"]["skipped"]],
-            ["not a router_bench bundle"],
+            [s["reason"] for s in doc["gateway"]["skipped"]],
+            ["not a router_bench bundle"],  # on-disk kind is unchanged
         )
 
     def test_tampered_bundle_fails_verification(self):
@@ -144,9 +144,9 @@ class RouterFamilyTests(_SiteFixture):
             "artifacts": {"results.jsonl": "0" * 64},
         }))
         _write(os.path.join(bundle, "results.jsonl"), "{}\n")
-        self.assertIsNotNone(site.router_verification_error(bundle))
+        self.assertIsNotNone(site.gateway_verification_error(bundle))
         doc = site.build_board(self.site_dir)
-        self.assertEqual(doc["router"]["bundle_count"], 0)
+        self.assertEqual(doc["gateway"]["bundle_count"], 0)
 
 
 class CostBasisTests(unittest.TestCase):
@@ -238,7 +238,7 @@ class RenderTests(_SiteFixture):
     def test_both_families_and_methodology_are_present(self):
         page = site.render_board_html(site.build_board(self.site_dir))
         self.assertIn('id="view-harness"', page)
-        self.assertIn('id="view-router"', page)
+        self.assertIn('id="view-gateway"', page)
         self.assertIn('id="view-methodology"', page)
         self.assertIn("Gateway Tax", page)
 
@@ -251,7 +251,7 @@ class RenderTests(_SiteFixture):
             doc = json.load(fh)
         self.assertEqual(doc["schema_version"], site.SCHEMA_VERSION)
         self.assertEqual(info["harness_bundles"], 1)
-        self.assertEqual(info["router_bundles"], 0)
+        self.assertEqual(info["gateway_bundles"], 0)
 
     def test_build_is_deterministic(self):
         first = site.write_board(self.site_dir)

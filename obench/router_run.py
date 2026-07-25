@@ -400,7 +400,7 @@ def _existing_attempts(
         identity = results.router_identity_from_row(row)
         if identity.experiment_digest != experiment.digest:
             raise RouterRunError(
-                "results file contains a different Router Bench experiment"
+                "results file contains a different Gateway Bench experiment"
             )
         coordinate = (identity.task, identity.window_id, identity.repetition)
         attempts[coordinate][identity.block_attempt].append(row)

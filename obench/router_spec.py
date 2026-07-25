@@ -1,4 +1,4 @@
-"""Immutable Router Bench experiment schema and route-plan compilation.
+"""Immutable Gateway Bench experiment schema and route-plan compilation.
 
 The MVP intentionally accepts only the Pi/OpenAI Chat ``gateway_tax`` track.
 TOML contains credential environment-variable names; credential values enter an
@@ -39,7 +39,7 @@ _RFC3339_RE = re.compile(
 
 
 class RouterSpecError(ValueError):
-    """Raised when a Router Bench experiment is malformed or unsafe."""
+    """Raised when a Gateway Bench experiment is malformed or unsafe."""
 
 
 def _canonical_value(value: Any) -> Any:
@@ -681,26 +681,26 @@ def parse_experiment(data: Mapping[str, Any]) -> RouterExperiment:
 
 
 def parse_experiment_toml(text: str, *, source: str = "<string>") -> RouterExperiment:
-    """Decode and validate Router Bench TOML text."""
+    """Decode and validate Gateway Bench TOML text."""
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     try:
         raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
-        raise RouterSpecError(f"invalid Router Bench TOML in {source}: {exc}") from exc
+        raise RouterSpecError(f"invalid Gateway Bench TOML in {source}: {exc}") from exc
     try:
         return parse_experiment(raw)
     except RouterSpecError as exc:
-        raise RouterSpecError(f"invalid Router Bench experiment in {source}: {exc}") from exc
+        raise RouterSpecError(f"invalid Gateway Bench experiment in {source}: {exc}") from exc
 
 
 def load_experiment(path: str | os.PathLike[str]) -> RouterExperiment:
-    """Load and validate a Router Bench experiment TOML file."""
+    """Load and validate a Gateway Bench experiment TOML file."""
     resolved = Path(path)
     try:
         text = resolved.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
-        raise RouterSpecError(f"cannot read Router Bench experiment {resolved}: {exc}") from exc
+        raise RouterSpecError(f"cannot read Gateway Bench experiment {resolved}: {exc}") from exc
     return parse_experiment_toml(text, source=str(resolved))
 
 

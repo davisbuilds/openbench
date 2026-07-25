@@ -25,7 +25,7 @@ routes, see [`docs/router-bench.md`](docs/router-bench.md) (`obench router
 validate|doctor|run|report|publish|verify`).
 
 **Live results:** https://minghinmatthewlam.github.io/openbench/ — the landing
-page is the leaderboard itself, with a tab each for Harness Bench and Router
+page is the leaderboard itself, with a tab each for Harness Bench and Gateway
 Bench (built by `obench site build`; see [`docs/site.md`](docs/site.md)).
 
 ## What this measures
@@ -36,7 +36,7 @@ credit), never by the harness's own claim of success.
 
 OpenBench has two separate benchmark families. **Harness Bench**, described
 throughout this README, varies the coding-agent harness while holding the model
-and task fixed. **Router Bench** holds the Pi harness, model, provider, sampling,
+and task fixed. **Gateway Bench** holds the Pi harness, model, provider, sampling,
 and task fixed while varying the serving route. Its implemented MVP is the
 direct-vs-gateway **Gateway Tax** track; Provider Router and Model Router tracks
 are deferred, not implemented. See

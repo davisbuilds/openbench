@@ -353,7 +353,7 @@ class LandingPageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             page = site.render_board_html(site.build_board(td))
         self.assertIn('id="view-harness"', page)
-        self.assertIn('id="view-router"', page)
+        self.assertIn('id="view-gateway"', page)
         self.assertNotIn("leaderboard.html", page)
 
 

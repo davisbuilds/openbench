@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     publish.add_argument("--ledgers-dir")
     publish.set_defaults(handler=_publish)
 
-    verify = sub.add_parser("verify", help="verify a Router Bench evidence bundle")
+    verify = sub.add_parser("verify", help="verify a Gateway Bench evidence bundle")
     verify.add_argument("bundle")
     verify.set_defaults(handler=_verify)
 

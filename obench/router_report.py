@@ -922,7 +922,7 @@ def render_text(report: Mapping[str, Any]) -> str:
     """Render a compact human-readable summary of an aggregate report DTO."""
     blocks = report["blocks"]
     lines = [
-        f"Router Bench: {report['track']} ({report['experiment_digest'][:12]})",
+        f"Gateway Bench: {report['track']} ({report['experiment_digest'][:12]})",
         (
             f"Blocks: {blocks['included']}/{blocks['observed']} included; "
             f"tasks: {report['tasks']['included']}"

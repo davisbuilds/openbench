@@ -1,16 +1,21 @@
-# Router Bench
+# Gateway Bench
+
+> The family is presented as **Gateway Bench** on the site. The command
+> group is still `obench router` and the on-disk `bundle_kind` is still
+> `router_bench` — that value is covered by the bundle digests.
+
 
 OpenBench has two separate benchmark families:
 
 - **Harness Bench** asks how much the coding-agent harness matters when the
   underlying model and task are held fixed. Its top-level commands are
   `obench validate`, `obench doctor`, `obench run`, and `obench report`.
-- **Router Bench** asks how much the serving route matters when the harness,
+- **Gateway Bench** asks how much the serving route matters when the harness,
   model, provider, sampling, task, and budget are held fixed. Its command group
   is `obench router validate|doctor|run|report|publish|verify`.
 
-Do not combine their result rows or interpret a Router Bench arm as another
-harness. Router Bench currently supports only the **Gateway Tax** track with Pi
+Do not combine their result rows or interpret a Gateway Bench arm as another
+harness. Gateway Bench currently supports only the **Gateway Tax** track with Pi
 and the OpenAI Chat Completions streaming protocol.
 
 ## Tracks and status
@@ -32,7 +37,7 @@ fallback policy, cache hit rate, or retry policy.
 
 ## Coding taskset
 
-Router Bench runs the normal OpenBench coding tasks. Each arm receives a fresh
+Gateway Bench runs the normal OpenBench coding tasks. Each arm receives a fresh
 copy of the same task workspace, and `checker.sh` remains the sole judge of
 correctness and partial credit. A useful starter taskset is:
 
@@ -83,7 +88,7 @@ Pricing changes over time; review and deliberately update this snapshot before
 each experiment. The example values are illustrative, not a current price
 claim.
 
-Published Gateway Tax bundles appear on the site's Router Bench tab; see
+Published Gateway Tax bundles appear on the site's Gateway Bench tab; see
 [`docs/site.md`](site.md) for the layout and `obench site build`.
 
 ## Commands
@@ -192,7 +197,7 @@ Route integrity and route isolation are different claims:
   network isolation, so the harness cannot bypass the managed proxy.
 
 The current local lane records `classification = "exploratory"` and
-`egress_enforced = false`. Therefore current Router Bench results are
+`egress_enforced = false`. Therefore current Gateway Bench results are
 eligible only for **exploratory** analysis, not verified-route publication or
 ranking.
 

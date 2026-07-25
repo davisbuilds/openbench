@@ -64,4 +64,4 @@ in sync.
 ## See also
 
 [`docs/site.md`](site.md) — the page this aggregation renders into, alongside
-the Router Bench boards.
+the Gateway Bench boards.
