@@ -40,7 +40,10 @@ from .paths import PACKAGE_DIR, SOURCE_ROOT, default_results_path, default_tasks
 HERE = PACKAGE_DIR
 REPO = SOURCE_ROOT
 
-DEFAULT_RUNNER = os.path.join(HERE, "run.py")
+# Invoke the runner as a MODULE, not a file path: obench/run.py uses relative
+# imports, so `python3 obench/run.py` dies with "attempted relative import
+# with no known parent package" (observed on first live queue use).
+DEFAULT_RUNNER_MODULE = "obench.run"
 DEFAULT_MAX_CONSECUTIVE_EXCLUDED = 5
 POLL_INTERVAL_S = 2.0
 
@@ -325,7 +328,7 @@ def build_runner_command(
     exec_mode: str,
 ) -> list[str]:
     """Build the ``obench run`` subprocess argv for one cell."""
-    cmd = [sys.executable, DEFAULT_RUNNER]
+    cmd = [sys.executable, "-m", DEFAULT_RUNNER_MODULE]
     cmd.extend([
         "--force",  # always re-run even if run_id exists (prior excluded rows)
         "--harness", cell["harness"],

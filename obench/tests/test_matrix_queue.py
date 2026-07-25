@@ -379,3 +379,33 @@ class ArmIdentityIncludesModelTests(unittest.TestCase):
         self.assertEqual(len(names), 2, f"expected two distinct arms, got {names}")
         self.assertIn("pi x laguna-s-2.1", names)
         self.assertIn("pi x inkling", names)
+
+
+class RunnerInvokedAsModuleTests(unittest.TestCase):
+    """The runner must be invoked as ``-m obench.run``, not as a file path.
+
+    Regression: obench/run.py uses relative imports, so running it as a script
+    path died with "attempted relative import with no known parent package" on
+    the queue's first live cell.
+    """
+
+    def test_command_uses_module_form(self):
+        cell = {"harness": "pi", "model": "m", "task": "t", "trial": 1,
+                "run_id": "pi:t:m:trial1", "arm": "pi x m", "arm_idx": 0}
+        cmd = mq.build_runner_command(
+            cell, results_path="/tmp/r.jsonl", tasks_dir="tasks",
+            timeout=60, stall_timeout=None, exec_mode="local")
+        self.assertIn("-m", cmd, f"runner must be a module invocation: {cmd}")
+        self.assertIn("obench.run", cmd)
+        self.assertFalse(any(str(part).endswith("run.py") for part in cmd),
+                         f"must not invoke run.py by path: {cmd}")
+
+    def test_command_forces_rerun_over_excluded_rows(self):
+        cell = {"harness": "pi", "model": "m", "task": "t", "trial": 2,
+                "run_id": "pi:t:m:trial2", "arm": "pi x m", "arm_idx": 0}
+        cmd = mq.build_runner_command(
+            cell, results_path="/tmp/r.jsonl", tasks_dir="tasks",
+            timeout=60, stall_timeout=None, exec_mode="local")
+        self.assertIn("--force", cmd,
+                      "without --force the runner skips cells that already have "
+                      "an excluded row, which is exactly the coverage gap")
