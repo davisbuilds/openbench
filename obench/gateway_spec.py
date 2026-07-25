@@ -18,7 +18,10 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from . import gateway_profiles
+try:
+    from . import gateway_profiles
+except ImportError:  # file-path / Docker mount layout: no package context
+    import gateway_profiles
 
 
 SCHEMA_VERSION = 2
