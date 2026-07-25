@@ -110,24 +110,47 @@ def resolve_tasks(spec: dict[str, Any], base_dir: str = "") -> list[str]:
     seen: set[str] = set()
     tasks: list[str] = []
     for tg in enumerate_task_groups(spec):
-        tg_dir = tg.get("tasks_dir", "")
         for name in tg.get("tasks", []):
-            full = os.path.join(tg_dir, name) if tg_dir else name
-            if full not in seen:
-                seen.add(full)
-                tasks.append(full)
+            if name not in seen:
+                seen.add(name)
+                tasks.append(name)
     return tasks
 
 
-def resolve_tasks_dir(spec: dict[str, Any], spec_dir: str, cwd: str) -> str:
-    """Resolve the effective tasks directory from spec or defaults."""
-    spec_tasks_dir = spec.get("tasks_dir", "")
-    if spec_tasks_dir:
-        return os.path.abspath(os.path.join(spec_dir, spec_tasks_dir))
-    try:
-        return bench_run.resolve_tasks_dir(None)
-    except Exception:
-        return os.path.abspath(os.path.join(cwd, "tasks"))
+def resolve_group_tasks_dir(
+    group: dict[str, Any], spec: dict[str, Any], spec_dir: str
+) -> str | None:
+    """Resolve one task group's tasks directory, or None to let the runner decide.
+
+    Precedence: the group's own ``tasks_dir`` beats the spec-level ``tasks_dir``.
+    Both are interpreted relative to the spec file's directory. When neither is
+    set we return None: the runner then resolves the tasks dir from config or
+    discovery, and ``--tasks-dir`` is omitted entirely (see build_runner_command).
+    This is what lets one spec mix a local core-tasks group with a docker
+    terminal-bench group that each point at a different tree.
+    """
+    group_dir = group.get("tasks_dir") or spec.get("tasks_dir")
+    if group_dir:
+        return os.path.abspath(os.path.join(spec_dir, str(group_dir)))
+    return None
+
+
+def resolve_groups(
+    spec: dict[str, Any], spec_dir: str, default_exec_mode: str
+) -> list[dict[str, Any]]:
+    """Resolve each task group's tasks, tasks_dir, and exec_mode.
+
+    A group may set its own ``exec_mode`` (e.g. a docker terminal-bench group in
+    an otherwise-local spec); it falls back to the spec-level default otherwise.
+    """
+    groups: list[dict[str, Any]] = []
+    for tg in enumerate_task_groups(spec):
+        groups.append({
+            "tasks": list(tg.get("tasks", [])),
+            "tasks_dir": resolve_group_tasks_dir(tg, spec, spec_dir),
+            "exec_mode": tg.get("exec_mode") or default_exec_mode,
+        })
+    return groups
 
 
 def expand_cells(
@@ -152,6 +175,45 @@ def expand_cells(
                     "trial": trial_num,
                     "run_id": run_id,
                 })
+    return cells
+
+
+def expand_cells_grouped(
+    arms: list[dict[str, str]],
+    groups: list[dict[str, Any]],
+    trials: int,
+) -> list[dict[str, Any]]:
+    """Enumerate cells across per-task-group tasks_dir/exec_mode.
+
+    Each cell carries the ``tasks_dir`` and ``exec_mode`` of its task group so a
+    single spec can run a local core-tasks group and a docker terminal-bench
+    group in the same queue. Cells are deduplicated by ``run_id`` (the same task
+    name in two groups would collide; first group wins).
+    """
+    cells: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for arm in arms:
+        harness = arm["harness"]
+        model = arm["model"]
+        arm_idx = arms.index(arm)
+        for group in groups:
+            for task in group.get("tasks", []):
+                for trial_num in range(1, trials + 1):
+                    run_id = bench_run.make_run_id(harness, task, model, trial_num)
+                    if run_id in seen:
+                        continue
+                    seen.add(run_id)
+                    cells.append({
+                        "arm": f"{harness} x {model}",
+                        "arm_idx": arm_idx,
+                        "harness": harness,
+                        "model": model,
+                        "task": task,
+                        "trial": trial_num,
+                        "run_id": run_id,
+                        "tasks_dir": group.get("tasks_dir"),
+                        "exec_mode": group.get("exec_mode", "local"),
+                    })
     return cells
 
 
@@ -210,6 +272,10 @@ class ArmState:
         self.satisfied = 0
         self.planned = 0
         self.exhausted_cells: list[str] = []
+        # A harness/config error: the runner exited nonzero and wrote no row at
+        # all. Distinct from an exhausted retry budget -- it means the arm is
+        # mis-wired, so we stop it and surface the reason instead of retrying.
+        self.config_error: str | None = None
 
     def retry_budget(self, failure_class: str | None) -> int:
         """Re-queues allowed for a cell that failed with ``failure_class``.
@@ -248,6 +314,7 @@ class ArmState:
             "satisfied": self.satisfied,
             "planned": self.planned,
             "exhausted_cells": list(self.exhausted_cells),
+            "config_error": self.config_error,
         }
 
     @classmethod
@@ -258,6 +325,7 @@ class ArmState:
         self.satisfied = d.get("satisfied", 0)
         self.planned = d.get("planned", 0)
         self.exhausted_cells = list(d.get("exhausted_cells", []))
+        self.config_error = d.get("config_error")
         return self
 
 
@@ -322,12 +390,23 @@ def backoff_for_failure(fc: str | None, attempt: int,
 def build_runner_command(
     cell: dict[str, Any],
     results_path: str,
-    tasks_dir: str,
+    tasks_dir: str | None,
     timeout: int,
     stall_timeout: int | None,
     exec_mode: str,
 ) -> list[str]:
-    """Build the ``obench run`` subprocess argv for one cell."""
+    """Build the ``obench run`` subprocess argv for one cell.
+
+    ``tasks_dir`` and ``exec_mode`` are DEFAULTS: a cell carrying its own
+    ``tasks_dir``/``exec_mode`` (set by ``expand_cells_grouped`` for per-task-group
+    execution) overrides them. When neither the cell nor the caller supplies a
+    tasks dir, ``--tasks-dir`` is OMITTED so the runner resolves it via config
+    or discovery -- emitting ``--tasks-dir`` with an empty/None value made the
+    runner fail with no row written, which the queue then misread as an
+    unclassifiable exhausted cell (observed on the first live coverage-gap spec).
+    """
+    effective_tasks_dir = cell.get("tasks_dir", tasks_dir)
+    effective_exec_mode = cell.get("exec_mode", exec_mode)
     cmd = [sys.executable, "-m", DEFAULT_RUNNER_MODULE]
     cmd.extend([
         "--force",  # always re-run even if run_id exists (prior excluded rows)
@@ -337,9 +416,10 @@ def build_runner_command(
         "--trial", str(cell["trial"]),
         "--timeout", str(timeout),
         "--results-path", results_path,
-        "--tasks-dir", tasks_dir,
     ])
-    if exec_mode == "docker":
+    if effective_tasks_dir:
+        cmd.extend(["--tasks-dir", effective_tasks_dir])
+    if effective_exec_mode == "docker":
         cmd.extend(["--exec", "docker"])
     if stall_timeout is not None:
         cmd.extend(["--stall-timeout", str(stall_timeout)])
@@ -349,22 +429,51 @@ def build_runner_command(
     return cmd
 
 
-def run_runner(cmd: list[str], timeout_s: float | None = None) -> int:
-    """Run one obench runner invocation and return its exit code."""
-    proc = subprocess.Popen(cmd, start_new_session=True)
+STDERR_TAIL_CHARS = 4000
+
+
+def _last_meaningful_line(text: str | None) -> str:
+    """Return the last non-blank line of ``text`` (usually the error summary)."""
+    for line in reversed((text or "").splitlines()):
+        line = line.strip()
+        if line:
+            return line[:500]
+    return ""
+
+
+def run_runner(cmd: list[str], timeout_s: float | None = None) -> tuple[int, str]:
+    """Run one obench runner invocation; return ``(exit_code, stderr_tail)``.
+
+    stderr is captured to a temp file (not a PIPE) so a long, chatty runner
+    cannot deadlock on a full pipe buffer, while stdout stays inherited so live
+    progress still streams. The returned tail is only meaningful for diagnosing
+    a failed invocation -- the queue logs it when a nonzero exit wrote no row.
+    """
+    stderr_file = tempfile.TemporaryFile(mode="w+b")
     try:
-        return proc.wait(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
+        proc = subprocess.Popen(cmd, start_new_session=True, stderr=stderr_file)
         try:
-            os.killpg(proc.pid, 15)  # SIGTERM
-            proc.wait(timeout=5)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
+            rc = proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
             try:
-                os.killpg(proc.pid, 9)  # SIGKILL
-            except ProcessLookupError:
-                pass
-            proc.wait()
-        return -1
+                os.killpg(proc.pid, 15)  # SIGTERM
+                proc.wait(timeout=5)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(proc.pid, 9)  # SIGKILL
+                except ProcessLookupError:
+                    pass
+                proc.wait()
+            rc = -1
+        try:
+            stderr_file.seek(0)
+            data = stderr_file.read()
+        except OSError:
+            data = b""
+        tail = data[-STDERR_TAIL_CHARS:].decode("utf-8", "replace") if data else ""
+        return rc, tail
+    finally:
+        stderr_file.close()
 
 
 # ── Main ────────────────────────────────────────────────────────────────
@@ -395,25 +504,41 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         spec.get("max_consecutive_excluded", DEFAULT_MAX_CONSECUTIVE_EXCLUDED)
     )
 
-    tasks_dir = resolve_tasks_dir(spec, spec_dir, cwd)
+    groups = resolve_groups(spec, spec_dir, exec_mode)
     tasks = resolve_tasks(spec, spec_dir)
     arms = enumerate_arms(spec)
-    all_cells = expand_cells(arms, tasks, trials)
+    all_cells = expand_cells_grouped(arms, groups, trials)
 
-    # Quick sanity check
-    missing = [t for t in tasks if not os.path.isfile(os.path.join(tasks_dir, t.split("/")[0], "instruction.md"))
-               and not os.path.isfile(os.path.join(tasks_dir, t, "instruction.md"))]
+    # Quick sanity check: only groups with a resolved tasks_dir can be checked
+    # here. Groups that omit tasks_dir defer resolution to the runner (config or
+    # discovery), so we can't pre-verify them and must not guess a path.
+    missing: list[str] = []
+    for group in groups:
+        td = group.get("tasks_dir")
+        if not td:
+            continue
+        for task in group["tasks"]:
+            leaf = task.split("/")[0]
+            if (not os.path.isfile(os.path.join(td, task, "instruction.md"))
+                    and not os.path.isfile(os.path.join(td, leaf, "instruction.md"))):
+                missing.append(f"{task} (under {td})")
     if missing:
         print(
-            f"ERROR: {len(missing)} task(s) not found under {tasks_dir}: "
-            + ", ".join(missing[:5]),
+            f"ERROR: {len(missing)} task(s) not found: " + ", ".join(missing[:5]),
             file=sys.stderr,
         )
         return 1
 
     # ── Initialize queue state ──────────────────────────────────────────
-    qdir = spec.get("ledger_dir") or os.path.join(
-        os.path.dirname(results_path), ".matrix-queue")
+    # Resolve ledger_dir against the spec dir just like results_path. A bare
+    # relative ledger_dir was previously taken as-is (relative to CWD), so the
+    # persistent queue-state.json landed in a shared location and stale
+    # satisfied/planned counts from an unrelated run leaked back in on resume.
+    ledger_dir = spec.get("ledger_dir")
+    if ledger_dir:
+        qdir = os.path.abspath(os.path.join(spec_dir, str(ledger_dir)))
+    else:
+        qdir = os.path.join(os.path.dirname(results_path), ".matrix-queue")
     queue_state_path = os.path.join(str(qdir), "queue-state.json")
     os.makedirs(str(qdir), exist_ok=True)
     state = QueueState(queue_state_path)
@@ -494,8 +619,8 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         # Run the cell
         print(f"    RUN    {run_id}", flush=True)
         cmd = build_runner_command(
-            cell, results_path, tasks_dir, timeout, stall_timeout, exec_mode)
-        rc = run_runner(cmd, timeout + 60)
+            cell, results_path, None, timeout, stall_timeout, exec_mode)
+        rc, stderr_tail = run_runner(cmd, timeout + 60)
 
         if rc != 0:
             print(f"    WARN runner exit={rc} for {run_id}", file=sys.stderr)
@@ -507,6 +632,30 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
             as_.satisfied += 1
             as_.record_included()
             print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
+        elif row is None:
+            # The runner wrote NO row for this cell. A completed cell -- even a
+            # failing one -- always appends a classified row, so an absent row
+            # means the runner itself never ran the cell: a bad --tasks-dir, an
+            # argparse error, a missing adapter, an import crash. This is a
+            # harness/config error, not an unclassifiable capability result.
+            # Burning retries against fc=None here is exactly what silently
+            # declared cells EXHAUSTED on the first live coverage-gap spec, so we
+            # STOP the arm and surface the runner's own stderr instead.
+            reason = _last_meaningful_line(stderr_tail) or f"exit={rc}, no row written"
+            as_.config_error = f"exit={rc}: {reason}"
+            print(
+                f"    CONFIG-ERROR {run_id}: runner exit={rc} wrote no row -- "
+                f"stopping arm {arm_name!r}. Reason: {reason}",
+                file=sys.stderr,
+            )
+            if stderr_tail.strip():
+                print("    --- runner stderr (tail) ---", file=sys.stderr)
+                print(stderr_tail.rstrip(), file=sys.stderr)
+                print("    --- end runner stderr ---", file=sys.stderr)
+            # Drop every remaining cell for this arm from the queue and the
+            # paused list; there is no point retrying a mis-wired arm.
+            pending = [(n, i, c) for n, i, c in pending if n != arm_name]
+            paused_arms = [(n, i, c) for n, i, c in paused_arms if n != arm_name]
         else:
             new_fc = row_failure_class(row)
             retry_counts[run_id] = retry_counts.get(run_id, 0) + 1
@@ -521,8 +670,8 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
                     as_.exhausted_cells.append(run_id)
                     print(f"    EXHAUSTED {run_id} (fc={new_fc} retry budget exhausted)")
 
-        # Arm pause check
-        if as_.consecutive_excluded >= max_consecutive_excluded:
+        # Arm pause check (skip if the arm just hit a config error and stopped)
+        if as_.config_error is None and as_.consecutive_excluded >= max_consecutive_excluded:
             if not as_.paused:
                 as_.paused = True
                 # Move all remaining cells for this arm to paused list
@@ -554,9 +703,18 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         as_ = arm_states[name]
         pct = (as_.satisfied / as_.planned * 100) if as_.planned > 0 else 0
         marker = " [PAUSED]" if as_.paused else ""
+        if as_.config_error is not None:
+            marker = " [CONFIG-ERROR]"
         exhausted_count = len(as_.exhausted_cells)
         exhausted_mark = f" {exhausted_count} exhausted" if exhausted_count else ""
         print(f"  {name}: {as_.satisfied}/{as_.planned} ({pct:.1f}%){marker}{exhausted_mark}")
+
+    config_errored = [(n, a.config_error) for n, a in arm_states.items()
+                      if a.config_error is not None]
+    if config_errored:
+        print("\nArms stopped by a harness/config error (not a retry exhaustion):")
+        for arm_name, reason in config_errored:
+            print(f"  {arm_name}: {reason}")
 
     if exhausted:
         print("\nExhausted cells (retry budget depleted):")
@@ -564,7 +722,8 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
             for c in cells:
                 print(f"  {arm_name}: {c}")
 
-    failed_arms = [n for n, a in arm_states.items() if a.exhausted_cells]
+    failed_arms = [n for n, a in arm_states.items()
+                   if a.exhausted_cells or a.config_error is not None]
     exit_code = 1 if failed_arms else 0
     print(f"\nTotal: {total_satisfied}/{total_planned} satisfied")
     print(f"Exit: {exit_code}")
