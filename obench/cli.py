@@ -53,6 +53,7 @@ def main(argv=None):
         add_help=False,
     )
     sub.add_parser("matrix", help="retry-aware queue-based benchmark runner", add_help=False)
+    sub.add_parser("results", help="query results: summary/pertask/matched/errors/evidence", add_help=False)
     sub.add_parser("export", help="export tasks to external formats (harbor)", add_help=False)
     sub.add_parser("import", help="import tasks from external formats (harbor)", add_help=False)
 
@@ -72,7 +73,7 @@ def main(argv=None):
 
     known = {
         "run", "report", "doctor", "validate", "gateway", "gate", "compare", "init",
-        "matrix", "publish", "verify", "community", "leaderboard", "pack", "export",
+        "matrix", "results", "publish", "verify", "community", "leaderboard", "pack", "export",
         "import",
     }
     if command not in known:
@@ -82,6 +83,9 @@ def main(argv=None):
             "leaderboard, pack, export, import"
         )
 
+    if command == "results":
+        from .results_query import main as results_main
+        return results_main(rest)
     if command == "matrix":
         from .matrix_queue import main as matrix_main
         return matrix_main(rest)
