@@ -293,6 +293,27 @@ class ReportPageTest(unittest.TestCase):
         with open(os.path.join(site, "index.html"), "rb") as fh:
             self.assertEqual(fh.read(), index_before)
 
+        board_path = os.path.join(site, "board.json")
+        with open(board_path, "rb") as fh:
+            board_before = fh.read()
+        with mock.patch(
+            "obench.community.write_site_index",
+            side_effect=ValueError("synthetic site rebuild failure"),
+        ):
+            with self.assertRaisesRegex(ValueError, "synthetic site rebuild failure"):
+                report_page.build_site(
+                    site, "2026-07-21-synthetic", "2026-07-21",
+                    "Synthetic release 2", models, page,
+                )
+        self.assertFalse(os.path.exists(os.path.join(
+            site, "releases", "2026-07-21-synthetic", "index.html")))
+        with open(os.path.join(site, "releases.json"), "rb") as fh:
+            self.assertEqual(fh.read(), manifest_before)
+        with open(os.path.join(site, "index.html"), "rb") as fh:
+            self.assertEqual(fh.read(), index_before)
+        with open(board_path, "rb") as fh:
+            self.assertEqual(fh.read(), board_before)
+
         os.remove(os.path.join(site, "releases.json"))
         report_page.build_site(site, "2026-07-20-synthetic", "2026-07-20",
                                "Synthetic release", models, page)

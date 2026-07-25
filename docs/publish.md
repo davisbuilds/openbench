@@ -125,5 +125,7 @@ Publish the full matrix whenever possible.
   [`docs/REPORT_PAGE.md`](REPORT_PAGE.md), [`docs/README.md`](README.md)
 - Per-bundle leaderboard from verified `results.jsonl` bundles:
   [`docs/leaderboard.md`](leaderboard.md)
+- Browsable two-family leaderboard site (harness + gateway):
+  [`docs/site.md`](site.md)
 - Community submission tree:
   [`data/community/README.md`](../data/community/README.md)

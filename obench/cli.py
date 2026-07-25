@@ -2,7 +2,8 @@
 """Umbrella CLI for the OpenBench harness benchmarking framework.
 
     obench run | report | doctor | validate | gateway | gate | compare | init |
-         publish | verify | community | leaderboard | pack | export | import [args...]
+         publish | verify | community | leaderboard | site | pack | export | import
+         [args...]
 """
 
 from __future__ import annotations
@@ -44,7 +45,12 @@ def main(argv=None):
     )
     sub.add_parser(
         "leaderboard",
-        help="build the static verified-bundle leaderboard for the docs site",
+        help="alias for `site` (kept for existing scripts)",
+        add_help=False,
+    )
+    sub.add_parser(
+        "site",
+        help="build the harness+gateway leaderboard site (docs/index.html)",
         add_help=False,
     )
     sub.add_parser(
@@ -73,14 +79,15 @@ def main(argv=None):
 
     known = {
         "run", "report", "doctor", "validate", "gateway", "gate", "compare", "init",
-        "matrix", "results", "publish", "verify", "community", "leaderboard", "pack", "export",
+        "matrix", "results", "publish", "verify", "community", "leaderboard",
+        "site", "pack", "export",
         "import",
     }
     if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, report, doctor, "
             "validate, gateway, gate, compare, init, publish, verify, community, "
-            "leaderboard, pack, export, import"
+            "leaderboard, results, site, pack, export, import"
         )
 
     if command == "results":
@@ -125,6 +132,9 @@ def main(argv=None):
     if command == "leaderboard":
         from .leaderboard import main as leaderboard_main
         return leaderboard_main(rest)
+    if command == "site":
+        from .site import main as site_main
+        return site_main(rest)
     if command == "pack":
         from .packs import main as pack_main
         return pack_main(rest)

@@ -522,7 +522,8 @@ class PacksIndexTests(unittest.TestCase):
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0]["latest"], "1.1.0")
 
-            html = report_page._site_index([], community=[], packs=entries)
+            from obench import site
+            html = site._packs_section(entries)
             self.assertIn('id="packs"', html)
             self.assertIn("acme/smoke@1.1.0", html)
             self.assertIn("tasks", html)

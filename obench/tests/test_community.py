@@ -152,7 +152,7 @@ class DiscoverVerifySyncTests(unittest.TestCase):
         )
         with open(os.path.join(site, "index.html"), encoding="utf-8") as fh:
             index = fh.read()
-        self.assertIn("Community results", index)
+        self.assertIn("Community", index)
         self.assertIn("alice-alpha", index)
         self.assertIn("@alice", index)
 
@@ -168,20 +168,17 @@ class DiscoverVerifySyncTests(unittest.TestCase):
         self.assertNotEqual(code, 0)
 
     def test_site_index_includes_community_section(self):
-        html = report_page._site_index(
-            [{"id": "r1", "title": "Official", "date": "2026-07-01",
-              "models": ["m"], "path": "releases/r1/index.html"}],
-            community=[{
-                "id": "bob-demo",
-                "submitter": "bob",
-                "date": "2026-07-20",
-                "claim": "demo claim",
-                "title": "Demo title",
-                "path": "community/bob-demo/index.html",
-                "link": "https://example.com/x",
-            }],
-        )
-        self.assertIn("id=\"community\"", html)
+        from obench import site
+        html = site._community_section([{
+            "id": "bob-demo",
+            "submitter": "bob",
+            "date": "2026-07-20",
+            "claim": "demo claim",
+            "title": "Demo title",
+            "path": "community/bob-demo/index.html",
+            "link": "https://example.com/x",
+        }])
+        self.assertIn('id="community"', html)
         self.assertIn("Demo title", html)
         self.assertIn("@bob", html)
         self.assertIn("demo claim", html)

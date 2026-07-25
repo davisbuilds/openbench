@@ -24,7 +24,9 @@ To compare a fixed coding harness and model over direct and gateway serving
 routes, see [`docs/gateway-bench.md`](docs/gateway-bench.md) (`obench gateway
 validate|doctor|run|report|publish|verify`).
 
-**Live results:** https://minghinmatthewlam.github.io/openbench/
+**Live results:** https://minghinmatthewlam.github.io/openbench/ — the landing
+page is the leaderboard itself, with a tab each for Harness Bench and Gateway
+Bench (built by `obench site build`; see [`docs/site.md`](docs/site.md)).
 
 ## What this measures
 
