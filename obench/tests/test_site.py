@@ -270,6 +270,11 @@ class DesignContractTests(_SiteFixture):
         super().setUp()
         self.page = site.render_board_html(site.build_board(self.site_dir))
 
+    def test_wordmark_is_the_project_name(self):
+        self.assertIn("OpenBench", self.page)
+        self.assertNotIn('class="cmd"', self.page)
+        self.assertNotIn('content:"$ "', self.page)
+
     def test_both_theme_scopes_are_defined(self):
         # The media query carries the OS preference; the data-theme scopes carry
         # the viewer's toggle and must be able to win in both directions.
@@ -312,14 +317,15 @@ class DesignContractTests(_SiteFixture):
         """Four contrast columns cannot each be as wide as a lone one."""
         self.assertIn("--plot-w:", self.page)
 
-    def test_lede_reports_a_spread_rather_than_a_cause(self):
-        """The headline is derived from the data and stays descriptive."""
+    def test_lede_states_coverage_and_draws_no_conclusion(self):
+        """The page reports what is covered; the boards carry the results."""
         title, deck, facts = site._lede(site.build_board(self.site_dir))
-        self.assertIn("spans", deck)
         self.assertTrue(any("verified bundles" in f for f in facts))
-        # Never asserts a cause for the spread.
-        for forbidden in ("because", "due to", "caused by", "proves"):
-            self.assertNotIn(forbidden, deck.lower())
+        self.assertTrue(any("countable cells" in f for f in facts))
+        # No interpretation of the numbers, and no claimed cause.
+        for forbidden in ("because", "due to", "caused by", "proves",
+                          "clusters", "spans", "wins", "best", "fastest"):
+            self.assertNotIn(forbidden, (title + " " + deck).lower())
 
     def test_lede_survives_an_empty_site(self):
         with tempfile.TemporaryDirectory() as td:

@@ -10,7 +10,7 @@
       "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
     }
   ],
-  "cross_family_note": "The two families answer different questions and share no denominators. Do not read a Router Bench arm as another harness, or compare a solve rate across families.",
+  "cross_family_note": "Each board is one verified bundle, shown with its interval and its provenance. The two families share no denominators.",
   "generated_by": "obench site",
   "harness": {
     "bundle_count": 2,
@@ -272,7 +272,7 @@
         "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
       }
     ],
-    "note": "Harness Bench varies the coding-agent harness while holding the model and task fixed. Each board below is one verified publish bundle. Scores are never mixed across bundles: different task sets, trial counts, timeout caps, or run conditions make cross-bundle rankings non-comparable. Within a bundle, arms are (harness, model) and — when two or more arms exist — use matched (task, trial) denominators.",
+    "note": "Scores are not comparable across bundles: task sets, trial counts, and timeout caps differ.",
     "skipped": [
       {
         "id": "2026-07-02-m3",
@@ -390,7 +390,7 @@
   "router": {
     "bundle_count": 0,
     "bundles": [],
-    "note": "Router Bench holds the harness, model, provider, sampling, task, and budget fixed while varying the serving route. The implemented track is Gateway Tax: one direct baseline arm against one or more gateway arms on the same canonical model revision, with fallbacks, gateway retries, and caching disabled. A block counts only when every expected arm is present, infrastructure-valid, and passes route integrity. Intervals are task-bootstrap, not Wilson.",
+    "note": "Each board is one Gateway Tax experiment: a direct control arm against gateway arms on the same model revision. Intervals are task-bootstrap.",
     "skipped": []
   },
   "schema_version": 1

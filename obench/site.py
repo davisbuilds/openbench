@@ -39,28 +39,18 @@ from .paths import SOURCE_ROOT
 SCHEMA_VERSION = 1
 
 HARNESS_NOTE = (
-    "Harness Bench varies the coding-agent harness while holding the model and "
-    "task fixed. Each board below is one verified publish bundle. Scores are "
-    "never mixed across bundles: different task sets, trial counts, timeout "
-    "caps, or run conditions make cross-bundle rankings non-comparable. Within "
-    "a bundle, arms are (harness, model) and — when two or more arms exist — "
-    "use matched (task, trial) denominators."
+    "Scores are not comparable across bundles: task sets, trial counts, and "
+    "timeout caps differ."
 )
 
 ROUTER_NOTE = (
-    "Router Bench holds the harness, model, provider, sampling, task, and "
-    "budget fixed while varying the serving route. The implemented track is "
-    "Gateway Tax: one direct baseline arm against one or more gateway arms on "
-    "the same canonical model revision, with fallbacks, gateway retries, and "
-    "caching disabled. A block counts only when every expected arm is present, "
-    "infrastructure-valid, and passes route integrity. Intervals are "
-    "task-bootstrap, not Wilson."
+    "Each board is one Gateway Tax experiment: a direct control arm against "
+    "gateway arms on the same model revision. Intervals are task-bootstrap."
 )
 
 CROSS_FAMILY_NOTE = (
-    "The two families answer different questions and share no denominators. "
-    "Do not read a Router Bench arm as another harness, or compare a solve "
-    "rate across families."
+    "Each board is one verified bundle, shown with its interval and its "
+    "provenance. The two families share no denominators."
 )
 
 # Preferred cost basis when an arm reports several. Invoice reconciliation is
@@ -602,10 +592,9 @@ button.theme:hover{color:var(--ink)}
 button.theme svg{width:15px;height:15px}
 
 /* --- the lede ----------------------------------------------------------- */
-.lede{padding:64px 0 40px;border-bottom:1px solid var(--rule)}
-.lede h1{margin:0;max-width:19ch;font:400 clamp(38px,5.4vw,62px)/1.04
-  var(--font-display);letter-spacing:-.022em;text-wrap:balance}
-.lede h1 em{font-style:italic;color:var(--ink-2)}
+.lede{padding:56px 0 36px;border-bottom:1px solid var(--rule)}
+.lede h1{margin:0;max-width:26ch;font:400 clamp(30px,4vw,46px)/1.08
+  var(--font-display);letter-spacing:-.02em;text-wrap:balance}
 .lede .deck{margin:22px 0 0;max-width:56ch;font-size:18.5px;line-height:1.55;
   color:var(--ink-2)}
 .lede .dateline{margin-top:30px;padding-top:14px;border-top:1px solid var(--rule);
@@ -933,46 +922,12 @@ _JS = r"""
 """
 
 def _lede(doc):
-    """The page's opening claim, derived from the data rather than asserted.
+    """Page title, one line on what is shown, and a count of what is covered.
 
-    Leads with the widest board's actual spread. The wording stays descriptive
-    — a spread is reported, never attributed to a cause — because the page's
-    whole argument is that it does not overclaim.
+    Deliberately draws no conclusion from the data: the boards carry the
+    results, and readers do their own reading.
     """
     bundles = doc["harness"]["bundles"]
-    boards = [b for b in bundles if len(b["arms"]) >= 2]
-    board = max(boards, key=lambda b: len(b["arms"]), default=None)
-
-    title, deck = "Same task, different wrapper.", (
-        "Two benchmark families: one varies the coding-agent harness around a "
-        "fixed model, the other varies the serving route. They answer "
-        "different questions and share no denominators."
-    )
-    if board is not None:
-        rates = [a["solve_rate"] for a in board["arms"] if a["solve_rate"] is not None]
-        walls = [a["median_wall_s"] for a in board["arms"]
-                 if a.get("median_wall_s")]
-        spread = (max(rates) - min(rates)) * 100 if len(rates) >= 2 else None
-        ratio = (max(walls) / min(walls)) if len(walls) >= 2 and min(walls) > 0 else None
-        board_models = ", ".join(board.get("models") or []) or "one model"
-        count = len(board["arms"])
-
-        measured = []
-        if spread is not None:
-            measured.append(f"solve rate spans {spread:.1f} points")
-        if ratio is not None:
-            measured.append(f"median wall time spans {ratio:.1f}\u00d7")
-        if spread is not None and spread >= 15:
-            title = "The harness moves <em>correctness</em>."
-        elif spread is not None and ratio is not None and ratio >= 1.8:
-            # Correctness is tight but the clock is not: say exactly that.
-            title = "Correctness clusters. <em>Speed doesn\u2019t.</em>"
-        if measured:
-            deck = (f"Across {count} harnesses on {board_models}, "
-                    + " and ".join(measured) + ". Every board below is one "
-                    "verified bundle, shown with its interval and its "
-                    "provenance.")
-
     harness = doc["harness"]
     router = doc["router"]
     harnesses = {a["harness"] for b in bundles for a in b["arms"]}
@@ -990,14 +945,18 @@ def _lede(doc):
         facts.append(f"{router['bundle_count']} router bundles")
     if dates:
         facts.append(f"updated {dates[-1]}")
-    return title, deck, facts
+    return (
+        "Harness and serving-route leaderboards",
+        doc["cross_family_note"],
+        facts,
+    )
 
 
 _METHODOLOGY = """
 <section class="prose">
   <h2>What is being measured</h2>
   <p>OpenBench runs two benchmark families. They share a task contract and a
-  checker, and nothing else. Never compare a number across them.</p>
+  checker, and no denominators.</p>
 
   <h3>Harness Bench</h3>
   <p>Varies the coding-agent harness — the CLI that wraps a model in a run loop,
@@ -1011,8 +970,7 @@ _METHODOLOGY = """
   varying the serving route. An arm is a route. The implemented track is
   <strong>Gateway Tax</strong>: a direct baseline against one or more gateway
   arms on the same canonical model revision, with fallbacks, gateway retries,
-  and caching disabled, so the measurement is the gateway path itself rather
-  than its model choice or cache hit rate.</p>
+  and caching disabled.</p>
 
   <h2>Denominators and intervals</h2>
   <ul>
@@ -1037,8 +995,7 @@ _METHODOLOGY = """
     price. Router cost prefers invoice reconciliation, then the router's own
     reported cost, then a frozen list-price estimate, and shows coverage when a
     basis does not cover every call.</li>
-    <li>Harness defaults are deliberately not clamped: they are part of the
-    product being evaluated.</li>
+    <li>Harness defaults are not clamped.</li>
   </ul>
 
   <h2>Comparability</h2>
@@ -1046,12 +1003,10 @@ _METHODOLOGY = """
     <li>Cells from different bundles are never blended. Each board is one
     bundle; cross-bundle ranking on different task sets is not supported.</li>
     <li>Every ranked bundle ships <code>results.jsonl</code> plus a provenance
-    digest and is re-verified before it appears here. Digests prove
-    tamper-evidence, not that runs were not cherry-picked — which is why
-    disclosed caveats are shown next to the scores rather than in a footnote.</li>
+    digest and is re-verified before it appears here. Digests show
+    tamper-evidence, not absence of cherry-picking.</li>
     <li>Results cover only the included tasks, trials, model deployments,
-    harness versions, and timeout caps. They do not establish a universal
-    ranking.</li>
+    harness versions, and timeout caps.</li>
   </ul>
 
   <h2>Reproducing a board</h2>
@@ -1511,10 +1466,8 @@ def _router_board(bundle):
         parts += _tag("div", {"class": "head"},
                       _tag("h2", {}, "Gateway tax")
                       + _tag("p", {},
-                             "Paired, task-weighted difference from the direct "
-                             "control arm, with bootstrap 95% intervals. Each "
-                             "column is plotted on its own shared scale about a "
-                             "zero line.")
+                             "Paired difference from the direct control arm, "
+                             "bootstrap 95% intervals.")
                       + _tag("div", {"class": "legend"}, legend))
         parts += _render_table(tax_columns, contrasts)
 
@@ -1561,7 +1514,7 @@ def _linked_title(entry):
 
 def _releases_section(entries):
     return _records_section(
-        "Releases", "First-party published comparison bundles.",
+        "Releases", "First-party bundles.",
         [_record(_linked_title(e),
                  [e.get("date"), ", ".join(e.get("models") or [])])
          for e in entries])
@@ -1583,8 +1536,8 @@ def _community_section(entries):
             extra=extra))
     return _records_section(
         "Community",
-        "Third-party bundles re-verified by CI. Digests prove tamper-evidence, "
-        "not that runs were not cherry-picked.",
+        "Third-party bundles, re-verified by CI. Digests show tamper-evidence, "
+        "not absence of cherry-picking.",
         items, anchor="community")
 
 
@@ -1604,8 +1557,7 @@ def _packs_section(entries):
             sub=entry.get("description")))
     return _records_section(
         "Packs",
-        "Versioned task and harness packs "
-        "(obench pack install org/name@version).",
+        "Versioned task and harness packs.",
         items, anchor="packs")
 
 
@@ -1638,8 +1590,7 @@ def _controls(doc):
 def _harness_view(doc):
     family = doc["harness"]
     body = _controls(doc)
-    body += _tag("div", {"class": "note"},
-                 _tag("strong", {}, "How to read this. ") + _esc(family["note"]))
+    body += _tag("p", {"class": "note"}, _esc(family["note"]))
     body += "".join(_harness_board(b) for b in family["bundles"])
     body += _tag("section", {"class": "board", "id": "no-matches", "hidden": True},
                  _tag("div", {"class": "empty"},
@@ -1647,30 +1598,23 @@ def _harness_view(doc):
     if family.get("skipped"):
         body += _skipped_board(
             f"Not ranked ({len(family['skipped'])})",
-            "Published pages without machine-verifiable results, listed with the "
-            "reason rather than dropped.",
+            "No machine-verifiable results.",
             family["skipped"])
     return body
 
 
 def _router_view(doc):
     family = doc["router"]
-    body = _tag("div", {"class": "note"},
-                _tag("strong", {}, "How to read this. ") + _esc(family["note"]))
+    body = _tag("p", {"class": "note"}, _esc(family["note"]))
     if not family["bundles"]:
         body += _tag("section", {"class": "board"}, _tag(
             "div", {"class": "empty"},
-            _tag("p", {}, "No verified Router Bench bundles are published yet.")
-            + _tag("p", {},
-                   "Produce one with <code>obench router run</code>, publish it "
-                   "with <code>obench router publish &lt;results&gt; "
-                   "&lt;experiment&gt; docs/router/&lt;id&gt;</code>, then "
-                   "rebuild with <code>obench site build</code>.")))
+            _tag("p", {}, "No verified Router Bench bundles published yet.")))
     body += "".join(_router_board(b) for b in family["bundles"])
     if family.get("skipped"):
         body += _skipped_board(
             f"Not ranked ({len(family['skipped'])})",
-            "Directories under the router root that did not verify.",
+            "Did not verify.",
             family["skipped"])
     return body
 
@@ -1685,7 +1629,7 @@ def render_board_html(doc):
     """The whole page: content rendered here, behaviour layered on top."""
     title, deck, facts = _lede(doc)
     lede = _tag("div", {"class": "lede"},
-                _tag("h1", {}, title)          # the only markup we author
+                _tag("h1", {}, _esc(title))
                 + _tag("p", {"class": "deck"}, _esc(deck))
                 + _tag("div", {"class": "dateline"},
                        "".join(_tag("span", {}, _esc(f)) for f in facts)))
@@ -1708,7 +1652,7 @@ def render_board_html(doc):
     masthead = _tag("header", {"class": "top"}, _tag(
         "div", {"class": "wrap"},
         _tag("div", {"class": "brand"},
-             _tag("span", {"class": "cmd"}, "obench")
+             _tag("span", {"class": "name"}, "OpenBench")
              + _tag("span", {"class": "what"}, "leaderboards"))
         + _tag("nav", {"class": "tabs"}, tabs)
         + theme_button))
