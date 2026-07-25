@@ -9,7 +9,7 @@ page, with a tab each:
   exactly as [`obench leaderboard`](leaderboard.md) does, then enriched with
   median wall time and `$/solve`.
 - **Gateway Bench** — verified evidence bundles, aggregated by
-  `obench/router_report.py`, including the Gateway Tax contrast table.
+  `obench/gateway_report.py`, including the Gateway Tax contrast table.
 - **Releases** — the `releases.json` / `community.json` / `packs.json` manifests.
 - **Methodology** — denominators, intervals, token bases, and the
   comparability rules, in one place next to the numbers.
@@ -46,17 +46,17 @@ regenerating produces a clean diff.
 ## Publishing a Gateway Bench board
 
 The Gateway tab reads verified bundles from `docs/gateway/*/`. Each directory is
-what `obench router publish` produces — `provenance.json` with
-`bundle_kind = "router_bench"`, the sanitized `results.jsonl`, and the
+what `obench gateway publish` produces — `provenance.json` with
+`bundle_kind = "gateway_bench"`, the sanitized `results.jsonl`, and the
 `experiment` / `policy` / `catalog` / `prices` snapshots.
 
 ```bash
-obench router run experiment.toml --results results/gw.jsonl
-obench router publish results/gw.jsonl experiment.toml docs/gateway/2026-07-23-gateway-tax
+obench gateway run experiment.toml --results results/gw.jsonl
+obench gateway publish results/gw.jsonl experiment.toml docs/gateway/2026-07-23-gateway-tax
 obench site build
 ```
 
-Every bundle is re-verified with `router_publish.verify_bundle()` at build time.
+Every bundle is re-verified with `gateway_publish.verify_bundle()` at build time.
 A directory that fails verification, is not a gateway bundle, or whose rows do
 not aggregate into a Gateway Tax report is listed as skipped rather than
 silently dropped. Optional titles and dates come from a `docs/gateway.json`
@@ -73,15 +73,6 @@ manifest keyed by directory name, in the same shape as `releases.json`:
 ]
 ```
 
-## A note on the name
-
-The family is presented as **Gateway Bench**. The CLI that produces its bundles
-is still `obench router`, and the on-disk `bundle_kind` is still
-`router_bench` — that value is covered by the bundle digests, so renaming it
-would invalidate every published bundle. The site reads the old
-`docs/router/` directory and `docs/router.json` manifest as well as the new
-`docs/gateway/` ones.
-
 ## What the columns mean
 
 **Harness Bench.** Solve rate on countable cells with a Wilson 95% interval
@@ -94,7 +85,7 @@ interchangeable.
 **Gateway Bench.** Per route: solve rate, mean checker score, availability, and
 latency, each with a task-bootstrap 95% interval; plus `$/solve` on the
 best-covered cost basis, preferring `invoice_reconciled`, then
-`router_reported`, then `frozen_list_estimate`. A basis covering less than every
+`gateway_reported`, then `frozen_list_estimate`. A basis covering less than every
 call is flagged with its coverage. The **Gateway tax** table shows the paired,
 task-weighted difference of each gateway arm from its direct control arm — an
 interval spanning zero is not a detected effect.

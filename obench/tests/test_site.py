@@ -126,21 +126,21 @@ class GatewayFamilyTests(_SiteFixture):
         self.assertEqual(doc["gateway"]["bundles"], [])
 
     def test_non_gateway_directory_is_reported_as_skipped(self):
-        bundle = os.path.join(self.site_dir, "router", "not-a-bundle")
+        bundle = os.path.join(self.site_dir, "gateway", "not-a-bundle")
         _write(os.path.join(bundle, "provenance.json"),
                json.dumps({"bundle_kind": "harness"}))
         doc = site.build_board(self.site_dir)
         self.assertEqual(doc["gateway"]["bundle_count"], 0)
         self.assertEqual(
             [s["reason"] for s in doc["gateway"]["skipped"]],
-            ["not a router_bench bundle"],  # on-disk kind is unchanged
+            ["not a gateway_bench bundle"],
         )
 
     def test_tampered_bundle_fails_verification(self):
-        bundle = os.path.join(self.site_dir, "router", "tampered")
+        bundle = os.path.join(self.site_dir, "gateway", "tampered")
         _write(os.path.join(bundle, "provenance.json"), json.dumps({
             "schema_version": 1,
-            "bundle_kind": "router_bench",
+            "bundle_kind": "gateway_bench",
             "artifacts": {"results.jsonl": "0" * 64},
         }))
         _write(os.path.join(bundle, "results.jsonl"), "{}\n")
@@ -157,9 +157,9 @@ class CostBasisTests(unittest.TestCase):
             "basis_coverage": {"covered_calls": covered, "ratio": 1.0 if covered else 0.0},
         }
 
-    def test_prefers_invoice_over_router_reported(self):
+    def test_prefers_invoice_over_gateway_reported(self):
         picked = site._pick_cost({
-            "router_reported": self._basis("router_reported", 10),
+            "gateway_reported": self._basis("gateway_reported", 10),
             "invoice_reconciled": self._basis("invoice_reconciled", 10),
             "frozen_list_estimate": self._basis("frozen_list_estimate", 10),
         })
@@ -168,12 +168,12 @@ class CostBasisTests(unittest.TestCase):
     def test_skips_bases_with_no_covered_calls(self):
         picked = site._pick_cost({
             "invoice_reconciled": self._basis("invoice_reconciled", 0),
-            "router_reported": self._basis("router_reported", 4),
+            "gateway_reported": self._basis("gateway_reported", 4),
         })
-        self.assertEqual(picked["basis"], "router_reported")
+        self.assertEqual(picked["basis"], "gateway_reported")
 
     def test_no_covered_basis_returns_none(self):
-        self.assertIsNone(site._pick_cost({"router_reported": self._basis("x", 0)}))
+        self.assertIsNone(site._pick_cost({"gateway_reported": self._basis("x", 0)}))
         self.assertIsNone(site._pick_cost({}))
 
 

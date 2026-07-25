@@ -5,8 +5,8 @@
 
 * ``board.json`` — one machine-readable document covering **Harness Bench**
   (verified ``results.jsonl`` publish bundles, aggregated by
-  :mod:`obench.leaderboard`) and **Gateway Bench** (verified ``router_bench``
-  evidence bundles, aggregated by :mod:`obench.router_report`).
+  :mod:`obench.leaderboard`) and **Gateway Bench** (verified ``gateway_bench``
+  evidence bundles, aggregated by :mod:`obench.gateway_report`).
 * ``index.html`` — the site's landing page, which *is* the leaderboard: family
   tabs, per-board sortable tables, model/harness filters, Wilson and bootstrap
   confidence intervals drawn as bars, and the Gateway Tax contrast table.
@@ -54,18 +54,18 @@ CROSS_FAMILY_NOTE = (
 )
 
 # Preferred cost basis when an arm reports several. Invoice reconciliation is
-# ground truth; the router's own number is next; a frozen list price is an
+# ground truth; the gateway's own number is next; a frozen list price is an
 # estimate and is labelled as one in the UI.
 COST_BASIS_PREFERENCE = (
     "invoice_reconciled",
-    "router_reported",
+    "gateway_reported",
     "frozen_list_estimate",
 )
 
 # Short column labels; the full basis name stays available on hover.
 COST_BASIS_LABELS = {
     "invoice_reconciled": "invoice",
-    "router_reported": "router",
+    "gateway_reported": "gateway",
     "frozen_list_estimate": "list est.",
 }
 
@@ -184,11 +184,11 @@ def gateway_verification_error(bundle_dir):
         return "invalid provenance.json"
     if not isinstance(provenance, dict):
         return "invalid provenance.json"
-    if provenance.get("bundle_kind") != "router_bench":
-        return "not a router_bench bundle"
-    from . import router_publish
+    if provenance.get("bundle_kind") != "gateway_bench":
+        return "not a gateway_bench bundle"
+    from . import gateway_publish
     try:
-        router_publish.verify_bundle(bundle_dir)
+        gateway_publish.verify_bundle(bundle_dir)
     except Exception as exc:  # noqa: BLE001 - report any verification failure
         return f"bundle verification failed: {exc}"
     return None
@@ -237,14 +237,14 @@ def _metric_dto(metric):
 
 def aggregate_gateway_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
     """Aggregate one verified gateway bundle, or ``None`` when unusable."""
-    from . import router_report
+    from . import gateway_report
 
     if gateway_verification_error(bundle_dir) is not None:
         return None
     results_path = os.path.join(bundle_dir, "results.jsonl")
     try:
         rows = _read_jsonl(results_path)
-        report = router_report.aggregate(rows)
+        report = gateway_report.aggregate(rows)
     except (OSError, ValueError) as exc:
         del exc
         return None
@@ -332,16 +332,15 @@ def build_gateway_family(site_dir, gateway_dirs=None):
     site_dir = os.path.abspath(site_dir)
     roots = list(gateway_dirs or [])
     if not roots:
-        # ``router`` is the pre-rename directory name; still read if present.
-        roots = [d for d in (os.path.join(site_dir, "gateway"),
-                             os.path.join(site_dir, "router"))
-                 if os.path.isdir(d)]
+        default_root = os.path.join(site_dir, "gateway")
+        roots = [default_root] if os.path.isdir(default_root) else []
 
-    manifest = {}
-    for name in ("router.json", "gateway.json"):
-        for e in leaderboard._load_manifest_list(os.path.join(site_dir, name)):
-            if isinstance(e, dict) and e.get("id"):
-                manifest[e["id"]] = e
+    manifest = {
+        e["id"]: e
+        for e in leaderboard._load_manifest_list(
+            os.path.join(site_dir, "gateway.json"))
+        if isinstance(e, dict) and e.get("id")
+    }
 
     bundles = []
     skipped = []
@@ -994,7 +993,7 @@ _METHODOLOGY = """
     figure was proxy-metered, vendor-split, or self-reported by the CLI. These
     bases are not interchangeable.</li>
     <li>Harness <code>$/solve</code> appears only for models with a configured
-    price. Gateway cost prefers invoice reconciliation, then the router's own
+    price. Gateway cost prefers invoice reconciliation, then the gateway's own
     reported cost, then a frozen list-price estimate, and shows coverage when a
     basis does not cover every call.</li>
     <li>Harness defaults are not clamped.</li>
@@ -1014,7 +1013,7 @@ _METHODOLOGY = """
   <h2>Reproducing a board</h2>
   <p>Every board links its <code>results.jsonl</code>. Re-check a bundle with
   <code>obench verify &lt;bundle&gt;</code> (harness) or
-  <code>obench router verify &lt;bundle&gt;</code> (router), and rebuild this
+  <code>obench gateway verify &lt;bundle&gt;</code> (gateway), and rebuild this
   page with <code>obench site build</code>.</p>
 </section>
 """
