@@ -409,3 +409,70 @@ class RunnerInvokedAsModuleTests(unittest.TestCase):
         self.assertIn("--force", cmd,
                       "without --force the runner skips cells that already have "
                       "an excluded row, which is exactly the coverage gap")
+
+
+class TasksDirOmittedWhenUnsetTests(unittest.TestCase):
+    """--tasks-dir must be OMITTED (not emitted empty) when no dir is set.
+
+    Regression #4: with a spec that omits tasks_dir, the command still carried
+    ``--tasks-dir`` with an empty/None value; the runner then failed and wrote
+    no row, and the queue misread the missing row as an unclassifiable exhausted
+    cell. When no tasks dir is known the flag must be absent so the runner
+    resolves it via config/discovery.
+    """
+
+    def test_none_tasks_dir_omits_flag(self):
+        cell = {"harness": "null", "model": "m", "task": "t", "trial": 1}
+        cmd = mq.build_runner_command(
+            cell, "/r.jsonl", None, 60, None, "local")
+        self.assertNotIn("--tasks-dir", cmd, cmd)
+
+    def test_cell_tasks_dir_overrides_default(self):
+        cell = {"harness": "null", "model": "m", "task": "t", "trial": 1,
+                "tasks_dir": "/group/dir", "exec_mode": "docker"}
+        cmd = mq.build_runner_command(cell, "/r.jsonl", None, 60, None, "local")
+        self.assertIn("--tasks-dir", cmd)
+        self.assertIn("/group/dir", cmd)
+        # Per-group exec_mode on the cell wins over the default.
+        self.assertIn("--exec", cmd)
+        self.assertIn("docker", cmd)
+
+    def test_cell_local_exec_mode_overrides_docker_default(self):
+        cell = {"harness": "null", "model": "m", "task": "t", "trial": 1,
+                "tasks_dir": "/g", "exec_mode": "local"}
+        cmd = mq.build_runner_command(cell, "/r.jsonl", None, 60, None, "docker")
+        self.assertNotIn("--exec", cmd, "cell's local exec_mode must override docker default")
+
+
+class GroupedCellExpansionTests(unittest.TestCase):
+    """expand_cells_grouped carries per-group tasks_dir + exec_mode onto cells."""
+
+    def test_cells_carry_group_tasks_dir_and_exec_mode(self):
+        arms = [{"harness": "null", "model": "m"}]
+        groups = [
+            {"tasks": ["core"], "tasks_dir": "/core", "exec_mode": "local"},
+            {"tasks": ["tb"], "tasks_dir": "/tb", "exec_mode": "docker"},
+        ]
+        cells = mq.expand_cells_grouped(arms, groups, 1)
+        by_task = {c["task"]: c for c in cells}
+        self.assertEqual(by_task["core"]["tasks_dir"], "/core")
+        self.assertEqual(by_task["core"]["exec_mode"], "local")
+        self.assertEqual(by_task["tb"]["tasks_dir"], "/tb")
+        self.assertEqual(by_task["tb"]["exec_mode"], "docker")
+
+    def test_group_without_tasks_dir_yields_none(self):
+        arms = [{"harness": "null", "model": "m"}]
+        groups = [{"tasks": ["t"], "tasks_dir": None, "exec_mode": "local"}]
+        cells = mq.expand_cells_grouped(arms, groups, 1)
+        self.assertIsNone(cells[0]["tasks_dir"])
+
+    def test_resolve_group_tasks_dir_precedence(self):
+        spec = {"tasks_dir": "spec-tasks"}
+        # Group-level wins.
+        self.assertTrue(mq.resolve_group_tasks_dir(
+            {"tasks_dir": "grp"}, spec, "/base").endswith("/base/grp"))
+        # Falls back to spec-level.
+        self.assertTrue(mq.resolve_group_tasks_dir(
+            {}, spec, "/base").endswith("/base/spec-tasks"))
+        # Neither set -> None (runner resolves).
+        self.assertIsNone(mq.resolve_group_tasks_dir({}, {}, "/base"))
