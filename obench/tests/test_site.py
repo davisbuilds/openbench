@@ -178,13 +178,39 @@ class CostBasisTests(unittest.TestCase):
 
 
 class RenderTests(_SiteFixture):
-    def test_page_is_self_contained(self):
+    def test_page_loads_no_external_resources(self):
+        """Self-contained means no resource *loads*, not no links.
+
+        A community bundle legitimately links its source on github.com, so
+        forbidding the substring "https://" outright would be a false
+        invariant that only passes while no fixture has a link.
+        """
         doc = site.build_board(self.site_dir)
         page = site.render_board_html(doc)
         self.assertIn("<!doctype html>", page)
-        # No third-party assets and no network fetches.
-        for forbidden in ("http://", "https://", "fetch(", "cdn."):
+        for forbidden in (
+            "<script src", "<link rel=\"stylesheet",
+            "<img", "<iframe", "@import", "url(http", "src=\"http",
+            "fetch(", "XMLHttpRequest", "WebSocket", "cdn.",
+        ):
             self.assertNotIn(forbidden, page)
+
+    def test_anchor_links_are_allowed_and_scheme_checked(self):
+        """External links are fine; they must still be http(s)."""
+        import re
+        doc = site.build_board(self.site_dir)
+        doc["community"] = [{
+            "id": "c1", "title": "Community bundle", "submitter": "someone",
+            "path": "community/c1/index.html",
+            "link": "https://example.com/proof",
+        }]
+        page = site.render_board_html(doc)
+        self.assertIn('href="https://example.com/proof"', page)
+        for href in re.findall(r'href="([^"]+)"', page):
+            self.assertFalse(
+                href.lower().startswith(("javascript:", "data:", "vbscript:")),
+                f"unsafe scheme in href: {href}",
+            )
 
     def test_bundle_supplied_text_is_escaped(self):
         """Titles and caveats come from bundles; they are content, not markup."""
@@ -301,6 +327,62 @@ class DesignContractTests(_SiteFixture):
         self.assertTrue(title)
         self.assertTrue(deck)
         self.assertTrue(facts)
+
+
+class TableOrderingTests(_SiteFixture):
+    """A header that claims a sort must be telling the truth."""
+
+    def _rows(self, page, after):
+        import re
+        chunk = page[page.index(after):]
+        chunk = chunk[:chunk.index("</tbody>")]
+        return re.findall(r'class="name">([^<]+)<', chunk)
+
+    def test_declared_sort_is_actually_applied(self):
+        columns = [
+            {"label": "Name", "cls": "name", "type": "str",
+             "cell": lambda r: r["n"], "key": lambda r: r["n"]},
+            {"label": "Score", "cell": lambda r: str(r["v"]), "key": lambda r: r["v"]},
+        ]
+        rows = [{"n": "a", "v": 1}, {"n": "b", "v": 9}, {"n": "c", "v": 5}]
+        html = site._render_table(columns, rows, "Score")
+        self.assertEqual(self._rows(html, "<tbody>"), ["b", "c", "a"])
+        self.assertIn('aria-sort="descending"', html)
+
+    def test_ascending_column_sorts_and_labels_ascending(self):
+        columns = [
+            {"label": "Name", "cls": "name", "type": "str",
+             "cell": lambda r: r["n"], "key": lambda r: r["n"]},
+            {"label": "Wall", "dir": "asc",
+             "cell": lambda r: str(r["v"]), "key": lambda r: r["v"]},
+        ]
+        rows = [{"n": "a", "v": 9}, {"n": "b", "v": 1}]
+        html = site._render_table(columns, rows, "Wall")
+        self.assertEqual(self._rows(html, "<tbody>"), ["b", "a"])
+        self.assertIn('aria-sort="ascending"', html)
+
+    def test_rows_without_a_value_sink_and_do_not_crash(self):
+        columns = [
+            {"label": "Name", "cls": "name", "type": "str",
+             "cell": lambda r: r["n"], "key": lambda r: r["n"]},
+            {"label": "Score", "cell": lambda r: "-", "key": lambda r: r["v"]},
+        ]
+        rows = [{"n": "a", "v": None}, {"n": "b", "v": 3}]
+        html = site._render_table(columns, rows, "Score")
+        self.assertEqual(self._rows(html, "<tbody>"), ["b", "a"])
+
+    def test_no_declared_sort_preserves_caller_order(self):
+        """The router arms table leads with a control, not a rank."""
+        columns = [{"label": "Name", "cls": "name", "type": "str",
+                    "cell": lambda r: r["n"], "key": lambda r: r["n"]}]
+        rows = [{"n": "z"}, {"n": "a"}]
+        html = site._render_table(columns, rows)
+        self.assertEqual(self._rows(html, "<tbody>"), ["z", "a"])
+        self.assertNotIn("aria-sort", html)
+
+    def test_leading_row_is_marked_for_the_no_javascript_case(self):
+        page = site.render_board_html(site.build_board(self.site_dir))
+        self.assertIn('class="lead"', page)
 
 
 class ContrastPlotTests(unittest.TestCase):

@@ -680,11 +680,11 @@ tbody tr:hover td{background:var(--wash)}
 td.rank{width:1%;padding-right:6px;font:400 19px/1 var(--font-display);
   color:var(--ink-3)}
 td.name{color:var(--ink);font-weight:600;letter-spacing:-.01em}
-/* The leading row of the current sort carries the emphasis. */
-tbody tr:first-child td{border-bottom-color:var(--rule-strong)}
-tbody tr:first-child td.rank{color:var(--ink)}
-tbody tr:first-child td.name{font-size:15px}
-tbody tr:first-child .iv .val{font-size:16px;color:var(--ink)}
+/* The leading visible row of the current sort carries the emphasis. */
+tbody tr.lead td{border-bottom-color:var(--rule-strong)}
+tbody tr.lead td.rank{color:var(--ink)}
+tbody tr.lead td.name{font-size:15px}
+tbody tr.lead .iv .val{font-size:16px;color:var(--ink)}
 /* Identity stays put while the measures scroll. */
 thead th:first-child,tbody td:first-child{position:sticky;left:0;z-index:1;
   background:var(--paper)}
@@ -807,9 +807,13 @@ _JS = r"""
   function renumber(tbody) {
     var n = 0;
     Array.prototype.forEach.call(tbody.rows, function (tr) {
+      tr.classList.remove("lead");
       if (tr.hidden) return;
       n += 1;
       tr.cells[0].textContent = String(n);
+      // Emphasis belongs to the leading *visible* row, not to whichever row
+      // happens to sit first in the DOM after a filter.
+      if (n === 1) tr.classList.add("lead");
     });
   }
 
@@ -904,7 +908,16 @@ _JS = r"""
 
   function showView() {
     var hash = (location.hash || "").replace("#", "");
-    var view = VIEWS.indexOf(hash) === -1 ? "harness" : hash;
+    var view = "harness";
+    if (VIEWS.indexOf(hash) !== -1) {
+      view = hash;
+    } else if (hash) {
+      // A deep link to a section (#community, #packs) should open the view
+      // that section lives in rather than silently falling back.
+      var target = document.getElementById(hash);
+      var host = target && target.closest('main[id^="view-"]');
+      if (host) view = host.id.replace("view-", "");
+    }
     VIEWS.forEach(function (name) {
       document.getElementById("view-" + name).hidden = name !== view;
     });
@@ -940,22 +953,22 @@ def _lede(doc):
                  if a.get("median_wall_s")]
         spread = (max(rates) - min(rates)) * 100 if len(rates) >= 2 else None
         ratio = (max(walls) / min(walls)) if len(walls) >= 2 and min(walls) > 0 else None
-        models = ", ".join(board.get("models") or []) or "one model"
+        board_models = ", ".join(board.get("models") or []) or "one model"
         count = len(board["arms"])
 
-        facts = []
+        measured = []
         if spread is not None:
-            facts.append(f"solve rate spans {spread:.1f} points")
+            measured.append(f"solve rate spans {spread:.1f} points")
         if ratio is not None:
-            facts.append(f"median wall time spans {ratio:.1f}\u00d7")
+            measured.append(f"median wall time spans {ratio:.1f}\u00d7")
         if spread is not None and spread >= 15:
             title = "The harness moves <em>correctness</em>."
         elif spread is not None and ratio is not None and ratio >= 1.8:
             # Correctness is tight but the clock is not: say exactly that.
             title = "Correctness clusters. <em>Speed doesn\u2019t.</em>"
-        if facts:
-            deck = (f"Across {count} harnesses on {models}, "
-                    + " and ".join(facts) + ". Every board below is one "
+        if measured:
+            deck = (f"Across {count} harnesses on {board_models}, "
+                    + " and ".join(measured) + ". Every board below is one "
                     "verified bundle, shown with its interval and its "
                     "provenance.")
 
@@ -1115,6 +1128,25 @@ def _meta_field(label, value):
     return _tag("span", {}, _tag("b", {}, _esc(label) + " ") + _esc(value))
 
 
+def _sort_key(value, descending):
+    """Order strings alphabetically and numbers by magnitude, either way."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.lower() if not descending else _ReversedText(value.lower())
+    return -value if descending else value
+
+
+class _ReversedText(str):
+    """A string that compares backwards, so text can sort descending."""
+
+    def __lt__(self, other):
+        return str.__gt__(self, other)
+
+    def __gt__(self, other):
+        return str.__lt__(self, other)
+
+
 def _clamp01(value):
     return max(0.0, min(1.0, value))
 
@@ -1191,7 +1223,7 @@ def _delta_domain(rows, key):
     return widest or 1.0
 
 
-def _render_table(columns, rows, sort_index, row_attrs=None):
+def _render_table(columns, rows, sorted_by=None, row_attrs=None):
     """One table. ``columns`` entries are dicts:
 
     ``label``  header text
@@ -1201,13 +1233,35 @@ def _render_table(columns, rows, sort_index, row_attrs=None):
     ``dir``    default direction when the column is first clicked
     ``axis``   optional tick labels drawn under the header
     ``cls``    optional cell class
+    ``plot``   the cell draws a plot (used to budget the plot width)
     ``skip_if_empty``  drop the column when no row has a key
+
+    ``sorted_by`` is a column label. When given, the rows are *actually* sorted
+    by that column before rendering, so the header's sort indicator and the
+    rank numbers agree with what is on screen. When omitted, the caller's own
+    ordering stands and no column claims to be sorted — which is what a table
+    with a control arm wants, since its first row is a baseline and not a rank.
     """
     columns = [
         col for col in columns
         if not col.get("skip_if_empty")
         or any(col["key"](row) is not None for row in rows)
     ]
+
+    sort_index = None
+    if sorted_by is not None:
+        sort_index = next(
+            (i for i, col in enumerate(columns) if col["label"] == sorted_by), None)
+    if sort_index is not None:
+        col = columns[sort_index]
+        descending = col.get("dir", "desc") == "desc"
+        # Stable, so the caller's ordering survives as the tie-break, and rows
+        # with nothing to compare sink either way.
+        rows = sorted(
+            rows,
+            key=lambda r: (col["key"](r) is None,
+                           _sort_key(col["key"](r), descending)),
+        )
 
     heads = ""
     for index, col in enumerate(columns):
@@ -1221,10 +1275,13 @@ def _render_table(columns, rows, sort_index, row_attrs=None):
             "role": "button" if sortable else None,
         }
         if index == sort_index:
-            attrs["aria-sort"] = "descending"
+            attrs["aria-sort"] = (
+                "descending" if col.get("dir", "desc") == "desc" else "ascending")
         body = _esc(col["label"])
         if sortable:
-            arrow = "↓" if index == sort_index else "↕"
+            arrow = "↕"
+            if index == sort_index:
+                arrow = "↓" if col.get("dir", "desc") == "desc" else "↑"
             body += _tag("span", {"class": "arrow"}, arrow)
         if col.get("axis"):
             body += _tag("div", {"class": "axis"},
@@ -1242,6 +1299,8 @@ def _render_table(columns, rows, sort_index, row_attrs=None):
                 keys[f"data-s{index}"] = "" if value is None else str(value)
         attrs = dict(row_attrs(row) if row_attrs else {})
         attrs.update(keys)
+        if position == 1:
+            attrs["class"] = "lead"
         body_rows += _tag("tr", attrs, cells)
 
     # Plot width is a per-table budget: four contrast columns cannot each be as
@@ -1254,7 +1313,7 @@ def _render_table(columns, rows, sort_index, row_attrs=None):
     attrs = {"class": "scroll", "style": f"--plot-w:{plot_w}px"}
     if len(columns) > 6 or plots > 2:
         attrs["data-dense"] = "1"
-    return _tag(attrs.pop("_tag", "div"), attrs, _tag(
+    return _tag("div", attrs, _tag(
         "table", {},
         _tag("thead", {}, _tag("tr", {}, _tag("th", {"scope": "col"}, "#") + heads))
         + _tag("tbody", {}, body_rows)))
@@ -1332,9 +1391,7 @@ def _harness_board(bundle):
              _chip(b) for b in (a.get("token_bases") or ["unknown"])))},
     ]
 
-    sort_index = next(i for i, c in enumerate(columns)
-                      if c["label"].startswith("Solve rate"))
-    table = _render_table(columns, arms, sort_index, row_attrs=lambda a: {
+    table = _render_table(columns, arms, "Solve rate · Wilson 95%", row_attrs=lambda a: {
         "data-harness": a["harness"],
         "data-model": a["model"],
         "data-search": f"{a['harness']} {a['model']}".lower(),
@@ -1421,7 +1478,7 @@ def _router_board(bundle):
          "cell": cost_cell,
          "key": lambda a: a.get("cost") and a["cost"]["basis"]},
     ]
-    parts = head + _render_table(columns, bundle["arms"], 2)
+    parts = head + _render_table(columns, bundle["arms"])
 
     contrasts = bundle.get("contrasts") or []
     if contrasts:
@@ -1458,7 +1515,7 @@ def _router_board(bundle):
                              "column is plotted on its own shared scale about a "
                              "zero line.")
                       + _tag("div", {"class": "legend"}, legend))
-        parts += _render_table(tax_columns, contrasts, 2)
+        parts += _render_table(tax_columns, contrasts)
 
     return _tag("section", {"class": "board", "data-caveats": "0"}, parts)
 

@@ -263,8 +263,12 @@ def write_site_index(site_dir, releases=None, community=None, packs=None):
     compatibility but no longer consulted.
     """
     del releases, community, packs
-    from . import site
-    return site.write_board(site_dir)["html_path"]
+    from . import leaderboard, site
+    # Use the same default scan roots as `obench site build`, so a rebuild
+    # triggered by a publish produces the same page as one run by hand.
+    info = site.write_board(
+        site_dir, community_dir=leaderboard._default_community_dir())
+    return info["html_path"]
 
 
 def sync_community_to_site(community_dir, site_dir):
