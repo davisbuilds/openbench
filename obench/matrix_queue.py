@@ -269,13 +269,22 @@ class ArmState:
         self.budgets: dict[str, int] = dict(retry_budgets or DEFAULT_RETRY)
         self.consecutive_excluded = 0
         self.paused = False
-        self.satisfied = 0
+        # A SET, not a counter: an incrementing int carried across resumes
+        # double-counted cells re-verified in a later pass and printed
+        # coverage above 100% (observed: 'Total: 4/2 satisfied'). Coverage
+        # is a property of WHICH cells have verdicts, so store which.
+        self.satisfied_cells: set[str] = set()
         self.planned = 0
         self.exhausted_cells: list[str] = []
         # A harness/config error: the runner exited nonzero and wrote no row at
         # all. Distinct from an exhausted retry budget -- it means the arm is
         # mis-wired, so we stop it and surface the reason instead of retrying.
         self.config_error: str | None = None
+
+    @property
+    def satisfied(self) -> int:
+        """Distinct cells with a verdict. Never exceeds ``planned``."""
+        return len(self.satisfied_cells)
 
     def retry_budget(self, failure_class: str | None) -> int:
         """Re-queues allowed for a cell that failed with ``failure_class``.
@@ -311,7 +320,7 @@ class ArmState:
             "budgets": dict(self.budgets),
             "consecutive_excluded": self.consecutive_excluded,
             "paused": self.paused,
-            "satisfied": self.satisfied,
+            "satisfied_cells": sorted(self.satisfied_cells),
             "planned": self.planned,
             "exhausted_cells": list(self.exhausted_cells),
             "config_error": self.config_error,
@@ -322,7 +331,7 @@ class ArmState:
         self = cls(d["name"], d.get("budgets"))
         self.consecutive_excluded = d.get("consecutive_excluded", 0)
         self.paused = d.get("paused", False)
-        self.satisfied = d.get("satisfied", 0)
+        self.satisfied_cells = set(d.get("satisfied_cells") or [])
         self.planned = d.get("planned", 0)
         self.exhausted_cells = list(d.get("exhausted_cells", []))
         self.config_error = d.get("config_error")
@@ -593,7 +602,7 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         existing = load_results_ids(results_path)
         row = existing.get(run_id)
         if cell_is_satisfied(row):
-            as_.satisfied += 1
+            as_.satisfied_cells.add(run_id)
             print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
             state.set("arm_states", {n: a.to_dict() for n, a in arm_states.items()})
             state.save()
@@ -629,7 +638,7 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         existing = load_results_ids(results_path)
         row = existing.get(run_id)
         if cell_is_satisfied(row):
-            as_.satisfied += 1
+            as_.satisfied_cells.add(run_id)
             as_.record_included()
             print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
         elif row is None:

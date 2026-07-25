@@ -156,7 +156,7 @@ class QueueStateTests(unittest.TestCase):
 
     def test_arm_state_roundtrip(self):
         a = mq.ArmState("pi")
-        a.satisfied = 5
+        a.satisfied_cells.update(f"c{i}" for i in range(5))
         a.planned = 10
         a.consecutive_excluded = 3
         a.exhausted_cells = ["pi:t1:m:trial1"]
@@ -318,7 +318,7 @@ class CoverageSummaryTests(unittest.TestCase):
         cells = mq.expand_cells(arms, tasks, 1)
         arm_states = {a["harness"]: mq.ArmState(a["harness"]) for a in arms}
         arm_states["pi"].planned = 1
-        arm_states["pi"].satisfied = 1
+        arm_states["pi"].satisfied_cells.add("pi:t1:m:trial1")
 
         self.assertEqual(arm_states["pi"].satisfied, 1)
         self.assertEqual(arm_states["pi"].planned, 1)
@@ -326,7 +326,7 @@ class CoverageSummaryTests(unittest.TestCase):
     def test_partial_coverage_exhausted(self):
         arm = mq.ArmState("pi")
         arm.planned = 3
-        arm.satisfied = 1
+        arm.satisfied_cells.add("pi:t1:m:trial1")
         arm.exhausted_cells = ["pi:t1:a:trial2"]
         self.assertEqual(len(arm.exhausted_cells), 1)
         self.assertEqual(arm.satisfied, 1)
@@ -476,3 +476,34 @@ class GroupedCellExpansionTests(unittest.TestCase):
             {}, spec, "/base").endswith("/base/spec-tasks"))
         # Neither set -> None (runner resolves).
         self.assertIsNone(mq.resolve_group_tasks_dir({}, {}, "/base"))
+
+
+class CoverageCannotExceedPlannedTests(unittest.TestCase):
+    """Coverage must be idempotent: re-verifying a cell cannot inflate it.
+
+    Regression: satisfied was an incrementing int persisted across resumes, so
+    a second pass over already-satisfied cells double-counted and the report
+    printed impossible coverage ("Total: 4/2 satisfied", and 300% in another
+    run). Coverage is the control protecting solve-rate honesty; a control that
+    can print 200% is not a control. Satisfied is now the SET of cells with a
+    verdict.
+    """
+
+    def test_duplicate_satisfaction_counts_once(self):
+        arm = mq.ArmState("pi x m")
+        arm.planned = 2
+        for _ in range(5):
+            arm.satisfied_cells.add("pi:t:m:trial1")
+        arm.satisfied_cells.add("pi:t:m:trial2")
+        self.assertEqual(arm.satisfied, 2)
+        self.assertLessEqual(arm.satisfied, arm.planned)
+
+    def test_satisfied_survives_state_roundtrip_without_growing(self):
+        arm = mq.ArmState("pi x m")
+        arm.planned = 3
+        arm.satisfied_cells.update({"a", "b"})
+        restored = mq.ArmState.from_dict(arm.to_dict())
+        self.assertEqual(restored.satisfied, 2)
+        # Re-adding the same cells after a resume must not inflate the count.
+        restored.satisfied_cells.update({"a", "b"})
+        self.assertEqual(restored.satisfied, 2)
