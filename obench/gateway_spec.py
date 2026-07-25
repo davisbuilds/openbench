@@ -238,8 +238,8 @@ class RoutePlan:
     allow_private_endpoint: bool
     private_host_allowlist: tuple[str, ...]
     private_cidr_allowlist: tuple[str, ...]
-    # Proxy-only controls. They are bound by the experiment or arm digest but
-    # intentionally omitted from the adapter-facing route-plan JSON.
+    # Proxy-only controls. They are bound by arm_digest but intentionally
+    # omitted from the adapter-facing route-plan JSON.
     gateway: str | None = None
     track: str = TRACK
     model_match: str = "exact_revision"
@@ -691,6 +691,14 @@ def _parse_allowlists(table: Mapping[str, Any], allow_private_endpoint: bool) ->
     return hosts, tuple(cidrs)
 
 
+def parse_endpoint_allowlists(
+    data: Mapping[str, Any],
+    allow_private_endpoint: bool,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Validate endpoint allowlists for another gateway experiment surface."""
+    return _parse_allowlists(data, allow_private_endpoint)
+
+
 def _normalize_hostname(value: str, path: str, *, allow_ip: bool = False) -> str:
     hostname = value.strip().rstrip(".").lower()
     try:
@@ -706,6 +714,29 @@ def _normalize_hostname(value: str, path: str, *, allow_ip: bool = False) -> str
             or any(not _HOST_LABEL_RE.fullmatch(label) for label in labels)):
         raise GatewaySpecError(f"{path} must be a bare DNS hostname")
     return hostname
+
+
+def parse_route_arm(
+    value: Any,
+    index: int,
+    *,
+    allow_private_endpoint: bool,
+    private_host_allowlist: tuple[str, ...],
+    private_cidr_allowlist: tuple[str, ...],
+) -> Arm:
+    """Parse one route arm without imposing a benchmark scheduling contract."""
+    return _parse_arm(
+        value,
+        index,
+        allow_private_endpoint,
+        private_host_allowlist,
+        private_cidr_allowlist,
+    )
+
+
+def validate_fixed_route_arms(arms: tuple[Arm, ...]) -> None:
+    """Require the fixed direct-control comparison used by gateway tracks."""
+    _validate_gateway_controls(arms)
 
 
 def parse_experiment(data: Mapping[str, Any]) -> GatewayExperiment:
@@ -825,22 +856,57 @@ def load_experiment(path: str | os.PathLike[str]) -> GatewayExperiment:
     return parse_experiment_toml(text, source=str(resolved))
 
 
-def compile_route_plans(
-    experiment: GatewayExperiment,
+def compile_fixed_route_plans(
     *,
+    arms: tuple[Arm, ...],
+    experiment_digest: str,
+    track: str,
+    model_match: str,
+    provider_prompt_mode: str,
+    allow_private_endpoint: bool,
+    private_host_allowlist: tuple[str, ...],
+    private_cidr_allowlist: tuple[str, ...],
     environ: Mapping[str, str],
     admitted_auth_envs: set[str] | frozenset[str],
 ) -> tuple[tuple[RoutePlan, ...], SecretPlan]:
-    """Compile sanitized route plans and admitted in-memory credentials."""
-    if not isinstance(experiment, GatewayExperiment):
-        raise TypeError("experiment must be a GatewayExperiment")
-    # Public dataclasses are convenient value types, but parsing remains the
-    # validation boundary. Reparse here so hand-built instances cannot bypass it.
-    experiment = parse_experiment(experiment.to_dict())
+    """Compile one validated direct-control route set for any gateway track."""
+    if not isinstance(experiment_digest, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", experiment_digest
+    ):
+        raise GatewaySpecError("experiment_digest must be a lowercase SHA-256 digest")
+    if not isinstance(track, str) or not track:
+        raise GatewaySpecError("track must be a non-empty string")
+    if model_match not in MODEL_MATCHES:
+        raise GatewaySpecError("model_match is unsupported")
+    if provider_prompt_mode not in PROVIDER_PROMPT_MODES:
+        raise GatewaySpecError("provider_prompt_mode is unsupported")
+    if not isinstance(allow_private_endpoint, bool):
+        raise GatewaySpecError("allow_private_endpoint must be a boolean")
+    if (
+        not isinstance(private_host_allowlist, tuple)
+        or any(not isinstance(item, str) for item in private_host_allowlist)
+        or not isinstance(private_cidr_allowlist, tuple)
+        or any(not isinstance(item, str) for item in private_cidr_allowlist)
+    ):
+        raise GatewaySpecError("private endpoint allowlists must be tuples of strings")
+    policy = {
+        "private_host_allowlist": list(private_host_allowlist),
+        "private_cidr_allowlist": list(private_cidr_allowlist),
+    }
+    hosts, cidrs = _parse_allowlists(policy, allow_private_endpoint)
+    if not isinstance(arms, tuple) or not arms or any(
+        not isinstance(arm, Arm) for arm in arms
+    ):
+        raise GatewaySpecError("arms must be a non-empty tuple of Arm values")
+    validated_arms = tuple(
+        _parse_arm(arm.to_dict(), index, allow_private_endpoint, hosts, cidrs)
+        for index, arm in enumerate(arms)
+    )
+    _validate_gateway_controls(validated_arms)
     admitted = frozenset(admitted_auth_envs)
     if any(not isinstance(name, str) for name in admitted):
         raise GatewaySpecError("admitted_auth_envs must contain environment variable names")
-    declared = frozenset(arm.auth_env for arm in experiment.arms)
+    declared = frozenset(arm.auth_env for arm in validated_arms)
     unexpected = sorted(admitted - declared)
     if unexpected:
         raise GatewaySpecError(
@@ -848,7 +914,7 @@ def compile_route_plans(
         )
     plans: list[RoutePlan] = []
     secrets: list[_ArmSecret] = []
-    for arm in experiment.arms:
+    for arm in validated_arms:
         if arm.auth_env not in admitted:
             raise GatewaySpecError(
                 f"auth environment variable {arm.auth_env!r} is not explicitly admitted"
@@ -860,10 +926,10 @@ def compile_route_plans(
             )
         plans.append(RoutePlan(
             schema_version=SCHEMA_VERSION,
-            experiment_digest=experiment.digest,
-            track=experiment.track,
-            model_match=experiment.model_match,
-            provider_prompt_mode=experiment.provider_prompt_mode,
+            experiment_digest=experiment_digest,
+            track=track,
+            model_match=model_match,
+            provider_prompt_mode=provider_prompt_mode,
             arm_digest=arm.digest,
             arm_id=arm.arm_id,
             route_kind=arm.route_kind,
@@ -879,13 +945,39 @@ def compile_route_plans(
             cache_enabled=arm.cache_enabled,
             auth_env=arm.auth_env,
             sampling=arm.sampling,
-            allow_private_endpoint=experiment.allow_private_endpoint,
-            private_host_allowlist=experiment.private_host_allowlist,
-            private_cidr_allowlist=experiment.private_cidr_allowlist,
+            allow_private_endpoint=allow_private_endpoint,
+            private_host_allowlist=hosts,
+            private_cidr_allowlist=cidrs,
             gateway=arm.gateway,
         ))
         secrets.append(_ArmSecret(arm.arm_id, arm.auth_env, value))
     return tuple(plans), SecretPlan(tuple(secrets))
+
+
+def compile_route_plans(
+    experiment: GatewayExperiment,
+    *,
+    environ: Mapping[str, str],
+    admitted_auth_envs: set[str] | frozenset[str],
+) -> tuple[tuple[RoutePlan, ...], SecretPlan]:
+    """Compile sanitized route plans and admitted in-memory credentials."""
+    if not isinstance(experiment, GatewayExperiment):
+        raise TypeError("experiment must be a GatewayExperiment")
+    # Public dataclasses are convenient value types, but parsing remains the
+    # validation boundary. Reparse here so hand-built instances cannot bypass it.
+    experiment = parse_experiment(experiment.to_dict())
+    return compile_fixed_route_plans(
+        arms=experiment.arms,
+        experiment_digest=experiment.digest,
+        track=experiment.track,
+        model_match=experiment.model_match,
+        provider_prompt_mode=experiment.provider_prompt_mode,
+        allow_private_endpoint=experiment.allow_private_endpoint,
+        private_host_allowlist=experiment.private_host_allowlist,
+        private_cidr_allowlist=experiment.private_cidr_allowlist,
+        environ=environ,
+        admitted_auth_envs=admitted_auth_envs,
+    )
 
 
 # Explicit aliases make call sites readable while retaining one parser contract.

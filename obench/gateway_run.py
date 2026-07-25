@@ -742,6 +742,21 @@ def _cache_accounting(metrics: Mapping[str, Any]) -> dict[str, int | None]:
     }
 
 
+def price_call(
+    metrics: Mapping[str, Any],
+    prices: Mapping[str, Price],
+    plan: gateway_spec.RoutePlan,
+    observed_at: Any,
+) -> tuple[dict[str, Any], Decimal | None]:
+    """Public request-level accounting wrapper shared by gateway tracks."""
+    return _price_call(metrics, prices, plan, observed_at)
+
+
+def cache_accounting(metrics: Mapping[str, Any]) -> dict[str, int | None]:
+    """Return normalized cache token counts from privacy-safe metrics."""
+    return _cache_accounting(metrics)
+
+
 def _token_accounting(metrics: Mapping[str, Any]) -> dict[str, int | None]:
     usage = metrics.get("usage")
     usage = usage if isinstance(usage, Mapping) else {}
