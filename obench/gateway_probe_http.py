@@ -20,6 +20,43 @@ from . import gateway_probe_spec as probe_spec
 from .gateway_probe_models import GatewayProbeRunError, PrimerError, ProbeBlock
 
 
+_ROUTE_REASON_STATUS = {
+    "missing_stream_metrics": "unverifiable",
+    "missing_route_evidence": "unverifiable",
+    "missing_requested_model": "unverifiable",
+    "missing_served_model": "unverifiable",
+    "stream_not_done": "unverifiable",
+    "missing_gateway_profile": "unverifiable",
+    "missing_cloudflare_metadata": "unverifiable",
+    "missing_concentrate_metadata": "unverifiable",
+    "missing_openrouter_metadata": "unverifiable",
+    "missing_vercel_metadata": "unverifiable",
+    "missing_provider": "unverifiable",
+    "unqualified_served_model": "unverifiable",
+    "missing_metadata_requested_model": "unverifiable",
+    "missing_attempt_count": "unverifiable",
+    "missing_model_attempts": "unverifiable",
+    "missing_successful_attempt": "unverifiable",
+    "missing_attempt_evidence": "unverifiable",
+    "missing_attempt_provider": "unverifiable",
+    "missing_attempt_model": "unverifiable",
+    "missing_attempt_status": "unverifiable",
+    "malformed_route_evidence": "failed",
+    "malformed_events": "failed",
+    "fallback_enabled": "failed",
+    "served_model_conflict": "failed",
+    "provider_conflict": "failed",
+    "multiple_attempts": "failed",
+    "served_model_not_allowed": "failed",
+    "provider_not_allowed": "failed",
+    "requested_model_conflict": "failed",
+    "malformed_attempts": "failed",
+    "fallback_attempt": "failed",
+    "attempt_provider_not_allowed": "failed",
+    "unsuccessful_attempt": "failed",
+}
+
+
 class _TimedConnection(http.client.HTTPConnection):
     """HTTP connection with separately observed DNS and TCP setup."""
 
@@ -233,16 +270,16 @@ def _route_status(
     reasons = evidence.get("reasons")
     reasons = reasons if isinstance(reasons, list) else ["malformed_route_evidence"]
     normalized_reasons = list(dict.fromkeys(str(reason) for reason in reasons))
-    if evidence.get("pass") is True:
+    if evidence.get("pass") is True and not normalized_reasons:
         return "verified", []
-    conflict_markers = ("conflict", "fallback", "malformed")
+    statuses = {
+        _ROUTE_REASON_STATUS.get(reason, "failed")
+        for reason in normalized_reasons
+    }
     status = (
-        "failed"
-        if any(
-            any(marker in reason for marker in conflict_markers)
-            for reason in normalized_reasons
-        )
-        else "unverifiable"
+        "unverifiable"
+        if normalized_reasons and statuses == {"unverifiable"}
+        else "failed"
     )
     return status, normalized_reasons
 

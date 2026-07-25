@@ -298,6 +298,104 @@ class GatewayProbeHttpTests(unittest.TestCase):
             {"only": ["openai"], "allow_fallbacks": False},
         )
 
+    def test_route_reason_taxonomy_is_explicit_and_fail_closed(self):
+        expected = {
+            "missing_stream_metrics": "unverifiable",
+            "missing_route_evidence": "unverifiable",
+            "missing_requested_model": "unverifiable",
+            "missing_served_model": "unverifiable",
+            "stream_not_done": "unverifiable",
+            "missing_gateway_profile": "unverifiable",
+            "missing_cloudflare_metadata": "unverifiable",
+            "missing_concentrate_metadata": "unverifiable",
+            "missing_openrouter_metadata": "unverifiable",
+            "missing_vercel_metadata": "unverifiable",
+            "missing_provider": "unverifiable",
+            "unqualified_served_model": "unverifiable",
+            "missing_metadata_requested_model": "unverifiable",
+            "missing_attempt_count": "unverifiable",
+            "missing_model_attempts": "unverifiable",
+            "missing_successful_attempt": "unverifiable",
+            "missing_attempt_evidence": "unverifiable",
+            "missing_attempt_provider": "unverifiable",
+            "missing_attempt_model": "unverifiable",
+            "missing_attempt_status": "unverifiable",
+            "malformed_route_evidence": "failed",
+            "malformed_events": "failed",
+            "fallback_enabled": "failed",
+            "served_model_conflict": "failed",
+            "provider_conflict": "failed",
+            "multiple_attempts": "failed",
+            "served_model_not_allowed": "failed",
+            "provider_not_allowed": "failed",
+            "requested_model_conflict": "failed",
+            "malformed_attempts": "failed",
+            "fallback_attempt": "failed",
+            "attempt_provider_not_allowed": "failed",
+            "unsuccessful_attempt": "failed",
+        }
+        self.assertEqual(
+            gateway_probe_http._ROUTE_REASON_STATUS,
+            expected,
+        )
+        for reason, expected_status in expected.items():
+            with self.subTest(reason=reason):
+                status, reasons = gateway_probe_http._route_status({
+                    "route_evidence": {
+                        "pass": False,
+                        "reasons": [reason],
+                    }
+                })
+                self.assertEqual(status, expected_status)
+                self.assertEqual(reasons, [reason])
+
+        for reasons in (
+            ["unknown_route_reason"],
+            ["missing_provider", "provider_not_allowed"],
+            [],
+        ):
+            with self.subTest(reasons=reasons):
+                status, _normalized = gateway_probe_http._route_status({
+                    "route_evidence": {
+                        "pass": False,
+                        "reasons": reasons,
+                    }
+                })
+                self.assertEqual(status, "failed")
+
+        self.assertEqual(
+            gateway_probe_http._route_status({
+                "route_evidence": {
+                    "pass": True,
+                    "reasons": ["provider_not_allowed"],
+                }
+            }),
+            ("failed", ["provider_not_allowed"]),
+        )
+        self.assertEqual(
+            gateway_probe_http._route_status({
+                "route_evidence": {
+                    "pass": True,
+                    "reasons": [],
+                }
+            }),
+            ("verified", []),
+        )
+        self.assertEqual(
+            gateway_probe_http._route_status(None),
+            ("unverifiable", ["missing_stream_metrics"]),
+        )
+        self.assertEqual(
+            gateway_probe_http._route_status({}),
+            ("unverifiable", ["missing_route_evidence"]),
+        )
+        self.assertEqual(
+            gateway_probe_http._route_status({
+                "route_evidence": {"pass": False, "reasons": "not-a-list"}
+            }),
+            ("failed", ["malformed_route_evidence"]),
+        )
+
     def test_bad_status_line_never_persists_server_or_exception_text(self):
         exp = experiment(self.endpoint)
         block = ProbeBlock(
