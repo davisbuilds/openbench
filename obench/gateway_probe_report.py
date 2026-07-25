@@ -9,7 +9,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from . import gateway_probe_results, stats
+from . import gateway_probe_results, gateway_probe_spec, stats
 
 
 class GatewayProbeReportError(ValueError):
@@ -17,12 +17,33 @@ class GatewayProbeReportError(ValueError):
 
 
 _METRICS = {
-    "dns_s": ("request_metrics", "connection", "dns_s"),
-    "tcp_s": ("request_metrics", "connection", "tcp_s"),
-    "tls_s": ("request_metrics", "connection", "tls_s"),
-    "request_to_first_byte_s": ("request_metrics", "timing", "ttfb_s"),
-    "semantic_ttft_s": ("request_metrics", "timing", "semantic_ttft_s"),
-    "total_s": ("request_metrics", "timing", "total_s"),
+    "setup_dns_s": ("request_metrics", "setup", "dns_s"),
+    "setup_tcp_s": ("request_metrics", "setup", "tcp_s"),
+    "setup_tls_s": ("request_metrics", "setup", "tls_s"),
+    "request_to_response_headers_s": (
+        "request_metrics", "timing", "request_to_response_headers_s",
+    ),
+    "request_to_first_body_byte_s": (
+        "request_metrics", "timing", "request_to_first_body_byte_s",
+    ),
+    "request_to_semantic_ttft_s": (
+        "request_metrics", "timing", "request_to_semantic_ttft_s",
+    ),
+    "request_stream_total_s": (
+        "request_metrics", "timing", "request_stream_total_s",
+    ),
+    "cold_end_to_end_response_headers_s": (
+        "request_metrics", "timing", "cold_end_to_end_response_headers_s",
+    ),
+    "cold_end_to_end_first_body_byte_s": (
+        "request_metrics", "timing", "cold_end_to_end_first_body_byte_s",
+    ),
+    "cold_end_to_end_semantic_ttft_s": (
+        "request_metrics", "timing", "cold_end_to_end_semantic_ttft_s",
+    ),
+    "cold_end_to_end_stream_total_s": (
+        "request_metrics", "timing", "cold_end_to_end_stream_total_s",
+    ),
     "throughput_tokens_per_s": (
         "request_metrics", "generation", "tokens_per_second",
     ),
@@ -40,6 +61,29 @@ _METRICS = {
     ),
     "charged_cost_usd": ("billing", "charged_cost_usd"),
 }
+
+_PHASE_METRIC_LABELS = (
+    ("setup_dns_s", "Setup DNS"),
+    ("setup_tcp_s", "Setup TCP"),
+    ("setup_tls_s", "Setup TLS"),
+    ("request_to_response_headers_s", "Request to response headers"),
+    ("request_to_first_body_byte_s", "Request to first body byte"),
+    ("request_to_semantic_ttft_s", "Request to semantic TTFT"),
+    ("request_stream_total_s", "Request stream total"),
+    (
+        "cold_end_to_end_response_headers_s",
+        "Cold end-to-end response headers",
+    ),
+    (
+        "cold_end_to_end_first_body_byte_s",
+        "Cold end-to-end first body byte",
+    ),
+    (
+        "cold_end_to_end_semantic_ttft_s",
+        "Cold end-to-end semantic TTFT",
+    ),
+    ("cold_end_to_end_stream_total_s", "Cold end-to-end stream total"),
+)
 
 
 def _number(value: Any) -> float | None:
@@ -65,6 +109,16 @@ def _metric(row: Mapping[str, Any], path: Sequence[str]) -> float | None:
             return None
         value = value.get(key)
     return _number(value)
+
+
+def _metric_items(condition: str) -> Iterable[tuple[str, Sequence[str]]]:
+    for name, path in _METRICS.items():
+        if condition == "warm" and (
+            name.startswith("setup_")
+            or name.startswith("cold_end_to_end_")
+        ):
+            continue
+        yield name, path
 
 
 def _percentile(values: Sequence[float], probability: float) -> float | None:
@@ -121,6 +175,7 @@ def aggregate(
     rows: Iterable[Mapping[str, Any]],
     *,
     bootstrap_replicates: int = 2_000,
+    experiment: gateway_probe_spec.GatewayProbeExperiment | None = None,
 ) -> dict[str, Any]:
     materialized = list(rows)
     if not materialized:
@@ -136,6 +191,10 @@ def aggregate(
             or row.get("benchmark") != gateway_probe_results.BENCHMARK
         ):
             raise GatewayProbeReportError("results contain an invalid probe row")
+        try:
+            gateway_probe_results.validate_row_shape(row)
+        except Exception as exc:
+            raise GatewayProbeReportError(str(exc)) from exc
         identity = row.get("identity")
         if not isinstance(identity, Mapping):
             raise GatewayProbeReportError("result identity is missing")
@@ -146,16 +205,19 @@ def aggregate(
         if row.get("cell_id") != expected_cell_id:
             raise GatewayProbeReportError("result cell_id does not match identity")
         benchmark = identity.get("benchmark")
-        experiment = identity.get("experiment")
+        experiment_provenance = identity.get("experiment")
         comparison = identity.get("comparison")
         if benchmark != {
             "name": gateway_probe_results.BENCHMARK,
             "track": "request_probe",
         }:
             raise GatewayProbeReportError("rows contain invalid benchmark provenance")
-        if not isinstance(experiment, Mapping):
+        if not isinstance(experiment_provenance, Mapping):
             raise GatewayProbeReportError("rows omit experiment provenance")
-        experiment_identity = (experiment.get("id"), experiment.get("digest"))
+        experiment_identity = (
+            experiment_provenance.get("id"),
+            experiment_provenance.get("digest"),
+        )
         if not all(isinstance(item, str) and item for item in experiment_identity):
             raise GatewayProbeReportError("rows omit experiment provenance")
         experiment_identities.add(experiment_identity)
@@ -266,6 +328,29 @@ def aggregate(
             raise GatewayProbeReportError("rows contain inconsistent block provenance")
         block_provenance[block_key] = block_id
         attempts[(case, condition, repetition)][attempt].append(row)
+    if experiment is not None:
+        if (
+            experiment.experiment_id != experiment_id
+            or experiment.digest != experiment_digest
+            or tuple(sorted(arm.arm_id for arm in experiment.arms))
+            != expected_arms
+        ):
+            raise GatewayProbeReportError(
+                "experiment snapshot does not match result provenance"
+            )
+        for arm in experiment.arms:
+            metadata = (
+                arm.digest,
+                arm.route_kind,
+                arm.baseline,
+                experiment.model_match,
+            )
+            existing = arm_metadata.get(arm.arm_id)
+            if existing is not None and existing != metadata:
+                raise GatewayProbeReportError(
+                    "experiment snapshot conflicts with arm provenance"
+                )
+            arm_metadata[arm.arm_id] = metadata
     missing_arm_metadata = sorted(set(expected_arms) - set(arm_metadata))
     if missing_arm_metadata:
         raise GatewayProbeReportError(
@@ -342,7 +427,7 @@ def aggregate(
                         ],
                         success,
                     )
-                    for name, path in _METRICS.items()
+                    for name, path in _metric_items(condition)
                 },
             }
 
@@ -358,7 +443,7 @@ def aggregate(
                 for coordinate, rows_by_arm in complete_blocks.items()
                 if coordinate[1] == condition
             ]
-            for name, path in _METRICS.items():
+            for name, path in _metric_items(condition):
                 deltas = []
                 for rows_by_arm in condition_blocks:
                     direct = rows_by_arm[baseline]
@@ -393,7 +478,7 @@ def aggregate(
 
     minimum_blocks = min(complete_by_condition.get("cold", 0), complete_by_condition.get("warm", 0))
     return {
-        "schema_version": 1,
+        "schema_version": 3,
         "benchmark": gateway_probe_results.BENCHMARK,
         "experiment_id": experiment_id,
         "experiment_digest": experiment_digest,
@@ -420,11 +505,6 @@ def render_text(report: Mapping[str, Any]) -> str:
             return "n/a"
         prefix = "+" if signed and value > 0 else ""
         return f"{prefix}{value:.3f}s"
-
-    def number(value: Any) -> str:
-        if not isinstance(value, (int, float)) or not math.isfinite(value):
-            return "n/a"
-        return f"{value:.1f}"
 
     def coverage(value: Mapping[str, Any] | None) -> str:
         if not isinstance(value, Mapping):
@@ -471,27 +551,12 @@ def render_text(report: Mapping[str, Any]) -> str:
         rendered = f"${value:.6f}" if isinstance(value, (int, float)) else "n/a"
         return f"{rendered} ({coverage(cov)})"
 
-    def delta(
-        condition_metrics: Mapping[str, Any],
-        name: str,
-    ) -> str:
-        value = condition_metrics.get(name, {}).get("median_gateway_minus_direct")
-        return seconds(value, signed=True)
-
-    def pair_coverage(condition_metrics: Mapping[str, Any]) -> str:
-        names = (
-            ("TTFT", "semantic_ttft_s"),
-            ("TTFB", "request_to_first_byte_s"),
-            ("Total", "total_s"),
-        )
-        rendered = [
-            (label, coverage(condition_metrics.get(name, {}).get("coverage")))
-            for label, name in names
-        ]
-        values = {value for _label, value in rendered}
-        if len(values) == 1:
-            return rendered[0][1]
-        return ", ".join(f"{label} {value}" for label, value in rendered)
+    def count_metric(item: Mapping[str, Any], name: str) -> str:
+        summary = item.get("metrics", {}).get(name, {})
+        value = summary.get("p50") if isinstance(summary, Mapping) else None
+        cov = summary.get("coverage") if isinstance(summary, Mapping) else None
+        rendered = f"{value:.1f}" if isinstance(value, (int, float)) else "n/a"
+        return f"{rendered} ({coverage(cov)})"
 
     lines = [
         f"Gateway Probe ({report['label']})",
@@ -505,10 +570,12 @@ def render_text(report: Mapping[str, Any]) -> str:
         "",
         (
             "| Arm | Condition | Success / availability | Route verified | "
-            "Semantic TTFT p50 / p95 | Total p50 | TTFB p50 | "
-            "Tokens p50 | Measured cost p50 (coverage) |"
+            "Request to headers p50 | Request to first body byte p50 | "
+            "Request to semantic TTFT p50 / p95 | Request stream total p50 | "
+            "Total tokens p50 (coverage) | Cached input p50 (coverage) | "
+            "Measured cost p50 (coverage) |"
         ),
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for arm, arm_report in report["arms"].items():
         for condition, item in arm_report["conditions"].items():
@@ -516,27 +583,63 @@ def render_text(report: Mapping[str, Any]) -> str:
             lines.append(
                 f"| {arm} | {condition} | {availability(item['availability'])} | "
                 f"{count_ratio(den['route_verified'], den['attempted'])} | "
-                f"{seconds(metric(item, 'semantic_ttft_s'))} / "
-                f"{seconds(metric(item, 'semantic_ttft_s', 'p95'))} | "
-                f"{seconds(metric(item, 'total_s'))} | "
-                f"{seconds(metric(item, 'request_to_first_byte_s'))} | "
-                f"{number(metric(item, 'total_tokens'))} | {cost(item)} |"
+                f"{seconds(metric(item, 'request_to_response_headers_s'))} | "
+                f"{seconds(metric(item, 'request_to_first_body_byte_s'))} | "
+                f"{seconds(metric(item, 'request_to_semantic_ttft_s'))} / "
+                f"{seconds(metric(item, 'request_to_semantic_ttft_s', 'p95'))} | "
+                f"{seconds(metric(item, 'request_stream_total_s'))} | "
+                f"{count_metric(item, 'total_tokens')} | "
+                f"{count_metric(item, 'cached_input_tokens')} | {cost(item)} |"
             )
     lines.extend([
         "",
+        "| Arm | Cold setup DNS p50 | TCP p50 | TLS p50 |",
+        "|---|---:|---:|---:|",
+    ])
+    for arm, arm_report in report["arms"].items():
+        item = arm_report["conditions"]["cold"]
+        lines.append(
+            f"| {arm} | {seconds(metric(item, 'setup_dns_s'))} | "
+            f"{seconds(metric(item, 'setup_tcp_s'))} | "
+            f"{seconds(metric(item, 'setup_tls_s'))} |"
+        )
+    lines.extend([
+        "",
         (
-            "| Gateway | Condition | Median delta TTFT | Median delta TTFB | "
-            "Median delta total | Pair coverage |"
+            "| Arm | Cold end-to-end response headers p50 | "
+            "First body byte p50 | Semantic TTFT p50 | Stream total p50 |"
         ),
-        "|---|---|---:|---:|---:|---:|",
+        "|---|---:|---:|---:|---:|",
+    ])
+    for arm, arm_report in report["arms"].items():
+        item = arm_report["conditions"]["cold"]
+        lines.append(
+            f"| {arm} | "
+            f"{seconds(metric(item, 'cold_end_to_end_response_headers_s'))} | "
+            f"{seconds(metric(item, 'cold_end_to_end_first_body_byte_s'))} | "
+            f"{seconds(metric(item, 'cold_end_to_end_semantic_ttft_s'))} | "
+            f"{seconds(metric(item, 'cold_end_to_end_stream_total_s'))} |"
+        )
+    lines.extend([
+        "",
+        (
+            "| Gateway | Condition | Phase metric | "
+            "Median gateway - direct | Pair coverage |"
+        ),
+        "|---|---|---|---:|---:|",
     ])
     for arm, conditions in report["paired_contrasts"].items():
         for condition, condition_metrics in conditions.items():
-            lines.append(
-                f"| {arm} | {condition} | "
-                f"{delta(condition_metrics, 'semantic_ttft_s')} | "
-                f"{delta(condition_metrics, 'request_to_first_byte_s')} | "
-                f"{delta(condition_metrics, 'total_s')} | "
-                f"{pair_coverage(condition_metrics)} |"
-            )
+            for name, label in _PHASE_METRIC_LABELS:
+                if condition == "warm" and (
+                    name.startswith("setup_")
+                    or name.startswith("cold_end_to_end_")
+                ):
+                    continue
+                contrast = condition_metrics.get(name, {})
+                lines.append(
+                    f"| {arm} | {condition} | {label} | "
+                    f"{seconds(contrast.get('median_gateway_minus_direct'), signed=True)} | "
+                    f"{coverage(contrast.get('coverage'))} |"
+                )
     return "\n".join(lines)

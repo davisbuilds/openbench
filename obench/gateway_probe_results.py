@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
@@ -15,7 +17,18 @@ from .gateway_probe_models import GatewayProbeRunError, ProbeBlock
 
 
 BENCHMARK = "gateway_probe"
-RESULT_SCHEMA_VERSION = 2
+RESULT_SCHEMA_VERSION = 3
+RECEIPT_HEADER_ALLOWLIST = frozenset({
+    "x-request-id",
+    "request-id",
+    "openai-request-id",
+    "anthropic-request-id",
+    "x-vercel-id",
+    "cf-ray",
+})
+RECEIPT_VALUE_MAX_LENGTH = 256
+_SAFE_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9._:/@+\-]{1,256}")
+RECEIPT_VALUE_RE = re.compile(r"[A-Za-z0-9._:/@+=\-]{1,256}")
 
 
 def block_id(
@@ -60,7 +73,7 @@ def make_identity(
 
 
 def cell_id(identity: Mapping[str, Any]) -> str:
-    return "gateway-probe-cell-v2-" + gateway_spec.canonical_digest(identity)
+    return "gateway-probe-cell-v3-" + gateway_spec.canonical_digest(identity)
 
 
 def read_rows(path: Path) -> list[dict[str, Any]]:
@@ -84,6 +97,7 @@ def read_rows(path: Path) -> list[dict[str, Any]]:
             ) from exc
         if not isinstance(row, dict) or row.get("benchmark") != BENCHMARK:
             raise GatewayProbeRunError("results JSONL contains a non-probe row")
+        validate_row_shape(row)
         row_cell_id = row.get("cell_id")
         if not isinstance(row_cell_id, str) or row_cell_id in seen:
             raise GatewayProbeRunError(
@@ -104,7 +118,423 @@ def _exact_mapping(value: Any, fields: set[str], label: str) -> Mapping[str, Any
     return value
 
 
-def _validate_result_shape(row: Mapping[str, Any]) -> None:
+def _duration(value: Any) -> bool:
+    return (
+        value is None
+        or (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and value >= 0
+        )
+    )
+
+
+def _validate_timing_order(
+    timing: Mapping[str, Any],
+    *,
+    condition: str,
+) -> None:
+    request_names = (
+        "request_to_response_headers_s",
+        "request_to_first_body_byte_s",
+        "request_to_semantic_ttft_s",
+        "request_stream_total_s",
+    )
+    cold_names = (
+        "cold_end_to_end_response_headers_s",
+        "cold_end_to_end_first_body_byte_s",
+        "cold_end_to_end_semantic_ttft_s",
+        "cold_end_to_end_stream_total_s",
+    )
+
+    def ordered(names: Sequence[str]) -> bool:
+        observed = [
+            timing.get(name)
+            for name in names
+            if timing.get(name) is not None
+        ]
+        return observed == sorted(observed)
+
+    if not ordered(request_names):
+        raise GatewayProbeRunError("results row request timing is out of order")
+    if condition == "warm":
+        if any(timing.get(name) is not None for name in cold_names):
+            raise GatewayProbeRunError(
+                "warm request contains cold timing evidence"
+            )
+        return
+    if not ordered(cold_names):
+        raise GatewayProbeRunError(
+            "results row cold end-to-end timing is out of order"
+        )
+    offsets = []
+    for request_name, cold_name in zip(request_names, cold_names):
+        request_value = timing.get(request_name)
+        cold_value = timing.get(cold_name)
+        if (request_value is None) is not (cold_value is None):
+            raise GatewayProbeRunError(
+                "cold request timing coverage is inconsistent"
+            )
+        if request_value is not None:
+            if cold_value < request_value:
+                raise GatewayProbeRunError(
+                    "cold end-to-end timing is shorter than request timing"
+                )
+            offsets.append(cold_value - request_value)
+    if offsets and max(offsets) - min(offsets) > 1e-6:
+        raise GatewayProbeRunError(
+            "cold end-to-end timing has inconsistent setup offsets"
+        )
+
+
+def _validate_setup(value: Any, label: str, *, nullable: bool) -> None:
+    if value is None and nullable:
+        return
+    setup = _exact_mapping(value, {"dns_s", "tcp_s", "tls_s"}, label)
+    if any(not _duration(setup.get(name)) for name in setup):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+
+
+def _validate_receipts(value: Any, label: str) -> None:
+    if not isinstance(value, Mapping):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    if any(name not in RECEIPT_HEADER_ALLOWLIST for name in value):
+        raise GatewayProbeRunError(f"results row has unsafe {label}")
+    for receipt in value.values():
+        if (
+            not isinstance(receipt, str)
+            or not receipt
+            or len(receipt) > RECEIPT_VALUE_MAX_LENGTH
+            or receipt != receipt.strip()
+            or RECEIPT_VALUE_RE.fullmatch(receipt) is None
+        ):
+            raise GatewayProbeRunError(f"results row has unsafe {label}")
+
+
+def _count(value: Any, *, nullable: bool = True) -> bool:
+    return (
+        value is None and nullable
+    ) or (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= 0
+    )
+
+
+def _safe_identifier(value: Any, *, nullable: bool = True) -> bool:
+    return (
+        value is None and nullable
+    ) or (
+        isinstance(value, str)
+        and _SAFE_IDENTIFIER_RE.fullmatch(value) is not None
+    )
+
+
+def _cost_scalar(value: Any) -> bool:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return math.isfinite(value) and value >= 0
+    if not isinstance(value, str) or len(value) > 64:
+        return False
+    try:
+        amount = Decimal(value)
+    except (ArithmeticError, ValueError):
+        return False
+    return amount.is_finite() and amount >= 0
+
+
+def _validate_usage(value: Any, label: str) -> None:
+    if value is None:
+        return
+    usage = _exact_mapping(
+        value,
+        set(value) if isinstance(value, Mapping) else set(),
+        label,
+    )
+    allowed = {
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "input_tokens_details",
+    }
+    if not set(usage) <= allowed or any(
+        not _count(usage.get(name))
+        for name in ("input_tokens", "output_tokens", "total_tokens")
+        if name in usage
+    ):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    details = usage.get("input_tokens_details")
+    if details is not None:
+        details = _exact_mapping(
+            details,
+            set(details) if isinstance(details, Mapping) else set(),
+            f"{label} details",
+        )
+        if (
+            not set(details) <= {
+                "cached_tokens",
+                "cache_write_tokens",
+                "cached_tokens_created",
+            }
+            or any(not _count(item, nullable=False) for item in details.values())
+        ):
+            raise GatewayProbeRunError(
+                f"results row has malformed {label} details"
+            )
+
+
+def _validate_generation(value: Any, label: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping) or not set(value) <= {
+        "output_tokens", "duration_s", "tokens_per_second",
+    }:
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    if "output_tokens" in value and not _count(value["output_tokens"]):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    if any(
+        not _duration(value[name])
+        for name in ("duration_s", "tokens_per_second")
+        if name in value
+    ):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+
+
+def _validate_cache(value: Any, label: str, *, nullable: bool) -> None:
+    if value is None and nullable:
+        return
+    cache = _exact_mapping(
+        value,
+        {"cached_input_tokens", "cache_write_input_tokens"},
+        label,
+    )
+    if any(not _count(item) for item in cache.values()):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+
+
+def _validate_route(value: Any, label: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping) or not set(value) <= {
+        "requested_model",
+        "metadata_requested_model",
+        "served_model",
+        "provider",
+        "attempts",
+        "gateway_metadata",
+    }:
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    for name in (
+        "requested_model",
+        "metadata_requested_model",
+        "served_model",
+        "provider",
+    ):
+        if name in value and not _safe_identifier(value[name]):
+            raise GatewayProbeRunError(f"results row has unsafe {label}")
+    attempts = value.get("attempts")
+    if attempts is not None:
+        if not isinstance(attempts, list) or len(attempts) > 64:
+            raise GatewayProbeRunError(f"results row has malformed {label}")
+        for attempt in attempts:
+            if not isinstance(attempt, Mapping) or not set(attempt) <= {
+                "provider", "model", "status",
+            }:
+                raise GatewayProbeRunError(f"results row has malformed {label}")
+            if (
+                "provider" in attempt
+                and not _safe_identifier(attempt["provider"], nullable=False)
+            ) or (
+                "model" in attempt
+                and not _safe_identifier(attempt["model"], nullable=False)
+            ) or (
+                "status" in attempt
+                and not _count(attempt["status"], nullable=False)
+            ):
+                raise GatewayProbeRunError(f"results row has unsafe {label}")
+    metadata = value.get("gateway_metadata")
+    if metadata is not None:
+        if not isinstance(metadata, Mapping) or not set(metadata) <= {
+            "cost", "marketCost", "generationId",
+        }:
+            raise GatewayProbeRunError(f"results row has malformed {label}")
+        for name, item in metadata.items():
+            if name == "generationId":
+                valid = _safe_identifier(item, nullable=False)
+            else:
+                valid = _cost_scalar(item)
+            if not valid:
+                raise GatewayProbeRunError(f"results row has unsafe {label}")
+
+
+def _validate_costs(value: Any, label: str) -> None:
+    if not isinstance(value, Mapping) or not set(value) <= {
+        "gateway_reported", "frozen_list_estimate",
+    }:
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    for item in value.values():
+        evidence = _exact_mapping(
+            item,
+            {"amount_usd", "currency", "effective_at"},
+            label,
+        )
+        if (
+            not _duration(evidence.get("amount_usd"))
+            or evidence.get("amount_usd") is None
+            or evidence.get("currency") != "USD"
+            or not _safe_identifier(
+                evidence.get("effective_at"), nullable=False
+            )
+        ):
+            raise GatewayProbeRunError(f"results row has malformed {label}")
+
+
+def _validate_stream(value: Any, label: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping) or not set(value) <= {
+        "events",
+        "ignored_events",
+        "malformed_events",
+        "done",
+        "terminal_status",
+        "finalized",
+    }:
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    for name in ("events", "ignored_events", "malformed_events"):
+        if name in value and not _count(value[name], nullable=False):
+            raise GatewayProbeRunError(f"results row has malformed {label}")
+    for name in ("done", "finalized"):
+        if name in value and not isinstance(value[name], bool):
+            raise GatewayProbeRunError(f"results row has malformed {label}")
+    if "terminal_status" in value and not _safe_identifier(
+        value["terminal_status"]
+    ):
+        raise GatewayProbeRunError(f"results row has unsafe {label}")
+
+
+def _validate_outcome_evidence(
+    outcome: Mapping[str, Any],
+    timing: Mapping[str, Any],
+    stream: Any,
+) -> None:
+    timed_out = outcome.get("timed_out")
+    error_class = outcome.get("error_class")
+    error_detail = outcome.get("error_detail")
+    if timed_out is not (error_class == "timeout"):
+        raise GatewayProbeRunError("results row timeout evidence is inconsistent")
+    if (error_class is None) is not (error_detail is None):
+        raise GatewayProbeRunError("results row error evidence is inconsistent")
+
+    attempted = outcome.get("attempted")
+    success = outcome.get("success")
+    status = outcome.get("http_status")
+    request_names = (
+        "request_to_response_headers_s",
+        "request_to_first_body_byte_s",
+        "request_to_semantic_ttft_s",
+        "request_stream_total_s",
+    )
+    if not attempted:
+        if (
+            success
+            or status is not None
+            or stream is not None
+            or any(timing.get(name) is not None for name in request_names)
+        ):
+            raise GatewayProbeRunError(
+                "unattempted request contains response evidence"
+            )
+        return
+    if success:
+        if (
+            not isinstance(status, int)
+            or not 200 <= status < 300
+            or timed_out
+            or error_class is not None
+            or any(timing.get(name) is None for name in request_names)
+            or not isinstance(stream, Mapping)
+            or stream.get("done") is not True
+            or stream.get("finalized") is not True
+            or stream.get("terminal_status") not in {None, "completed"}
+        ):
+            raise GatewayProbeRunError(
+                "successful request evidence is inconsistent"
+            )
+    elif error_class is None:
+        raise GatewayProbeRunError(
+            "unsuccessful attempted request has no error evidence"
+        )
+
+
+def _validate_coverage(value: Any, label: str) -> None:
+    if value is None:
+        return
+    allowed_flags = {
+        "ttfb",
+        "semantic_ttft",
+        "usage",
+        "generation",
+        "requested_model",
+        "served_model",
+        "openrouter_metadata",
+        "provider",
+        "attempts",
+        "attempt_evidence",
+        "stream_done",
+    }
+    if not isinstance(value, Mapping) or not set(value) <= (
+        allowed_flags | {"covered", "total", "ratio"}
+    ):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    if any(
+        not isinstance(value[name], bool)
+        for name in allowed_flags
+        if name in value
+    ):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    if any(
+        not _count(value[name], nullable=False)
+        for name in ("covered", "total")
+        if name in value
+    ):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    ratio = value.get("ratio")
+    if ratio is not None and (
+        isinstance(ratio, bool)
+        or not isinstance(ratio, (int, float))
+        or not math.isfinite(ratio)
+        or not 0 <= ratio <= 1
+    ):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+
+
+def _validate_route_integrity(value: Any, label: str) -> None:
+    if value is None:
+        return
+    route = _exact_mapping(value, {"status", "pass", "reasons"}, label)
+    if (
+        route.get("status") not in {"verified", "unverifiable", "failed"}
+        or route.get("pass") is not (route.get("status") == "verified")
+        or not isinstance(route.get("reasons"), list)
+        or any(not _safe_identifier(reason, nullable=False) for reason in route["reasons"])
+    ):
+        raise GatewayProbeRunError(f"results row {label} is malformed")
+
+
+def _validate_money(value: Any, *, nullable: bool) -> bool:
+    if value is None:
+        return nullable
+    if not isinstance(value, str) or len(value) > 64:
+        return False
+    try:
+        amount = Decimal(value)
+    except (ArithmeticError, ValueError):
+        return False
+    return amount.is_finite() and amount >= 0
+
+
+def validate_row_shape(row: Mapping[str, Any]) -> None:
     expected_fields = {
         "schema_version", "benchmark", "cell_id", "identity",
         "expected_arm_ids", "scheduled_blocks_per_condition", "arm_role",
@@ -112,7 +542,72 @@ def _validate_result_shape(row: Mapping[str, Any]) -> None:
         "request_metrics", "reuse_evidence", "billing",
     }
     if set(row) != expected_fields:
-        raise GatewayProbeRunError("results row does not match schema v2")
+        raise GatewayProbeRunError("results row does not match schema v3")
+    if row.get("schema_version") != RESULT_SCHEMA_VERSION:
+        raise GatewayProbeRunError("results row has unsupported schema_version")
+    if row.get("benchmark") != BENCHMARK:
+        raise GatewayProbeRunError("results row benchmark is malformed")
+    identity = _exact_mapping(
+        row.get("identity"),
+        {"benchmark", "experiment", "arm", "case", "comparison", "schedule"},
+        "identity",
+    )
+    if _exact_mapping(
+        identity.get("benchmark"), {"name", "track"}, "benchmark identity"
+    ) != {"name": BENCHMARK, "track": probe_spec.TRACK}:
+        raise GatewayProbeRunError("results row benchmark identity is malformed")
+    for name, fields in (
+        ("experiment", {"id", "digest"}),
+        ("arm", {"id", "digest"}),
+        ("case", {"id", "prompt_digest"}),
+        ("comparison", {"schedule_digest", "price_digest"}),
+    ):
+        value = _exact_mapping(identity.get(name), fields, f"{name} identity")
+        if any(
+            not _safe_identifier(item, nullable=False)
+            for item in value.values()
+        ):
+            raise GatewayProbeRunError(f"results row {name} identity is malformed")
+    schedule = _exact_mapping(
+        identity.get("schedule"),
+        {"condition", "repetition", "block_id", "block_attempt"},
+        "schedule identity",
+    )
+    if (
+        schedule.get("condition") not in {"cold", "warm"}
+        or not isinstance(schedule.get("repetition"), int)
+        or isinstance(schedule.get("repetition"), bool)
+        or schedule.get("repetition") < 1
+        or not _safe_identifier(schedule.get("block_id"), nullable=False)
+        or not isinstance(schedule.get("block_attempt"), int)
+        or isinstance(schedule.get("block_attempt"), bool)
+        or schedule.get("block_attempt") < 0
+    ):
+        raise GatewayProbeRunError("results row schedule identity is malformed")
+    try:
+        expected_cell_id = cell_id(identity)
+    except (TypeError, ValueError, gateway_spec.GatewaySpecError) as exc:
+        raise GatewayProbeRunError(
+            "results row identity is not canonical JSON"
+        ) from exc
+    if row.get("cell_id") != expected_cell_id:
+        raise GatewayProbeRunError("results row cell_id does not match identity")
+    expected_arms = row.get("expected_arm_ids")
+    if (
+        not isinstance(expected_arms, list)
+        or not expected_arms
+        or any(
+            not _safe_identifier(arm, nullable=False) for arm in expected_arms
+        )
+        or expected_arms != sorted(set(expected_arms))
+        or not isinstance(row.get("scheduled_blocks_per_condition"), int)
+        or isinstance(row.get("scheduled_blocks_per_condition"), bool)
+        or row.get("scheduled_blocks_per_condition") < 1
+        or row.get("arm_role") not in {"direct", "gateway"}
+        or not isinstance(row.get("baseline"), bool)
+        or not _safe_identifier(row.get("model_match"), nullable=False)
+    ):
+        raise GatewayProbeRunError("results row top-level provenance is malformed")
     outcome = _exact_mapping(
         row.get("outcome"),
         {
@@ -137,45 +632,131 @@ def _validate_result_shape(row: Mapping[str, Any]) -> None:
         "tls", "dns", "connection_refused", "connection_reset",
         "connection_closed", "probe_policy", "network_io", "internal",
         "http_status", "stream_terminal", "stream_incomplete",
+        "stream_no_semantic_output",
+    }
+    budget_reasons = {
+        None,
+        "primer_cost_unavailable",
+        "usd_cap_reached_by_primer",
+        "measured_cost_unavailable",
+        "usd_cap_reached",
     }
     if (
         outcome.get("error_class") not in error_classes
         or outcome.get("error_detail") not in error_details
-        or (
-            outcome.get("budget_exhausted_reason") is not None
-            and not isinstance(outcome.get("budget_exhausted_reason"), str)
-        )
+        or outcome.get("budget_exhausted_reason") not in budget_reasons
     ):
         raise GatewayProbeRunError("results row outcome taxonomy is malformed")
-    route = _exact_mapping(
-        row.get("route_integrity"),
-        {"status", "pass", "reasons"},
-        "route integrity",
-    )
     if (
-        route.get("status") not in {"verified", "unverifiable", "failed"}
-        or route.get("pass") is not (route.get("status") == "verified")
-        or not isinstance(route.get("reasons"), list)
-        or any(not isinstance(reason, str) for reason in route["reasons"])
+        outcome.get("success") is not outcome.get("available")
+        or (outcome.get("success") and not outcome.get("attempted"))
     ):
+        raise GatewayProbeRunError("results row outcome is inconsistent")
+    _validate_route_integrity(row.get("route_integrity"), "route integrity")
+    route = row["route_integrity"]
+    if route is None:
         raise GatewayProbeRunError("results row route integrity is malformed")
-    _exact_mapping(
+    request_metrics = _exact_mapping(
         row.get("request_metrics"),
         {
-            "connection", "timing", "usage", "generation", "cache",
-            "route", "costs", "stream", "coverage",
+            "setup", "timing", "receipt_headers", "usage", "generation",
+            "cache", "route", "costs", "stream", "coverage",
         },
         "request metrics",
     )
-    _exact_mapping(
+    condition = schedule["condition"]
+    _validate_setup(
+        request_metrics.get("setup"),
+        "request setup",
+        nullable=condition == "warm",
+    )
+    if condition == "warm" and request_metrics.get("setup") is not None:
+        raise GatewayProbeRunError("warm request contains measured setup evidence")
+    timing = _exact_mapping(
+        request_metrics.get("timing"),
+        {
+            "request_to_response_headers_s",
+            "request_to_first_body_byte_s",
+            "request_to_semantic_ttft_s",
+            "request_stream_total_s",
+            "cold_end_to_end_response_headers_s",
+            "cold_end_to_end_first_body_byte_s",
+            "cold_end_to_end_semantic_ttft_s",
+            "cold_end_to_end_stream_total_s",
+        },
+        "request timing",
+    )
+    if any(not _duration(value) for value in timing.values()):
+        raise GatewayProbeRunError("results row has malformed request timing")
+    _validate_timing_order(timing, condition=condition)
+    _validate_receipts(request_metrics.get("receipt_headers"), "request receipts")
+    _validate_usage(request_metrics.get("usage"), "request usage")
+    _validate_generation(request_metrics.get("generation"), "request generation")
+    _validate_cache(request_metrics.get("cache"), "request cache", nullable=False)
+    _validate_route(request_metrics.get("route"), "request route")
+    _validate_costs(request_metrics.get("costs"), "request costs")
+    _validate_stream(request_metrics.get("stream"), "request stream")
+    _validate_coverage(request_metrics.get("coverage"), "request coverage")
+    _validate_outcome_evidence(
+        outcome,
+        timing,
+        request_metrics.get("stream"),
+    )
+    primer = _exact_mapping(
         row.get("reuse_evidence"),
         {
             "required", "completed", "http_status", "socket_reused",
-            "primer_nonce_sha256", "measured_nonce_sha256", "connection",
-            "route_integrity", "usage", "cache", "costs",
+            "primer_nonce_sha256", "measured_nonce_sha256", "setup",
+            "receipt_headers", "route_integrity", "usage", "cache", "costs",
         },
         "reuse evidence",
     )
+    if (
+        not isinstance(primer.get("required"), bool)
+        or not isinstance(primer.get("completed"), bool)
+        or primer.get("required") is not (condition == "warm")
+        or (
+            primer.get("http_status") is not None
+            and (
+                not isinstance(primer.get("http_status"), int)
+                or isinstance(primer.get("http_status"), bool)
+            )
+        )
+        or (
+            primer.get("socket_reused") is not None
+            and not isinstance(primer.get("socket_reused"), bool)
+        )
+    ):
+        raise GatewayProbeRunError("results row reuse evidence is malformed")
+    for name in ("primer_nonce_sha256", "measured_nonce_sha256"):
+        value = primer.get(name)
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+        ):
+            raise GatewayProbeRunError("results row reuse nonce is malformed")
+    _validate_setup(primer.get("setup"), "primer setup", nullable=False)
+    _validate_receipts(primer.get("receipt_headers"), "primer receipts")
+    _validate_route_integrity(
+        primer.get("route_integrity"), "primer route integrity"
+    )
+    _validate_usage(primer.get("usage"), "primer usage")
+    _validate_cache(primer.get("cache"), "primer cache", nullable=True)
+    _validate_costs(primer.get("costs"), "primer costs")
+    if condition == "warm" and outcome.get("success") is True:
+        primer_route = primer.get("route_integrity")
+        if (
+            primer.get("completed") is not True
+            or primer.get("socket_reused") is not True
+            or not isinstance(primer.get("http_status"), int)
+            or not 200 <= primer["http_status"] < 300
+            or not isinstance(primer_route, Mapping)
+            or primer_route.get("status") != "verified"
+        ):
+            raise GatewayProbeRunError(
+                "successful warm row lacks verified reuse evidence"
+            )
     billing = _exact_mapping(
         row.get("billing"),
         {
@@ -184,8 +765,26 @@ def _validate_result_shape(row: Mapping[str, Any]) -> None:
         },
         "billing evidence",
     )
-    if not isinstance(billing.get("stop_required"), bool):
+    if (
+        not isinstance(billing.get("stop_required"), bool)
+        or not _validate_money(billing.get("primer_cost_usd"), nullable=True)
+        or not _validate_money(billing.get("measured_cost_usd"), nullable=True)
+        or not _validate_money(billing.get("charged_cost_usd"), nullable=False)
+    ):
         raise GatewayProbeRunError("results row billing evidence is malformed")
+    component_total = sum(
+        (
+            Decimal(value)
+            for value in (
+                billing.get("primer_cost_usd"),
+                billing.get("measured_cost_usd"),
+            )
+            if value is not None
+        ),
+        Decimal(0),
+    )
+    if Decimal(billing["charged_cost_usd"]) != component_total:
+        raise GatewayProbeRunError("results row charged cost is inconsistent")
 
 
 def validate_resume_rows(
@@ -205,7 +804,7 @@ def validate_resume_rows(
     for row in rows:
         if row.get("schema_version") != RESULT_SCHEMA_VERSION:
             raise GatewayProbeRunError("results row has unsupported schema_version")
-        _validate_result_shape(row)
+        validate_row_shape(row)
         identity = _exact_mapping(
             row.get("identity"),
             {"benchmark", "experiment", "arm", "case", "comparison", "schedule"},
@@ -322,6 +921,7 @@ def validate_resume_rows(
 
 
 def append_row(path: Path, row: Mapping[str, Any]) -> None:
+    validate_row_shape(row)
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(
         row,

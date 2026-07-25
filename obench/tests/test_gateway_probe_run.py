@@ -32,8 +32,8 @@ def environment():
     }
 
 
-def canned_result(*, stop_required=False):
-    return {
+def canned_result(*, stop_required=False, condition="cold"):
+    result = {
         "outcome": {
             "attempted": True,
             "success": True,
@@ -52,16 +52,22 @@ def canned_result(*, stop_required=False):
             "reasons": [],
         },
         "request_metrics": {
-            "connection": {
+            "setup": {
                 "dns_s": 0.01,
                 "tcp_s": 0.01,
                 "tls_s": 0.01,
             },
             "timing": {
-                "ttfb_s": 0.1,
-                "semantic_ttft_s": 0.2,
-                "total_s": 0.3,
+                "request_to_response_headers_s": 0.1,
+                "request_to_first_body_byte_s": 0.15,
+                "request_to_semantic_ttft_s": 0.2,
+                "request_stream_total_s": 0.3,
+                "cold_end_to_end_response_headers_s": 0.13,
+                "cold_end_to_end_first_body_byte_s": 0.18,
+                "cold_end_to_end_semantic_ttft_s": 0.23,
+                "cold_end_to_end_stream_total_s": 0.33,
             },
+            "receipt_headers": {},
             "usage": {
                 "input_tokens": 1,
                 "output_tokens": 1,
@@ -77,7 +83,11 @@ def canned_result(*, stop_required=False):
                 "provider": "openai",
             },
             "costs": {},
-            "stream": {"done": True, "terminal_status": "completed"},
+            "stream": {
+                "done": True,
+                "terminal_status": "completed",
+                "finalized": True,
+            },
             "coverage": {},
         },
         "reuse_evidence": {
@@ -87,7 +97,8 @@ def canned_result(*, stop_required=False):
             "socket_reused": None,
             "primer_nonce_sha256": "1" * 64,
             "measured_nonce_sha256": "2" * 64,
-            "connection": {},
+            "setup": {"dns_s": None, "tcp_s": None, "tls_s": None},
+            "receipt_headers": {},
             "route_integrity": None,
             "usage": None,
             "cache": None,
@@ -100,6 +111,34 @@ def canned_result(*, stop_required=False):
             "stop_required": stop_required,
         },
     }
+    if condition == "warm":
+        result["request_metrics"]["setup"] = None
+        for name in (
+            "cold_end_to_end_response_headers_s",
+            "cold_end_to_end_first_body_byte_s",
+            "cold_end_to_end_semantic_ttft_s",
+            "cold_end_to_end_stream_total_s",
+        ):
+            result["request_metrics"]["timing"][name] = None
+        result["reuse_evidence"]["required"] = True
+        result["reuse_evidence"]["completed"] = True
+        result["reuse_evidence"]["socket_reused"] = True
+        result["reuse_evidence"]["http_status"] = 200
+        result["reuse_evidence"]["route_integrity"] = {
+            "status": "verified",
+            "pass": True,
+            "reasons": [],
+        }
+    return result
+
+
+def canned_execute(*, stop_required=False):
+    def execute(**kwargs):
+        return canned_result(
+            stop_required=stop_required,
+            condition=kwargs["block"].condition,
+        )
+    return execute
 
 
 class GatewayProbeRunTests(unittest.TestCase):
@@ -164,7 +203,7 @@ class GatewayProbeRunTests(unittest.TestCase):
             with mock.patch.object(
                 gateway_probe_http,
                 "execute_request",
-                return_value=canned_result(stop_required=True),
+                side_effect=canned_execute(stop_required=True),
             ) as execute:
                 first = gateway_probe_run.run_experiment(
                     spec_path, results_path=results_path, environ=environment()
@@ -185,7 +224,7 @@ class GatewayProbeRunTests(unittest.TestCase):
             with mock.patch.object(
                 gateway_probe_http,
                 "execute_request",
-                return_value=canned_result(),
+                side_effect=canned_execute(),
             ):
                 first = gateway_probe_run.run_experiment(
                     spec_path, results_path=results_path, environ=environment()

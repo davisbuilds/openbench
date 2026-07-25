@@ -23,6 +23,7 @@ def bound_row(experiment, block, schedule_digest, price_digest):
     identity = gateway_probe_results.make_identity(
         experiment, arm, block, 0, schedule_digest, price_digest
     )
+    cold = block.condition == "cold"
     return {
         "schema_version": gateway_probe_results.RESULT_SCHEMA_VERSION,
         "benchmark": gateway_probe_results.BENCHMARK,
@@ -51,25 +52,49 @@ def bound_row(experiment, block, schedule_digest, price_digest):
             "reasons": [],
         },
         "request_metrics": {
-            "connection": {},
-            "timing": {},
+            "setup": (
+                {"dns_s": 0.01, "tcp_s": 0.02, "tls_s": 0.03}
+                if cold else None
+            ),
+            "timing": {
+                "request_to_response_headers_s": 0.1,
+                "request_to_first_body_byte_s": 0.15,
+                "request_to_semantic_ttft_s": 0.2,
+                "request_stream_total_s": 0.3,
+                "cold_end_to_end_response_headers_s": 0.16 if cold else None,
+                "cold_end_to_end_first_body_byte_s": 0.21 if cold else None,
+                "cold_end_to_end_semantic_ttft_s": 0.26 if cold else None,
+                "cold_end_to_end_stream_total_s": 0.36 if cold else None,
+            },
+            "receipt_headers": {},
             "usage": None,
             "generation": None,
-            "cache": {},
+            "cache": {
+                "cached_input_tokens": None,
+                "cache_write_input_tokens": None,
+            },
             "route": None,
             "costs": {},
-            "stream": None,
+            "stream": {
+                "done": True,
+                "terminal_status": "completed",
+                "finalized": True,
+            },
             "coverage": None,
         },
         "reuse_evidence": {
-            "required": False,
-            "completed": False,
-            "http_status": None,
-            "socket_reused": None,
+            "required": not cold,
+            "completed": not cold,
+            "http_status": 200 if not cold else None,
+            "socket_reused": True if not cold else None,
             "primer_nonce_sha256": "1" * 64,
             "measured_nonce_sha256": "2" * 64,
-            "connection": {},
-            "route_integrity": None,
+            "setup": {"dns_s": 0.01, "tcp_s": 0.02, "tls_s": 0.03},
+            "receipt_headers": {},
+            "route_integrity": (
+                {"status": "verified", "pass": True, "reasons": []}
+                if not cold else None
+            ),
             "usage": None,
             "cache": None,
             "costs": {},
@@ -107,9 +132,15 @@ class GatewayProbeResultsTests(unittest.TestCase):
             base = bound_row(
                 experiment, schedule[0], schedule_digest, price_digest
             )
+            warm_base = bound_row(
+                experiment,
+                next(block for block in schedule if block.condition == "warm"),
+                schedule_digest,
+                price_digest,
+            )
             variants = {}
             variants["schema"] = copy.deepcopy(base)
-            variants["schema"]["schema_version"] = 999
+            variants["schema"]["schema_version"] = 2
             variants["cell_id"] = copy.deepcopy(base)
             variants["cell_id"]["cell_id"] = "forged"
             variants["block_id"] = copy.deepcopy(base)
@@ -134,6 +165,44 @@ class GatewayProbeResultsTests(unittest.TestCase):
             variants["provenance"]["arm_role"] = (
                 "gateway" if base["arm_role"] == "direct" else "direct"
             )
+            variants["unsafe_receipt"] = copy.deepcopy(base)
+            variants["unsafe_receipt"]["request_metrics"]["receipt_headers"] = {
+                "authorization": "secret"
+            }
+            variants["timing_schema"] = copy.deepcopy(base)
+            variants["timing_schema"]["request_metrics"]["timing"]["ttfb_s"] = 1.0
+            variants["timing_order"] = copy.deepcopy(base)
+            variants["timing_order"]["request_metrics"]["timing"][
+                "request_to_response_headers_s"
+            ] = 0.25
+            variants["timing_offset"] = copy.deepcopy(base)
+            variants["timing_offset"]["request_metrics"]["timing"][
+                "cold_end_to_end_semantic_ttft_s"
+            ] = 0.4
+            variants["success_timeout"] = copy.deepcopy(base)
+            variants["success_timeout"]["outcome"].update({
+                "timed_out": True,
+                "error_class": "timeout",
+                "error_detail": "timeout",
+            })
+            variants["success_without_stream"] = copy.deepcopy(base)
+            variants["success_without_stream"]["request_metrics"]["stream"] = None
+            variants["numeric_socket_reuse"] = copy.deepcopy(base)
+            variants["numeric_socket_reuse"]["reuse_evidence"][
+                "socket_reused"
+            ] = 1
+            variants["warm_without_reuse"] = copy.deepcopy(warm_base)
+            variants["warm_without_reuse"]["reuse_evidence"][
+                "socket_reused"
+            ] = False
+            variants["nested_private_field"] = copy.deepcopy(base)
+            variants["nested_private_field"]["request_metrics"]["route"] = {
+                "private_output": "must-not-persist"
+            }
+            variants["inconsistent_charged_cost"] = copy.deepcopy(base)
+            variants["inconsistent_charged_cost"]["billing"][
+                "charged_cost_usd"
+            ] = "1"
             for name, candidate in variants.items():
                 if name not in {
                     "schema", "cell_id", "expected_arms", "provenance"

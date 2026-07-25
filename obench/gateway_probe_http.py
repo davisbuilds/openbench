@@ -18,6 +18,7 @@ from decimal import Decimal
 from typing import Any
 
 from . import gateway_metrics, gateway_profiles, gateway_run, gateway_spec
+from . import gateway_probe_results as probe_results
 from . import gateway_probe_spec as probe_spec
 from .gateway_probe_models import GatewayProbeRunError, PrimerError, ProbeBlock
 
@@ -259,6 +260,42 @@ def _headers(
     return headers
 
 
+def _receipt_headers(headers: list[tuple[str, str]]) -> dict[str, str]:
+    """Return only bounded, printable receipt identifiers."""
+    receipts: dict[str, str] = {}
+    duplicates = set()
+    for raw_name, raw_value in headers:
+        name = raw_name.lower()
+        if (
+            name not in probe_results.RECEIPT_HEADER_ALLOWLIST
+            or name in duplicates
+        ):
+            continue
+        value = raw_value.strip()
+        if (
+            not value
+            or len(value) > probe_results.RECEIPT_VALUE_MAX_LENGTH
+            or probe_results.RECEIPT_VALUE_RE.fullmatch(value) is None
+        ):
+            continue
+        if name in receipts:
+            receipts.pop(name)
+            duplicates.add(name)
+            continue
+        receipts[name] = value
+    return receipts
+
+
+def _same_socket(connection: Any, expected: tuple[Any, int, Any]) -> bool:
+    socket_object, socket_fileno, socket_peer = expected
+    return bool(
+        connection.sock is socket_object
+        and connection.sock is not None
+        and connection.sock.fileno() == socket_fileno
+        and connection.sock.getpeername() == socket_peer
+    )
+
+
 def _consume(
     connection: Any,
     path: str,
@@ -267,15 +304,27 @@ def _consume(
     plan: gateway_spec.RoutePlan,
     *,
     capture_metrics: bool,
-) -> tuple[int, dict[str, Any] | None, bool]:
-    started = time.monotonic()
-    deadline = started + float(connection.timeout)
+    cold_started_at: float | None = None,
+    expected_socket: tuple[Any, int, Any] | None = None,
+) -> tuple[int, dict[str, Any] | None, bool, dict[str, Any]]:
+    operation_started_at = time.monotonic()
+    deadline = operation_started_at + float(connection.timeout)
     connection.set_request_deadline(deadline)
     connection.request("POST", path, body=body, headers=dict(headers))
+    request_sent_at = time.monotonic()
+    socket_reused = (
+        _same_socket(connection, expected_socket)
+        if expected_socket is not None
+        else None
+    )
+    if expected_socket is not None and not socket_reused:
+        raise PrimerError("warm measured request did not reuse the primer socket")
     if connection.sock is not None:
         connection.sock.settimeout(connection._remaining_timeout())
     response = connection.getresponse()
-    response_headers = {key.lower(): value for key, value in response.getheaders()}
+    response_headers_at = time.monotonic()
+    raw_response_headers = response.getheaders()
+    response_headers = {key.lower(): value for key, value in raw_response_headers}
     parser = None
     if capture_metrics and "text/event-stream" in response_headers.get(
         "content-type", ""
@@ -283,7 +332,7 @@ def _consume(
         parser = gateway_metrics.sse_parser(
             plan.protocol,
             requested_model=plan.requested_model,
-            started_at=started,
+            started_at=request_sent_at,
             route_kind=plan.route_kind,
             requested_provider=plan.requested_provider,
             allowed_models=plan.allowed_models,
@@ -303,8 +352,48 @@ def _consume(
             break
         if parser is not None:
             parser.feed(chunk, time.monotonic())
-    metrics = parser.finalize(time.monotonic()) if parser is not None else None
-    return response.status, metrics, response.will_close
+    completed_at = time.monotonic()
+    metrics = parser.finalize(completed_at) if parser is not None else None
+    first_body_byte_s = None
+    semantic_ttft_s = None
+    if isinstance(metrics, Mapping):
+        parser_timing = metrics.get("timing")
+        if isinstance(parser_timing, Mapping):
+            first_body_byte_s = parser_timing.get("ttfb_s")
+            semantic_ttft_s = parser_timing.get("semantic_ttft_s")
+    timing = {
+        "request_to_response_headers_s": response_headers_at - request_sent_at,
+        "request_to_first_body_byte_s": first_body_byte_s,
+        "request_to_semantic_ttft_s": semantic_ttft_s,
+        "request_stream_total_s": completed_at - request_sent_at,
+        "cold_end_to_end_response_headers_s": None,
+        "cold_end_to_end_first_body_byte_s": None,
+        "cold_end_to_end_semantic_ttft_s": None,
+        "cold_end_to_end_stream_total_s": None,
+    }
+    if cold_started_at is not None:
+        timing.update({
+            "cold_end_to_end_response_headers_s": (
+                response_headers_at - cold_started_at
+            ),
+            "cold_end_to_end_first_body_byte_s": (
+                None
+                if first_body_byte_s is None
+                else request_sent_at - cold_started_at + first_body_byte_s
+            ),
+            "cold_end_to_end_semantic_ttft_s": (
+                None
+                if semantic_ttft_s is None
+                else request_sent_at - cold_started_at + semantic_ttft_s
+            ),
+            "cold_end_to_end_stream_total_s": completed_at - cold_started_at,
+        })
+    evidence = {
+        "timing": timing,
+        "receipt_headers": _receipt_headers(raw_response_headers),
+        "socket_reused": socket_reused,
+    }
+    return response.status, metrics, response.will_close, evidence
 
 
 def _route_status(
@@ -374,7 +463,8 @@ def execute_request(
         "socket_reused": None,
         "primer_nonce_sha256": hashlib.sha256(primer_nonce.encode()).hexdigest(),
         "measured_nonce_sha256": hashlib.sha256(measured_nonce.encode()).hexdigest(),
-        "connection": {"dns_s": None, "tcp_s": None, "tls_s": None},
+        "setup": {"dns_s": None, "tcp_s": None, "tls_s": None},
+        "receipt_headers": {},
         "route_integrity": None,
         "usage": None,
         "cache": None,
@@ -385,7 +475,7 @@ def execute_request(
     error_class = None
     error_detail = None
     timed_out = False
-    measured_started = None
+    measured_evidence = None
     measured_attempted = False
     primer_attempted = False
     primer_amount = None
@@ -398,7 +488,7 @@ def execute_request(
             body = request_body(
                 case.prompt, primer_nonce, plan, experiment.budget.max_output_tokens
             )
-            primer_status, primer_metrics, primer_closed = _consume(
+            primer_status, primer_metrics, primer_closed, primer_evidence = _consume(
                 connection,
                 path,
                 body,
@@ -406,7 +496,8 @@ def execute_request(
                 plan,
                 capture_metrics=True,
             )
-            primer["connection"] = dict(connection.phase_s)
+            primer["setup"] = dict(connection.phase_s)
+            primer["receipt_headers"] = primer_evidence["receipt_headers"]
             primer_route_status, primer_route_reasons = _route_status(primer_metrics)
             primer["route_integrity"] = {
                 "status": primer_route_status,
@@ -451,9 +542,11 @@ def execute_request(
                 raise PrimerError(
                     "warm primer was not successful, route-verified, and reusable"
                 )
-            socket_object = connection.sock
-            socket_fileno = socket_object.fileno()
-            socket_peer = socket_object.getpeername()
+            primer_socket = (
+                connection.sock,
+                connection.sock.fileno(),
+                connection.sock.getpeername(),
+            )
             if primer_amount is None:
                 budget_reason = "primer_cost_unavailable"
                 stop_for_budget = True
@@ -464,32 +557,31 @@ def execute_request(
             body = request_body(
                 case.prompt, measured_nonce, plan, experiment.budget.max_output_tokens
             )
-            if block.condition == "warm":
-                primer["socket_reused"] = bool(
-                    connection.sock is socket_object
-                    and connection.sock is not None
-                    and connection.sock.fileno() == socket_fileno
-                    and connection.sock.getpeername() == socket_peer
-                )
-                if not primer["socket_reused"]:
-                    raise GatewayProbeRunError(
-                        "warm measured request did not reuse the primer socket"
-                    )
-            measured_started = time.monotonic()
+            cold_started_at = (
+                time.monotonic() if block.condition == "cold" else None
+            )
             measured_attempted = True
-            status, metrics, _closed = _consume(
+            status, metrics, _closed, measured_evidence = _consume(
                 connection,
                 path,
                 body,
                 _headers(plan, secret, body),
                 plan,
                 capture_metrics=True,
+                cold_started_at=cold_started_at,
+                expected_socket=(
+                    primer_socket if block.condition == "warm" else None
+                ),
             )
+            if block.condition == "warm":
+                primer["socket_reused"] = measured_evidence["socket_reused"]
     except (socket.timeout, TimeoutError):
         timed_out = True
         error_class = "timeout"
         error_detail = "timeout"
     except PrimerError:
+        if block.condition == "warm" and measured_attempted:
+            primer["socket_reused"] = False
         error_class = "primer"
         error_detail = "primer_invalid"
     except Exception as exc:  # noqa: BLE001 - classified in the result row
@@ -497,11 +589,6 @@ def execute_request(
         error_detail = _transport_error_detail(exc)
     finally:
         connection.close()
-    total_s = (
-        time.monotonic() - measured_started
-        if measured_started is not None
-        else None
-    )
     route_status, route_reasons = _route_status(metrics)
     costs: dict[str, Any] = {}
     cache = {"cached_input_tokens": None, "cache_write_input_tokens": None}
@@ -539,14 +626,36 @@ def execute_request(
         error_detail = (
             "stream_terminal" if terminal is not None else "stream_incomplete"
         )
+    elif (
+        error_class is None
+        and isinstance(status, int)
+        and isinstance(measured_evidence, Mapping)
+        and measured_evidence["timing"].get(
+            "request_to_semantic_ttft_s"
+        ) is None
+    ):
+        error_class = "stream"
+        error_detail = "stream_no_semantic_output"
     available = (
         isinstance(status, int)
         and 200 <= status < 300
         and error_class is None
         and completed
     )
-    timing = dict(metrics.get("timing", {})) if isinstance(metrics, Mapping) else {}
-    timing["total_s"] = total_s
+    timing = (
+        measured_evidence["timing"]
+        if isinstance(measured_evidence, Mapping)
+        else {
+            "request_to_response_headers_s": None,
+            "request_to_first_body_byte_s": None,
+            "request_to_semantic_ttft_s": None,
+            "request_stream_total_s": None,
+            "cold_end_to_end_response_headers_s": None,
+            "cold_end_to_end_first_body_byte_s": None,
+            "cold_end_to_end_semantic_ttft_s": None,
+            "cold_end_to_end_stream_total_s": None,
+        }
+    )
     return {
         "outcome": {
             "attempted": measured_attempted,
@@ -564,12 +673,17 @@ def execute_request(
             "reasons": route_reasons,
         },
         "request_metrics": {
-            "connection": (
+            "setup": (
                 dict(connection.phase_s)
                 if block.condition == "cold"
-                else {"dns_s": None, "tcp_s": None, "tls_s": None}
+                else None
             ),
             "timing": timing,
+            "receipt_headers": (
+                measured_evidence["receipt_headers"]
+                if isinstance(measured_evidence, Mapping)
+                else {}
+            ),
             "usage": metrics.get("usage") if isinstance(metrics, Mapping) else None,
             "generation": (
                 metrics.get("generation") if isinstance(metrics, Mapping) else None

@@ -54,6 +54,8 @@ class _SSEHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("content-length", str(len(body)))
+        self.send_header("x-request-id", "receipt-123")
+        self.send_header("x-internal-debug", "must-not-persist")
         close_response = self.close_measured and len(self.requests) == 2
         self.send_header(
             "connection", "close" if close_response else "keep-alive"
@@ -192,11 +194,32 @@ class GatewayProbeHttpTests(unittest.TestCase):
             result["reuse_evidence"]["measured_nonce_sha256"],
         )
         self.assertIsNotNone(
-            result["reuse_evidence"]["connection"]["dns_s"]
+            result["reuse_evidence"]["setup"]["dns_s"]
+        )
+        self.assertIsNone(result["request_metrics"]["setup"])
+        timing = result["request_metrics"]["timing"]
+        self.assertIsNotNone(timing["request_to_response_headers_s"])
+        self.assertIsNotNone(timing["request_to_first_body_byte_s"])
+        self.assertIsNotNone(timing["request_to_semantic_ttft_s"])
+        self.assertIsNotNone(timing["request_stream_total_s"])
+        self.assertTrue(
+            all(
+                timing[name] is None
+                for name in (
+                    "cold_end_to_end_response_headers_s",
+                    "cold_end_to_end_first_body_byte_s",
+                    "cold_end_to_end_semantic_ttft_s",
+                    "cold_end_to_end_stream_total_s",
+                )
+            )
         )
         self.assertEqual(
-            result["request_metrics"]["connection"],
-            {"dns_s": None, "tcp_s": None, "tls_s": None},
+            result["request_metrics"]["receipt_headers"],
+            {"x-request-id": "receipt-123"},
+        )
+        self.assertEqual(
+            result["reuse_evidence"]["receipt_headers"],
+            {"x-request-id": "receipt-123"},
         )
         self.assertGreater(
             Decimal(result["billing"]["primer_cost_usd"]), 0
@@ -227,6 +250,151 @@ class GatewayProbeHttpTests(unittest.TestCase):
         self.assertGreater(
             Decimal(result["billing"]["primer_cost_usd"]), 0
         )
+
+    def test_cold_phase_boundaries_include_setup_exactly_once(self):
+        exp = experiment(self.endpoint)
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "cold", 1, ("direct",)
+        )
+        result = gateway_probe_http.execute_request(
+            experiment=exp,
+            case=exp.cases[0],
+            block=block,
+            plan=route_plan(exp, self.endpoint),
+            secret="test-secret",
+            prices=prices(),
+        )
+        setup = result["request_metrics"]["setup"]
+        timing = result["request_metrics"]["timing"]
+        self.assertIsNotNone(setup["dns_s"])
+        self.assertIsNotNone(setup["tcp_s"])
+        self.assertIsNone(setup["tls_s"])
+        pairs = (
+            (
+                "cold_end_to_end_response_headers_s",
+                "request_to_response_headers_s",
+            ),
+            (
+                "cold_end_to_end_first_body_byte_s",
+                "request_to_first_body_byte_s",
+            ),
+            (
+                "cold_end_to_end_semantic_ttft_s",
+                "request_to_semantic_ttft_s",
+            ),
+            (
+                "cold_end_to_end_stream_total_s",
+                "request_stream_total_s",
+            ),
+        )
+        for end_to_end, request_only in pairs:
+            self.assertGreaterEqual(timing[end_to_end], timing[request_only])
+        self.assertLessEqual(
+            timing["request_to_response_headers_s"],
+            timing["request_to_first_body_byte_s"],
+        )
+        self.assertLessEqual(
+            timing["request_to_first_body_byte_s"],
+            timing["request_to_semantic_ttft_s"],
+        )
+
+    def test_consume_uses_post_send_and_pre_dns_clock_boundaries(self):
+        class FakeSocket:
+            def settimeout(self, _value):
+                return None
+
+        class FakeResponse:
+            status = 200
+            will_close = False
+
+            def __init__(self):
+                self.chunks = [b"data", b""]
+
+            def getheaders(self):
+                return [("content-type", "text/event-stream")]
+
+            def read1(self, _size):
+                return self.chunks.pop(0)
+
+        class FakeConnection:
+            timeout = 30
+            sock = FakeSocket()
+
+            def set_request_deadline(self, deadline):
+                self.deadline = deadline
+
+            def request(self, *_args, **_kwargs):
+                return None
+
+            def _remaining_timeout(self):
+                return 20
+
+            def getresponse(self):
+                return FakeResponse()
+
+        class FakeParser:
+            def feed(self, _chunk, received_at):
+                self.received_at = received_at
+
+            def finalize(self, completed_at):
+                self.completed_at = completed_at
+                return {
+                    "timing": {
+                        "ttfb_s": 6.0,
+                        "semantic_ttft_s": 7.0,
+                    }
+                }
+
+        exp = experiment(self.endpoint)
+        parser = FakeParser()
+        with (
+            mock.patch.object(
+                gateway_probe_http.time,
+                "monotonic",
+                side_effect=[10.0, 12.0, 15.0, 16.0, 18.0, 19.0, 20.0],
+            ),
+            mock.patch.object(
+                gateway_probe_http.gateway_metrics,
+                "sse_parser",
+                return_value=parser,
+            ) as parser_factory,
+        ):
+            _status, _metrics, _closed, evidence = gateway_probe_http._consume(
+                FakeConnection(),
+                "/responses",
+                b"{}",
+                {},
+                route_plan(exp, self.endpoint),
+                capture_metrics=True,
+                cold_started_at=9.0,
+            )
+        self.assertEqual(parser_factory.call_args.kwargs["started_at"], 12.0)
+        self.assertEqual(evidence["timing"], {
+            "request_to_response_headers_s": 3.0,
+            "request_to_first_body_byte_s": 6.0,
+            "request_to_semantic_ttft_s": 7.0,
+            "request_stream_total_s": 8.0,
+            "cold_end_to_end_response_headers_s": 6.0,
+            "cold_end_to_end_first_body_byte_s": 9.0,
+            "cold_end_to_end_semantic_ttft_s": 10.0,
+            "cold_end_to_end_stream_total_s": 11.0,
+        })
+
+    def test_receipt_headers_use_strict_allowlist_and_value_sanitation(self):
+        receipts = gateway_probe_http._receipt_headers([
+            ("X-Request-ID", " safe-id "),
+            ("Authorization", "secret"),
+            ("CF-Ray", "bad\nvalue"),
+            ("X-Vercel-ID", "x" * 257),
+            ("Request-ID", "first"),
+            ("Request-ID", "second"),
+            ("OpenAI-Request-ID", "openai-id"),
+            ("Anthropic-Request-ID", "private output words"),
+        ])
+        self.assertEqual(receipts, {
+            "x-request-id": "safe-id",
+            "openai-request-id": "openai-id",
+        })
 
     def test_warm_reuse_survives_measured_response_closing_same_socket(self):
         _SSEHandler.close_measured = True
