@@ -195,6 +195,47 @@ class RenderTests(_SiteFixture):
         ):
             self.assertNotIn(forbidden, page)
 
+    def test_hostile_manifest_cannot_produce_a_scripting_href(self):
+        """The renderer enforces the scheme itself.
+
+        Ingest validates community links, but `community.json`, `releases.json`
+        and `gateway.json` are committed files a pull request can edit
+        directly, so the guard cannot live only at ingest.
+        """
+        import re
+        doc = site.build_board(self.site_dir)
+        doc["community"] = [{
+            "id": "evil", "title": "Evil bundle", "submitter": "someone",
+            "path": "javascript:alert(1)",
+            "link": "JaVaScRiPt:alert(document.cookie)",
+        }]
+        doc["releases"] = [{
+            "id": "r", "title": "Rel", "path": "  javascript:alert(2)",
+        }]
+        doc["harness"]["bundles"][0]["path"] = "data:text/html,<script>x</script>"
+        doc["harness"]["bundles"][0]["results_path"] = "//evil.example/x"
+        page = site.render_board_html(doc)
+
+        for href in re.findall(r'href="([^"]*)"', page):
+            self.assertFalse(
+                href.lower().replace("\t", "").strip().startswith(
+                    ("javascript:", "data:", "vbscript:", "//")),
+                f"unsafe href rendered: {href!r}",
+            )
+        # Dropping the link must not drop the text.
+        self.assertIn("Evil bundle", page)
+        self.assertIn("results.jsonl", page)
+
+    def test_safe_href_accepts_relative_and_http_only(self):
+        for allowed in ("https://e.example/x", "http://e.example",
+                        "releases/a/index.html", "/abs", "#packs"):
+            self.assertEqual(site._safe_href(allowed), allowed.strip())
+        for blocked in ("javascript:alert(1)", "JaVaScRiPt:alert(1)",
+                        "  javascript:alert(1)", "java\tscript:alert(1)",
+                        "data:text/html,x", "vbscript:x", "//evil.example",
+                        "mailto:a@b.c", "", None, 42):
+            self.assertIsNone(site._safe_href(blocked), blocked)
+
     def test_anchor_links_are_allowed_and_scheme_checked(self):
         """External links are fine; they must still be http(s)."""
         import re

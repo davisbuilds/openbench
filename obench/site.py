@@ -30,6 +30,7 @@ import argparse
 import html
 import json
 import os
+import re
 import sys
 from collections import defaultdict
 
@@ -1077,6 +1078,46 @@ def _signed(value, fmt):
     return ("+" if value > 0 else "") + fmt(value)
 
 
+def _safe_href(value):
+    """Return ``value`` if it is safe to put in an ``href``, else ``None``.
+
+    Escaping stops attribute breakout but says nothing about the scheme, so a
+    manifest carrying ``javascript:...`` would still render a working link.
+    Manifests are validated where they are ingested, but ``community.json``,
+    ``releases.json``, and ``gateway.json`` are committed files that a pull
+    request can edit directly, bypassing that check — so the renderer enforces
+    the rule itself rather than trusting its inputs.
+
+    Allowed: absolute ``http(s)`` URLs, same-document fragments, and relative
+    paths. Everything else is dropped, and the caller renders plain text.
+    """
+    if not isinstance(value, str):
+        return None
+    # Strip characters a browser ignores when resolving the scheme, so
+    # "java\tscript:" and "  javascript:" cannot slip past the prefix check.
+    collapsed = "".join(ch for ch in value if ch not in "\t\r\n\x00").strip()
+    if not collapsed:
+        return None
+    lowered = collapsed.lower()
+    if lowered.startswith(("http://", "https://")):
+        return collapsed
+    if collapsed.startswith("//"):
+        return None          # protocol-relative: inherits whatever the page used
+    if collapsed.startswith("#") or collapsed.startswith("/"):
+        return collapsed
+    # Relative only when no scheme appears before the first path separator.
+    head = re.split(r"[/?#]", collapsed, 1)[0]
+    return None if ":" in head else collapsed
+
+
+def _link(href, body, **attrs):
+    """An anchor when the target is safe, otherwise the text on its own."""
+    safe = _safe_href(href)
+    if safe is None:
+        return body
+    return _tag("a", {"href": safe, **attrs}, body)
+
+
 def _chip(text, cls="", title=None):
     return _tag("span", {"class": ("chip " + cls).strip(), "title": title}, _esc(text))
 
@@ -1280,7 +1321,7 @@ def _harness_board(bundle):
     arms = bundle["arms"]
     title = _esc(bundle["title"])
     if bundle.get("path"):
-        title = _tag("a", {"href": bundle["path"]}, title)
+        title = _link(bundle["path"], title)
 
     meta = "".join(filter(None, [
         _meta_field("kind", bundle["kind"]),
@@ -1355,9 +1396,9 @@ def _harness_board(bundle):
     })
 
     links = "".join(filter(None, [
-        _tag("span", {}, _tag("a", {"href": bundle["results_path"]}, "results.jsonl"))
+        _tag("span", {}, _link(bundle["results_path"], "results.jsonl"))
         if bundle.get("results_path") else None,
-        _tag("span", {}, _tag("a", {"href": bundle["path"]}, "release page"))
+        _tag("span", {}, _link(bundle["path"], "release page"))
         if bundle.get("path") else None,
     ]))
     foot = _tag("div", {"class": "head"}, _tag("div", {"class": "meta"}, links))
@@ -1373,7 +1414,7 @@ def _harness_board(bundle):
 def _gateway_board(bundle):
     title = _esc(bundle["title"])
     if bundle.get("path"):
-        title = _tag("a", {"href": bundle["path"]}, title)
+        title = _link(bundle["path"], title)
 
     meta = "".join(filter(None, [
         _meta_field("track", bundle.get("track") or "gateway_tax"),
@@ -1509,8 +1550,11 @@ def _record(name_html, meta_parts, sub=None, extra=""):
 
 def _linked_title(entry):
     name = _esc(entry.get("title") or entry.get("id") or "")
-    return (_tag("a", {"href": entry["path"]}, name) if entry.get("path")
-            else _tag("strong", {}, name))
+    if entry.get("path"):
+        linked = _link(entry["path"], name)
+        if linked != name:
+            return linked
+    return _tag("strong", {}, name)
 
 
 def _releases_section(entries):
@@ -1527,8 +1571,8 @@ def _community_section(entries):
         extra = ""
         if entry.get("link"):
             extra = _tag("div", {"class": "sub"},
-                         _tag("a", {"href": entry["link"], "rel": "nofollow noopener"},
-                              "source"))
+                         _link(entry["link"], "source",
+                               rel="nofollow noopener"))
         items.append(_record(
             _linked_title(entry),
             [entry.get("date"),
