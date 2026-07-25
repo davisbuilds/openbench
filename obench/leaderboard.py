@@ -488,13 +488,12 @@ def _fmt_tokens(value):
     return f"{value:.1f}"
 
 
-def write_leaderboard(site_dir, community_dir=None, *, refresh_index=True):
+def write_leaderboard(site_dir, community_dir=None):
     """Deprecated shim: the leaderboard is now the site landing page.
 
     Kept so existing scripts keep working; it builds the same artifacts as
     ``obench site build``.
     """
-    del refresh_index
     from . import site
     info = site.write_board(site_dir, community_dir=community_dir)
     return {
@@ -542,12 +541,6 @@ def main(argv=None):
         action="store_true",
         help="do not scan data/community (only site-dir releases + community)",
     )
-    build.add_argument(
-        "--no-refresh-index",
-        action="store_true",
-        help="do not regenerate docs/index.html",
-    )
-
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
     if args.command is None:
         parser.print_help()
@@ -561,7 +554,6 @@ def main(argv=None):
         info = write_leaderboard(
             args.site_dir,
             community_dir=community_dir,
-            refresh_index=not args.no_refresh_index,
         )
         print("note: `obench leaderboard build` is now `obench site build`")
         print(f"index.html  {info['html_path']}")

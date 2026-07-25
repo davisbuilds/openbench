@@ -316,7 +316,7 @@ class BuildLeaderboardTests(unittest.TestCase):
         )
         _write(os.path.join(self.site, "community.json"), "[]\n")
         # Kept as a shim: it now builds the same artifacts as `obench site build`.
-        info = leaderboard.write_leaderboard(self.site, refresh_index=True)
+        info = leaderboard.write_leaderboard(self.site)
         self.assertEqual(info["html_path"], os.path.join(self.site, "index.html"))
         self.assertTrue(os.path.isfile(info["html_path"]))
         self.assertTrue(os.path.isfile(info["json_path"]))

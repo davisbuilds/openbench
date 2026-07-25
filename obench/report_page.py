@@ -616,22 +616,27 @@ def _build_site_locked(site_dir, release_id, release_date, title, models, page):
     manifest_text = json.dumps(releases, indent=2, ensure_ascii=False) + "\n"
     pending = []
     originals = {}
-    replaced = []
+    index_path = os.path.join(site_dir, "index.html")
+    board_path = os.path.join(site_dir, "board.json")
+    tracked = (destination, manifest_path, index_path, board_path)
+    for final in tracked:
+        try:
+            with open(final, "rb") as fh:
+                originals[final] = fh.read()
+        except FileNotFoundError:
+            originals[final] = None
     try:
         for content, final in ((page, destination),
                                (manifest_text, manifest_path)):
             pending.append((_temporary_text(final, content), final))
-        for _, final in pending:
-            try:
-                with open(final, "rb") as fh:
-                    originals[final] = fh.read()
-            except FileNotFoundError:
-                originals[final] = None
         for temporary, final in pending:
             os.replace(temporary, final)
-            replaced.append(final)
+        # The landing page is the leaderboard, so the release, manifest, and
+        # generated board must commit or roll back as one publication.
+        from .community import write_site_index
+        write_site_index(site_dir)
     except BaseException:
-        for final in reversed(replaced):
+        for final in reversed(tracked):
             original = originals[final]
             if original is None:
                 try:
@@ -649,10 +654,6 @@ def _build_site_locked(site_dir, release_id, release_date, title, models, page):
         for temporary, _ in pending:
             if os.path.exists(temporary):
                 os.unlink(temporary)
-    # The landing page is the leaderboard, so it is rebuilt from the committed
-    # manifests once the artifact and manifest have landed together.
-    from .community import write_site_index
-    write_site_index(site_dir)
     return destination
 
 
