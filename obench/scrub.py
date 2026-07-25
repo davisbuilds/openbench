@@ -56,6 +56,11 @@ _API_KEY_RE = re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}\b")
 _GITHUB_RE = re.compile(r"\b(?:gh[opsur]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")
 _SLACK_RE = re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")
 _AWS_RE = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
+# Hugging Face user/org tokens. Found missing 2026-07-24 when GitHub push
+# protection blocked a results file that this scrubber had already passed: the
+# sanitize-git-repo task's checker echoes the fixture credentials it found into
+# checker_stdout, and hf_ was the one prefix with no rule.
+_HUGGINGFACE_RE = re.compile(r"\bhf_[A-Za-z0-9]{20,}\b")
 _HEX_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")
 _B64_RE = re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b")
 
@@ -65,6 +70,7 @@ _STATIC_RULES = [
     ("github-token", _GITHUB_RE, "<REDACTED_KEY>"),
     ("slack-token", _SLACK_RE, "<REDACTED_KEY>"),
     ("aws-key", _AWS_RE, "<REDACTED_KEY>"),
+    ("huggingface-token", _HUGGINGFACE_RE, "<REDACTED_KEY>"),
 ]
 # hex/base64 run LAST (after the dynamic host/home/user rules) so labeled data
 # wins over the generic blob catch-alls.
