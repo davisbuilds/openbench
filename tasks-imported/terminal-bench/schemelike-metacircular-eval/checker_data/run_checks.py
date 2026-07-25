@@ -18,6 +18,7 @@ All must match (after stripping a trailing "True" line that eval.scm emits).
 Exit 0 iff every program passes. This mirrors tests/test_outputs.py without pytest.
 """
 import atexit
+import concurrent.futures
 import hashlib
 import importlib.util
 import os
@@ -33,6 +34,7 @@ DIRECT_TIMEOUT = 60
 EVAL_TIMEOUT = 90
 META_PROGRAMS = ("05-simple", "calculator.scm", "closures.scm")
 MAX_EVAL_BYTES = 2 * 1024 * 1024
+MAX_WORKERS = 2
 MUTATION_SALT = b"openbench-schemelike-selfhost-mutation-2026-07-12"
 MUTATION_SENTINEL_BASE = "__openbench_mutation_sentinel"
 
@@ -49,23 +51,35 @@ INTERP = load_interp_ref()
 
 def run_direct(prog, input_data):
     try:
-        r = subprocess.run(["python3", INTERP_REF, prog], capture_output=True,
+        r = subprocess.run([sys.executable, INTERP_REF, prog], capture_output=True,
                            text=True, input=input_data, timeout=DIRECT_TIMEOUT)
         return r.stdout, r.stderr, r.returncode
     except subprocess.TimeoutExpired:
         return "", "TIMEOUT", -1
 
 
-def run_through_eval(prog, input_data, selfhost_source=None):
+def start_eval(prog, input_data, selfhost_source=None):
     eval_input = f"{selfhost_source}\n" if selfhost_source else ""
     eval_input += f"{prog}\n"
     if input_data:
         eval_input += input_data
+    proc = subprocess.Popen(
+        [sys.executable, INTERP_REF, "eval.scm"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return proc, eval_input
+
+
+def finish_eval(proc, eval_input):
     try:
-        r = subprocess.run(["python3", INTERP_REF, "eval.scm"], capture_output=True,
-                           text=True, input=eval_input, timeout=EVAL_TIMEOUT)
-        return r.stdout, r.stderr, r.returncode
+        stdout, stderr = proc.communicate(input=eval_input, timeout=EVAL_TIMEOUT)
+        return stdout, stderr, proc.returncode
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
         return "", "TIMEOUT", -1
 
 
@@ -230,6 +244,57 @@ def write_eval_for_selfhost():
     return os.path.basename(selfhost_path)
 
 
+def stop_pending_evals(pending):
+    for _, proc in pending.values():
+        if proc.poll() is None:
+            proc.kill()
+
+
+def check_eval_cases(cases, selfhost_source=None):
+    label = "self-hosted eval.scm" if selfhost_source else "eval.scm"
+    remaining = iter(cases)
+    # Keep both CI cores busy without queueing the full suite behind a bad solution.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        pending = {}
+        for case in remaining:
+            prog, input_data, _ = case
+            proc, eval_input = start_eval(prog, input_data, selfhost_source)
+            future = pool.submit(finish_eval, proc, eval_input)
+            pending[future] = (case, proc)
+            if len(pending) == MAX_WORKERS:
+                break
+
+        while pending:
+            done, _ = concurrent.futures.wait(
+                pending, return_when=concurrent.futures.FIRST_COMPLETED
+            )
+            for future in done:
+                case, _ = pending.pop(future)
+                prog, _, direct_output = case
+                eval_output, eval_error, _ = future.result()
+                if eval_error == "TIMEOUT":
+                    stop_pending_evals(pending)
+                    print(f"FAIL: {label} timed out on {prog}")
+                    sys.exit(1)
+                if normalize(direct_output) != normalize(eval_output):
+                    stop_pending_evals(pending)
+                    print(f"FAIL: {prog}: {label} output != interp.py output")
+                    print(f"  direct:    {normalize(direct_output)!r}")
+                    print(f"  via eval:  {normalize(eval_output)!r}")
+                    sys.exit(1)
+
+                try:
+                    case = next(remaining)
+                except StopIteration:
+                    continue
+                next_prog, input_data, _ = case
+                proc, eval_input = start_eval(
+                    next_prog, input_data, selfhost_source
+                )
+                next_future = pool.submit(finish_eval, proc, eval_input)
+                pending[next_future] = (case, proc)
+
+
 def main():
     if not os.path.exists("eval.scm"):
         print("FAIL: eval.scm does not exist")
@@ -248,7 +313,7 @@ def main():
     # identify the self-host case.
     selfhost_source = write_eval_for_selfhost()
 
-    passed = 0
+    cases = []
     for prog in progs:
         inp = detect_input(prog)
         d_out, d_err, d_code = run_direct(prog, inp)
@@ -258,31 +323,15 @@ def main():
         if d_code not in (0, -1):
             print(f"FAIL: direct interp.py failed ({d_code}) on {prog}: {d_err[-300:]}")
             sys.exit(1)
+        cases.append((prog, inp, d_out))
 
-        e_out, e_err, _ = run_through_eval(prog, inp)
-        if e_err == "TIMEOUT":
-            print(f"FAIL: eval.scm timed out on {prog}")
-            sys.exit(1)
+    check_eval_cases(cases)
+    meta_cases = [
+        case for case in cases if any(tag in case[0] for tag in META_PROGRAMS)
+    ]
+    check_eval_cases(meta_cases, selfhost_source)
 
-        if normalize(d_out) != normalize(e_out):
-            print(f"FAIL: {prog}: eval.scm output != interp.py output")
-            print(f"  direct:    {normalize(d_out)!r}")
-            print(f"  via eval:  {normalize(e_out)!r}")
-            sys.exit(1)
-
-        if any(tag in prog for tag in META_PROGRAMS):
-            m_out, m_err, _ = run_through_eval(prog, inp, selfhost_source=selfhost_source)
-            if m_err == "TIMEOUT":
-                print(f"FAIL: self-hosted eval.scm timed out on {prog}")
-                sys.exit(1)
-            if normalize(d_out) != normalize(m_out):
-                print(f"FAIL: {prog}: self-hosted eval.scm output != interp.py output")
-                print(f"  direct:      {normalize(d_out)!r}")
-                print(f"  via meta:    {normalize(m_out)!r}")
-                sys.exit(1)
-        passed += 1
-
-    print(f"PASS: all {passed} scheme programs match via eval.scm")
+    print(f"PASS: all {len(cases)} scheme programs match via eval.scm")
     sys.exit(0)
 
 

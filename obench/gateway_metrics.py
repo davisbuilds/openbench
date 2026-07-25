@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Privacy-preserving metrics and route evidence for OpenAI Chat SSE streams.
+"""Privacy-preserving metrics and route evidence for OpenAI streaming APIs.
 
 The parser accepts response chunks with caller-supplied monotonic timestamps.
 It deliberately exposes no event payloads or generated text: snapshots contain
@@ -11,7 +11,10 @@ from __future__ import annotations
 import codecs
 import json
 import math
+from collections.abc import Mapping
 from typing import Any, Iterable
+
+from . import gateway_profiles
 
 
 _SEMANTIC_DELTA_KEYS = ("content", "reasoning_content", "reasoning", "refusal")
@@ -69,38 +72,15 @@ def _has_semantic_delta(obj: dict[str, Any]) -> bool:
     return False
 
 
-def _clean_attempts(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    attempts = []
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        attempt = {}
-        provider = _identifier(item.get("provider"))
-        model = _identifier(item.get("model"))
-        status = item.get("status")
-        if provider is not None:
-            attempt["provider"] = provider
-        if model is not None:
-            attempt["model"] = model
-        if isinstance(status, int) and not isinstance(status, bool):
-            attempt["status"] = status
-        if attempt:
-            attempts.append(attempt)
-    return attempts
-
-
-def _successful_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
-    for attempt in reversed(attempts):
-        status = attempt.get("status")
-        try:
-            status_code = int(status)
-        except (TypeError, ValueError):
-            continue
-        if 200 <= status_code < 300:
-            return attempt
-    return None
+def _has_responses_semantic_delta(obj: dict[str, Any]) -> bool:
+    event_type = obj.get("type")
+    if event_type in {
+        "response.output_text.delta",
+        "response.refusal.delta",
+        "response.function_call_arguments.delta",
+    }:
+        return _has_text(obj.get("delta"))
+    return False
 
 
 class OpenAIChatSSEParser:
@@ -116,6 +96,9 @@ class OpenAIChatSSEParser:
         allowed_models: Iterable[str] = (),
         allowed_providers: Iterable[str] = (),
         fallback_enabled: bool = False,
+        model_match: str = "exact_revision",
+        gateway: str | None = None,
+        response_headers: Mapping[str, str] | None = None,
     ):
         self._started_at = _timestamp(started_at, "started_at")
         self._requested_model = _identifier(requested_model)
@@ -132,6 +115,21 @@ class OpenAIChatSSEParser:
             if (provider := _identifier(value)) is not None
         )
         self._fallback_enabled = bool(fallback_enabled)
+        self._model_match = model_match
+        self._gateway = gateway or ("openrouter" if route_kind == "gateway" else None)
+        self._gateway_evidence = (
+            gateway_profiles.GatewayEvidence(
+                gateway=self._gateway,
+                requested_model=self._requested_model or "",
+                requested_provider=self._requested_provider or "",
+                allowed_models=self._allowed_models,
+                allowed_providers=self._allowed_providers,
+                model_match=model_match,
+                response_headers=response_headers or {},
+            )
+            if self._gateway is not None
+            else None
+        )
         self._decoder = codecs.getincrementaldecoder("utf-8")("replace")
         self._chunk_type: type | None = None
         self._line = ""
@@ -144,18 +142,16 @@ class OpenAIChatSSEParser:
         self._last_received_at: float | None = None
         self._completed_at: float | None = None
         self._served_model: str | None = None
+        self._direct_dated_model_ids: set[str] = set()
+        self._direct_model_conflict = False
+        self._direct_provider_conflict = False
         self._top_level_provider: str | None = None
-        self._metadata_requested: str | None = None
-        self._metadata_seen = False
-        self._metadata_provider: str | None = None
-        self._attempts: list[dict[str, Any]] = []
-        self._attempts_present = False
-        self._attempts_malformed = False
-        self._usage: dict[str, int] | None = None
+        self._usage: dict[str, Any] | None = None
         self._events = 0
         self._ignored_events = 0
         self._malformed_events = 0
         self._done_seen = False
+        self._terminal_status: str | None = None
         self._finalized = False
 
     def feed(self, chunk: bytes | str, received_at: float) -> None:
@@ -229,20 +225,58 @@ class OpenAIChatSSEParser:
                 ),
             }
 
-        provider = self._resolved_provider()
+        gateway_evidence = self._gateway_evidence
+        provider = (
+            gateway_evidence.provider
+            if gateway_evidence is not None
+            else self._resolved_provider()
+        )
+        served_model = (
+            gateway_evidence.served_model
+            if gateway_evidence is not None
+            else self._served_model
+        )
+        metadata_requested_model = (
+            gateway_evidence.metadata_requested_model
+            if gateway_evidence is not None
+            else None
+        )
+        attempts = (
+            gateway_evidence.attempts
+            if gateway_evidence is not None
+            else []
+        )
         coverage = {
             "ttfb": ttfb is not None,
             "semantic_ttft": ttft is not None,
             "usage": self._usage is not None,
             "generation": generation is not None,
             "requested_model": self._requested_model is not None,
-            "served_model": self._served_model is not None,
-            "openrouter_metadata": self._metadata_seen,
+            "served_model": served_model is not None,
+            "openrouter_metadata": (
+                gateway_evidence.metadata_seen
+                if gateway_evidence is not None
+                else False
+            ),
             "provider": provider is not None,
-            "attempts": bool(self._attempts),
+            "attempts": bool(attempts),
+            "attempt_evidence": (
+                gateway_evidence.attempts_present
+                if gateway_evidence is not None
+                else False
+            ),
             "stream_done": self._done_seen,
         }
         covered = sum(coverage.values())
+        route = {
+            "requested_model": self._requested_model,
+            "metadata_requested_model": metadata_requested_model,
+            "served_model": served_model,
+            "provider": provider,
+            "attempts": [dict(attempt) for attempt in attempts],
+        }
+        if gateway_evidence is not None and gateway_evidence.safe_metadata:
+            route["gateway_metadata"] = dict(gateway_evidence.safe_metadata)
         return {
             "timing": {
                 "ttfb_s": ttfb,
@@ -251,25 +285,20 @@ class OpenAIChatSSEParser:
             },
             "usage": dict(self._usage) if self._usage is not None else None,
             "generation": generation,
-            "route": {
-                "requested_model": self._requested_model,
-                "metadata_requested_model": self._metadata_requested,
-                "served_model": self._served_model,
-                "provider": provider,
-                "attempts": [dict(attempt) for attempt in self._attempts],
-            },
+            "route": route,
             "coverage": {
                 **coverage,
                 "covered": covered,
                 "total": len(coverage),
                 "ratio": covered / len(coverage),
             },
-            "route_evidence": self._route_evidence(provider),
+            "route_evidence": self._route_evidence(provider, served_model),
             "stream": {
                 "events": self._events,
                 "ignored_events": self._ignored_events,
                 "malformed_events": self._malformed_events,
                 "done": self._done_seen,
+                "terminal_status": self._terminal_status,
                 "finalized": self._finalized,
             },
         }
@@ -321,7 +350,9 @@ class OpenAIChatSSEParser:
             self._ignored_events += 1
             return
         if data.strip() == "[DONE]":
-            self._done_seen = True
+            if self._accept_done_marker():
+                self._done_seen = True
+                self._terminal_status = "completed"
             self._events += 1
             return
         try:
@@ -332,141 +363,162 @@ class OpenAIChatSSEParser:
         if not isinstance(obj, dict):
             self._ignored_events += 1
             return
+        if self._is_terminal_event(obj):
+            self._done_seen = True
+            response = obj.get("response")
+            if isinstance(response, dict) and isinstance(response.get("status"), str):
+                self._terminal_status = response["status"]
+            else:
+                self._terminal_status = obj["type"].removeprefix("response.")
         if self._observe(obj, event_data_at):
             self._events += 1
         else:
             self._ignored_events += 1
 
+    def _metric_objects(self, obj: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+        return (obj,)
+
+    def _accept_done_marker(self) -> bool:
+        return True
+
+    def _is_terminal_event(self, obj: dict[str, Any]) -> bool:
+        return False
+
+    def _has_semantic_content(self, obj: dict[str, Any]) -> bool:
+        return _has_semantic_delta(obj)
+
     def _observe(self, obj: dict[str, Any], timestamp: float) -> bool:
-        model = _identifier(obj.get("model"))
-        if model is not None:
-            self._served_model = model
-        provider = _identifier(obj.get("provider"))
-        if provider is not None:
-            self._top_level_provider = provider
+        gateway_metadata_observed = False
+        usage_observed = False
+        for metric_obj in self._metric_objects(obj):
+            if self._gateway_evidence is not None:
+                gateway_metadata_observed = (
+                    self._gateway_evidence.observe(metric_obj)
+                    or gateway_metadata_observed
+                )
+            model = _identifier(metric_obj.get("model"))
+            if model is not None:
+                if self._route_kind == "direct" and self._model_match == "rolling_alias":
+                    revision = gateway_profiles.concrete_model_revision(model)
+                    if revision is not None:
+                        self._direct_dated_model_ids.add(revision)
+                        if len(self._direct_dated_model_ids) > 1:
+                            self._direct_model_conflict = True
+                    if (
+                        self._requested_provider
+                        and not gateway_profiles.model_provider_matches(
+                            model, self._requested_provider
+                        )
+                    ):
+                        self._direct_model_conflict = True
+                self._served_model = model
+            provider = _identifier(metric_obj.get("provider"))
+            if provider is not None:
+                if (
+                    self._route_kind == "direct"
+                    and self._requested_provider
+                    and provider.casefold() != self._requested_provider.casefold()
+                ):
+                    self._direct_provider_conflict = True
+                self._top_level_provider = provider
 
-        metadata = obj.get("openrouter_metadata")
-        if isinstance(metadata, dict):
-            self._metadata_seen = True
-            requested = _identifier(metadata.get("requested"))
-            if requested is not None:
-                self._metadata_requested = requested
-            if "attempts" in metadata:
-                raw_attempts = metadata.get("attempts")
-                if not isinstance(raw_attempts, list):
-                    self._attempts_present = True
-                    self._attempts_malformed = True
-                    self._attempts = []
-                elif not raw_attempts:
-                    self._attempts = []
-                else:
-                    self._attempts_present = True
-                    self._attempts = _clean_attempts(raw_attempts)
-                    if len(self._attempts) != len(raw_attempts):
-                        self._attempts_malformed = True
-            endpoints = metadata.get("endpoints")
-            available = endpoints.get("available") if isinstance(endpoints, dict) else None
-            if isinstance(available, list):
-                for endpoint in available:
-                    if isinstance(endpoint, dict) and endpoint.get("selected") is True:
-                        self._metadata_provider = _identifier(endpoint.get("provider"))
-                        break
+            usage = metric_obj.get("usage")
+            if isinstance(usage, dict):
+                prompt = _token_count(usage.get("prompt_tokens"))
+                completion = _token_count(usage.get("completion_tokens"))
+                if prompt is None:
+                    prompt = _token_count(usage.get("input_tokens"))
+                if completion is None:
+                    completion = _token_count(usage.get("output_tokens"))
+                total = _token_count(usage.get("total_tokens"))
+                clean = {}
+                if prompt is not None:
+                    clean["input_tokens"] = prompt
+                if completion is not None:
+                    clean["output_tokens"] = completion
+                if total is not None:
+                    clean["total_tokens"] = total
+                raw_details = usage.get("input_tokens_details")
+                if raw_details is None:
+                    raw_details = usage.get("prompt_tokens_details")
+                if isinstance(raw_details, Mapping):
+                    details = {}
+                    for key in (
+                        "cached_tokens",
+                        "cache_write_tokens",
+                        "cached_tokens_created",
+                    ):
+                        count = _token_count(raw_details.get(key))
+                        if count is not None:
+                            details[key] = count
+                    if details:
+                        clean["input_tokens_details"] = details
+                if clean:
+                    self._usage = clean
+                    usage_observed = True
 
-        usage = obj.get("usage")
-        if isinstance(usage, dict):
-            prompt = _token_count(usage.get("prompt_tokens"))
-            completion = _token_count(usage.get("completion_tokens"))
-            if prompt is None:
-                prompt = _token_count(usage.get("input_tokens"))
-            if completion is None:
-                completion = _token_count(usage.get("output_tokens"))
-            total = _token_count(usage.get("total_tokens"))
-            clean = {}
-            if prompt is not None:
-                clean["input_tokens"] = prompt
-            if completion is not None:
-                clean["output_tokens"] = completion
-            if total is not None:
-                clean["total_tokens"] = total
-            if clean:
-                self._usage = clean
-
-        semantic = _has_semantic_delta(obj)
+        semantic = self._has_semantic_content(obj)
         if self._first_semantic_at is None and semantic:
             self._first_semantic_at = timestamp
         return (
             semantic
-            or isinstance(metadata, dict)
-            or (self._usage is not None and isinstance(usage, dict))
+            or gateway_metadata_observed
+            or usage_observed
+            or self._is_terminal_event(obj)
         )
 
     def _resolved_provider(self) -> str | None:
-        return self._top_level_provider or self._metadata_provider
+        return self._top_level_provider
 
-    def _route_evidence(self, provider: str | None) -> dict[str, Any]:
+    def _route_evidence(
+        self,
+        provider: str | None,
+        served_model: str | None,
+    ) -> dict[str, Any]:
         reasons = []
         required = (
             (self._requested_model, "missing_requested_model"),
-            (self._served_model, "missing_served_model"),
+            (served_model, "missing_served_model"),
             (self._done_seen, "stream_not_done"),
             (self._malformed_events == 0, "malformed_events"),
         )
         reasons.extend(reason for value, reason in required if not value)
-        if self._requested_model and self._served_model != self._requested_model:
-            reasons.append("served_model_conflict")
 
         if self._route_kind == "gateway":
-            gateway_required = (
-                (self._metadata_seen, "missing_openrouter_metadata"),
-                (self._metadata_requested, "missing_metadata_requested_model"),
-                (provider, "missing_provider"),
-            )
-            reasons.extend(reason for value, reason in gateway_required if not value)
-            if self._metadata_requested and self._metadata_requested != self._requested_model:
-                reasons.append("requested_model_conflict")
-            if self._allowed_models and self._served_model not in self._allowed_models:
-                reasons.append("served_model_not_allowed")
-
-            expected_provider = self._requested_provider
-            provider_folded = provider.casefold() if provider else None
-            if expected_provider and provider_folded != expected_provider.casefold():
-                reasons.append("provider_conflict")
-            allowed_provider_folds = {
-                allowed.casefold() for allowed in self._allowed_providers
-            }
-            if provider and allowed_provider_folds and provider_folded not in allowed_provider_folds:
-                reasons.append("provider_not_allowed")
+            if self._gateway_evidence is None:
+                reasons.append("missing_gateway_profile")
+            else:
+                reasons.extend(self._gateway_evidence.route_reasons())
+            if self._fallback_enabled:
+                reasons.append("fallback_enabled")
+        else:
+            if self._direct_model_conflict:
+                reasons.append("served_model_conflict")
             if (
-                self._top_level_provider
-                and self._metadata_provider
-                and self._top_level_provider.casefold() != self._metadata_provider.casefold()
+                self._requested_model
+                and isinstance(served_model, str)
+                and (
+                    not gateway_profiles.models_match(
+                        self._requested_model, served_model, self._model_match
+                    )
+                    or (
+                        self._requested_provider
+                        and not gateway_profiles.model_provider_matches(
+                            served_model, self._requested_provider
+                        )
+                    )
+                )
+            ):
+                reasons.append("served_model_conflict")
+            if (
+                self._direct_provider_conflict
+                or (
+                    provider is not None
+                    and self._requested_provider
+                    and provider.casefold() != self._requested_provider.casefold()
+                )
             ):
                 reasons.append("provider_conflict")
-
-            if self._attempts_present:
-                if self._attempts_malformed or not self._attempts:
-                    reasons.append("malformed_attempts")
-                success = _successful_attempt(self._attempts)
-                if success is None:
-                    reasons.append("missing_successful_attempt")
-                for attempt in self._attempts:
-                    attempt_provider = _identifier(attempt.get("provider"))
-                    attempt_model = _identifier(attempt.get("model"))
-                    status = attempt.get("status")
-                    if not attempt_provider:
-                        reasons.append("missing_attempt_provider")
-                    elif provider_folded and attempt_provider.casefold() != provider_folded:
-                        reasons.append("fallback_attempt")
-                    if not attempt_model:
-                        reasons.append("missing_attempt_model")
-                    elif self._served_model and attempt_model != self._served_model:
-                        reasons.append("fallback_attempt")
-                    if not isinstance(status, int) or isinstance(status, bool):
-                        reasons.append("missing_attempt_status")
-                    elif not 200 <= status < 300:
-                        reasons.append("unsuccessful_attempt")
-                if self._fallback_enabled:
-                    reasons.append("fallback_enabled")
         return {
             "pass": not reasons,
             "verdict": "pass" if not reasons else "fail",
@@ -476,6 +528,39 @@ class OpenAIChatSSEParser:
 
 # Short alias for callers that already know the protocol context.
 ChatSSEMetricsParser = OpenAIChatSSEParser
+
+
+class OpenAIResponsesSSEParser(OpenAIChatSSEParser):
+    """Incrementally derive metrics from an OpenAI Responses SSE body."""
+
+    def _metric_objects(self, obj: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+        response = obj.get("response")
+        if isinstance(response, dict):
+            return obj, response
+        return (obj,)
+
+    def _accept_done_marker(self) -> bool:
+        return False
+
+    def _is_terminal_event(self, obj: dict[str, Any]) -> bool:
+        return obj.get("type") in {
+            "response.cancelled",
+            "response.completed",
+            "response.incomplete",
+            "response.failed",
+        }
+
+    def _has_semantic_content(self, obj: dict[str, Any]) -> bool:
+        return _has_responses_semantic_delta(obj)
+
+
+def sse_parser(protocol: str, **kwargs: Any) -> OpenAIChatSSEParser:
+    """Construct the strict parser for a Gateway Bench wire protocol."""
+    if protocol == "openai_chat":
+        return OpenAIChatSSEParser(**kwargs)
+    if protocol == "openai_responses":
+        return OpenAIResponsesSSEParser(**kwargs)
+    raise ValueError(f"unsupported gateway protocol: {protocol}")
 
 
 def parse_chat_sse(
@@ -489,6 +574,9 @@ def parse_chat_sse(
     allowed_models: Iterable[str] = (),
     allowed_providers: Iterable[str] = (),
     fallback_enabled: bool = False,
+    model_match: str = "exact_revision",
+    gateway: str | None = None,
+    response_headers: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Replay timestamped chunks through :class:`OpenAIChatSSEParser`."""
     parser = OpenAIChatSSEParser(
@@ -499,6 +587,42 @@ def parse_chat_sse(
         allowed_models=allowed_models,
         allowed_providers=allowed_providers,
         fallback_enabled=fallback_enabled,
+        model_match=model_match,
+        gateway=gateway,
+        response_headers=response_headers,
+    )
+    for received_at, chunk in chunks:
+        parser.feed(chunk, received_at)
+    return parser.finalize(completed_at)
+
+
+def parse_responses_sse(
+    chunks: Iterable[tuple[float, bytes | str]],
+    *,
+    requested_model: str | None,
+    started_at: float,
+    completed_at: float | None = None,
+    route_kind: str = "gateway",
+    requested_provider: str | None = None,
+    allowed_models: Iterable[str] = (),
+    allowed_providers: Iterable[str] = (),
+    fallback_enabled: bool = False,
+    model_match: str = "exact_revision",
+    gateway: str | None = None,
+    response_headers: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Replay timestamped chunks through :class:`OpenAIResponsesSSEParser`."""
+    parser = OpenAIResponsesSSEParser(
+        requested_model=requested_model,
+        started_at=started_at,
+        route_kind=route_kind,
+        requested_provider=requested_provider,
+        allowed_models=allowed_models,
+        allowed_providers=allowed_providers,
+        fallback_enabled=fallback_enabled,
+        model_match=model_match,
+        gateway=gateway,
+        response_headers=response_headers,
     )
     for received_at, chunk in chunks:
         parser.feed(chunk, received_at)
