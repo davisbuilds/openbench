@@ -43,6 +43,7 @@ ENTRY_PATH = os.path.join(HERE, "entry.py")
 CANDIDATES_PATH = os.path.join(HERE, "candidates.py")
 AUTH_PERSIST_PATH = os.path.join(HERE, "auth_persist.py")
 GATEWAY_SPEC_PATH = os.path.join(HERE, "gateway_spec.py")
+GATEWAY_PROFILES_PATH = os.path.join(HERE, "gateway_profiles.py")
 DOCKERFILE_DIR = os.path.join(HERE, "docker")
 RESULT_SENTINEL = "__BENCH_RESULT__"
 DEFAULT_IMAGE = "openbench-harness:latest"
@@ -472,6 +473,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-v", f"{ENTRY_PATH}:/bench/entry.py:ro",
         "-v", f"{AUTH_PERSIST_PATH}:/bench/auth_persist.py:ro",
         "-v", f"{GATEWAY_SPEC_PATH}:/bench/gateway_spec.py:ro",
+        "-v", f"{GATEWAY_PROFILES_PATH}:/bench/gateway_profiles.py:ro",
         "-v", f"{os.path.abspath(instruction_path)}:/bench/instruction.txt:ro",
     ]
     candidate_arg = None
