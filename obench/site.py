@@ -629,6 +629,7 @@ button.theme svg{width:15px;height:15px}
 
 /* --- boards, as records rather than cards ------------------------------- */
 .board{padding:52px 0 8px;border-bottom:1px solid var(--rule)}
+.board:last-child{border-bottom:0}
 .board .head{padding:0 0 18px}
 .board .head:last-child{padding:16px 0 0;border-top:1px solid var(--rule)}
 .scroll+.head{padding-top:40px}
@@ -739,7 +740,7 @@ tbody tr:hover td:first-child{background:var(--wash)}
 .legend i.null{background:var(--pole-null)}
 
 /* --- lists and prose ---------------------------------------------------- */
-.empty{padding:56px 0;color:var(--ink-2);max-width:62ch}
+.empty{padding:4px 0 32px;color:var(--ink-2);max-width:62ch}
 .empty p{margin:0 0 10px}
 code{font-family:var(--font-mono);font-size:.86em}
 ul.records{list-style:none;margin:0;padding:0}
@@ -758,8 +759,8 @@ ul.records .sub{color:var(--ink-3);font:11.5px/1.8 var(--font-mono);
 .prose p,.prose li{color:var(--ink-2);font-size:15.5px}
 .prose li{margin:9px 0}
 .prose strong{color:var(--ink)}
-footer{color:var(--ink-3);font-size:12.5px;padding:40px 0 60px;
-  border-top:1px solid var(--rule);margin-top:40px}
+footer{color:var(--ink-3);font-size:12.5px;padding:28px 0 60px;
+  border-top:1px solid var(--rule)}
 
 @media(max-width:1080px){:root{--plot-w:112px}}
 @media(max-width:860px){
