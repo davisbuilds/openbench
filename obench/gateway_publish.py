@@ -661,7 +661,7 @@ def _require_complete_schedule(
     }
     observed: dict[
         tuple[str, str, int],
-        dict[int, list[results.CellIdentity]],
+        dict[int, list[tuple[results.CellIdentity, Mapping[str, Any]]]],
     ] = {}
     for row in rows:
         identity = results.gateway_identity_from_row(row)
@@ -677,7 +677,7 @@ def _require_complete_schedule(
         )
         observed.setdefault(coordinate, {}).setdefault(
             identity.block_attempt, []
-        ).append(identity)
+        ).append((identity, row))
     if set(observed) != expected:
         missing = sorted(expected - set(observed))
         extra = sorted(set(observed) - expected)
@@ -690,7 +690,8 @@ def _require_complete_schedule(
             raise GatewayPublishError(
                 f"result schedule has non-contiguous attempts for {coordinate!r}"
             )
-        for attempt, identities in attempts.items():
+        for attempt, entries in attempts.items():
+            identities = [identity for identity, _row in entries]
             block_ids = {identity.block_id for identity in identities}
             arm_ids = [identity.arm_id for identity in identities]
             if len(block_ids) != 1:
@@ -704,11 +705,30 @@ def _require_complete_schedule(
                     f"{coordinate!r} attempt {attempt}"
                 )
         latest = attempts[attempt_numbers[-1]]
-        latest_arm_ids = {identity.arm_id for identity in latest}
+        latest_arm_ids = {identity.arm_id for identity, _row in latest}
         if len(latest) != len(arm_digests) or latest_arm_ids != set(arm_digests):
             raise GatewayPublishError(
                 f"latest matched block is incomplete for {coordinate!r}"
             )
+        for identity, row in latest:
+            result = row.get("result")
+            if (
+                not isinstance(result, Mapping)
+                or result.get("infrastructure_invalid_reason") is not None
+            ):
+                raise GatewayPublishError(
+                    f"latest matched block has infrastructure-invalid cell "
+                    f"{results.make_gateway_cell_id(identity)}"
+                )
+            route_integrity = row.get("route_integrity")
+            if (
+                not isinstance(route_integrity, Mapping)
+                or route_integrity.get("pass") is not True
+            ):
+                raise GatewayPublishError(
+                    f"latest matched block has route-integrity-invalid cell "
+                    f"{results.make_gateway_cell_id(identity)}"
+                )
 
 
 def _require_provider_prompt_mode_binding(
