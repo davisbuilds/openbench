@@ -669,14 +669,7 @@ tbody td{font:14px/1.4 var(--font-mono);color:var(--ink-2);
   border-bottom:1px solid var(--rule)}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:var(--wash)}
-td.rank{width:1%;padding-right:6px;font:400 19px/1 var(--font-display);
-  color:var(--ink-3)}
 td.name{color:var(--ink);font-weight:600;letter-spacing:-.01em}
-/* The leading visible row of the current sort carries the emphasis. */
-tbody tr.lead td{border-bottom-color:var(--rule-strong)}
-tbody tr.lead td.rank{color:var(--ink)}
-tbody tr.lead td.name{font-size:15px}
-tbody tr.lead .iv .val{font-size:16px;color:var(--ink)}
 /* Identity stays put while the measures scroll. */
 thead th:first-child,tbody td:first-child{position:sticky;left:0;z-index:1;
   background:var(--paper)}
@@ -796,19 +789,6 @@ _JS = r"""
   });
 
   // --- sorting ------------------------------------------------------------
-  function renumber(tbody) {
-    var n = 0;
-    Array.prototype.forEach.call(tbody.rows, function (tr) {
-      tr.classList.remove("lead");
-      if (tr.hidden) return;
-      n += 1;
-      tr.cells[0].textContent = String(n);
-      // Emphasis belongs to the leading *visible* row, not to whichever row
-      // happens to sit first in the DOM after a filter.
-      if (n === 1) tr.classList.add("lead");
-    });
-  }
-
   function sortBy(table, th) {
     var col = th.getAttribute("data-col");
     var numeric = th.getAttribute("data-type") !== "str";
@@ -838,7 +818,6 @@ _JS = r"""
       return x.localeCompare(y) * sign;
     });
     rows.forEach(function (tr) { tbody.appendChild(tr); });
-    renumber(tbody);
   }
 
   document.querySelectorAll("table").forEach(function (table) {
@@ -882,8 +861,6 @@ _JS = r"""
         });
         board.hidden = visible === 0;
         if (visible) shown += 1;
-        var tbody = board.querySelector("tbody");
-        if (tbody) renumber(tbody);
       });
       if (noMatches) noMatches.hidden = shown !== 0;
     }
@@ -1106,7 +1083,7 @@ def _safe_href(value):
     if collapsed.startswith("#") or collapsed.startswith("/"):
         return collapsed
     # Relative only when no scheme appears before the first path separator.
-    head = re.split(r"[/?#]", collapsed, 1)[0]
+    head = re.split(r"[/?#]", collapsed, maxsplit=1)[0]
     return None if ":" in head else collapsed
 
 
@@ -1235,10 +1212,9 @@ def _render_table(columns, rows, sorted_by=None, row_attrs=None):
     ``skip_if_empty``  drop the column when no row has a key
 
     ``sorted_by`` is a column label. When given, the rows are *actually* sorted
-    by that column before rendering, so the header's sort indicator and the
-    rank numbers agree with what is on screen. When omitted, the caller's own
-    ordering stands and no column claims to be sorted — which is what a table
-    with a control arm wants, since its first row is a baseline and not a rank.
+    by that column before rendering, so the header's sort indicator agrees with
+    what is on screen. When omitted, the caller's own ordering stands and no
+    column claims to be sorted.
     """
     columns = [
         col for col in columns
@@ -1287,8 +1263,8 @@ def _render_table(columns, rows, sorted_by=None, row_attrs=None):
         heads += _tag("th", attrs, body)
 
     body_rows = ""
-    for position, row in enumerate(rows, 1):
-        cells = _tag("td", {"class": "rank"}, str(position))
+    for row in rows:
+        cells = ""
         keys = {}
         for index, col in enumerate(columns):
             cells += _tag("td", {"class": col.get("cls")}, col["cell"](row))
@@ -1297,8 +1273,6 @@ def _render_table(columns, rows, sorted_by=None, row_attrs=None):
                 keys[f"data-s{index}"] = "" if value is None else str(value)
         attrs = dict(row_attrs(row) if row_attrs else {})
         attrs.update(keys)
-        if position == 1:
-            attrs["class"] = "lead"
         body_rows += _tag("tr", attrs, cells)
 
     # Plot width is a per-table budget: four contrast columns cannot each be as
@@ -1313,7 +1287,7 @@ def _render_table(columns, rows, sorted_by=None, row_attrs=None):
         attrs["data-dense"] = "1"
     return _tag("div", attrs, _tag(
         "table", {},
-        _tag("thead", {}, _tag("tr", {}, _tag("th", {"scope": "col"}, "#") + heads))
+        _tag("thead", {}, _tag("tr", {}, heads))
         + _tag("tbody", {}, body_rows)))
 
 
@@ -1329,7 +1303,12 @@ def _harness_board(bundle):
         _meta_field("denominators",
                     "matched (task, trial)" if bundle["table"] == "matched"
                     else "all countable"),
-        _meta_field("cells", bundle["countable_rows"]),
+        _meta_field(
+            "ranked cells",
+            (bundle.get("matched") or {}).get("matched_rows")
+            if bundle["table"] == "matched"
+            else bundle["countable_rows"],
+        ),
         _meta_field("results", (bundle.get("results_sha256") or "")[:12])
         if bundle.get("results_sha256") else None,
         _meta_field("taskset", (bundle.get("task_set_digest") or "")[:12])

@@ -427,9 +427,11 @@ class TableOrderingTests(_SiteFixture):
         self.assertEqual(self._rows(html, "<tbody>"), ["z", "a"])
         self.assertNotIn("aria-sort", html)
 
-    def test_leading_row_is_marked_for_the_no_javascript_case(self):
+    def test_tables_do_not_assign_ordinal_rank_or_lead_treatment(self):
         page = site.render_board_html(site.build_board(self.site_dir))
-        self.assertIn('class="lead"', page)
+        self.assertNotIn('class="lead"', page)
+        self.assertNotIn('class="rank"', page)
+        self.assertNotIn('<th scope="col">#</th>', page)
 
 
 class ContrastPlotTests(unittest.TestCase):

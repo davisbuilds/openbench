@@ -108,11 +108,12 @@ than an admin-panel one.
   contrast poles, so a coloured pixel always means something measured.
 - **Rules, not boxes.** Boards are records separated by hairlines rather than
   cards with borders and shadows, so the data sits on the page.
-- **The lede is derived, not asserted.** The headline and deck are computed
-  from the widest board's actual spread (`_lede`). The wording stays
-  descriptive — a spread is reported, never attributed to a cause — because
-  the page's whole argument is that it does not overclaim. There is no
-  stat-tile strip; the summary is a single typographic dateline.
+- **The lede reports coverage, not a conclusion.** The headline names the two
+  result families and the dateline counts the included harnesses, models,
+  bundles, and cells. Results stay in the tables for readers to interpret.
+- **Tables sort values without assigning ordinal ranks.** Equal estimates are
+  not presented as first, second, and third, and no row receives visual
+  winner treatment.
 - **One shared interval scale.** Solve-rate intervals plot against the same
   0–100% track, gridded at 25% steps with the axis labelled once in the column
   header, so rows compare down the column instead of each bar being its own
