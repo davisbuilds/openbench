@@ -131,6 +131,7 @@ def aggregate(rows):
             stats[key] = {"per_task": {}, "succ": 0, "n": 0, "scores": [],
                           "wall_times": [], "token_vals": [], "token_bases": set(),
                           "turn_vals": [],
+                          "cells_planned": set(), "cells_satisfied": set(),
                           "taxonomy": {fc: 0 for fc in FAILURE_CLASSES}}
             arms.append(key)
         if task not in tasks:
@@ -139,8 +140,16 @@ def aggregate(rows):
         st = stats[key]
         fc = class_for_report(row)
         st["taxonomy"][fc] = st["taxonomy"].get(fc, 0) + 1
+        # Coverage: a (task, trial) cell is PLANNED as soon as any row exists for
+        # it (excluded rows carry their trial index, so a fully rate-limited cell
+        # still proves it was attempted) and SATISFIED only once some attempt
+        # produced a countable verdict. Tracking distinct cells rather than row
+        # counts keeps retries from inflating either side.
+        cell = (task, row.get("trial"))
+        st["cells_planned"].add(cell)
         if is_excluded_from_solve_rate(row):
             continue
+        st["cells_satisfied"].add(cell)
 
         pt = st["per_task"].setdefault(task, [0, 0])
         success = bool(row.get("success"))
@@ -172,6 +181,39 @@ def aggregate(rows):
 
 
 # --- derived per-arm metrics (each returns None when undefined) -------------- #
+# Below this fraction of planned cells returning a countable verdict, an arm's
+# solve rate describes a self-selected subset rather than the task set. Rate
+# limits and infra failures hit LONG-running cells hardest, and long cells are
+# the hard ones, so incomplete coverage biases solve rates UPWARD.
+COVERAGE_PUBLISH_THRESHOLD = 0.95
+
+
+def coverage(st):
+    """Fraction of an arm's planned (task, trial) cells that got a real verdict."""
+    planned = len(st.get("cells_planned") or ())
+    if not planned:
+        return None
+    return len(st.get("cells_satisfied") or ()) / planned
+
+
+def coverage_warnings(stats, arms, threshold=COVERAGE_PUBLISH_THRESHOLD):
+    """Warn for any arm whose solve rate rests on an incomplete cell set."""
+    out = []
+    for arm in arms:
+        st = stats.get(arm) or {}
+        cov = coverage(st)
+        if cov is None or cov >= threshold:
+            continue
+        planned = len(st["cells_planned"])
+        missing = planned - len(st["cells_satisfied"])
+        out.append(
+            "%s: coverage %.0f%% (%d of %d planned cells never returned a verdict); "
+            "solve rate covers the cells that completed, which skews high because "
+            "excluded cells run longer and fail more. Refill before publishing."
+            % (" x ".join(str(a) for a in arm), 100 * cov, missing, planned))
+    return out
+
+
 def mean(vals):
     """Arithmetic mean, or None for an empty list."""
     return (sum(vals) / len(vals)) if vals else None
@@ -256,13 +298,22 @@ def _render(headers, rows_text):
     return "\n".join(lines)
 
 
+def _fmt_coverage(cov):
+    """Coverage as a percent, flagged with ! when below the publish threshold."""
+    if cov is None:
+        return "-"
+    mark = "" if cov >= COVERAGE_PUBLISH_THRESHOLD else "!"
+    return f"{cov:.0%}{mark}"
+
+
 def _token_notes(stats, arms, used_proxy):
-    """Footnotes / warnings for tok/slv basis honesty."""
+    """Footnotes / warnings for tok/slv basis honesty and cell coverage."""
     notes = []
     if used_proxy:
         notes.append(PROXY_FOOTNOTE)
     if table_has_mixed_token_bases(stats, arms):
         notes.append(MIXED_BASIS_WARNING)
+    notes.extend("COVERAGE: " + w for w in coverage_warnings(stats, arms))
     return notes
 
 
@@ -275,7 +326,7 @@ def format_table(arms, tasks, stats):
     alongside. Both stay ``-`` when the adapter reports no data.
     """
     headers = ["harness", "model"] + tasks + [
-        "overall", "wilson95", "mscore", "mean_s", "tok/slv", "turns",
+        "overall", "cov", "wilson95", "mscore", "mean_s", "tok/slv", "turns",
     ]
     rows_text = []
     used_proxy = False
@@ -291,6 +342,7 @@ def format_table(arms, tasks, stats):
         rate = (succ / n) if n else 0.0
         lo, hi = wilson_ci(succ, n)
         cells.append(f"{succ}/{n} ({rate:.0%})" if n else "-")
+        cells.append(_fmt_coverage(coverage(st)))
         cells.append(f"[{lo:.3f}, {hi:.3f}]")
         ms = mean(st["scores"])
         cells.append("-" if ms is None else f"{ms:.2f}")
@@ -314,7 +366,7 @@ def format_efficiency(arms, stats):
     half-width, tokens-per-solve, turns-per-solve.
     """
     headers = [
-        "harness", "model", "success", "rate", "wilson95", "mscore",
+        "harness", "model", "success", "rate", "cov", "wilson95", "mscore",
         "mean_s", "tok/slv", "turns/slv",
     ]
     rows_text = []
@@ -336,6 +388,7 @@ def format_efficiency(arms, stats):
             model,
             f"{succ}/{n}" if n else "-",
             f"{rate:.0%}" if n else "-",
+            _fmt_coverage(coverage(st)),
             f"[{lo:.3f}, {hi:.3f}]",
             "-" if ms is None else f"{ms:.2f}",
             mean_s,
