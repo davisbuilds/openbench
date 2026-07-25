@@ -1032,8 +1032,15 @@ def _close_pipe(pipe):
         pass
 
 
-def run_checker(task_dir, workdir, timeout_s, checker_env=None):
+def run_checker(task_dir, workdir, timeout_s, checker_env=None, task_image=None):
     """Run ``<task_dir>/checker.sh`` with cwd=workdir and TASK_DIR set.
+
+    ``task_image`` is exported as ``BENCH_TASK_IMAGE`` so a pinned-image task's
+    checker runs in the SAME image the agent ran in, without restating the
+    digest. Checkers used to hardcode their own copy, which desynced on every
+    image rebuild: docker then refused to start the checker (exit 125) and the
+    cell was recorded as the model answering wrongly. 13 cells were corrupted
+    that way before the classifier learned to treat non-verdict exits as infra.
 
     Returns ``(checker_exit, raw_score, stdout, stderr)`` where
     ``checker_exit`` is the integer exit code (or the string ``"timeout"``) and
@@ -1045,6 +1052,8 @@ def run_checker(task_dir, workdir, timeout_s, checker_env=None):
     checker = os.path.join(task_dir, "checker.sh")
     env = dict(os.environ) if checker_env is None else dict(checker_env)
     env["TASK_DIR"] = os.path.abspath(task_dir)
+    if task_image:
+        env["BENCH_TASK_IMAGE"] = str(task_image)
     env.pop("OPENBENCH_SOLUTION_OVERLAY", None)
     stdout_capture = TailCapture()
     stderr_capture = TailCapture()
@@ -1821,7 +1830,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             checker_start = time.monotonic()
             try:
                 checker_exit, raw_score, checker_stdout, checker_stderr = run_checker(
-                    task_dir, workdir, checker_timeout_s)
+                    task_dir, workdir, checker_timeout_s, task_image=task_image)
             finally:
                 row["t_checker_s"] = round(time.monotonic() - checker_start, 3)
         except Exception:  # noqa: BLE001

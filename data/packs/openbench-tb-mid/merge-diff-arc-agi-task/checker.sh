@@ -1,6 +1,9 @@
 #!/bin/bash
 set -uo pipefail
-IMAGE=openbench-tb2-merge-diff-arc-agi-task@sha256:11dc550b6657fd5dbd4840823cf7c3c4fe07f94e2e06f24b7005aff1d28191ff
+# Image comes from the runner (BENCH_TASK_IMAGE) so the checker runs in the
+# SAME image as the agent. The literal below is a hand-run fallback only --
+# never a second source of truth: task.toml/images.json own the digest.
+IMAGE="${BENCH_TASK_IMAGE:-openbench-tb2-merge-diff-arc-agi-task@sha256:11dc550b6657fd5dbd4840823cf7c3c4fe07f94e2e06f24b7005aff1d28191ff}"
 WORKDIR=/app
 if [ ! -f .openbench-image-hydrated ]; then
   cid=$(docker create "$IMAGE") || exit 2
