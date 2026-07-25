@@ -35,3 +35,7 @@ transcripts/
 scrubbed/
 .bench-tmp/
 .worker/
+
+# reclassification/repair backups are scratch, never committed
+*.pre-reclass
+*.pre-*.bak

@@ -11,10 +11,10 @@ def digest(label):
     return results.canonical_digest({"identity": label})
 
 
-def router_identity():
-    return results.CellIdentity.for_router(
-        track="gateway_tax",
-        experiment_id="gateway-tax-smoke",
+def gateway_identity():
+    return results.CellIdentity.for_gateway(
+        track="fixed_model_provider",
+        experiment_id="gateway-bench-smoke",
         experiment_digest=digest("experiment"),
         arm_id="via-openrouter",
         arm_digest=digest("arm"),
@@ -23,6 +23,7 @@ def router_identity():
         price_digest=digest("price"),
         sampling_digest=digest("sampling"),
         schedule_digest=digest("schedule"),
+        provider_prompt_mode="provider_default",
         task="make-it-run",
         task_digest=digest("task"),
         checker_digest=digest("checker"),
@@ -46,7 +47,7 @@ def router_identity():
 
 
 SHARED_CHANGES = {
-    "track": "model_router",
+    "track": "other_gateway_track",
     "experiment_id": "other-experiment",
     "experiment_digest": digest("experiment-changed"),
     "policy_digest": digest("policy-changed"),
@@ -54,6 +55,7 @@ SHARED_CHANGES = {
     "price_digest": digest("price-changed"),
     "sampling_digest": digest("sampling-changed"),
     "schedule_digest": digest("schedule-changed"),
+    "provider_prompt_mode": "isolated_per_call_v1",
     "harness": "other-harness",
     "candidate": "other-candidate",
     "harness_version": "0.80.11",
@@ -98,9 +100,9 @@ class CanonicalJsonTests(unittest.TestCase):
             results.canonical_json({"value": float("nan")})
 
 
-class RouterIdentityTests(unittest.TestCase):
+class GatewayIdentityTests(unittest.TestCase):
     def setUp(self):
-        self.identity = router_identity()
+        self.identity = gateway_identity()
 
     def test_schema_v2_identity_is_immutable_and_canonically_nested(self):
         self.assertEqual(self.identity.schema_version, 2)
@@ -124,25 +126,25 @@ class RouterIdentityTests(unittest.TestCase):
             self.identity.task = "other"
 
     def test_every_normative_dimension_changes_cell_id(self):
-        original = results.make_router_cell_id(self.identity)
+        original = results.make_gateway_cell_id(self.identity)
         for field, replacement in {**SHARED_CHANGES, **CELL_ONLY_CHANGES}.items():
             with self.subTest(field=field):
                 changed = dataclasses.replace(self.identity, **{field: replacement})
-                self.assertNotEqual(original, results.make_router_cell_id(changed))
+                self.assertNotEqual(original, results.make_gateway_cell_id(changed))
 
     def test_comparison_shared_dimensions_change_run_id(self):
-        original = results.make_router_run_id(self.identity)
+        original = results.make_gateway_run_id(self.identity)
         for field, replacement in SHARED_CHANGES.items():
             with self.subTest(field=field):
                 changed = dataclasses.replace(self.identity, **{field: replacement})
-                self.assertNotEqual(original, results.make_router_run_id(changed))
+                self.assertNotEqual(original, results.make_gateway_run_id(changed))
 
     def test_cell_specific_dimensions_do_not_split_run_id(self):
-        original = results.make_router_run_id(self.identity)
+        original = results.make_gateway_run_id(self.identity)
         for field, replacement in CELL_ONLY_CHANGES.items():
             with self.subTest(field=field):
                 changed = dataclasses.replace(self.identity, **{field: replacement})
-                self.assertEqual(original, results.make_router_run_id(changed))
+                self.assertEqual(original, results.make_gateway_run_id(changed))
 
     def test_fixed_benchmark_and_schema_are_normative(self):
         for changes in (
@@ -155,7 +157,7 @@ class RouterIdentityTests(unittest.TestCase):
 
     def test_nested_validation_round_trips_and_rejects_shape_drift(self):
         nested = self.identity.as_dict()
-        self.assertEqual(results.validate_router_identity(nested), self.identity)
+        self.assertEqual(results.validate_gateway_identity(nested), self.identity)
 
         missing = dict(nested)
         missing.pop("comparison")
@@ -166,7 +168,7 @@ class RouterIdentityTests(unittest.TestCase):
         for candidate in (missing, extra, bad_nested):
             with self.subTest(candidate=candidate):
                 with self.assertRaises(results.ResultIdentityError):
-                    results.validate_router_identity(candidate)
+                    results.validate_gateway_identity(candidate)
 
 
 class DispatchTests(unittest.TestCase):
@@ -182,12 +184,12 @@ class DispatchTests(unittest.TestCase):
             row["run_id"],
         )
 
-    def test_router_results_dispatch_as_schema_v2(self):
-        row = {"schema_version": 2, "benchmark": "router"}
+    def test_gateway_results_dispatch_as_schema_v2(self):
+        row = {"schema_version": 2, "benchmark": "gateway"}
 
-        self.assertEqual(results.result_kind(row), (2, "router"))
+        self.assertEqual(results.result_kind(row), (2, "gateway"))
         with self.assertRaises(results.UnsupportedResultError):
-            results.dispatch_result(row, {(1, "router"): lambda value: value})
+            results.dispatch_result(row, {(1, "gateway"): lambda value: value})
 
     def test_invalid_schema_version_fails_closed(self):
         for version in (True, -1, "2"):
@@ -195,7 +197,7 @@ class DispatchTests(unittest.TestCase):
                 with self.assertRaises(results.ResultError):
                     results.result_kind({
                         "schema_version": version,
-                        "benchmark": "router",
+                        "benchmark": "gateway",
                     })
 
 
@@ -203,19 +205,20 @@ class ResumeTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.path = Path(self.temp_dir.name) / "results.jsonl"
-        self.identity = router_identity()
+        self.identity = gateway_identity()
 
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def router_row(self, identity=None):
+    def gateway_row(self, identity=None):
         identity = identity or self.identity
         return {
             "schema_version": 2,
-            "benchmark": "router",
+            "benchmark": "gateway",
             "identity": identity.as_dict(),
-            "run_id": results.make_router_run_id(identity),
-            "cell_id": results.make_router_cell_id(identity),
+            "provider_prompt_mode": identity.provider_prompt_mode,
+            "run_id": results.make_gateway_run_id(identity),
+            "cell_id": results.make_gateway_cell_id(identity),
         }
 
     def write_rows(self, rows):
@@ -232,19 +235,19 @@ class ResumeTests(unittest.TestCase):
 
     def test_reads_legacy_and_nested_v2_rows(self):
         legacy = {"run_id": "pi:task:model:trial1", "success": True}
-        router = self.router_row()
-        self.write_rows([legacy, router])
+        gateway = self.gateway_row()
+        self.write_rows([legacy, gateway])
 
         state = results.read_jsonl_for_resume(self.path)
 
-        self.assertEqual(state.rows, (legacy, router))
+        self.assertEqual(state.rows, (legacy, gateway))
         self.assertEqual(
             state.cell_ids,
-            frozenset({legacy["run_id"], router["cell_id"]}),
+            frozenset({legacy["run_id"], gateway["cell_id"]}),
         )
 
-    def test_router_row_requires_canonical_nested_identity(self):
-        row = self.router_row()
+    def test_gateway_row_requires_canonical_nested_identity(self):
+        row = self.gateway_row()
         row.pop("identity")
         self.write_rows([row])
 
@@ -264,16 +267,16 @@ class ResumeTests(unittest.TestCase):
             repetition=2,
             block_id="block-002",
         )
-        rows = [self.router_row(), self.router_row(other)]
+        rows = [self.gateway_row(), self.gateway_row(other)]
         self.assertEqual(rows[0]["run_id"], rows[1]["run_id"])
         self.write_rows(rows)
 
         self.assertEqual(len(results.read_jsonl_for_resume(self.path).cell_ids), 2)
 
-    def test_duplicate_legacy_or_router_cells_are_rejected(self):
+    def test_duplicate_legacy_or_gateway_cells_are_rejected(self):
         cases = (
             [{"run_id": "same"}, {"run_id": "same"}],
-            [self.router_row(), self.router_row()],
+            [self.gateway_row(), self.gateway_row()],
         )
         for rows in cases:
             with self.subTest(rows=rows):
@@ -306,16 +309,16 @@ class ResumeTests(unittest.TestCase):
         with self.assertRaisesRegex(results.ResultsLogError, "legacy row run_id"):
             results.read_jsonl_for_resume(self.path)
 
-    def test_router_ids_and_dispatch_metadata_must_match_identity(self):
+    def test_gateway_ids_and_dispatch_metadata_must_match_identity(self):
         cases = (
-            ("cell_id", "router-cell-v2-wrong", "cell_id does not match"),
-            ("run_id", "router-run-v2-wrong", "run_id does not match"),
+            ("cell_id", "gateway-cell-v2-wrong", "cell_id does not match"),
+            ("run_id", "gateway-run-v2-wrong", "run_id does not match"),
             ("schema_version", 1, "schema_version conflicts"),
             ("benchmark", "harness", "benchmark conflicts"),
         )
         for field, value, message in cases:
             with self.subTest(field=field):
-                row = self.router_row()
+                row = self.gateway_row()
                 row[field] = value
                 self.write_rows([row])
                 with self.assertRaisesRegex(results.ResultsLogError, message):

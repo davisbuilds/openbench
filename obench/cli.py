@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Umbrella CLI for the OpenBench harness benchmarking framework.
 
-    obench run | report | doctor | validate | router | gate | compare | init |
+    obench run | report | doctor | validate | gateway | gate | compare | init |
          publish | verify | community | leaderboard | site | pack | export | import
          [args...]
 """
@@ -28,7 +28,11 @@ def main(argv=None):
     sub.add_parser("report", help="aggregate results.jsonl", add_help=False)
     sub.add_parser("doctor", help="preflight CLI/auth/model checks", add_help=False)
     sub.add_parser("validate", help="check task checker polarity", add_help=False)
-    sub.add_parser("router", help="run Gateway Tax experiments", add_help=False)
+    sub.add_parser(
+        "gateway",
+        help="compare fixed model/provider routes through AI gateways",
+        add_help=False,
+    )
     sub.add_parser("gate", help="BYO candidate admission gate", add_help=False)
     sub.add_parser("compare", help="matched-denominator scorecard", add_help=False)
     sub.add_parser("init", help="scaffold .openbench/ for private evals", add_help=False)
@@ -46,7 +50,7 @@ def main(argv=None):
     )
     sub.add_parser(
         "site",
-        help="build the harness+router leaderboard site (docs/index.html)",
+        help="build the harness+gateway leaderboard site (docs/index.html)",
         add_help=False,
     )
     sub.add_parser(
@@ -54,6 +58,7 @@ def main(argv=None):
         help="install and manage versioned packs (tasks or harness manifests)",
         add_help=False,
     )
+    sub.add_parser("matrix", help="retry-aware queue-based benchmark runner", add_help=False)
     sub.add_parser("export", help="export tasks to external formats (harbor)", add_help=False)
     sub.add_parser("import", help="import tasks from external formats (harbor)", add_help=False)
 
@@ -72,17 +77,21 @@ def main(argv=None):
         return 0
 
     known = {
-        "run", "report", "doctor", "validate", "router", "gate", "compare", "init",
-        "publish", "verify", "community", "leaderboard", "site", "pack", "export",
+        "run", "report", "doctor", "validate", "gateway", "gate", "compare", "init",
+        "matrix", "publish", "verify", "community", "leaderboard", "site", "pack",
+        "export",
         "import",
     }
     if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, report, doctor, "
-            "validate, router, gate, compare, init, publish, verify, community, "
+            "validate, gateway, gate, compare, init, publish, verify, community, "
             "leaderboard, site, pack, export, import"
         )
 
+    if command == "matrix":
+        from .matrix_queue import main as matrix_main
+        return matrix_main(rest)
     if command == "run":
         from .run import main as run_main
         return run_main(rest)
@@ -95,9 +104,9 @@ def main(argv=None):
     if command == "validate":
         from .validate_tasks import main as validate_main
         return validate_main(rest)
-    if command == "router":
-        from .router_cli import main as router_main
-        return router_main(rest)
+    if command == "gateway":
+        from .gateway_cli import main as gateway_main
+        return gateway_main(rest)
     if command == "gate":
         from .candidate_gate import main as gate_main
         return gate_main(rest)

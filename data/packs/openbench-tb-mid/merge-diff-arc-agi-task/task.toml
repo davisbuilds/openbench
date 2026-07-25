@@ -1,3 +1,3 @@
-docker_image = "openbench-tb2-merge-diff-arc-agi-task@sha256:11dc550b6657fd5dbd4840823cf7c3c4fe07f94e2e06f24b7005aff1d28191ff"
+docker_image = "openbench-tb2-merge-diff-arc-agi-task@sha256:a7a9fc71d33e7a87e54b93ede147e839fec2e5aea867cdfcf1fc8f4aa9810deb"
 docker_image_tag = "openbench-tb2-merge-diff-arc-agi-task:pinned"
 docker_workdir = "/app"

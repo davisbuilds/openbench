@@ -1,6 +1,9 @@
 #!/bin/bash
 set -uo pipefail
-IMAGE=openbench-tb2-query-optimize@sha256:9e847e4af966d76e41363651967f2523e469bd8a8e517b5364a9f79fe95d4134
+# Image comes from the runner (BENCH_TASK_IMAGE) so the checker runs in the
+# SAME image as the agent. The literal below is a hand-run fallback only --
+# never a second source of truth: task.toml/images.json own the digest.
+IMAGE="${BENCH_TASK_IMAGE:-openbench-tb2-query-optimize@sha256:9e847e4af966d76e41363651967f2523e469bd8a8e517b5364a9f79fe95d4134}"
 WORKDIR=/app
 if [ ! -f .openbench-image-hydrated ]; then
   cid=$(docker create "$IMAGE") || exit 2

@@ -88,6 +88,15 @@ class TestScrubClasses(unittest.TestCase):
         self.assertIn("<REDACTED_KEY>", out)
         self.assertNotIn("AKIAIOSFODNN7EXAMPLE", out)
 
+    def test_huggingface_token(self):
+        # Regression: GitHub push protection blocked a results file this
+        # scrubber had already passed. sanitize-git-repo's checker echoes the
+        # fixture credentials it finds into checker_stdout, and hf_ was the one
+        # prefix with no rule.
+        out = self._scrub("HF_TOKEN=hf_abcdefghijklmnopqrstuvwxyz123456 end")
+        self.assertIn("<REDACTED_KEY>", out)
+        self.assertNotIn("hf_abcdefghij", out)
+
     def test_hex_blob(self):
         out = self._scrub("sha " + "a1b2c3d4" * 5 + " done")  # 40 hex chars
         self.assertIn("<REDACTED_HEX>", out)

@@ -86,6 +86,19 @@ def effective_score(exit_code, parsed_score):
 CHECKER_TIMEOUT_S = 120
 
 
+def _task_docker_image(task_dir):
+    """Return task.toml's ``docker_image`` (the digest's single source), or None."""
+    path = os.path.join(task_dir, "task.toml")
+    if not os.path.isfile(path):
+        return None
+    try:
+        import tomllib
+        with open(path, "rb") as fh:
+            return tomllib.load(fh).get("docker_image")
+    except (OSError, ValueError):
+        return None
+
+
 def run_checker(task_dir, overlay_solution_flag):
     """Set up a workspace copy, optionally overlay solution/, run checker.sh.
 
@@ -104,6 +117,15 @@ def run_checker(task_dir, overlay_solution_flag):
 
         env = dict(os.environ)
         env["TASK_DIR"] = task_dir
+        # Same contract as obench.run.run_checker: the task's pinned image is
+        # resolved from task.toml and handed to the checker, so the checker
+        # never depends on its own hardcoded copy. Found the hard way: the
+        # runner path was fixed first, validation still used the stale
+        # fallback, and the same task PASSED on one machine and FAILED on the
+        # other purely by which machine's images the fallback happened to name.
+        task_image = _task_docker_image(task_dir)
+        if task_image:
+            env["BENCH_TASK_IMAGE"] = str(task_image)
         if overlay_solution_flag:
             env["OPENBENCH_SOLUTION_OVERLAY"] = "1"
         else:

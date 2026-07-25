@@ -14,7 +14,7 @@ from typing import Any, TypeVar
 LEGACY_SCHEMA_VERSION = 0
 CURRENT_SCHEMA_VERSION = 2
 HARNESS_BENCHMARK = "harness"
-ROUTER_BENCHMARK = "router"
+GATEWAY_BENCHMARK = "gateway"
 _SHA256_HEX_LENGTH = 64
 
 _IDENTITY_FIELDS = frozenset({
@@ -26,7 +26,7 @@ _EXPERIMENT_FIELDS = frozenset({"id", "digest"})
 _ARM_FIELDS = frozenset({"id", "digest"})
 _COMPARISON_FIELDS = frozenset({
     "policy_digest", "catalog_digest", "price_digest", "sampling_digest",
-    "schedule_digest",
+    "schedule_digest", "provider_prompt_mode",
 })
 _TASK_FIELDS = frozenset({
     "name", "digest", "checker_digest", "workspace_source_sha",
@@ -177,7 +177,7 @@ def _require_object(name: str, value: Any, fields: frozenset[str]) -> Mapping[st
 
 @dataclass(frozen=True, slots=True)
 class CellIdentity:
-    """Immutable normative identity for one router benchmark cell."""
+    """Immutable normative identity for one gateway benchmark cell."""
 
     schema_version: int
     benchmark: str
@@ -210,14 +210,15 @@ class CellIdentity:
     repetition: int
     block_id: str
     block_attempt: int
+    provider_prompt_mode: str
 
     def __post_init__(self) -> None:
         if self.schema_version != CURRENT_SCHEMA_VERSION:
             raise ResultIdentityError(
-                f"schema_version must be {CURRENT_SCHEMA_VERSION} for router identities"
+                f"schema_version must be {CURRENT_SCHEMA_VERSION} for gateway identities"
             )
-        if self.benchmark != ROUTER_BENCHMARK:
-            raise ResultIdentityError(f"benchmark must be {ROUTER_BENCHMARK!r}")
+        if self.benchmark != GATEWAY_BENCHMARK:
+            raise ResultIdentityError(f"benchmark must be {GATEWAY_BENCHMARK!r}")
         for name in (
             "track", "experiment_id", "arm_id", "task", "harness",
             "harness_version", "execution_lane", "budget_usd_cap", "window_id",
@@ -240,18 +241,27 @@ class CellIdentity:
         _require_positive_number("checker_timeout_s", self.checker_timeout_s)
         _require_positive_int("repetition", self.repetition)
         _require_non_negative_int("block_attempt", self.block_attempt)
+        _require_non_empty_string("provider_prompt_mode", self.provider_prompt_mode)
 
     @classmethod
-    def for_router(cls, **values: Any) -> "CellIdentity":
-        """Build a schema-v2 router identity without repeating fixed fields."""
+    def for_gateway(cls, **values: Any) -> "CellIdentity":
+        """Build a schema-v2 gateway identity without repeating fixed fields."""
         return cls(
             schema_version=CURRENT_SCHEMA_VERSION,
-            benchmark=ROUTER_BENCHMARK,
+            benchmark=GATEWAY_BENCHMARK,
             **values,
         )
 
     def as_dict(self) -> dict[str, Any]:
         """Return the canonical nested identity representation."""
+        comparison = {
+            "policy_digest": self.policy_digest,
+            "catalog_digest": self.catalog_digest,
+            "price_digest": self.price_digest,
+            "sampling_digest": self.sampling_digest,
+            "schedule_digest": self.schedule_digest,
+            "provider_prompt_mode": self.provider_prompt_mode,
+        }
         return {
             "schema_version": self.schema_version,
             "benchmark": {"name": self.benchmark, "track": self.track},
@@ -260,13 +270,7 @@ class CellIdentity:
                 "digest": self.experiment_digest,
             },
             "arm": {"id": self.arm_id, "digest": self.arm_digest},
-            "comparison": {
-                "policy_digest": self.policy_digest,
-                "catalog_digest": self.catalog_digest,
-                "price_digest": self.price_digest,
-                "sampling_digest": self.sampling_digest,
-                "schedule_digest": self.schedule_digest,
-            },
+            "comparison": comparison,
             "task": {
                 "name": self.task,
                 "digest": self.task_digest,
@@ -299,7 +303,7 @@ class CellIdentity:
         }
 
     def run_dict(self) -> dict[str, Any]:
-        """Return comparison-shared dimensions that define one router run."""
+        """Return comparison-shared dimensions that define one gateway run."""
         identity = self.as_dict()
         return {
             key: identity[key]
@@ -310,11 +314,11 @@ class CellIdentity:
         }
 
 
-def validate_router_identity(value: CellIdentity | Mapping[str, Any]) -> CellIdentity:
-    """Return a validated schema-v2 router identity."""
+def validate_gateway_identity(value: CellIdentity | Mapping[str, Any]) -> CellIdentity:
+    """Return a validated schema-v2 gateway identity."""
     if isinstance(value, CellIdentity):
         return value
-    root = _require_object("router identity", value, _IDENTITY_FIELDS)
+    root = _require_object("gateway identity", value, _IDENTITY_FIELDS)
     benchmark = _require_object("identity.benchmark", root["benchmark"], _BENCHMARK_FIELDS)
     experiment = _require_object(
         "identity.experiment", root["experiment"], _EXPERIMENT_FIELDS
@@ -364,31 +368,36 @@ def validate_router_identity(value: CellIdentity | Mapping[str, Any]) -> CellIde
         repetition=schedule["repetition"],
         block_id=schedule["block_id"],
         block_attempt=schedule["block_attempt"],
+        provider_prompt_mode=comparison["provider_prompt_mode"],
     )
 
 
-def router_identity_from_row(row: Mapping[str, Any]) -> CellIdentity:
+def gateway_identity_from_row(row: Mapping[str, Any]) -> CellIdentity:
     """Read the canonical nested identity and verify dispatch metadata."""
     if "identity" not in row:
-        raise ResultIdentityError("router row identity is required")
-    identity = validate_router_identity(row["identity"])
+        raise ResultIdentityError("gateway row identity is required")
+    identity = validate_gateway_identity(row["identity"])
     if row.get("schema_version") != identity.schema_version:
-        raise ResultIdentityError("router row schema_version conflicts with its identity")
+        raise ResultIdentityError("gateway row schema_version conflicts with its identity")
     if row.get("benchmark") != identity.benchmark:
-        raise ResultIdentityError("router row benchmark conflicts with its identity")
+        raise ResultIdentityError("gateway row benchmark conflicts with its identity")
+    if row.get("provider_prompt_mode") != identity.provider_prompt_mode:
+        raise ResultIdentityError(
+            "gateway row provider_prompt_mode conflicts with its identity"
+        )
     return identity
 
 
-def make_router_run_id(identity: CellIdentity | Mapping[str, Any]) -> str:
+def make_gateway_run_id(identity: CellIdentity | Mapping[str, Any]) -> str:
     """Return the deterministic ID shared by comparable cells in one run."""
-    identity = validate_router_identity(identity)
-    return f"router-run-v{CURRENT_SCHEMA_VERSION}-{canonical_digest(identity.run_dict())}"
+    identity = validate_gateway_identity(identity)
+    return f"gateway-run-v{CURRENT_SCHEMA_VERSION}-{canonical_digest(identity.run_dict())}"
 
 
-def make_router_cell_id(identity: CellIdentity | Mapping[str, Any]) -> str:
-    """Return the deterministic ID for one router benchmark cell."""
-    identity = validate_router_identity(identity)
-    return f"router-cell-v{CURRENT_SCHEMA_VERSION}-{canonical_digest(identity.as_dict())}"
+def make_gateway_cell_id(identity: CellIdentity | Mapping[str, Any]) -> str:
+    """Return the deterministic ID for one gateway benchmark cell."""
+    identity = validate_gateway_identity(identity)
+    return f"gateway-cell-v{CURRENT_SCHEMA_VERSION}-{canonical_digest(identity.as_dict())}"
 
 
 def schema_version(row: Mapping[str, Any]) -> int:
@@ -434,14 +443,14 @@ def dispatch_result(
 def result_cell_id(row: Mapping[str, Any]) -> str:
     """Return the resumable cell ID for a legacy or versioned result row."""
     if "identity" in row:
-        identity = validate_router_identity(row["identity"])
+        identity = validate_gateway_identity(row["identity"])
         if row.get("schema_version") != identity.schema_version:
             raise ResultIdentityError(
-                "router row schema_version conflicts with its identity"
+                "gateway row schema_version conflicts with its identity"
             )
         if row.get("benchmark") != identity.benchmark:
             raise ResultIdentityError(
-                "router row benchmark conflicts with its identity"
+                "gateway row benchmark conflicts with its identity"
             )
     kind = result_kind(row)
     if kind == (LEGACY_SCHEMA_VERSION, HARNESS_BENCHMARK):
@@ -449,12 +458,12 @@ def result_cell_id(row: Mapping[str, Any]) -> str:
         if not isinstance(value, str) or not value:
             raise ResultIdentityError("legacy row run_id must be a non-empty string")
         return value
-    if kind == (CURRENT_SCHEMA_VERSION, ROUTER_BENCHMARK):
-        identity = router_identity_from_row(row)
-        if row.get("run_id") != make_router_run_id(identity):
-            raise ResultIdentityError("router row run_id does not match its identity")
-        if row.get("cell_id") != make_router_cell_id(identity):
-            raise ResultIdentityError("router row cell_id does not match its identity")
+    if kind == (CURRENT_SCHEMA_VERSION, GATEWAY_BENCHMARK):
+        identity = gateway_identity_from_row(row)
+        if row.get("run_id") != make_gateway_run_id(identity):
+            raise ResultIdentityError("gateway row run_id does not match its identity")
+        if row.get("cell_id") != make_gateway_cell_id(identity):
+            raise ResultIdentityError("gateway row cell_id does not match its identity")
         return row["cell_id"]
     raise UnsupportedResultError(
         f"unsupported result schema_version={kind[0]} benchmark={kind[1]!r}"
@@ -533,6 +542,6 @@ def read_jsonl_for_resume(path: str | Path) -> ResumeState:
 
 get_schema_version = schema_version
 get_benchmark = benchmark_name
-router_run_id = make_router_run_id
-router_cell_id = make_router_cell_id
+gateway_run_id = make_gateway_run_id
+gateway_cell_id = make_gateway_cell_id
 load_resume_state = read_jsonl_for_resume

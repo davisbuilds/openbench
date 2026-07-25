@@ -1,3 +1,3 @@
-docker_image = "openbench-tb2-sanitize-git-repo@sha256:d972cfdfdee6b175d3593a2b0bac469b9d8e06c3be64148650af427ec1995298"
+docker_image = "openbench-tb2-sanitize-git-repo@sha256:45fc6a76ddb4c4a22b698fc167f8a51ac4a91bf2c472d72b4e00451cbe5b27ad"
 docker_image_tag = "openbench-tb2-sanitize-git-repo:pinned"
 docker_workdir = "/app/dclm"

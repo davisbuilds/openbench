@@ -27,8 +27,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from obench.router_metrics import OpenAIChatSSEParser
-from obench.router_spec import RoutePlan, SecretPlan
+from obench import gateway_profiles, gateway_spec
+from obench.gateway_metrics import sse_parser
+from obench.gateway_spec import TRACK, RoutePlan, SecretPlan
 
 HOP_BY_HOP = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -88,19 +89,32 @@ class LedgerSeal:
 class _CellLedger:
     state: str = "ACTIVE"
     in_flight: int = 0
+    max_calls: int | None = None
+    admitted_calls: int = 0
+    max_calls_exceeded: bool = False
     record_count: int = 0
     last_sequence: int = 0
     root_hash: str = EMPTY_LEDGER_HASH
     seal: LedgerSeal | None = None
     write_error: str | None = None
     terminal_written: bool = False
+    last_activity_monotonic: float = 0.0
 
 
 @dataclass(frozen=True, repr=False)
-class _RouterRoute:
+class _GatewayRoute:
     plan: RoutePlan
     upstream: Any
     secret: str
+
+
+class MaxCallsExceeded(RuntimeError):
+    """Raised when a managed cell has exhausted its upstream call budget."""
+
+    def __init__(self, max_calls: int, *, record: bool):
+        super().__init__(f"cell max_calls budget exhausted ({max_calls})")
+        self.max_calls = max_calls
+        self.record = record
 
 
 def new_cell_token() -> str:
@@ -339,12 +353,12 @@ def _urlsplit_map(values: dict[str, str]) -> dict[str, Any]:
 
 class Route:
     def __init__(self, token: str, route: str, upstream: Any, upstream_path: str,
-                 router: _RouterRoute | None = None):
+                 gateway_route: _GatewayRoute | None = None):
         self.token = token
         self.route = route
         self.upstream = upstream
         self.upstream_path = upstream_path
-        self.router = router
+        self.gateway_route = gateway_route
 
 
 class CountingProxyHandler(BaseHTTPRequestHandler):
@@ -376,20 +390,53 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         error = None
         token = self._token_from_header_or_path()
         managed_ledger: bool | None = None
-        router_parser = None
-        router_metrics = None
+        gateway_parser = None
+        gateway_metrics = None
+        cache_control = None
+        forwarded_upstream = False
         try:
             route = self._route_request()
             token = route.token
-            managed_ledger = self.server.admit_cell_request(token)  # type: ignore[attr-defined]
+            try:
+                managed_ledger = self.server.admit_cell_request(token)  # type: ignore[attr-defined]
+            except MaxCallsExceeded as exc:
+                status = 429
+                error = "max_calls_exceeded"
+                managed_ledger = True if exc.record else None
+                payload = json.dumps(
+                    {
+                        "error": {
+                            "code": "max_calls_exceeded",
+                            "message": "OpenBench max_calls budget exceeded",
+                            "type": "openbench_budget_error",
+                        }
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+                self.send_response(status)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(payload)))
+                self.send_header("connection", "close")
+                self.end_headers()
+                self.wfile.write(payload)
+                headers_sent = True
+                self.close_connection = True
+                return
             body = self._read_body()
-            if route.router is not None:
-                body = self._router_request_body(body, route.router.plan)
+            if route.gateway_route is not None:
+                body, cache_control = self._gateway_request_body(
+                    body, route.gateway_route.plan
+                )
+                if len(body) > self.server.max_request_bytes:  # type: ignore[attr-defined]
+                    raise RuntimeError(
+                        "transformed gateway request exceeds max_request_bytes"
+                    )
             request_body = decode_for_parsing(body, self.headers.get("content-encoding", ""))
             sampling = observed_sampling(
                 body,
                 self.headers.get("content-type", ""),
-                "" if route.router is not None else self.headers.get("content-encoding", ""),
+                "" if route.gateway_route is not None else self.headers.get("content-encoding", ""),
             )
             links.update(protocol_links(request_body))
             headers = self._forward_headers(route, len(body))
@@ -398,24 +445,29 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 raise RuntimeError("upstream URL missing host")
             conn = conn_cls(route.upstream.hostname, port=route.upstream.port, timeout=self.server.timeout_s)  # type: ignore[attr-defined]
             conn.request(self.command, route.upstream_path, body=body, headers=headers)
+            forwarded_upstream = True
             resp = conn.getresponse()
             status = resp.status
             resp_headers = resp.getheaders()
-            if route.router is not None and 300 <= resp.status < 400:
+            if route.gateway_route is not None and 300 <= resp.status < 400:
                 status = 502
                 conn.close()
-                raise RuntimeError(f"router upstream redirect rejected: HTTP {resp.status}")
+                raise RuntimeError(f"gateway upstream redirect rejected: HTTP {resp.status}")
             header_map = {k.lower(): v for k, v in resp_headers}
-            if (route.router is not None
+            if (route.gateway_route is not None
                     and "text/event-stream" in header_map.get("content-type", "").lower()):
-                router_parser = OpenAIChatSSEParser(
-                    requested_model=route.router.plan.requested_model,
+                gateway_parser = sse_parser(
+                    route.gateway_route.plan.protocol,
+                    requested_model=route.gateway_route.plan.requested_model,
                     started_at=started_monotonic,
-                    route_kind=route.router.plan.route_kind,
-                    requested_provider=route.router.plan.requested_provider,
-                    allowed_models=route.router.plan.allowed_models,
-                    allowed_providers=route.router.plan.allowed_providers,
-                    fallback_enabled=route.router.plan.fallback_enabled,
+                    route_kind=route.gateway_route.plan.route_kind,
+                    requested_provider=route.gateway_route.plan.requested_provider,
+                    allowed_models=route.gateway_route.plan.allowed_models,
+                    allowed_providers=route.gateway_route.plan.allowed_providers,
+                    fallback_enabled=route.gateway_route.plan.fallback_enabled,
+                    model_match=route.gateway_route.plan.model_match,
+                    gateway=route.gateway_route.plan.gateway,
+                    response_headers=header_map,
                 )
             self.send_response(resp.status, resp.reason)
             for key, value in resp_headers:
@@ -432,8 +484,8 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 chunk = resp.read1(65536)
                 if not chunk:
                     break
-                if router_parser is not None:
-                    router_parser.feed(chunk, time.monotonic())
+                if gateway_parser is not None:
+                    gateway_parser.feed(chunk, time.monotonic())
                 if len(capture) + len(chunk) <= limit:
                     capture.extend(chunk)
                 else:
@@ -444,14 +496,14 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                     capture.extend(chunk[-limit:])
                 self.wfile.write(chunk)
                 self.wfile.flush()
-            if router_parser is not None:
-                router_metrics = router_parser.finalize(time.monotonic())
+            if gateway_parser is not None:
+                gateway_metrics = gateway_parser.finalize(time.monotonic())
             parse_body = decode_for_parsing(bytes(capture), header_map.get("content-encoding", ""))
             usage = parse_json_usage(parse_body)
             if usage is None:
                 usage = parse_sse_usage(parse_body)
-            if router_metrics is not None and router_metrics.get("usage") is not None:
-                usage = router_metrics["usage"]
+            if gateway_metrics is not None and gateway_metrics.get("usage") is not None:
+                usage = gateway_metrics["usage"]
             links.update(protocol_links(parse_body, response=True))
             conn.close()
         except Exception as exc:  # noqa: BLE001
@@ -469,11 +521,11 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             else:
                 self.close_connection = True
         finally:
-            if router_parser is not None and router_metrics is None:
+            if gateway_parser is not None and gateway_metrics is None:
                 try:
-                    router_metrics = router_parser.finalize(time.monotonic())
+                    gateway_metrics = gateway_parser.finalize(time.monotonic())
                 except Exception:
-                    router_metrics = None
+                    gateway_metrics = None
             token = route.token if route is not None else token
             meta = self._read_metadata(token)
             configured_sampling = meta.get("sampling") if isinstance(meta.get("sampling"), dict) else {}
@@ -492,14 +544,16 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             if route is not None:
                 rec["route"] = route.route
                 rec["upstream"] = f"{route.upstream.scheme}://{route.upstream.netloc}{route.upstream.path.rstrip('/')}"
-                if route.router is not None:
-                    rec["router_arm"] = {
-                        "arm_id": route.router.plan.arm_id,
-                        "arm_digest": route.router.plan.arm_digest,
-                        "route_kind": route.router.plan.route_kind,
+                if route.gateway_route is not None:
+                    rec["serving_arm"] = {
+                        "arm_id": route.gateway_route.plan.arm_id,
+                        "arm_digest": route.gateway_route.plan.arm_digest,
+                        "route_kind": route.gateway_route.plan.route_kind,
                     }
-            if router_metrics is not None:
-                rec["router_metrics"] = router_metrics
+                    rec["provider_cache"] = cache_control
+                    rec["forwarded_upstream"] = forwarded_upstream
+            if gateway_metrics is not None:
+                rec["gateway_metrics"] = gateway_metrics
             if "session" in links:
                 rec["session_hash"] = _identifier_hash(links["session"], self.server.identifier_salt)
             if "previous_response" in links:
@@ -550,16 +604,22 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             if (registration_meta.get("harness") != "grokbuild"
                     or registration_meta.get("model") not in {"gpt-5.6", "gpt-5.6-sol"}):
                 raise RuntimeError("cell token is not authorized for subscription bridge")
-        router = None
+        gateway_route = None
         if prefix == "route":
             if not tail:
                 raise RuntimeError("/route requires an arm digest")
-            router = self.server.resolve_route(token, tail[0])  # type: ignore[attr-defined]
-            upstream = router.upstream
+            gateway_route = self.server.resolve_route(token, tail[0])  # type: ignore[attr-defined]
+            upstream = gateway_route.upstream
             upstream_path = upstream.path or "/"
             if upstream.query:
                 upstream_path += "?" + upstream.query
-            return Route(token, f"route/{router.plan.arm_digest}", upstream, upstream_path, router)
+            return Route(
+                token,
+                f"route/{gateway_route.plan.arm_digest}",
+                upstream,
+                upstream_path,
+                gateway_route,
+            )
         if prefix == "codex":
             upstream = self.server.upstreams["codex"]  # type: ignore[attr-defined]
             route_name = "codex"
@@ -632,7 +692,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         # Host identifies this proxy on ingress; let http.client generate the
         # selected upstream's Host header instead of forwarding the proxy host.
         blocked = HOP_BY_HOP | connection_tokens | {"host", "x-openbench-cell-token"}
-        if route.router is None:
+        if route.gateway_route is None:
             return {k: v for k, v in self.headers.items() if k.lower() not in blocked}
         headers = {
             k: v for k, v in self.headers.items()
@@ -640,56 +700,78 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             and not _credential_header(k)
             and k.lower() not in {
                 "content-length", "content-encoding", "accept-encoding",
-                "x-openrouter-metadata",
             }
-            and not k.lower().startswith("x-openrouter-cache")
+            and not gateway_profiles.blocked_request_header(k)
         }
-        headers["Authorization"] = f"Bearer {route.router.secret}"
+        headers.update(gateway_profiles.request_headers(
+            gateway=route.gateway_route.plan.gateway,
+            secret=route.gateway_route.secret,
+        ))
         headers["Content-Length"] = str(body_length)
-        if route.router.plan.route_kind == "gateway":
-            headers["X-OpenRouter-Metadata"] = "enabled"
-            headers["X-OpenRouter-Cache"] = "false"
         return headers
 
-    def _router_request_body(self, body: bytes, plan: RoutePlan) -> bytes:
+    def _gateway_request_body(
+        self, body: bytes, plan: RoutePlan
+    ) -> tuple[bytes, dict[str, Any]]:
         if self.headers.get("content-encoding"):
-            raise RuntimeError("router requests do not permit content encoding")
+            raise RuntimeError("gateway requests do not permit content encoding")
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RuntimeError("router request body must be a JSON object") from exc
+            raise RuntimeError("gateway request body must be a JSON object") from exc
         if not isinstance(payload, dict):
-            raise RuntimeError("router request body must be a JSON object")
+            raise RuntimeError("gateway request body must be a JSON object")
         payload["model"] = plan.requested_model
         for key in ("top_k", "reasoning_effort", "reasoning", "thinking"):
             payload.pop(key, None)
         payload.update({
             "temperature": plan.sampling.temperature,
             "top_p": plan.sampling.top_p,
-            "seed": plan.sampling.seed,
         })
+        if plan.protocol == "openai_chat":
+            payload["seed"] = plan.sampling.seed
+        else:
+            payload.pop("seed", None)
+        gateway_profiles.strip_cache_controls(payload)
+        prefix_injected = False
+        if plan.provider_prompt_mode == "isolated_per_call_v1":
+            if plan.protocol != "openai_responses":
+                raise RuntimeError(
+                    "isolated_per_call_v1 requires openai_responses"
+                )
+            instructions = payload.get("instructions", "")
+            if not isinstance(instructions, str):
+                raise RuntimeError(
+                    "isolated_per_call_v1 requires string Responses instructions"
+                )
+            nonce = secrets.token_hex(32)
+            nonce_commitment = self.server.reserve_cache_nonce(nonce)  # type: ignore[attr-defined]
+            prefix = (
+                f"[OpenBench cache isolation id: {nonce}. "
+                "Do not reference this identifier in the response.]\n"
+            )
+            payload["instructions"] = prefix + instructions
+            prefix_injected = True
         if plan.route_kind == "gateway":
-            self._strip_cache_controls(payload)
-            payload["provider"] = {
-                "only": [plan.requested_provider],
-                "allow_fallbacks": False,
-            }
+            if plan.gateway is None:
+                raise RuntimeError("gateway route plan is missing gateway profile")
+            gateway_profiles.shape_body(
+                payload,
+                gateway=plan.gateway,
+                requested_provider=plan.requested_provider,
+            )
         else:
             payload.pop("provider", None)
-        return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-    @classmethod
-    def _strip_cache_controls(cls, value: Any) -> None:
-        if isinstance(value, dict):
-            for key in list(value):
-                normalized = str(key).lower().replace("-", "_")
-                if normalized in {"cache", "cache_control", "cache_key", "prompt_cache_key"}:
-                    value.pop(key)
-                else:
-                    cls._strip_cache_controls(value[key])
-        elif isinstance(value, list):
-            for item in value:
-                cls._strip_cache_controls(item)
+        shaped = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return shaped, {
+            "mode": plan.provider_prompt_mode,
+            "transform_id": (
+                gateway_spec.COLD_PREFIX_TRANSFORM_ID if prefix_injected else None
+            ),
+            "prefix_injected": prefix_injected,
+            "scope": "forwarded_request" if prefix_injected else None,
+            "nonce_commitment": nonce_commitment if prefix_injected else None,
+        }
 
     def _read_body(self) -> bytes:
         max_bytes = self.server.max_request_bytes  # type: ignore[attr-defined]
@@ -750,11 +832,26 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
 class CountingProxyServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = 128
 
-    def register_cell(self, token: str) -> None:
-        """Opt a router cell into lifecycle-managed, sealed ledger writes."""
+    def reserve_cache_nonce(self, nonce: str) -> str:
+        """Bind one cold-prefix nonce without retaining the nonce itself."""
+        commitment = _identifier_hash(nonce, self.identifier_salt)  # type: ignore[attr-defined]
+        with self._ledger_condition:
+            if commitment in self._cache_nonce_commitments:
+                raise RuntimeError("cold-prefix nonce reuse detected")
+            self._cache_nonce_commitments.add(commitment)
+        return commitment
+
+    def register_cell(self, token: str, *, max_calls: int | None = None) -> None:
+        """Opt a gateway cell into lifecycle-managed, sealed ledger writes."""
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", token):
             raise ValueError("cell token must contain only letters, digits, '.', '_', or '-'")
+        if (
+            max_calls is not None
+            and (isinstance(max_calls, bool) or not isinstance(max_calls, int) or max_calls < 1)
+        ):
+            raise ValueError("max_calls must be a positive integer")
         with self._ledger_condition:
             if token in self._cell_ledgers:
                 raise RuntimeError(f"cell already registered: {token}")
@@ -763,7 +860,7 @@ class CountingProxyServer(ThreadingHTTPServer):
             path = self._ledger_path(token)
             if path.exists():
                 raise FileExistsError(f"cell ledger already exists: {path}")
-            self._cell_ledgers[token] = _CellLedger()
+            self._cell_ledgers[token] = _CellLedger(max_calls=max_calls)
 
     def register_route(
             self, token: str, plan: RoutePlan, secrets_plan: SecretPlan) -> None:
@@ -772,45 +869,91 @@ class CountingProxyServer(ThreadingHTTPServer):
             raise TypeError("plan must be a RoutePlan")
         if not isinstance(secrets_plan, SecretPlan):
             raise TypeError("secrets_plan must be a SecretPlan")
-        if plan.protocol != "openai_chat":
-            raise ValueError("router route protocol must be openai_chat")
+        if plan.protocol not in {"openai_chat", "openai_responses"}:
+            raise ValueError("unsupported gateway route protocol")
         if plan.route_kind not in {"direct", "gateway"}:
-            raise ValueError("router route kind must be direct or gateway")
+            raise ValueError("gateway route kind must be direct or gateway")
         if plan.requested_model not in plan.allowed_models:
             raise ValueError("requested model is not allowed by the route plan")
         if plan.allowed_providers != (plan.requested_provider,):
-            raise ValueError("router route must allow exactly the requested provider")
-        if plan.fallback_enabled or plan.retry_count or plan.cache_enabled:
-            raise ValueError("router route controls do not match gateway_tax")
+            raise ValueError("gateway route must allow exactly the requested provider")
+        if plan.retry_count or plan.cache_enabled:
+            raise ValueError("gateway route retries and cache must be disabled")
+        if plan.provider_prompt_mode not in gateway_spec.PROVIDER_PROMPT_MODES:
+            raise ValueError("unsupported provider cache mode")
+        if (
+            plan.provider_prompt_mode == "isolated_per_call_v1"
+            and plan.protocol != "openai_responses"
+        ):
+            raise ValueError(
+                "isolated_per_call_v1 requires openai_responses"
+            )
+        if plan.track != TRACK:
+            raise ValueError(f"gateway route track must be {TRACK!r}")
+        if plan.fallback_enabled:
+            raise ValueError("gateway route fallback must be disabled")
         upstream = urlsplit(plan.endpoint)
         if upstream.scheme not in {"http", "https"} or not upstream.hostname:
-            raise ValueError("router route endpoint must be an absolute HTTP(S) URL")
+            raise ValueError("gateway route endpoint must be an absolute HTTP(S) URL")
+        try:
+            gateway_spec._validate_endpoint_target(  # noqa: SLF001
+                upstream.hostname,
+                "route plan endpoint",
+                plan.allow_private_endpoint,
+                plan.private_host_allowlist,
+                plan.private_cidr_allowlist,
+            )
+            gateway_profiles.validate_arm(
+                route_kind=plan.route_kind,
+                gateway=plan.gateway,
+                endpoint=plan.endpoint,
+                protocol=plan.protocol,
+                requested_model=plan.requested_model,
+                requested_provider=plan.requested_provider,
+                allow_private_endpoint=plan.allow_private_endpoint,
+            )
+        except (gateway_spec.GatewaySpecError, gateway_profiles.GatewayProfileError) as exc:
+            raise ValueError(f"invalid gateway profile: {exc}") from exc
         secret = secrets_plan.value_for(plan.arm_id)
         if secrets_plan.env_name_for(plan.arm_id) != plan.auth_env:
             raise ValueError("secret plan does not match route auth environment")
         if not secret:
-            raise ValueError("router route secret must not be empty")
+            raise ValueError("gateway route secret must not be empty")
         with self._ledger_condition:
             ledger = self._require_cell(token)
             if ledger.state != "ACTIVE" or ledger.in_flight:
                 raise RuntimeError(f"cell cannot register a route while {ledger.state.lower()}")
-            if token in self._router_routes:
+            if token in self._gateway_routes:
                 raise RuntimeError(f"cell already has a registered route: {token}")
-            self._router_routes[token] = _RouterRoute(plan, upstream, secret)
+            self._gateway_routes[token] = _GatewayRoute(plan, upstream, secret)
 
-    register_router_route = register_route
-
-    def resolve_route(self, token: str, arm_digest: str) -> _RouterRoute:
+    def resolve_route(self, token: str, arm_digest: str) -> _GatewayRoute:
         """Authorize one route digest without exposing its in-memory secret."""
         with self._ledger_condition:
-            route = self._router_routes.get(token)
+            route = self._gateway_routes.get(token)
             if route is None or route.plan.arm_digest != arm_digest:
-                raise RuntimeError("router arm is not authorized for this cell")
+                raise RuntimeError("gateway arm is not authorized for this cell")
             return route
 
     def cell_is_registered(self, token: str) -> bool:
         with self._ledger_condition:
             return token in self._cell_ledgers
+
+    def cell_last_activity(self, token: str) -> float | None:
+        """Return the monotonic ts of the most recent proxied request, or None."""
+        with self._ledger_condition:
+            ledger = self._cell_ledgers.get(token)
+            if ledger is None:
+                return None
+            ts = ledger.last_activity_monotonic
+            return ts if ts > 0 else None
+
+    def cell_last_activity_age(self, token: str) -> float | None:
+        """Return seconds since last proxied request, or None if no activity."""
+        ts = self.cell_last_activity(token)
+        if ts is None:
+            return None
+        return time.monotonic() - ts
 
     def admit_cell_request(self, token: str) -> bool:
         """Atomically admit a request, returning False for a legacy cell."""
@@ -819,8 +962,19 @@ class CountingProxyServer(ThreadingHTTPServer):
             if ledger is None:
                 self._legacy_in_flight[token] = self._legacy_in_flight.get(token, 0) + 1
                 return False
+            if ledger.max_calls is not None and ledger.admitted_calls >= ledger.max_calls:
+                record = (
+                    not ledger.max_calls_exceeded
+                    and ledger.state != "SEALED"
+                    and ledger.write_error is None
+                )
+                ledger.max_calls_exceeded = True
+                if record:
+                    ledger.in_flight += 1
+                raise MaxCallsExceeded(ledger.max_calls, record=record)
             if ledger.state != "ACTIVE":
                 raise RuntimeError(f"cell ledger is {ledger.state.lower()}: {token}")
+            ledger.admitted_calls += 1
             ledger.in_flight += 1
             return True
 
@@ -856,6 +1010,7 @@ class CountingProxyServer(ThreadingHTTPServer):
                 ledger.write_error = f"{type(exc).__name__}: {exc}"
                 raise
             finally:
+                ledger.last_activity_monotonic = time.monotonic()
                 ledger.in_flight -= 1
                 self._ledger_condition.notify_all()
 
@@ -1042,7 +1197,8 @@ def make_server(listen_host: str, port: int, ledger_dir: str | os.PathLike[str],
     httpd._ledger_condition = threading.Condition()
     httpd._cell_ledgers = {}
     httpd._legacy_in_flight = {}
-    httpd._router_routes = {}
+    httpd._gateway_routes = {}
+    httpd._cache_nonce_commitments = set()
     # Docker requires a non-loopback bind. In that mode the runner enables this
     # gate so arbitrary LAN clients cannot spend through a subscription route.
     httpd.require_registered_tokens = require_registered_tokens

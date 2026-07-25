@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end tests for managed Gateway Bench proxy routes."""
 
+import dataclasses
 import http.client
 import json
 import tempfile
@@ -8,12 +9,13 @@ import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
 
 from obench import proxy
-from obench import router_spec
+from obench import gateway_spec
 
 
-HOST_SECRET = "HOST_ROUTER_SECRET_MUST_NOT_PERSIST"
+HOST_SECRET = "HOST_GATEWAY_SECRET_MUST_NOT_PERSIST"
 CLIENT_SECRET = "CLIENT_CREDENTIAL_MUST_NOT_FORWARD"
 PRIVATE_CONTENT = "PRIVATE_STREAM_CONTENT_MUST_NOT_PERSIST"
 PRIVATE_PROMPT = "PRIVATE_PROMPT_MUST_NOT_PERSIST"
@@ -110,15 +112,24 @@ class RouteFixtureHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
-def route_plan(*, endpoint, route_kind, arm_id, arm_digest):
-    return router_spec.RoutePlan(
-        schema_version=1,
+def route_plan(
+    *,
+    endpoint,
+    route_kind,
+    arm_id,
+    arm_digest,
+    gateway=None,
+    protocol="openai_chat",
+    provider_prompt_mode="provider_default",
+):
+    return gateway_spec.RoutePlan(
+        schema_version=2,
         experiment_digest="e" * 64,
         arm_digest=arm_digest,
         arm_id=arm_id,
         route_kind=route_kind,
         endpoint=endpoint,
-        protocol="openai_chat",
+        protocol=protocol,
         canonical_model="openai/gpt-route-test",
         requested_model="gpt-route-test",
         requested_provider="openai",
@@ -127,21 +138,23 @@ def route_plan(*, endpoint, route_kind, arm_id, arm_digest):
         fallback_enabled=False,
         retry_count=0,
         cache_enabled=False,
-        auth_env="ROUTER_TEST_KEY",
-        sampling=router_spec.Sampling(temperature=0.0, top_p=1.0, seed=1234),
-        private_router=True,
+        auth_env="GATEWAY_TEST_KEY",
+        sampling=gateway_spec.Sampling(temperature=0.0, top_p=1.0, seed=1234),
+        allow_private_endpoint=True,
         private_host_allowlist=("127.0.0.1",),
         private_cidr_allowlist=(),
+        gateway=gateway or ("openrouter" if route_kind == "gateway" else None),
+        provider_prompt_mode=provider_prompt_mode,
     )
 
 
 def secret_plan(arm_id):
-    return router_spec.SecretPlan((
-        router_spec._ArmSecret(arm_id, "ROUTER_TEST_KEY", HOST_SECRET),
+    return gateway_spec.SecretPlan((
+        gateway_spec._ArmSecret(arm_id, "GATEWAY_TEST_KEY", HOST_SECRET),
     ))
 
 
-class RouterRouteTests(unittest.TestCase):
+class GatewayRouteTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="router_route_test_")
         self.upstream = RouteFixtureServer(("127.0.0.1", 0), RouteFixtureHandler)
@@ -161,13 +174,151 @@ class RouterRouteTests(unittest.TestCase):
         self.upstream.server_close()
         self.tmp.cleanup()
 
-    def _register(self, token, *, route_kind="gateway", path="/gateway"):
+    def test_responses_route_removes_unsupported_seed(self):
+        plan = route_plan(
+            endpoint=self.upstream_base + "/responses",
+            route_kind="direct",
+            arm_id="direct-responses",
+            arm_digest="d" * 64,
+            protocol="openai_responses",
+        )
+        token = "responses-cell"
+        self.server.register_cell(token)
+        self.server.register_route(token, plan, secret_plan(plan.arm_id))
+
+        status, _ = self._post(
+            token,
+            plan.arm_digest,
+            body={
+                "model": "attacker-model",
+                "input": "private",
+                "temperature": 0.8,
+                "top_p": 0.1,
+                "seed": 99,
+                "prompt_cache_key": "client-cache",
+                "safety_identifier": "client-safety",
+            },
+        )
+        self.assertEqual(status, 200)
+        request = self.upstream.requests[-1]
+        self.assertEqual(request["path"], "/responses")
+        self.assertEqual(request["body"]["model"], plan.requested_model)
+        self.assertEqual(request["body"]["temperature"], 0.0)
+        self.assertEqual(request["body"]["top_p"], 1.0)
+        self.assertNotIn("seed", request["body"])
+        self.assertNotIn("prompt_cache_key", request["body"])
+        self.assertEqual(request["body"]["safety_identifier"], "client-safety")
+        rows = self._seal_rows(token)
+        ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
+        self.assertNotIn("client-cache", ledger)
+        self.assertNotIn("client-safety", ledger)
+        self.assertNotIn("client-safety", json.dumps(rows))
+
+    def test_cold_prefix_is_unique_per_responses_call_and_safely_evidenced(self):
+        plan = route_plan(
+            endpoint=self.upstream_base + "/responses",
+            route_kind="direct",
+            arm_id="direct-cold-responses",
+            arm_digest="c" * 64,
+            protocol="openai_responses",
+            provider_prompt_mode="isolated_per_call_v1",
+        )
+        token = "cold-responses-cell"
+        self.server.register_cell(token)
+        self.server.register_route(token, plan, secret_plan(plan.arm_id))
+
+        body = {
+            "model": "attacker-model",
+            "instructions": "Keep the workspace correct.",
+            "input": "private",
+        }
+        for _ in range(2):
+            status, _response = self._post(token, plan.arm_digest, body=body)
+            self.assertEqual(status, 200)
+
+        first, second = self.upstream.requests[-2:]
+        first_instructions = first["body"]["instructions"]
+        second_instructions = second["body"]["instructions"]
+        self.assertTrue(first_instructions.endswith(body["instructions"]))
+        self.assertTrue(second_instructions.endswith(body["instructions"]))
+        self.assertNotEqual(first_instructions, second_instructions)
+
+        rows = self._seal_rows(token)
+        call_rows = [row for row in rows if row.get("record_type") != "ledger_seal"]
+        self.assertTrue(all(row["forwarded_upstream"] is True for row in call_rows))
+        cache_evidence = [row["provider_cache"] for row in call_rows]
+        self.assertTrue(all(
+            item["mode"] == "isolated_per_call_v1"
+            and item["transform_id"] == gateway_spec.COLD_PREFIX_TRANSFORM_ID
+            and item["prefix_injected"] is True
+            and item["scope"] == "forwarded_request"
+            and len(item["nonce_commitment"]) == 64
+            for item in cache_evidence
+        ))
+        self.assertNotEqual(
+            cache_evidence[0]["nonce_commitment"],
+            cache_evidence[1]["nonce_commitment"],
+        )
+        ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
+        self.assertNotIn("OpenBench cache isolation id", ledger)
+        self.assertNotIn("Keep the workspace correct.", ledger)
+
+    def test_cold_prefix_rejects_nonce_reuse_before_second_upstream_call(self):
+        plan = route_plan(
+            endpoint=self.upstream_base + "/responses",
+            route_kind="direct",
+            arm_id="direct-cold-reuse",
+            arm_digest="9" * 64,
+            protocol="openai_responses",
+            provider_prompt_mode="isolated_per_call_v1",
+        )
+        token = "cold-reuse-cell"
+        self.server.register_cell(token)
+        self.server.register_route(token, plan, secret_plan(plan.arm_id))
+        body = {"model": "wrong", "instructions": "Stable", "input": "private"}
+
+        with mock.patch("obench.proxy.secrets.token_hex", return_value="a" * 64):
+            first, _ = self._post(token, plan.arm_digest, body=body)
+            second, _ = self._post(token, plan.arm_digest, body=body)
+
+        self.assertEqual(first, 200)
+        self.assertEqual(second, 502)
+        self.assertEqual(len(self.upstream.requests), 1)
+        rows = self._seal_rows(token)
+        call_rows = [row for row in rows if row.get("record_type") != "ledger_seal"]
+        self.assertEqual(
+            [row["forwarded_upstream"] for row in call_rows],
+            [True, False],
+        )
+
+    def test_programmatic_route_rejects_host_outside_explicit_allowlist(self):
+        token = "unlisted-host"
+        plan = route_plan(
+            endpoint="https://attacker.example/v1/chat/completions",
+            route_kind="gateway",
+            arm_id="unlisted-host",
+            arm_digest="f" * 64,
+        )
+        self.server.register_cell(token)
+
+        with self.assertRaisesRegex(ValueError, "explicit endpoint allowlist"):
+            self.server.register_route(token, plan, secret_plan(plan.arm_id))
+
+    def _register(
+        self,
+        token,
+        *,
+        route_kind="gateway",
+        path="/gateway",
+        gateway=None,
+    ):
         digest = ("a" if route_kind == "gateway" else "b") * 64
         plan = route_plan(
             endpoint=self.upstream_base + path,
             route_kind=route_kind,
             arm_id=f"{route_kind}-{token}",
             arm_digest=digest,
+            gateway=gateway,
         )
         self.server.register_cell(token)
         self.server.register_route(token, plan, secret_plan(plan.arm_id))
@@ -223,6 +374,7 @@ class RouterRouteTests(unittest.TestCase):
                 "provider": {"only": ["attacker"], "allow_fallbacks": True},
                 "cache": True,
                 "prompt_cache_key": "client-cache",
+                "safety_identifier": "client-safety",
                 "temperature": 0.8,
                 "top_p": 0.1,
                 "seed": 99,
@@ -261,6 +413,7 @@ class RouterRouteTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", request["body"])
         self.assertNotIn("cache", request["body"])
         self.assertNotIn("prompt_cache_key", request["body"])
+        self.assertEqual(request["body"]["safety_identifier"], "client-safety")
         self.assertNotIn("cache_control", request["body"]["messages"][0])
         self.assertEqual(request["body"]["provider"], {
             "only": ["openai"],
@@ -269,7 +422,7 @@ class RouterRouteTests(unittest.TestCase):
 
         rows = self._seal_rows(token)
         ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
-        self.assertEqual(rows[0]["router_arm"]["arm_digest"], plan.arm_digest)
+        self.assertEqual(rows[0]["serving_arm"]["arm_digest"], plan.arm_digest)
         for secret in (HOST_SECRET, CLIENT_SECRET, PRIVATE_PROMPT):
             self.assertNotIn(secret, ledger)
 
@@ -299,6 +452,148 @@ class RouterRouteTests(unittest.TestCase):
             {"temperature": 0.0, "top_p": 1.0, "seed": 1234},
         )
 
+    def test_vercel_proxy_replaces_client_routing_and_cache_controls(self):
+        token = "vercel-cell"
+        plan = self._register(token, gateway="vercel", path="/vercel")
+        status, _ = self._post(
+            token,
+            plan.arm_digest,
+            body={
+                "model": "attacker/model",
+                "messages": [{
+                    "role": "user",
+                    "content": PRIVATE_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                "provider": {"only": ["attacker"]},
+                "providerOptions": {
+                    "gateway": {
+                        "models": ["fallback/model"],
+                        "order": ["attacker"],
+                        "caching": "auto",
+                    },
+                    "openai": {"reasoningEffort": "low"},
+                    "attacker": {"arbitrary": {"nested": True}},
+                },
+                "models": ["fallback/model"],
+                "order": ["attacker"],
+                "sort": "price",
+                "caching": "auto",
+            },
+        )
+        self.assertEqual(status, 200)
+        request = self.upstream.requests[-1]
+        self.assertEqual(request["path"], "/vercel")
+        self.assertEqual(request["headers"]["authorization"], f"Bearer {HOST_SECRET}")
+        self.assertNotIn("x-openrouter-metadata", request["headers"])
+        self.assertEqual(
+            request["body"]["providerOptions"],
+            {"gateway": {"only": ["openai"]}},
+        )
+        for key in ("provider", "models", "order", "sort", "caching"):
+            self.assertNotIn(key, request["body"])
+        self.assertNotIn("cache_control", request["body"]["messages"][0])
+
+    def test_concentrate_responses_rewrites_routing_and_isolates_secrets(self):
+        token = "concentrate-cell"
+        plan = dataclasses.replace(
+            route_plan(
+                endpoint="https://api.concentrate.ai/v1/responses",
+                route_kind="gateway",
+                arm_id="concentrate",
+                arm_digest="c" * 64,
+                gateway="concentrate",
+                protocol="openai_responses",
+            ),
+            requested_model="openai/gpt-route-test",
+            allowed_models=("openai/gpt-route-test",),
+            allow_private_endpoint=False,
+            private_host_allowlist=(),
+        )
+        self.server.register_cell(token)
+        self.server.register_route(token, plan, secret_plan(plan.arm_id))
+        fixture_host, fixture_port = self.upstream.server_address[:2]
+
+        class FixtureHTTPSConnection(http.client.HTTPConnection):
+            def __init__(self, _host, port=None, timeout=None):
+                super().__init__(fixture_host, fixture_port, timeout=timeout)
+
+        with mock.patch.object(
+            proxy.http.client, "HTTPSConnection", FixtureHTTPSConnection
+        ):
+            statuses = []
+            for call in range(2):
+                status, _ = self._post(
+                    token,
+                    plan.arm_digest,
+                    body={
+                        "model": "attacker/model",
+                        "input": PRIVATE_PROMPT,
+                        "routing": {
+                            "providers": ["attacker"],
+                            "models": ["fallback/model"],
+                        },
+                        "fallback": {"model": "fallback/model"},
+                        "prompt_cache_key": f"client-cache-{call}",
+                        "prompt_cache_options": {"mode": "explicit"},
+                        "cache_control": {"type": "ephemeral"},
+                        "safety_identifier": f"client-safety-{call}",
+                        "seed": 99,
+                    },
+                    headers={
+                        "authorization": f"Bearer {CLIENT_SECRET}",
+                        "x-api-key": CLIENT_SECRET,
+                        "cookie": f"session={CLIENT_SECRET}",
+                    },
+                )
+                statuses.append(status)
+
+        self.assertEqual(statuses, [200, 200])
+        requests = self.upstream.requests[-2:]
+        for call, request in enumerate(requests):
+            self.assertEqual(request["path"], "/v1/responses")
+            self.assertEqual(
+                request["headers"]["authorization"], f"Bearer {HOST_SECRET}"
+            )
+            self.assertNotIn("x-api-key", request["headers"])
+            self.assertNotIn("cookie", request["headers"])
+            self.assertEqual(request["body"]["model"], plan.requested_model)
+            self.assertEqual(request["body"]["routing"], {
+                "providers": ["openai"],
+                "models": [],
+            })
+            for key in (
+                "fallback", "prompt_cache_key", "prompt_cache_options",
+                "cache_control", "seed",
+            ):
+                self.assertNotIn(key, request["body"])
+            self.assertEqual(
+                request["body"]["safety_identifier"], f"client-safety-{call}"
+            )
+
+        rows = self._seal_rows(token)
+        ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
+        request_rows = [
+            row for row in rows if row.get("record_type") != "ledger_seal"
+        ]
+        self.assertEqual(len(request_rows), 2)
+        self.assertEqual(
+            request_rows[0]["serving_arm"]["arm_digest"], plan.arm_digest
+        )
+        private_values = (
+            HOST_SECRET,
+            CLIENT_SECRET,
+            PRIVATE_PROMPT,
+            "client-cache-0",
+            "client-cache-1",
+            "client-safety-0",
+            "client-safety-1",
+        )
+        result = json.dumps(rows)
+        for secret in private_values:
+            self.assertNotIn(secret, ledger)
+            self.assertNotIn(secret, result)
+
     def test_redirect_is_rejected_and_recorded_without_following(self):
         token = "redirect-cell"
         plan = self._register(token, path="/redirect")
@@ -318,7 +613,7 @@ class RouterRouteTests(unittest.TestCase):
 
         rows = self._seal_rows(token)
         request = rows[0]
-        metrics = request["router_metrics"]
+        metrics = request["gateway_metrics"]
         self.assertEqual(metrics["usage"], {
             "input_tokens": 5,
             "output_tokens": 3,
@@ -333,7 +628,7 @@ class RouterRouteTests(unittest.TestCase):
         self.assertGreaterEqual(metrics["timing"]["ttfb_s"], 0)
         self.assertGreaterEqual(metrics["timing"]["semantic_ttft_s"], 0)
         self.assertGreaterEqual(metrics["timing"]["total_s"], 0)
-        self.assertEqual(request["router_arm"]["arm_digest"], plan.arm_digest)
+        self.assertEqual(request["serving_arm"]["arm_digest"], plan.arm_digest)
 
         ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
         for secret in (HOST_SECRET, CLIENT_SECRET, PRIVATE_CONTENT, PRIVATE_PROMPT):
@@ -351,7 +646,7 @@ class RouterRouteTests(unittest.TestCase):
                 plan = self._register(token, route_kind=route_kind, path=path)
                 status, _ = self._post(token, plan.arm_digest)
                 self.assertEqual(status, 200)
-                evidence = self._seal_rows(token)[0]["router_metrics"]["route_evidence"]
+                evidence = self._seal_rows(token)[0]["gateway_metrics"]["route_evidence"]
                 self.assertEqual(evidence["pass"], expected_pass)
                 if reason is not None:
                     self.assertIn(reason, evidence["reasons"])

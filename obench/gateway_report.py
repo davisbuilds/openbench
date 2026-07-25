@@ -1,6 +1,6 @@
-"""Matched, task-weighted reporting for schema-v2 Gateway Tax rows.
+"""Matched, task-weighted reporting for schema-v2 Gateway Bench rows.
 
-The report consumes canonical router identities from :mod:`obench.results` plus
+The report consumes canonical gateway identities from :mod:`obench.results` plus
 these result fields:
 
 * ``arm_role`` (``"direct"`` or ``"gateway"``) and boolean ``baseline``;
@@ -9,13 +9,15 @@ these result fields:
 * ``route_integrity`` with boolean ``pass`` and a list of reason strings;
 * ``proxy_metrics.calls``, where each call may contain ``timing`` (``ttfb_s``
   and ``semantic_ttft_s``), ``generation`` (paired ``output_tokens`` and
-  ``duration_s``), ``route`` (``provider`` and ``served_model``), and ``costs``.
+  ``duration_s``), ``tokens`` (input, output, and total), ``cache``
+  (``cached_input_tokens`` and ``cache_write_input_tokens``), ``route``
+  (``provider`` and ``served_model``), and ``costs``.
 
 ``costs`` maps a basis name to an object containing ``amount_usd``, ``currency``
 and ``effective_at``. Missing conditional timing or cost evidence affects only
 that metric's coverage. Invalid infrastructure, route-integrity, and incomplete
 all-arm blocks are excluded as whole matched blocks and counted by reason.
-Router/provider outcomes remain ordinary attempted cells.
+Gateway/provider outcomes remain ordinary attempted cells.
 """
 
 from __future__ import annotations
@@ -27,21 +29,30 @@ import math
 import random
 from typing import Any
 
-from obench import results
+from obench import gateway_spec, results
 
 
 DEFAULT_BOOTSTRAP_REPLICATES = 10_000
 DEFAULT_BOOTSTRAP_SEED = 20_260_722
 _COST_BASES = (
-    "router_reported",
+    "gateway_reported",
     "invoice_reconciled",
     "frozen_list_estimate",
 )
+_CALL_COVERAGE_FIELDS = {
+    "ttfb_s": "ttfb",
+    "semantic_ttft_s": "ttft",
+    "mean_input_tokens_per_call": "input_tokens",
+    "mean_output_tokens_per_call": "token_output_tokens",
+    "mean_total_tokens_per_call": "total_tokens",
+    "mean_cached_input_tokens_per_call": "cached_input_tokens",
+    "mean_cache_write_input_tokens_per_call": "cache_write_input_tokens",
+}
 _ROLES = frozenset({"direct", "gateway"})
 
 
-class RouterReportError(ValueError):
-    """Raised when router rows cannot support an unambiguous report."""
+class GatewayReportError(ValueError):
+    """Raised when gateway rows cannot support an unambiguous report."""
 
 
 def _number(value: Any, name: str, *, minimum: float = 0.0) -> float:
@@ -51,7 +62,7 @@ def _number(value: Any, name: str, *, minimum: float = 0.0) -> float:
         or not math.isfinite(value)
         or value < minimum
     ):
-        raise RouterReportError(f"{name} must be a finite number >= {minimum}")
+        raise GatewayReportError(f"{name} must be a finite number >= {minimum}")
     return float(value)
 
 
@@ -63,19 +74,19 @@ def _optional_number(value: Any, name: str, *, minimum: float = 0.0) -> float | 
 
 def _object(value: Any, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise RouterReportError(f"{name} must be an object")
+        raise GatewayReportError(f"{name} must be an object")
     return value
 
 
 def _string(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value:
-        raise RouterReportError(f"{name} must be a non-empty string")
+        raise GatewayReportError(f"{name} must be a non-empty string")
     return value
 
 
 def _bool(value: Any, name: str) -> bool:
     if not isinstance(value, bool):
-        raise RouterReportError(f"{name} must be a boolean")
+        raise GatewayReportError(f"{name} must be a boolean")
     return value
 
 
@@ -169,7 +180,9 @@ def _metric(
     }
 
 
-def _arm_metadata(row: Mapping[str, Any], row_number: int) -> tuple[str, bool]:
+def _arm_metadata(
+    row: Mapping[str, Any], row_number: int
+) -> tuple[str, bool]:
     role = row.get("arm_role")
     baseline = row.get("baseline")
     if role is None and isinstance(row.get("arm"), Mapping):
@@ -179,7 +192,7 @@ def _arm_metadata(row: Mapping[str, Any], row_number: int) -> tuple[str, bool]:
         baseline = row.get("is_baseline")
     role = _string(role, f"row {row_number} arm_role")
     if role not in _ROLES:
-        raise RouterReportError(
+        raise GatewayReportError(
             f"row {row_number} arm_role must be one of {sorted(_ROLES)}"
         )
     return role, _bool(baseline, f"row {row_number} baseline")
@@ -229,7 +242,7 @@ def _infrastructure_reason(row: Mapping[str, Any], row_number: int) -> str | Non
     if reason is None:
         valid = result.get("infrastructure_valid", True)
         if not isinstance(valid, bool):
-            raise RouterReportError(
+            raise GatewayReportError(
                 f"row {row_number} result.infrastructure_valid must be a boolean"
             )
         return None if valid else "unspecified_infrastructure"
@@ -243,11 +256,11 @@ def _route_reasons(row: Mapping[str, Any], row_number: int) -> list[str]:
     if not isinstance(raw_reasons, list) or not all(
         isinstance(reason, str) and reason for reason in raw_reasons
     ):
-        raise RouterReportError(
+        raise GatewayReportError(
             f"row {row_number} route_integrity.reasons must be non-empty strings"
         )
     if passed and raw_reasons:
-        raise RouterReportError(
+        raise GatewayReportError(
             f"row {row_number} route integrity passes but contains failure reasons"
         )
     if not passed and not raw_reasons:
@@ -264,7 +277,7 @@ def _costs(
     raw = _object(raw, f"row {row_number} call {call_number} costs")
     unknown = sorted(set(raw) - set(_COST_BASES))
     if unknown:
-        raise RouterReportError(
+        raise GatewayReportError(
             f"row {row_number} call {call_number} has unknown cost bases: "
             + ", ".join(unknown)
         )
@@ -280,7 +293,7 @@ def _costs(
             f"row {row_number} call {call_number} costs.{basis}.currency",
         )
         if currency != "USD":
-            raise RouterReportError(
+            raise GatewayReportError(
                 f"row {row_number} call {call_number} costs.{basis}.currency "
                 "must be USD for amount_usd"
             )
@@ -308,6 +321,9 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
         result.get("checker_score"),
         f"row {row_number} result.checker_score",
     )
+    if result.get("budget_exhausted_reason") == "max_calls":
+        solved = False
+        score = 0.0
     available = _bool(
         result.get("available"),
         f"row {row_number} result.available",
@@ -318,11 +334,11 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
     )
     timed_out = result.get("timed_out", False)
     if not isinstance(timed_out, bool):
-        raise RouterReportError(f"row {row_number} result.timed_out must be a boolean")
+        raise GatewayReportError(f"row {row_number} result.timed_out must be a boolean")
     proxy = _object(row.get("proxy_metrics"), f"row {row_number} proxy_metrics")
     raw_calls = proxy.get("calls")
     if not isinstance(raw_calls, list):
-        raise RouterReportError(f"row {row_number} proxy_metrics.calls must be a list")
+        raise GatewayReportError(f"row {row_number} proxy_metrics.calls must be a list")
 
     calls = []
     for call_number, raw_call in enumerate(raw_calls, 1):
@@ -338,12 +354,35 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
                 generation,
                 f"row {row_number} call {call_number} generation",
             )
+        cache_value = call.get("cache")
+        cache = _object(
+            {} if cache_value is None else cache_value,
+            f"row {row_number} call {call_number} cache",
+        )
+        tokens_value = call.get("tokens")
+        tokens = _object(
+            {} if tokens_value is None else tokens_value,
+            f"row {row_number} call {call_number} tokens",
+        )
         route = _object(
             call.get("route", {}),
             f"row {row_number} call {call_number} route",
         )
         provider = route.get("provider")
         model = route.get("served_model")
+        raw_attempts = route.get("attempts", [])
+        if not isinstance(raw_attempts, list) or not all(
+            isinstance(attempt, Mapping) for attempt in raw_attempts
+        ):
+            raise GatewayReportError(
+                f"row {row_number} call {call_number} route.attempts must be a list"
+            )
+        attempts_present = route.get("attempts_present", False)
+        if not isinstance(attempts_present, bool):
+            raise GatewayReportError(
+                f"row {row_number} call {call_number} "
+                "route.attempts_present must be a boolean"
+            )
         if provider is not None:
             provider = _string(
                 provider, f"row {row_number} call {call_number} route.provider"
@@ -352,6 +391,24 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
             model = _string(
                 model, f"row {row_number} call {call_number} route.served_model"
             )
+        fallback_observed = len(raw_attempts) > 1 or any(
+            (
+                isinstance(attempt.get("status"), int)
+                and not isinstance(attempt.get("status"), bool)
+                and not 200 <= attempt["status"] < 300
+            )
+            or (
+                provider is not None
+                and isinstance(attempt.get("provider"), str)
+                and attempt["provider"].casefold() != provider.casefold()
+            )
+            or (
+                model is not None
+                and isinstance(attempt.get("model"), str)
+                and attempt["model"] != model
+            )
+            for attempt in raw_attempts
+        )
         output_tokens = generation_duration = None
         if generation is not None:
             output_tokens = _optional_number(
@@ -363,7 +420,7 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
                 f"row {row_number} call {call_number} generation.duration_s",
             )
             if (output_tokens is None) != (generation_duration is None):
-                raise RouterReportError(
+                raise GatewayReportError(
                     f"row {row_number} call {call_number} generation evidence "
                     "must pair output_tokens with duration_s"
                 )
@@ -378,13 +435,38 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
                     f"row {row_number} call {call_number} timing.semantic_ttft_s",
                 ),
                 "output_tokens": output_tokens,
+                "input_tokens": _optional_number(
+                    tokens.get("input_tokens"),
+                    f"row {row_number} call {call_number} tokens.input_tokens",
+                ),
+                "token_output_tokens": _optional_number(
+                    tokens.get("output_tokens"),
+                    f"row {row_number} call {call_number} tokens.output_tokens",
+                ),
+                "total_tokens": _optional_number(
+                    tokens.get("total_tokens"),
+                    f"row {row_number} call {call_number} tokens.total_tokens",
+                ),
                 "generation_duration": generation_duration,
+                "cached_input_tokens": _optional_number(
+                    cache.get("cached_input_tokens"),
+                    f"row {row_number} call {call_number} "
+                    "cache.cached_input_tokens",
+                ),
+                "cache_write_input_tokens": _optional_number(
+                    cache.get("cache_write_input_tokens"),
+                    f"row {row_number} call {call_number} "
+                    "cache.cache_write_input_tokens",
+                ),
                 "route": _route_label(provider, model),
+                "attempts": len(raw_attempts),
+                "attempts_present": attempts_present,
+                "fallback_observed": fallback_observed,
                 "costs": _costs(call, row_number, call_number),
             }
         )
 
-    identity = results.router_identity_from_row(row)
+    identity = results.gateway_identity_from_row(row)
     timeout = float(identity.budget_timeout_s)
     return {
         "solved": 1.0 if solved else 0.0,
@@ -416,6 +498,32 @@ def _cell_throughput(cell: Mapping[str, Any]) -> float | None:
     if duration <= 0:
         return None
     return sum(item[0] for item in paired) / duration
+
+
+def _cell_cache_hit_rate(cell: Mapping[str, Any]) -> float | None:
+    values = [
+        call["cached_input_tokens"]
+        for call in cell["calls"]
+        if call["cached_input_tokens"] is not None
+    ]
+    if not values:
+        return None
+    return sum(value > 0 for value in values) / len(values)
+
+
+def _cell_cached_input_fraction(cell: Mapping[str, Any]) -> float | None:
+    paired = [
+        (call["cached_input_tokens"], call["input_tokens"])
+        for call in cell["calls"]
+        if call["cached_input_tokens"] is not None
+        and call["input_tokens"] is not None
+    ]
+    if not paired:
+        return None
+    total_input = sum(item[1] for item in paired)
+    if total_input <= 0:
+        return None
+    return sum(item[0] for item in paired) / total_input
 
 
 def _cell_cost(cell: Mapping[str, Any], basis: str) -> float | None:
@@ -454,19 +562,19 @@ def aggregate(
     bootstrap_replicates: int = DEFAULT_BOOTSTRAP_REPLICATES,
     bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
-    """Build a JSON-safe Gateway Tax report DTO from schema-v2 router rows."""
+    """Build a JSON-safe Gateway Bench report DTO from schema-v2 gateway rows."""
     if (
         not isinstance(bootstrap_replicates, int)
         or isinstance(bootstrap_replicates, bool)
         or bootstrap_replicates < 1
     ):
-        raise RouterReportError("bootstrap_replicates must be a positive integer")
+        raise GatewayReportError("bootstrap_replicates must be a positive integer")
     if not isinstance(bootstrap_seed, int) or isinstance(bootstrap_seed, bool):
-        raise RouterReportError("bootstrap_seed must be an integer")
+        raise GatewayReportError("bootstrap_seed must be an integer")
 
     materialized = list(rows)
     if not materialized:
-        raise RouterReportError("at least one router row is required")
+        raise GatewayReportError("at least one gateway row is required")
 
     parsed = []
     experiment_ids = set()
@@ -476,29 +584,47 @@ def aggregate(
     cell_ids = {}
     logical_cells = {}
     arm_metadata: dict[str, tuple[str, bool, str]] = {}
+    model_matches = set()
+    provider_prompt_modes = set()
     task_metadata: dict[str, tuple[str, str, str]] = {}
     block_coordinates: dict[str, tuple[Any, ...]] = {}
     coordinate_block_ids: dict[tuple[Any, ...], str] = {}
     for row_number, row in enumerate(materialized, 1):
         if not isinstance(row, Mapping):
-            raise RouterReportError(f"row {row_number} must be an object")
+            raise GatewayReportError(f"row {row_number} must be an object")
         try:
-            identity = results.router_identity_from_row(row)
+            identity = results.gateway_identity_from_row(row)
             cell_id = results.result_cell_id(row)
         except results.ResultError as exc:
-            raise RouterReportError(f"row {row_number} has invalid identity: {exc}") from exc
+            raise GatewayReportError(f"row {row_number} has invalid identity: {exc}") from exc
         tracks.add(identity.track)
+        model_match = row.get("model_match", "exact_revision")
+        if model_match not in {"exact_revision", "model_family", "rolling_alias"}:
+            raise GatewayReportError(
+                f"row {row_number} has invalid model_match"
+            )
+        model_matches.add(model_match)
+        provider_prompt_mode = row.get("provider_prompt_mode")
+        if provider_prompt_mode not in gateway_spec.PROVIDER_PROMPT_MODES:
+            raise GatewayReportError(
+                f"row {row_number} has invalid provider_prompt_mode"
+            )
+        if provider_prompt_mode != identity.provider_prompt_mode:
+            raise GatewayReportError(
+                f"row {row_number} provider_prompt_mode conflicts with identity"
+            )
+        provider_prompt_modes.add(provider_prompt_mode)
         experiment_ids.add(identity.experiment_id)
         experiment_digests.add(identity.experiment_digest)
         strata.add(_stratum(identity))
         if cell_id in cell_ids:
-            raise RouterReportError(
+            raise GatewayReportError(
                 f"duplicate cell_id {cell_id!r} on rows {cell_ids[cell_id]} and {row_number}"
             )
         cell_ids[cell_id] = row_number
         logical = _logical_cell_key(identity)
         if logical in logical_cells:
-            raise RouterReportError(
+            raise GatewayReportError(
                 "duplicate logical cell on rows "
                 f"{logical_cells[logical]} and {row_number}"
             )
@@ -507,7 +633,7 @@ def aggregate(
         metadata = (role, baseline, identity.arm_digest)
         previous = arm_metadata.setdefault(identity.arm_id, metadata)
         if previous != metadata:
-            raise RouterReportError(f"arm {identity.arm_id!r} metadata is inconsistent")
+            raise GatewayReportError(f"arm {identity.arm_id!r} metadata is inconsistent")
         task_provenance = (
             identity.task_digest,
             identity.checker_digest,
@@ -515,7 +641,7 @@ def aggregate(
         )
         previous_task = task_metadata.setdefault(identity.task, task_provenance)
         if previous_task != task_provenance:
-            raise RouterReportError(f"task {identity.task!r} provenance is inconsistent")
+            raise GatewayReportError(f"task {identity.task!r} provenance is inconsistent")
         coordinates = (
             identity.task,
             identity.window_id,
@@ -524,7 +650,7 @@ def aggregate(
         )
         previous_coordinates = block_coordinates.setdefault(identity.block_id, coordinates)
         if previous_coordinates != coordinates:
-            raise RouterReportError(
+            raise GatewayReportError(
                 f"block_id {identity.block_id!r} maps to mixed schedule coordinates"
             )
         coordinate_key = _block_key(identity)
@@ -532,7 +658,7 @@ def aggregate(
             coordinate_key, identity.block_id
         )
         if previous_block_id != identity.block_id:
-            raise RouterReportError(
+            raise GatewayReportError(
                 "one logical block maps to multiple block_id values"
             )
         infrastructure_reason = _infrastructure_reason(row, row_number)
@@ -548,27 +674,41 @@ def aggregate(
         )
 
     if len(experiment_ids) != 1 or len(experiment_digests) != 1:
-        raise RouterReportError("rows mix experiments")
-    if tracks != {"gateway_tax"}:
-        raise RouterReportError("rows must contain only the gateway_tax track")
+        raise GatewayReportError("rows mix experiments")
+    if tracks != {gateway_spec.TRACK}:
+        raise GatewayReportError(
+            f"rows must use the {gateway_spec.TRACK!r} gateway track"
+        )
+    track = next(iter(tracks))
+    if len(model_matches) != 1:
+        raise GatewayReportError("rows mix model_match policies")
+    model_match = next(iter(model_matches))
+    if len(provider_prompt_modes) != 1:
+        raise GatewayReportError("rows mix provider cache modes")
+    provider_prompt_mode = next(iter(provider_prompt_modes))
     if len(strata) != 1:
-        raise RouterReportError("rows mix comparison strata")
+        raise GatewayReportError("rows mix comparison strata")
 
     baseline_arms = [
-        arm_id for arm_id, (role, baseline, _digest) in arm_metadata.items() if baseline
+        arm_id
+        for arm_id, (_role, baseline, _digest) in arm_metadata.items()
+        if baseline
     ]
     if len(baseline_arms) != 1:
-        raise RouterReportError("gateway_tax requires exactly one baseline arm")
+        raise GatewayReportError(f"{track} requires exactly one baseline arm")
     baseline_arm = baseline_arms[0]
     if arm_metadata[baseline_arm][0] != "direct":
-        raise RouterReportError("the gateway_tax baseline arm must be direct")
+        raise GatewayReportError("the gateway baseline arm must be direct")
     if any(
         role == "direct" and arm_id != baseline_arm
         for arm_id, (role, _baseline, _digest) in arm_metadata.items()
     ):
-        raise RouterReportError("gateway_tax allows exactly one direct arm")
-    if not any(role == "gateway" for role, _baseline, _digest in arm_metadata.values()):
-        raise RouterReportError("gateway_tax requires at least one gateway arm")
+        raise GatewayReportError("Gateway Bench allows exactly one direct arm")
+    if not any(
+        role == "gateway"
+        for role, _baseline, _digest in arm_metadata.values()
+    ):
+        raise GatewayReportError("Gateway Bench requires at least one gateway arm")
 
     if expected_arm_ids is None:
         expected_arms = frozenset(arm_metadata)
@@ -577,14 +717,14 @@ def aggregate(
         if not expected_list or not all(
             isinstance(arm_id, str) and arm_id for arm_id in expected_list
         ):
-            raise RouterReportError("expected_arm_ids must contain non-empty strings")
+            raise GatewayReportError("expected_arm_ids must contain non-empty strings")
         if len(set(expected_list)) != len(expected_list):
-            raise RouterReportError("expected_arm_ids contains duplicates")
+            raise GatewayReportError("expected_arm_ids contains duplicates")
         expected_arms = frozenset(expected_list)
         unknown = sorted(expected_arms - set(arm_metadata))
         extra = sorted(set(arm_metadata) - expected_arms)
         if unknown or extra:
-            raise RouterReportError(
+            raise GatewayReportError(
                 "observed arms do not match expected_arm_ids"
                 + (f"; missing: {', '.join(unknown)}" if unknown else "")
                 + (f"; unexpected: {', '.join(extra)}" if extra else "")
@@ -662,6 +802,23 @@ def aggregate(
             "ttfb_s": lambda cell: _cell_call_metric(cell, "ttfb"),
             "semantic_ttft_s": lambda cell: _cell_call_metric(cell, "ttft"),
             "throughput_tokens_per_s": _cell_throughput,
+            "mean_input_tokens_per_call": lambda cell: _cell_call_metric(
+                cell, "input_tokens"
+            ),
+            "mean_output_tokens_per_call": lambda cell: _cell_call_metric(
+                cell, "token_output_tokens"
+            ),
+            "mean_total_tokens_per_call": lambda cell: _cell_call_metric(
+                cell, "total_tokens"
+            ),
+            "cache_hit_call_rate": _cell_cache_hit_rate,
+            "cached_input_fraction": _cell_cached_input_fraction,
+            "mean_cached_input_tokens_per_call": lambda cell: _cell_call_metric(
+                cell, "cached_input_tokens"
+            ),
+            "mean_cache_write_input_tokens_per_call": lambda cell: _cell_call_metric(
+                cell, "cache_write_input_tokens"
+            ),
         }
         metrics = {}
         for name, getter in getters.items():
@@ -674,7 +831,7 @@ def aggregate(
                 replicates=bootstrap_replicates,
                 seed=_seed(bootstrap_seed, f"arm:{arm_id}:{name}"),
             )
-            if name in ("ttfb_s", "semantic_ttft_s", "throughput_tokens_per_s"):
+            if name in _CALL_COVERAGE_FIELDS or name == "throughput_tokens_per_s":
                 call_total = sum(
                     len(cell["calls"])
                     for cells in cells_by_task.values()
@@ -691,7 +848,7 @@ def aggregate(
                         and call["generation_duration"] > 0
                     )
                 else:
-                    call_name = "ttfb" if name == "ttfb_s" else "ttft"
+                    call_name = _CALL_COVERAGE_FIELDS[name]
                     covered_calls = sum(
                         1
                         for cells in cells_by_task.values()
@@ -819,7 +976,7 @@ def aggregate(
                 },
             }
 
-        report_arms[arm_id] = {
+        report_arm = {
             "role": arm_metadata[arm_id][0],
             "baseline": arm_metadata[arm_id][1],
             "arm_digest": arm_metadata[arm_id][2],
@@ -828,6 +985,7 @@ def aggregate(
             "costs": costs,
             "route_distribution": distribution,
         }
+        report_arms[arm_id] = report_arm
 
     contrasts = {}
     contrast_getters = {
@@ -838,6 +996,23 @@ def aggregate(
         "ttfb_s": lambda cell: _cell_call_metric(cell, "ttfb"),
         "semantic_ttft_s": lambda cell: _cell_call_metric(cell, "ttft"),
         "throughput_tokens_per_s": _cell_throughput,
+        "mean_input_tokens_per_call": lambda cell: _cell_call_metric(
+            cell, "input_tokens"
+        ),
+        "mean_output_tokens_per_call": lambda cell: _cell_call_metric(
+            cell, "token_output_tokens"
+        ),
+        "mean_total_tokens_per_call": lambda cell: _cell_call_metric(
+            cell, "total_tokens"
+        ),
+        "cache_hit_call_rate": _cell_cache_hit_rate,
+        "cached_input_fraction": _cell_cached_input_fraction,
+        "mean_cached_input_tokens_per_call": lambda cell: _cell_call_metric(
+            cell, "cached_input_tokens"
+        ),
+        "mean_cache_write_input_tokens_per_call": lambda cell: _cell_call_metric(
+            cell, "cache_write_input_tokens"
+        ),
         **{
             f"cost:{basis}": (lambda cell, basis=basis: _cell_cost(cell, basis))
             for basis in _COST_BASES
@@ -851,10 +1026,10 @@ def aggregate(
             block_differences: dict[str, list[float]] = defaultdict(list)
             covered_blocks = 0
             for block in analyzed_blocks:
-                gateway = getter(block["cells"][arm_id])
-                direct = getter(block["cells"][baseline_arm])
-                if gateway is not None and direct is not None:
-                    block_differences[block["task"]].append(gateway - direct)
+                treatment = getter(block["cells"][arm_id])
+                control = getter(block["cells"][baseline_arm])
+                if treatment is not None and control is not None:
+                    block_differences[block["task"]].append(treatment - control)
                     covered_blocks += 1
             paired = {
                 task: sum(values) / len(values)
@@ -891,8 +1066,10 @@ def aggregate(
 
     dto = {
         "schema_version": 1,
-        "benchmark": "router",
-        "track": "gateway_tax",
+        "benchmark": results.GATEWAY_BENCHMARK,
+        "track": track,
+        "model_match": model_match,
+        "provider_prompt_mode": provider_prompt_mode,
         "experiment_id": next(iter(experiment_ids)),
         "experiment_digest": next(iter(experiment_digests)),
         "analysis": {
@@ -923,6 +1100,7 @@ def render_text(report: Mapping[str, Any]) -> str:
     blocks = report["blocks"]
     lines = [
         f"Gateway Bench: {report['track']} ({report['experiment_digest'][:12]})",
+        f"Provider prompt mode: {report['provider_prompt_mode']}",
         (
             f"Blocks: {blocks['included']}/{blocks['observed']} included; "
             f"tasks: {report['tasks']['included']}"
@@ -940,8 +1118,9 @@ def render_text(report: Mapping[str, Any]) -> str:
         score = metrics["mean_checker_score"]["estimate"]
         availability = metrics["availability"]["estimate"]
         latency = metrics["latency_s"]["estimate"]
+        role = arm["role"]
         lines.append(
-            f"{arm_id} ({arm['role']}): solve {_format_percent(solve)}, "
+            f"{arm_id} ({role}): solve {_format_percent(solve)}, "
             f"score {_format_number(score)}, availability {_format_percent(availability)}, "
             f"latency {_format_seconds(latency)}"
         )
@@ -957,8 +1136,9 @@ def render_text(report: Mapping[str, Any]) -> str:
     for arm_id, contrast in report["paired_contrasts"].items():
         latency = contrast["metrics"]["latency_s"]["estimate"]
         solve = contrast["metrics"]["solve_rate"]["estimate"]
+        control = contrast.get("fixed_control_arm", contrast.get("direct_arm"))
         lines.append(
-            f"{arm_id} - {contrast['direct_arm']}: "
+            f"{arm_id} - {control} ({contrast['direction']}): "
             f"solve {_format_signed(solve)}, latency {_format_signed(latency, 's')}"
         )
     return "\n".join(lines)

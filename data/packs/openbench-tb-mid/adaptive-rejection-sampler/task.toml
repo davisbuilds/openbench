@@ -1,3 +1,3 @@
-docker_image = "openbench-tb2-adaptive-rejection-sampler@sha256:b5df629425a80e7ced5d68628bd2ee4d16523a6ec9c09f42b5fea900c0e1a575"
+docker_image = "openbench-tb2-adaptive-rejection-sampler@sha256:d7f5e336c95f08b1c63c657a2e417ff36d99a8ba8dc95dec2b33aff0c1aa70dc"
 docker_image_tag = "openbench-tb2-adaptive-rejection-sampler:pinned"
 docker_workdir = "/app"

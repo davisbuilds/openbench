@@ -1,4 +1,4 @@
-"""CLI for Gateway Tax experiments."""
+"""CLI for Gateway Bench experiments."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import results, router_publish, router_report, router_run, router_spec
+from . import results, gateway_publish, gateway_report, gateway_run, gateway_spec
 
 
 def _tasks_dir(value: str | None) -> str:
@@ -16,12 +16,12 @@ def _tasks_dir(value: str | None) -> str:
 
 
 def _print_error(exc: Exception) -> int:
-    print(f"obench router: {exc}", file=sys.stderr)
+    print(f"obench gateway: {exc}", file=sys.stderr)
     return 2
 
 
 def _validate(args: argparse.Namespace) -> int:
-    experiment, tasks = router_run.validate_experiment(
+    experiment, tasks = gateway_run.validate_experiment(
         args.experiment, tasks_dir=_tasks_dir(args.tasks_dir)
     )
     print(
@@ -32,13 +32,13 @@ def _validate(args: argparse.Namespace) -> int:
 
 
 def _doctor(args: argparse.Namespace) -> int:
-    report = router_run.doctor_experiment(
+    report = gateway_run.doctor_experiment(
         args.experiment, tasks_dir=_tasks_dir(args.tasks_dir)
     )
     print(json.dumps(report, sort_keys=True))
     if not report["usd_cap_enforceable"]:
         print(
-            f"obench router: {router_run.FROZEN_PRICES_ENV} is required to run",
+            f"obench gateway: {gateway_run.FROZEN_PRICES_ENV} is required to run",
             file=sys.stderr,
         )
         return 2
@@ -46,9 +46,9 @@ def _doctor(args: argparse.Namespace) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
-    experiment = router_spec.load_experiment(args.experiment)
-    results_path = args.results or f"results/router-{experiment.experiment_id}.jsonl"
-    summary = router_run.run_experiment(
+    experiment = gateway_spec.load_experiment(args.experiment)
+    results_path = args.results or f"results/gateway-{experiment.experiment_id}.jsonl"
+    summary = gateway_run.run_experiment(
         args.experiment,
         results_path=results_path,
         tasks_dir=_tasks_dir(args.tasks_dir),
@@ -67,47 +67,47 @@ def _run(args: argparse.Namespace) -> int:
 def _report(args: argparse.Namespace) -> int:
     state = results.read_jsonl_for_resume(Path(args.results))
     if not state.rows:
-        raise router_run.RouterRunError("results file contains no rows")
+        raise gateway_run.GatewayRunError("results file contains no rows")
     expected = set()
     for row in state.rows:
         raw = row.get("expected_arm_ids")
         if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
             expected.update(raw)
-    report = router_report.aggregate(
+    report = gateway_report.aggregate(
         state.rows,
         expected_arm_ids=expected or None,
     )
     if args.json:
         print(json.dumps(report, allow_nan=False, sort_keys=True))
     else:
-        print(router_report.render_text(report))
+        print(gateway_report.render_text(report))
     return 0
 
 
 def _publish(args: argparse.Namespace) -> int:
     results_path = Path(args.results).resolve()
-    experiment = router_spec.load_experiment(args.experiment)
+    experiment = gateway_spec.load_experiment(args.experiment)
     state = results.read_jsonl_for_resume(results_path)
     if not state.rows:
-        raise router_run.RouterRunError("results file contains no rows")
-    price_snapshot = router_run.load_persisted_price_snapshot(results_path)
+        raise gateway_run.GatewayRunError("results file contains no rows")
+    price_snapshot = gateway_run.load_persisted_price_snapshot(results_path)
     ledger_dir = (
         Path(args.ledgers_dir).resolve()
         if args.ledgers_dir
-        else results_path.parent / f".{results_path.stem}.router-ledgers"
+        else results_path.parent / f".{results_path.stem}.gateway-ledgers"
     )
     ledgers = {}
     for row in state.rows:
         seal = row.get("ledger_seal")
         if not isinstance(seal, dict) or not isinstance(seal.get("ledger_file"), str):
-            raise router_run.RouterRunError("result row is missing its sealed ledger binding")
+            raise gateway_run.GatewayRunError("result row is missing its sealed ledger binding")
         ledgers[results.result_cell_id(row)] = ledger_dir / seal["ledger_file"]
-    provenance = router_publish.publish_bundle(
+    provenance = gateway_publish.publish_bundle(
         results_path,
         args.bundle,
         experiment=experiment,
-        policy=router_run.policy_snapshot(),
-        catalog=router_run.catalog_snapshot(experiment),
+        policy=gateway_run.policy_snapshot(experiment),
+        catalog=gateway_run.catalog_snapshot(experiment),
         prices=price_snapshot,
         ledgers=ledgers,
     )
@@ -116,16 +116,16 @@ def _publish(args: argparse.Namespace) -> int:
 
 
 def _verify(args: argparse.Namespace) -> int:
-    print(json.dumps(router_publish.verify_bundle(args.bundle), sort_keys=True))
+    print(json.dumps(gateway_publish.verify_bundle(args.bundle), sort_keys=True))
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="obench router",
-        description="Run and report Gateway Tax experiments.",
+        prog="obench gateway",
+        description="Compare fixed model/provider routes through AI gateways.",
     )
-    sub = parser.add_subparsers(dest="router_command", required=True)
+    sub = parser.add_subparsers(dest="gateway_command", required=True)
 
     validate = sub.add_parser("validate", help="validate experiment and task inputs")
     validate.add_argument("experiment")
@@ -145,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--force", action="store_true")
     run.set_defaults(handler=_run)
 
-    report = sub.add_parser("report", help="report schema-v2 router results")
+    report = sub.add_parser("report", help="report schema-v2 gateway results")
     report.add_argument("results")
     report.add_argument("--json", action="store_true")
     report.set_defaults(handler=_report)
@@ -168,10 +168,10 @@ def main(argv: list[str] | None = None) -> int:
         OSError,
         results.ResultError,
         results.ResultsLogError,
-        router_report.RouterReportError,
-        router_publish.RouterPublishError,
-        router_run.RouterRunError,
-        router_spec.RouterSpecError,
+        gateway_report.GatewayReportError,
+        gateway_publish.GatewayPublishError,
+        gateway_run.GatewayRunError,
+        gateway_spec.GatewaySpecError,
     ) as exc:
         return _print_error(exc)
 

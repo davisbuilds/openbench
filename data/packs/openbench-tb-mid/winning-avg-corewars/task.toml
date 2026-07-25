@@ -1,3 +1,3 @@
-docker_image = "openbench-tb2-winning-avg-corewars@sha256:6144649d4a2d9aa0bb25c86715b66e720274e53a37480cae0f1c26ae6edfb251"
+docker_image = "openbench-tb2-winning-avg-corewars@sha256:e5eca19a424c5e33411cc929391ae7bd927cd8f961c1e1645e2f7dd24522577a"
 docker_image_tag = "openbench-tb2-winning-avg-corewars:pinned"
 docker_workdir = "/app"

@@ -29,8 +29,8 @@ the model's ability to solve the task.
 
 import re
 
-FAILURE_CLASSES = ("solved", "wrong_answer", "timeout", "rate_limited", "infra")
-EXCLUDED_FROM_SOLVE_RATE = ("rate_limited", "infra")
+FAILURE_CLASSES = ("solved", "wrong_answer", "timeout", "rate_limited", "infra", "stalled")
+EXCLUDED_FROM_SOLVE_RATE = ("rate_limited", "infra", "stalled")
 NEAR_ZERO_TOKEN_LIMIT = 100
 _TOKEN_FIELDS = (
     "tokens", "tokens_fresh", "tokens_input_uncached", "tokens_cache_read",
@@ -245,6 +245,24 @@ def is_silent_no_model_call(row, adapter_output=""):
                  or not _has_model_work_evidence(row, text)))
 
 
+def has_checker_crash(row):
+    """True when the checker itself failed to execute (not a graded verdict).
+
+    A checker communicates its verdict through exit 0 (pass) / 1 (fail), or the
+    literal ``"timeout"`` sentinel. Any other exit code means the checker never
+    reached a verdict — docker refusing to start it (125/126/127), a signal, or
+    an interpreter crash. Those cells measure our infrastructure, not the model,
+    so they must never be scored as ``wrong_answer``.
+    """
+    exit_code = (row or {}).get("checker_exit")
+    if exit_code is None or exit_code == "timeout":
+        return False
+    try:
+        return int(exit_code) not in (0, 1)
+    except (TypeError, ValueError):
+        return False
+
+
 def classify_failure_reason(row, adapter_output=""):
     """Return a stable diagnostic reason without overriding stronger markers."""
     row = row or {}
@@ -285,6 +303,8 @@ def classify_failure(row, adapter_output="", timeout_s=None):
     if has_instant_cli_exit_shape(row):
         return "infra"
     if is_silent_no_model_call(row, adapter_output):
+        return "infra"
+    if has_checker_crash(row):
         return "infra"
     # Wall time riding the cap only means "timeout" when the runner killed the
     # agent; a CLI that exited on its own (completed=True) just ran slow.
