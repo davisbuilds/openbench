@@ -119,6 +119,33 @@ class GatewayProbeReportTests(unittest.TestCase):
         text = gateway_probe_report.render_text(report)
         self.assertIn("n/a", text)
 
+    def test_unverified_success_counts_as_available_but_not_as_fixed_route_metric(self):
+        rows = [
+            row("direct", "cold", 1, baseline=True),
+            row("gateway", "cold", 1, route="unverifiable"),
+            row("direct", "warm", 1, baseline=True),
+            row("gateway", "warm", 1),
+        ]
+        for item in rows:
+            item["scheduled_blocks_per_condition"] = 1
+        report = gateway_probe_report.aggregate(rows, bootstrap_replicates=20)
+        cold = report["arms"]["gateway"]["conditions"]["cold"]
+        self.assertEqual(cold["denominators"]["success"], 1)
+        self.assertEqual(cold["availability"]["rate"], 1.0)
+        self.assertEqual(
+            cold["metrics"]["total_s"]["coverage"],
+            {"covered": 0, "total": 1, "ratio": 0.0},
+        )
+        self.assertIsNone(cold["metrics"]["total_s"]["p50"])
+        self.assertEqual(
+            cold["metrics"]["total_tokens"]["coverage"],
+            {"covered": 0, "total": 1, "ratio": 0.0},
+        )
+        self.assertEqual(
+            cold["metrics"]["measured_cost_usd"]["coverage"],
+            {"covered": 0, "total": 1, "ratio": 0.0},
+        )
+
     def test_rejects_mixed_comparison_duplicate_logical_and_provenance_drift(self):
         direct = row("direct", "cold", 1, baseline=True)
         gateway = row("gateway", "cold", 1)

@@ -24,6 +24,7 @@ class _SSEHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     requests = []
     fail_first = False
+    close_measured = False
 
     def log_message(self, _format, *_args):
         return
@@ -51,7 +52,10 @@ class _SSEHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("content-length", str(len(body)))
-        self.send_header("connection", "keep-alive")
+        close_response = self.close_measured and len(self.requests) == 2
+        self.send_header(
+            "connection", "close" if close_response else "keep-alive"
+        )
         self.end_headers()
         self.wfile.write(body)
         self.wfile.flush()
@@ -131,6 +135,7 @@ class GatewayProbeHttpTests(unittest.TestCase):
     def setUp(self):
         _SSEHandler.requests = []
         _SSEHandler.fail_first = False
+        _SSEHandler.close_measured = False
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), _SSEHandler)
         self.thread = threading.Thread(
             target=self.server.serve_forever, daemon=True
@@ -220,6 +225,28 @@ class GatewayProbeHttpTests(unittest.TestCase):
         self.assertGreater(
             Decimal(result["billing"]["primer_cost_usd"]), 0
         )
+
+    def test_warm_reuse_survives_measured_response_closing_same_socket(self):
+        _SSEHandler.close_measured = True
+        exp = experiment(self.endpoint)
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "warm", 1, ("direct",)
+        )
+        result = gateway_probe_http.execute_request(
+            experiment=exp,
+            case=exp.cases[0],
+            block=block,
+            plan=route_plan(exp, self.endpoint),
+            secret="test-secret",
+            prices=prices(),
+        )
+        self.assertEqual(len(_SSEHandler.requests), 2)
+        self.assertEqual(
+            _SSEHandler.requests[0]["connection"],
+            _SSEHandler.requests[1]["connection"],
+        )
+        self.assertTrue(result["reuse_evidence"]["socket_reused"])
+        self.assertTrue(result["outcome"]["success"])
 
     def test_gateway_body_shaping_is_authoritative(self):
         plan = gateway_spec.RoutePlan(

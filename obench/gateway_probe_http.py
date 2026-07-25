@@ -376,18 +376,8 @@ def execute_request(
                 budget_reason = "usd_cap_reached_by_primer"
                 stop_for_budget = True
         if not stop_for_budget:
-            measured_started = time.monotonic()
-            measured_attempted = True
             body = request_body(
                 case.prompt, measured_nonce, plan, experiment.budget.max_output_tokens
-            )
-            status, metrics, _closed = _consume(
-                connection,
-                path,
-                body,
-                _headers(plan, secret, body),
-                plan,
-                capture_metrics=True,
             )
             if block.condition == "warm":
                 primer["socket_reused"] = bool(
@@ -400,6 +390,16 @@ def execute_request(
                     raise GatewayProbeRunError(
                         "warm measured request did not reuse the primer socket"
                     )
+            measured_started = time.monotonic()
+            measured_attempted = True
+            status, metrics, _closed = _consume(
+                connection,
+                path,
+                body,
+                _headers(plan, secret, body),
+                plan,
+                capture_metrics=True,
+            )
     except (socket.timeout, TimeoutError):
         timed_out = True
         error_class = "timeout"

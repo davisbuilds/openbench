@@ -336,6 +336,8 @@ def aggregate(
                         [
                             value for row in selected
                             if row.get("outcome", {}).get("success") is True
+                            and row.get("route_integrity", {}).get("status")
+                            == "verified"
                             and (value := _metric(row, path)) is not None
                         ],
                         success,
