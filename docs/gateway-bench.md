@@ -53,6 +53,23 @@ Client retries are zero. Request cache controls are stripped. A returned
 cached-input count is retained as measured provider behavior, not treated as a
 client-requested cache hit.
 
+Provider prompt-prefix caching is a required, experiment-wide condition:
+
+- `provider_prompt_mode = "provider_default"` leaves the provider-visible
+  prompt intact and measures normal production behavior, including
+  provider-reported cached input tokens.
+- `provider_prompt_mode = "isolated_per_call_v1"` prepends a unique neutral
+  identifier to Responses `instructions` on every model call. It is currently
+  admitted only for direct OpenAI, OpenRouter, Vercel, and Concentrate
+  Responses routes. A cell fails route integrity if transformation evidence is
+  missing or the provider reports any cached input tokens.
+
+The provider prompt mode is bound into experiment, policy, run, and cell
+identity, retained in public bundles, and reports refuse to mix modes. Use
+`provider_default` for headline gateway comparisons and
+`isolated_per_call_v1` as a sensitivity control for whether provider prompt
+caching changes the ranking. Both modes disable gateway response caching.
+
 Route integrity fails closed when required evidence is absent or contradictory:
 served model, provider, requested-model metadata, terminal stream state, or
 single-attempt evidence where the gateway exposes it.
@@ -66,7 +83,8 @@ Reports retain per-metric coverage and use equal task weighting.
 - time to first byte and semantic time to first token;
 - output throughput;
 - input, output, and total token usage;
-- cached-input and cache-write token counts when reported;
+- cached-input and cache-write token counts, cache-hit call rate, and cached
+  input fraction when reported;
 - cost using separately labeled evidence bases;
 - served-model/provider distribution;
 - route-integrity and infrastructure exclusion reasons;
@@ -165,7 +183,9 @@ obench gateway report results/gateway-five-way.jsonl --json \
 Publication creates a new sanitized, tamper-evident `gateway_bench` bundle. It
 contains canonical Gateway identities (`benchmark="gateway"`), `gateway-run-*`
 and `gateway-cell-*` IDs, public snapshots, minimized ledgers, and provenance
-digests.
+digests. Publishing and verification reject a result set that does not contain
+the latest complete all-arm block for every declared task, window, and
+repetition.
 
 ```bash
 obench gateway publish \

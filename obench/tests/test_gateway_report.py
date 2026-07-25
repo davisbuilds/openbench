@@ -60,6 +60,7 @@ def make_row(
         price_digest=DIGESTS["price"],
         sampling_digest=DIGESTS["sampling"],
         schedule_digest=DIGESTS["schedule"],
+        provider_prompt_mode="provider_default",
         task=task,
         task_digest=DIGESTS[task],
         checker_digest=DIGESTS["checker"],
@@ -95,6 +96,7 @@ def make_row(
         "identity": identity.as_dict(),
         "arm_role": role,
         "model_match": model_match,
+        "provider_prompt_mode": "provider_default",
         "baseline": baseline,
         "result": result,
         "route_integrity": {
@@ -113,6 +115,7 @@ def call(
     ttfb=1.0,
     ttft=2.0,
     tokens=10,
+    input_tokens=100,
     generation_s=2.0,
     costs=True,
     attempts=None,
@@ -136,6 +139,11 @@ def call(
     result = {
         "timing": {"ttfb_s": ttfb, "semantic_ttft_s": ttft},
         "generation": {"output_tokens": tokens, "duration_s": generation_s},
+        "tokens": {
+            "input_tokens": input_tokens,
+            "output_tokens": tokens,
+            "total_tokens": input_tokens + tokens,
+        },
         "route": {
             "provider": provider,
             "served_model": model,
@@ -413,10 +421,11 @@ class GatewayReportTests(unittest.TestCase):
         self.assertEqual(
             metrics["mean_cache_write_input_tokens_per_call"]["estimate"], 25.0
         )
-        self.assertNotIn("cache_hit_call_rate", metrics)
-        self.assertNotIn(
-            "cache_hit_call_rate",
-            report["arms"]["direct"]["metrics"],
+        self.assertEqual(metrics["cache_hit_call_rate"]["estimate"], 0.75)
+        self.assertAlmostEqual(metrics["cached_input_fraction"]["estimate"], 0.35)
+        self.assertEqual(
+            report["arms"]["direct"]["metrics"]["cache_hit_call_rate"]["estimate"],
+            0.0,
         )
         for name in (
             "mean_cached_input_tokens_per_call",
@@ -439,7 +448,7 @@ class GatewayReportTests(unittest.TestCase):
         self.assertEqual(
             contrasts["mean_cached_input_tokens_per_call"]["estimate"], 35.0
         )
-        self.assertNotIn("cache_hit_call_rate", contrasts)
+        self.assertEqual(contrasts["cache_hit_call_rate"]["estimate"], 0.75)
         self.assertEqual(
             contrasts["mean_cache_write_input_tokens_per_call"]["estimate"], 25.0
         )

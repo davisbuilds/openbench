@@ -120,9 +120,10 @@ def route_plan(
     arm_digest,
     gateway=None,
     protocol="openai_chat",
+    provider_prompt_mode="provider_default",
 ):
     return gateway_spec.RoutePlan(
-        schema_version=1,
+        schema_version=2,
         experiment_digest="e" * 64,
         arm_digest=arm_digest,
         arm_id=arm_id,
@@ -143,6 +144,7 @@ def route_plan(
         private_host_allowlist=("127.0.0.1",),
         private_cidr_allowlist=(),
         gateway=gateway or ("openrouter" if route_kind == "gateway" else None),
+        provider_prompt_mode=provider_prompt_mode,
     )
 
 
@@ -211,6 +213,76 @@ class GatewayRouteTests(unittest.TestCase):
         self.assertNotIn("client-cache", ledger)
         self.assertNotIn("client-safety", ledger)
         self.assertNotIn("client-safety", json.dumps(rows))
+
+    def test_cold_prefix_is_unique_per_responses_call_and_safely_evidenced(self):
+        plan = route_plan(
+            endpoint=self.upstream_base + "/responses",
+            route_kind="direct",
+            arm_id="direct-cold-responses",
+            arm_digest="c" * 64,
+            protocol="openai_responses",
+            provider_prompt_mode="isolated_per_call_v1",
+        )
+        token = "cold-responses-cell"
+        self.server.register_cell(token)
+        self.server.register_route(token, plan, secret_plan(plan.arm_id))
+
+        body = {
+            "model": "attacker-model",
+            "instructions": "Keep the workspace correct.",
+            "input": "private",
+        }
+        for _ in range(2):
+            status, _response = self._post(token, plan.arm_digest, body=body)
+            self.assertEqual(status, 200)
+
+        first, second = self.upstream.requests[-2:]
+        first_instructions = first["body"]["instructions"]
+        second_instructions = second["body"]["instructions"]
+        self.assertTrue(first_instructions.endswith(body["instructions"]))
+        self.assertTrue(second_instructions.endswith(body["instructions"]))
+        self.assertNotEqual(first_instructions, second_instructions)
+
+        rows = self._seal_rows(token)
+        call_rows = [row for row in rows if row.get("record_type") != "ledger_seal"]
+        cache_evidence = [row["provider_cache"] for row in call_rows]
+        self.assertTrue(all(
+            item["mode"] == "isolated_per_call_v1"
+            and item["transform_id"] == gateway_spec.COLD_PREFIX_TRANSFORM_ID
+            and item["prefix_injected"] is True
+            and item["scope"] == "forwarded_request"
+            and len(item["nonce_commitment"]) == 64
+            for item in cache_evidence
+        ))
+        self.assertNotEqual(
+            cache_evidence[0]["nonce_commitment"],
+            cache_evidence[1]["nonce_commitment"],
+        )
+        ledger = self.server._ledger_path(token).read_text(encoding="utf-8")
+        self.assertNotIn("OpenBench cache isolation id", ledger)
+        self.assertNotIn("Keep the workspace correct.", ledger)
+
+    def test_cold_prefix_rejects_nonce_reuse_before_second_upstream_call(self):
+        plan = route_plan(
+            endpoint=self.upstream_base + "/responses",
+            route_kind="direct",
+            arm_id="direct-cold-reuse",
+            arm_digest="9" * 64,
+            protocol="openai_responses",
+            provider_prompt_mode="isolated_per_call_v1",
+        )
+        token = "cold-reuse-cell"
+        self.server.register_cell(token)
+        self.server.register_route(token, plan, secret_plan(plan.arm_id))
+        body = {"model": "wrong", "instructions": "Stable", "input": "private"}
+
+        with mock.patch("obench.proxy.secrets.token_hex", return_value="a" * 64):
+            first, _ = self._post(token, plan.arm_digest, body=body)
+            second, _ = self._post(token, plan.arm_digest, body=body)
+
+        self.assertEqual(first, 200)
+        self.assertEqual(second, 502)
+        self.assertEqual(len(self.upstream.requests), 1)
 
     def test_programmatic_route_rejects_host_outside_explicit_allowlist(self):
         token = "unlisted-host"

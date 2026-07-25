@@ -8,7 +8,7 @@ the private source ledger.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 import hashlib
 import json
 import math
@@ -23,7 +23,7 @@ from . import results
 from . import gateway_spec
 
 
-BUNDLE_SCHEMA_VERSION = 1
+BUNDLE_SCHEMA_VERSION = 2
 PROVENANCE_FILE = "provenance.json"
 RESULTS_FILE = "results.jsonl"
 SNAPSHOT_FILES = {
@@ -163,6 +163,11 @@ _REPORT_CACHE_SCHEMA = {
     "cached_input_tokens": _SCALAR,
     "cache_write_input_tokens": _SCALAR,
 }
+_REPORT_TOKENS_SCHEMA = {
+    "input_tokens": _SCALAR,
+    "output_tokens": _SCALAR,
+    "total_tokens": _SCALAR,
+}
 _REPORT_ROUTE_SCHEMA = {
     "served_model": _SCALAR,
     "provider": _SCALAR,
@@ -170,9 +175,11 @@ _REPORT_ROUTE_SCHEMA = {
     "attempts_present": _SCALAR,
 }
 _PROXY_CALL_SCHEMA = {
+    "request_ordinal": _SCALAR,
     "timing": _NullableSchema(_REPORT_TIMING_SCHEMA),
     "generation": _NullableSchema(_REPORT_GENERATION_SCHEMA),
     "route": _NullableSchema(_REPORT_ROUTE_SCHEMA),
+    "tokens": _NullableSchema(_REPORT_TOKENS_SCHEMA),
     "cache": _NullableSchema(_REPORT_CACHE_SCHEMA),
     "costs": _NullableSchema(_COSTS_SCHEMA),
 }
@@ -190,6 +197,7 @@ _RESULT_SCHEMA = {
     "arm_role": _SCALAR,
     "baseline": _SCALAR,
     "model_match": _SCALAR,
+    "provider_prompt_mode": _SCALAR,
     "result": _CANONICAL_RESULT_SCHEMA,
     "route_integrity": _ROUTE_EVIDENCE_SCHEMA,
     "proxy_metrics": {"calls": [_PROXY_CALL_SCHEMA]},
@@ -216,6 +224,13 @@ _SERVING_ARM_SCHEMA = {
     "arm_digest": _SCALAR,
     "route_kind": _SCALAR,
 }
+_PROVIDER_CACHE_SCHEMA = {
+    "mode": _SCALAR,
+    "transform_id": _SCALAR,
+    "prefix_injected": _SCALAR,
+    "scope": _SCALAR,
+    "nonce_commitment": _SCALAR,
+}
 _LEDGER_REQUEST_SCHEMA = {
     "ts": _SCALAR,
     "status": _SCALAR,
@@ -225,6 +240,7 @@ _LEDGER_REQUEST_SCHEMA = {
     "sampling_source": _SCALAR,
     "duration_ms": _SCALAR,
     "serving_arm": _SERVING_ARM_SCHEMA,
+    "provider_cache": _PROVIDER_CACHE_SCHEMA,
     "gateway_metrics": _NullableSchema(_METRICS_SCHEMA),
     "session_hash": _SCALAR,
     "previous_response_hash": _SCALAR,
@@ -239,6 +255,7 @@ _POLICY_SCHEMA = {
     "version": _SCALAR,
     "track": _SCALAR,
     "model_match": _SCALAR,
+    "provider_prompt_mode": _SCALAR,
     "route_kind": _SCALAR,
     "allowed_models": [_SCALAR],
     "allowed_providers": [_SCALAR],
@@ -334,6 +351,7 @@ _EXPERIMENT_PUBLIC_SCHEMA = {
     "experiment_id": _SCALAR,
     "track": _SCALAR,
     "model_match": _SCALAR,
+    "provider_prompt_mode": _SCALAR,
     "harness": _SCALAR,
     "tasks": [_SCALAR],
     "repetitions_per_window": _SCALAR,
@@ -547,6 +565,7 @@ def _experiment_dto(source: Mapping[str, Any], source_digest: str) -> dict[str, 
         "experiment_id": source["experiment_id"],
         "track": source["track"],
         "model_match": source["model_match"],
+        "provider_prompt_mode": source["provider_prompt_mode"],
         "harness": source["harness"],
         "tasks": list(source["tasks"]),
         "repetitions_per_window": source["repetitions_per_window"],
@@ -587,6 +606,76 @@ def _load_jsonl(path: Path, label: str) -> list[dict[str, Any]]:
             raise GatewayPublishError(f"{label} line {line_no} is not an object")
         rows.append(row)
     return rows
+
+
+def _require_complete_schedule(
+    experiment: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+) -> None:
+    tasks = experiment.get("tasks")
+    windows = experiment.get("windows")
+    repetitions = experiment.get("repetitions_per_window")
+    arms = experiment.get("arms")
+    if (
+        not isinstance(tasks, list)
+        or not isinstance(windows, list)
+        or not isinstance(repetitions, int)
+        or isinstance(repetitions, bool)
+        or repetitions < 1
+        or not isinstance(arms, list)
+    ):
+        raise GatewayPublishError("experiment has invalid schedule dimensions")
+    window_ids = {
+        window.get("window_id")
+        for window in windows
+        if isinstance(window, Mapping)
+    }
+    arm_ids = {
+        arm.get("arm_id")
+        for arm in arms
+        if isinstance(arm, Mapping)
+    }
+    if (
+        len(window_ids) != len(windows)
+        or None in window_ids
+        or len(arm_ids) != len(arms)
+        or None in arm_ids
+    ):
+        raise GatewayPublishError("experiment has invalid schedule identifiers")
+    expected = {
+        (task, window_id, repetition)
+        for task in tasks
+        for window_id in window_ids
+        for repetition in range(1, repetitions + 1)
+    }
+    observed: dict[tuple[str, str, int], dict[int, list[str]]] = {}
+    for row in rows:
+        identity = results.gateway_identity_from_row(row)
+        coordinate = (
+            identity.task,
+            identity.window_id,
+            identity.repetition,
+        )
+        observed.setdefault(coordinate, {}).setdefault(
+            identity.block_attempt, []
+        ).append(identity.arm_id)
+    if set(observed) != expected:
+        missing = sorted(expected - set(observed))
+        extra = sorted(set(observed) - expected)
+        raise GatewayPublishError(
+            f"result schedule is incomplete; missing={missing!r} extra={extra!r}"
+        )
+    for coordinate, attempts in observed.items():
+        attempt_numbers = sorted(attempts)
+        if attempt_numbers != list(range(attempt_numbers[-1] + 1)):
+            raise GatewayPublishError(
+                f"result schedule has non-contiguous attempts for {coordinate!r}"
+            )
+        latest = attempts[attempt_numbers[-1]]
+        if len(latest) != len(arm_ids) or set(latest) != arm_ids:
+            raise GatewayPublishError(
+                f"latest matched block is incomplete for {coordinate!r}"
+            )
 
 
 def _validate_source_ledger(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -853,6 +942,7 @@ def publish_bundle(
             bindings[cell_id] = binding
             ledger_provenance[cell_id] = dict(binding)
 
+        _require_complete_schedule(experiment_source, resume.rows)
         public_rows = [
             _result_dto(row, bindings[results.result_cell_id(row)])
             for row in resume.rows
@@ -998,6 +1088,7 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     snapshot_digests = provenance["snapshot_digests"]
     if not isinstance(snapshot_digests, dict) or set(snapshot_digests) != set(SNAPSHOT_FILES):
         raise GatewayPublishError("invalid snapshot digest provenance")
+    experiment_snapshot = None
     for kind, relative in SNAPSHOT_FILES.items():
         expected = _require_digest(snapshot_digests[kind], f"{kind} source digest")
         snapshot = _read_json(root / relative)
@@ -1005,6 +1096,7 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             raise GatewayPublishError(f"{kind} snapshot digest binding mismatch")
         if kind == "experiment":
             _require_projected(snapshot, _EXPERIMENT_PUBLIC_SCHEMA, kind)
+            experiment_snapshot = snapshot
         else:
             expected_keys = {"kind", "source_digest", "data"}
             if set(snapshot) != expected_keys or snapshot.get("kind") != kind:
@@ -1020,6 +1112,9 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     result_rows = _load_jsonl(root / RESULTS_FILE, RESULTS_FILE)
     if provenance["result_count"] != len(result_rows):
         raise GatewayPublishError("result count does not match provenance")
+    if experiment_snapshot is None:
+        raise GatewayPublishError("experiment snapshot is missing")
+    _require_complete_schedule(experiment_snapshot, result_rows)
     ledger_meta = provenance["ledgers"]
     if not isinstance(ledger_meta, dict):
         raise GatewayPublishError("ledger provenance must be an object")

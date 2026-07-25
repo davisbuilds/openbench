@@ -26,7 +26,7 @@ _EXPERIMENT_FIELDS = frozenset({"id", "digest"})
 _ARM_FIELDS = frozenset({"id", "digest"})
 _COMPARISON_FIELDS = frozenset({
     "policy_digest", "catalog_digest", "price_digest", "sampling_digest",
-    "schedule_digest",
+    "schedule_digest", "provider_prompt_mode",
 })
 _TASK_FIELDS = frozenset({
     "name", "digest", "checker_digest", "workspace_source_sha",
@@ -210,6 +210,7 @@ class CellIdentity:
     repetition: int
     block_id: str
     block_attempt: int
+    provider_prompt_mode: str
 
     def __post_init__(self) -> None:
         if self.schema_version != CURRENT_SCHEMA_VERSION:
@@ -240,6 +241,7 @@ class CellIdentity:
         _require_positive_number("checker_timeout_s", self.checker_timeout_s)
         _require_positive_int("repetition", self.repetition)
         _require_non_negative_int("block_attempt", self.block_attempt)
+        _require_non_empty_string("provider_prompt_mode", self.provider_prompt_mode)
 
     @classmethod
     def for_gateway(cls, **values: Any) -> "CellIdentity":
@@ -252,6 +254,14 @@ class CellIdentity:
 
     def as_dict(self) -> dict[str, Any]:
         """Return the canonical nested identity representation."""
+        comparison = {
+            "policy_digest": self.policy_digest,
+            "catalog_digest": self.catalog_digest,
+            "price_digest": self.price_digest,
+            "sampling_digest": self.sampling_digest,
+            "schedule_digest": self.schedule_digest,
+        }
+        comparison["provider_prompt_mode"] = self.provider_prompt_mode
         return {
             "schema_version": self.schema_version,
             "benchmark": {"name": self.benchmark, "track": self.track},
@@ -260,13 +270,7 @@ class CellIdentity:
                 "digest": self.experiment_digest,
             },
             "arm": {"id": self.arm_id, "digest": self.arm_digest},
-            "comparison": {
-                "policy_digest": self.policy_digest,
-                "catalog_digest": self.catalog_digest,
-                "price_digest": self.price_digest,
-                "sampling_digest": self.sampling_digest,
-                "schedule_digest": self.schedule_digest,
-            },
+            "comparison": comparison,
             "task": {
                 "name": self.task,
                 "digest": self.task_digest,
@@ -364,6 +368,7 @@ def validate_gateway_identity(value: CellIdentity | Mapping[str, Any]) -> CellId
         repetition=schedule["repetition"],
         block_id=schedule["block_id"],
         block_attempt=schedule["block_attempt"],
+        provider_prompt_mode=comparison["provider_prompt_mode"],
     )
 
 
@@ -376,6 +381,12 @@ def gateway_identity_from_row(row: Mapping[str, Any]) -> CellIdentity:
         raise ResultIdentityError("gateway row schema_version conflicts with its identity")
     if row.get("benchmark") != identity.benchmark:
         raise ResultIdentityError("gateway row benchmark conflicts with its identity")
+    if (
+        row.get("provider_prompt_mode") != identity.provider_prompt_mode
+    ):
+        raise ResultIdentityError(
+            "gateway row provider_prompt_mode conflicts with its identity"
+        )
     return identity
 
 

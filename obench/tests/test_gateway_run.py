@@ -196,9 +196,10 @@ top_p = 1.0
 seed = 7
 '''
         return f'''\
-schema_version = 1
+schema_version = 2
 experiment_id = "fake-gateway-bench"
 track = "fixed_model_provider"
+provider_prompt_mode = "provider_default"
 harness = "pi"
 tasks = ["fake-task"]
 repetitions_per_window = 1
@@ -523,6 +524,61 @@ direct_control_arm_id = "direct"
             },
         }
         self.assertIn("malformed_sse_event", gateway_run._route_reasons(metrics, plan))
+
+    def test_cold_prefix_evidence_fails_closed_on_missing_or_cached_usage(self):
+        experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
+        plans, _secrets = gateway_run.gateway_spec.compile_route_plans(
+            experiment,
+            environ=self.env,
+            admitted_auth_envs={"DIRECT_KEY", "GATEWAY_KEY"},
+        )
+        plan = dataclasses.replace(
+            next(item for item in plans if item.route_kind == "direct"),
+            protocol="openai_responses",
+            provider_prompt_mode="isolated_per_call_v1",
+        )
+        base = {
+            "route": {
+                "requested_model": plan.requested_model,
+                "served_model": plan.requested_model,
+                "provider": plan.requested_provider,
+            },
+            "stream": {"done": True},
+            "route_evidence": {"pass": True, "reasons": []},
+        }
+        evidence = {
+            "mode": "isolated_per_call_v1",
+            "transform_id": gateway_run.gateway_spec.COLD_PREFIX_TRANSFORM_ID,
+            "prefix_injected": True,
+            "scope": "forwarded_request",
+            "nonce_commitment": "a" * 64,
+        }
+        self.assertEqual(
+            gateway_run._provider_cache_reasons(
+                {"provider_cache": evidence}, base, plan
+            ),
+            ["cold_cache_usage_missing"],
+        )
+        cached = {
+            **base,
+            "usage": {"input_tokens_details": {"cached_tokens": 128}},
+        }
+        self.assertEqual(
+            gateway_run._provider_cache_reasons(
+                {"provider_cache": evidence}, cached, plan
+            ),
+            ["cold_cache_hit"],
+        )
+        uncached = {
+            **base,
+            "usage": {"input_tokens_details": {"cached_tokens": 0}},
+        }
+        self.assertEqual(
+            gateway_run._provider_cache_reasons(
+                {"provider_cache": evidence}, uncached, plan
+            ),
+            [],
+        )
 
     def test_posthoc_caps_override_combined_max_calls_exhaustion(self):
         experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
@@ -868,12 +924,14 @@ direct_control_arm_id = "direct"
         self.assertTrue(integrity["pass"])
         self.assertIsNone(reason)
         self.assertEqual(calls, [{
+            "request_ordinal": None,
             "timing": None,
             "generation": None,
             "route": {
                 "provider": plan.requested_provider,
                 "served_model": plan.requested_model,
             },
+            "tokens": None,
             "cache": None,
             "costs": None,
         }])

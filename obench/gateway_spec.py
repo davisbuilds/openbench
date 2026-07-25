@@ -21,9 +21,12 @@ from typing import Any
 from . import gateway_profiles
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 TRACK = "fixed_model_provider"
 MODEL_MATCHES = frozenset({"exact_revision", "model_family", "rolling_alias"})
+PROVIDER_PROMPT_MODES = frozenset({"provider_default", "isolated_per_call_v1"})
+COLD_PREFIX_GATEWAYS = frozenset({"openrouter", "vercel", "concentrate"})
+COLD_PREFIX_TRANSFORM_ID = "openbench.responses-prefix.v1"
 HARNESS = "pi"
 PROTOCOLS = frozenset({"openai_chat", "openai_responses"})
 PROTOCOL_ENDPOINT_SUFFIXES = {
@@ -166,6 +169,7 @@ class GatewayExperiment:
     experiment_id: str
     track: str
     model_match: str
+    provider_prompt_mode: str
     harness: str
     tasks: tuple[str, ...]
     repetitions_per_window: int
@@ -179,11 +183,12 @@ class GatewayExperiment:
     arms: tuple[Arm, ...]
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "experiment_id": self.experiment_id,
             "track": self.track,
             "model_match": self.model_match,
+            "provider_prompt_mode": self.provider_prompt_mode,
             "harness": self.harness,
             "tasks": list(self.tasks),
             "repetitions_per_window": self.repetitions_per_window,
@@ -196,6 +201,7 @@ class GatewayExperiment:
             "budget": self.budget.to_dict(),
             "arms": [arm.to_dict() for arm in self.arms],
         }
+        return result
 
     @property
     def canonical_json(self) -> str:
@@ -230,11 +236,12 @@ class RoutePlan:
     allow_private_endpoint: bool
     private_host_allowlist: tuple[str, ...]
     private_cidr_allowlist: tuple[str, ...]
-    # Proxy-only controls. They are bound by arm_digest but intentionally
-    # omitted from the adapter-facing route-plan JSON.
+    # Proxy-only controls. They are bound by the experiment or arm digest but
+    # intentionally omitted from the adapter-facing route-plan JSON.
     gateway: str | None = None
     track: str = TRACK
     model_match: str = "exact_revision"
+    provider_prompt_mode: str = "provider_default"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -300,7 +307,8 @@ class SecretPlan:
 
 
 _ROOT_FIELDS = {
-    "schema_version", "experiment_id", "track", "model_match", "harness", "tasks",
+    "schema_version", "experiment_id", "track", "model_match",
+    "provider_prompt_mode", "harness", "tasks",
     "repetitions_per_window", "schedule_seed", "execution_lane",
     "allow_private_endpoint", "private_host_allowlist", "private_cidr_allowlist",
     "windows", "budget", "arms",
@@ -713,6 +721,15 @@ def parse_experiment(data: Mapping[str, Any]) -> GatewayExperiment:
         raise GatewaySpecError(
             f"model_match must be one of: {', '.join(sorted(MODEL_MATCHES))}"
         )
+    provider_prompt_mode = _string(
+        _required(table, "provider_prompt_mode", "experiment"),
+        "provider_prompt_mode",
+    )
+    if provider_prompt_mode not in PROVIDER_PROMPT_MODES:
+        raise GatewaySpecError(
+            "provider_prompt_mode must be one of: "
+            + ", ".join(sorted(PROVIDER_PROMPT_MODES))
+        )
     harness = _string(_required(table, "harness", "experiment"), "harness")
     if harness != HARNESS:
         raise GatewaySpecError(f"harness must be {HARNESS!r} for the MVP")
@@ -727,6 +744,21 @@ def parse_experiment(data: Mapping[str, Any]) -> GatewayExperiment:
     arms = tuple(_parse_arm(raw, index, allow_private_endpoint, hosts, cidrs)
                  for index, raw in enumerate(raw_arms))
     _validate_gateway_controls(arms)
+    if provider_prompt_mode == "isolated_per_call_v1" and any(
+        arm.protocol != "openai_responses" for arm in arms
+    ):
+        raise GatewaySpecError(
+            "provider_prompt_mode='isolated_per_call_v1' requires "
+            "openai_responses for every arm"
+        )
+    if provider_prompt_mode == "isolated_per_call_v1" and any(
+        arm.route_kind == "gateway" and arm.gateway not in COLD_PREFIX_GATEWAYS
+        for arm in arms
+    ):
+        raise GatewaySpecError(
+            "provider_prompt_mode='isolated_per_call_v1' is admitted only for "
+            "OpenRouter, Vercel, and Concentrate gateway arms"
+        )
     lane = _string(_required(table, "execution_lane", "experiment"), "execution_lane")
     if lane not in {"local", "docker"}:
         raise GatewaySpecError("execution_lane must be 'local' or 'docker'")
@@ -736,6 +768,7 @@ def parse_experiment(data: Mapping[str, Any]) -> GatewayExperiment:
                               "experiment_id", _ID_RE),
         track=track,
         model_match=model_match,
+        provider_prompt_mode=provider_prompt_mode,
         harness=harness,
         tasks=tasks,
         repetitions_per_window=_integer(
@@ -816,6 +849,7 @@ def compile_route_plans(
             experiment_digest=experiment.digest,
             track=experiment.track,
             model_match=experiment.model_match,
+            provider_prompt_mode=experiment.provider_prompt_mode,
             arm_digest=arm.digest,
             arm_id=arm.arm_id,
             route_kind=arm.route_kind,

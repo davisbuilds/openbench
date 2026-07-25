@@ -23,6 +23,7 @@ def gateway_identity():
         price_digest=digest("price"),
         sampling_digest=digest("sampling"),
         schedule_digest=digest("schedule"),
+        provider_prompt_mode="provider_default",
         task="make-it-run",
         task_digest=digest("task"),
         checker_digest=digest("checker"),
@@ -54,6 +55,7 @@ SHARED_CHANGES = {
     "price_digest": digest("price-changed"),
     "sampling_digest": digest("sampling-changed"),
     "schedule_digest": digest("schedule-changed"),
+    "provider_prompt_mode": "isolated_per_call_v1",
     "harness": "other-harness",
     "candidate": "other-candidate",
     "harness_version": "0.80.11",
@@ -214,6 +216,7 @@ class ResumeTests(unittest.TestCase):
             "schema_version": 2,
             "benchmark": "gateway",
             "identity": identity.as_dict(),
+            "provider_prompt_mode": identity.provider_prompt_mode,
             "run_id": results.make_gateway_run_id(identity),
             "cell_id": results.make_gateway_cell_id(identity),
         }

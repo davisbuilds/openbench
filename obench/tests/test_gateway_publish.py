@@ -26,9 +26,10 @@ def canonical_line(value):
 
 def experiment():
     return gateway_spec.parse_experiment({
-        "schema_version": 1,
+        "schema_version": 2,
         "experiment_id": "gateway-bench-publish",
         "track": "fixed_model_provider",
+        "provider_prompt_mode": "provider_default",
         "harness": "pi",
         "tasks": ["make-it-run"],
         "repetitions_per_window": 1,
@@ -140,7 +141,8 @@ class GatewayPublishTests(unittest.TestCase):
             catalog_digest=results.canonical_digest(self.catalog),
             price_digest=results.canonical_digest(self.prices),
             sampling_digest=digest("sampling"),
-            schedule_digest=digest("schedule"),
+        schedule_digest=digest("schedule"),
+        provider_prompt_mode="provider_default",
             task="make-it-run",
             task_digest=digest("task"),
             checker_digest=digest("checker"),
@@ -171,6 +173,7 @@ class GatewayPublishTests(unittest.TestCase):
             "expected_arm_ids": ["direct", "gateway"],
             "arm_role": "gateway",
             "baseline": False,
+            "provider_prompt_mode": "provider_default",
             "result": {
                 "solved": True,
                 "checker_score": 1.0,
@@ -272,6 +275,85 @@ class GatewayPublishTests(unittest.TestCase):
         self._write_results(self.row)
 
     def publish(self):
+        ledgers = {self.cell_id: self.source_ledger}
+        raw_results = self.results_path.read_bytes()
+        try:
+            source_rows = [
+                json.loads(line)
+                for line in self.results_path.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+        except (OSError, json.JSONDecodeError):
+            source_rows = []
+        if hasattr(self, "_direct_cell_id") and any(
+            row.get("cell_id") == self._direct_cell_id for row in source_rows
+        ):
+            ledgers[self._direct_cell_id] = self._direct_ledger
+        if (
+            raw_results.endswith(b"\n")
+            and len(source_rows) == 1
+            and source_rows[0].get("cell_id") == self.cell_id
+        ):
+            direct_identity = dataclasses.replace(
+                self.identity,
+                arm_id="direct",
+                arm_digest=self.experiment.arms[0].digest,
+            )
+            direct = copy.deepcopy(source_rows[0])
+            direct["identity"] = direct_identity.as_dict()
+            direct["run_id"] = results.make_gateway_run_id(direct_identity)
+            direct["cell_id"] = results.make_gateway_cell_id(direct_identity)
+            direct["arm_role"] = "direct"
+            direct["baseline"] = True
+
+            direct_ledger = self.root / "direct-companion-ledger.jsonl"
+            source_ledger_rows = [
+                json.loads(line)
+                for line in self.source_ledger.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+            requests = source_ledger_rows[:-1]
+            previous = hashlib.sha256(b"").hexdigest()
+            rewritten = []
+            for sequence, request in enumerate(requests, 1):
+                request = copy.deepcopy(request)
+                request["sequence"] = sequence
+                request["previous_hash"] = previous
+                request["serving_arm"] = {
+                    "arm_id": "direct",
+                    "arm_digest": direct_identity.arm_digest,
+                    "route_kind": "direct",
+                }
+                request["record_hash"] = hashlib.sha256(
+                    results.canonical_json_bytes({
+                        key: value
+                        for key, value in request.items()
+                        if key != "record_hash"
+                    })
+                ).hexdigest()
+                previous = request["record_hash"]
+                rewritten.append(request)
+            seal = {
+                "record_type": "ledger_seal",
+                "state": "SEALED",
+                "record_count": len(rewritten),
+                "last_sequence": len(rewritten),
+                "root_hash": previous,
+            }
+            direct_ledger.write_text(
+                "".join(canonical_line(item) for item in [*rewritten, seal]),
+                encoding="utf-8",
+            )
+            direct["ledger_seal"] = {
+                "record_count": len(rewritten),
+                "last_sequence": len(rewritten),
+                "root_hash": previous,
+                "ledger_file": direct_ledger.name,
+            }
+            self._write_results(direct, source_rows[0])
+            ledgers[direct["cell_id"]] = direct_ledger
+            self._direct_cell_id = direct["cell_id"]
+            self._direct_ledger = direct_ledger
         return gateway_publish.publish_bundle(
             self.results_path,
             self.bundle,
@@ -279,7 +361,17 @@ class GatewayPublishTests(unittest.TestCase):
             policy=self.policy,
             catalog=self.catalog,
             prices=self.prices,
-            ledgers={self.cell_id: self.source_ledger},
+            ledgers=ledgers,
+        )
+
+    def _public_gateway_row(self):
+        rows = [
+            json.loads(line)
+            for line in (self.bundle / "results.jsonl").read_text().splitlines()
+        ]
+        return next(
+            row for row in rows
+            if row["identity"]["arm"]["id"] == "gateway"
         )
 
     def test_round_trip_uses_allowlisted_dtos_and_binds_all_artifacts(self):
@@ -316,7 +408,7 @@ class GatewayPublishTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, bundle_text)
 
-        public_row = json.loads((self.bundle / "results.jsonl").read_text())
+        public_row = self._public_gateway_row()
         self.assertEqual(
             public_row["proxy_metrics"]["calls"][0]["cache"],
             {
@@ -332,6 +424,16 @@ class GatewayPublishTests(unittest.TestCase):
         self.assertEqual(seal["cell_id"], self.cell_id)
         self.assertEqual(seal["root_hash"], binding["root_hash"])
         self.assertEqual(seal["seal_sha256"], binding["seal_sha256"])
+
+    def test_publication_rejects_incomplete_declared_schedule(self):
+        with self.assertRaisesRegex(
+            gateway_publish.GatewayPublishError,
+            "latest matched block is incomplete",
+        ):
+            gateway_publish._require_complete_schedule(
+                self.experiment.to_dict(),
+                [self.row],
+            )
 
     def test_gateway_route_evidence_is_minimized_and_opaque_in_public_ledger(self):
         generation_id = "vercel-generation-raw-id"
@@ -386,7 +488,7 @@ class GatewayPublishTests(unittest.TestCase):
             ["openai/gpt-test", "gpt-test-2026-07-22"],
         )
 
-        public_row = json.loads((self.bundle / "results.jsonl").read_text())
+        public_row = self._public_gateway_row()
         public_ledger = self.bundle / public_row["ledger"]["artifact"]
         request = json.loads(public_ledger.read_text().splitlines()[0])
         route = request["gateway_metrics"]["route"]
@@ -527,7 +629,7 @@ class GatewayPublishTests(unittest.TestCase):
         provenance = self.publish()
 
         self.assertEqual(gateway_publish.verify_bundle(self.bundle), provenance)
-        public_row = json.loads((self.bundle / "results.jsonl").read_text())
+        public_row = self._public_gateway_row()
         self.assertEqual(
             public_row["result"]["budget_exhausted_reason"],
             "max_calls",
@@ -554,7 +656,7 @@ class GatewayPublishTests(unittest.TestCase):
 
         provenance = self.publish()
         self.assertEqual(gateway_publish.verify_bundle(self.bundle), provenance)
-        public_row = json.loads((self.bundle / "results.jsonl").read_text())
+        public_row = self._public_gateway_row()
         public_call = public_row["proxy_metrics"]["calls"][0]
         self.assertNotIn("timing", public_call)
         self.assertIsNone(public_call["generation"])

@@ -310,6 +310,7 @@ def policy_snapshot(
         policy.update({
             "track": experiment.track,
             "model_match": experiment.model_match,
+            "provider_prompt_mode": experiment.provider_prompt_mode,
             "fallback": False,
         })
     return policy
@@ -401,6 +402,7 @@ def _identity(
         repetition=block.repetition,
         block_id=block_id,
         block_attempt=attempt,
+        provider_prompt_mode=experiment.provider_prompt_mode,
         **digests,
     )
 
@@ -740,6 +742,28 @@ def _cache_accounting(metrics: Mapping[str, Any]) -> dict[str, int | None]:
     }
 
 
+def _token_accounting(metrics: Mapping[str, Any]) -> dict[str, int | None]:
+    usage = metrics.get("usage")
+    usage = usage if isinstance(usage, Mapping) else {}
+
+    def count(key: str) -> int | None:
+        value = usage.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+        return None
+
+    input_tokens = count("input_tokens")
+    output_tokens = count("output_tokens")
+    total_tokens = count("total_tokens")
+    if total_tokens is None and input_tokens is not None and output_tokens is not None:
+        total_tokens = input_tokens + output_tokens
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
 def _route_reasons(metrics: Mapping[str, Any], plan: gateway_spec.RoutePlan) -> list[str]:
     route = metrics.get("route")
     stream = metrics.get("stream")
@@ -821,6 +845,49 @@ def _route_reasons(metrics: Mapping[str, Any], plan: gateway_spec.RoutePlan) -> 
     return sorted(set(reasons))
 
 
+def _provider_cache_reasons(
+    row: Mapping[str, Any],
+    metrics: Mapping[str, Any],
+    plan: gateway_spec.RoutePlan,
+) -> list[str]:
+    evidence = row.get("provider_cache")
+    if plan.provider_prompt_mode == "provider_default":
+        if evidence is None:
+            return []
+        if (
+            not isinstance(evidence, Mapping)
+            or evidence.get("mode") != "provider_default"
+        ):
+            return ["provider_prompt_mode_unverified"]
+        if evidence.get("prefix_injected") is not False:
+            return ["unexpected_cache_prefix"]
+        return []
+    if (
+        not isinstance(evidence, Mapping)
+        or evidence.get("mode") != plan.provider_prompt_mode
+    ):
+        return ["provider_prompt_mode_unverified"]
+    if (
+        evidence.get("prefix_injected") is not True
+        or evidence.get("scope") != "forwarded_request"
+        or evidence.get("transform_id") != gateway_spec.COLD_PREFIX_TRANSFORM_ID
+    ):
+        return ["cold_cache_prefix_unverified"]
+    commitment = evidence.get("nonce_commitment")
+    if (
+        not isinstance(commitment, str)
+        or len(commitment) != 64
+        or any(character not in "0123456789abcdef" for character in commitment)
+    ):
+        return ["cold_cache_nonce_unverified"]
+    cached_tokens = _cache_accounting(metrics)["cached_input_tokens"]
+    if cached_tokens is None:
+        return ["cold_cache_usage_missing"]
+    if cached_tokens != 0:
+        return ["cold_cache_hit"]
+    return []
+
+
 def _proxy_evidence(
     ledger_rows: Sequence[Mapping[str, Any]],
     prices: Mapping[str, Price],
@@ -840,12 +907,14 @@ def _proxy_evidence(
             continue
         if isinstance(status, int) and 200 <= status < 300 and row.get("error"):
             calls.append({
+                "request_ordinal": row.get("sequence"),
                 "timing": None,
                 "generation": None,
                 "route": {
                     "provider": plan.requested_provider,
                     "served_model": plan.requested_model,
                 },
+                "tokens": None,
                 "cache": None,
                 "costs": None,
             })
@@ -854,12 +923,14 @@ def _proxy_evidence(
             if status in {401, 403, 407}:
                 auth_failure = True
             calls.append({
+                "request_ordinal": row.get("sequence"),
                 "timing": None,
                 "generation": None,
                 "route": {
                     "provider": plan.requested_provider,
                     "served_model": plan.requested_model,
                 },
+                "tokens": None,
                 "cache": None,
                 "costs": None,
             })
@@ -868,18 +939,21 @@ def _proxy_evidence(
         if not isinstance(metrics, dict):
             reasons.append("missing_gateway_metrics")
             calls.append({
+                "request_ordinal": row.get("sequence"),
                 "timing": None,
                 "generation": None,
                 "route": {
                     "provider": plan.requested_provider,
                     "served_model": plan.requested_model,
                 },
+                "tokens": None,
                 "cache": None,
                 "costs": None,
             })
             continue
         successful_calls += 1
         reasons.extend(_route_reasons(metrics, plan))
+        reasons.extend(_provider_cache_reasons(row, metrics, plan))
         usage = metrics.get("usage") if isinstance(metrics.get("usage"), dict) else {}
         output_tokens = usage.get("output_tokens")
         if isinstance(output_tokens, int) and not isinstance(output_tokens, bool):
@@ -895,9 +969,11 @@ def _proxy_evidence(
                 normalized_route["provider"] = plan.requested_provider
         calls.append(
             {
+                "request_ordinal": row.get("sequence"),
                 "timing": metrics.get("timing"),
                 "generation": metrics.get("generation"),
                 "route": normalized_route,
+                "tokens": _token_accounting(metrics),
                 "cache": _cache_accounting(metrics),
                 "costs": costs,
             }
@@ -1105,6 +1181,7 @@ def _run_cell(
         "arm_role": arm.route_kind,
         "baseline": arm.baseline,
         "model_match": experiment.model_match,
+        "provider_prompt_mode": experiment.provider_prompt_mode,
         "result": {
             "solved": solved,
             "checker_score": checker_score,
