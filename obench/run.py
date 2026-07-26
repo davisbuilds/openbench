@@ -1790,6 +1790,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["tokens_output"] = result.get("tokens_output")
         row["tokens_reasoning"] = result.get("tokens_reasoning")
         row["usage_raw"] = result.get("usage_raw")
+        row["model_context_window"] = result.get("model_context_window")
+        row["model_max_tokens"] = result.get("model_max_tokens")
         row["token_basis"] = ("unmetered" if candidate is not None
                               and getattr(candidate, "unmetered", False)
                               else result.get("token_basis"))
