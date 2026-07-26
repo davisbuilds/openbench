@@ -9,6 +9,15 @@
     "path": "releases/2026-07-02-m3/index.html"
   },
   {
+    "id": "2026-07-09-glm52",
+    "title": "OpenBench: GLM 5.2 quarantine-safe archive",
+    "date": "2026-07-09",
+    "models": [
+      "glm-5.2"
+    ],
+    "path": "releases/2026-07-09-glm52/index.html"
+  },
+  {
     "id": "2026-07-20-grok45",
     "title": "OpenBench: grok-4.5 across 4 harnesses",
     "date": "2026-07-20",

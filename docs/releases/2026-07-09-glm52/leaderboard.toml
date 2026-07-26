@@ -1,0 +1,6 @@
+caveats = [
+  "Quarantine-safe derived bundle: all 15 terminal-bench/cancel-async-tasks rows were excluded because its load-sensitive checker is binding-quarantined. No model was rerun.",
+  "The bundled results SHA is sealed. Current-tree task checks report expected post-run definition drift; recorded task digests are retained as run-time fingerprints.",
+  "The retained archive lacks image digests, version-source labels, and an explicit per-row timeout field; contemporaneous version-stamp drift is documented in the bundle README.",
+  "The unified board ranks only task/trial cells shared by every harness. The release page also shows the per-arm countable view, so its denominators differ.",
+]

@@ -1,0 +1,6 @@
+caveats = [
+  "Archived first-party matrix published without rerunning models. The source contains 180 rows across 4 harnesses, 15 tasks, and 3 trials.",
+  "The bundled results SHA is sealed. Current-tree task checks report expected post-run definition drift; recorded task digests are retained as run-time fingerprints.",
+  "The unified board ranks only task/trial cells shared by every harness. The historical release page retains its older per-arm countable view, so its denominators differ.",
+  "No counting-proxy telemetry was retained for this run. Complete native split telemetry is available only where the board reports 100% native coverage.",
+]

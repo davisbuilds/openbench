@@ -19,139 +19,220 @@
   },
   "generated_by": "obench site",
   "harness": {
-    "bundle_count": 2,
+    "bundle_count": 5,
     "bundles": [
       {
         "also_seen_as": [],
         "arms": [
           {
             "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 5518.583333333333,
             "harness": "cursor",
             "median_wall_s": 42.908500000000004,
             "model": "gpt-5.6-sol",
-            "n": 41,
-            "solve_rate": 0.8780487804878049,
+            "n": 42,
+            "solve_rate": 0.8571428571428571,
             "solved": 36,
-            "token_bases": [
-              "self-reported"
+            "token_telemetry_bases": [
+              "harness_reported"
             ],
-            "total_tokens_per_solve": 407404.55555555556,
+            "token_telemetry_coverage": {
+              "covered_rows": 42,
+              "native_covered_rows": 42,
+              "proxy_covered_rows": 0,
+              "ratio": 1.0,
+              "total_rows": 42
+            },
+            "token_telemetry_source": "native",
+            "tokens_cache_read_per_solve": 407067.22222222225,
+            "tokens_cache_write_per_solve": 45776.333333333336,
+            "tokens_input_uncached_per_solve": 72.13888888888889,
+            "tokens_output_per_solve": 5446.444444444444,
             "wilson95": [
-              0.7445549235115514,
-              0.9467674200265918
+              0.7215861764782122,
+              0.9328412431581007
             ]
           },
           {
             "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": null,
             "harness": "devin",
-            "median_wall_s": 65.144,
+            "median_wall_s": 68.4285,
             "model": "gpt-5.6-sol",
-            "n": 41,
-            "solve_rate": 0.8048780487804879,
-            "solved": 33,
-            "token_bases": [
-              "self-reported"
-            ],
-            "total_tokens_per_solve": null,
+            "n": 42,
+            "solve_rate": 0.8095238095238095,
+            "solved": 34,
+            "token_telemetry_bases": [],
+            "token_telemetry_coverage": {
+              "covered_rows": 0,
+              "native_covered_rows": 0,
+              "proxy_covered_rows": 0,
+              "ratio": 0.0,
+              "total_rows": 42
+            },
+            "token_telemetry_source": null,
+            "tokens_cache_read_per_solve": null,
+            "tokens_cache_write_per_solve": null,
+            "tokens_input_uncached_per_solve": null,
+            "tokens_output_per_solve": null,
             "wilson95": [
-              0.6598611764744329,
-              0.8976568425079408
+              0.6669893264500356,
+              0.9001811039014356
             ]
           },
           {
             "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 46215.58823529412,
             "harness": "grokbuild",
-            "median_wall_s": 86.087,
+            "median_wall_s": 86.2995,
             "model": "gpt-5.6-sol",
-            "n": 41,
-            "solve_rate": 0.8048780487804879,
-            "solved": 33,
-            "token_bases": [
-              "self-reported"
+            "n": 42,
+            "solve_rate": 0.8095238095238095,
+            "solved": 34,
+            "token_telemetry_bases": [
+              "proxy_measured"
             ],
-            "total_tokens_per_solve": 394809.1818181818,
+            "token_telemetry_coverage": {
+              "covered_rows": 42,
+              "native_covered_rows": 0,
+              "proxy_covered_rows": 42,
+              "ratio": 1.0,
+              "total_rows": 42
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 368079.0588235294,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 38726.82352941176,
+            "tokens_output_per_solve": 7488.764705882353,
             "wilson95": [
-              0.6598611764744329,
-              0.8976568425079408
+              0.6669893264500356,
+              0.9001811039014356
             ]
           },
           {
             "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 42634.5,
             "harness": "opencode",
-            "median_wall_s": 60.137,
+            "median_wall_s": 60.524,
             "model": "gpt-5.6-sol",
-            "n": 41,
-            "solve_rate": 0.8048780487804879,
-            "solved": 33,
-            "token_bases": [
-              "self-reported"
+            "n": 42,
+            "solve_rate": 0.8095238095238095,
+            "solved": 34,
+            "token_telemetry_bases": [
+              "vendor_split"
             ],
-            "total_tokens_per_solve": 351618.36363636365,
+            "token_telemetry_coverage": {
+              "covered_rows": 42,
+              "native_covered_rows": 42,
+              "proxy_covered_rows": 0,
+              "ratio": 1.0,
+              "total_rows": 42
+            },
+            "token_telemetry_source": "native",
+            "tokens_cache_read_per_solve": 313916.23529411765,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 36707.55882352941,
+            "tokens_output_per_solve": 5926.941176470588,
             "wilson95": [
-              0.6598611764744329,
-              0.8976568425079408
+              0.6669893264500356,
+              0.9001811039014356
             ]
           },
           {
             "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 40255.0,
             "harness": "claude",
-            "median_wall_s": 57.282,
+            "median_wall_s": 58.793,
             "model": "gpt-5.6-sol",
-            "n": 41,
-            "solve_rate": 0.7560975609756098,
-            "solved": 31,
-            "token_bases": [
-              "self-reported"
+            "n": 42,
+            "solve_rate": 0.7619047619047619,
+            "solved": 32,
+            "token_telemetry_bases": [
+              "proxy_measured"
             ],
-            "total_tokens_per_solve": 181456.51612903227,
+            "token_telemetry_coverage": {
+              "covered_rows": 42,
+              "native_covered_rows": 42,
+              "proxy_covered_rows": 42,
+              "ratio": 1.0,
+              "total_rows": 42
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 153488.0,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 34455.125,
+            "tokens_output_per_solve": 5799.875,
             "wilson95": [
-              0.6065636934554182,
-              0.8617514424897756
+              0.6147216491768112,
+              0.8651917918898182
             ]
           },
           {
             "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 37602.0625,
+            "harness": "pi",
+            "median_wall_s": 39.670500000000004,
+            "model": "gpt-5.6-sol",
+            "n": 42,
+            "solve_rate": 0.7619047619047619,
+            "solved": 32,
+            "token_telemetry_bases": [
+              "proxy_measured"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 42,
+              "native_covered_rows": 42,
+              "proxy_covered_rows": 42,
+              "ratio": 1.0,
+              "total_rows": 42
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 111408.0,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 32915.71875,
+            "tokens_output_per_solve": 4686.34375,
+            "wilson95": [
+              0.6147216491768112,
+              0.8651917918898182
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 117107.35483870968,
             "harness": "codex",
             "median_wall_s": 94.603,
             "model": "gpt-5.6-sol",
-            "n": 41,
-            "solve_rate": 0.7560975609756098,
+            "n": 42,
+            "solve_rate": 0.7380952380952381,
             "solved": 31,
-            "token_bases": [
-              "proxy-measured",
-              "self-reported"
+            "token_telemetry_bases": [
+              "proxy_measured"
             ],
-            "total_tokens_per_solve": null,
+            "token_telemetry_coverage": {
+              "covered_rows": 42,
+              "native_covered_rows": 0,
+              "proxy_covered_rows": 42,
+              "ratio": 1.0,
+              "total_rows": 42
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 1164510.9677419355,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 102174.32258064517,
+            "tokens_output_per_solve": 14933.032258064517,
             "wilson95": [
-              0.6065636934554182,
-              0.8617514424897756
-            ]
-          },
-          {
-            "cost_per_solve_usd": null,
-            "harness": "pi",
-            "median_wall_s": 37.942,
-            "model": "gpt-5.6-sol",
-            "n": 41,
-            "solve_rate": 0.7560975609756098,
-            "solved": 31,
-            "token_bases": [
-              "self-reported"
-            ],
-            "total_tokens_per_solve": 144650.5806451613,
-            "wilson95": [
-              0.6065636934554182,
-              0.8617514424897756
+              0.5893098001502446,
+              0.8469751462739642
             ]
           }
         ],
         "caveats": [],
         "claim": null,
-        "countable_rows": 311,
+        "countable_rows": 312,
         "date": "2026-07-21",
         "excluded_counts": {
           "infra": 2,
-          "rate_limited": 2
+          "rate_limited": 1
         },
         "family": "harness",
         "has_caveats": false,
@@ -162,9 +243,9 @@
           "duplicate_cells_excluded": 0,
           "duplicate_rows_excluded": 0,
           "groups_compared": 7,
-          "matched_cells_per_group": 41,
-          "matched_rows": 287,
-          "unmatched_countable_rows": 24
+          "matched_cells_per_group": 42,
+          "matched_rows": 294,
+          "unmatched_countable_rows": 18
         },
         "models": [
           "gpt-5.6-sol"
@@ -190,16 +271,28 @@
         "arms": [
           {
             "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 5856.0,
             "harness": "aider",
             "median_wall_s": 39.0355,
             "model": "deepseek-v4-flash",
             "n": 8,
             "solve_rate": 1.0,
             "solved": 8,
-            "token_bases": [
-              "proxy-measured"
+            "token_telemetry_bases": [
+              "proxy_measured"
             ],
-            "total_tokens_per_solve": 6192.0,
+            "token_telemetry_coverage": {
+              "covered_rows": 8,
+              "native_covered_rows": 0,
+              "proxy_covered_rows": 8,
+              "ratio": 1.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 336.0,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 2307.625,
+            "tokens_output_per_solve": 3548.375,
             "wilson95": [
               0.6755843804891231,
               1.0
@@ -207,16 +300,28 @@
           },
           {
             "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 13669.375,
             "harness": "opencode",
             "median_wall_s": 31.720999999999997,
             "model": "deepseek-v4-flash",
             "n": 8,
             "solve_rate": 1.0,
             "solved": 8,
-            "token_bases": [
-              "self-reported"
+            "token_telemetry_bases": [
+              "proxy_measured"
             ],
-            "total_tokens_per_solve": 105269.375,
+            "token_telemetry_coverage": {
+              "covered_rows": 8,
+              "native_covered_rows": 8,
+              "proxy_covered_rows": 8,
+              "ratio": 1.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 91600.0,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 10327.875,
+            "tokens_output_per_solve": 3341.5,
             "wilson95": [
               0.6755843804891231,
               1.0
@@ -224,16 +329,28 @@
           },
           {
             "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 7742.25,
             "harness": "pi",
             "median_wall_s": 26.444,
             "model": "deepseek-v4-flash",
             "n": 8,
             "solve_rate": 1.0,
             "solved": 8,
-            "token_bases": [
-              "self-reported"
+            "token_telemetry_bases": [
+              "proxy_measured"
             ],
-            "total_tokens_per_solve": 43198.25,
+            "token_telemetry_coverage": {
+              "covered_rows": 8,
+              "native_covered_rows": 8,
+              "proxy_covered_rows": 8,
+              "ratio": 1.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 35456.0,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 4927.75,
+            "tokens_output_per_solve": 2814.5,
             "wilson95": [
               0.6755843804891231,
               1.0
@@ -276,6 +393,523 @@
         "table": "matched",
         "task_set_digest": "8b757f8abf3816cac2ddc80e5ceaefa3f4a323c47c2431258a655d4d3b7f2e43",
         "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
+      },
+      {
+        "also_seen_as": [],
+        "arms": [
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 88266.36666666667,
+            "harness": "claude",
+            "median_wall_s": 47.6005,
+            "model": "deepseek-v4-flash",
+            "n": 40,
+            "solve_rate": 0.75,
+            "solved": 30,
+            "token_telemetry_bases": [
+              "proxy_measured"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 40,
+              "native_covered_rows": 39,
+              "proxy_covered_rows": 40,
+              "ratio": 1.0,
+              "total_rows": 40
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 2160081.066666667,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 37583.566666666666,
+            "tokens_output_per_solve": 50682.8,
+            "wilson95": [
+              0.5980574093302989,
+              0.8581303210445049
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 85596.35714285714,
+            "harness": "pi",
+            "median_wall_s": 24.4575,
+            "model": "deepseek-v4-flash",
+            "n": 40,
+            "solve_rate": 0.7,
+            "solved": 28,
+            "token_telemetry_bases": [
+              "proxy_measured"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 40,
+              "native_covered_rows": 37,
+              "proxy_covered_rows": 40,
+              "ratio": 1.0,
+              "total_rows": 40
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 2012722.2857142857,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 49843.92857142857,
+            "tokens_output_per_solve": 35752.42857142857,
+            "wilson95": [
+              0.545696893456796,
+              0.819253290843047
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 81116.23076923077,
+            "harness": "opencode",
+            "median_wall_s": 40.271,
+            "model": "deepseek-v4-flash",
+            "n": 40,
+            "solve_rate": 0.65,
+            "solved": 26,
+            "token_telemetry_bases": [
+              "proxy_measured"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 40,
+              "native_covered_rows": 39,
+              "proxy_covered_rows": 40,
+              "ratio": 1.0,
+              "total_rows": 40
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 1769472.0,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 42251.807692307695,
+            "tokens_output_per_solve": 38864.42307692308,
+            "wilson95": [
+              0.4950559699353738,
+              0.7786566682895085
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 133278.16,
+            "harness": "grokbuild",
+            "median_wall_s": 27.67,
+            "model": "deepseek-v4-flash",
+            "n": 40,
+            "solve_rate": 0.625,
+            "solved": 25,
+            "token_telemetry_bases": [
+              "proxy_measured"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 40,
+              "native_covered_rows": 0,
+              "proxy_covered_rows": 40,
+              "ratio": 1.0,
+              "total_rows": 40
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 1763886.08,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 83262.04,
+            "tokens_output_per_solve": 50016.12,
+            "wilson95": [
+              0.4703216005453191,
+              0.7577722646420829
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 108480.0,
+            "harness": "codex",
+            "median_wall_s": 27.182,
+            "model": "deepseek-v4-flash",
+            "n": 40,
+            "solve_rate": 0.6,
+            "solved": 24,
+            "token_telemetry_bases": [
+              "proxy_measured"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 40,
+              "native_covered_rows": 35,
+              "proxy_covered_rows": 40,
+              "ratio": 1.0,
+              "total_rows": 40
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 1629205.3333333333,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 48623.625,
+            "tokens_output_per_solve": 59856.375,
+            "wilson95": [
+              0.44595619827393507,
+              0.7365188938759865
+            ]
+          }
+        ],
+        "caveats": [
+          "Archived first-party matrix published without rerunning models. The source contains 225 rows across 5 harnesses, 15 tasks, and 3 trials.",
+          "The bundled results SHA is sealed. Current-tree task checks report expected post-run definition drift; recorded task digests are retained as run-time fingerprints.",
+          "The unified board ranks only task/trial cells shared by every harness. The historical release page retains its older per-arm countable view, so its denominators differ.",
+          "Harness and host/container version stamps vary in the archive. Token columns use the complete counting-proxy lane for every displayed harness."
+        ],
+        "claim": null,
+        "countable_rows": 219,
+        "date": "2026-07-20",
+        "excluded_counts": {
+          "infra": 6
+        },
+        "family": "harness",
+        "has_caveats": true,
+        "id": "2026-07-20-deepseek",
+        "kind": "release",
+        "link": null,
+        "matched": {
+          "duplicate_cells_excluded": 0,
+          "duplicate_rows_excluded": 0,
+          "groups_compared": 5,
+          "matched_cells_per_group": 40,
+          "matched_rows": 200,
+          "unmatched_countable_rows": 19
+        },
+        "models": [
+          "deepseek-v4-flash"
+        ],
+        "path": "releases/2026-07-20-deepseek/index.html",
+        "raw_rows": 225,
+        "results_path": "releases/2026-07-20-deepseek/results.jsonl",
+        "results_sha256": "ec6b9d58fd3aa6d001db67dc8333e1590c7b1acaa65595f05347413ad23ef414",
+        "submitter": null,
+        "table": "matched",
+        "task_set_digest": "1c4805e7fcd0fd8ff18912c3f745ad243edd2dfd2448f933efe5d0a79966f5bc",
+        "title": "OpenBench: deepseek across 5 harnesses"
+      },
+      {
+        "also_seen_as": [],
+        "arms": [
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 36706.57142857143,
+            "harness": "cursor",
+            "median_wall_s": 25.938,
+            "model": "grok-4.5",
+            "n": 39,
+            "solve_rate": 0.8974358974358975,
+            "solved": 35,
+            "token_telemetry_bases": [
+              "harness_reported"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 39,
+              "native_covered_rows": 39,
+              "proxy_covered_rows": 0,
+              "ratio": 1.0,
+              "total_rows": 39
+            },
+            "token_telemetry_source": "native",
+            "tokens_cache_read_per_solve": 247504.45714285714,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 28600.485714285714,
+            "tokens_output_per_solve": 8106.085714285714,
+            "wilson95": [
+              0.7642084129775517,
+              0.9593873444171301
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": null,
+            "harness": "grokbuild",
+            "median_wall_s": 42.2565,
+            "model": "grok-4.5",
+            "n": 39,
+            "solve_rate": 0.8717948717948718,
+            "solved": 34,
+            "token_telemetry_bases": [],
+            "token_telemetry_coverage": {
+              "covered_rows": 0,
+              "native_covered_rows": 0,
+              "proxy_covered_rows": 0,
+              "ratio": 0.0,
+              "total_rows": 39
+            },
+            "token_telemetry_source": null,
+            "tokens_cache_read_per_solve": null,
+            "tokens_cache_write_per_solve": null,
+            "tokens_input_uncached_per_solve": null,
+            "tokens_output_per_solve": null,
+            "wilson95": [
+              0.7329395096236953,
+              0.9439726505197168
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": null,
+            "harness": "pi",
+            "median_wall_s": 25.284,
+            "model": "grok-4.5",
+            "n": 39,
+            "solve_rate": 0.7948717948717948,
+            "solved": 31,
+            "token_telemetry_bases": [],
+            "token_telemetry_coverage": {
+              "covered_rows": 0,
+              "native_covered_rows": 38,
+              "proxy_covered_rows": 0,
+              "ratio": 0.0,
+              "total_rows": 39
+            },
+            "token_telemetry_source": null,
+            "tokens_cache_read_per_solve": null,
+            "tokens_cache_write_per_solve": null,
+            "tokens_input_uncached_per_solve": null,
+            "tokens_output_per_solve": null,
+            "wilson95": [
+              0.6446572703687137,
+              0.8922040980208888
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 55008.13333333333,
+            "harness": "opencode",
+            "median_wall_s": 21.2275,
+            "model": "grok-4.5",
+            "n": 39,
+            "solve_rate": 0.7692307692307693,
+            "solved": 30,
+            "token_telemetry_bases": [
+              "vendor_split"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 39,
+              "native_covered_rows": 39,
+              "proxy_covered_rows": 0,
+              "ratio": 1.0,
+              "total_rows": 39
+            },
+            "token_telemetry_source": "native",
+            "tokens_cache_read_per_solve": 250734.93333333332,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 45493.666666666664,
+            "tokens_output_per_solve": 9514.466666666667,
+            "wilson95": [
+              0.6166343954261705,
+              0.8735433757121625
+            ]
+          }
+        ],
+        "caveats": [
+          "Archived first-party matrix published without rerunning models. The source contains 180 rows across 4 harnesses, 15 tasks, and 3 trials.",
+          "The bundled results SHA is sealed. Current-tree task checks report expected post-run definition drift; recorded task digests are retained as run-time fingerprints.",
+          "The unified board ranks only task/trial cells shared by every harness. The historical release page retains its older per-arm countable view, so its denominators differ.",
+          "No counting-proxy telemetry was retained for this run. Complete native split telemetry is available only where the board reports 100% native coverage."
+        ],
+        "claim": null,
+        "countable_rows": 174,
+        "date": "2026-07-20",
+        "excluded_counts": {
+          "infra": 6
+        },
+        "family": "harness",
+        "has_caveats": true,
+        "id": "2026-07-20-grok45",
+        "kind": "release",
+        "link": null,
+        "matched": {
+          "duplicate_cells_excluded": 0,
+          "duplicate_rows_excluded": 0,
+          "groups_compared": 4,
+          "matched_cells_per_group": 39,
+          "matched_rows": 156,
+          "unmatched_countable_rows": 18
+        },
+        "models": [
+          "grok-4.5"
+        ],
+        "path": "releases/2026-07-20-grok45/index.html",
+        "raw_rows": 180,
+        "results_path": "releases/2026-07-20-grok45/results.jsonl",
+        "results_sha256": "3905ac339eea53b2e66fd2eb6b3a670174d364a40111777d4428619aba3f0081",
+        "submitter": null,
+        "table": "matched",
+        "task_set_digest": "1c4805e7fcd0fd8ff18912c3f745ad243edd2dfd2448f933efe5d0a79966f5bc",
+        "title": "OpenBench: grok-4.5 across 4 harnesses"
+      },
+      {
+        "also_seen_as": [],
+        "arms": [
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": null,
+            "harness": "pi",
+            "median_wall_s": 693.4925000000001,
+            "model": "glm-5.2",
+            "n": 8,
+            "solve_rate": 1.0,
+            "solved": 8,
+            "token_telemetry_bases": [],
+            "token_telemetry_coverage": {
+              "covered_rows": 0,
+              "native_covered_rows": 6,
+              "proxy_covered_rows": 0,
+              "ratio": 0.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": null,
+            "tokens_cache_read_per_solve": null,
+            "tokens_cache_write_per_solve": null,
+            "tokens_input_uncached_per_solve": null,
+            "tokens_output_per_solve": null,
+            "wilson95": [
+              0.6755843804891231,
+              1.0
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 94197.42857142857,
+            "harness": "opencode",
+            "median_wall_s": 661.219,
+            "model": "glm-5.2",
+            "n": 8,
+            "solve_rate": 0.875,
+            "solved": 7,
+            "token_telemetry_bases": [
+              "vendor_split"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 8,
+              "native_covered_rows": 8,
+              "proxy_covered_rows": 0,
+              "ratio": 1.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": "native",
+            "tokens_cache_read_per_solve": 973165.7142857143,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 54762.0,
+            "tokens_output_per_solve": 39435.42857142857,
+            "wilson95": [
+              0.5291051942301385,
+              0.9775830911367039
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": null,
+            "harness": "claude",
+            "median_wall_s": 568.97,
+            "model": "glm-5.2",
+            "n": 8,
+            "solve_rate": 0.625,
+            "solved": 5,
+            "token_telemetry_bases": [],
+            "token_telemetry_coverage": {
+              "covered_rows": 0,
+              "native_covered_rows": 4,
+              "proxy_covered_rows": 0,
+              "ratio": 0.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": null,
+            "tokens_cache_read_per_solve": null,
+            "tokens_cache_write_per_solve": null,
+            "tokens_input_uncached_per_solve": null,
+            "tokens_output_per_solve": null,
+            "wilson95": [
+              0.3057378545838018,
+              0.863158240538479
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": null,
+            "harness": "grokbuild",
+            "median_wall_s": 267.572,
+            "model": "glm-5.2",
+            "n": 8,
+            "solve_rate": 0.625,
+            "solved": 5,
+            "token_telemetry_bases": [],
+            "token_telemetry_coverage": {
+              "covered_rows": 0,
+              "native_covered_rows": 0,
+              "proxy_covered_rows": 0,
+              "ratio": 0.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": null,
+            "tokens_cache_read_per_solve": null,
+            "tokens_cache_write_per_solve": null,
+            "tokens_input_uncached_per_solve": null,
+            "tokens_output_per_solve": null,
+            "wilson95": [
+              0.3057378545838018,
+              0.863158240538479
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": null,
+            "harness": "codex",
+            "median_wall_s": 801.077,
+            "model": "glm-5.2",
+            "n": 8,
+            "solve_rate": 0.5,
+            "solved": 4,
+            "token_telemetry_bases": [],
+            "token_telemetry_coverage": {
+              "covered_rows": 0,
+              "native_covered_rows": 4,
+              "proxy_covered_rows": 0,
+              "ratio": 0.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": null,
+            "tokens_cache_read_per_solve": null,
+            "tokens_cache_write_per_solve": null,
+            "tokens_input_uncached_per_solve": null,
+            "tokens_output_per_solve": null,
+            "wilson95": [
+              0.2152125268244419,
+              0.7847874731755581
+            ]
+          }
+        ],
+        "caveats": [
+          "Quarantine-safe derived bundle: all 15 terminal-bench/cancel-async-tasks rows were excluded because its load-sensitive checker is binding-quarantined. No model was rerun.",
+          "The bundled results SHA is sealed. Current-tree task checks report expected post-run definition drift; recorded task digests are retained as run-time fingerprints.",
+          "The retained archive lacks image digests, version-source labels, and an explicit per-row timeout field; contemporaneous version-stamp drift is documented in the bundle README.",
+          "The unified board ranks only task/trial cells shared by every harness. The release page also shows the per-arm countable view, so its denominators differ."
+        ],
+        "claim": null,
+        "countable_rows": 44,
+        "date": "2026-07-09",
+        "excluded_counts": {
+          "infra": 1
+        },
+        "family": "harness",
+        "has_caveats": true,
+        "id": "2026-07-09-glm52",
+        "kind": "release",
+        "link": null,
+        "matched": {
+          "duplicate_cells_excluded": 0,
+          "duplicate_rows_excluded": 0,
+          "groups_compared": 5,
+          "matched_cells_per_group": 8,
+          "matched_rows": 40,
+          "unmatched_countable_rows": 4
+        },
+        "models": [
+          "glm-5.2"
+        ],
+        "path": "releases/2026-07-09-glm52/index.html",
+        "raw_rows": 45,
+        "results_path": "releases/2026-07-09-glm52/results.jsonl",
+        "results_sha256": "5434f3f8aa66a708936cc322e26b23dd5670caa5532163f1c27fe3cb1a57349c",
+        "submitter": null,
+        "table": "matched",
+        "task_set_digest": "46075fa27b81914497dc37b6ff595ef49dd09b04154ac9f9e93c33892aa0168f",
+        "title": "OpenBench: GLM 5.2 quarantine-safe archive"
       }
     ],
     "note": "Scores are not comparable across bundles: task sets, trial counts, and timeout caps differ.",
@@ -284,18 +918,6 @@
         "id": "2026-07-02-m3",
         "kind": "release",
         "path": "releases/2026-07-02-m3/index.html",
-        "reason": "no results.jsonl (HTML-only release page)"
-      },
-      {
-        "id": "2026-07-20-deepseek",
-        "kind": "release",
-        "path": "releases/2026-07-20-deepseek/index.html",
-        "reason": "no results.jsonl (HTML-only release page)"
-      },
-      {
-        "id": "2026-07-20-grok45",
-        "kind": "release",
-        "path": "releases/2026-07-20-grok45/index.html",
         "reason": "no results.jsonl (HTML-only release page)"
       },
       {
@@ -348,6 +970,15 @@
       "title": "OpenBench M3 — Harness Comparison"
     },
     {
+      "date": "2026-07-09",
+      "id": "2026-07-09-glm52",
+      "models": [
+        "glm-5.2"
+      ],
+      "path": "releases/2026-07-09-glm52/index.html",
+      "title": "OpenBench: GLM 5.2 quarantine-safe archive"
+    },
+    {
       "date": "2026-07-20",
       "id": "2026-07-20-grok45",
       "models": [
@@ -393,5 +1024,5 @@
       "title": "OpenBench: gpt-5.6 across 7 harnesses"
     }
   ],
-  "schema_version": 1
+  "schema_version": 2
 }
