@@ -23,6 +23,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import platform
 import re
 import shutil
 import signal
@@ -1599,6 +1600,13 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     row = {
         "run_id": run_id,
         "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+        # Which machine produced this row. The estate is two hosts with
+        # different container runtimes (Docker Desktop vs colima) and different
+        # available API keys, so arms silently land on different machines --
+        # tb-mid ran deepseek on the laptop (the only host with its key) and
+        # the rest on the mini, which makes cross-arm WALL TIME confounded and
+        # was impossible to detect from the rows themselves.
+        "host": platform.node(),
         "harness": harness,
         "model": model,
         "task": task,
