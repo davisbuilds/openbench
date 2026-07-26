@@ -29,7 +29,7 @@ from . import stats
 from .paths import SOURCE_ROOT
 
 METHODOLOGY_NOTE = (
-    "Each board below is one verified publish bundle. Scores are never mixed "
+    "Each board below is one result-sealed publish bundle. Scores are never mixed "
     "across bundles: different task sets, trial counts, timeout caps, or run "
     "conditions make cross-bundle rankings non-comparable. Within a bundle, "
     "arms are (harness, model) and (when two or more arms exist) use matched "

@@ -928,7 +928,7 @@ def _lede(doc):
     facts = [
         f"{len(harnesses)} harnesses",
         f"{len(models)} models",
-        f"{harness['bundle_count']} verified bundles",
+        f"{harness['bundle_count']} result-sealed bundles",
         f"{valid_rows:,} valid result rows",
         f"{matched_rows:,} matched result rows",
     ]

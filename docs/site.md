@@ -114,9 +114,11 @@ than an admin-panel one.
 - **Rules, not boxes.** Boards are records separated by hairlines rather than
   cards with borders and shadows, so the data sits on the page.
 - **The lede reports coverage, not a conclusion.** The headline names the two
-  result families and the dateline counts included harnesses, models, bundles,
-  valid result rows, and matched result rows. Results stay in the tables for
-  readers to interpret.
+  result families and the dateline counts included harnesses, models,
+  result-sealed bundles, valid result rows, and matched result rows. A result
+  seal verifies the bundled JSONL hash; current-tree task digest status is a
+  separate check because task definitions can change after an archived run.
+  Results stay in the tables for readers to interpret.
 - **Tables sort values without assigning ordinal ranks.** Equal estimates are
   not presented as first, second, and third, and no row receives visual
   winner treatment.

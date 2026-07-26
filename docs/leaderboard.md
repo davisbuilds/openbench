@@ -69,7 +69,7 @@ fingerprints, not result counts. `matched rows` is the number of displayed
 result rows after intersecting common `(task, trial)` cells across arms;
 `common task/trials` is that intersection size per arm.
 
-Regenerate after adding or updating a verified bundle so the Pages site stays
+Regenerate after adding or updating a result-sealed bundle so the Pages site stays
 in sync.
 
 ## See also

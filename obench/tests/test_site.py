@@ -447,7 +447,7 @@ class DesignContractTests(_SiteFixture):
     def test_lede_states_coverage_and_draws_no_conclusion(self):
         """The page reports what is covered; the boards carry the results."""
         title, deck, facts = site._lede(site.build_board(self.site_dir))
-        self.assertTrue(any("verified bundles" in f for f in facts))
+        self.assertTrue(any("result-sealed bundles" in f for f in facts))
         self.assertTrue(any("valid result rows" in f for f in facts))
         self.assertTrue(any("matched result rows" in f for f in facts))
         # No interpretation of the numbers, and no claimed cause.
