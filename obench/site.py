@@ -50,7 +50,7 @@ GATEWAY_NOTE = (
 )
 
 CROSS_FAMILY_NOTE = (
-    "Each board is one verified bundle, shown with its interval and its "
+    "Each board is one result-sealed bundle, shown with its interval and its "
     "provenance. The two families share no denominators."
 )
 
@@ -1670,7 +1670,7 @@ def _harness_view(doc):
     if family.get("skipped"):
         body += _skipped_board(
             f"Not ranked ({len(family['skipped'])})",
-            "No machine-verifiable results.",
+            "No result-sealed results.jsonl.",
             family["skipped"])
     return body
 

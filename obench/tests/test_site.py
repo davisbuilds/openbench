@@ -450,6 +450,8 @@ class DesignContractTests(_SiteFixture):
         self.assertTrue(any("result-sealed bundles" in f for f in facts))
         self.assertTrue(any("valid result rows" in f for f in facts))
         self.assertTrue(any("matched result rows" in f for f in facts))
+        self.assertIn("result-sealed bundle", deck)
+        self.assertNotIn("verified bundle", deck)
         # No interpretation of the numbers, and no claimed cause.
         for forbidden in ("because", "due to", "caused by", "proves",
                           "clusters", "spans", "wins", "best", "fastest"):

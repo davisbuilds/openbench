@@ -10,7 +10,7 @@
       "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
     }
   ],
-  "cross_family_note": "Each board is one verified bundle, shown with its interval and its provenance. The two families share no denominators.",
+  "cross_family_note": "Each board is one result-sealed bundle, shown with its interval and its provenance. The two families share no denominators.",
   "gateway": {
     "bundle_count": 0,
     "bundles": [],
