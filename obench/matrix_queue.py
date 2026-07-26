@@ -744,6 +744,39 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     return exit_code
 
 
+def missing_task_images(spec, spec_dir, docker_runner=None):
+    """Pinned task images the spec needs that this host lacks at that digest.
+
+    A spec whose tasks pin per-task images is unrunnable on a host that does not
+    hold those exact digests: every cell dies immediately with "cannot inspect
+    Docker image". That happened on a live re-run -- the host had 23
+    ``openbench-tb2`` images but none at the pinned digests, and the queue burned
+    the launch to discover it. The existing preflight checks CLI pins, not task
+    images, so nothing caught it.
+
+    Returns a list of ``(task, image)``; empty when the host can run the spec.
+    """
+    import tomllib
+    runner = docker_runner or (lambda ref: subprocess.run(
+        ["docker", "image", "inspect", ref],
+        capture_output=True, text=True, timeout=30).returncode == 0)
+    missing = []
+    for group in spec.get("task_group") or []:
+        tasks_dir = resolve_group_tasks_dir(group, spec, spec_dir)
+        for task in group.get("tasks") or []:
+            toml_path = os.path.join(tasks_dir, task, "task.toml")
+            if not os.path.isfile(toml_path):
+                continue
+            try:
+                with open(toml_path, "rb") as fh:
+                    image = tomllib.load(fh).get("docker_image")
+            except (OSError, ValueError):
+                continue
+            if image and not runner(image):
+                missing.append((task, image))
+    return missing
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Matrix queue: retry-aware benchmark runner for OpenBench.")
@@ -763,6 +796,16 @@ def main(argv: list[str] | None = None) -> int:
         spec = load_spec(spec_path)
     except SpecError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    missing = missing_task_images(spec, spec_dir)
+    if missing:
+        print("ERROR: pinned task images are not present at their exact digest "
+              "on this host:", file=sys.stderr)
+        for task, image in missing:
+            print(f"  {task}: {image}", file=sys.stderr)
+        print("Every cell would die on 'cannot inspect Docker image'. Build or "
+              "pull them, or run on a host that has them.", file=sys.stderr)
         return 1
 
     return run_matrix(spec, spec_dir, cwd)

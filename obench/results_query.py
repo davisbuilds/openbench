@@ -129,6 +129,55 @@ def cmd_summary(rows, args):
     _warn_low_coverage(cells)
     _warn_missing_cells(cells)
     _warn_mixed_hosts(cells)
+    _warn_mixed_harness_versions(cells)
+
+
+def _harness_version(row):
+    """Bare CLI version, dropping the binary path the adapter appends."""
+    raw = row.get("harness_version")
+    return str(raw).split(" ")[0] if raw else None
+
+
+def _warn_mixed_harness_versions(cells):
+    """Flag arms compared across different CLI versions.
+
+    ``obench.bump_clis`` already gates each RUN against the pinned version, but
+    that check is per-host and per-run: nothing stopped results produced by
+    different CLI versions from being pooled at report time. The campaign data
+    holds seven distinct pi versions (0.79.5, 0.80.3, 0.80.5, 0.80.6, 0.80.8,
+    0.80.10 and unrecorded), silently compared as if they were one harness.
+
+    It also nearly re-happened live: a re-run was launched with deepseek on a
+    host carrying pi 0.82.0 and laguna on one carrying 0.80.10 -- a harness
+    difference that would have been read as a model difference. The launch-time
+    gate cannot catch that, because each host was internally consistent; only a
+    check at the point of COMPARISON can.
+    """
+    # Grouped BY HARNESS: different harnesses legitimately have different CLI
+    # versions (pi 0.80.10 vs opencode 1.18.3 is not a skew, they are different
+    # tools). Only a version split WITHIN one harness confounds a comparison.
+    by_harness = collections.defaultdict(dict)
+    unknown = []
+    for armname, byc in cells.items():
+        harness = armname.split(" x ")[0]
+        versions = {v for v in (_harness_version(r) for r in byc.values()) if v}
+        if any(_harness_version(r) is None for r in byc.values()):
+            unknown.append(armname)
+        if versions:
+            by_harness[harness][armname] = versions
+        if len(versions) > 1:
+            print(f"  MIXED-HARNESS WARNING {armname}: cells ran on {harness} "
+                  f"versions {sorted(versions)}; this arm is not internally "
+                  f"consistent.")
+    for harness, arms in sorted(by_harness.items()):
+        distinct = {v for vs in arms.values() for v in vs}
+        if len(arms) > 1 and len(distinct) > 1:
+            print(f"  MIXED-HARNESS WARNING: {harness} arms ran on different CLI "
+                  f"versions ({ {a: sorted(vs) for a, vs in sorted(arms.items())} }); "
+                  f"a harness difference here is indistinguishable from a model one.")
+    if unknown:
+        print(f"  HARNESS-VERSION-UNKNOWN: {len(unknown)} arm(s) have cells with "
+              f"no recorded harness_version: {sorted(unknown)[:4]}")
 
 
 def _warn_missing_cells(cells):

@@ -133,6 +133,43 @@ class ResultsQueryTests(unittest.TestCase):
                 for arm in ("a", "b") for task in ("t1", "t2")]
         self.assertNotIn("MISSING-CELLS", _run("summary", _write(rows)))
 
+    def test_arms_on_different_cli_versions_are_flagged(self):
+        # The launch-time pin gate is per-host, so it cannot catch this: each
+        # host was internally consistent while the two arms differed. Only a
+        # check at the point of COMPARISON catches it.
+        rows = [_row("pi", "a", "t", 1, "solved", True),
+                _row("pi", "b", "t", 1, "solved", True)]
+        rows[0]["harness_version"] = "0.82.0 (/usr/local/bin/pi)"
+        rows[1]["harness_version"] = "0.80.10 (/usr/local/bin/pi)"  # same harness
+        out = _run("summary", _write(rows))
+        self.assertIn("MIXED-HARNESS WARNING", out)
+        self.assertIn("indistinguishable from a model one", out)
+
+    def test_same_cli_version_is_not_flagged(self):
+        rows = [_row("pi", "a", "t", 1, "solved", True),
+                _row("pi", "b", "t", 1, "solved", True)]
+        for r in rows:
+            r["harness_version"] = "0.80.10 (/usr/local/bin/pi)"
+        self.assertNotIn("MIXED-HARNESS WARNING", _run("summary", _write(rows)))
+
+    def test_one_arm_spanning_two_versions_is_flagged(self):
+        rows = [_row("pi", "a", "t", 1, "solved", True),
+                _row("pi", "a", "t", 2, "solved", True)]
+        rows[0]["harness_version"] = "0.80.6"
+        rows[1]["harness_version"] = "0.80.10"
+        out = _run("summary", _write(rows))
+        self.assertIn("not internally consistent", out)
+
+    def test_different_harnesses_with_different_versions_are_NOT_flagged(self):
+        # pi 0.80.10 vs opencode 1.18.3 are different tools, not a version skew.
+        # The first version of this check fired on exactly this and was wrong.
+        rows = [_row("pi", "m", "t", 1, "solved", True),
+                _row("opencode", "m", "t", 1, "solved", True)]
+        rows[0]["harness_version"] = "0.80.10"
+        rows[1]["harness_version"] = "1.18.3"
+        out = _run("summary", _write(rows))
+        self.assertNotIn("MIXED-HARNESS WARNING", out)
+
     def test_evidence_prints_source_line(self):
         path = _write([_row("pi", "m", "t", 1, "solved", True)])
         out = _run("evidence", path, "--run-id", "pi:t:m")
