@@ -58,7 +58,18 @@ Per arm inside a bundle:
   split fields (never the vendor aggregate `tokens` field), plus token-basis tags
 - Cell counts and links back to the bundle card / `results.jsonl`
 
-Regenerate after adding or updating a verified bundle so the Pages site stays
+Harness token columns use one complete source per arm: proxy splits first,
+otherwise native splits. Fresh, uncached-input, output, cache-read, and
+cache-write traffic remain separate, and incomplete sources show coverage
+instead of mixing rows. Token traffic per solve includes all matched attempts
+and is divided by solved cells.
+
+Board metadata labels `results SHA` and `task-set SHA` are truncated
+fingerprints, not result counts. `matched rows` is the number of displayed
+result rows after intersecting common `(task, trial)` cells across arms;
+`common task/trials` is that intersection size per arm.
+
+Regenerate after adding or updating a result-sealed bundle so the Pages site stays
 in sync.
 
 ## See also
