@@ -91,6 +91,31 @@ class ResultsQueryTests(unittest.TestCase):
         self.assertIn("real model failures: 2", out)
         self.assertIn("infra-family: 1", out)
 
+    def test_mixed_host_arms_are_flagged(self):
+        # tb-mid really did run deepseek on the laptop (the only host with its
+        # API key) and the other arms on the mini. Solve rates survive that;
+        # wall-time comparisons do not, and nothing in the numbers reveals it.
+        rows = [_row("pi", "a", "t", 1, "solved", True),
+                _row("pi", "b", "t", 1, "solved", True)]
+        rows[0]["host"] = "laptop"
+        rows[1]["host"] = "mini"
+        out = _run("summary", _write(rows))
+        self.assertIn("MIXED-HOST WARNING", out)
+        self.assertIn("NOT wall time", out)
+
+    def test_single_host_is_not_flagged(self):
+        rows = [_row("pi", "a", "t", 1, "solved", True),
+                _row("pi", "b", "t", 1, "solved", True)]
+        for r in rows:
+            r["host"] = "mini"
+        self.assertNotIn("MIXED-HOST WARNING", _run("summary", _write(rows)))
+
+    def test_rows_without_host_are_reported_as_unverifiable(self):
+        # Every row predating the `host` field falls in here; silence would
+        # imply single-host provenance we cannot actually confirm.
+        out = _run("summary", _write([_row("pi", "a", "t", 1, "solved", True)]))
+        self.assertIn("HOST-UNKNOWN", out)
+
     def test_evidence_prints_source_line(self):
         path = _write([_row("pi", "m", "t", 1, "solved", True)])
         out = _run("evidence", path, "--run-id", "pi:t:m")

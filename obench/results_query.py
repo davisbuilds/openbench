@@ -122,6 +122,39 @@ def cmd_summary(rows, args):
           f"excluded classes = {EXCLUDED}; a cell counts once "
           f"(judged beats excluded, then latest ts_iso wins).")
     _warn_low_coverage(cells)
+    _warn_mixed_hosts(cells)
+
+
+def _warn_mixed_hosts(cells):
+    """Flag arms whose cells came from more than one machine, and comparisons
+    whose arms ran on different machines.
+
+    The estate is two hosts with different container runtimes (Docker Desktop vs
+    colima) and different available API keys, so an arm lands wherever its key
+    exists: tb-mid ran deepseek on the laptop and laguna/inkling on the mini.
+    Solve rates survive that, WALL TIME does not -- and rows written before the
+    `host` field existed cannot be attributed at all, which is its own warning.
+    """
+    hosts_by_arm = {}
+    unattributed = []
+    for armname, byc in cells.items():
+        hosts = {r.get("host") for r in byc.values() if r.get("host")}
+        if len(byc) != sum(1 for r in byc.values() if r.get("host")):
+            unattributed.append(armname)
+        if hosts:
+            hosts_by_arm[armname] = hosts
+        if len(hosts) > 1:
+            print(f"  MIXED-HOST WARNING {armname}: cells from {sorted(hosts)}; "
+                  f"latency is not comparable within this arm.")
+    distinct = {h for hs in hosts_by_arm.values() for h in hs}
+    if len(hosts_by_arm) > 1 and len(distinct) > 1:
+        print(f"  MIXED-HOST WARNING: arms ran on different machines "
+              f"({ {a: sorted(hs) for a, hs in sorted(hosts_by_arm.items())} }); "
+              f"compare solve rates, NOT wall time.")
+    if unattributed:
+        print(f"  HOST-UNKNOWN: {len(unattributed)} arm(s) have cells with no "
+              f"`host` field (written before it was recorded): "
+              f"{sorted(unattributed)[:4]}; their machine cannot be verified.")
 
 
 def _warn_low_coverage(cells):
