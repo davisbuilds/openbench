@@ -42,8 +42,8 @@ from .failure_class import classify_failure, classify_failure_reason
 from .config import load_config
 from .paths import (PACKAGE_DIR, SOURCE_ROOT, TasksDirError,
                     default_adapters_dir, default_results_path,
-                    default_tasks_dir, ensure_package_path_on_sys_path,
-                    resolve_tasks_dir)
+                    default_tasks_dir, docker_workdir_parent,
+                    ensure_package_path_on_sys_path, resolve_tasks_dir)
 from .scrub import build_context as build_scrub_context, scrub_text
 from .workspace import (
     WorkspaceError,
@@ -1655,11 +1655,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     # temp path is NOT shared into the VM and mounts as an EMPTY dir, so create
     # it somewhere the VM can see (same policy as docker_exec instruction files).
     env_setup_start = time.monotonic()
-    workdir_parent = None
-    if exec_mode == "docker":
-        workdir_parent = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".bench-tmp")
-        os.makedirs(workdir_parent, exist_ok=True)
+    workdir_parent = docker_workdir_parent() if exec_mode == "docker" else None
     workdir = tempfile.mkdtemp(prefix=f"bench_{harness}_{task.replace('/', '_')}_", dir=workdir_parent)
     try:
         # Materialize a pristine workspace into the disposable temp dir. Never

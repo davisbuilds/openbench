@@ -29,6 +29,26 @@ def find_repo_root(start: str | None = None) -> str | None:
     return None
 
 
+def docker_workdir_parent() -> str:
+    """Parent dir for workspaces that get bind-mounted into a container.
+
+    macOS ``tempfile`` defaults to ``/var/folders/...``, which Docker Desktop
+    shares into its VM but **colima does not**: the bind mount then resolves to
+    a directory the container sees as empty, so every checker test fails on
+    missing files while the host workspace looks correct. Staging under the
+    source tree keeps the path inside colima's shared mount.
+
+    Found twice: the runner hit it first (hence ``OPENBENCH_DOCKER_TMPDIR``),
+    then ``validate_tasks`` hit the same wall independently -- 5 of 6 tb-mid
+    tasks failed their solution stage on the colima host and passed on the
+    Docker Desktop host, from nothing but this path choice.
+    """
+    parent = os.environ.get("OPENBENCH_DOCKER_TMPDIR") or os.path.join(
+        SOURCE_ROOT, ".bench-tmp")
+    os.makedirs(parent, exist_ok=True)
+    return parent
+
+
 def default_adapters_dir() -> str:
     """Packaged adapters directory (overridable via ``--adapters-dir``)."""
     return os.path.join(PACKAGE_DIR, "adapters")

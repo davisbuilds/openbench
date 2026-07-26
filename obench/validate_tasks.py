@@ -43,6 +43,7 @@ from .paths import (
     TasksDirError,
     default_imported_tasks_dir,
     default_tasks_dir,
+    docker_workdir_parent,
     resolve_tasks_dir,
 )
 from .workspace import (
@@ -106,7 +107,10 @@ def run_checker(task_dir, overlay_solution_flag):
     """
     checker = os.path.join(task_dir, "checker.sh")
 
-    tmp = tempfile.mkdtemp(prefix="taskcheck-")
+    # Same tmpdir policy as obench.run: the checker bind-mounts this dir into
+    # the task image, and macOS's default /var/folders path is invisible to
+    # colima's VM.
+    tmp = tempfile.mkdtemp(prefix="taskcheck-", dir=docker_workdir_parent())
     try:
         try:
             materialize_workspace(task_dir, tmp)
