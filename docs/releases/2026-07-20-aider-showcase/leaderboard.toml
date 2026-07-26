@@ -1,6 +1,0 @@
-# Optional annotations for `obench leaderboard build`.
-# Bundle-level caveats surface on the static leaderboard page.
-
-caveats = [
-  "Harness mode is not apples-to-apples: aider ran as a one-shot --message invocation, while pi and opencode ran full agentic loops. Token comparison reflects that difference in harness mode, not a pure like-for-like agent loop contest.",
-]
