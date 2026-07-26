@@ -6,6 +6,7 @@ stream parser is exercised against the captured DeepSeek probe fixture.
 """
 
 import importlib.util
+import json
 import os
 
 BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -362,3 +363,58 @@ class TestRunConstruction(unittest.TestCase):
         self.assertEqual(res["tokens_reasoning"], 2)
 if __name__ == "__main__":
     unittest.main()
+
+
+class TokenBasisLabelTests(unittest.TestCase):
+    """grokbuild's token split must be LABELLED, not just populated.
+
+    The adapter read Grok's own per-call counters -- a genuine vendor split --
+    but never set token_basis, so 180 of 214 solved grokbuild cells carried a
+    full set of token fields with no basis and could not be converted to cost.
+    Grok's log has no total_tokens, so pi's total-consistency invariant is not
+    available here; only containment checks are, and a violation must downgrade
+    to "estimated" rather than assert vendor fidelity we never verified.
+    """
+
+    @staticmethod
+    def _home(ctx):
+        home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(home, "logs"))
+        with open(os.path.join(home, "logs", "unified.jsonl"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(json.dumps({"msg": "shell.turn.inference_done",
+                                 "ctx": ctx}) + "\n")
+        return home
+
+    def test_clean_counters_are_labelled_vendor_split(self):
+        usage = grokbuild._parse_log_usage(self._home(
+            {"prompt_tokens": 100, "cached_prompt_tokens": 40,
+             "completion_tokens": 7, "reasoning_tokens": 2}))
+        self.assertEqual(usage["token_basis"], "vendor_split")
+
+    def test_cache_read_exceeding_prompt_downgrades(self):
+        # max(0, prompt - cached) would otherwise absorb this silently.
+        usage = grokbuild._parse_log_usage(self._home(
+            {"prompt_tokens": 100, "cached_prompt_tokens": 140,
+             "completion_tokens": 7}))
+        self.assertEqual(usage["token_basis"], "estimated")
+
+    def test_reasoning_exceeding_completion_downgrades(self):
+        usage = grokbuild._parse_log_usage(self._home(
+            {"prompt_tokens": 100, "cached_prompt_tokens": 10,
+             "completion_tokens": 7, "reasoning_tokens": 99}))
+        self.assertEqual(usage["token_basis"], "estimated")
+
+    def test_unparseable_record_downgrades(self):
+        home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(home, "logs"))
+        with open(os.path.join(home, "logs", "unified.jsonl"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(json.dumps({"msg": "shell.turn.inference_done",
+                                 "ctx": {"prompt_tokens": 100,
+                                         "cached_prompt_tokens": 10,
+                                         "completion_tokens": 7}}) + "\n")
+            fh.write(json.dumps({"msg": "shell.turn.inference_done",
+                                 "ctx": {"prompt_tokens": "?"}}) + "\n")
+        usage = grokbuild._parse_log_usage(home)
+        self.assertEqual(usage["token_basis"], "estimated")

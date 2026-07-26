@@ -279,6 +279,16 @@ def _parse_log_usage(grok_dir):
     }
     found = False
     calls = 0
+    # These counters come straight from Grok's own per-call records, so the
+    # split is vendor-reported -- but the adapter never labelled it, leaving
+    # token_basis None on 180 of 214 solved grokbuild cells and making them
+    # uncostable even though every field was present.
+    #
+    # Unlike pi, the log carries NO total_tokens, so the total-consistency
+    # invariant pi uses cannot be checked here. Only the containment checks the
+    # data supports are applied; anything violating them falls back to
+    # "estimated" rather than claiming vendor fidelity we did not verify.
+    invariant_ok = True
     for raw in lines:
         try:
             obj = json.loads(raw)
@@ -293,17 +303,27 @@ def _parse_log_usage(grok_dir):
         reasoning = ctx.get("reasoning_tokens") or 0
         if isinstance(prompt, (int, float)) and isinstance(completion, (int, float)):
             cached_i = int(cached) if isinstance(cached, (int, float)) else 0
+            if cached_i > int(prompt):
+                # cache-read cannot exceed the prompt it was read for; the
+                # max(0, ...) below would silently absorb it into a 0.
+                invariant_ok = False
             totals["tokens_input_uncached"] += max(0, int(prompt) - cached_i)
             totals["tokens_cache_read"] += cached_i
             totals["tokens_output"] += int(completion)
             if isinstance(reasoning, (int, float)):
+                if int(reasoning) > int(completion):
+                    invariant_ok = False
                 totals["tokens_reasoning"] += int(reasoning)
             found = True
             calls += 1
+        else:
+            # A record we cannot parse means the summed totals are incomplete.
+            invariant_ok = False
     if not found:
         return None
     totals["tokens"] = totals["tokens_input_uncached"] + totals["tokens_output"]
     totals["turns"] = calls
+    totals["token_basis"] = "vendor_split" if invariant_ok else "estimated"
     return totals
 
 
