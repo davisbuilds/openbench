@@ -86,5 +86,22 @@ class CheckerOwnedVerdictTests(unittest.TestCase):
         self.assertFalse(fc.has_checker_owned_verdict(_row(turns=0, tokens_output=0)))
 
 
+class QueueSatisfactionTests(unittest.TestCase):
+    """The queue must agree with the reporters about what counts as judged."""
+
+    def test_stored_exclusion_with_a_real_verdict_counts_as_satisfied(self):
+        from obench.matrix_queue import cell_is_satisfied
+        row = _row(failure_class="rate_limited")
+        self.assertTrue(
+            cell_is_satisfied(row),
+            "a cell whose checker already reached a verdict must not be "
+            "re-queued; re-running it burns provider quota for no new data")
+
+    def test_genuine_exclusion_is_still_requeued(self):
+        from obench.matrix_queue import cell_is_satisfied
+        row = _row(failure_class="rate_limited", turns=0, tokens_output=0)
+        self.assertFalse(cell_is_satisfied(row))
+
+
 if __name__ == "__main__":
     unittest.main()

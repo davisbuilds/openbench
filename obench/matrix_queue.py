@@ -366,7 +366,12 @@ def cell_is_satisfied(row: dict[str, Any] | None) -> bool:
     """A cell is SATISFIED when it has a row whose failure_class is NOT excluded."""
     if row is None:
         return False
-    fc = row.get("failure_class") or fc_mod.class_for_report(row)
+    # class_for_report unconditionally: `row.get("failure_class") or ...`
+    # short-circuited on any stored value, so a cell stored as rate_limited was
+    # re-queued even when the row's own fields prove the checker reached a
+    # verdict (a 429 that recovered mid-run). That burns provider quota re-running
+    # cells that are already judged -- 2 of the 7 laguna tb-mid "gaps" were this.
+    fc = fc_mod.class_for_report(row)
     return fc not in fc_mod.EXCLUDED_FROM_SOLVE_RATE
 
 
