@@ -119,6 +119,64 @@ def has_instant_cli_exit_shape(row):
     return float(wall) < 30.0
 
 
+def per_reply_outputs(row):
+    """Per-REQUEST output token counts for a cell, or () if unavailable.
+
+    Exists because ``tokens_output`` is the SUM over every turn, while an output
+    cap (``max_completion_tokens``) bounds a SINGLE reply. Comparing the two
+    directly is a unit error that reports any multi-turn run as truncated --
+    verified on a real cell: turns=18, tokens_output=28466, which equals the sum
+    of its 18 per-call outputs exactly.
+
+    That mistake was made twice in one session, producing "224 truncated cells"
+    (real: 11) and "56% of laguna / 65% of deepseek cells hit the cap"
+    (real: 14 and 0). Both times the falsifying check was one division: median
+    output PER TURN was 864 against a cap of 8192.
+
+    ``usage_raw`` holds one entry per model call, so this is exact rather than
+    an average. Use this -- never ``tokens_output`` -- against a per-reply cap.
+    """
+    usage = (row or {}).get("usage_raw")
+    if not isinstance(usage, list):
+        return ()
+    out = []
+    for call in usage:
+        if isinstance(call, dict):
+            value = call.get("output")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                out.append(int(value))
+    return tuple(out)
+
+
+def has_per_reply_truncation(row, cap=None, ratio=0.99):
+    """True when any single reply reached the per-request output cap.
+
+    ``cap`` defaults to the smallest cap actually observed on the cell's own
+    requests (``sampling_observed``), so it needs no external table.
+    """
+    row = row or {}
+    if cap is None:
+        caps = [s.get("max_completion_tokens") or s.get("max_tokens")
+                for s in row.get("sampling_observed") or () if isinstance(s, dict)]
+        caps = [c for c in caps
+                if isinstance(c, (int, float)) and not isinstance(c, bool) and c > 0]
+        if not caps:
+            return False
+        cap = max(caps)
+    replies = per_reply_outputs(row)
+    if not replies:
+        return False
+    # If a reply EXCEEDS its own cap, the cap is not being enforced on this
+    # route, so "reply sits at the cap" carries no information and no truncation
+    # can be inferred. Measured: deepseek-v4-flash overshoots on 29% of cells,
+    # by up to 4.9x (a 17096-token reply against an 8192 cap) -- its endpoint
+    # either ignores max_tokens or counts reasoning tokens outside it. laguna,
+    # inkling and kimi-k3 never exceed their cap, so the signal is valid there.
+    if max(replies) > cap:
+        return False
+    return max(replies) >= ratio * cap
+
+
 STARVED_OUTPUT_BUDGET = 64
 
 
