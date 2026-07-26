@@ -33,7 +33,7 @@ import json
 import os
 import sys
 
-from .failure_class import EXCLUDED_FROM_SOLVE_RATE
+from .failure_class import EXCLUDED_FROM_SOLVE_RATE, class_for_report
 from .report import wilson_ci
 
 EXCLUDED = tuple(EXCLUDED_FROM_SOLVE_RATE)
@@ -68,7 +68,12 @@ def cell_of(row):
 
 
 def is_judged(row):
-    return row.get("failure_class") not in EXCLUDED
+    # class_for_report, not the raw field: it corrects a stored exclusion the
+    # row's own fields refute (a 429 mid-run that did not stop the checker from
+    # reaching a verdict). Reading the raw field here would make this tool
+    # disagree with `obench report` on the same file, which is the exact
+    # inconsistency this module exists to remove.
+    return class_for_report(row) not in EXCLUDED
 
 
 def _filter(rows, args):
@@ -212,14 +217,14 @@ def cmd_errors(rows, args):
     cells = _arm_cells(rows)
     for armname in sorted(cells):
         byc = cells[armname]
-        tax = collections.Counter(r.get("failure_class") for r in byc.values())
+        tax = collections.Counter(class_for_report(r) for r in byc.values())
         real = sum(v for k, v in tax.items() if k in ("wrong_answer", "timeout"))
         excl = sum(v for k, v in tax.items() if k in EXCLUDED)
         print(f"{armname}: {dict(tax)}")
         print(f"  -> real model failures: {real} (wrong_answer/timeout, in "
               f"denominator); infra-family: {excl} (excluded, not the model's fault)")
         for fc in EXCLUDED:
-            bad = [r for r in byc.values() if r.get("failure_class") == fc][:2]
+            bad = [r for r in byc.values() if class_for_report(r) == fc][:2]
             for r in bad:
                 err = str(r.get("error") or r.get("output_tail") or "")[:90]
                 print(f"     {fc}: {r.get('run_id')}  [{r['_src']}]  {err!r}")

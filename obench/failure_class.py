@@ -193,6 +193,37 @@ def _meaningful_work_text(text):
     return "\n".join(kept).strip()
 
 
+def has_checker_owned_verdict(row, text=""):
+    """True when the checker already judged a cell that genuinely ran.
+
+    Three conditions, all required:
+
+    * ``completed`` -- the harness exited on its own rather than being killed,
+      so the agent was not cut off mid-answer.
+    * ``checker_exit`` in {0, 1} -- a real verdict. Anything else is a checker
+      crash and stays infra (see ``has_checker_crash``); "timeout" is handled by
+      the caller.
+    * the cell did real work -- guards against a cell that was throttled before
+      producing anything and then trivially failed the checker. Those keep their
+      infra/rate_limited class, because a model that never answered cannot have
+      answered wrong.
+
+    The work guards are deliberately the SAME ones the taxonomy already uses for
+    the no-work case, so this predicate cannot resurrect a cell that those gates
+    would exclude on their own.
+    """
+    row = row or {}
+    if not bool(row.get("completed")):
+        return False
+    if row.get("checker_exit") not in (0, 1):
+        return False
+    if has_zero_output_and_minimal_turns(row, text):
+        return False
+    if has_near_zero_agent_tokens(row) and not row.get("turns"):
+        return False
+    return True
+
+
 def has_near_zero_agent_tokens(row):
     """True when every reported agent/proxy token field is absent or below 100."""
     values = [row.get(field) for field in _TOKEN_FIELDS]
@@ -293,6 +324,22 @@ def classify_failure(row, adapter_output="", timeout_s=None):
 
     if bool(row.get("success")):
         return "solved"
+    # A transient provider hiccup does NOT erase a verdict the checker already
+    # reached. When the agent ran to completion, did real work, and the checker
+    # exited with a real verdict (0/1), the checker owns the oracle -- fall
+    # through to wrong_answer/timeout instead of excluding the cell.
+    #
+    # Without this, a single 429 anywhere in a long transcript excluded a cell
+    # the checker had already FAILED on its merits. Campaign-wide that was 67 of
+    # 90 rate_limited and 11 of 85 infra cells -- 78 real failures removed from
+    # denominators, all with a checker FAIL message (e.g. "primer/vector overlap
+    # mismatch"), median 11 turns and 15,885 output tokens, and not one of them a
+    # hidden solve. It inflated rates in proportion to how often an arm got
+    # throttled, so the thin-capacity models gained most (laguna 44 cells,
+    # deepseek 13, kimi-k3 6, inkling 6, versus gpt-5.6 5) -- which flattered
+    # exactly the comparison we were trying to measure.
+    if has_checker_owned_verdict(row, combined):
+        return "timeout" if row.get("checker_exit") == "timeout" else "wrong_answer"
     if has_rate_limit_marker(combined):
         return "rate_limited"
     if has_infra_marker(combined):
@@ -319,11 +366,29 @@ def classify_failure(row, adapter_output="", timeout_s=None):
 
 
 def class_for_report(row):
-    """Return a row's failure_class, deriving one from saved fields if absent."""
-    fc = (row or {}).get("failure_class")
-    if fc in FAILURE_CLASSES:
-        return fc
-    return classify_failure(row, (row or {}).get("output_tail") or "")
+    """Return a row's failure_class, deriving one from saved fields if absent.
+
+    Also CORRECTS a stored exclusion that the row's own fields refute. The
+    write-time classifier sees the full transcript and used to let one 429
+    anywhere in it override a verdict the checker had already reached; the
+    transcript is not persisted, so re-running the classifier on a stored row
+    cannot detect that -- no marker text survives to re-evaluate. The row's own
+    fields do survive, and ``completed`` + ``checker_exit`` in {0,1} + real work
+    is sufficient proof that the checker owned the oracle.
+
+    Correcting here rather than rewriting the JSONLs keeps one source of truth
+    for every reader (report, results-query) and fixes already-published
+    datasets in place. 78 cells campaign-wide are affected, every one a real
+    failure wrongly excluded, which inflated rates in proportion to how often an
+    arm was throttled.
+    """
+    row = row or {}
+    stored = row.get("failure_class")
+    if stored in FAILURE_CLASSES:
+        if stored in EXCLUDED_FROM_SOLVE_RATE and has_checker_owned_verdict(row):
+            return "timeout" if row.get("checker_exit") == "timeout" else "wrong_answer"
+        return stored
+    return classify_failure(row, row.get("output_tail") or "")
 
 
 def is_excluded_from_solve_rate(row):
