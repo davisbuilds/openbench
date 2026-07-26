@@ -297,7 +297,68 @@ def _pi_models_override(base_url):
     return json.dumps({"providers": {"openai-codex": {"baseUrl": base_url}}}, indent=2)
 
 
-def _pi_provider_ext(spec):
+_MODEL_LIMITS_CACHE = {}
+# Where the pinned limits live. In the container the adapter is file-loaded from
+# /bench/adapters with the JSON mounted alongside entry.py; in a checkout it sits
+# under data/. Both are checked, nearest first.
+_MODEL_LIMITS_PATHS = (
+    "/bench/model_limits.json",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "data", "model_limits.json"),
+)
+
+
+def _model_limits(model_key):
+    """Pinned context window and output cap for an open model.
+
+    Raises rather than defaulting. The previous code did
+    ``spec.get('context_window', 128000)`` / ``spec.get('max_tokens', 8192)``,
+    and five of seven open models silently inherited those invented numbers --
+    deepseek-v4-flash ran at 128000/8192 against a real 1048576/393216. It went
+    unnoticed for weeks precisely because a plausible default never complains.
+
+    It is not a cosmetic mismatch: pi clamps each request to
+    ``min(maxTokens, max(1, contextWindow - promptTokens - 4096))``, so an
+    understated context window drives the reply budget to 1 token as the
+    conversation grows and the model is then scored as answering wrong.
+
+    Regenerate with ``python3 -m obench.fetch_model_limits --write``; never
+    hand-write values here.
+    """
+    if not _MODEL_LIMITS_CACHE:
+        for path in _MODEL_LIMITS_PATHS:
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    _MODEL_LIMITS_CACHE.update(json.load(fh))
+                break
+            except (OSError, json.JSONDecodeError):
+                continue
+    entry = _MODEL_LIMITS_CACHE.get(model_key)
+    if not entry:
+        raise RuntimeError(
+            f"no pinned context/output limits for {model_key!r} (looked in "
+            f"{', '.join(_MODEL_LIMITS_PATHS)}). Run "
+            f"`python3 -m obench.fetch_model_limits --fetched-at <date> --write`. "
+            f"There is deliberately no default: the old 128000/8192 fallback "
+            f"understated deepseek by 8x on context and 48x on output.")
+    return entry
+
+
+def _limits_provenance(model_key):
+    """The declared limits for a cell, for the results row.
+
+    Native (subscription) models carry None: pi supplies their limits from its
+    own catalog and sends no cap, which is itself the asymmetry worth seeing in
+    the data -- gpt-5.6-sol ran uncapped while every open model was capped.
+    """
+    if model_key not in OPEN_MODELS:
+        return {"model_context_window": None, "model_max_tokens": None}
+    limits = _model_limits(model_key)
+    return {"model_context_window": limits["context_window"],
+            "model_max_tokens": limits["max_tokens"]}
+
+
+def _pi_provider_ext(spec, model_key):
     """JS extension source registering the open provider (loaded via -e).
 
     pi resolves "$ENV_KEY" in apiKey from the environment; api
@@ -318,7 +379,8 @@ def _pi_provider_ext(spec):
         f'      compat: {json.dumps(spec["compat"])},\n'
         f'      thinkingLevelMap: {json.dumps(spec["thinkingLevelMap"])},\n'
         "      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },\n"
-        f"      contextWindow: {spec.get('context_window', 128000)}, maxTokens: {spec.get('max_tokens', 8192)}\n"
+        f"      contextWindow: {_model_limits(model_key)['context_window']}, "
+        f"maxTokens: {_model_limits(model_key)['max_tokens']}\n"
         "    }]\n"
         "  });\n"
         "}\n"
@@ -694,6 +756,10 @@ def run_routed(
             "tokens": tokens,
             "turns": turns,
             "cmd": cmd,
+            # Routed runs get their limits from the route plan's provider
+            # config, not from OPEN_MODELS, so there is nothing of ours to
+            # stamp here; canonical_model records which model it was.
+            **_limits_provenance(plan.canonical_model),
             **token_usage,
         }
     finally:
@@ -752,7 +818,7 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             spec = OPEN_MODELS[model]
             ext_path = os.path.join(iso_home, "open-provider.mjs")
             with open(ext_path, "w", encoding="utf-8") as fh:
-                fh.write(_pi_provider_ext(spec))
+                fh.write(_pi_provider_ext(spec, model))
             cmd = [
                 "pi", "-p",
                 "--no-approve",
@@ -797,6 +863,11 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "tokens": tokens,
             "turns": turns,
             "cmd": cmd,
+            # Stamp the limits this cell actually ran under. Without them, an
+            # arm handicapped by an understated context window looks in the data
+            # exactly like one that simply performed worse -- which is how
+            # deepseek running at 128000/8192 went unnoticed for weeks.
+            **_limits_provenance(model),
             **token_usage,
         }
     finally:

@@ -98,6 +98,8 @@ ROW_FIELDS = (
     "workspace_source",
     "last_activity_age_s",
     "host",
+    "model_context_window",
+    "model_max_tokens",
 )
 
 
@@ -1656,6 +1658,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "timeout_s": timeout_s,
         "workspace_source": None,
         "last_activity_age_s": None,
+        "model_context_window": None,
+        "model_max_tokens": None,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix

@@ -1,0 +1,74 @@
+{
+  "deepseek-v4-flash": {
+    "context_window": 1048576,
+    "fetched_at": "2026-07-26",
+    "max_tokens": 393216,
+    "note": "top_provider.max_completion_tokens; api.deepseek.com /models publishes no limit fields; values are OpenRouter's listing of the same model",
+    "openrouter_id": "deepseek/deepseek-v4-flash",
+    "sources": [
+      "https://openrouter.ai/api/v1/models"
+    ]
+  },
+  "glm-4.7-flash": {
+    "context_window": 202752,
+    "fetched_at": "2026-07-26",
+    "max_tokens": 16384,
+    "note": "top_provider.max_completion_tokens; api.z.ai /paas/v4/models publishes no limit fields; values are OpenRouter's listing of the same model",
+    "openrouter_id": "z-ai/glm-4.7-flash",
+    "sources": [
+      "https://openrouter.ai/api/v1/models"
+    ]
+  },
+  "glm-5.2": {
+    "context_window": 1048576,
+    "fetched_at": "2026-07-26",
+    "max_tokens": 131072,
+    "note": "top_provider.max_completion_tokens; api.z.ai /paas/v4/models publishes no limit fields; values are OpenRouter's listing of the same model",
+    "openrouter_id": "z-ai/glm-5.2",
+    "sources": [
+      "https://openrouter.ai/api/v1/models"
+    ]
+  },
+  "inkling": {
+    "context_window": 1048576,
+    "fetched_at": "2026-07-26",
+    "max_tokens": 131072,
+    "note": "no provider publishes an output cap; set to the cap of poolside/laguna-s-2.1, the same 1048576-context class",
+    "openrouter_id": "thinkingmachines/inkling",
+    "sources": [
+      "https://openrouter.ai/api/v1/models"
+    ]
+  },
+  "kimi-k2.7-code": {
+    "context_window": 262144,
+    "fetched_at": "2026-07-26",
+    "max_tokens": 262144,
+    "note": "top_provider.max_completion_tokens",
+    "openrouter_id": "moonshotai/kimi-k2.7-code",
+    "sources": [
+      "https://openrouter.ai/api/v1/models",
+      "https://api.moonshot.ai/v1/models"
+    ]
+  },
+  "kimi-k3": {
+    "context_window": 1048576,
+    "fetched_at": "2026-07-26",
+    "max_tokens": 131072,
+    "note": "no provider publishes an output cap; set to the cap of the same 1048576-context class",
+    "openrouter_id": "moonshotai/kimi-k3",
+    "sources": [
+      "https://openrouter.ai/api/v1/models",
+      "https://api.moonshot.ai/v1/models"
+    ]
+  },
+  "laguna-s-2.1": {
+    "context_window": 1048576,
+    "fetched_at": "2026-07-26",
+    "max_tokens": 131072,
+    "note": "top_provider.max_completion_tokens",
+    "openrouter_id": "poolside/laguna-s-2.1",
+    "sources": [
+      "https://openrouter.ai/api/v1/models"
+    ]
+  }
+}
