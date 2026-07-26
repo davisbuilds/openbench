@@ -25,7 +25,7 @@ import sys
 import tomllib
 from collections import defaultdict
 
-from . import report_page, stats
+from . import stats
 from .paths import SOURCE_ROOT
 
 METHODOLOGY_NOTE = (
@@ -286,13 +286,91 @@ def discover_bundle_dirs(site_dir, community_dir=None):
                 yield "community", path, data_manifest.get(name)
 
 
-def _total_tokens_per_solve(rows):
-    """Uniform split-derived total tokens/solve plus accounting basis tags."""
-    bases = {
-        basis for row in rows
-        if (basis := stats.display_token_basis(row)) is not None
+TOKEN_SPLITS = (
+    "input_uncached",
+    "output",
+    "cache_read",
+    "cache_write",
+)
+
+
+def _token_lane(rows, source):
+    """Return complete rows and exact bases for one telemetry source."""
+    prefix = "tokens_proxy_" if source == "proxy" else "tokens_"
+    complete = []
+    bases = set()
+    for row in rows:
+        values = {split: row.get(prefix + split) for split in TOKEN_SPLITS}
+        measured = (
+            row.get("token_basis_proxy") == "proxy_measured"
+            if source == "proxy"
+            else True
+        )
+        if measured and all(
+            stats.is_nonnegative_number(value) for value in values.values()
+        ):
+            complete.append(values)
+            raw_basis = (
+                row.get("token_basis_proxy")
+                if source == "proxy"
+                else row.get("token_basis")
+            )
+            bases.add(str(raw_basis) if raw_basis not in (None, "") else "unknown")
+    return complete, sorted(bases)
+
+
+def token_telemetry_per_solve(rows, solved=None):
+    """Select one complete split lane for an arm and aggregate its fields."""
+    if solved is None:
+        solved = sum(bool(row.get("success")) for row in rows)
+    total_rows = len(rows)
+    proxy_rows, proxy_bases = _token_lane(rows, "proxy")
+    native_rows, native_bases = _token_lane(rows, "native")
+    coverage = {
+        "total_rows": total_rows,
+        "proxy_covered_rows": len(proxy_rows),
+        "native_covered_rows": len(native_rows),
     }
-    return report_page.split_total_tokens_per_solve(rows), sorted(bases)
+
+    source = None
+    lane = []
+    bases = []
+    if total_rows and len(proxy_rows) == total_rows:
+        source, lane, bases = "proxy", proxy_rows, proxy_bases
+    elif total_rows and len(native_rows) == total_rows:
+        source, lane, bases = "native", native_rows, native_bases
+
+    selected_rows = len(lane)
+    coverage.update({
+        "covered_rows": selected_rows,
+        "ratio": selected_rows / total_rows if total_rows else None,
+    })
+    metrics = {
+        "fresh_tokens_per_solve": None,
+        "tokens_input_uncached_per_solve": None,
+        "tokens_output_per_solve": None,
+        "tokens_cache_read_per_solve": None,
+        "tokens_cache_write_per_solve": None,
+    }
+    if source is not None and solved:
+        sums = {
+            split: sum(float(values[split]) for values in lane)
+            for split in TOKEN_SPLITS
+        }
+        metrics.update({
+            "fresh_tokens_per_solve":
+                (sums["input_uncached"] + sums["output"]) / solved,
+            "tokens_input_uncached_per_solve": sums["input_uncached"] / solved,
+            "tokens_output_per_solve": sums["output"] / solved,
+            "tokens_cache_read_per_solve": sums["cache_read"] / solved,
+            "tokens_cache_write_per_solve": sums["cache_write"] / solved,
+        })
+    return {
+        **metrics,
+        "token_telemetry_source": source,
+        "token_telemetry_bases": bases,
+        "token_telemetry_coverage": coverage,
+    }
 
 
 def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
@@ -330,7 +408,7 @@ def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
         n = len(arm_rows)
         lo, hi = stats.wilson_ci(solved, n)
         rate = (solved / n) if n else None
-        tok_slv, bases = _total_tokens_per_solve(arm_rows)
+        token_telemetry = token_telemetry_per_solve(arm_rows, solved)
         arms.append({
             "harness": harness,
             "model": model,
@@ -338,8 +416,7 @@ def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
             "n": n,
             "solve_rate": rate,
             "wilson95": [lo, hi],
-            "total_tokens_per_solve": tok_slv,
-            "token_bases": bases,
+            **token_telemetry,
         })
 
     # Rank within bundle: rate desc, Wilson lo desc, harness, model.

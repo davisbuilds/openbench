@@ -41,6 +41,7 @@ def _row(harness, task, trial, success, *, model="model-x", wall=10.0, tokens=10
         "tokens_input_uncached": tokens - 20,
         "tokens_output": 20,
         "tokens_cache_read": 50,
+        "tokens_cache_write": 5,
         "tokens": tokens,
         "token_basis": "vendor_split",
         "harness_version": "1.0",
@@ -179,6 +180,66 @@ class CostBasisTests(unittest.TestCase):
 
 
 class RenderTests(_SiteFixture):
+    def test_harness_token_columns_render_factual_split_semantics(self):
+        page = site.render_board_html(site.build_board(self.site_dir))
+        for label in (
+            "Fresh tokens/solve",
+            "Uncached input/solve",
+            "Output/solve",
+            "Cache-read/solve",
+            "Cache-write/solve",
+            "Telemetry source / basis",
+            "Telemetry coverage",
+        ):
+            self.assertIn(label, page)
+        self.assertIn(">100<", page)
+        self.assertIn(">80<", page)
+        self.assertIn(">20<", page)
+        self.assertIn(">50<", page)
+        self.assertIn(">5<", page)
+        self.assertIn(">proxy 0/4 · native 4/4<", page)
+        self.assertIn(">native<", page)
+        self.assertIn(">vendor_split<", page)
+        self.assertNotIn(">Tokens/solve<", page)
+        self.assertNotIn("cache-hit", page.lower())
+
+    def test_native_fallback_renders_partial_proxy_coverage(self):
+        doc = site.build_board(self.site_dir)
+        arm = doc["harness"]["bundles"][0]["arms"][0]
+        arm["token_telemetry_coverage"]["proxy_covered_rows"] = 2
+        page = site.render_board_html(doc)
+        row = page[page.index('data-harness="fast"'):]
+        row = row[:row.index("</tr>")]
+        self.assertIn(">native<", row)
+        self.assertIn(">proxy 2/4 · native 4/4<", row)
+
+    def test_incomplete_token_telemetry_renders_coverage_and_no_metrics(self):
+        doc = site.build_board(self.site_dir)
+        arm = doc["harness"]["bundles"][0]["arms"][0]
+        for field in (
+            "fresh_tokens_per_solve",
+            "tokens_input_uncached_per_solve",
+            "tokens_output_per_solve",
+            "tokens_cache_read_per_solve",
+            "tokens_cache_write_per_solve",
+        ):
+            arm[field] = None
+        arm["token_telemetry_source"] = None
+        arm["token_telemetry_bases"] = []
+        arm["token_telemetry_coverage"] = {
+            "total_rows": 4,
+            "covered_rows": 0,
+            "ratio": 0.0,
+            "proxy_covered_rows": 1,
+            "native_covered_rows": 2,
+        }
+        page = site.render_board_html(doc)
+        row = page[page.index('data-harness="fast"'):]
+        row = row[:row.index("</tr>")]
+        self.assertEqual(row.count("<td>—</td>"), 5)
+        self.assertIn(">unavailable<", row)
+        self.assertIn(">proxy 1/4 · native 2/4<", row)
+
     def test_page_loads_no_external_resources(self):
         """Self-contained means no resource *loads*, not no links.
 
@@ -387,7 +448,8 @@ class DesignContractTests(_SiteFixture):
         """The page reports what is covered; the boards carry the results."""
         title, deck, facts = site._lede(site.build_board(self.site_dir))
         self.assertTrue(any("verified bundles" in f for f in facts))
-        self.assertTrue(any("countable cells" in f for f in facts))
+        self.assertTrue(any("valid result rows" in f for f in facts))
+        self.assertTrue(any("matched result rows" in f for f in facts))
         # No interpretation of the numbers, and no claimed cause.
         for forbidden in ("because", "due to", "caused by", "proves",
                           "clusters", "spans", "wins", "best", "fastest"):
@@ -405,6 +467,14 @@ class DesignContractTests(_SiteFixture):
         doc["gateway"]["bundles"] = [{"date": "2026-07-25"}]
         _, _, facts = site._lede(doc)
         self.assertIn("updated 2026-07-25", facts)
+
+    def test_harness_metadata_names_counts_and_digests_precisely(self):
+        page = site.render_board_html(site.build_board(self.site_dir))
+        self.assertIn("<b>matched rows </b>8", page)
+        self.assertIn("<b>common task/trials </b>4", page)
+        self.assertIn("<b>results SHA </b>", page)
+        self.assertIn("<b>task-set SHA </b>", page)
+        self.assertNotIn("<b>ranked cells </b>", page)
 
 
 class TableOrderingTests(_SiteFixture):

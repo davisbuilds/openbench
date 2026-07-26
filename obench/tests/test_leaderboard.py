@@ -44,6 +44,7 @@ def _row(harness, task, trial, success, *, model="model-x", tokens=100):
         "tokens_input_uncached": tokens - 20,
         "tokens_output": 20,
         "tokens_cache_read": 50,
+        "tokens_cache_write": 5,
         "tokens": tokens,
         "token_basis": "vendor_split",
         "harness_version": "1.0",
@@ -143,7 +144,7 @@ class AggregateBundleTests(unittest.TestCase):
         self.assertAlmostEqual(by_key[("pi", "m1")]["solve_rate"], 1.0)
         self.assertEqual(len(by_key[("pi", "m1")]["wilson95"]), 2)
 
-    def test_split_total_tokens_and_basis(self):
+    def test_native_split_lane_metrics_and_basis(self):
         bundle = os.path.join(self.tmp.name, "bundle-tok")
         rows = [
             _row("pi", "alpha", 1, True, tokens=100),
@@ -154,9 +155,84 @@ class AggregateBundleTests(unittest.TestCase):
         _publish_bundle(bundle, self.tasks, rows)
         agg = leaderboard.aggregate_bundle(bundle, kind="release")
         pi = next(a for a in agg["arms"] if a["harness"] == "pi")
-        # (100+50 + 300+50) / 2 solves; vendor `tokens` is not the total.
-        self.assertAlmostEqual(pi["total_tokens_per_solve"], 250.0)
-        self.assertIn("self-reported", pi["token_bases"])
+        self.assertAlmostEqual(pi["fresh_tokens_per_solve"], 200.0)
+        self.assertAlmostEqual(pi["tokens_input_uncached_per_solve"], 180.0)
+        self.assertAlmostEqual(pi["tokens_output_per_solve"], 20.0)
+        self.assertAlmostEqual(pi["tokens_cache_read_per_solve"], 50.0)
+        self.assertAlmostEqual(pi["tokens_cache_write_per_solve"], 5.0)
+        self.assertEqual(pi["token_telemetry_source"], "native")
+        self.assertEqual(pi["token_telemetry_bases"], ["vendor_split"])
+        self.assertEqual(pi["token_telemetry_coverage"]["covered_rows"], 2)
+        self.assertEqual(pi["token_telemetry_coverage"]["total_rows"], 2)
+
+    def test_complete_proxy_lane_is_preferred_over_complete_native_lane(self):
+        rows = [
+            _row("pi", "alpha", 1, True, tokens=100),
+            _row("pi", "alpha", 2, True, tokens=300),
+        ]
+        for index, row in enumerate(rows, start=1):
+            row.update({
+                "tokens_proxy_input_uncached": 1000 * index,
+                "tokens_proxy_output": 100 * index,
+                "tokens_proxy_cache_read": 10 * index,
+                "tokens_proxy_cache_write": index,
+                "token_basis_proxy": "proxy_measured",
+            })
+        telemetry = leaderboard.token_telemetry_per_solve(rows)
+        self.assertEqual(telemetry["token_telemetry_source"], "proxy")
+        self.assertEqual(telemetry["token_telemetry_bases"], ["proxy_measured"])
+        self.assertEqual(telemetry["fresh_tokens_per_solve"], 1650.0)
+        self.assertEqual(telemetry["tokens_cache_read_per_solve"], 15.0)
+        self.assertEqual(telemetry["tokens_cache_write_per_solve"], 1.5)
+
+    def test_complete_native_lane_is_fallback_for_incomplete_proxy(self):
+        rows = [
+            _row("pi", "alpha", 1, True, tokens=100),
+            _row("pi", "alpha", 2, True, tokens=300),
+        ]
+        rows[0].update({
+            "tokens_proxy_input_uncached": 1000,
+            "tokens_proxy_output": 100,
+            "tokens_proxy_cache_read": 10,
+            "tokens_proxy_cache_write": 1,
+            "token_basis_proxy": "proxy_measured",
+        })
+        telemetry = leaderboard.token_telemetry_per_solve(rows)
+        self.assertEqual(telemetry["token_telemetry_source"], "native")
+        self.assertEqual(telemetry["fresh_tokens_per_solve"], 200.0)
+        self.assertEqual(
+            telemetry["token_telemetry_coverage"]["proxy_covered_rows"], 1,
+        )
+
+    def test_incomplete_lanes_fail_closed_without_row_mixing(self):
+        rows = [
+            _row("pi", "alpha", 1, True, tokens=100),
+            _row("pi", "alpha", 2, True, tokens=300),
+        ]
+        rows[0].update({
+            "tokens_proxy_input_uncached": 1000,
+            "tokens_proxy_output": 100,
+            "tokens_proxy_cache_read": 10,
+            "tokens_proxy_cache_write": 1,
+            "token_basis_proxy": "proxy_measured",
+            "tokens_cache_write": None,
+        })
+        telemetry = leaderboard.token_telemetry_per_solve(rows)
+        self.assertIsNone(telemetry["token_telemetry_source"])
+        self.assertEqual(telemetry["token_telemetry_bases"], [])
+        for field in (
+            "fresh_tokens_per_solve",
+            "tokens_input_uncached_per_solve",
+            "tokens_output_per_solve",
+            "tokens_cache_read_per_solve",
+            "tokens_cache_write_per_solve",
+        ):
+            self.assertIsNone(telemetry[field])
+        coverage = telemetry["token_telemetry_coverage"]
+        self.assertEqual(coverage["covered_rows"], 0)
+        self.assertEqual(coverage["proxy_covered_rows"], 1)
+        self.assertEqual(coverage["native_covered_rows"], 1)
+        self.assertEqual(coverage["total_rows"], 2)
 
 
 class BuildLeaderboardTests(unittest.TestCase):
@@ -223,7 +299,18 @@ class BuildLeaderboardTests(unittest.TestCase):
         self.assertIn("never mixed", page.lower() + doc["methodology_note"].lower())
         self.assertIn("bundle-a", page)
         self.assertIn("bundle-b", page)
-        self.assertIn("Tokens/solve", page)
+        for label in (
+            "Fresh tokens/solve",
+            "Uncached input/solve",
+            "Output/solve",
+            "Cache-read/solve",
+            "Cache-write/solve",
+            "Telemetry source / basis",
+            "Telemetry coverage",
+        ):
+            self.assertIn(label, page)
+        self.assertNotIn(">Tokens/solve<", page)
+        self.assertNotIn("cache-hit", page.lower())
         # Each bundle keeps its own board rather than merging into one table.
         self.assertEqual(page.count('data-harness="pi"'), 2)
 

@@ -37,7 +37,7 @@ from collections import defaultdict
 from . import leaderboard, report_page, stats
 from .paths import SOURCE_ROOT
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 HARNESS_NOTE = (
     "Scores are not comparable across bundles: task sets, trial counts, and "
@@ -911,7 +911,13 @@ def _lede(doc):
     gateway = doc["gateway"]
     harnesses = {a["harness"] for b in bundles for a in b["arms"]}
     models = {a["model"] for b in bundles for a in b["arms"]}
-    cells = sum(b.get("countable_rows") or 0 for b in bundles)
+    valid_rows = sum(b.get("countable_rows") or 0 for b in bundles)
+    matched_rows = sum(
+        (b.get("matched") or {}).get("matched_rows")
+        if b.get("table") == "matched"
+        else b.get("countable_rows") or 0
+        for b in bundles
+    )
     dates = sorted(
         b["date"]
         for family in (bundles, gateway["bundles"])
@@ -923,7 +929,8 @@ def _lede(doc):
         f"{len(harnesses)} harnesses",
         f"{len(models)} models",
         f"{harness['bundle_count']} verified bundles",
-        f"{cells:,} countable cells",
+        f"{valid_rows:,} valid result rows",
+        f"{matched_rows:,} matched result rows",
     ]
     if gateway["bundle_count"]:
         facts.append(f"{gateway['bundle_count']} gateway bundles")
@@ -971,10 +978,15 @@ _METHODOLOGY = """
   <h2>Efficiency and cost</h2>
   <ul>
     <li>Median wall time is taken among solved cells only.</li>
-    <li>Tokens per solve use split fields — uncached input, output, and cache
-    reads — never a vendor aggregate. The token basis chip records whether a
-    figure was proxy-metered, vendor-split, or self-reported by the CLI. These
-    bases are not interchangeable.</li>
+    <li>Each Harness Bench arm uses one complete split-token lane across all
+    matched result rows, preferring proxy telemetry and otherwise using native
+    telemetry. Fresh tokens are uncached input plus output; cache reads and
+    cache writes remain separate. Incomplete lanes produce no token metrics
+    and report their row coverage instead.</li>
+    <li>Each per-solve token figure sums traffic from every matched attempt,
+    including failed attempts, then divides by the number of solved cells. It
+    measures attempted traffic required per solve, not the average size of
+    successful attempts alone.</li>
     <li>Harness <code>$/solve</code> appears only for models with a configured
     price. Gateway cost prefers invoice reconciliation, then the gateway's own
     reported cost, then a frozen list-price estimate, and shows coverage when a
@@ -1309,14 +1321,18 @@ def _harness_board(bundle):
                     "matched (task, trial)" if bundle["table"] == "matched"
                     else "all countable"),
         _meta_field(
-            "ranked cells",
+            "matched rows",
             (bundle.get("matched") or {}).get("matched_rows")
             if bundle["table"] == "matched"
             else bundle["countable_rows"],
         ),
-        _meta_field("results", (bundle.get("results_sha256") or "")[:12])
+        _meta_field(
+            "common task/trials",
+            (bundle.get("matched") or {}).get("matched_cells_per_group"),
+        ) if bundle["table"] == "matched" else None,
+        _meta_field("results SHA", (bundle.get("results_sha256") or "")[:12])
         if bundle.get("results_sha256") else None,
-        _meta_field("taskset", (bundle.get("task_set_digest") or "")[:12])
+        _meta_field("task-set SHA", (bundle.get("task_set_digest") or "")[:12])
         if bundle.get("task_set_digest") else None,
     ]))
 
@@ -1342,6 +1358,20 @@ def _harness_board(bundle):
     # when a board actually compares more than one.
     many_models = len({a["model"] for a in arms}) > 1
 
+    def telemetry_basis(arm):
+        source = arm.get("token_telemetry_source")
+        bases = arm.get("token_telemetry_bases") or []
+        if source is None:
+            return _chip("unavailable", "warn")
+        return _chip(source) + "".join(_chip(basis) for basis in bases)
+
+    def telemetry_coverage(arm):
+        coverage = arm.get("token_telemetry_coverage") or {}
+        total = coverage.get("total_rows") or 0
+        proxy = coverage.get("proxy_covered_rows", 0)
+        native = coverage.get("native_covered_rows", 0)
+        return f"proxy {proxy}/{total} · native {native}/{total}"
+
     columns = [
         {"label": "Harness", "cls": "name", "type": "str", "dir": "asc",
          "cell": lambda a: _esc(a["harness"]), "key": lambda a: a["harness"]},
@@ -1362,15 +1392,28 @@ def _harness_board(bundle):
         {"label": "Median wall", "dir": "asc", "skip_if_empty": True,
          "cell": lambda a: _fmt_secs(a.get("median_wall_s")),
          "key": lambda a: a.get("median_wall_s")},
-        {"label": "Tokens/solve", "dir": "asc", "skip_if_empty": True,
-         "cell": lambda a: _fmt_num(a.get("total_tokens_per_solve")),
-         "key": lambda a: a.get("total_tokens_per_solve")},
+        {"label": "Fresh tokens/solve", "dir": "asc",
+         "cell": lambda a: _fmt_num(a.get("fresh_tokens_per_solve")),
+         "key": lambda a: a.get("fresh_tokens_per_solve")},
+        {"label": "Uncached input/solve", "dir": "asc",
+         "cell": lambda a: _fmt_num(a.get("tokens_input_uncached_per_solve")),
+         "key": lambda a: a.get("tokens_input_uncached_per_solve")},
+        {"label": "Output/solve", "dir": "asc",
+         "cell": lambda a: _fmt_num(a.get("tokens_output_per_solve")),
+         "key": lambda a: a.get("tokens_output_per_solve")},
+        {"label": "Cache-read/solve", "dir": "asc",
+         "cell": lambda a: _fmt_num(a.get("tokens_cache_read_per_solve")),
+         "key": lambda a: a.get("tokens_cache_read_per_solve")},
+        {"label": "Cache-write/solve", "dir": "asc",
+         "cell": lambda a: _fmt_num(a.get("tokens_cache_write_per_solve")),
+         "key": lambda a: a.get("tokens_cache_write_per_solve")},
         {"label": "$/solve", "dir": "asc", "skip_if_empty": True,
          "cell": lambda a: _fmt_money(a.get("cost_per_solve_usd")),
          "key": lambda a: a.get("cost_per_solve_usd")},
-        {"label": "Token basis",
-         "cell": lambda a: _tag("div", {"class": "chips"}, "".join(
-             _chip(b) for b in (a.get("token_bases") or ["unknown"])))},
+        {"label": "Telemetry source / basis",
+         "cell": lambda a: _tag("div", {"class": "chips"}, telemetry_basis(a))},
+        {"label": "Telemetry coverage",
+         "cell": telemetry_coverage},
     ]
 
     table = _render_table(columns, arms, "Solve rate · Wilson 95%", row_attrs=lambda a: {

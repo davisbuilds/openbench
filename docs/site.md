@@ -75,12 +75,17 @@ manifest keyed by directory name, in the same shape as `releases.json`:
 
 ## What the columns mean
 
-**Harness Bench.** Solve rate on countable cells with a Wilson 95% interval
-drawn as a bar; solved/n; median wall time among *solved* cells; total tokens
-per solve from split fields (never the vendor aggregate); `$/solve` when the
-model has a configured price in `prices.json`; and token-basis chips
-(`proxy-measured`, `vendor_split`, `self-reported`) because those bases are not
-interchangeable.
+**Harness Bench.** Solve rate on matched task/trial rows with a Wilson 95%
+interval drawn as a bar; solved/n; median wall time among *solved* cells; fresh,
+uncached-input, output, cache-read, and cache-write traffic per solve; `$/solve`
+when the model has a configured price in `prices.json`; and exact telemetry
+source, basis, and row coverage.
+
+One complete telemetry lane is selected for each arm: complete counting-proxy
+splits are preferred, otherwise complete native harness splits are used. Sources
+are never mixed row by row. Incomplete lanes fail closed and display coverage
+instead of a potentially biased token figure. Per-solve token traffic sums every
+matched attempt, including failures, and divides by solved cells.
 
 **Gateway Bench.** Per route: solve rate, mean checker score, availability, and
 latency, each with a task-bootstrap 95% interval; plus `$/solve` on the
@@ -109,8 +114,9 @@ than an admin-panel one.
 - **Rules, not boxes.** Boards are records separated by hairlines rather than
   cards with borders and shadows, so the data sits on the page.
 - **The lede reports coverage, not a conclusion.** The headline names the two
-  result families and the dateline counts the included harnesses, models,
-  bundles, and cells. Results stay in the tables for readers to interpret.
+  result families and the dateline counts included harnesses, models, bundles,
+  valid result rows, and matched result rows. Results stay in the tables for
+  readers to interpret.
 - **Tables sort values without assigning ordinal ranks.** Equal estimates are
   not presented as first, second, and third, and no row receives visual
   winner treatment.
