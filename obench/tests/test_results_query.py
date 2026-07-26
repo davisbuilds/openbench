@@ -116,6 +116,23 @@ class ResultsQueryTests(unittest.TestCase):
         out = _run("summary", _write([_row("pi", "a", "t", 1, "solved", True)]))
         self.assertIn("HOST-UNKNOWN", out)
 
+    def test_never_run_cells_are_flagged_not_hidden(self):
+        # `planned` counts cells with at least one ROW, so a cell that never ran
+        # is invisible to coverage: pi x deepseek read 100% on tb-mid while
+        # holding 14 of 18 cells. That is the exact case coverage exists for.
+        rows = [_row("pi", "a", "t1", 1, "solved", True),
+                _row("pi", "a", "t2", 1, "solved", True),
+                _row("pi", "b", "t1", 1, "solved", True)]  # arm b never ran t2
+        out = _run("summary", _write(rows))
+        self.assertIn("MISSING-CELLS pi x b", out)
+        self.assertIn("t2#t1", out)
+        self.assertNotIn("MISSING-CELLS pi x a", out)
+
+    def test_full_grid_is_not_flagged(self):
+        rows = [_row("pi", arm, task, 1, "solved", True)
+                for arm in ("a", "b") for task in ("t1", "t2")]
+        self.assertNotIn("MISSING-CELLS", _run("summary", _write(rows)))
+
     def test_evidence_prints_source_line(self):
         path = _write([_row("pi", "m", "t", 1, "solved", True)])
         out = _run("evidence", path, "--run-id", "pi:t:m")
