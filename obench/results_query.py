@@ -127,7 +127,35 @@ def cmd_summary(rows, args):
           f"excluded classes = {EXCLUDED}; a cell counts once "
           f"(judged beats excluded, then latest ts_iso wins).")
     _warn_low_coverage(cells)
+    _warn_missing_cells(cells)
     _warn_mixed_hosts(cells)
+
+
+def _warn_missing_cells(cells):
+    """Flag arms that are missing whole cells from the grid the other arms ran.
+
+    ``planned`` counts cells that produced at least one ROW, so a cell that never
+    ran at all is invisible: pi x deepseek-v4-flash reported coverage 100% on
+    tb-mid while actually holding 14 of 18 cells, because its 4 missing cells had
+    no rows to be counted. That is precisely the case coverage exists to catch.
+
+    The reference grid is the union of tasks across all selected arms x the
+    highest trial number seen. An arm that deliberately ran a subset still gets
+    flagged, which is correct -- it cannot be compared on the full grid.
+    """
+    tasks = {t for byc in cells.values() for (t, _) in byc}
+    trials = {tr for byc in cells.values() for (_, tr) in byc}
+    if not tasks or not trials:
+        return
+    grid = {(t, tr) for t in tasks for tr in trials}
+    for armname in sorted(cells):
+        absent = grid - set(cells[armname])
+        if not absent:
+            continue
+        sample = ", ".join(f"{t}#t{tr}" for t, tr in sorted(absent)[:4])
+        print(f"  MISSING-CELLS {armname}: {len(cells[armname])} of {len(grid)} "
+              f"grid cells ever ran; {len(absent)} never produced a row "
+              f"(e.g. {sample}). True coverage is below the figure above.")
 
 
 def _warn_mixed_hosts(cells):
