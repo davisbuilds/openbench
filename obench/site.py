@@ -227,12 +227,18 @@ def _pick_cost(costs):
 
 def _metric_dto(metric):
     if not isinstance(metric, dict):
-        return {"estimate": None, "low": None, "high": None}
+        return {
+            "estimate": None,
+            "low": None,
+            "high": None,
+            "aggregation": None,
+        }
     interval = metric.get("interval") or {}
     return {
         "estimate": metric.get("estimate"),
         "low": interval.get("low"),
         "high": interval.get("high"),
+        "aggregation": metric.get("aggregation"),
     }
 
 
@@ -1514,7 +1520,7 @@ def _gateway_board(bundle):
              f"({_fmt_pct(a['max_calls']['ratio'])})"
          ),
          "key": lambda a: a["max_calls"]["ratio"]},
-        {"label": "Latency", "dir": "asc",
+        {"label": "Median latency", "dir": "asc",
          "cell": lambda a: _fmt_secs(a["latency_s"]["estimate"]),
          "key": lambda a: a["latency_s"]["estimate"]},
         {"label": "$/solve", "dir": "asc", "skip_if_empty": True,
@@ -1543,7 +1549,7 @@ def _gateway_board(bundle):
             delta_column("Δ solve rate", "solve_rate", _fmt_pct, True),
             delta_column("Δ mean score", "mean_checker_score", _fmt_score, True),
             delta_column("Δ availability", "availability", _fmt_pct, True),
-            delta_column("Δ latency", "latency_s",
+            delta_column("Δ median latency", "latency_s",
                          lambda v: f"{v:.2f}s", False, "asc"),
         ]
         legend = "".join(

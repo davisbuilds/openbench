@@ -94,6 +94,13 @@ def _mean(values: Sequence[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
+def _median(values: Sequence[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return _percentile(ordered, 0.5)
+
+
 def _percentile(sorted_values: Sequence[float], probability: float) -> float:
     if len(sorted_values) == 1:
         return sorted_values[0]
@@ -111,6 +118,7 @@ def _interval(
     *,
     replicates: int,
     seed: int,
+    statistic: Any = _mean,
 ) -> dict[str, float] | None:
     if not task_values:
         return None
@@ -118,7 +126,9 @@ def _interval(
     rng = random.Random(seed)
     samples = []
     for _ in range(replicates):
-        samples.append(sum(rng.choice(ordered) for _ in ordered) / len(ordered))
+        sample = statistic([rng.choice(ordered) for _ in ordered])
+        if sample is not None:
+            samples.append(sample)
     samples.sort()
     return {
         "confidence": 0.95,
@@ -162,11 +172,19 @@ def _metric(
     cells_total: int,
     replicates: int,
     seed: int,
+    statistic: Any = _mean,
+    aggregation: str = "mean_of_task_means",
 ) -> dict[str, Any]:
     values = list(task_values.values())
     return {
-        "estimate": _mean(values),
-        "interval": _interval(task_values, replicates=replicates, seed=seed),
+        "estimate": statistic(values),
+        "aggregation": aggregation,
+        "interval": _interval(
+            task_values,
+            replicates=replicates,
+            seed=seed,
+            statistic=statistic,
+        ),
         "task_coverage": {
             "covered": len(task_values),
             "total": eligible_tasks,
@@ -538,6 +556,8 @@ def _cell_cost(cell: Mapping[str, Any], basis: str) -> float | None:
 def _task_values(
     cells_by_task: Mapping[str, Sequence[Mapping[str, Any]]],
     getter: Any,
+    *,
+    statistic: Any = _mean,
 ) -> tuple[dict[str, float], int]:
     values = {}
     covered_cells = 0
@@ -546,7 +566,7 @@ def _task_values(
         covered = [value for value in cell_values if value is not None]
         covered_cells += len(covered)
         if covered:
-            values[task] = sum(covered) / len(covered)
+            values[task] = statistic(covered)
     return values, covered_cells
 
 
@@ -824,7 +844,12 @@ def aggregate(
         }
         metrics = {}
         for name, getter in getters.items():
-            values, covered_cells = _task_values(cells_by_task, getter)
+            statistic = _median if name == "latency_s" else _mean
+            values, covered_cells = _task_values(
+                cells_by_task,
+                getter,
+                statistic=statistic,
+            )
             metrics[name] = _metric(
                 values,
                 eligible_tasks=eligible_tasks,
@@ -832,6 +857,12 @@ def aggregate(
                 cells_total=cells_total,
                 replicates=bootstrap_replicates,
                 seed=_seed(bootstrap_seed, f"arm:{arm_id}:{name}"),
+                statistic=statistic,
+                aggregation=(
+                    "median_of_task_medians"
+                    if name == "latency_s"
+                    else "mean_of_task_means"
+                ),
             )
             if name in _CALL_COVERAGE_FIELDS or name == "throughput_tokens_per_s":
                 call_total = sum(
@@ -1043,16 +1074,23 @@ def aggregate(
                 if treatment is not None and control is not None:
                     block_differences[block["task"]].append(treatment - control)
                     covered_blocks += 1
+            statistic = _median if name == "latency_s" else _mean
             paired = {
-                task: sum(values) / len(values)
+                task: statistic(values)
                 for task, values in sorted(block_differences.items())
             }
             metrics[name] = {
-                "estimate": _mean(list(paired.values())),
+                "estimate": statistic(list(paired.values())),
+                "aggregation": (
+                    "median_of_task_median_paired_differences"
+                    if name == "latency_s"
+                    else "mean_of_task_mean_paired_differences"
+                ),
                 "interval": _interval(
                     paired,
                     replicates=bootstrap_replicates,
                     seed=_seed(bootstrap_seed, f"contrast:{arm_id}:{name}"),
+                    statistic=statistic,
                 ),
                 "paired_task_coverage": {
                     "covered": len(paired),

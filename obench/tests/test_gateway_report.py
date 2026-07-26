@@ -264,6 +264,53 @@ class GatewayReportTests(unittest.TestCase):
         rendered = gateway_report.render_text(report)
         self.assertIn("call cap 1/4 (25.0%)", rendered)
 
+    def test_latency_uses_task_weighted_medians(self):
+        rows = []
+        durations = {
+            "task_a": ([1, 1, 1], [2, 3, 100]),
+            "task_b": ([2, 2, 2], [4, 5, 6]),
+        }
+        for task, (direct, gateway) in durations.items():
+            for repetition, (direct_s, gateway_s) in enumerate(
+                zip(direct, gateway), start=1
+            ):
+                rows.append(
+                    make_row(
+                        task=task,
+                        arm_id="direct",
+                        role="direct",
+                        baseline=True,
+                        repetition=repetition,
+                        duration=direct_s,
+                        calls=[call()],
+                    )
+                )
+                rows.append(
+                    make_row(
+                        task=task,
+                        arm_id="gateway",
+                        role="gateway",
+                        baseline=False,
+                        repetition=repetition,
+                        duration=gateway_s,
+                        calls=[call()],
+                    )
+                )
+
+        report = gateway_report.aggregate(
+            rows, bootstrap_replicates=200, bootstrap_seed=7
+        )
+        latency = report["arms"]["gateway"]["metrics"]["latency_s"]
+        contrast = report["paired_contrasts"]["gateway"]["metrics"]["latency_s"]
+
+        self.assertEqual(latency["estimate"], 4.0)
+        self.assertEqual(latency["aggregation"], "median_of_task_medians")
+        self.assertEqual(contrast["estimate"], 2.5)
+        self.assertEqual(
+            contrast["aggregation"],
+            "median_of_task_median_paired_differences",
+        )
+
     def test_gateway_provider_failure_stays_in_attempted_denominator(self):
         rows = self.complete_rows()
         failed = rows[-1]
