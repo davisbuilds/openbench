@@ -119,6 +119,37 @@ def has_instant_cli_exit_shape(row):
     return float(wall) < 30.0
 
 
+STARVED_OUTPUT_BUDGET = 64
+
+
+def has_starved_output_budget(row):
+    """True when a request was sent with an output budget too small to answer.
+
+    pi derives each request's max output tokens from the model's configured
+    context window minus the prompt, so on a long conversation the budget decays
+    monotonically -- observed on one deepseek cell as
+    8192 -> 8173 -> 4998 -> ... -> 1258 -> 1. A model asked to reply in 1 token
+    cannot answer, so scoring the cell as wrong_answer measures the harness's
+    budget arithmetic, not the model.
+
+    The effect is large and one-sided: deepseek cells containing a starved
+    request had median 114 turns and solved 3/21 (14%), against 11.5 turns and
+    103/197 (52%) for the rest. It also hits long-horizon task sets harder --
+    16% of tb-mid cells versus 8% of TB-7 -- which manufactured an apparent
+    model x task-set interaction that vanished once these cells were excluded.
+
+    Only capped models can trip this. gpt-5.6-sol runs with no cap at all, so
+    the handicap fell entirely on the open models it was being compared against.
+    """
+    for sample in (row or {}).get("sampling_observed") or ():
+        if not isinstance(sample, dict):
+            continue
+        cap = sample.get("max_completion_tokens") or sample.get("max_tokens")
+        if isinstance(cap, (int, float)) and not isinstance(cap, bool) and 0 < cap <= STARVED_OUTPUT_BUDGET:
+            return True
+    return False
+
+
 def has_zero_output_and_minimal_turns(row, text=""):
     """True when a completed cell produced no model output and at most 1 turn.
 
@@ -324,6 +355,11 @@ def classify_failure(row, adapter_output="", timeout_s=None):
 
     if bool(row.get("success")):
         return "solved"
+    # Checked BEFORE the checker-owned verdict: these cells DO complete and the
+    # checker DOES judge them, so the verdict rule would otherwise score them as
+    # wrong_answer. A model given a 1-token budget never got to answer.
+    if has_starved_output_budget(row):
+        return "infra"
     # A transient provider hiccup does NOT erase a verdict the checker already
     # reached. When the agent ran to completion, did real work, and the checker
     # exited with a real verdict (0/1), the checker owns the oracle -- fall
@@ -385,6 +421,12 @@ def class_for_report(row):
     row = row or {}
     stored = row.get("failure_class")
     if stored in FAILURE_CLASSES:
+        # Correct the other direction too: a stored VERDICT on a cell whose
+        # request budget was starved is not a capability result. sampling_observed
+        # is persisted, so unlike the 429 case this is recoverable from history.
+        if stored not in EXCLUDED_FROM_SOLVE_RATE and not row.get("success") \
+                and has_starved_output_budget(row):
+            return "infra"
         if stored in EXCLUDED_FROM_SOLVE_RATE and has_checker_owned_verdict(row):
             return "timeout" if row.get("checker_exit") == "timeout" else "wrong_answer"
         return stored
