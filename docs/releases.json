@@ -45,15 +45,6 @@
     "path": "releases/2026-07-20-deepseek/index.html"
   },
   {
-    "id": "2026-07-20-aider-showcase",
-    "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)",
-    "date": "2026-07-20",
-    "models": [
-      "deepseek-v4-flash"
-    ],
-    "path": "releases/2026-07-20-aider-showcase/index.html"
-  },
-  {
     "id": "2026-07-21-gpt56",
     "title": "OpenBench: gpt-5.6 across 7 harnesses",
     "date": "2026-07-21",

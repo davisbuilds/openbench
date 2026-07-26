@@ -1,15 +1,5 @@
 {
-  "community": [
-    {
-      "claim": "Seed community submission: the verified aider showcase bundle (same artifact as docs/releases/2026-07-20-aider-showcase).",
-      "date": "2026-07-20",
-      "id": "openbench-aider-showcase",
-      "link": "https://github.com/minghinmatthewlam/openbench/tree/main/docs/releases/2026-07-20-aider-showcase",
-      "path": "community/openbench-aider-showcase/index.html",
-      "submitter": "openbench",
-      "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
-    }
-  ],
+  "community": [],
   "cross_family_note": "Each board is one result-sealed bundle, shown with its interval and its provenance. The two families share no denominators.",
   "gateway": {
     "bundle_count": 0,
@@ -19,7 +9,7 @@
   },
   "generated_by": "obench site",
   "harness": {
-    "bundle_count": 5,
+    "bundle_count": 4,
     "bundles": [
       {
         "also_seen_as": [],
@@ -258,141 +248,6 @@
         "table": "matched",
         "task_set_digest": "d949d46e8aae81489a91d1925ec14f91e4667f5c69ccb314e8fdc611d966c059",
         "title": "OpenBench: gpt-5.6 across 7 harnesses"
-      },
-      {
-        "also_seen_as": [
-          {
-            "id": "openbench-aider-showcase",
-            "kind": "community",
-            "path": "community/openbench-aider-showcase/index.html",
-            "results_path": "community/openbench-aider-showcase/results.jsonl"
-          }
-        ],
-        "arms": [
-          {
-            "cost_per_solve_usd": null,
-            "fresh_tokens_per_solve": 5856.0,
-            "harness": "aider",
-            "median_wall_s": 39.0355,
-            "model": "deepseek-v4-flash",
-            "n": 8,
-            "solve_rate": 1.0,
-            "solved": 8,
-            "token_telemetry_bases": [
-              "proxy_measured"
-            ],
-            "token_telemetry_coverage": {
-              "covered_rows": 8,
-              "native_covered_rows": 0,
-              "proxy_covered_rows": 8,
-              "ratio": 1.0,
-              "total_rows": 8
-            },
-            "token_telemetry_source": "proxy",
-            "tokens_cache_read_per_solve": 336.0,
-            "tokens_cache_write_per_solve": 0.0,
-            "tokens_input_uncached_per_solve": 2307.625,
-            "tokens_output_per_solve": 3548.375,
-            "wilson95": [
-              0.6755843804891231,
-              1.0
-            ]
-          },
-          {
-            "cost_per_solve_usd": null,
-            "fresh_tokens_per_solve": 13669.375,
-            "harness": "opencode",
-            "median_wall_s": 31.720999999999997,
-            "model": "deepseek-v4-flash",
-            "n": 8,
-            "solve_rate": 1.0,
-            "solved": 8,
-            "token_telemetry_bases": [
-              "proxy_measured"
-            ],
-            "token_telemetry_coverage": {
-              "covered_rows": 8,
-              "native_covered_rows": 8,
-              "proxy_covered_rows": 8,
-              "ratio": 1.0,
-              "total_rows": 8
-            },
-            "token_telemetry_source": "proxy",
-            "tokens_cache_read_per_solve": 91600.0,
-            "tokens_cache_write_per_solve": 0.0,
-            "tokens_input_uncached_per_solve": 10327.875,
-            "tokens_output_per_solve": 3341.5,
-            "wilson95": [
-              0.6755843804891231,
-              1.0
-            ]
-          },
-          {
-            "cost_per_solve_usd": null,
-            "fresh_tokens_per_solve": 7742.25,
-            "harness": "pi",
-            "median_wall_s": 26.444,
-            "model": "deepseek-v4-flash",
-            "n": 8,
-            "solve_rate": 1.0,
-            "solved": 8,
-            "token_telemetry_bases": [
-              "proxy_measured"
-            ],
-            "token_telemetry_coverage": {
-              "covered_rows": 8,
-              "native_covered_rows": 8,
-              "proxy_covered_rows": 8,
-              "ratio": 1.0,
-              "total_rows": 8
-            },
-            "token_telemetry_source": "proxy",
-            "tokens_cache_read_per_solve": 35456.0,
-            "tokens_cache_write_per_solve": 0.0,
-            "tokens_input_uncached_per_solve": 4927.75,
-            "tokens_output_per_solve": 2814.5,
-            "wilson95": [
-              0.6755843804891231,
-              1.0
-            ]
-          }
-        ],
-        "caveats": [
-          "Harness mode is not apples-to-apples: aider ran as a one-shot --message invocation, while pi and opencode ran full agentic loops. Token comparison reflects that difference in harness mode, not a pure like-for-like agent loop contest.",
-          "One aider cell excluded: 1 of 9 aider cells was infrastructure-classified and is excluded from solve-rate denominators (aider reported as 8/8). pi and opencode are 9/9.",
-          "Uniform total-token basis: totals include uncached input, output, and cache reads from split fields; the vendor aggregate is never used. Values are 6,192 vs 48,262 vs 111,380 tokens/solve (aider vs pi vs opencode).",
-          "Verifiable bundle: this release includes results.jsonl and provenance.json. Re-check digests with obench verify docs/releases/2026-07-20-aider-showcase."
-        ],
-        "claim": null,
-        "countable_rows": 26,
-        "date": "2026-07-20",
-        "excluded_counts": {
-          "infra": 1
-        },
-        "family": "harness",
-        "has_caveats": true,
-        "id": "2026-07-20-aider-showcase",
-        "kind": "release",
-        "link": null,
-        "matched": {
-          "duplicate_cells_excluded": 0,
-          "duplicate_rows_excluded": 0,
-          "groups_compared": 3,
-          "matched_cells_per_group": 8,
-          "matched_rows": 24,
-          "unmatched_countable_rows": 2
-        },
-        "models": [
-          "deepseek-v4-flash"
-        ],
-        "path": "releases/2026-07-20-aider-showcase/index.html",
-        "raw_rows": 27,
-        "results_path": "releases/2026-07-20-aider-showcase/results.jsonl",
-        "results_sha256": "677642cc0649ecfd42231dbdf49fc5aa0b2c2a8161ccb879358bfeec40e45192",
-        "submitter": null,
-        "table": "matched",
-        "task_set_digest": "8b757f8abf3816cac2ddc80e5ceaefa3f4a323c47c2431258a655d4d3b7f2e43",
-        "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
       },
       {
         "also_seen_as": [],
@@ -1004,15 +859,6 @@
       ],
       "path": "releases/2026-07-20-deepseek/index.html",
       "title": "OpenBench: deepseek across 5 harnesses"
-    },
-    {
-      "date": "2026-07-20",
-      "id": "2026-07-20-aider-showcase",
-      "models": [
-        "deepseek-v4-flash"
-      ],
-      "path": "releases/2026-07-20-aider-showcase/index.html",
-      "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
     },
     {
       "date": "2026-07-21",
