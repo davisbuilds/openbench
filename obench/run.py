@@ -97,6 +97,7 @@ ROW_FIELDS = (
     "image_digest", "candidate_provenance", "version_drift", "timeout_s",
     "workspace_source",
     "last_activity_age_s",
+    "host",
 )
 
 

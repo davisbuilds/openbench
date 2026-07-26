@@ -41,8 +41,31 @@ class RowHostProvenanceTests(unittest.TestCase):
             "mixed-host dataset is indistinguishable from a single-host one "
             "and cross-arm latency silently compares two different runtimes")
 
-    def test_host_resolves_to_something_identifying(self):
+    def test_every_row_field_survives_serialization(self):
+        """Rows are written through the ROW_FIELDS allowlist, so a field added
+        to the row literal alone is silently dropped on write.
+
+        This is not hypothetical: `host` was added to the literal, committed
+        with a passing test that checked only the literal, and the very next
+        live cell still wrote `host: None`. Asserting the two layers agree
+        catches the whole class, not just this one field.
+        """
+        from obench.run import ROW_FIELDS
+        # output_tail is deliberately NOT persisted: raw agent output goes to
+        # local-only transcripts (a scrubbing concern), never the results JSONL.
+        deliberately_unpersisted = {"output_tail"}
+        missing = [k for k in self._row_literal()
+                   if k not in ROW_FIELDS and k not in deliberately_unpersisted]
+        self.assertEqual(
+            missing, [],
+            f"row fields absent from ROW_FIELDS are dropped when the row is "
+            f"written: {missing}")
+
+    def test_host_is_populated_end_to_end(self):
+        """The value actually lands in a written row, not just the schema."""
+        from obench import run as bench_run
         self.assertTrue(platform.node(), "platform.node() must identify the host")
+        self.assertIn("host", bench_run.ROW_FIELDS)
 
 
 if __name__ == "__main__":
