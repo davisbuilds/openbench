@@ -6920,7 +6920,7 @@
         "submitter": "OpenBench",
         "title": "GPT-4o mini managed gateway request probe",
         "track": "request_probe",
-        "verified_with_commit": "d2090ed9ac81d7b6a3a97d02360560e2cfdf99eb"
+        "verified_with_commit": "bcbc8f7d5e5a479df86dd8ca1cec1ea38e4e15cf"
       }
     ],
     "note": "Gateway Probe is request-level transport and serving telemetry. Cold and warm denominators are separate and are never merged with Gateway Bench.",
