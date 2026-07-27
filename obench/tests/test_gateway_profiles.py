@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from obench import gateway_profiles, gateway_metrics
+from obench import gateway_profiles, gateway_metrics, gateway_probe_results
 
 
 def sse(*objects):
@@ -740,6 +740,11 @@ class GatewayEvidenceTests(unittest.TestCase):
                             "model": observed,
                             "selected": True,
                         }]},
+                        "attempts": [{
+                            "provider": provider,
+                            "model": observed,
+                            "status": 200,
+                        }],
                     },
                 },
                 "[DONE]",
@@ -756,8 +761,15 @@ class GatewayEvidenceTests(unittest.TestCase):
         )
 
         self.assertTrue(result["route_evidence"]["pass"], result)
-        self.assertEqual(result["route"]["provider"], "Moonshot AI")
+        self.assertEqual(result["route"]["provider"], "moonshotai")
         self.assertEqual(result["route"]["served_model"], observed)
+        self.assertEqual(
+            result["route"]["attempts"],
+            [{"provider": "moonshotai", "model": observed, "status": 200}],
+        )
+        gateway_probe_results._validate_route(
+            result["route"], "request route"
+        )
 
         contradictory = self.parse(
             payload("Moonshot Labs"),
