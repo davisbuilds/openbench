@@ -280,6 +280,11 @@ def aggregate_gateway_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
             "mean_checker_score": _metric_dto(metrics.get("mean_checker_score")),
             "availability": _metric_dto(metrics.get("availability")),
             "latency_s": _metric_dto(metrics.get("latency_s")),
+            "max_calls": arm.get("max_calls") or {
+                "cells": 0,
+                "total_cells": arm.get("attempted_cells", 0),
+                "ratio": 0.0,
+            },
             "cost": _pick_cost(arm.get("costs")),
         })
     # Baseline first, then slowest-to-fastest is meaningless before sorting in
@@ -319,9 +324,11 @@ def aggregate_gateway_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
         "experiment_id": experiment.get("experiment_id"),
         "experiment_digest": report.get("experiment_digest"),
         "execution_lane": experiment.get("execution_lane"),
+        "budget_max_calls": (report.get("budget") or {}).get("max_calls"),
         "blocks_included": blocks.get("included"),
         "blocks_observed": blocks.get("observed"),
         "blocks_excluded": blocks.get("excluded_by_reason") or {},
+        "blocks_max_calls_affected": blocks.get("max_calls_affected", 0),
         "tasks_included": (report.get("tasks") or {}).get("included"),
         "arms": arms,
         "contrasts": contrasts,
@@ -1448,6 +1455,10 @@ def _gateway_board(bundle):
         _meta_field("harness", bundle["harness"]) if bundle.get("harness") else None,
         _meta_field("date", bundle["date"]) if bundle.get("date") else None,
         _meta_field("blocks", f"{bundle['blocks_included']}/{bundle['blocks_observed']}"),
+        _meta_field(
+            "cap-affected blocks",
+            f"{bundle.get('blocks_max_calls_affected', 0)}/{bundle['blocks_included']}",
+        ),
         _meta_field("tasks", bundle["tasks_included"]),
         _meta_field("lane", bundle["execution_lane"]) if bundle.get("execution_lane") else None,
         _meta_field("experiment", (bundle.get("experiment_digest") or "")[:12])
@@ -1493,6 +1504,16 @@ def _gateway_board(bundle):
         {"label": "Availability",
          "cell": lambda a: _fmt_pct(a["availability"]["estimate"]),
          "key": lambda a: a["availability"]["estimate"]},
+        {"label": (
+            f"{bundle['budget_max_calls']}-call cap"
+            if bundle.get("budget_max_calls") is not None
+            else "Call cap"
+         ),
+         "cell": lambda a: (
+             f"{a['max_calls']['cells']}/{a['max_calls']['total_cells']} "
+             f"({_fmt_pct(a['max_calls']['ratio'])})"
+         ),
+         "key": lambda a: a["max_calls"]["ratio"]},
         {"label": "Latency", "dir": "asc",
          "cell": lambda a: _fmt_secs(a["latency_s"]["estimate"]),
          "key": lambda a: a["latency_s"]["estimate"]},

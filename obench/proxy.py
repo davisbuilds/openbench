@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -92,6 +92,9 @@ class _CellLedger:
     max_calls: int | None = None
     admitted_calls: int = 0
     max_calls_exceeded: bool = False
+    max_calls_event: threading.Event = field(
+        default_factory=threading.Event, repr=False
+    )
     record_count: int = 0
     last_sequence: int = 0
     root_hash: str = EMPTY_LEDGER_HASH
@@ -957,6 +960,14 @@ class CountingProxyServer(ThreadingHTTPServer):
             return None
         return time.monotonic() - ts
 
+    def cell_max_calls_event(self, token: str) -> threading.Event:
+        """Return the cell-owned signal set by its terminal call-cap rejection."""
+        with self._ledger_condition:
+            ledger = self._cell_ledgers.get(token)
+            if ledger is None:
+                raise KeyError(f"cell is not registered: {token}")
+            return ledger.max_calls_event
+
     def admit_cell_request(self, token: str) -> bool:
         """Atomically admit a request, returning False for a legacy cell."""
         with self._ledger_condition:
@@ -971,6 +982,7 @@ class CountingProxyServer(ThreadingHTTPServer):
                     and ledger.write_error is None
                 )
                 ledger.max_calls_exceeded = True
+                ledger.max_calls_event.set()
                 if record:
                     ledger.in_flight += 1
                 raise MaxCallsExceeded(ledger.max_calls, record=record)

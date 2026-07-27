@@ -20,7 +20,7 @@ import sys
 import tempfile
 import time
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -549,6 +549,16 @@ def _parse_entry_result(stdout: str) -> dict[str, Any]:
     raise GatewayRunError("routed entry emitted no result sentinel")
 
 
+def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
 def _invoke_local(
     *,
     plan_path: Path,
@@ -558,6 +568,7 @@ def _invoke_local(
     token: str,
     timeout_s: int,
     adapters_dir: Path,
+    max_calls_exceeded: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     env = _sanitized_env(
         adapters_dir=adapters_dir,
@@ -582,17 +593,49 @@ def _invoke_local(
         text=True,
         start_new_session=True,
     )
-    try:
-        stdout, stderr = proc.communicate(timeout=timeout_s + 10)
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        stdout, stderr = proc.communicate()
+    deadline = time.monotonic() + timeout_s + 10
+
+    def max_calls_result(stdout: str, stderr: str) -> dict[str, Any]:
         return {
             "completed": False,
-            "error": f"entry timeout after {timeout_s}s",
+            "error": "entry stopped after max_calls budget exhaustion",
             "output_tail": (stdout + stderr)[-2000:],
-            "entry_timed_out": True,
+            "entry_timed_out": False,
+            "max_calls_exceeded": True,
         }
+
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _kill_process_group(proc)
+                stdout, stderr = proc.communicate()
+                return {
+                    "completed": False,
+                    "error": f"entry timeout after {timeout_s}s",
+                    "output_tail": (stdout + stderr)[-2000:],
+                    "entry_timed_out": True,
+                }
+            try:
+                stdout, stderr = proc.communicate(timeout=min(0.1, remaining))
+                # The session belongs to this cell. Clean up any background
+                # descendants even when the entry leader has already exited.
+                _kill_process_group(proc)
+                if max_calls_exceeded is not None and max_calls_exceeded():
+                    return max_calls_result(stdout, stderr)
+                break
+            except subprocess.TimeoutExpired:
+                if max_calls_exceeded is not None and max_calls_exceeded():
+                    _kill_process_group(proc)
+                    stdout, stderr = proc.communicate()
+                    return max_calls_result(stdout, stderr)
+    except BaseException:
+        _kill_process_group(proc)
+        try:
+            proc.communicate()
+        except BaseException:
+            pass
+        raise
     if proc.returncode != 0:
         raise GatewayRunError(
             f"routed entry exited {proc.returncode}: {(stderr or stdout)[-1000:]}"
@@ -1076,6 +1119,7 @@ def _run_cell(
         f"{results.make_gateway_cell_id(identity)}:{time.time_ns()}".encode()
     ).hexdigest()[:32]
     server.register_cell(token, max_calls=experiment.budget.max_calls)
+    max_calls_event = server.cell_max_calls_event(token)
     server.register_route(token, plan, secret_plan)
     started = time.monotonic()
     infrastructure_reason = None
@@ -1115,6 +1159,7 @@ def _run_cell(
                     token=token,
                     timeout_s=experiment.budget.timeout_s,
                     adapters_dir=adapters_dir,
+                    max_calls_exceeded=max_calls_event.is_set,
                 )
             except Exception as exc:  # noqa: BLE001 - row records infra failure
                 infrastructure_reason = "adapter_entry_failure"
@@ -1130,6 +1175,7 @@ def _run_cell(
             )
             if budget_reason == "max_calls_exceeded":
                 budget_exhausted_reason = "max_calls"
+                infrastructure_reason = None
             else:
                 infrastructure_reason = infrastructure_reason or budget_reason
         except Exception as exc:  # noqa: BLE001 - sealing is evidence-critical

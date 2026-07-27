@@ -43,6 +43,7 @@ def make_row(
     duration=10.0,
     calls=None,
     infrastructure_reason=None,
+    budget_exhausted_reason=None,
     route_pass=True,
     route_reasons=None,
     track="fixed_model_provider",
@@ -87,6 +88,7 @@ def make_row(
         "available": available,
         "duration_s": duration,
         "infrastructure_invalid_reason": infrastructure_reason,
+        "budget_exhausted_reason": budget_exhausted_reason,
     }
     row = {
         "schema_version": 2,
@@ -209,7 +211,10 @@ class GatewayReportTests(unittest.TestCase):
             "included": 4,
             "excluded": 0,
             "excluded_by_reason": {},
+            "max_calls_affected": 0,
+            "max_calls_rate": 0.0,
         })
+        self.assertEqual(report["budget"]["max_calls"], 4)
         self.assertEqual(report["tasks"]["included"], 2)
         self.assertEqual(direct["metrics"]["solve_rate"]["estimate"], 1.0)
         self.assertEqual(gateway["metrics"]["solve_rate"]["estimate"], 0.5)
@@ -228,6 +233,36 @@ class GatewayReportTests(unittest.TestCase):
         )
         self.assertFalse(report["analysis"]["wilson_intervals"])
         self.assertFalse(report["analysis"]["composite_score"])
+
+    def test_max_calls_incidence_keeps_cells_in_matched_denominator(self):
+        rows = self.complete_rows()
+        rows[1]["result"].update(
+            solved=True,
+            checker_score=1.0,
+            budget_exhausted_reason="max_calls",
+        )
+
+        report = gateway_report.aggregate(rows, bootstrap_replicates=20)
+
+        self.assertEqual(report["blocks"]["included"], 4)
+        self.assertEqual(report["blocks"]["max_calls_affected"], 1)
+        self.assertEqual(report["blocks"]["max_calls_rate"], 0.25)
+        self.assertEqual(report["arms"]["direct"]["max_calls"], {
+            "cells": 0,
+            "total_cells": 4,
+            "ratio": 0.0,
+        })
+        self.assertEqual(report["arms"]["gateway"]["max_calls"], {
+            "cells": 1,
+            "total_cells": 4,
+            "ratio": 0.25,
+        })
+        self.assertEqual(
+            report["arms"]["gateway"]["metrics"]["solve_rate"]["estimate"],
+            0.25,
+        )
+        rendered = gateway_report.render_text(report)
+        self.assertIn("call cap 1/4 (25.0%)", rendered)
 
     def test_gateway_provider_failure_stays_in_attempted_denominator(self):
         rows = self.complete_rows()
