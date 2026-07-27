@@ -24,6 +24,11 @@ no separate fallback page.
 
 The page is generated, never edited by hand.
 
+An optional `site-meta.json` in the site root supplies the official
+deployment's canonical URL and absolute social-preview image URL. Only
+HTTP(S) values render. The preview remains a committed site asset, so it can
+show the published table rather than decorative sample data.
+
 ## Build
 
 ```bash

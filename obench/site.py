@@ -38,7 +38,7 @@ from collections import defaultdict
 from . import leaderboard, report_page, stats
 from .paths import SOURCE_ROOT
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 HARNESS_NOTE = (
     "Scores are not comparable across bundles: task sets, trial counts, and "
@@ -629,9 +629,24 @@ def build_board(
     releases = leaderboard._load_manifest_list(os.path.join(site_dir, "releases.json"))
     community = leaderboard._load_manifest_list(os.path.join(site_dir, "community.json"))
     packs = leaderboard._load_manifest_list(os.path.join(site_dir, "packs.json"))
+    site_metadata = {}
+    metadata_path = os.path.join(site_dir, "site-meta.json")
+    try:
+        with open(metadata_path, encoding="utf-8") as fh:
+            candidate = json.load(fh)
+        if isinstance(candidate, dict):
+            site_metadata = {
+                key: value
+                for key, value in candidate.items()
+                if key in {"canonical_url", "social_image_url"}
+                and isinstance(value, str)
+            }
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        pass
     return {
         "generated_by": "obench site",
         "schema_version": SCHEMA_VERSION,
+        "site_metadata": site_metadata,
         "cross_family_note": CROSS_FAMILY_NOTE,
         "harness": harness,
         "gateway": gateway,
@@ -2101,6 +2116,17 @@ def _gateway_probe_board(bundle):
             )
         )
 
+    def compact_percentile(item, name, fmt):
+        value = summary(item, name)
+        return (
+            f"{fmt(value.get('p50'))} / {fmt(value.get('p95'))} "
+            + _tag(
+                "span",
+                {"class": "sub"},
+                f"({coverage(value.get('coverage'))})",
+            )
+        )
+
     def seconds(value):
         return "—" if value is None else f"{value:.3f}s"
 
@@ -2147,18 +2173,20 @@ def _gateway_probe_board(bundle):
         item = row["item"]
         return (
             "measured "
-            + percentile_cell(item, "measured_cost_usd", money)
+            + compact_percentile(item, "measured_cost_usd", money)
             + "<br>charged "
-            + percentile_cell(item, "charged_cost_usd", money)
+            + compact_percentile(item, "charged_cost_usd", money)
         )
 
     def tokens_cell(row):
         item = row["item"]
         return "<br>".join((
-            "total " + percentile_cell(item, "total_tokens", decimal),
-            "cached " + percentile_cell(item, "cached_input_tokens", decimal),
+            "total " + compact_percentile(item, "total_tokens", decimal),
+            "cached " + compact_percentile(item, "cached_input_tokens", decimal),
             "cache write "
-            + percentile_cell(item, "cache_write_input_tokens", decimal),
+            + compact_percentile(
+                item, "cache_write_input_tokens", decimal
+            ),
         ))
 
     request_columns = [
@@ -2616,13 +2644,38 @@ def render_board_html(doc):
                   + " &middot; static, self-contained, no third-party assets "
                   "&middot; " + _tag("a", {"href": "board.json"}, "board.json"))
 
+    site_metadata = doc.get("site_metadata") or {}
+    canonical_url = _safe_href(site_metadata.get("canonical_url"))
+    social_image_url = _safe_href(site_metadata.get("social_image_url"))
+    social_metadata = ""
+    if canonical_url and canonical_url.startswith(("http://", "https://")):
+        social_metadata += (
+            f'<link rel="canonical" href="{_esc(canonical_url)}">'
+            f'<meta property="og:url" content="{_esc(canonical_url)}">'
+        )
+    if social_image_url and social_image_url.startswith(("http://", "https://")):
+        social_metadata += (
+            f'<meta property="og:image" content="{_esc(social_image_url)}">'
+            '<meta property="og:image:width" content="1200">'
+            '<meta property="og:image:height" content="630">'
+            f'<meta name="twitter:image" content="{_esc(social_image_url)}">'
+        )
+    social_metadata += (
+        '<meta property="og:type" content="website">'
+        '<meta property="og:title" content="OpenBench gateway benchmarks">'
+        '<meta property="og:description" content="Digest-verified managed AI '
+        'gateway benchmark and request-probe results.">'
+        '<meta name="twitter:card" content="summary_large_image">'
+    )
+
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         "<title>OpenBench leaderboards</title>"
         '<meta name="description" content="Harness and serving-route leaderboards '
         'for OpenBench, built from digest-verified result bundles.">'
-        f"<style>{_CSS}</style></head><body>"
+        + social_metadata
+        + f"<style>{_CSS}</style></head><body>"
         + masthead
         + '<div class="wrap">'
         + lede

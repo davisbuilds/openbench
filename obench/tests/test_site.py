@@ -326,7 +326,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn("CI 88.6%–100.0%", page)
         self.assertIn("95% CI", page)
         self.assertIn("coverage 30/30", page)
-        self.assertIn("coverage 0/30", page)
+        self.assertIn("(0/30)", page)
         self.assertNotIn("TTFB", page)
         self.assertNotIn("exploratory", page.lower())
         self.assertNotIn("confirmatory", page.lower())
@@ -603,6 +603,36 @@ class RenderTests(_SiteFixture):
             "fetch(", "XMLHttpRequest", "WebSocket", "cdn.",
         ):
             self.assertNotIn(forbidden, page)
+
+    def test_site_metadata_emits_safe_social_preview_tags(self):
+        _write(
+            os.path.join(self.site_dir, "site-meta.json"),
+            json.dumps({
+                "canonical_url": "https://openbench.example/",
+                "social_image_url": "https://openbench.example/og.png",
+            }),
+        )
+        doc = site.build_board(self.site_dir)
+        page = site.render_board_html(doc)
+
+        self.assertEqual(doc["schema_version"], 4)
+        self.assertIn(
+            '<link rel="canonical" href="https://openbench.example/">',
+            page,
+        )
+        self.assertIn(
+            '<meta property="og:image" '
+            'content="https://openbench.example/og.png">',
+            page,
+        )
+
+        doc["site_metadata"] = {
+            "canonical_url": "javascript:alert(1)",
+            "social_image_url": "data:image/png,unsafe",
+        }
+        unsafe_page = site.render_board_html(doc)
+        self.assertNotIn("javascript:", unsafe_page)
+        self.assertNotIn("data:image", unsafe_page)
 
     def test_hostile_manifest_cannot_produce_a_scripting_href(self):
         """The renderer enforces the scheme itself.
