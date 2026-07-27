@@ -19,7 +19,7 @@ from obench.tests.test_gateway_probe_report import row
 from obench.tests.test_gateway_probe_spec import manifest
 
 
-TEST_COMMIT = "d" * 40
+TEST_COMMIT = "080f3132049b12bf04ac3a0437dfacf387d82b9a"
 
 
 def _json(value):
@@ -277,6 +277,15 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                     run_dir,
                     Path(tmp, "public"),
                     verified_with_commit="short",
+                )
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "must resolve to a git commit",
+            ):
+                gateway_probe_publish.publish_bundle(
+                    run_dir,
+                    Path(tmp, "missing-commit"),
+                    verified_with_commit="d" * 40,
                 )
 
     def test_rejects_source_digest_drift_extra_files_and_symlinks(self):

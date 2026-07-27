@@ -478,9 +478,38 @@ def _detect_verifier_commit() -> str:
 
 
 def _verified_with_commit(explicit: str | None) -> str:
-    if explicit is not None:
-        return _commit_value(explicit, "verified_with_commit")
-    return _detect_verifier_commit()
+    if explicit is None:
+        return _detect_verifier_commit()
+    commit = _commit_value(explicit, "verified_with_commit")
+    source_root = Path(__file__).resolve().parents[1]
+    try:
+        subprocess.run(
+            ["git", "-C", str(source_root), "cat-file", "-e", f"{commit}^{{commit}}"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(source_root),
+                "cat-file",
+                "-e",
+                f"{commit}:obench/gateway_probe_publish.py",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise GatewayProbeRunError(
+            "verified_with_commit must resolve to a git commit containing "
+            "obench/gateway_probe_publish.py"
+        ) from exc
+    return commit
 
 
 def _validate_public_rows(rows: list[dict[str, Any]]) -> None:
