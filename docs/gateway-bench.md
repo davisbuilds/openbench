@@ -92,7 +92,7 @@ single-attempt evidence where the gateway exposes it.
 Reports retain per-metric coverage and use equal task weighting.
 
 - checker solve rate and mean checker score;
-- availability and end-to-end cell latency;
+- availability and task-weighted median end-to-end cell latency;
 - time to first byte and semantic time to first token;
 - output throughput;
 - input, output, and total token usage;
@@ -103,6 +103,11 @@ Reports retain per-metric coverage and use equal task weighting.
 - route-integrity and infrastructure exclusion reasons;
 - per-arm cap-hit cells and cap-affected matched blocks;
 - paired gateway-minus-direct contrasts.
+
+Cell latency is summarized as the median across repetitions within each task,
+then the median across tasks. Its paired contrast applies the same aggregation
+to matched gateway-minus-direct differences. This keeps long agent trajectories
+from dominating the headline while preserving equal task weighting.
 
 Cost bases are never silently mixed:
 

@@ -122,6 +122,43 @@ class HarnessFamilyTests(_SiteFixture):
 
 
 class GatewayFamilyTests(_SiteFixture):
+    def test_gateway_board_labels_latency_as_median(self):
+        metric = {"estimate": 1.0, "low": 0.5, "high": 1.5}
+        bundle = {
+            "title": "Gateway fixture",
+            "track": "fixed_model_provider",
+            "blocks_included": 1,
+            "blocks_observed": 1,
+            "tasks_included": 1,
+            "blocks_excluded": {},
+            "blocks_max_calls_affected": 0,
+            "budget_max_calls": 20,
+            "arms": [{
+                "arm_id": "direct",
+                "role": "direct",
+                "requested_provider": "openai",
+                "solve_rate": metric,
+                "mean_checker_score": metric,
+                "availability": metric,
+                "latency_s": metric,
+                "max_calls": {"cells": 0, "total_cells": 1, "ratio": 0.0},
+                "cost": None,
+            }],
+            "contrasts": [{
+                "arm_id": "gateway",
+                "direct_arm": "direct",
+                "solve_rate": metric,
+                "mean_checker_score": metric,
+                "availability": metric,
+                "latency_s": metric,
+            }],
+        }
+
+        page = site._gateway_board(bundle)
+
+        self.assertIn("Median latency", page)
+        self.assertIn("Δ median latency", page)
+
     def test_missing_gateway_root_is_empty_not_an_error(self):
         doc = site.build_board(self.site_dir)
         self.assertEqual(doc["gateway"]["bundle_count"], 0)
