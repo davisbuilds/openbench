@@ -301,8 +301,6 @@ class GatewayProbeFamilyTests(_SiteFixture):
         for label in (
             "Cold requests",
             "Warm requests",
-            "Success / availability · Wilson 95%",
-            "Route verification",
             "Response headers p50 / p95",
             "First body byte p50 / p95",
             "Semantic TTFT p50 / p95",
@@ -322,11 +320,14 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn("<b>cold blocks </b>30/30", page)
         self.assertIn("<b>warm blocks </b>30/30", page)
         self.assertIn("Complete blocks: 30/30.", page)
-        self.assertIn("verified 30/30", page)
-        self.assertIn("CI 88.6%–100.0%", page)
         self.assertIn("95% CI", page)
-        self.assertIn("coverage 30/30", page)
         self.assertIn("(0/30)", page)
+        self.assertNotIn("Success / availability", page)
+        self.assertNotIn("Route verification", page)
+        self.assertNotIn("verified 30/30", page)
+        self.assertNotIn("unverifiable", page)
+        self.assertNotIn("coverage 30/30", page)
+        self.assertNotIn("CI 88.6%–100.0%", page)
         self.assertNotIn("TTFB", page)
         self.assertNotIn("exploratory", page.lower())
         self.assertNotIn("confirmatory", page.lower())
