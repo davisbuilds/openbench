@@ -974,6 +974,30 @@ tbody tr:hover td:first-child{background:var(--wash)}
 .legend i.worse{background:var(--pole-worse)}
 .legend i.null{background:var(--pole-null)}
 
+/* --- compact route leaderboard ----------------------------------------- */
+.route-leaderboard{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;margin:2px 0 40px}
+.route-rank{display:grid;grid-template-columns:28px minmax(0,1fr) auto;
+  align-items:center;gap:12px;min-height:74px;padding:13px 15px;
+  border:1px solid var(--rule);border-radius:6px;background:var(--paper)}
+.route-rank.baseline{border-style:dashed}
+.route-position{font:600 12px/1 var(--font-mono);color:var(--ink-3);
+  text-align:center}
+.route-identity{display:flex;align-items:center;gap:11px;min-width:0}
+.route-logo{display:inline-flex;align-items:center;justify-content:center;
+  width:30px;height:30px;flex:0 0 30px;color:var(--ink)}
+.route-logo svg{display:block;width:100%;height:100%}
+.route-copy{min-width:0}
+.route-name{font:600 14px/1.25 var(--font-sans);color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.route-detail{margin-top:5px;font:10.5px/1.35 var(--font-mono);
+  color:var(--ink-3);white-space:nowrap}
+.route-measure{text-align:right;white-space:nowrap}
+.route-measure strong{display:block;font:600 18px/1.15 var(--font-mono);
+  color:var(--ink)}
+.route-measure span{display:block;margin-top:4px;font:10px/1.2 var(--font-sans);
+  text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3)}
+
 /* --- lists and prose ---------------------------------------------------- */
 .empty{padding:4px 0 32px;color:var(--ink-2);max-width:62ch}
 .empty p{margin:0 0 10px}
@@ -1015,6 +1039,10 @@ footer{color:var(--ink-3);font-size:12.5px;padding:28px 0 60px;
   .lede .deck{font-size:16.5px}
   .board{padding:34px 0 8px}
   .board h2{font-size:22px}
+  .route-leaderboard{grid-template-columns:1fr}
+  .route-rank{grid-template-columns:24px minmax(0,1fr) auto;
+    align-items:start;padding-left:12px;padding-right:12px}
+  .route-detail{white-space:normal}
   th,td{padding:11px 10px}
 }
 """
@@ -2067,6 +2095,237 @@ def _gateway_probe_route_name(arm_id):
     }.get(arm_id, arm_id)
 
 
+def _gateway_probe_logo(arm_id):
+    """Return a compact inline mark without adding external page resources."""
+    attrs = {
+        "class": "route-logo",
+        "aria-hidden": "true",
+    }
+    svg_attrs = {
+        "xmlns": "http://www.w3.org/2000/svg",
+        "focusable": "false",
+    }
+    if arm_id == "cloudflare-openai":
+        svg_attrs["viewBox"] = "0 0 177 80"
+        paths = (
+            '<path fill="#F6821F" d="M120.36 78.957l.894-3.141c1.084-3.717.'
+            '68-7.178-1.128-9.698-1.658-2.329-4.423-3.696-7.783-3.867L48.'
+            '761 61.44c-.425-.022-.787-.214-1-.535-.212-.32-.276-.748-.127'
+            '-1.153.213-.62.83-1.111 1.467-1.133l64.157-.811c7.613-.342 '
+            '15.842-6.558 18.735-14.121l3.657-9.613c.106-.257.149-.534.149'
+            '-.812 0-.15-.021-.299-.043-.449C131.631 14.035 114.938 0 '
+            '95.012 0 76.64 0 61.031 11.92 55.438 28.477c-3.615-2.714-8.'
+            '23-4.166-13.206-3.675-8.824.876-15.906 8.011-16.778 16.877-.'
+            '234 2.307-.042 4.507.489 6.601C11.547 48.707 0 60.563 0 75.'
+            '111c0 1.325.106 2.606.276 3.888.085.62.617 1.069 1.234 1.'
+            '069l117.362.021h.042c.66-.021 1.255-.47 1.446-1.132Z"/>'
+            '<path fill="#FBAD41" d="M141.541 34.782c-.595 0-1.17.022-1.765.'
+            '043-.106 0-.191.021-.276.064-.298.107-.553.363-.638.684l-2.'
+            '509 8.673c-1.085 3.717-.681 7.178 1.127 9.698 1.658 2.329 4.'
+            '423 3.696 7.783 3.867l13.546.812c.403.021.744.214.956.534.234.'
+            '321.277.748.149 1.154-.212.619-.829 1.111-1.467 1.132l-14.078'
+            '.812c-7.634.363-15.885 6.558-18.777 14.121l-1.02 2.67c-.192.'
+            '492.17 1.004.659 1.026h48.506c.574 0 1.084-.385 1.254-.94.851'
+            '-3.013 1.298-6.174 1.298-9.464 0-19.248-15.567-34.886-34.748'
+            '-34.886Z"/>'
+        )
+        svg = _tag("svg", svg_attrs, paths)
+    elif arm_id == "openrouter-openai":
+        svg_attrs["viewBox"] = "0 0 362 259"
+        svg = _tag(
+            "svg",
+            svg_attrs,
+            '<path fill="#7624F4" d="M284.128 0c42.797 0 77.489 34.693 '
+            '77.489 77.489s-34.692 77.49-77.489 77.49l76.861 76.862c9.764 '
+            '9.763 2.849 26.457-10.957 26.457H129.149C57.822 258.298 0 '
+            '200.476 0 129.149S57.822 0 129.149 0h154.979ZM129.149 51.66c'
+            '-42.796 0-77.489 34.693-77.489 77.489s34.693 77.489 77.489 '
+            '77.489 77.489-34.693 77.489-77.489S171.945 51.66 129.149 51.66Z"/>',
+        )
+    elif arm_id == "vercel-openai":
+        svg_attrs["viewBox"] = "0 0 92 80"
+        svg = _tag(
+            "svg",
+            svg_attrs,
+            '<path fill="currentColor" d="M91.575 80 45.788 0 0 80h91.575Z"/>',
+        )
+    elif arm_id == "direct-openai":
+        svg_attrs["viewBox"] = "0 0 20 20"
+        svg = _tag(
+            "svg",
+            svg_attrs,
+            '<path fill="currentColor" d="M11.248 18.25c-.55 0-1.073-.105-1.568'
+            '-.314a4.3 4.3 0 0 1-1.32-.874 4 4 0 0 1-1.304.214 4 4 0 0 '
+            '1-2.046-.544 4.27 4.27 0 0 1-1.518-1.485 4 4 0 0 1-.56-2.095'
+            'c0-.32.044-.667.131-1.04A4.4 4.4 0 0 1 2.04 10.71a4.07 4.07 '
+            '0 0 1 .017-3.4 4.2 4.2 0 0 1 1.056-1.418 3.8 3.8 0 0 1 1.6'
+            '-.842 3.9 3.9 0 0 1 .76-1.683q.593-.759 1.451-1.188a4.04 4.04'
+            ' 0 0 1 1.832-.429q.825 0 1.567.313.742.314 1.32.875a4 4 0 0'
+            ' 1 1.304-.215q1.106 0 2.046.545a4.14 4.14 0 0 1 1.501 1.485'
+            'q.578.941.578 2.095 0 .48-.132 1.04.66.61 1.023 1.419.363.792'
+            '.363 1.666 0 .892-.38 1.717a4.3 4.3 0 0 1-1.072 1.435 3.8 '
+            '3.8 0 0 1-1.584.825 3.8 3.8 0 0 1-.775 1.683 4.06 4.06 0 0 '
+            '1-1.436 1.188 4.04 4.04 0 0 1-1.832.429m-4.076-2.062q.825 0 '
+            '1.435-.347l3.103-1.782a.36.36 0 0 0 .164-.313v-1.42L7.881 '
+            '14.62a.67.67 0 0 1-.726 0l-3.118-1.798v.313q0 .841.396 1.551.'
+            '413.693 1.139 1.089a3.2 3.2 0 0 0 1.617.412m.165-2.69q.099.05'
+            '.181.05.083 0 .165-.05l1.238-.71-3.977-2.31a.7.7 0 0 1-.363'
+            '-.643v-3.58q-.825.362-1.32 1.122a2.9 2.9 0 0 0-.495 1.65q0 .'
+            '809.413 1.55.412.743 1.072 1.123zm3.91 3.663q.875 0 1.585-.'
+            '396a2.96 2.96 0 0 0 1.534-2.64v-3.564a.32.32 0 0 0-.165-.297'
+            'l-1.254-.726v4.604a.7.7 0 0 1-.363.643l-3.119 1.799a3 3 0 0 '
+            '0 1.783.577m.627-6.039V8.878L10.01 7.822 8.129 8.878v2.244l1.'
+            '881 1.056zM7.057 5.859a.7.7 0 0 1 .363-.644l3.119-1.798a3 3 0'
+            ' 0 0-1.782-.578q-.874 0-1.584.396A2.96 2.96 0 0 0 6.05 4.324'
+            'a3.07 3.07 0 0 0-.396 1.551v3.547q0 .199.165.314l1.237.726zm'
+            '8.383 7.887q.825-.364 1.303-1.123.495-.758.495-1.65a3.15 3.15 '
+            '0 0 0-.412-1.55q-.413-.743-1.073-1.123l-3.086-1.782q-.099-.'
+            '065-.181-.049a.3.3 0 0 0-.165.05l-1.238.692 3.993 2.327q.165.'
+            '099.264.264.1.165.1.363zm-3.317-8.382a.63.63 0 0 1 .726 0l3.'
+            '135 1.831v-.297q0-.792-.396-1.501a2.86 2.86 0 0 0-1.105-1.155'
+            'q-.71-.43-1.65-.43-.825 0-1.436.347L8.294 5.941a.36.36 0 0 0'
+            '-.165.314v1.418z"/>',
+        )
+    elif arm_id == "concentrate-openai":
+        svg_attrs["viewBox"] = "0 0 80 80"
+        dots = []
+        for row in range(8):
+            for column in range(8):
+                strength = (column / 7) * (1 - (row / 7))
+                radius = 0.35 + 3.97 * (strength ** 0.62)
+                dots.append(
+                    f'<circle cx="{6.4 + 9.6 * column:g}" '
+                    f'cy="{6.4 + 9.6 * row:g}" r="{radius:.3f}" '
+                    'fill="currentColor"/>'
+                )
+        svg = _tag("svg", svg_attrs, "".join(dots))
+    else:
+        initial = (_gateway_probe_route_name(arm_id) or "?")[:1].upper()
+        svg_attrs["viewBox"] = "0 0 32 32"
+        svg = _tag(
+            "svg",
+            svg_attrs,
+            '<circle cx="16" cy="16" r="15" fill="none" '
+            'stroke="currentColor"/>'
+            + _tag(
+                "text",
+                {
+                    "x": "16",
+                    "y": "21",
+                    "text-anchor": "middle",
+                    "font-size": "15",
+                    "fill": "currentColor",
+                },
+                _esc(initial),
+            ),
+        )
+    return _tag("span", attrs, svg)
+
+
+def _gateway_probe_leaderboard(bundle):
+    rows = []
+    for contrast in bundle.get("contrasts") or []:
+        metric = (
+            (contrast.get("conditions") or {})
+            .get("warm", {})
+            .get("request_to_semantic_ttft_s", {})
+        )
+        estimate = metric.get("median_gateway_minus_direct")
+        if estimate is None:
+            continue
+        rows.append({
+            "arm_id": contrast["arm_id"],
+            "estimate": estimate,
+            "interval": metric.get("interval") or {},
+            "coverage": metric.get("coverage") or {},
+        })
+    if not rows:
+        return ""
+
+    rows.sort(key=lambda item: item["estimate"])
+    ranked = []
+    for position, row in enumerate(rows, 1):
+        interval = row["interval"]
+        covered = row["coverage"].get("covered")
+        total = row["coverage"].get("total")
+        pair_text = (
+            f"paired {covered}/{total}"
+            if covered is not None and total is not None
+            else "paired coverage unavailable"
+        )
+        if interval.get("low") is not None and interval.get("high") is not None:
+            pair_text = (
+                f"95% CI {interval['low'] * 1000:+.0f} to "
+                f"{interval['high'] * 1000:+.0f} ms · {pair_text}"
+            )
+        ranked.append((row["estimate"], _tag(
+            "div",
+            {"class": "route-rank"},
+            _tag("div", {"class": "route-position"}, str(position))
+            + _tag(
+                "div",
+                {"class": "route-identity"},
+                _gateway_probe_logo(row["arm_id"])
+                + _tag(
+                    "div",
+                    {"class": "route-copy"},
+                    _tag(
+                        "div",
+                        {"class": "route-name"},
+                        _esc(_gateway_probe_route_name(row["arm_id"])),
+                    )
+                    + _tag("div", {"class": "route-detail"}, _esc(pair_text)),
+                ),
+            )
+            + _tag(
+                "div",
+                {"class": "route-measure"},
+                _tag("strong", {}, f"{row['estimate'] * 1000:+.0f} ms")
+                + _tag("span", {}, "vs direct"),
+            ),
+        )))
+
+    baseline = _tag(
+        "div",
+        {"class": "route-rank baseline"},
+        _tag("div", {"class": "route-position"}, "—")
+        + _tag(
+            "div",
+            {"class": "route-identity"},
+            _gateway_probe_logo("direct-openai")
+            + _tag(
+                "div",
+                {"class": "route-copy"},
+                _tag("div", {"class": "route-name"}, "Direct OpenAI")
+                + _tag("div", {"class": "route-detail"}, "No-gateway control"),
+            ),
+        )
+        + _tag(
+            "div",
+            {"class": "route-measure"},
+            _tag("strong", {}, "0 ms")
+            + _tag("span", {}, "baseline"),
+        ),
+    )
+    entries = [item for _, item in ranked]
+    insert_at = sum(1 for estimate, _ in ranked if estimate < 0)
+    entries.insert(insert_at, baseline)
+    return (
+        _tag(
+            "div",
+            {"class": "head"},
+            _tag("h2", {}, "Route leaderboard")
+            + _tag(
+                "p",
+                {},
+                "Median warm semantic TTFT difference versus Direct OpenAI. "
+                "Lower is better; the direct control is not ranked.",
+            ),
+        )
+        + _tag("div", {"class": "route-leaderboard"}, "".join(entries))
+    )
+
+
 def _gateway_probe_board(bundle):
     title = _esc(bundle["title"])
     if bundle.get("path"):
@@ -2149,14 +2408,6 @@ def _gateway_probe_board(bundle):
     def decimal(value):
         return "—" if value is None else f"{value:.1f}"
 
-    def money(value):
-        return "—" if value is None else f"${value:.6f}"
-
-    def cost_cell(row):
-        return compact_percentile(
-            row["item"], "measured_cost_usd", money
-        )
-
     def tokens_cell(row):
         item = row["item"]
         return "<br>".join((
@@ -2207,13 +2458,11 @@ def _gateway_probe_board(bundle):
          "key": lambda row: summary(
              row["item"], "throughput_tokens_per_s"
          ).get("p50")},
-        {"label": "Cost p50 / p95",
-         "cell": cost_cell},
         {"label": "Total / cached / cache-write tokens p50 / p95",
          "cell": tokens_cell},
     ]
 
-    parts = head
+    parts = head + _gateway_probe_leaderboard(bundle)
     for condition in ("cold", "warm"):
         rows = [
             {

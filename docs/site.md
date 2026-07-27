@@ -116,6 +116,13 @@ Gateway Probe is a third measurement family, not a Gateway Bench extension.
 Request attempts and complete cold/warm blocks are never merged with coding
 agent cells, task-weighted Gateway Tax estimates, or their claims.
 
+The route leaderboard ranks managed gateways by the median paired warm semantic
+TTFT difference versus Direct OpenAI. Direct OpenAI is an unranked baseline;
+bootstrap 95% intervals and paired-block coverage remain visible. The detailed
+cold, warm, connection-setup, and paired-delta tables remain the factual record.
+Frozen-list prices stay sealed in the bundle for reproducibility but are not
+displayed because market prices drift.
+
 ## What the columns mean
 
 **Harness Bench.** Solve rate on matched task/trial rows with a Wilson 95%
