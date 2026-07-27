@@ -2057,6 +2057,16 @@ def _gateway_board(bundle):
     return _tag("section", {"class": "board", "data-caveats": "0"}, parts)
 
 
+def _gateway_probe_route_name(arm_id):
+    return {
+        "cloudflare-openai": "Cloudflare",
+        "concentrate-openai": "Concentrate",
+        "direct-openai": "Direct OpenAI",
+        "openrouter-openai": "OpenRouter",
+        "vercel-openai": "Vercel",
+    }.get(arm_id, arm_id)
+
+
 def _gateway_probe_board(bundle):
     title = _esc(bundle["title"])
     if bundle.get("path"):
@@ -2143,12 +2153,8 @@ def _gateway_probe_board(bundle):
         return "—" if value is None else f"${value:.6f}"
 
     def cost_cell(row):
-        item = row["item"]
-        return (
-            "measured "
-            + compact_percentile(item, "measured_cost_usd", money)
-            + "<br>charged "
-            + compact_percentile(item, "charged_cost_usd", money)
+        return compact_percentile(
+            row["item"], "measured_cost_usd", money
         )
 
     def tokens_cell(row):
@@ -2164,8 +2170,8 @@ def _gateway_probe_board(bundle):
 
     request_columns = [
         {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
-         "cell": lambda row: _esc(row["arm_id"]),
-         "key": lambda row: row["arm_id"]},
+         "cell": lambda row: _esc(_gateway_probe_route_name(row["arm_id"])),
+         "key": lambda row: _gateway_probe_route_name(row["arm_id"])},
         {"label": "Response headers p50 / p95", "dir": "asc",
          "cell": lambda row: percentile_cell(
              row["item"], "request_to_response_headers_s", seconds
@@ -2201,7 +2207,7 @@ def _gateway_probe_board(bundle):
          "key": lambda row: summary(
              row["item"], "throughput_tokens_per_s"
          ).get("p50")},
-        {"label": "Measured / charged cost p50 / p95",
+        {"label": "Cost p50 / p95",
          "cell": cost_cell},
         {"label": "Total / cached / cache-write tokens p50 / p95",
          "cell": tokens_cell},
@@ -2231,8 +2237,8 @@ def _gateway_probe_board(bundle):
 
     setup_columns = [
         {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
-         "cell": lambda row: _esc(row["arm_id"]),
-         "key": lambda row: row["arm_id"]},
+         "cell": lambda row: _esc(_gateway_probe_route_name(row["arm_id"])),
+         "key": lambda row: _gateway_probe_route_name(row["arm_id"])},
         {"label": "DNS p50 / p95", "dir": "asc",
          "cell": lambda row: percentile_cell(row["item"], "setup_dns_s", seconds),
          "key": lambda row: summary(row["item"], "setup_dns_s").get("p50")},
@@ -2335,13 +2341,17 @@ def _gateway_probe_board(bundle):
 
         contrast_columns = [
             {"label": "Gateway route", "cls": "name", "type": "str", "dir": "asc",
-             "cell": lambda row: _esc(row["arm_id"]),
-             "key": lambda row: row["arm_id"]},
+             "cell": lambda row: _esc(
+                 _gateway_probe_route_name(row["arm_id"])
+             ),
+             "key": lambda row: _gateway_probe_route_name(row["arm_id"])},
             {"label": "Condition", "type": "str", "dir": "asc",
              "cell": lambda row: _esc(row["condition"]),
              "key": lambda row: row["condition"]},
             {"label": "vs direct",
-             "cell": lambda row: _esc(row["direct_arm"])},
+             "cell": lambda row: _esc(
+                 _gateway_probe_route_name(row["direct_arm"])
+             )},
             {"label": "Δ response headers", "plot": True,
              "cell": lambda row: contrast_cell(row, "headers", headers_domain),
              "key": lambda row: row["headers"].get(
