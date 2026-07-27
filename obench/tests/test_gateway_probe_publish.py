@@ -408,6 +408,17 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
             path.write_text(_json(manifest_value), encoding="ascii")
             with self.assertRaisesRegex(GatewayProbeRunError, "explicitly unknown"):
                 gateway_probe_publish.verify_bundle(bundle)
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            path = bundle / "manifest.json"
+            manifest_value = json.loads(path.read_text())
+            manifest_value["verification"]["verified_with_commit"] = "d" * 40
+            path.write_text(_json(manifest_value), encoding="ascii")
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "must resolve to a git commit",
+            ):
+                gateway_probe_publish.verify_bundle(bundle)
 
     def test_rejects_incomplete_cold_or_warm_schedule(self):
         with tempfile.TemporaryDirectory() as tmp:

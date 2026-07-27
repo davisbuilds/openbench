@@ -828,6 +828,7 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     directory = bundle_input.resolve()
     _exact_directory(directory, _PUBLIC_DIRECTORY_FILES, "public Gateway Probe bundle")
     manifest = _validate_manifest(_load_json(directory / "manifest.json", "manifest"))
+    _verified_with_commit(manifest["verification"]["verified_with_commit"])
     for name in PUBLIC_FILES:
         if _sha256(directory / name) != manifest["files"][name]["sha256"]:
             raise GatewayProbeRunError(f"public artifact digest mismatch: {name}")
