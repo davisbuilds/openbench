@@ -16,6 +16,9 @@ class GatewayProbeReportError(ValueError):
     """Raised when probe rows cannot support an unambiguous report."""
 
 
+REPORT_SCHEMA_VERSION = 4
+
+
 _METRICS = {
     "setup_dns_s": ("request_metrics", "setup", "dns_s"),
     "setup_tcp_s": ("request_metrics", "setup", "tcp_s"),
@@ -476,15 +479,13 @@ def aggregate(
             arm_contrasts[condition] = metrics
         contrasts[arm] = arm_contrasts
 
-    minimum_blocks = min(complete_by_condition.get("cold", 0), complete_by_condition.get("warm", 0))
     return {
-        "schema_version": 3,
+        "schema_version": REPORT_SCHEMA_VERSION,
         "benchmark": gateway_probe_results.BENCHMARK,
         "experiment_id": experiment_id,
         "experiment_digest": experiment_digest,
         "schedule_digest": schedule_digest,
         "price_digest": price_digest,
-        "label": "exploratory" if minimum_blocks < 100 else "confirmatory",
         "complete_blocks": {
             condition: complete_by_condition.get(condition, 0)
             for condition in ("cold", "warm")
@@ -559,7 +560,7 @@ def render_text(report: Mapping[str, Any]) -> str:
         return f"{rendered} ({coverage(cov)})"
 
     lines = [
-        f"Gateway Probe ({report['label']})",
+        "Gateway Probe",
         (
             "blocks "
             f"cold={report['complete_blocks']['cold']}/"

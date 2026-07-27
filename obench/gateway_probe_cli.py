@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import (
+    gateway_probe_publish,
     gateway_probe_report,
     gateway_probe_results,
     gateway_probe_run,
@@ -61,6 +62,40 @@ def _report(args: argparse.Namespace) -> int:
         print(json.dumps(report, allow_nan=False, sort_keys=True))
     else:
         print(gateway_probe_report.render_text(report))
+    return 0
+
+
+def _publish(args: argparse.Namespace) -> int:
+    manifest = gateway_probe_publish.publish_bundle(
+        args.run_dir,
+        args.bundle_dir,
+        verified_with_commit=args.verified_with_commit,
+    )
+    print(
+        f"published={Path(args.bundle_dir).resolve()} "
+        f"rows={manifest['result_count']} "
+        f"blocks=cold:{manifest['complete_blocks']['cold']}/"
+        f"{manifest['scheduled_blocks_per_condition']},"
+        f"warm:{manifest['complete_blocks']['warm']}/"
+        f"{manifest['scheduled_blocks_per_condition']} "
+        f"verified_with_commit="
+        f"{manifest['verification']['verified_with_commit']}"
+    )
+    return 0
+
+
+def _verify(args: argparse.Namespace) -> int:
+    manifest = gateway_probe_publish.verify_bundle(args.bundle_dir)
+    print(
+        f"verified={Path(args.bundle_dir).resolve()} "
+        f"rows={manifest['result_count']} "
+        f"blocks=cold:{manifest['complete_blocks']['cold']}/"
+        f"{manifest['scheduled_blocks_per_condition']},"
+        f"warm:{manifest['complete_blocks']['warm']}/"
+        f"{manifest['scheduled_blocks_per_condition']} "
+        f"verified_with_commit="
+        f"{manifest['verification']['verified_with_commit']}"
+    )
     return 0
 
 
@@ -294,6 +329,20 @@ def main(argv: list[str] | None = None) -> int:
     benchmark.add_argument("--output-dir")
     benchmark.add_argument("--force", action="store_true")
     benchmark.set_defaults(handler=_benchmark)
+    publish = sub.add_parser(
+        "publish",
+        help="project a private run into a public, verified probe bundle",
+    )
+    publish.add_argument("run_dir")
+    publish.add_argument("bundle_dir")
+    publish.add_argument("--verified-with-commit")
+    publish.set_defaults(handler=_publish)
+    verify = sub.add_parser(
+        "verify",
+        help="verify a public probe bundle and recompute its report",
+    )
+    verify.add_argument("bundle_dir")
+    verify.set_defaults(handler=_verify)
     args = parser.parse_args(argv)
     try:
         return args.handler(args)

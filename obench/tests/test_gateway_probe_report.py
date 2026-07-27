@@ -115,7 +115,8 @@ class GatewayProbeReportTests(unittest.TestCase):
                 rows.append(row("direct", condition, repetition, baseline=True, total=direct_total))
                 rows.append(row("gateway", condition, repetition, total=direct_total + 0.5))
         report = gateway_probe_report.aggregate(rows, bootstrap_replicates=100)
-        self.assertEqual(report["label"], "exploratory")
+        self.assertEqual(report["schema_version"], 4)
+        self.assertNotIn("label", report)
         cold = report["arms"]["gateway"]["conditions"]["cold"]
         self.assertEqual(cold["denominators"], {
             "scheduled": 2,
@@ -151,7 +152,9 @@ class GatewayProbeReportTests(unittest.TestCase):
             report["paired_contrasts"]["gateway"]["warm"],
         )
         text = gateway_probe_report.render_text(report)
-        self.assertIn("Gateway Probe (exploratory)", text)
+        self.assertTrue(text.startswith("Gateway Probe\nblocks cold=2/2 warm=2/2"))
+        self.assertNotIn("exploratory", text)
+        self.assertNotIn("confirmatory", text)
         self.assertIn("| Arm | Condition | Success / availability |", text)
         self.assertIn("Request to semantic TTFT p50 / p95", text)
         self.assertIn("Cold setup DNS p50", text)
