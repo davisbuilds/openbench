@@ -1,0 +1,14 @@
+{
+  "currency": "USD",
+  "price_id": "frozen-env-v1",
+  "prices": [
+    {
+      "currency": "USD",
+      "effective_at": "2026-07-27T00:00:00Z",
+      "input_per_million": "0.15",
+      "model": "openai/gpt-4o-mini",
+      "output_per_million": "0.60"
+    }
+  ],
+  "schema_version": 1
+}

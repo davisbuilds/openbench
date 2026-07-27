@@ -42,8 +42,9 @@ Reports separate cold and warm conditions. They show scheduled, attempted,
 successful, request-failed, route-verified, route-unverifiable, and route-failed
 denominators. Arm metrics use p50/p95 with explicit coverage. Paired
 gateway-minus-direct median contrasts use deterministic bootstrap confidence
-intervals. Missing values are not zero-filled or trimmed. Runs with fewer than
-100 complete blocks in either condition are labeled `exploratory`.
+intervals. Missing values are not zero-filled or trimmed. Reports disclose the
+complete and scheduled block counts for cold and warm conditions directly;
+they do not assign a qualitative sample-size label.
 
 ## Timing definitions
 
@@ -154,3 +155,36 @@ attempt.
 
 The lower-level `validate`, `doctor`, `run`, and `report` commands remain
 available. `validate`, `doctor`, and `report` make no model API calls.
+
+## Publish
+
+Private benchmark bundles are not documentation-safe: `experiment.toml`
+contains prompts, endpoints, credential environment names, and potentially
+account identifiers. Project a completed run into a separate public bundle:
+
+```bash
+obench gateway probe publish RUN_DIR BUNDLE_DIR
+obench gateway probe verify BUNDLE_DIR
+```
+
+`publish` verifies every private artifact digest, requires every scheduled cold
+and warm matched block, and recomputes the report before writing an exact public
+file set. No public experiment snapshot is emitted because fields such as
+endpoints, credential names, routing policy, and budget cannot all be
+independently authenticated from sanitized result rows. A sanitized
+`schedule.json` is emitted because its digest is already bound into every row;
+verification uses it to authenticate exact case/repetition coordinates, arm
+membership, prompt digests, and block IDs. Prompt digests remain in row
+identities; receipt values and operational generation IDs are removed.
+`verify` rejects partial schedules, extra files, symlinks, secrets, paths,
+account identifiers, nonempty receipts, digest drift, schema drift, and reports
+that do not exactly match recomputation.
+
+Public report schema v4 has no qualitative sample-size classification. It
+records complete and scheduled cold/warm blocks, p50/p95 values, metric
+coverage, Wilson availability intervals, and paired bootstrap intervals.
+Because legacy run bundles did not record trustworthy run commit or start/end
+timestamps, those fields are explicitly `unknown`; the manifest separately
+records the commit used to verify and project the bundle. Pass
+`--verified-with-commit COMMIT` when publishing from an uncommitted verifier
+checkout.

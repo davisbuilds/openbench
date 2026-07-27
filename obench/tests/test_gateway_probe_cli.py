@@ -16,10 +16,39 @@ from obench import (
 )
 from obench.gateway_probe_models import RunSummary
 from obench.tests.test_gateway_probe_report import row
+from obench.tests.test_gateway_probe_publish import (
+    TEST_COMMIT,
+    build_private_run,
+)
 from obench.tests.test_gateway_probe_spec import manifest
 
 
 class GatewayProbeCliTests(unittest.TestCase):
+    def test_gateway_dispatches_probe_publish_and_verify(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = build_private_run(tmp)
+            bundle = Path(tmp, "public")
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                publish_code = gateway_cli.main([
+                    "probe",
+                    "publish",
+                    str(run_dir),
+                    str(bundle),
+                    "--verified-with-commit",
+                    TEST_COMMIT,
+                ])
+                verify_code = gateway_cli.main([
+                    "probe",
+                    "verify",
+                    str(bundle),
+                ])
+        self.assertEqual(publish_code, 0)
+        self.assertEqual(verify_code, 0)
+        self.assertIn("blocks=cold:2/2,warm:2/2", stdout.getvalue())
+        self.assertNotIn("exploratory", stdout.getvalue())
+        self.assertNotIn("confirmatory", stdout.getvalue())
+
     def test_checked_in_minimal_and_five_way_examples_validate_through_cli(self):
         examples = Path(__file__).parents[1] / "examples"
         cases = (
@@ -124,7 +153,9 @@ class GatewayProbeCliTests(unittest.TestCase):
             with contextlib.redirect_stdout(stdout):
                 code = gateway_probe_cli.main(["report", str(results)])
         self.assertEqual(code, 0)
-        self.assertIn("Gateway Probe (exploratory)", stdout.getvalue())
+        self.assertIn("Gateway Probe\nblocks cold=1/1 warm=1/1", stdout.getvalue())
+        self.assertNotIn("exploratory", stdout.getvalue())
+        self.assertNotIn("confirmatory", stdout.getvalue())
         self.assertIn("| Arm | Condition |", stdout.getvalue())
         self.assertIn("| Gateway | Condition | Phase metric |", stdout.getvalue())
 

@@ -1,19 +1,5 @@
 [
   {
-    "id": "openbench/aider",
-    "org": "openbench",
-    "name": "aider",
-    "latest": "1.0.0",
-    "kind": "harness",
-    "description": "BYO Aider candidate manifest (DeepSeek proxy route)",
-    "license": "Apache-2.0",
-    "source": "data/packs/openbench-aider",
-    "content_sha256": "7f4a9d273763ec6d90f676771f41ebb12da42dc0197102cbf196b4c0bb6ac0d4",
-    "manifests": [
-      "aider.toml"
-    ]
-  },
-  {
     "id": "openbench/core-smoke",
     "org": "openbench",
     "name": "core-smoke",
