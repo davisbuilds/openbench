@@ -660,6 +660,14 @@ class GatewayProbeHttpTests(unittest.TestCase):
             bodies["concentrate-moonshot"]["routing"],
             {"providers": ["moonshot"], "models": []},
         )
+        self.assertEqual(bodies["concentrate-moonshot"]["seed"], "20260727")
+        self.assertTrue(
+            all(
+                body["seed"] == 20260727
+                for arm_id, body in bodies.items()
+                if arm_id != "concentrate-moonshot"
+            )
+        )
         self.assertEqual(
             by_id["concentrate-moonshot"].requested_model,
             "moonshot/kimi-k3",
@@ -691,6 +699,10 @@ class GatewayProbeHttpTests(unittest.TestCase):
         self.assertTrue(
             all(body["max_completion_tokens"] == 128 for body in bodies.values())
         )
+        self.assertTrue(
+            all(body["temperature"] == 1.0 for body in bodies.values())
+        )
+        self.assertTrue(all(body["top_p"] == 0.95 for body in bodies.values()))
 
         gateway_bench = gateway_spec.load_experiment(
             examples / "gateway-bench-kimi-k3-five-way-chat.toml"
@@ -703,6 +715,12 @@ class GatewayProbeHttpTests(unittest.TestCase):
         self.assertEqual(
             {arm.canonical_model for arm in gateway_bench.arms},
             {"moonshotai/kimi-k3"},
+        )
+        self.assertEqual(
+            {arm.sampling.temperature for arm in gateway_bench.arms}, {1.0}
+        )
+        self.assertEqual(
+            {arm.sampling.top_p for arm in gateway_bench.arms}, {0.95}
         )
 
     def test_route_reason_taxonomy_is_explicit_and_fail_closed(self):

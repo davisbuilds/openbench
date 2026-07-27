@@ -296,6 +296,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             requested_provider="moonshotai",
         )
         body = self.base_body()
+        body["seed"] = 20260727
         gateway_profiles.shape_body(
             body, gateway="concentrate", requested_provider="moonshotai"
         )
@@ -303,6 +304,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "providers": ["moonshot"],
             "models": [],
         })
+        self.assertEqual(body["seed"], "20260727")
 
     def test_concentrate_replaces_hostile_routing_cache_and_fallback_controls(self):
         body = self.base_body()
@@ -425,6 +427,27 @@ class GatewayRequestProfileTests(unittest.TestCase):
             gateway_profiles.model_evidence_consistent(
                 "openai/gpt-4o-mini",
                 "anthropic/gpt-4o-mini-2024-07-18",
+                "rolling_alias",
+            )
+        )
+        self.assertTrue(
+            gateway_profiles.models_match(
+                "moonshotai/kimi-k3",
+                "moonshotai/kimi-k3-20260715",
+                "rolling_alias",
+            )
+        )
+        self.assertFalse(
+            gateway_profiles.models_match(
+                "moonshotai/kimi-k3",
+                "moonshotai/kimi-k3-20260715",
+                "exact_revision",
+            )
+        )
+        self.assertFalse(
+            gateway_profiles.model_evidence_consistent(
+                "moonshotai/kimi-k3-20260715",
+                "moonshotai/kimi-k3-20260716",
                 "rolling_alias",
             )
         )
@@ -699,6 +722,56 @@ class GatewayEvidenceTests(unittest.TestCase):
         self.assertTrue(result["route_evidence"]["pass"])
         self.assertEqual(result["route"]["gateway_metadata"], {"cost": 0.00125})
         self.assertNotIn(private_value, json.dumps(result, sort_keys=True))
+
+    def test_openrouter_normalizes_moonshot_display_provider_and_compact_revision(self):
+        requested = "moonshotai/kimi-k3"
+        observed = "moonshotai/kimi-k3-20260715"
+
+        def payload(provider):
+            return sse(
+                {
+                    "model": observed,
+                    "provider": provider,
+                    "choices": [{"delta": {"content": "x"}}],
+                    "openrouter_metadata": {
+                        "requested": requested,
+                        "endpoints": {"available": [{
+                            "provider": provider,
+                            "model": observed,
+                            "selected": True,
+                        }]},
+                    },
+                },
+                "[DONE]",
+            )
+
+        result = self.parse(
+            payload("Moonshot AI"),
+            gateway="openrouter",
+            requested_model=requested,
+            requested_provider="moonshotai",
+            allowed_models=(requested,),
+            allowed_providers=("moonshotai",),
+            model_match="rolling_alias",
+        )
+
+        self.assertTrue(result["route_evidence"]["pass"], result)
+        self.assertEqual(result["route"]["provider"], "Moonshot AI")
+        self.assertEqual(result["route"]["served_model"], observed)
+
+        contradictory = self.parse(
+            payload("Moonshot Labs"),
+            gateway="openrouter",
+            requested_model=requested,
+            requested_provider="moonshotai",
+            allowed_models=(requested,),
+            allowed_providers=("moonshotai",),
+            model_match="rolling_alias",
+        )
+        self.assertFalse(contradictory["route_evidence"]["pass"])
+        self.assertIn(
+            "provider_conflict", contradictory["route_evidence"]["reasons"]
+        )
 
     def test_openrouter_rejects_selected_endpoint_from_other_model_family(self):
         requested = "openai/gpt-4o-mini"

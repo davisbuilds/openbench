@@ -40,8 +40,8 @@ retry_count = 0
 cache_enabled = false
 auth_env = "MOONSHOT_API_KEY"
 [arms.sampling]
-temperature = 0.0
-top_p = 1.0
+temperature = 1.0
+top_p = 0.95
 seed = 20260727
 
 [[arms]]
@@ -62,8 +62,8 @@ retry_count = 0
 cache_enabled = false
 auth_env = "OPENROUTER_API_KEY"
 [arms.sampling]
-temperature = 0.0
-top_p = 1.0
+temperature = 1.0
+top_p = 0.95
 seed = 20260727
 
 [[arms]]
@@ -84,8 +84,8 @@ retry_count = 0
 cache_enabled = false
 auth_env = "VERCEL_API_KEY"
 [arms.sampling]
-temperature = 0.0
-top_p = 1.0
+temperature = 1.0
+top_p = 0.95
 seed = 20260727
 
 [[arms]]
@@ -106,8 +106,8 @@ retry_count = 0
 cache_enabled = false
 auth_env = "CONCENTRATE_API_KEY"
 [arms.sampling]
-temperature = 0.0
-top_p = 1.0
+temperature = 1.0
+top_p = 0.95
 seed = 20260727
 
 [[arms]]
@@ -130,6 +130,6 @@ retry_count = 0
 cache_enabled = false
 auth_env = "CLOUDFLARE_API_TOKEN"
 [arms.sampling]
-temperature = 0.0
-top_p = 1.0
+temperature = 1.0
+top_p = 0.95
 seed = 20260727
