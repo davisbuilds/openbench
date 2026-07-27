@@ -572,11 +572,27 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     # Pending cell queue: list of (arm_name, cell) tuples.
     # Restore from saved state if available.
     pending_raw = state.get("pending", [])
+    by_run_id = {c["run_id"]: c for c in all_cells}
     if pending_raw:
         pending: list[tuple[str, int, dict[str, Any]]] = [
-            (p[0], p[1], next(c for c in all_cells if c["run_id"] == p[2]))
-            for p in pending_raw
+            (p[0], p[1], by_run_id[p[2]]) for p in pending_raw if p[2] in by_run_id
         ]
+        # A saved queue can name cells the CURRENT spec no longer contains --
+        # narrowing a spec (dropping a task group) while its ledger holds state
+        # is the normal way to refocus a campaign. The old code did
+        # next(c for c in all_cells if ...) and died on a bare StopIteration
+        # with no indication that the spec had changed. Drop the stale entries
+        # and say so; cells that are genuinely done are still skipped via the
+        # results file, which is the source of truth for completion.
+        dropped = len(pending_raw) - len(pending)
+        if dropped:
+            print(f"  spec changed since the last run: dropping {dropped} queued "
+                  f"cell(s) no longer in it, re-planning the rest")
+        known = {p[2] for p in pending_raw}
+        added = [c for c in all_cells if c["run_id"] not in known]
+        if added:
+            print(f"  spec changed since the last run: adding {len(added)} new cell(s)")
+            pending += [(c["arm"], c["arm_idx"], c) for c in added]
     else:
         pending = [(c["arm"], c["arm_idx"], c) for c in all_cells]
 
