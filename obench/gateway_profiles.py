@@ -19,7 +19,13 @@ _VERCEL_ENDPOINTS = {
     "openai_chat": "https://ai-gateway.vercel.sh/v1/chat/completions",
     "openai_responses": "https://ai-gateway.vercel.sh/v1/responses",
 }
-_CONCENTRATE_RESPONSES_ENDPOINT = "https://api.concentrate.ai/v1/responses"
+_CONCENTRATE_ENDPOINTS = {
+    "openai_chat": "https://api.concentrate.ai/v1/chat/completions",
+    "openai_responses": "https://api.concentrate.ai/v1/responses",
+}
+_CONCENTRATE_PROVIDER_SLUGS = {
+    "moonshotai": "moonshot",
+}
 _CLOUDFLARE_REST_ENDPOINT_RE = re.compile(
     r"https://api\.cloudflare\.com/client/v4/accounts/"
     r"(?P<account_id>[0-9a-fA-F]{32})/ai/v1/"
@@ -114,6 +120,11 @@ def _model_alias(value: str) -> str:
     return _DATED_REVISION_RE.sub("", _model_id(value))
 
 
+def _concentrate_provider_slug(value: str) -> str:
+    provider = value.casefold()
+    return _CONCENTRATE_PROVIDER_SLUGS.get(provider, provider)
+
+
 def validate_arm(
     *,
     route_kind: str,
@@ -149,18 +160,19 @@ def validate_arm(
             "cloudflare managed gateway arm requires a valid gateway_id"
         )
     if gateway == "concentrate":
+        expected_endpoint = _CONCENTRATE_ENDPOINTS.get(protocol)
+        if endpoint != expected_endpoint:
+            raise GatewayProfileError(
+                "concentrate endpoint must be "
+                f"{expected_endpoint} for protocol {protocol}"
+            )
         if (
-            endpoint != _CONCENTRATE_RESPONSES_ENDPOINT
-            or protocol != "openai_responses"
+            _model_provider(requested_model)
+            != _concentrate_provider_slug(requested_provider)
         ):
             raise GatewayProfileError(
-                "concentrate supports only "
-                f"{_CONCENTRATE_RESPONSES_ENDPOINT} with protocol openai_responses"
-            )
-        if _model_provider(requested_model) != requested_provider.casefold():
-            raise GatewayProfileError(
                 "concentrate requested_model must be provider-qualified with "
-                "requested_provider"
+                "the Concentrate provider slug for requested_provider"
             )
     if gateway == "cloudflare":
         rest_match = _CLOUDFLARE_REST_ENDPOINT_RE.fullmatch(endpoint)
@@ -258,7 +270,7 @@ def shape_body(
         ):
             payload.pop(key, None)
         payload["routing"] = {
-            "providers": [requested_provider],
+            "providers": [_concentrate_provider_slug(requested_provider)],
             "models": [],
         }
         return
@@ -700,10 +712,19 @@ class GatewayEvidence:
         if (
             self.provider
             and self.requested_provider
-            and self.provider.casefold() != self.requested_provider.casefold()
+            and not self._provider_matches(
+                self.provider, self.requested_provider
+            )
         ):
             reasons.append("provider_conflict")
-        allowed = {provider.casefold() for provider in self.allowed_providers}
+        allowed = {
+            (
+                _concentrate_provider_slug(provider)
+                if self.gateway == "concentrate"
+                else provider.casefold()
+            )
+            for provider in self.allowed_providers
+        }
         if self.provider and allowed and self.provider.casefold() not in allowed:
             reasons.append("provider_not_allowed")
         if self.gateway in {"openrouter", "vercel"}:
@@ -749,3 +770,11 @@ class GatewayEvidence:
             elif not 200 <= status < 300:
                 reasons.append("unsuccessful_attempt")
         return list(dict.fromkeys(reasons))
+
+    def _provider_matches(self, observed: str, expected: str) -> bool:
+        expected_slug = (
+            _concentrate_provider_slug(expected)
+            if self.gateway == "concentrate"
+            else expected.casefold()
+        )
+        return observed.casefold() == expected_slug

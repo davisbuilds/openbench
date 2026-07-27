@@ -249,8 +249,8 @@ class GatewayRequestProfileTests(unittest.TestCase):
             with self.subTest(header=name):
                 self.assertTrue(gateway_profiles.blocked_request_header(name))
 
-    def test_concentrate_requires_exact_responses_route_and_qualified_model(self):
-        valid = {
+    def test_concentrate_requires_exact_protocol_endpoint_pairs(self):
+        responses = {
             "route_kind": "gateway",
             "gateway": "concentrate",
             "endpoint": "https://api.concentrate.ai/v1/responses",
@@ -258,20 +258,51 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "requested_model": "openai/gpt-4o-mini",
             "requested_provider": "openai",
         }
-        gateway_profiles.validate_arm(**valid)
+        chat = {
+            **responses,
+            "endpoint": "https://api.concentrate.ai/v1/chat/completions",
+            "protocol": "openai_chat",
+        }
+        gateway_profiles.validate_arm(**responses)
+        gateway_profiles.validate_arm(**chat)
 
         invalid = (
-            ({"endpoint": valid["endpoint"] + "/"}, "supports only"),
-            ({"protocol": "openai_chat"}, "supports only"),
+            ({**responses, "endpoint": responses["endpoint"] + "/"}, "endpoint must be"),
+            ({**responses, "protocol": "openai_chat"}, "endpoint must be"),
+            ({**chat, "protocol": "openai_responses"}, "endpoint must be"),
             ({"requested_model": "gpt-4o-mini"}, "provider-qualified"),
             ({"requested_model": "azure/gpt-4o-mini"}, "provider-qualified"),
         )
-        for changes, message in invalid:
-            with self.subTest(changes=changes):
+        for candidate, message in invalid:
+            with self.subTest(candidate=candidate):
                 with self.assertRaisesRegex(
                     gateway_profiles.GatewayProfileError, message
                 ):
-                    gateway_profiles.validate_arm(**{**valid, **changes})
+                    gateway_profiles.validate_arm(
+                        **(
+                            candidate
+                            if "route_kind" in candidate
+                            else {**responses, **candidate}
+                        )
+                    )
+
+    def test_concentrate_uses_moonshot_route_slug_for_kimi(self):
+        gateway_profiles.validate_arm(
+            route_kind="gateway",
+            gateway="concentrate",
+            endpoint="https://api.concentrate.ai/v1/chat/completions",
+            protocol="openai_chat",
+            requested_model="moonshot/kimi-k3",
+            requested_provider="moonshotai",
+        )
+        body = self.base_body()
+        gateway_profiles.shape_body(
+            body, gateway="concentrate", requested_provider="moonshotai"
+        )
+        self.assertEqual(body["routing"], {
+            "providers": ["moonshot"],
+            "models": [],
+        })
 
     def test_concentrate_replaces_hostile_routing_cache_and_fallback_controls(self):
         body = self.base_body()
@@ -999,6 +1030,20 @@ class GatewayEvidenceTests(unittest.TestCase):
                 self.assertIn(
                     expected_reason, result["route_evidence"]["reasons"]
                 )
+
+    def test_concentrate_accepts_moonshot_slug_as_moonshotai_route_evidence(self):
+        result = self.parse(
+            sse({"model": "moonshot/kimi-k3"}, "[DONE]"),
+            gateway="concentrate",
+            requested_model="moonshot/kimi-k3",
+            requested_provider="moonshotai",
+            allowed_models=("moonshot/kimi-k3",),
+            allowed_providers=("moonshotai",),
+        )
+
+        self.assertTrue(result["route_evidence"]["pass"])
+        self.assertEqual(result["route"]["provider"], "moonshot")
+        self.assertEqual(result["route"]["served_model"], "moonshot/kimi-k3")
 
 if __name__ == "__main__":
     unittest.main()
