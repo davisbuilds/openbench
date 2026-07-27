@@ -180,6 +180,38 @@ class CostBasisTests(unittest.TestCase):
 
 
 class RenderTests(_SiteFixture):
+    def test_gateway_board_renders_call_cap_denominators(self):
+        metric = {"estimate": 1.0, "low": 0.8, "high": 1.0}
+        bundle = {
+            "title": "Gateway run",
+            "track": "fixed_model_provider",
+            "harness": "pi",
+            "blocks_included": 5,
+            "blocks_observed": 5,
+            "blocks_excluded": {},
+            "blocks_max_calls_affected": 2,
+            "tasks_included": 1,
+            "budget_max_calls": 20,
+            "arms": [{
+                "arm_id": "direct",
+                "role": "direct",
+                "requested_provider": "openai",
+                "solve_rate": metric,
+                "mean_checker_score": metric,
+                "availability": metric,
+                "latency_s": metric,
+                "max_calls": {"cells": 2, "total_cells": 5, "ratio": 0.4},
+                "cost": None,
+            }],
+            "contrasts": [],
+        }
+
+        page = site._gateway_board(bundle)
+
+        self.assertIn("<b>cap-affected blocks </b>2/5", page)
+        self.assertIn("20-call cap", page)
+        self.assertIn("2/5 (40.0%)", page)
+
     def test_harness_token_columns_render_factual_split_semantics(self):
         page = site.render_board_html(site.build_board(self.site_dir))
         for label in (

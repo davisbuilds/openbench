@@ -371,6 +371,8 @@ direct_control_arm_id = "direct"
                 "excluded": 0,
                 "excluded_by_reason": {},
                 "included": 1,
+                "max_calls_affected": 0,
+                "max_calls_rate": 0.0,
                 "observed": 1,
             })
             self.assertEqual(report["arms"]["gateway"]["attempted_cells"], 1)
@@ -499,6 +501,8 @@ direct_control_arm_id = "direct"
             "excluded": 0,
             "excluded_by_reason": {},
             "included": 1,
+            "max_calls_affected": 1,
+            "max_calls_rate": 1.0,
             "observed": 1,
         })
         self.assertTrue(all(

@@ -31,6 +31,13 @@ arms for one task and repetition. If infrastructure invalidates one cell, the
 whole block is excluded or replaced so every paired comparison uses the same
 task opportunity.
 
+Reaching `budget.max_calls` is a valid treatment outcome, not infrastructure
+failure: the cell remains in the denominator as unsolved with score zero.
+Never rerun only a cap-hit arm after observing its result. A different call
+budget is a separate experiment; any explicit replacement must rerun the
+complete all-arm block for a recorded infrastructure or route-integrity
+invalidation.
+
 Examples:
 
 - [`gateway-bench-responses.toml`](../obench/examples/gateway-bench-responses.toml):
@@ -94,6 +101,7 @@ Reports retain per-metric coverage and use equal task weighting.
 - cost using separately labeled evidence bases;
 - served-model/provider distribution;
 - route-integrity and infrastructure exclusion reasons;
+- per-arm cap-hit cells and cap-affected matched blocks;
 - paired gateway-minus-direct contrasts.
 
 Cost bases are never silently mixed:

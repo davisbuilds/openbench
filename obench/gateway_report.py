@@ -321,7 +321,8 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
         result.get("checker_score"),
         f"row {row_number} result.checker_score",
     )
-    if result.get("budget_exhausted_reason") == "max_calls":
+    max_calls_exhausted = result.get("budget_exhausted_reason") == "max_calls"
+    if max_calls_exhausted:
         solved = False
         score = 0.0
     available = _bool(
@@ -472,6 +473,7 @@ def _cell(row: Mapping[str, Any], row_number: int) -> dict[str, Any]:
         "solved": 1.0 if solved else 0.0,
         "score": score,
         "availability": 1.0 if available else 0.0,
+        "max_calls_exhausted": max_calls_exhausted,
         "latency": (
             min(duration, timeout)
             if duration is not None
@@ -976,11 +978,21 @@ def aggregate(
                 },
             }
 
+        max_calls_cells = sum(
+            cell["max_calls_exhausted"]
+            for cells in cells_by_task.values()
+            for cell in cells
+        )
         report_arm = {
             "role": arm_metadata[arm_id][0],
             "baseline": arm_metadata[arm_id][1],
             "arm_digest": arm_metadata[arm_id][2],
             "attempted_cells": cells_total,
+            "max_calls": {
+                "cells": max_calls_cells,
+                "total_cells": cells_total,
+                "ratio": max_calls_cells / cells_total if cells_total else 0.0,
+            },
             "metrics": metrics,
             "costs": costs,
             "route_distribution": distribution,
@@ -1064,6 +1076,10 @@ def aggregate(
             "metrics": metrics,
         }
 
+    max_calls_affected_blocks = sum(
+        any(cell["max_calls_exhausted"] for cell in block["cells"].values())
+        for block in analyzed_blocks
+    )
     dto = {
         "schema_version": 1,
         "benchmark": results.GATEWAY_BENCHMARK,
@@ -1072,6 +1088,9 @@ def aggregate(
         "provider_prompt_mode": provider_prompt_mode,
         "experiment_id": next(iter(experiment_ids)),
         "experiment_digest": next(iter(experiment_digests)),
+        "budget": {
+            "max_calls": parsed[0]["identity"].budget_max_calls,
+        },
         "analysis": {
             "weighting": "calls_to_cell_complete_blocks_to_task_tasks_equal",
             "interval": "task_cluster_bootstrap_percentile",
@@ -1085,6 +1104,12 @@ def aggregate(
             "included": len(included_blocks),
             "excluded": len(blocks) - len(included_blocks),
             "excluded_by_reason": dict(sorted(exclusions.items())),
+            "max_calls_affected": max_calls_affected_blocks,
+            "max_calls_rate": (
+                max_calls_affected_blocks / len(included_blocks)
+                if included_blocks
+                else 0.0
+            ),
         },
         "tasks": {"included": eligible_tasks, "names": task_names},
         "baseline_arm": baseline_arm,
@@ -1122,7 +1147,9 @@ def render_text(report: Mapping[str, Any]) -> str:
         lines.append(
             f"{arm_id} ({role}): solve {_format_percent(solve)}, "
             f"score {_format_number(score)}, availability {_format_percent(availability)}, "
-            f"latency {_format_seconds(latency)}"
+            f"latency {_format_seconds(latency)}, "
+            f"call cap {arm['max_calls']['cells']}/{arm['max_calls']['total_cells']} "
+            f"({_format_percent(arm['max_calls']['ratio'])})"
         )
         for basis, cost in arm["costs"].items():
             attempted = cost["attempted_cost_usd"]["estimate"]
