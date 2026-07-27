@@ -43,6 +43,16 @@ SOURCE_FILES = (
 )
 _PUBLIC_DIRECTORY_FILES = frozenset((*PUBLIC_FILES, "manifest.json"))
 _SOURCE_DIRECTORY_FILES = frozenset((*SOURCE_FILES, "manifest.json"))
+VERIFIER_SOURCE_FILES = (
+    "obench/gateway_probe_publish.py",
+    "obench/gateway_probe_report.py",
+    "obench/gateway_probe_results.py",
+    "obench/gateway_probe_run.py",
+    "obench/gateway_probe_spec.py",
+    "obench/gateway_probe_models.py",
+    "obench/gateway_spec.py",
+    "obench/stats.py",
+)
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _ACCOUNT_ID_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])", re.I)
@@ -450,7 +460,7 @@ def _detect_verifier_commit() -> str:
                 "status",
                 "--porcelain",
                 "--",
-                "obench",
+                *VERIFIER_SOURCE_FILES,
             ],
             check=True,
             capture_output=True,
@@ -481,7 +491,16 @@ def _assert_verifier_tree_matches(commit: str) -> None:
     source_root = Path(__file__).resolve().parents[1]
     try:
         diff = subprocess.run(
-            ["git", "-C", str(source_root), "diff", "--quiet", commit, "--", "obench"],
+            [
+                "git",
+                "-C",
+                str(source_root),
+                "diff",
+                "--quiet",
+                commit,
+                "--",
+                *VERIFIER_SOURCE_FILES,
+            ],
             check=False,
             capture_output=True,
             text=True,
@@ -496,7 +515,7 @@ def _assert_verifier_tree_matches(commit: str) -> None:
                 "--others",
                 "--exclude-standard",
                 "--",
-                "obench",
+                *VERIFIER_SOURCE_FILES,
             ],
             check=True,
             capture_output=True,

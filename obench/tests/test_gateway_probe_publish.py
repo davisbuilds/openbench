@@ -166,7 +166,11 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
             with self.assertRaisesRegex(GatewayProbeRunError, "source is dirty"):
                 gateway_probe_publish._detect_verifier_commit()
         run.assert_called_once()
-        self.assertEqual(run.call_args.args[0][-1], "obench")
+        command = run.call_args.args[0]
+        self.assertTrue(set(
+            gateway_probe_publish.VERIFIER_SOURCE_FILES
+        ).issubset(command))
+        self.assertNotIn("obench/site.py", command)
 
     def test_migrates_legacy_source_report_without_publishing_its_label(self):
         with tempfile.TemporaryDirectory() as tmp:

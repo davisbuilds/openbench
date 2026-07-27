@@ -2105,28 +2105,31 @@ def _gateway_probe_board(bundle):
             return "—"
         return f"{covered}/{total}"
 
+    def coverage_detail(value, *, compact=False):
+        value = value or {}
+        covered = value.get("covered")
+        total = value.get("total")
+        if covered is not None and total is not None and covered == total:
+            return ""
+        rendered = coverage(value)
+        if compact:
+            return " " + _tag("span", {"class": "sub"}, f"({rendered})")
+        return _tag("div", {"class": "sub"}, "coverage " + rendered)
+
     def percentile_cell(item, name, fmt):
         value = summary(item, name)
-        rendered = (
-            f"{fmt(value.get('p50'))} / {fmt(value.get('p95'))}"
-        )
         return (
-            rendered
-            + _tag(
-                "div",
-                {"class": "sub"},
-                "coverage " + coverage(value.get("coverage")),
-            )
+            f"{fmt(value.get('p50'))} / {fmt(value.get('p95'))}"
+            + coverage_detail(value.get("coverage"))
         )
 
     def compact_percentile(item, name, fmt):
         value = summary(item, name)
         return (
-            f"{fmt(value.get('p50'))} / {fmt(value.get('p95'))} "
-            + _tag(
-                "span",
-                {"class": "sub"},
-                f"({coverage(value.get('coverage'))})",
+            f"{fmt(value.get('p50'))} / {fmt(value.get('p95'))}"
+            + coverage_detail(
+                value.get("coverage"),
+                compact=True,
             )
         )
 
@@ -2138,39 +2141,6 @@ def _gateway_probe_board(bundle):
 
     def money(value):
         return "—" if value is None else f"${value:.6f}"
-
-    def availability_cell(row):
-        value = row["item"].get("availability") or {}
-        interval = value.get("wilson95") or {}
-        count = f"{value.get('successes', 0)}/{value.get('attempted', 0)}"
-        low = interval.get("low")
-        high = interval.get("high")
-        detail = count
-        if low is not None and high is not None:
-            detail += f" · CI {_fmt_pct(low)}–{_fmt_pct(high)}"
-        return (
-            _tag("div", {"class": "sub"}, detail)
-            + _interval_cell(
-                value.get("rate"),
-                low,
-                high,
-                _fmt_pct,
-            )
-        )
-
-    def route_cell(row):
-        denominators = row["item"].get("denominators") or {}
-        attempted = denominators.get("attempted", 0)
-        return (
-            f"verified {denominators.get('route_verified', 0)}/{attempted}"
-            + _tag(
-                "div",
-                {"class": "sub"},
-                "unverifiable "
-                f"{denominators.get('route_unverifiable', 0)} · failed "
-                f"{denominators.get('route_failed', 0)}",
-            )
-        )
 
     def cost_cell(row):
         item = row["item"]
@@ -2196,16 +2166,6 @@ def _gateway_probe_board(bundle):
         {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
          "cell": lambda row: _esc(row["arm_id"]),
          "key": lambda row: row["arm_id"]},
-        {"label": "Condition", "type": "str", "dir": "asc",
-         "cell": lambda row: _esc(row["condition"]),
-         "key": lambda row: row["condition"]},
-        {"label": "Success / availability · Wilson 95%", "plot": True,
-         "cell": availability_cell,
-         "key": lambda row: (
-             row["item"].get("availability") or {}
-         ).get("rate")},
-        {"label": "Route verification",
-         "cell": route_cell},
         {"label": "Response headers p50 / p95", "dir": "asc",
          "cell": lambda row: percentile_cell(
              row["item"], "request_to_response_headers_s", seconds
@@ -2253,7 +2213,6 @@ def _gateway_probe_board(bundle):
             {
                 "arm_id": arm["arm_id"],
                 "role": arm.get("role"),
-                "condition": condition,
                 "item": (arm.get("conditions") or {}).get(condition) or {},
             }
             for arm in bundle["arms"]
