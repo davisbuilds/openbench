@@ -2,8 +2,357 @@
   "community": [],
   "cross_family_note": "Each board is one result-sealed bundle, shown with its interval and its provenance. The two families share no denominators.",
   "gateway": {
-    "bundle_count": 0,
-    "bundles": [],
+    "bundle_count": 1,
+    "bundles": [
+      {
+        "arms": [
+          {
+            "arm_id": "direct-openai-responses",
+            "availability": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 1.0,
+              "high": 1.0,
+              "low": 1.0
+            },
+            "cost": {
+              "attempted_cost_usd": 0.002166114,
+              "basis": "frozen_list_estimate",
+              "cost_per_solve_usd": 0.0033845531249999997,
+              "coverage_ratio": 1.0
+            },
+            "latency_s": {
+              "aggregation": "median_of_task_medians",
+              "estimate": 6.779114104021573,
+              "high": 10.170653250010218,
+              "low": 5.969400416011922
+            },
+            "max_calls": {
+              "cells": 3,
+              "ratio": 0.06,
+              "total_cells": 50
+            },
+            "mean_checker_score": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 0.7843600000000001,
+              "high": 0.93272,
+              "low": 0.616
+            },
+            "requested_model": "gpt-4o-mini",
+            "requested_provider": "openai",
+            "role": "direct",
+            "route_kind": "direct",
+            "solve_rate": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 0.64,
+              "high": 0.86,
+              "low": 0.38
+            }
+          },
+          {
+            "arm_id": "cloudflare-openai-responses",
+            "availability": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 1.0,
+              "high": 1.0,
+              "low": 1.0
+            },
+            "cost": {
+              "attempted_cost_usd": 0.002488047,
+              "basis": "frozen_list_estimate",
+              "cost_per_solve_usd": 0.004012979032258065,
+              "coverage_ratio": 1.0
+            },
+            "latency_s": {
+              "aggregation": "median_of_task_medians",
+              "estimate": 6.762857916997746,
+              "high": 9.74486700000125,
+              "low": 5.897067917016102
+            },
+            "max_calls": {
+              "cells": 3,
+              "ratio": 0.06,
+              "total_cells": 50
+            },
+            "mean_checker_score": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 0.76436,
+              "high": 0.9199999999999999,
+              "low": 0.596
+            },
+            "requested_model": "openai/gpt-4o-mini",
+            "requested_provider": "openai",
+            "role": "gateway",
+            "route_kind": "gateway",
+            "solve_rate": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 0.62,
+              "high": 0.86,
+              "low": 0.36
+            }
+          },
+          {
+            "arm_id": "concentrate-openai-responses",
+            "availability": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 1.0,
+              "high": 1.0,
+              "low": 1.0
+            },
+            "cost": {
+              "attempted_cost_usd": 0.0021296220000000003,
+              "basis": "frozen_list_estimate",
+              "cost_per_solve_usd": 0.0032267000000000007,
+              "coverage_ratio": 1.0
+            },
+            "latency_s": {
+              "aggregation": "median_of_task_medians",
+              "estimate": 5.527407729474362,
+              "high": 7.422696333494969,
+              "low": 4.764997999998741
+            },
+            "max_calls": {
+              "cells": 1,
+              "ratio": 0.02,
+              "total_cells": 50
+            },
+            "mean_checker_score": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 0.82345,
+              "high": 0.96,
+              "low": 0.644
+            },
+            "requested_model": "openai/gpt-4o-mini",
+            "requested_provider": "openai",
+            "role": "gateway",
+            "route_kind": "gateway",
+            "solve_rate": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 0.6599999999999999,
+              "high": 0.9199999999999999,
+              "low": 0.38
+            }
+          },
+          {
+            "arm_id": "openrouter-openai-responses",
+            "availability": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 1.0,
+              "high": 1.0,
+              "low": 1.0
+            },
+            "cost": {
+              "attempted_cost_usd": 0.006107901000000001,
+              "basis": "gateway_reported",
+              "cost_per_solve_usd": 0.013881593181818181,
+              "coverage_ratio": 1.0
+            },
+            "latency_s": {
+              "aggregation": "median_of_task_medians",
+              "estimate": 4.63767141700373,
+              "high": 17.999065749987494,
+              "low": 3.534136166475946
+            },
+            "max_calls": {
+              "cells": 13,
+              "ratio": 0.26,
+              "total_cells": 50
+            },
+            "mean_checker_score": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 0.57545,
+              "high": 0.83545,
+              "low": 0.3
+            },
+            "requested_model": "openai/gpt-4o-mini",
+            "requested_provider": "openai",
+            "role": "gateway",
+            "route_kind": "gateway",
+            "solve_rate": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 0.44000000000000006,
+              "high": 0.74,
+              "low": 0.13999999999999999
+            }
+          },
+          {
+            "arm_id": "vercel-openai-responses",
+            "availability": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 1.0,
+              "high": 1.0,
+              "low": 1.0
+            },
+            "cost": {
+              "attempted_cost_usd": 0.001909179,
+              "basis": "gateway_reported",
+              "cost_per_solve_usd": 0.0028076161764705883,
+              "coverage_ratio": 1.0
+            },
+            "latency_s": {
+              "aggregation": "median_of_task_medians",
+              "estimate": 7.1084466250031255,
+              "high": 9.827961853996385,
+              "low": 5.601082062494243
+            },
+            "max_calls": {
+              "cells": 2,
+              "ratio": 0.04,
+              "total_cells": 50
+            },
+            "mean_checker_score": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 0.8243600000000001,
+              "high": 0.9690799999999999,
+              "low": 0.65236
+            },
+            "requested_model": "openai/gpt-4o-mini",
+            "requested_provider": "openai",
+            "role": "gateway",
+            "route_kind": "gateway",
+            "solve_rate": {
+              "aggregation": "mean_of_task_means",
+              "estimate": 0.6799999999999999,
+              "high": 0.9199999999999999,
+              "low": 0.42000000000000004
+            }
+          }
+        ],
+        "blocks_excluded": {},
+        "blocks_included": 50,
+        "blocks_max_calls_affected": 14,
+        "blocks_observed": 50,
+        "budget_max_calls": 20,
+        "contrasts": [
+          {
+            "arm_id": "cloudflare-openai-responses",
+            "availability": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": 0.0,
+              "high": 0.0,
+              "low": 0.0
+            },
+            "direct_arm": "direct-openai-responses",
+            "latency_s": {
+              "aggregation": "median_of_task_median_paired_differences",
+              "estimate": 0.29675535345450044,
+              "high": 1.080481500015594,
+              "low": -0.5584535414818674
+            },
+            "mean_checker_score": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": -0.02,
+              "high": 0.0,
+              "low": -0.06000000000000001
+            },
+            "solve_rate": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": -0.02,
+              "high": 0.0,
+              "low": -0.06000000000000001
+            }
+          },
+          {
+            "arm_id": "concentrate-openai-responses",
+            "availability": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": 0.0,
+              "high": 0.0,
+              "low": 0.0
+            },
+            "direct_arm": "direct-openai-responses",
+            "latency_s": {
+              "aggregation": "median_of_task_median_paired_differences",
+              "estimate": -1.7669795420079026,
+              "high": -0.5037377910339274,
+              "low": -2.3028962915122975
+            },
+            "mean_checker_score": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": 0.03909,
+              "high": 0.12000000000000002,
+              "low": -0.002729999999999999
+            },
+            "solve_rate": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": 0.02,
+              "high": 0.12000000000000002,
+              "low": -0.06000000000000001
+            }
+          },
+          {
+            "arm_id": "openrouter-openai-responses",
+            "availability": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": 0.0,
+              "high": 0.0,
+              "low": 0.0
+            },
+            "direct_arm": "direct-openai-responses",
+            "latency_s": {
+              "aggregation": "median_of_task_median_paired_differences",
+              "estimate": -1.5739220625255257,
+              "high": 4.100577500008512,
+              "low": -2.9822296239435673
+            },
+            "mean_checker_score": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": -0.20891,
+              "high": -0.04182,
+              "low": -0.4
+            },
+            "solve_rate": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": -0.2,
+              "high": -0.04,
+              "low": -0.38
+            }
+          },
+          {
+            "arm_id": "vercel-openai-responses",
+            "availability": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": 0.0,
+              "high": 0.0,
+              "low": 0.0
+            },
+            "direct_arm": "direct-openai-responses",
+            "latency_s": {
+              "aggregation": "median_of_task_median_paired_differences",
+              "estimate": 0.4080994374817237,
+              "high": 1.4478734580043238,
+              "low": -0.21038156253052875
+            },
+            "mean_checker_score": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": 0.04,
+              "high": 0.1,
+              "low": 0.0
+            },
+            "solve_rate": {
+              "aggregation": "mean_of_task_mean_paired_differences",
+              "estimate": 0.04,
+              "high": 0.1,
+              "low": 0.0
+            }
+          }
+        ],
+        "date": "2026-07-27",
+        "execution_lane": "local",
+        "experiment_digest": "5c1a97d98ef4d36f9bc8bbc390269bee4097a9e707490a4158f1042e591ba040",
+        "experiment_id": "gpt-4o-mini-five-way-managed-gateway-bench-publish-v1-2026-07-27",
+        "family": "gateway",
+        "harness": "pi",
+        "id": "2026-07-27-gpt4o-mini-managed",
+        "kind": "release",
+        "link": null,
+        "path": null,
+        "results_path": "gateway/2026-07-27-gpt4o-mini-managed/results.jsonl",
+        "submitter": "OpenBench",
+        "tasks_included": 10,
+        "title": "GPT-4o mini across five managed AI gateways",
+        "track": "fixed_model_provider"
+      }
+    ],
     "note": "Each board is one Gateway Tax experiment: a direct control arm against gateway arms on the same model revision. Intervals are task-bootstrap.",
     "skipped": []
   },
@@ -254,147 +603,147 @@
         "arms": [
           {
             "cost_per_solve_usd": null,
-            "fresh_tokens_per_solve": 88266.36666666667,
+            "fresh_tokens_per_solve": 83322.96666666666,
             "harness": "claude",
             "median_wall_s": 47.6005,
             "model": "deepseek-v4-flash",
-            "n": 40,
-            "solve_rate": 0.75,
+            "n": 38,
+            "solve_rate": 0.7894736842105263,
             "solved": 30,
             "token_telemetry_bases": [
               "proxy_measured"
             ],
             "token_telemetry_coverage": {
-              "covered_rows": 40,
-              "native_covered_rows": 39,
-              "proxy_covered_rows": 40,
+              "covered_rows": 38,
+              "native_covered_rows": 37,
+              "proxy_covered_rows": 38,
               "ratio": 1.0,
-              "total_rows": 40
+              "total_rows": 38
             },
             "token_telemetry_source": "proxy",
-            "tokens_cache_read_per_solve": 2160081.066666667,
+            "tokens_cache_read_per_solve": 2053623.4666666666,
             "tokens_cache_write_per_solve": 0.0,
-            "tokens_input_uncached_per_solve": 37583.566666666666,
-            "tokens_output_per_solve": 50682.8,
+            "tokens_input_uncached_per_solve": 35233.7,
+            "tokens_output_per_solve": 48089.26666666667,
             "wilson95": [
-              0.5980574093302989,
-              0.8581303210445049
+              0.6365391162355784,
+              0.8892533964790406
             ]
           },
           {
             "cost_per_solve_usd": null,
-            "fresh_tokens_per_solve": 85596.35714285714,
+            "fresh_tokens_per_solve": 69624.10714285714,
             "harness": "pi",
             "median_wall_s": 24.4575,
             "model": "deepseek-v4-flash",
-            "n": 40,
-            "solve_rate": 0.7,
+            "n": 38,
+            "solve_rate": 0.7368421052631579,
             "solved": 28,
             "token_telemetry_bases": [
               "proxy_measured"
             ],
             "token_telemetry_coverage": {
-              "covered_rows": 40,
-              "native_covered_rows": 37,
-              "proxy_covered_rows": 40,
+              "covered_rows": 38,
+              "native_covered_rows": 35,
+              "proxy_covered_rows": 38,
               "ratio": 1.0,
-              "total_rows": 40
+              "total_rows": 38
             },
             "token_telemetry_source": "proxy",
-            "tokens_cache_read_per_solve": 2012722.2857142857,
+            "tokens_cache_read_per_solve": 1729696.0,
             "tokens_cache_write_per_solve": 0.0,
-            "tokens_input_uncached_per_solve": 49843.92857142857,
-            "tokens_output_per_solve": 35752.42857142857,
+            "tokens_input_uncached_per_solve": 37986.607142857145,
+            "tokens_output_per_solve": 31637.5,
             "wilson95": [
-              0.545696893456796,
-              0.819253290843047
+              0.5799084979362467,
+              0.8502853761029869
             ]
           },
           {
             "cost_per_solve_usd": null,
-            "fresh_tokens_per_solve": 81116.23076923077,
+            "fresh_tokens_per_solve": 71318.76923076923,
             "harness": "opencode",
             "median_wall_s": 40.271,
             "model": "deepseek-v4-flash",
-            "n": 40,
-            "solve_rate": 0.65,
+            "n": 38,
+            "solve_rate": 0.6842105263157895,
             "solved": 26,
             "token_telemetry_bases": [
               "proxy_measured"
             ],
             "token_telemetry_coverage": {
-              "covered_rows": 40,
-              "native_covered_rows": 39,
-              "proxy_covered_rows": 40,
+              "covered_rows": 38,
+              "native_covered_rows": 37,
+              "proxy_covered_rows": 38,
               "ratio": 1.0,
-              "total_rows": 40
+              "total_rows": 38
             },
             "token_telemetry_source": "proxy",
-            "tokens_cache_read_per_solve": 1769472.0,
+            "tokens_cache_read_per_solve": 1584019.6923076923,
             "tokens_cache_write_per_solve": 0.0,
-            "tokens_input_uncached_per_solve": 42251.807692307695,
-            "tokens_output_per_solve": 38864.42307692308,
+            "tokens_input_uncached_per_solve": 37710.61538461538,
+            "tokens_output_per_solve": 33608.153846153844,
             "wilson95": [
-              0.4950559699353738,
-              0.7786566682895085
+              0.5254394356005149,
+              0.8091557997633336
             ]
           },
           {
             "cost_per_solve_usd": null,
-            "fresh_tokens_per_solve": 133278.16,
+            "fresh_tokens_per_solve": 131326.68,
             "harness": "grokbuild",
             "median_wall_s": 27.67,
             "model": "deepseek-v4-flash",
-            "n": 40,
-            "solve_rate": 0.625,
+            "n": 38,
+            "solve_rate": 0.6578947368421053,
             "solved": 25,
             "token_telemetry_bases": [
               "proxy_measured"
             ],
             "token_telemetry_coverage": {
-              "covered_rows": 40,
+              "covered_rows": 38,
               "native_covered_rows": 0,
-              "proxy_covered_rows": 40,
+              "proxy_covered_rows": 38,
               "ratio": 1.0,
-              "total_rows": 40
+              "total_rows": 38
             },
             "token_telemetry_source": "proxy",
-            "tokens_cache_read_per_solve": 1763886.08,
+            "tokens_cache_read_per_solve": 1745745.92,
             "tokens_cache_write_per_solve": 0.0,
-            "tokens_input_uncached_per_solve": 83262.04,
-            "tokens_output_per_solve": 50016.12,
+            "tokens_input_uncached_per_solve": 81795.08,
+            "tokens_output_per_solve": 49531.6,
             "wilson95": [
-              0.4703216005453191,
-              0.7577722646420829
+              0.4989181162907454,
+              0.7878777997354104
             ]
           },
           {
             "cost_per_solve_usd": null,
-            "fresh_tokens_per_solve": 108480.0,
+            "fresh_tokens_per_solve": 92723.33333333333,
             "harness": "codex",
             "median_wall_s": 27.182,
             "model": "deepseek-v4-flash",
-            "n": 40,
-            "solve_rate": 0.6,
+            "n": 38,
+            "solve_rate": 0.631578947368421,
             "solved": 24,
             "token_telemetry_bases": [
               "proxy_measured"
             ],
             "token_telemetry_coverage": {
-              "covered_rows": 40,
-              "native_covered_rows": 35,
-              "proxy_covered_rows": 40,
+              "covered_rows": 38,
+              "native_covered_rows": 33,
+              "proxy_covered_rows": 38,
               "ratio": 1.0,
-              "total_rows": 40
+              "total_rows": 38
             },
             "token_telemetry_source": "proxy",
-            "tokens_cache_read_per_solve": 1629205.3333333333,
+            "tokens_cache_read_per_solve": 1212576.0,
             "tokens_cache_write_per_solve": 0.0,
-            "tokens_input_uncached_per_solve": 48623.625,
-            "tokens_output_per_solve": 59856.375,
+            "tokens_input_uncached_per_solve": 40351.541666666664,
+            "tokens_output_per_solve": 52371.791666666664,
             "wilson95": [
-              0.44595619827393507,
-              0.7365188938759865
+              0.4728367282426011,
+              0.766159868445862
             ]
           }
         ],
@@ -405,10 +754,10 @@
           "Harness and host/container version stamps vary in the archive. Token columns use the complete counting-proxy lane for every displayed harness."
         ],
         "claim": null,
-        "countable_rows": 219,
+        "countable_rows": 217,
         "date": "2026-07-20",
         "excluded_counts": {
-          "infra": 6
+          "infra": 8
         },
         "family": "harness",
         "has_caveats": true,
@@ -419,9 +768,9 @@
           "duplicate_cells_excluded": 0,
           "duplicate_rows_excluded": 0,
           "groups_compared": 5,
-          "matched_cells_per_group": 40,
-          "matched_rows": 200,
-          "unmatched_countable_rows": 19
+          "matched_cells_per_group": 38,
+          "matched_rows": 190,
+          "unmatched_countable_rows": 27
         },
         "models": [
           "deepseek-v4-flash"
