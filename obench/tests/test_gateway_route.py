@@ -119,6 +119,7 @@ def route_plan(
     arm_id,
     arm_digest,
     gateway=None,
+    gateway_id=None,
     protocol="openai_chat",
     provider_prompt_mode="provider_default",
 ):
@@ -144,6 +145,7 @@ def route_plan(
         private_host_allowlist=("127.0.0.1",),
         private_cidr_allowlist=(),
         gateway=gateway or ("openrouter" if route_kind == "gateway" else None),
+        gateway_id=gateway_id,
         provider_prompt_mode=provider_prompt_mode,
     )
 
@@ -425,6 +427,44 @@ class GatewayRouteTests(unittest.TestCase):
         self.assertEqual(rows[0]["serving_arm"]["arm_digest"], plan.arm_digest)
         for secret in (HOST_SECRET, CLIENT_SECRET, PRIVATE_PROMPT):
             self.assertNotIn(secret, ledger)
+
+    def test_cloudflare_managed_route_overwrites_gateway_controls(self):
+        token = "cloudflare-managed-cell"
+        plan = route_plan(
+            endpoint=self.upstream_base + "/gateway",
+            route_kind="gateway",
+            arm_id="cloudflare-managed",
+            arm_digest="c" * 64,
+            gateway="cloudflare",
+            gateway_id="openbench-gateway-bench",
+        )
+        self.server.register_cell(token)
+        with mock.patch.object(proxy.gateway_profiles, "validate_arm"):
+            self.server.register_route(token, plan, secret_plan(plan.arm_id))
+
+        status, _ = self._post(
+            token,
+            plan.arm_digest,
+            headers={
+                "authorization": f"Bearer {CLIENT_SECRET}",
+                "cf-aig-gateway-id": "attacker-gateway",
+                "cf-aig-skip-cache": "false",
+                "cf-aig-max-attempts": "99",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        headers = self.upstream.requests[-1]["headers"]
+        self.assertEqual(headers["authorization"], f"Bearer {HOST_SECRET}")
+        self.assertEqual(
+            headers["cf-aig-gateway-id"],
+            "openbench-gateway-bench",
+        )
+        self.assertEqual(headers["cf-aig-skip-cache"], "true")
+        self.assertEqual(headers["cf-aig-max-attempts"], "1")
+        ledger = self.server.seal_cell(token).path.read_text(encoding="utf-8")
+        for private in (HOST_SECRET, CLIENT_SECRET, "attacker-gateway"):
+            self.assertNotIn(private, ledger)
 
     def test_direct_openai_forces_model_and_sampling_without_gateway_metadata(self):
         token = "direct-cell"

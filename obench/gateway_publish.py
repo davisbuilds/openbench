@@ -338,6 +338,7 @@ _EXPERIMENT_ARM_SCHEMA = {
     "arm_digest": _SCALAR,
     "route_kind": _SCALAR,
     "gateway": _SCALAR,
+    "gateway_id": _SCALAR,
     "protocol": _SCALAR,
     "baseline": _SCALAR,
     "canonical_model": _SCALAR,
@@ -564,6 +565,8 @@ def _experiment_dto(source: Mapping[str, Any], source_digest: str) -> dict[str, 
         }
         if "gateway" in arm:
             public_arm["gateway"] = arm["gateway"]
+        if "gateway_id" in arm:
+            public_arm["gateway_id"] = arm["gateway_id"]
         arms.append(public_arm)
     return {
         "kind": "experiment",

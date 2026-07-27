@@ -121,6 +121,10 @@ def _verify(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "probe":
+        from .gateway_probe_cli import main as probe_main
+        return probe_main(argv[1:])
     parser = argparse.ArgumentParser(
         prog="obench gateway",
         description="Compare fixed model/provider routes through AI gateways.",
@@ -160,6 +164,10 @@ def main(argv: list[str] | None = None) -> int:
     verify = sub.add_parser("verify", help="verify a Gateway Bench evidence bundle")
     verify.add_argument("bundle")
     verify.set_defaults(handler=_verify)
+
+    probe = sub.add_parser("probe", help="run request-level gateway probes")
+    probe.add_argument("probe_args", nargs=argparse.REMAINDER)
+    probe.set_defaults(handler=lambda args: 0)
 
     args = parser.parse_args(argv)
     try:

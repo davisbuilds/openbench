@@ -309,7 +309,7 @@ class GatewayExperimentTests(unittest.TestCase):
             manifest(budget=manifest_budget() + "\nextra = 1"),
             manifest(gateway_extra='direct_control_arm_id = "direct-openai"\nextra = 1'),
             manifest(gateway_extra=(
-                'gateway_id = "strict-tax"\n'
+                'other_gateway_id = "strict-tax"\n'
                 'direct_control_arm_id = "direct-openai"'
             )),
             manifest(windows=manifest_windows().replace(
@@ -449,7 +449,7 @@ class GatewayExperimentTests(unittest.TestCase):
                 with self.assertRaisesRegex(GatewaySpecError, message):
                     parse_experiment_toml(text)
 
-    def test_vercel_is_admitted_and_cloudflare_requires_logs_verification(self):
+    def test_vercel_and_named_cloudflare_managed_gateway_are_admitted(self):
         vercel = manifest(
             gateway_auth='auth_env = "AI_GATEWAY_API_KEY"',
             gateway_extra=(
@@ -476,17 +476,68 @@ class GatewayExperimentTests(unittest.TestCase):
         ).join(vercel)
         self.assertEqual(parse_experiment_toml(vercel).arms[1].gateway, "vercel")
 
-        with self.assertRaisesRegex(
-            GatewaySpecError,
-            "metadata-only Logs API verification is required",
-        ):
-            parse_experiment_toml(manifest(
-                gateway_auth='auth_env = "CLOUDFLARE_API_TOKEN"',
-                gateway_extra=(
-                    'gateway = "cloudflare"\n'
-                    'direct_control_arm_id = "direct-openai"'
-                ),
-            ))
+        cloudflare = manifest(
+            gateway_auth='auth_env = "CLOUDFLARE_API_TOKEN"',
+            gateway_extra=(
+                'gateway = "cloudflare"\n'
+                'gateway_id = "openbench-gateway-bench"\n'
+                'direct_control_arm_id = "direct-openai"'
+            ),
+        ).replace(
+            "https://openrouter.ai/api/v1/chat/completions",
+            "https://api.cloudflare.com/client/v4/accounts/"
+            "0123456789abcdef0123456789abcdef/ai/v1/chat/completions",
+        )
+        cloudflare = cloudflare.rsplit(
+            'requested_model = "gpt-test-2026-07-01"',
+            1,
+        )
+        cloudflare = (
+            'requested_model = "openai/gpt-test-2026-07-01"'
+        ).join(cloudflare)
+        cloudflare = cloudflare.rsplit(
+            'allowed_models = ["gpt-test-2026-07-01"]',
+            1,
+        )
+        cloudflare = (
+            'allowed_models = ["openai/gpt-test-2026-07-01"]'
+        ).join(cloudflare)
+        parsed = parse_experiment_toml(cloudflare)
+        self.assertEqual(
+            parsed.arms[1].gateway_id,
+            "openbench-gateway-bench",
+        )
+        changed = parse_experiment_toml(
+            cloudflare.replace(
+                'gateway_id = "openbench-gateway-bench"',
+                'gateway_id = "openbench-gateway-bench-alt"',
+            )
+        )
+        self.assertNotEqual(parsed.arms[1].digest, changed.arms[1].digest)
+        self.assertNotEqual(parsed.digest, changed.digest)
+        with self.assertRaisesRegex(GatewaySpecError, "requires a valid gateway_id"):
+            parse_experiment_toml(
+                cloudflare.replace(
+                    'gateway_id = "openbench-gateway-bench"\n',
+                    "",
+                )
+            )
+        with self.assertRaisesRegex(GatewaySpecError, "only for cloudflare"):
+            parse_experiment_toml(
+                manifest(
+                    gateway_extra=(
+                        'gateway = "openrouter"\n'
+                        'gateway_id = "not-cloudflare"\n'
+                        'direct_control_arm_id = "direct-openai"'
+                    )
+                )
+            )
+        with self.assertRaisesRegex(GatewaySpecError, "direct arm must not declare"):
+            parse_experiment_toml(
+                manifest(
+                    direct_extra='gateway_id = "not-direct"',
+                )
+            )
 
     def test_responses_protocol_requires_responses_endpoints(self):
         responses = manifest().replace(

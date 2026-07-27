@@ -120,6 +120,7 @@ class GatewayPublishTests(unittest.TestCase):
                 "endpoint": "https://router.example.test/private/model",
             }],
         }
+
         self.prices = {
             "schema_version": 1,
             "price_id": "prices-1",
@@ -211,6 +212,34 @@ class GatewayPublishTests(unittest.TestCase):
             "transcript_path": "/Users/private/transcript.txt",
         }
         self._write_ledger()
+
+    def test_public_experiment_retains_cloudflare_managed_gateway_id(self):
+        source = experiment().to_dict()
+        gateway = source["arms"][1]
+        gateway.update({
+            "gateway": "cloudflare",
+            "gateway_id": "openbench-gateway-bench",
+            "endpoint": (
+                "https://api.cloudflare.com/client/v4/accounts/"
+                "0123456789abcdef0123456789abcdef/ai/v1/chat/completions"
+            ),
+            "auth_env": "CLOUDFLARE_API_TOKEN",
+        })
+        managed = gateway_spec.parse_experiment(source)
+
+        public = gateway_publish._experiment_dto(
+            managed.to_dict(),
+            managed.digest,
+        )
+
+        self.assertEqual(
+            public["arms"][1]["gateway_id"],
+            "openbench-gateway-bench",
+        )
+        self.assertEqual(
+            public["arms"][1]["arm_digest"],
+            managed.arms[1].digest,
+        )
 
     def test_provider_prompt_mode_is_bound_across_publication_artifacts(self):
         gateway_publish._require_provider_prompt_mode_binding(  # noqa: SLF001

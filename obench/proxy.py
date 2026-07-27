@@ -705,6 +705,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         }
         headers.update(gateway_profiles.request_headers(
             gateway=route.gateway_route.plan.gateway,
+            gateway_id=route.gateway_route.plan.gateway_id,
             secret=route.gateway_route.secret,
         ))
         headers["Content-Length"] = str(body_length)
@@ -906,6 +907,7 @@ class CountingProxyServer(ThreadingHTTPServer):
             gateway_profiles.validate_arm(
                 route_kind=plan.route_kind,
                 gateway=plan.gateway,
+                gateway_id=plan.gateway_id,
                 endpoint=plan.endpoint,
                 protocol=plan.protocol,
                 requested_model=plan.requested_model,

@@ -98,16 +98,15 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "0123456789abcdef0123456789abcdef/"
             "openbench-gateway-bench/compat/chat/completions"
         )
-        for endpoint in (rest_endpoint, compat_endpoint):
-            with self.subTest(endpoint=endpoint):
-                gateway_profiles.validate_arm(
-                    route_kind="gateway",
-                    gateway="cloudflare",
-                    endpoint=endpoint,
-                    protocol="openai_chat",
-                    requested_model="openai/gpt-4o-mini",
-                    requested_provider="openai",
-                )
+        gateway_profiles.validate_arm(
+            route_kind="gateway",
+            gateway="cloudflare",
+            gateway_id="openbench-gateway-bench",
+            endpoint=rest_endpoint,
+            protocol="openai_chat",
+            requested_model="openai/gpt-4o-mini",
+            requested_provider="openai",
+        )
 
         invalid_endpoints = (
             rest_endpoint.replace(
@@ -118,17 +117,18 @@ class GatewayRequestProfileTests(unittest.TestCase):
             ),
             rest_endpoint + "?gateway=other",
             compat_endpoint.replace("openbench-gateway-bench", "{gateway_id}"),
-            compat_endpoint.replace("/compat/chat/completions", "/openai"),
+            compat_endpoint,
         )
         for invalid in invalid_endpoints:
             with self.subTest(endpoint=invalid):
                 with self.assertRaisesRegex(
                     gateway_profiles.GatewayProfileError,
-                    "cloudflare endpoint must be",
+                    "cloudflare managed endpoint must be",
                 ):
                     gateway_profiles.validate_arm(
                         route_kind="gateway",
                         gateway="cloudflare",
+                        gateway_id="openbench-gateway-bench",
                         endpoint=invalid,
                         protocol="openai_chat",
                         requested_model="openai/gpt-4o-mini",
@@ -142,6 +142,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
             gateway_profiles.validate_arm(
                 route_kind="gateway",
                 gateway="cloudflare",
+                gateway_id="openbench-gateway-bench",
                 endpoint=rest_endpoint,
                 protocol="openai_chat",
                 requested_model="anthropic/gpt-4o-mini",
@@ -153,6 +154,7 @@ class GatewayRequestProfileTests(unittest.TestCase):
         gateway_profiles.validate_arm(
             route_kind="gateway",
             gateway="cloudflare",
+            gateway_id="openbench-gateway-bench",
             endpoint=responses_endpoint,
             protocol="openai_responses",
             requested_model="openai/gpt-4o-mini",
@@ -160,17 +162,44 @@ class GatewayRequestProfileTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(
             gateway_profiles.GatewayProfileError,
-            "cloudflare endpoint must be",
+            "cloudflare managed endpoint must be",
         ):
             gateway_profiles.validate_arm(
                 route_kind="gateway",
                 gateway="cloudflare",
+                gateway_id="openbench-gateway-bench",
                 endpoint=responses_endpoint,
                 protocol="openai_chat",
                 requested_model="openai/gpt-4o-mini",
                 requested_provider="openai",
             )
 
+        with self.assertRaisesRegex(
+            gateway_profiles.GatewayProfileError,
+            "requires a valid gateway_id",
+        ):
+            gateway_profiles.validate_arm(
+                route_kind="gateway",
+                gateway="cloudflare",
+                endpoint=responses_endpoint,
+                protocol="openai_responses",
+                requested_model="openai/gpt-4o-mini",
+                requested_provider="openai",
+            )
+        with self.assertRaisesRegex(
+            gateway_profiles.GatewayProfileError,
+            "cloudflare managed endpoint must be",
+        ):
+            gateway_profiles.validate_arm(
+                route_kind="gateway",
+                gateway="cloudflare",
+                gateway_id="openbench-gateway-bench",
+                endpoint=compat_endpoint,
+                protocol="openai_chat",
+                requested_model="openai/gpt-4o-mini",
+                requested_provider="openai",
+                allow_private_endpoint=True,
+            )
     def test_cloudflare_overwrites_headers_and_strips_body_controls(self):
         body = self.base_body()
         body.update({
@@ -194,10 +223,13 @@ class GatewayRequestProfileTests(unittest.TestCase):
         self.assertNotIn("cache_control", body["messages"][0])
         self.assertEqual(
             gateway_profiles.request_headers(
-                gateway="cloudflare", secret="secret"
+                gateway="cloudflare",
+                gateway_id="openbench-gateway-bench",
+                secret="secret",
             ),
             {
                 "Authorization": "Bearer secret",
+                "cf-aig-gateway-id": "openbench-gateway-bench",
                 "cf-aig-skip-cache": "true",
                 "cf-aig-max-attempts": "1",
                 "cf-aig-collect-log-payload": "false",
