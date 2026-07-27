@@ -524,6 +524,7 @@ def aggregate_gateway_probe_bundle(
         "id": bundle_id,
         "kind": entry.get("kind") or "release",
         "title": _public_gateway_title(entry.get("title") or bundle_id),
+        "model": entry.get("model") or entry.get("title") or bundle_id,
         "date": entry.get("date") or "",
         "path": entry.get("path"),
         "link": entry.get("link"),
@@ -873,6 +874,18 @@ button.theme svg{width:15px;height:15px}
 /* --- asides ------------------------------------------------------------- */
 .note{margin:22px 0 0;padding:0;color:var(--ink-2);font-size:15px;max-width:78ch}
 .note strong{color:var(--ink);font-weight:600}
+.gateway-model-tabs{display:flex;gap:0;margin-top:26px;border-bottom:1px solid var(--rule);
+  overflow-x:auto}
+.gateway-model-tabs button{appearance:none;background:none;border:0;
+  border-bottom:2px solid transparent;color:var(--ink-3);cursor:pointer;
+  padding:12px 18px 10px;font:600 14px/1.2 var(--font-sans);white-space:nowrap}
+.gateway-model-tabs button:first-child{padding-left:0}
+.gateway-model-tabs button[aria-selected="true"]{border-bottom-color:var(--ink);
+  color:var(--ink)}
+.gateway-model-tabs .tab-depth{display:block;margin-top:5px;
+  font:10.5px/1.25 var(--font-mono);font-weight:400;color:var(--ink-3)}
+.evidence-depth{border-left:3px solid var(--rule-strong);padding-left:12px}
+.evidence-depth.is-spike{border-left-color:var(--warn-rule);color:var(--warn-ink)}
 
 /* --- boards, as records rather than cards ------------------------------- */
 .board{padding:52px 0 8px;border-bottom:1px solid var(--rule)}
@@ -1162,6 +1175,46 @@ _JS = r"""
         ? "input" : "change", applyFilters);
     });
   }
+
+  // --- gateway model tabs ------------------------------------------------
+  var modelTabs = Array.prototype.slice.call(
+    document.querySelectorAll("[data-gateway-model-tab]")
+  );
+  var modelPanels = Array.prototype.slice.call(
+    document.querySelectorAll("[data-gateway-model-panel]")
+  );
+
+  function selectGatewayModel(tab, moveFocus) {
+    modelTabs.forEach(function (candidate) {
+      var selected = candidate === tab;
+      candidate.setAttribute("aria-selected", selected ? "true" : "false");
+      candidate.setAttribute("tabindex", selected ? "0" : "-1");
+    });
+    modelPanels.forEach(function (panel) {
+      panel.hidden = panel.id !== tab.getAttribute("aria-controls");
+    });
+    if (moveFocus) tab.focus();
+  }
+
+  modelTabs.forEach(function (tab, index) {
+    tab.addEventListener("click", function () {
+      selectGatewayModel(tab, false);
+    });
+    tab.addEventListener("keydown", function (ev) {
+      var next = null;
+      if (ev.key === "ArrowRight") next = (index + 1) % modelTabs.length;
+      if (ev.key === "ArrowLeft") {
+        next = (index - 1 + modelTabs.length) % modelTabs.length;
+      }
+      if (ev.key === "Home") next = 0;
+      if (ev.key === "End") next = modelTabs.length - 1;
+      if (next !== null) {
+        ev.preventDefault();
+        selectGatewayModel(modelTabs[next], true);
+      }
+    });
+  });
+  if (modelTabs.length) selectGatewayModel(modelTabs[0], false);
 
   // --- tabs ---------------------------------------------------------------
   var VIEWS = [
@@ -2136,12 +2189,12 @@ def _gateway_board(bundle):
 
 def _gateway_route_key(arm_id):
     arm_id = arm_id or ""
+    for provider in ("cloudflare", "concentrate", "openrouter", "vercel"):
+        if arm_id.startswith(provider + "-"):
+            return provider + "-openai"
     for key in (
-        "cloudflare-openai",
-        "concentrate-openai",
         "direct-openai",
-        "openrouter-openai",
-        "vercel-openai",
+        "direct-moonshot",
     ):
         if arm_id == key or arm_id.startswith(key + "-"):
             return key
@@ -2153,6 +2206,7 @@ def _gateway_probe_route_name(arm_id):
         "cloudflare-openai": "Cloudflare",
         "concentrate-openai": "Concentrate",
         "direct-openai": "Direct OpenAI",
+        "direct-moonshot": "Direct Moonshot",
         "openrouter-openai": "OpenRouter",
         "vercel-openai": "Vercel",
     }.get(_gateway_route_key(arm_id), arm_id)
@@ -2464,6 +2518,9 @@ def _gateway_probe_board(bundle):
 
     scheduled = bundle.get("scheduled_blocks_per_condition")
     complete = bundle.get("complete_blocks") or {}
+    cold_blocks = complete.get("cold", 0)
+    warm_blocks = complete.get("warm", 0)
+    is_spike = scheduled == 1
     meta = "".join(filter(None, [
         _meta_field("date", bundle["date"]) if bundle.get("date") else None,
         _meta_field("model match", bundle["model_match"])
@@ -2490,6 +2547,23 @@ def _gateway_probe_board(bundle):
             {},
             "Request-level benchmark. Cold and warm conditions retain "
             "separate denominators from Harness Bench cells.",
+        )
+        + _tag(
+            "p",
+            {
+                "class": (
+                    "evidence-depth is-spike" if is_spike else "evidence-depth"
+                )
+            },
+            (
+                f"Evidence depth: {cold_blocks} cold + {warm_blocks} warm "
+                "matched blocks per route."
+                + (
+                    " This is a spike denominator and is not maturity-equivalent "
+                    "to bundles with larger matched-block denominators."
+                    if is_spike else ""
+                )
+            ),
         ),
     )
 
@@ -2924,7 +2998,55 @@ def _gateway_probe_view(doc):
         body += _tag("section", {"class": "board"}, _tag(
             "div", {"class": "empty"},
             _tag("p", {}, "No verified Gateway Bench bundles published yet.")))
-    body += "".join(_gateway_probe_board(bundle) for bundle in family["bundles"])
+    else:
+        tabs = []
+        panels = []
+        for index, bundle in enumerate(family["bundles"]):
+            suffix = re.sub(r"[^a-z0-9_-]+", "-", bundle["id"].lower()).strip("-")
+            tab_id = f"gateway-model-tab-{suffix}"
+            panel_id = f"gateway-model-panel-{suffix}"
+            complete = bundle.get("complete_blocks") or {}
+            tabs.append(_tag(
+                "button",
+                {
+                    "type": "button",
+                    "role": "tab",
+                    "id": tab_id,
+                    "aria-controls": panel_id,
+                    "aria-selected": "true" if index == 0 else "false",
+                    "tabindex": "0" if index == 0 else "-1",
+                    "data-gateway-model-tab": "",
+                },
+                _esc(bundle.get("model") or bundle["title"])
+                + _tag(
+                    "span",
+                    {"class": "tab-depth"},
+                    _esc(
+                        f"{complete.get('cold', 0)} cold + "
+                        f"{complete.get('warm', 0)} warm matched blocks"
+                    ),
+                ),
+            ))
+            panels.append(_tag(
+                "section",
+                {
+                    "role": "tabpanel",
+                    "id": panel_id,
+                    "aria-labelledby": tab_id,
+                    "data-gateway-model-panel": "",
+                },
+                _gateway_probe_board(bundle),
+            ))
+        body += _tag(
+            "div",
+            {
+                "class": "gateway-model-tabs",
+                "role": "tablist",
+                "aria-label": "Benchmark model",
+            },
+            "".join(tabs),
+        )
+        body += "".join(panels)
     if family.get("skipped"):
         body += _skipped_board(
             f"Not published ({len(family['skipped'])})",

@@ -213,6 +213,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
             json.dumps([{
                 "id": "probe-v4",
                 "title": "Gateway Probe: managed request probe",
+                "model": "Synthetic model",
                 "date": "2026-07-27",
             }]),
         )
@@ -224,6 +225,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("gateway_probe", doc)
         bundle = family["bundles"][0]
         self.assertEqual(bundle["title"], "Gateway Bench: managed request benchmark")
+        self.assertEqual(bundle["model"], "Synthetic model")
         self.assertEqual(bundle["complete_blocks"], {"cold": 2, "warm": 2})
         self.assertEqual(bundle["scheduled_blocks_per_condition"], 2)
         self.assertEqual(bundle["model_match"], "exact_revision")
@@ -244,6 +246,66 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn("Gateway Bench: managed request benchmark", page)
         self.assertNotIn("Gateway Probe", page)
         self.assertNotIn('id="view-gateway-probe"', page)
+
+    def test_multiple_probe_bundles_render_as_accessible_model_tabs(self):
+        self._publish_probe("gpt-bundle")
+        self._publish_probe("kimi-bundle")
+        _write(
+            os.path.join(self.site_dir, "gateway-probe.json"),
+            json.dumps([
+                {
+                    "id": "gpt-bundle",
+                    "title": "GPT benchmark",
+                    "model": "GPT-4o mini",
+                    "date": "2026-07-27",
+                },
+                {
+                    "id": "kimi-bundle",
+                    "title": "Kimi benchmark",
+                    "model": "Kimi K3",
+                    "date": "2026-07-27",
+                },
+            ]),
+        )
+
+        doc = site.build_board(self.site_dir)
+        page = site.render_board_html(doc)
+
+        self.assertEqual(
+            [bundle["model"] for bundle in doc["gateway"]["bundles"]],
+            ["GPT-4o mini", "Kimi K3"],
+        )
+        self.assertEqual(page.count('role="tab"'), 2)
+        self.assertEqual(page.count('role="tabpanel"'), 2)
+        self.assertIn('role="tablist" aria-label="Benchmark model"', page)
+        self.assertIn(
+            'id="gateway-model-tab-gpt-bundle" '
+            'aria-controls="gateway-model-panel-gpt-bundle"',
+            page,
+        )
+        self.assertIn(
+            'id="gateway-model-panel-kimi-bundle" '
+            'aria-labelledby="gateway-model-tab-kimi-bundle"',
+            page,
+        )
+        self.assertIn("GPT benchmark", page)
+        self.assertIn("Kimi benchmark", page)
+        self.assertIn("2 cold + 2 warm matched blocks", page)
+        self.assertIn('ev.key === "ArrowRight"', page)
+        self.assertIn('ev.key === "Home"', page)
+        self.assertIn("selectGatewayModel(modelTabs[0], false)", page)
+
+    def test_single_block_bundle_is_plainly_labelled_as_a_spike(self):
+        bundle = site.aggregate_gateway_probe_bundle(self._publish_probe())
+        bundle["complete_blocks"] = {"cold": 1, "warm": 1}
+        bundle["scheduled_blocks_per_condition"] = 1
+
+        page = site._gateway_probe_board(bundle)
+
+        self.assertIn("Evidence depth: 1 cold + 1 warm matched blocks per route.", page)
+        self.assertIn("This is a spike denominator", page)
+        self.assertIn("not maturity-equivalent", page)
+        self.assertIn('class="evidence-depth is-spike"', page)
 
     def test_tampered_probe_bundle_fails_closed(self):
         bundle = self._publish_probe()
@@ -381,6 +443,11 @@ class GatewayProbeFamilyTests(_SiteFixture):
             "cloudflare-openai": "Cloudflare",
             "concentrate-openai": "Concentrate",
             "direct-openai": "Direct OpenAI",
+            "direct-moonshot": "Direct Moonshot",
+            "cloudflare-moonshot": "Cloudflare",
+            "concentrate-moonshot": "Concentrate",
+            "openrouter-moonshot": "OpenRouter",
+            "vercel-moonshot": "Vercel",
             "openrouter-openai": "OpenRouter",
             "vercel-openai": "Vercel",
             "custom-route": "custom-route",
