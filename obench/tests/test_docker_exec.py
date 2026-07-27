@@ -227,20 +227,21 @@ class TestBuildDockerCmd(unittest.TestCase):
             self.assertEqual(targets, [(dedicated, ".grok/auth.json")])
 
     def test_codex_ablation_mounts_only_variant_dir(self):
-        for harness, variant in (("codex_v1", "v1"), ("codex_v2", "v2")):
-            with self.subTest(harness=harness):
-                cmd = docker_exec.build_docker_cmd(
-                    harness=harness, workdir="/tmp/wd", model="deepseek-v4-flash",
-                    timeout_s=240, adapters_dir="/repo/obench/adapters",
-                    image="openbench-harness:latest",
-                    instruction_path="/tmp/instr.txt",
-                )
-                joined = " ".join(cmd)
-                expected = f"/ablation/codex-home-{variant}:/bench/ablation/codex-home-{variant}:ro"
-                self.assertIn(expected, joined)
-                self.assertNotIn("/ablation:/bench/ablation:ro", joined)
-                self.assertIn("OPENROUTER_API_KEY=openbench-bridge-placeholder", cmd)
-                self.assertNotIn("DEEPSEEK_API_KEY", cmd)
+        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-or-test"}):
+            for harness, variant in (("codex_v1", "v1"), ("codex_v2", "v2")):
+                with self.subTest(harness=harness):
+                    cmd = docker_exec.build_docker_cmd(
+                        harness=harness, workdir="/tmp/wd", model="deepseek-v4-flash",
+                        timeout_s=240, adapters_dir="/repo/obench/adapters",
+                        image="openbench-harness:latest",
+                        instruction_path="/tmp/instr.txt",
+                    )
+                    joined = " ".join(cmd)
+                    expected = f"/ablation/codex-home-{variant}:/bench/ablation/codex-home-{variant}:ro"
+                    self.assertIn(expected, joined)
+                    self.assertNotIn("/ablation:/bench/ablation:ro", joined)
+                    self.assertIn("OPENROUTER_API_KEY=openbench-bridge-placeholder", cmd)
+                    self.assertNotIn("DEEPSEEK_API_KEY", cmd)
 
     def test_grokbuild_mounts_only_grok_auth_file(self):
         # The native xAI subscription lane (grok-4.5) needs ~/.grok/auth.json in

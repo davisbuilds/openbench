@@ -997,6 +997,31 @@ tbody tr:hover td:first-child{background:var(--wash)}
   color:var(--ink)}
 .route-measure span{display:block;margin-top:4px;font:10px/1.2 var(--font-sans);
   text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3)}
+.provider-cell{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.provider-cell .route-logo{width:20px;height:20px;flex-basis:20px}
+.provider-variance{margin:2px 0 40px;border-top:1px solid var(--rule)}
+.variance-row{display:grid;grid-template-columns:34px minmax(170px,1fr)
+  minmax(220px,2fr) 76px;align-items:center;gap:12px;
+  min-height:58px;border-bottom:1px solid var(--rule)}
+.variance-rank{font:600 12px/1 var(--font-mono);color:var(--ink-3);
+  text-align:center}
+.variance-track{position:relative;height:8px;background:var(--track);
+  border-radius:2px}
+.variance-track::before{content:"";position:absolute;left:50%;top:-3px;
+  width:1px;height:14px;background:var(--rule-strong)}
+.variance-bar{position:absolute;top:0;height:100%;border-radius:2px}
+.variance-bar.better{left:50%;background:var(--pole-better)}
+.variance-bar.worse{right:50%;background:var(--pole-worse)}
+.variance-row.baseline .variance-track::after{content:"";position:absolute;
+  left:50%;top:-3px;width:2px;height:14px;background:var(--pole-null)}
+.variance-value{text-align:right;font:600 14px/1 var(--font-mono)}
+.variance-delta{display:none;margin-top:4px;font:10px/1 var(--font-mono);
+  color:var(--ink-3)}
+.contact-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
+.contact-actions a{display:inline-flex;align-items:center;min-height:38px;
+  padding:0 14px;border:1px solid var(--rule-strong);border-radius:4px;
+  color:var(--ink);font:600 13px/1 var(--font-sans);text-decoration:none}
+.contact-actions a:hover{border-color:var(--ink);background:var(--wash)}
 
 /* --- lists and prose ---------------------------------------------------- */
 .empty{padding:4px 0 32px;color:var(--ink-2);max-width:62ch}
@@ -1043,6 +1068,9 @@ footer{color:var(--ink-3);font-size:12.5px;padding:28px 0 60px;
   .route-rank{grid-template-columns:24px minmax(0,1fr) auto;
     align-items:start;padding-left:12px;padding-right:12px}
   .route-detail{white-space:normal}
+  .variance-row{grid-template-columns:26px minmax(135px,1fr) 58px}
+  .variance-track{display:none}
+  .variance-delta{display:block}
   th,td{padding:11px 10px}
 }
 """
@@ -1152,7 +1180,9 @@ _JS = r"""
   }
 
   // --- tabs ---------------------------------------------------------------
-  var VIEWS = ["harness", "gateway", "gateway-probe", "releases", "methodology"];
+  var VIEWS = [
+    "harness", "gateway", "gateway-probe", "releases", "methodology", "contact"
+  ];
 
   function showView() {
     var hash = (location.hash || "").replace("#", "");
@@ -1254,6 +1284,14 @@ _METHODOLOGY = """
   It is not a coding-agent outcome benchmark. Probe requests, Gateway Bench
   cells, and Harness Bench cells are never pooled or compared as one
   denominator.</p>
+  <p>The Gateway Probe leaderboard uses an absolute summary score: 30% cold
+  TTFT median, 15% cold TTFT p95, 30% warm TTFT median, 15% warm TTFT p95,
+  and 10% warm median output throughput. Cold TTFT includes DNS, TCP, and TLS.
+  Latency scores linearly from 100 at zero to zero at 20 seconds; throughput
+  scores linearly from zero at 5 tok/s to 100 at 200 tok/s. The weighted result
+  is multiplied by request success.
+  Cost is excluded. Direct OpenAI is an unranked reference, and the detailed
+  measurements below the score remain the factual record.</p>
 
   <h2>Denominators and intervals</h2>
   <ul>
@@ -1860,7 +1898,8 @@ def _gateway_board(bundle):
 
     columns = [
         {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
-         "cell": lambda a: _esc(a["arm_id"]), "key": lambda a: a["arm_id"]},
+         "cell": lambda a: _gateway_route_cell(a["arm_id"]),
+         "key": lambda a: a["arm_id"]},
         {"label": "Role", "type": "str", "dir": "asc",
          "cell": lambda a: _tag("div", {"class": "chips"},
                                 _chip(a.get("role") or "—",
@@ -1925,7 +1964,8 @@ def _gateway_board(bundle):
 
     telemetry_columns = [
         {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
-         "cell": lambda a: _esc(a["arm_id"]), "key": lambda a: a["arm_id"]},
+         "cell": lambda a: _gateway_route_cell(a["arm_id"]),
+         "key": lambda a: a["arm_id"]},
         {"label": "Served route",
          "cell": route_distribution},
         {"label": "TTFB", "dir": "asc",
@@ -1993,8 +2033,10 @@ def _gateway_board(bundle):
 
         tax_columns = [
             {"label": "Gateway arm", "cls": "name", "type": "str", "dir": "asc",
-             "cell": lambda r: _esc(r["arm_id"]), "key": lambda r: r["arm_id"]},
-            {"label": "vs direct", "cell": lambda r: _esc(r["direct_arm"])},
+             "cell": lambda r: _gateway_route_cell(r["arm_id"]),
+             "key": lambda r: r["arm_id"]},
+            {"label": "vs direct",
+             "cell": lambda r: _gateway_route_cell(r["direct_arm"])},
             delta_column("Δ solve rate", "solve_rate", _fmt_pct, True),
             delta_column("Δ mean score", "mean_checker_score", _fmt_score, True),
             delta_column("Δ availability", "availability", _fmt_pct, True),
@@ -2018,8 +2060,10 @@ def _gateway_board(bundle):
 
         telemetry_tax_columns = [
             {"label": "Gateway arm", "cls": "name", "type": "str", "dir": "asc",
-             "cell": lambda r: _esc(r["arm_id"]), "key": lambda r: r["arm_id"]},
-            {"label": "vs direct", "cell": lambda r: _esc(r["direct_arm"])},
+             "cell": lambda r: _gateway_route_cell(r["arm_id"]),
+             "key": lambda r: r["arm_id"]},
+            {"label": "vs direct",
+             "cell": lambda r: _gateway_route_cell(r["direct_arm"])},
             delta_column(
                 "Δ TTFB", "ttfb_s", lambda v: f"{v:.2f}s", False, "asc",
                 skip_if_empty=True,
@@ -2085,6 +2129,20 @@ def _gateway_board(bundle):
     return _tag("section", {"class": "board", "data-caveats": "0"}, parts)
 
 
+def _gateway_route_key(arm_id):
+    arm_id = arm_id or ""
+    for key in (
+        "cloudflare-openai",
+        "concentrate-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+    ):
+        if arm_id == key or arm_id.startswith(key + "-"):
+            return key
+    return arm_id
+
+
 def _gateway_probe_route_name(arm_id):
     return {
         "cloudflare-openai": "Cloudflare",
@@ -2092,11 +2150,12 @@ def _gateway_probe_route_name(arm_id):
         "direct-openai": "Direct OpenAI",
         "openrouter-openai": "OpenRouter",
         "vercel-openai": "Vercel",
-    }.get(arm_id, arm_id)
+    }.get(_gateway_route_key(arm_id), arm_id)
 
 
 def _gateway_probe_logo(arm_id):
     """Return a compact inline mark without adding external page resources."""
+    arm_id = _gateway_route_key(arm_id)
     attrs = {
         "class": "route-logo",
         "aria-hidden": "true",
@@ -2222,43 +2281,130 @@ def _gateway_probe_logo(arm_id):
     return _tag("span", attrs, svg)
 
 
-def _gateway_probe_leaderboard(bundle):
-    rows = []
-    for contrast in bundle.get("contrasts") or []:
-        metric = (
-            (contrast.get("conditions") or {})
-            .get("warm", {})
-            .get("request_to_semantic_ttft_s", {})
+def _gateway_route_cell(arm_id):
+    return _tag(
+        "span",
+        {"class": "provider-cell"},
+        _gateway_probe_logo(arm_id)
+        + _tag("span", {}, _esc(_gateway_probe_route_name(arm_id))),
+    )
+
+
+_GATEWAY_COMPOSITE_WEIGHTS = {
+    ("cold", "p50"): 0.30,
+    ("cold", "p95"): 0.15,
+    ("warm", "p50"): 0.30,
+    ("warm", "p95"): 0.15,
+}
+
+
+def _gateway_probe_composite_scores(bundle):
+    """Return absolute, cost-free route scores on fixed 0-100 scales."""
+    arms = {arm["arm_id"]: arm for arm in bundle.get("arms") or []}
+    baseline_id = bundle.get("baseline_arm_id")
+    if baseline_id not in arms:
+        return []
+
+    def metric(arm, condition, name, percentile):
+        condition_data = (arm.get("conditions") or {}).get(condition) or {}
+        return (
+            ((condition_data.get("metrics") or {}).get(name) or {})
+            .get(percentile)
         )
-        estimate = metric.get("median_gateway_minus_direct")
-        if estimate is None:
+
+    def metric_complete(arm, condition, name):
+        condition_data = (arm.get("conditions") or {}).get(condition) or {}
+        denominators = condition_data.get("denominators") or {}
+        summary = (condition_data.get("metrics") or {}).get(name) or {}
+        coverage = summary.get("coverage") or {}
+        scheduled = denominators.get("scheduled")
+        attempted = denominators.get("attempted")
+        success = denominators.get("success")
+        verified = denominators.get("route_verified")
+        covered = coverage.get("covered")
+        return (
+            scheduled is not None
+            and attempted == scheduled
+            and success == verified
+            and covered == success
+        )
+
+    def availability(arm):
+        successes = 0
+        attempted = 0
+        for condition in ("cold", "warm"):
+            value = (
+                ((arm.get("conditions") or {}).get(condition) or {})
+                .get("availability") or {}
+            )
+            if value.get("successes") is None or value.get("attempted") is None:
+                return None
+            successes += value["successes"]
+            attempted += value["attempted"]
+        return successes / attempted if attempted else None
+
+    def score_latency(value):
+        return max(0.0, min(100.0, 100.0 * (1.0 - value / 20.0)))
+
+    def score_throughput(value):
+        return max(0.0, min(100.0, (value - 5.0) / 195.0 * 100.0))
+
+    rows = []
+    for arm in arms.values():
+        weighted_score = 0.0
+        complete = True
+        for (condition, percentile), weight in _GATEWAY_COMPOSITE_WEIGHTS.items():
+            metric_name = (
+                "cold_end_to_end_semantic_ttft_s"
+                if condition == "cold"
+                else "request_to_semantic_ttft_s"
+            )
+            value = metric(
+                arm, condition, metric_name, percentile
+            )
+            if value is None or not metric_complete(
+                arm, condition, metric_name
+            ):
+                complete = False
+                break
+            weighted_score += weight * score_latency(value)
+
+        throughput = metric(
+            arm, "warm", "throughput_tokens_per_s", "p50"
+        )
+        route_availability = availability(arm)
+        if (
+            not complete
+            or throughput is None
+            or not metric_complete(
+                arm, "warm", "throughput_tokens_per_s"
+            )
+            or route_availability is None
+        ):
             continue
+        weighted_score += 0.10 * score_throughput(throughput)
+        score = weighted_score * route_availability
         rows.append({
-            "arm_id": contrast["arm_id"],
-            "estimate": estimate,
-            "interval": metric.get("interval") or {},
-            "coverage": metric.get("coverage") or {},
+            "arm_id": arm["arm_id"],
+            "baseline": arm["arm_id"] == baseline_id,
+            "score": score,
+            "availability": route_availability,
         })
+    return rows
+
+
+def _gateway_probe_leaderboard(bundle):
+    rows = _gateway_probe_composite_scores(bundle)
     if not rows:
         return ""
 
-    rows.sort(key=lambda item: item["estimate"])
-    ranked = []
-    for position, row in enumerate(rows, 1):
-        interval = row["interval"]
-        covered = row["coverage"].get("covered")
-        total = row["coverage"].get("total")
-        pair_text = (
-            f"paired {covered}/{total}"
-            if covered is not None and total is not None
-            else "paired coverage unavailable"
-        )
-        if interval.get("low") is not None and interval.get("high") is not None:
-            pair_text = (
-                f"95% CI {interval['low'] * 1000:+.0f} to "
-                f"{interval['high'] * 1000:+.0f} ms · {pair_text}"
-            )
-        ranked.append((row["estimate"], _tag(
+    gateway_rows = sorted(
+        (row for row in rows if not row["baseline"]),
+        key=lambda item: (-item["score"], item["arm_id"]),
+    )
+    entries = []
+    for position, row in enumerate(gateway_rows, 1):
+        entries.append(_tag(
             "div",
             {"class": "route-rank"},
             _tag("div", {"class": "route-position"}, str(position))
@@ -2274,42 +2420,21 @@ def _gateway_probe_leaderboard(bundle):
                         {"class": "route-name"},
                         _esc(_gateway_probe_route_name(row["arm_id"])),
                     )
-                    + _tag("div", {"class": "route-detail"}, _esc(pair_text)),
+                    + _tag(
+                        "div",
+                        {"class": "route-detail"},
+                        f"{row['availability'] * 100:.0f}% request success",
+                    ),
                 ),
             )
             + _tag(
                 "div",
                 {"class": "route-measure"},
-                _tag("strong", {}, f"{row['estimate'] * 1000:+.0f} ms")
-                + _tag("span", {}, "vs direct"),
+                _tag("strong", {}, f"{row['score']:.1f}")
+                + _tag("span", {}, "composite"),
             ),
-        )))
+        ))
 
-    baseline = _tag(
-        "div",
-        {"class": "route-rank baseline"},
-        _tag("div", {"class": "route-position"}, "—")
-        + _tag(
-            "div",
-            {"class": "route-identity"},
-            _gateway_probe_logo("direct-openai")
-            + _tag(
-                "div",
-                {"class": "route-copy"},
-                _tag("div", {"class": "route-name"}, "Direct OpenAI")
-                + _tag("div", {"class": "route-detail"}, "No-gateway control"),
-            ),
-        )
-        + _tag(
-            "div",
-            {"class": "route-measure"},
-            _tag("strong", {}, "0 ms")
-            + _tag("span", {}, "baseline"),
-        ),
-    )
-    entries = [item for _, item in ranked]
-    insert_at = sum(1 for estimate, _ in ranked if estimate < 0)
-    entries.insert(insert_at, baseline)
     return (
         _tag(
             "div",
@@ -2318,11 +2443,81 @@ def _gateway_probe_leaderboard(bundle):
             + _tag(
                 "p",
                 {},
-                "Median warm semantic TTFT difference versus Direct OpenAI. "
-                "Lower is better; the direct control is not ranked.",
+                "OpenBench Composite: absolute TTFT latency, output throughput, "
+                "and request success on a 0–100 scale. Higher is better; cost "
+                "is excluded and Direct OpenAI is an unranked reference.",
             ),
         )
         + _tag("div", {"class": "route-leaderboard"}, "".join(entries))
+    )
+
+
+def _gateway_probe_variance(bundle):
+    rows = _gateway_probe_composite_scores(bundle)
+    baseline = next((row for row in rows if row["baseline"]), None)
+    if baseline is None:
+        return ""
+    gateways = sorted(
+        (row for row in rows if not row["baseline"]),
+        key=lambda item: (-item["score"], item["arm_id"]),
+    )
+    max_delta = max(
+        [abs(row["score"] - baseline["score"]) for row in gateways] + [1.0]
+    )
+    rendered = []
+    for position, row in enumerate(gateways, 1):
+        delta = row["score"] - baseline["score"]
+        tone = "better" if delta >= 0 else "worse"
+        rendered.append(_tag(
+            "div",
+            {"class": "variance-row"},
+            _tag("div", {"class": "variance-rank"}, str(position))
+            + _gateway_route_cell(row["arm_id"])
+            + _tag(
+                "div",
+                {"class": "variance-track", "title": f"{delta:+.1f} vs direct"},
+                _tag(
+                    "span",
+                    {
+                        "class": f"variance-bar {tone}",
+                        "style": f"width:{50 * abs(delta) / max_delta:.2f}%",
+                    },
+                    "",
+                ),
+            )
+            + _tag(
+                "div",
+                {"class": "variance-value"},
+                f"{row['score']:.1f}"
+                + _tag(
+                    "span",
+                    {"class": "variance-delta"},
+                    f"{delta:+.1f}",
+                ),
+            ),
+        ))
+    rendered.append(_tag(
+        "div",
+        {"class": "variance-row baseline"},
+        _tag("div", {"class": "variance-rank"}, "—")
+        + _gateway_route_cell(baseline["arm_id"])
+        + _tag("div", {"class": "variance-track"}, "")
+        + _tag("div", {"class": "variance-value"}, "reference"),
+    ))
+    return (
+        _tag(
+            "div",
+            {"class": "head"},
+            _tag("h2", {}, "Provider variance")
+            + _tag(
+                "p",
+                {},
+                "Composite score difference from the unscored Direct OpenAI "
+                "reference; actual gateway scores appear at right. "
+                "Detailed request measurements and paired uncertainty follow.",
+            ),
+        )
+        + _tag("div", {"class": "provider-variance"}, "".join(rendered))
     )
 
 
@@ -2421,8 +2616,26 @@ def _gateway_probe_board(bundle):
 
     request_columns = [
         {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
-         "cell": lambda row: _esc(_gateway_probe_route_name(row["arm_id"])),
+         "cell": lambda row: _gateway_route_cell(row["arm_id"]),
          "key": lambda row: _gateway_probe_route_name(row["arm_id"])},
+        {"label": "TTFT p50 / p95", "dir": "asc",
+         "cell": lambda row: percentile_cell(
+             row["item"],
+             (
+                 "cold_end_to_end_semantic_ttft_s"
+                 if row["condition"] == "cold"
+                 else "request_to_semantic_ttft_s"
+             ),
+             seconds,
+         ),
+         "key": lambda row: summary(
+             row["item"],
+             (
+                 "cold_end_to_end_semantic_ttft_s"
+                 if row["condition"] == "cold"
+                 else "request_to_semantic_ttft_s"
+             ),
+         ).get("p50")},
         {"label": "Response headers p50 / p95", "dir": "asc",
          "cell": lambda row: percentile_cell(
              row["item"], "request_to_response_headers_s", seconds
@@ -2436,13 +2649,6 @@ def _gateway_probe_board(bundle):
          ),
          "key": lambda row: summary(
              row["item"], "request_to_first_body_byte_s"
-         ).get("p50")},
-        {"label": "Semantic TTFT p50 / p95", "dir": "asc",
-         "cell": lambda row: percentile_cell(
-             row["item"], "request_to_semantic_ttft_s", seconds
-         ),
-         "key": lambda row: summary(
-             row["item"], "request_to_semantic_ttft_s"
          ).get("p50")},
         {"label": "Stream total p50 / p95", "dir": "asc",
          "cell": lambda row: percentile_cell(
@@ -2462,12 +2668,17 @@ def _gateway_probe_board(bundle):
          "cell": tokens_cell},
     ]
 
-    parts = head + _gateway_probe_leaderboard(bundle)
+    parts = (
+        head
+        + _gateway_probe_leaderboard(bundle)
+        + _gateway_probe_variance(bundle)
+    )
     for condition in ("cold", "warm"):
         rows = [
             {
                 "arm_id": arm["arm_id"],
                 "role": arm.get("role"),
+                "condition": condition,
                 "item": (arm.get("conditions") or {}).get(condition) or {},
             }
             for arm in bundle["arms"]
@@ -2479,14 +2690,19 @@ def _gateway_probe_board(bundle):
             + _tag(
                 "p",
                 {},
-                f"Complete blocks: {complete.get(condition, 0)}/{scheduled}.",
+                f"Complete blocks: {complete.get(condition, 0)}/{scheduled}. "
+                + (
+                    "TTFT includes DNS, TCP, and TLS setup."
+                    if condition == "cold"
+                    else "TTFT begins when the measured request is sent."
+                ),
             ),
         )
         parts += _render_table(request_columns, rows)
 
     setup_columns = [
         {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
-         "cell": lambda row: _esc(_gateway_probe_route_name(row["arm_id"])),
+         "cell": lambda row: _gateway_route_cell(row["arm_id"]),
          "key": lambda row: _gateway_probe_route_name(row["arm_id"])},
         {"label": "DNS p50 / p95", "dir": "asc",
          "cell": lambda row: percentile_cell(row["item"], "setup_dns_s", seconds),
@@ -2590,23 +2806,17 @@ def _gateway_probe_board(bundle):
 
         contrast_columns = [
             {"label": "Gateway route", "cls": "name", "type": "str", "dir": "asc",
-             "cell": lambda row: _esc(
-                 _gateway_probe_route_name(row["arm_id"])
-             ),
+             "cell": lambda row: _gateway_route_cell(row["arm_id"]),
              "key": lambda row: _gateway_probe_route_name(row["arm_id"])},
             {"label": "Condition", "type": "str", "dir": "asc",
              "cell": lambda row: _esc(row["condition"]),
              "key": lambda row: row["condition"]},
-            {"label": "vs direct",
-             "cell": lambda row: _esc(
-                 _gateway_probe_route_name(row["direct_arm"])
-             )},
             {"label": "Δ response headers", "plot": True,
              "cell": lambda row: contrast_cell(row, "headers", headers_domain),
              "key": lambda row: row["headers"].get(
                  "median_gateway_minus_direct"
              )},
-            {"label": "Δ semantic TTFT", "plot": True,
+            {"label": "Δ TTFT", "plot": True,
              "cell": lambda row: contrast_cell(
                  row, "semantic_ttft", semantic_domain
              ),
@@ -2813,6 +3023,29 @@ def _releases_view(doc):
             + _packs_section(doc["packs"]))
 
 
+def _contact_view():
+    return _tag(
+        "section",
+        {"class": "prose"},
+        _tag("h2", {}, "Contact")
+        + _tag(
+            "p",
+            {},
+            "Want to add a gateway or harness, submit results, report a "
+            "problem, or share an idea? Reach Matthew through either channel.",
+        )
+        + _tag(
+            "div",
+            {"class": "contact-actions"},
+            _link(
+                "https://github.com/minghinmatthewlam/openbench/issues/new",
+                "Open a GitHub issue",
+            )
+            + _link("https://x.com/mattlam_", "Message @mattlam_ on X"),
+        ),
+    )
+
+
 def render_board_html(doc):
     """The whole page: content rendered here, behaviour layered on top."""
     title, deck, facts = _lede(doc)
@@ -2829,6 +3062,7 @@ def render_board_html(doc):
             ("gateway-probe", "Gateway Probe"),
             ("releases", "Releases"),
             ("methodology", "Methodology"),
+            ("contact", "Contact"),
         )
     )
     theme_button = _tag("button", {
@@ -2858,6 +3092,7 @@ def render_board_html(doc):
         )
         + _tag("main", {"id": "view-releases"}, _releases_view(doc))
         + _tag("main", {"id": "view-methodology"}, _METHODOLOGY)
+        + _tag("main", {"id": "view-contact"}, _contact_view())
     )
 
     footer = _tag("footer", {},
