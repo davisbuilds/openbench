@@ -307,7 +307,6 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn("This is a spike denominator", page)
         self.assertIn("not maturity-equivalent", page)
         self.assertIn('class="evidence-depth is-spike"', page)
-        self.assertIn("Direct Moonshot is an unranked reference.", page)
         self.assertIn("Every delta is gateway minus Direct Moonshot.", page)
 
     def test_tampered_probe_bundle_fails_closed(self):
@@ -436,7 +435,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("Δ stream total", page)
         self.assertNotIn("Provider variance", page)
         paired = page[page.index("Paired request deltas"):]
-        self.assertIn("Every delta is gateway minus Direct OpenAI.", paired)
+        self.assertIn("Every delta is gateway minus direct.", paired)
         self.assertIn("positive means slower/worse", paired)
         self.assertIn("negative means faster/better", paired)
         self.assertNotIn(">vs direct<", paired)
@@ -561,6 +560,16 @@ class GatewayProbeFamilyTests(_SiteFixture):
         ranked_rows = page[page.index('class="route-leaderboard"'):]
         self.assertNotIn("Direct OpenAI", ranked_rows)
         self.assertNotIn("cost", ranked_rows.lower())
+
+    def test_probe_leaderboard_names_the_bundle_baseline(self):
+        bundle = self._composite_bundle()
+        bundle["baseline_arm_id"] = "direct-moonshot"
+        bundle["arms"][0]["arm_id"] = "direct-moonshot"
+
+        page = site._gateway_probe_leaderboard(bundle)
+
+        self.assertIn("Direct Moonshot is an unranked reference.", page)
+        self.assertNotIn("Direct OpenAI is an unranked reference.", page)
 
     def test_probe_composite_withholds_incomplete_verified_telemetry(self):
         bundle = self._composite_bundle()
