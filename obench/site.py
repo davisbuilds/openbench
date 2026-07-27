@@ -1359,7 +1359,7 @@ _METHODOLOGY = """
   Latency scores linearly from 100 at zero to zero at 20 seconds; throughput
   scores linearly from zero at 5 tok/s to 100 at 200 tok/s. The weighted result
   is multiplied by request success.
-  Cost is excluded. Direct OpenAI is an unranked reference, and the detailed
+  Cost is excluded. The direct-provider arm is an unranked reference, and the detailed
   measurements below the score remain the factual record.</p>
 
   <h2>Denominators and intervals</h2>
@@ -2450,6 +2450,7 @@ def _gateway_probe_leaderboard(bundle):
     rows = _gateway_probe_composite_scores(bundle)
     if not rows:
         return ""
+    baseline_name = _gateway_probe_route_name(bundle.get("baseline_arm_id"))
 
     gateway_rows = sorted(
         (row for row in rows if not row["baseline"]),
@@ -2498,7 +2499,9 @@ def _gateway_probe_leaderboard(bundle):
                 {},
                 "OpenBench Composite: absolute TTFT latency, output throughput, "
                 "and request success on a 0–100 scale. Higher is better; cost "
-                "is excluded and Direct OpenAI is an unranked reference.",
+                "is excluded and "
+                + _esc(baseline_name)
+                + " is an unranked reference.",
             ),
         )
         + _tag("div", {"class": "route-leaderboard"}, "".join(entries))
@@ -2515,6 +2518,7 @@ def _gateway_probe_board(bundle):
     cold_blocks = complete.get("cold", 0)
     warm_blocks = complete.get("warm", 0)
     is_spike = scheduled == 1
+    baseline_name = _gateway_probe_route_name(bundle.get("baseline_arm_id"))
     meta = "".join(filter(None, [
         _meta_field("date", bundle["date"]) if bundle.get("date") else None,
         _meta_field("model match", bundle["model_match"])
@@ -2830,7 +2834,9 @@ def _gateway_probe_board(bundle):
             + _tag(
                 "p",
                 {},
-                "Every delta is gateway minus Direct OpenAI. These are latency "
+                "Every delta is gateway minus "
+                + _esc(baseline_name)
+                + ". These are latency "
                 "metrics, so positive means slower/worse and negative means "
                 "faster/better. Medians use complete paired blocks with "
                 "bootstrap 95% intervals.",

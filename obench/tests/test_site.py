@@ -299,6 +299,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
         bundle = site.aggregate_gateway_probe_bundle(self._publish_probe())
         bundle["complete_blocks"] = {"cold": 1, "warm": 1}
         bundle["scheduled_blocks_per_condition"] = 1
+        bundle["baseline_arm_id"] = "direct-moonshot"
 
         page = site._gateway_probe_board(bundle)
 
@@ -306,6 +307,8 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn("This is a spike denominator", page)
         self.assertIn("not maturity-equivalent", page)
         self.assertIn('class="evidence-depth is-spike"', page)
+        self.assertIn("Direct Moonshot is an unranked reference.", page)
+        self.assertIn("Every delta is gateway minus Direct Moonshot.", page)
 
     def test_tampered_probe_bundle_fails_closed(self):
         bundle = self._publish_probe()
