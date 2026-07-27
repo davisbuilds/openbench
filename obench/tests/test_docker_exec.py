@@ -78,7 +78,10 @@ class TestBuildDockerCmd(unittest.TestCase):
         # not mentioned at all. Pass-through is scoped to the exact cell so
         # unrelated agent containers cannot read extra credentials.
         orig_env = dict(os.environ)
-        os.environ["DEEPSEEK_API_KEY"] = "sk-test"
+        # deepseek-v4-flash routes through OpenRouter, so ITS key is the one
+        # that must be forwarded; the vendor key must not be.
+        os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
+        os.environ.pop("DEEPSEEK_API_KEY", None)
         os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
         os.environ["CURSOR_API_KEY"] = "cursor-test"
         os.environ.pop("MOONSHOT_API_KEY", None)
@@ -116,7 +119,8 @@ class TestBuildDockerCmd(unittest.TestCase):
         finally:
             os.environ.clear()
             os.environ.update(orig_env)
-        self.assertIn("DEEPSEEK_API_KEY", cmd)
+        self.assertIn("OPENROUTER_API_KEY", cmd)
+        self.assertNotIn("DEEPSEEK_API_KEY", cmd)
         self.assertNotIn("ANTHROPIC_API_KEY", cmd)
         self.assertNotIn("CURSOR_API_KEY", cmd)
         self.assertNotIn("MOONSHOT_API_KEY", cmd)
@@ -127,7 +131,7 @@ class TestBuildDockerCmd(unittest.TestCase):
         self.assertIn("ANTHROPIC_API_KEY=openbench-bridge-placeholder", codex_opus_cmd)
         self.assertNotIn("ANTHROPIC_API_KEY", codex_opus_cmd)
         self.assertNotIn("CURSOR_API_KEY", codex_opus_cmd)
-        self.assertIn("DEEPSEEK_API_KEY", grokbuild_cmd)
+        self.assertIn("OPENROUTER_API_KEY", grokbuild_cmd)  # same routing on every harness
         self.assertNotIn("ANTHROPIC_API_KEY", grokbuild_cmd)
         self.assertNotIn("CURSOR_API_KEY", grokbuild_cmd)
         for argv in (cmd, claude_cmd, cursor_cmd, codex_opus_cmd, grokbuild_cmd):
@@ -235,7 +239,7 @@ class TestBuildDockerCmd(unittest.TestCase):
                 expected = f"/ablation/codex-home-{variant}:/bench/ablation/codex-home-{variant}:ro"
                 self.assertIn(expected, joined)
                 self.assertNotIn("/ablation:/bench/ablation:ro", joined)
-                self.assertIn("DEEPSEEK_API_KEY=openbench-bridge-placeholder", cmd)
+                self.assertIn("OPENROUTER_API_KEY=openbench-bridge-placeholder", cmd)
                 self.assertNotIn("DEEPSEEK_API_KEY", cmd)
 
     def test_grokbuild_mounts_only_grok_auth_file(self):

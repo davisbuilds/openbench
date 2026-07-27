@@ -118,7 +118,7 @@ API_KEY_PASSTHROUGH = ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "A
 _MODEL_API_KEY = {
     "glm-5.2": "ZAI_API_KEY",
     "glm-4.7-flash": "ZAI_API_KEY",
-    "deepseek-v4-flash": "DEEPSEEK_API_KEY",
+    "deepseek-v4-flash": "OPENROUTER_API_KEY",  # routed via OpenRouter, not the vendor endpoint
     "kimi-k2.7-code": "MOONSHOT_API_KEY",
     "kimi-k3": "MOONSHOT_API_KEY",
     "gpt-5.6": "CLIPROXYAPI_API_KEY",

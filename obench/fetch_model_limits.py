@@ -76,9 +76,10 @@ LIMIT_SOURCES = {
     },
     "deepseek-v4-flash": {
         "openrouter_id": "deepseek/deepseek-v4-flash",
-        "direct_endpoint_note": "api.deepseek.com /models publishes no limit "
-                                "fields; values are OpenRouter's listing of the "
-                                "same model",
+        # Traffic now goes through OpenRouter too, so the limits describe the
+        # exact route we call. Previously this was a documented proxy: we read
+        # OpenRouter's catalog while calling api.deepseek.com, which publishes
+        # no limit fields at all.
     },
     "kimi-k3": {
         "openrouter_id": "moonshotai/kimi-k3",

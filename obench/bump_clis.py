@@ -405,7 +405,7 @@ def refresh_baselines(image):
         "python3 bench/run_matrix.py --docker "
         "--harness pi,codex,opencode "
         "--model gpt-5.5-medium "
-        "--task terminal-bench/cancel-async-tasks,terminal-bench/count-call-stack,"
+        "--task terminal-bench/count-call-stack,"
         "terminal-bench/feal-differential-cryptanalysis,"
         "terminal-bench/llm-inference-batching-scheduler,"
         "terminal-bench/schemelike-metacircular-eval "
