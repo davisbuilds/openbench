@@ -64,10 +64,10 @@ def build_private_run(root, *, prompt="PRIVATE PROMPT must never publish"):
     schedule_digest = "f" * 64
     arms = {arm.arm_id: arm for arm in experiment.arms}
     rows = [
-        row("direct", "cold", 1, baseline=True),
-        row("gateway", "cold", 1),
-        row("direct", "warm", 1, baseline=True),
-        row("gateway", "warm", 1),
+        row(arm_id, condition, repetition, baseline=arm_id == "direct")
+        for repetition in (1, 2)
+        for condition in ("cold", "warm")
+        for arm_id in ("direct", "gateway")
     ]
     for item in rows:
         arm_id = item["identity"]["arm"]["id"]
@@ -197,7 +197,6 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
             self.assertEqual(
                 {path.name for path in bundle.iterdir()},
                 {
-                    "experiment.json",
                     "prices.json",
                     "results.jsonl",
                     "report.json",
@@ -206,7 +205,7 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                 },
             )
             self.assertEqual(published["report_schema_version"], 4)
-            self.assertEqual(published["complete_blocks"], {"cold": 1, "warm": 1})
+            self.assertEqual(published["complete_blocks"], {"cold": 2, "warm": 2})
             self.assertEqual(published["scheduled_blocks_per_condition"], 2)
             self.assertNotIn("label", published)
             self.assertEqual(
@@ -217,16 +216,6 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                     "completed_at": "unknown",
                 },
             )
-            experiment = json.loads(
-                (bundle / "experiment.json").read_text(encoding="utf-8")
-            )
-            self.assertEqual(
-                set(experiment["cases"][0]),
-                {"case_id", "prompt_digest"},
-            )
-            self.assertTrue(all("endpoint" not in arm for arm in experiment["arms"]))
-            self.assertTrue(all("auth_env" not in arm for arm in experiment["arms"]))
-            self.assertTrue(all("gateway_id" not in arm for arm in experiment["arms"]))
             public_text = "\n".join(
                 path.read_text(encoding="utf-8")
                 for path in bundle.iterdir()
@@ -343,11 +332,17 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
     def test_rejects_unsafe_rehashed_public_dto_and_extra_artifact(self):
         with tempfile.TemporaryDirectory() as tmp:
             bundle = self._bundle(tmp)
-            experiment_path = bundle / "experiment.json"
-            experiment = json.loads(experiment_path.read_text())
-            experiment["arms"][1]["gateway"] = "/Users/private/route"
-            experiment_path.write_text(_json(experiment), encoding="ascii")
-            _rewrite_manifest_hash(bundle, "experiment.json")
+            results_path = bundle / "results.jsonl"
+            lines = results_path.read_text().splitlines()
+            changed = json.loads(lines[0])
+            changed["request_metrics"]["route"][
+                "served_model"
+            ] = "/Users/private/route"
+            lines[0] = json.dumps(
+                changed, separators=(",", ":"), sort_keys=True
+            )
+            results_path.write_text("\n".join(lines) + "\n", encoding="ascii")
+            _rewrite_manifest_hash(bundle, "results.jsonl")
             with self.assertRaisesRegex(GatewayProbeRunError, "URL or path"):
                 gateway_probe_publish.verify_bundle(bundle)
         with tempfile.TemporaryDirectory() as tmp:
@@ -365,6 +360,54 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
             path.write_text(_json(manifest_value), encoding="ascii")
             with self.assertRaisesRegex(GatewayProbeRunError, "explicitly unknown"):
                 gateway_probe_publish.verify_bundle(bundle)
+
+    def test_rejects_incomplete_cold_or_warm_schedule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = build_private_run(tmp)
+            experiment = gateway_probe_spec.load_experiment(
+                run_dir / "experiment.toml"
+            )
+            rows = gateway_probe_results.load_results(run_dir / "results.jsonl")
+            rows = [
+                item
+                for item in rows
+                if item["identity"]["schedule"]["repetition"] == 1
+            ]
+            (run_dir / "results.jsonl").write_text(
+                "".join(
+                    json.dumps(item, separators=(",", ":"), sort_keys=True)
+                    + "\n"
+                    for item in rows
+                ),
+                encoding="ascii",
+            )
+            report = gateway_probe_report.aggregate(rows, experiment=experiment)
+            (run_dir / "report.json").write_text(_json(report), encoding="ascii")
+            (run_dir / "report.md").write_text(
+                gateway_probe_report.render_text(report) + "\n",
+                encoding="utf-8",
+            )
+            source_manifest = json.loads(
+                (run_dir / "manifest.json").read_text()
+            )
+            for name in ("results.jsonl", "report.json", "report.md"):
+                source_manifest["files"][name]["sha256"] = _sha256(
+                    run_dir / name
+                )
+            (run_dir / "manifest.json").write_text(
+                _json(source_manifest),
+                encoding="ascii",
+            )
+
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "requires every scheduled cold and warm block",
+            ):
+                gateway_probe_publish.publish_bundle(
+                    run_dir,
+                    Path(tmp, "public"),
+                    verified_with_commit=TEST_COMMIT,
+                )
 
 
 if __name__ == "__main__":

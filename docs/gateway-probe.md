@@ -167,13 +167,15 @@ obench gateway probe publish RUN_DIR BUNDLE_DIR
 obench gateway probe verify BUNDLE_DIR
 ```
 
-`publish` verifies every private artifact digest and recomputes the report
-before writing an exact public file set. The public experiment contains prompt
-digests instead of prompt text and omits endpoints, credential names, and
-gateway/account identifiers. Receipt values and operational generation IDs are
-removed from result rows. `verify` rejects extra files, symlinks, secrets,
-paths, account identifiers, nonempty receipts, digest drift, schema drift, and
-reports that do not exactly match recomputation.
+`publish` verifies every private artifact digest, requires every scheduled cold
+and warm matched block, and recomputes the report before writing an exact public
+file set. No public experiment snapshot is emitted because fields such as
+endpoints, credential names, routing policy, and budget cannot all be
+independently authenticated from sanitized result rows. Prompt digests remain
+in row identities; receipt values and operational generation IDs are removed.
+`verify` rejects partial schedules, extra files, symlinks, secrets, paths,
+account identifiers, nonempty receipts, digest drift, schema drift, and reports
+that do not exactly match recomputation.
 
 Public report schema v4 has no qualitative sample-size classification. It
 records complete and scheduled cold/warm blocks, p50/p95 values, metric

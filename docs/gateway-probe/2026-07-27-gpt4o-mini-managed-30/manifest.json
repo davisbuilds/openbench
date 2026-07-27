@@ -8,9 +8,6 @@
   "experiment_digest": "e3649dbc6dc423c5209cdc09c73f0d1275bfa6c231a5fa8300e444dc89e6f943",
   "experiment_id": "gpt-4o-mini-five-way-managed-probe-r30-2026-07-27",
   "files": {
-    "experiment.json": {
-      "sha256": "c345dda947e32d9a57d8a349a516cc86bb7edd995e97a9a1e19585b85691612c"
-    },
     "prices.json": {
       "sha256": "12bdd3aee5d3dfc10aed09c3753cad58e2dd865045efdcef2bc91cef19d29636"
     },
@@ -41,7 +38,7 @@
   },
   "schedule_digest": "e6b8e2ac79abf1e3b6c6b4ce6b691747a1f9f6bf76c3c78bdb00051e99c097be",
   "scheduled_blocks_per_condition": 30,
-  "schema_version": 1,
+  "schema_version": 2,
   "verification": {
     "verified_with_commit": "02ea4954191593e3fb62010ca1573fff6cda5c35"
   }

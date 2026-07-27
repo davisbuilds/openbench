@@ -225,7 +225,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertEqual(doc["gateway"]["bundle_count"], 0)
         bundle = family["bundles"][0]
         self.assertEqual(bundle["title"], "Managed request probe")
-        self.assertEqual(bundle["complete_blocks"], {"cold": 1, "warm": 1})
+        self.assertEqual(bundle["complete_blocks"], {"cold": 2, "warm": 2})
         self.assertEqual(bundle["scheduled_blocks_per_condition"], 2)
         self.assertEqual(bundle["model_match"], "exact_revision")
         self.assertEqual(len(bundle["arms"]), 2)

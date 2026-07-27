@@ -471,8 +471,7 @@ def aggregate_gateway_probe_bundle(
         manifest = gateway_probe_publish.verify_bundle(bundle_dir)
         with open(os.path.join(bundle_dir, "report.json"), encoding="utf-8") as fh:
             report = json.load(fh)
-        with open(os.path.join(bundle_dir, "experiment.json"), encoding="utf-8") as fh:
-            experiment = json.load(fh)
+        rows = _read_jsonl(os.path.join(bundle_dir, "results.jsonl"))
     except Exception:  # noqa: BLE001 - any drift makes the board unusable
         return None
 
@@ -512,6 +511,10 @@ def aggregate_gateway_probe_bundle(
     bundle_id = entry.get("id") or os.path.basename(os.path.normpath(bundle_dir))
     results_path = os.path.join(bundle_dir, "results.jsonl")
     verification = manifest.get("verification") or {}
+    first_row = rows[0]
+    track = (
+        ((first_row.get("identity") or {}).get("benchmark") or {}).get("track")
+    )
     return {
         "family": "gateway_probe",
         "id": bundle_id,
@@ -525,8 +528,8 @@ def aggregate_gateway_probe_bundle(
             leaderboard._rel_under(site_dir, results_path)
             if site_dir else results_path
         ),
-        "track": experiment.get("track"),
-        "model_match": experiment.get("model_match"),
+        "track": track,
+        "model_match": first_row.get("model_match"),
         "experiment_id": report.get("experiment_id"),
         "experiment_digest": report.get("experiment_digest"),
         "schedule_digest": report.get("schedule_digest"),

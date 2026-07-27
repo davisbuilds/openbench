@@ -45,7 +45,7 @@ class GatewayProbeCliTests(unittest.TestCase):
                 ])
         self.assertEqual(publish_code, 0)
         self.assertEqual(verify_code, 0)
-        self.assertIn("blocks=cold:1/2,warm:1/2", stdout.getvalue())
+        self.assertIn("blocks=cold:2/2,warm:2/2", stdout.getvalue())
         self.assertNotIn("exploratory", stdout.getvalue())
         self.assertNotIn("confirmatory", stdout.getvalue())
 
