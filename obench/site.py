@@ -5,12 +5,10 @@
 
 * ``board.json`` — one machine-readable document covering **Harness Bench**
   (verified ``results.jsonl`` publish bundles, aggregated by
-  :mod:`obench.leaderboard`) and **Gateway Bench** (verified ``gateway_bench``
-  evidence bundles, aggregated by :mod:`obench.gateway_report`), plus verified
-  request-level **Gateway Probe** bundles.
+  :mod:`obench.leaderboard`) and request-level **Gateway Bench** bundles.
 * ``index.html`` — the site's landing page, which *is* the leaderboard: family
   tabs, per-board sortable tables, model/harness filters, Wilson and bootstrap
-  confidence intervals drawn as bars, and the Gateway Tax contrast table.
+  confidence intervals drawn as bars, and paired route contrasts.
 
 Every table is rendered here, in Python, at build time. The page's script only
 enhances what is already in the document — it re-orders rows, hides them, and
@@ -21,8 +19,8 @@ publishes.
 
 Comparability rule, unchanged from ``obench leaderboard``: cells from different
 bundles are never blended into one score. Each bundle is its own ranked board.
-The families are never merged either — Gateway Bench and Gateway Probe have
-different units and denominators, and neither is a harness ranking.
+Gateway Bench request measurements and Harness Bench cells have different units
+and denominators and are never merged.
 """
 
 from __future__ import annotations
@@ -38,7 +36,7 @@ from collections import defaultdict
 from . import leaderboard, report_page, stats
 from .paths import SOURCE_ROOT
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 HARNESS_NOTE = (
     "Scores are not comparable across bundles: task sets, trial counts, and "
@@ -52,14 +50,20 @@ GATEWAY_NOTE = (
 )
 
 GATEWAY_PROBE_NOTE = (
-    "Gateway Probe is request-level transport and serving telemetry. Cold and "
-    "warm denominators are separate and are never merged with Gateway Bench."
+    "Gateway Bench measures request-level transport and serving telemetry. "
+    "Cold and warm denominators are separate and are never merged."
 )
 
 CROSS_FAMILY_NOTE = (
     "Each board is one result-sealed bundle, shown with its interval and its "
     "provenance. Benchmark families share no denominators."
 )
+
+
+def _public_gateway_title(value):
+    """Map legacy public titles onto the sole Gateway Bench product name."""
+    value = re.sub(r"\bgateway probe\b", "Gateway Bench", str(value), flags=re.I)
+    return re.sub(r"\brequest probe\b", "request benchmark", value, flags=re.I)
 
 # --------------------------------------------------------------------------
 # Harness Bench
@@ -519,7 +523,7 @@ def aggregate_gateway_probe_bundle(
         "family": "gateway_probe",
         "id": bundle_id,
         "kind": entry.get("kind") or "release",
-        "title": entry.get("title") or bundle_id,
+        "title": _public_gateway_title(entry.get("title") or bundle_id),
         "date": entry.get("date") or "",
         "path": entry.get("path"),
         "link": entry.get("link"),
@@ -594,7 +598,7 @@ def build_gateway_probe_family(site_dir, gateway_probe_dirs=None):
                 skipped.append({
                     "id": name,
                     "kind": "gateway_probe",
-                    "reason": "verified report did not match Gateway Probe schema v4",
+                    "reason": "verified report did not match Gateway Bench schema v4",
                 })
                 continue
             bundles.append(aggregated)
@@ -625,7 +629,9 @@ def build_board(
     """Build the combined benchmark-family board document."""
     site_dir = os.path.abspath(site_dir)
     harness = build_harness_family(site_dir, community_dir=community_dir)
-    gateway = build_gateway_family(site_dir, gateway_dirs=gateway_dirs)
+    # Legacy coding-agent gateway workloads are intentionally excluded from
+    # the public board. Keep the argument as an inert compatibility input.
+    del gateway_dirs
     gateway_probe = build_gateway_probe_family(
         site_dir, gateway_probe_dirs=gateway_probe_dirs
     )
@@ -652,8 +658,7 @@ def build_board(
         "site_metadata": site_metadata,
         "cross_family_note": CROSS_FAMILY_NOTE,
         "harness": harness,
-        "gateway": gateway,
-        "gateway_probe": gateway_probe,
+        "gateway": gateway_probe,
         "releases": [e for e in releases if isinstance(e, dict)],
         "community": [e for e in community if isinstance(e, dict)],
         "packs": [e for e in packs if isinstance(e, dict)],
@@ -1181,11 +1186,17 @@ _JS = r"""
 
   // --- tabs ---------------------------------------------------------------
   var VIEWS = [
-    "harness", "gateway", "gateway-probe", "releases", "methodology", "contact"
+    "harness", "gateway", "releases", "methodology", "contact"
   ];
 
   function showView() {
     var hash = (location.hash || "").replace("#", "");
+    if (hash === "gateway-probe") {
+      hash = "gateway";
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, "", "#gateway");
+      }
+    }
     var view = "harness";
     if (VIEWS.indexOf(hash) !== -1) {
       view = hash;
@@ -1218,7 +1229,6 @@ def _lede(doc):
     bundles = doc["harness"]["bundles"]
     harness = doc["harness"]
     gateway = doc["gateway"]
-    gateway_probe = doc["gateway_probe"]
     harnesses = {a["harness"] for b in bundles for a in b["arms"]}
     models = {a["model"] for b in bundles for a in b["arms"]}
     valid_rows = sum(b.get("countable_rows") or 0 for b in bundles)
@@ -1230,7 +1240,7 @@ def _lede(doc):
     )
     dates = sorted(
         b["date"]
-        for family in (bundles, gateway["bundles"], gateway_probe["bundles"])
+        for family in (bundles, gateway["bundles"])
         for b in family
         if b.get("date")
     )
@@ -1244,8 +1254,6 @@ def _lede(doc):
     ]
     if gateway["bundle_count"]:
         facts.append(f"{gateway['bundle_count']} gateway bundles")
-    if gateway_probe["bundle_count"]:
-        facts.append(f"{gateway_probe['bundle_count']} gateway probe bundles")
     if dates:
         facts.append(f"updated {dates[-1]}")
     return (
@@ -1269,22 +1277,12 @@ _METHODOLOGY = """
   trusted.</p>
 
   <h3>Gateway Bench</h3>
-  <p>Holds the harness, requested model policy, provider, sampling, task, and
-  budget fixed while varying the serving route. An arm is a route. The
-  implemented track is <strong>Gateway Tax</strong>: a direct baseline against
-  one or more gateway arms with fallbacks, gateway retries, client retries,
-  and gateway response caching disabled. The declared model-match policy,
-  provider prompt mode, and observed served-route distribution are shown on
-  each board; a rolling alias does not prove one exact served revision.</p>
-
-  <h3>Gateway Probe</h3>
   <p>Measures one model request at a time under separately scheduled cold and
   warm transport conditions. It reports request success, route verification,
   transport and stream phase timing, throughput, usage, and per-request cost.
-  It is not a coding-agent outcome benchmark. Probe requests, Gateway Bench
-  cells, and Harness Bench cells are never pooled or compared as one
-  denominator.</p>
-  <p>The Gateway Probe leaderboard uses an absolute summary score: 30% cold
+  It is not a coding-agent outcome benchmark. Gateway Bench requests and
+  Harness Bench cells are never pooled or compared as one denominator.</p>
+  <p>The Gateway Bench leaderboard uses an absolute summary score: 30% cold
   TTFT median, 15% cold TTFT p95, 30% warm TTFT median, 15% warm TTFT p95,
   and 10% warm median output throughput. Cold TTFT includes DNS, TCP, and TLS.
   Latency scores linearly from 100 at zero to zero at 20 seconds; throughput
@@ -1299,15 +1297,11 @@ _METHODOLOGY = """
     are excluded; other failures, including timeouts, stay in the denominator.</li>
     <li>Harness Bench uses Wilson 95% intervals over matched
     <code>(task, trial)</code> cells whenever a bundle has two or more arms.</li>
-    <li>Gateway Bench uses task-weighted estimates with bootstrap 95% intervals,
-    and includes a block only when every expected arm is present,
-    infrastructure-valid, and passes route integrity.</li>
-    <li>Gateway Probe displays complete cold and warm block counts separately.
+    <li>Gateway Bench displays complete cold and warm block counts separately.
     Availability uses a Wilson 95% interval over attempted requests. Phase
     summaries use successful, route-verified requests and retain metric-specific
     coverage. Paired deltas use complete gateway/direct blocks and bootstrap
     95% intervals.</li>
-    <li>A gateway-tax interval that spans zero is not a detected effect.</li>
   </ul>
 
   <h2>Efficiency and cost</h2>
@@ -1323,27 +1317,14 @@ _METHODOLOGY = """
     measures attempted traffic required per solve, not the average size of
     successful attempts alone.</li>
     <li>Harness <code>$/solve</code> appears only for models with a configured
-    price. A Gateway Bench comparison shows <code>$/solve</code> only when one
-    complete frozen-list estimate covers every arm. Gateway-reported and
-    invoice-reconciled amounts remain separate evidence and are never mixed
-    into that comparison column.</li>
-    <li>The frozen-list estimate applies the experiment's dated input and
-    output prices to reported usage. It is not an invoice and does not assume
-    provider-specific prompt-cache discounts unless the frozen price contract
-    explicitly represents them.</li>
-    <li>Gateway median end-to-end latency is a cell-level benchmark outcome,
-    including the agent trajectory and timeout cap. TTFB, semantic TTFT, and
-    output throughput are per-call serving telemetry and have their own
-    coverage denominators.</li>
-    <li>Cache fields are provider-reported prompt-prefix accounting under the
-    displayed provider prompt mode. They do not indicate that gateway response
-    caching was enabled.</li>
-    <li>Gateway Probe response headers are the time until HTTP response headers.
+    price.</li>
+    <li>Gateway Bench response headers are the time until HTTP response headers.
     First body byte and semantic TTFT are reported separately; response headers
     are not labeled TTFB.</li>
-    <li>Probe measured cost is the frozen-list request estimate. Charged cost is
-    separately reported billing evidence. Each retains its own request
-    coverage, as do total, cached-input, and cache-write token readings.</li>
+    <li>Gateway Bench measured cost is the frozen-list request estimate.
+    Charged cost is separately reported billing evidence. Each retains its own
+    request coverage, as do total, cached-input, and cache-write token
+    readings.</li>
     <li>Harness defaults are not clamped.</li>
   </ul>
 
@@ -1361,8 +1342,8 @@ _METHODOLOGY = """
   <h2>Reproducing a board</h2>
   <p>Every board links its <code>results.jsonl</code>. Re-check a bundle with
   <code>obench verify &lt;bundle&gt;</code> (harness) or
-  <code>obench gateway verify &lt;bundle&gt;</code> (gateway), and rebuild this
-  page with <code>obench site build</code>.</p>
+  <code>obench gateway probe verify &lt;bundle&gt;</code> (gateway), and rebuild
+  this page with <code>obench site build</code>.</p>
 </section>
 """
 
@@ -2529,7 +2510,6 @@ def _gateway_probe_board(bundle):
     scheduled = bundle.get("scheduled_blocks_per_condition")
     complete = bundle.get("complete_blocks") or {}
     meta = "".join(filter(None, [
-        _meta_field("track", bundle.get("track") or "request_probe"),
         _meta_field("date", bundle["date"]) if bundle.get("date") else None,
         _meta_field("model match", bundle["model_match"])
         if bundle.get("model_match") else None,
@@ -2553,8 +2533,8 @@ def _gateway_probe_board(bundle):
         + _tag(
             "p",
             {},
-            "Request-level probe. Cold and warm conditions retain separate "
-            "denominators and are not Gateway Bench cells.",
+            "Request-level benchmark. Cold and warm conditions retain "
+            "separate denominators from Harness Bench cells.",
         ),
     )
 
@@ -2984,34 +2964,18 @@ def _harness_view(doc):
     return body
 
 
-def _gateway_view(doc):
+def _gateway_probe_view(doc):
     family = doc["gateway"]
     body = _tag("p", {"class": "note"}, _esc(family["note"]))
     if not family["bundles"]:
         body += _tag("section", {"class": "board"}, _tag(
             "div", {"class": "empty"},
             _tag("p", {}, "No verified Gateway Bench bundles published yet.")))
-    body += "".join(_gateway_board(b) for b in family["bundles"])
-    if family.get("skipped"):
-        body += _skipped_board(
-            f"Not ranked ({len(family['skipped'])})",
-            "Did not verify.",
-            family["skipped"])
-    return body
-
-
-def _gateway_probe_view(doc):
-    family = doc["gateway_probe"]
-    body = _tag("p", {"class": "note"}, _esc(family["note"]))
-    if not family["bundles"]:
-        body += _tag("section", {"class": "board"}, _tag(
-            "div", {"class": "empty"},
-            _tag("p", {}, "No verified Gateway Probe bundles published yet.")))
     body += "".join(_gateway_probe_board(bundle) for bundle in family["bundles"])
     if family.get("skipped"):
         body += _skipped_board(
             f"Not published ({len(family['skipped'])})",
-            "Did not pass public Gateway Probe verification.",
+            "Did not pass public Gateway Bench verification.",
             family["skipped"],
         )
     return body
@@ -3059,7 +3023,6 @@ def render_board_html(doc):
         for slug, label in (
             ("harness", "Harness Bench"),
             ("gateway", "Gateway Bench"),
-            ("gateway-probe", "Gateway Probe"),
             ("releases", "Releases"),
             ("methodology", "Methodology"),
             ("contact", "Contact"),
@@ -3084,12 +3047,7 @@ def render_board_html(doc):
     # it the nav degrades to jump links over one continuous page.
     views = (
         _tag("main", {"id": "view-harness"}, _harness_view(doc))
-        + _tag("main", {"id": "view-gateway"}, _gateway_view(doc))
-        + _tag(
-            "main",
-            {"id": "view-gateway-probe"},
-            _gateway_probe_view(doc),
-        )
+        + _tag("main", {"id": "view-gateway"}, _gateway_probe_view(doc))
         + _tag("main", {"id": "view-releases"}, _releases_view(doc))
         + _tag("main", {"id": "view-methodology"}, _METHODOLOGY)
         + _tag("main", {"id": "view-contact"}, _contact_view())
@@ -3120,7 +3078,7 @@ def render_board_html(doc):
         '<meta property="og:type" content="website">'
         '<meta property="og:title" content="OpenBench gateway benchmarks">'
         '<meta property="og:description" content="Digest-verified managed AI '
-        'gateway benchmark and request-probe results.">'
+        'gateway benchmark results.">'
         '<meta name="twitter:card" content="summary_large_image">'
     )
 
@@ -3199,11 +3157,9 @@ def write_board(
         "html_path": html_path,
         "harness_bundles": doc["harness"]["bundle_count"],
         "gateway_bundles": doc["gateway"]["bundle_count"],
-        "gateway_probe_bundles": doc["gateway_probe"]["bundle_count"],
         "skipped": (
             len(doc["harness"]["skipped"])
             + len(doc["gateway"]["skipped"])
-            + len(doc["gateway_probe"]["skipped"])
         ),
     }
 
@@ -3211,10 +3167,7 @@ def write_board(
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="obench site",
-        description=(
-            "Build the unified static site "
-            "(harness + gateway + gateway probe)."
-        ),
+        description="Build the unified static site (harness + gateway).",
     )
     sub = parser.add_subparsers(dest="command")
     build = sub.add_parser("build", help="write index.html + board.json")
@@ -3237,14 +3190,14 @@ def main(argv=None):
         "--gateway-dir",
         action="append",
         default=None,
-        help="gateway bundle root (repeatable; default: <site-dir>/gateway)",
+        help=argparse.SUPPRESS,
     )
     build.add_argument(
         "--gateway-probe-dir",
         action="append",
         default=None,
         help=(
-            "Gateway Probe public bundle root "
+            "Gateway Bench public bundle root "
             "(repeatable; default: <site-dir>/gateway-probe)"
         ),
     )
@@ -3270,7 +3223,6 @@ def main(argv=None):
         print(
             f"harness_bundles={info['harness_bundles']} "
             f"gateway_bundles={info['gateway_bundles']} "
-            f"gateway_probe_bundles={info['gateway_probe_bundles']} "
             f"skipped={info['skipped']}"
         )
         return 0
