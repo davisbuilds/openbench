@@ -1,5 +1,6 @@
 import hashlib
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,7 +20,10 @@ from obench.tests.test_gateway_probe_report import row
 from obench.tests.test_gateway_probe_spec import manifest
 
 
-TEST_COMMIT = "080f3132049b12bf04ac3a0437dfacf387d82b9a"
+TEST_COMMIT = subprocess.check_output(
+    ["git", "-C", str(Path(__file__).resolve().parents[2]), "rev-parse", "HEAD"],
+    text=True,
+).strip()
 
 
 def _json(value):

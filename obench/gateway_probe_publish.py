@@ -477,27 +477,26 @@ def _detect_verifier_commit() -> str:
     return _commit_value(completed.stdout.strip(), "detected verifier commit")
 
 
-def _verified_with_commit(explicit: str | None) -> str:
-    if explicit is None:
-        return _detect_verifier_commit()
-    commit = _commit_value(explicit, "verified_with_commit")
+def _assert_verifier_tree_matches(commit: str) -> None:
     source_root = Path(__file__).resolve().parents[1]
     try:
-        subprocess.run(
-            ["git", "-C", str(source_root), "cat-file", "-e", f"{commit}^{{commit}}"],
-            check=True,
+        diff = subprocess.run(
+            ["git", "-C", str(source_root), "diff", "--quiet", commit, "--", "obench"],
+            check=False,
             capture_output=True,
             text=True,
             timeout=10,
         )
-        subprocess.run(
+        untracked = subprocess.run(
             [
                 "git",
                 "-C",
                 str(source_root),
-                "cat-file",
-                "-e",
-                f"{commit}:obench/gateway_probe_publish.py",
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "obench",
             ],
             check=True,
             capture_output=True,
@@ -506,9 +505,59 @@ def _verified_with_commit(explicit: str | None) -> str:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise GatewayProbeRunError(
-            "verified_with_commit must resolve to a git commit containing "
-            "obench/gateway_probe_publish.py"
+            "cannot compare verifier source with verified_with_commit"
         ) from exc
+    if diff.returncode not in (0, 1):
+        raise GatewayProbeRunError(
+            "cannot compare verifier source with verified_with_commit"
+        )
+    if diff.returncode or untracked.stdout.strip():
+        raise GatewayProbeRunError(
+            "verifier source does not match verified_with_commit"
+        )
+
+
+def _verified_with_commit(explicit: str | None) -> str:
+    if explicit is None:
+        commit = _detect_verifier_commit()
+    else:
+        commit = _commit_value(explicit, "verified_with_commit")
+        source_root = Path(__file__).resolve().parents[1]
+        try:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(source_root),
+                    "cat-file",
+                    "-e",
+                    f"{commit}^{{commit}}",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(source_root),
+                    "cat-file",
+                    "-e",
+                    f"{commit}:obench/gateway_probe_publish.py",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise GatewayProbeRunError(
+                "verified_with_commit must resolve to a git commit containing "
+                "obench/gateway_probe_publish.py"
+            ) from exc
+    _assert_verifier_tree_matches(commit)
     return commit
 
 
