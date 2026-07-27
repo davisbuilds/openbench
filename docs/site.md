@@ -116,12 +116,32 @@ Gateway Probe is a third measurement family, not a Gateway Bench extension.
 Request attempts and complete cold/warm blocks are never merged with coding
 agent cells, task-weighted Gateway Tax estimates, or their claims.
 
-The route leaderboard ranks managed gateways by the median paired warm semantic
-TTFT difference versus Direct OpenAI. Direct OpenAI is an unranked baseline;
-bootstrap 95% intervals and paired-block coverage remain visible. The detailed
-cold, warm, connection-setup, and paired-delta tables remain the factual record.
-Frozen-list prices stay sealed in the bundle for reproducibility but are not
-displayed because market prices drift.
+The route leaderboard ranks managed gateways by an absolute, cost-free
+**OpenBench Composite** on a 0–100 scale. Before the availability multiplier,
+the normalized weights are:
+
+| Component | Weight |
+|-----------|-------:|
+| Cold TTFT p50 | 30% |
+| Cold TTFT p95 | 15% |
+| Warm TTFT p50 | 30% |
+| Warm TTFT p95 | 15% |
+| Output throughput | 10% |
+
+For a latency value `t` in seconds, its subscore is
+`clamp(100 × (1 - t / 20), 0, 100)`. For output throughput `r` in tokens per
+second, its subscore is `clamp((r - 5) / (200 - 5) × 100, 0, 100)`. The
+throughput input is the warm p50 reading; cold TTFT includes cold connection
+setup. The weighted score is multiplied by the combined cold-and-warm request
+success rate **linearly**.
+
+Direct OpenAI does not appear in the ranking. It appears only as an unscored
+reference in **Provider variance**, where each gateway's composite delta from
+Direct OpenAI is shown. The detailed cold, warm, connection-setup, and paired
+delta tables remain the factual record, including bootstrap 95% intervals and
+paired-block coverage. Frozen-list prices stay sealed in the bundle for
+reproducibility but are not a composite component and are not displayed because
+market prices drift.
 
 ## What the columns mean
 
@@ -157,18 +177,27 @@ cost contrasts appear separately. Paired cost is labeled per attempted cell,
 not per solve; provider cache-accounting deltas are not ranked.
 
 **Gateway Probe.** Cold and warm request conditions render in separate tables.
-Each shows response headers, first body byte, semantic TTFT, stream total, and
-throughput p50/p95; measured-request frozen-list cost with coverage; and total,
-cached-input, and cache-write tokens with coverage. Charged cost, including the
-warm primer request, remains in the sealed result artifact for spend auditing
-but is not a comparable per-request table metric. Response headers are not
-labeled TTFB.
+Each route row includes the provider logo, followed by TTFT, response headers,
+first body byte, stream total, throughput p50/p95, and total, cached-input, and
+cache-write tokens with coverage. The raw label is **TTFT**, and it appears
+before response headers. Cold TTFT includes DNS, TCP, and TLS setup, matching
+the composite input; warm TTFT starts when the measured request is sent.
+Response headers are not labeled TTFB. Measured and
+charged cost, including the warm primer request, remain in the sealed result
+artifact for spend auditing but are not displayed or included in the composite.
 
 The board displays exact complete/scheduled block counts for both conditions
 prominently, without a qualitative sample-size label. A compact cold-only table
-shows DNS, TCP, and TLS setup p50/p95. Paired request contrasts are limited to
-gateway-minus-direct response-headers and semantic-TTFT medians with bootstrap
-95% intervals and pair coverage.
+shows provider logos plus DNS, TCP, and TLS setup p50/p95. Paired request
+contrasts are limited to gateway-minus-direct response-headers and TTFT medians
+with bootstrap 95% intervals and pair coverage. Because Direct OpenAI is fixed
+by the experiment, the paired table does not repeat a `vs direct` column.
+
+## Contact
+
+The generated Contact section links directly to
+[GitHub issue creation](https://github.com/minghinmatthewlam/openbench/issues/new)
+and [@mattlam_ on X](https://x.com/mattlam_).
 
 ## Design decisions worth keeping
 

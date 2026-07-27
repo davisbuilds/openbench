@@ -301,28 +301,33 @@ class GatewayProbeFamilyTests(_SiteFixture):
         for label in (
             "Cold requests",
             "Warm requests",
+            "OpenBench Composite",
+            "Provider variance",
+            "TTFT p50 / p95",
             "Response headers p50 / p95",
             "First body byte p50 / p95",
-            "Semantic TTFT p50 / p95",
             "Stream total p50 / p95",
             "Throughput tok/s p50 / p95",
             "Total / cached / cache-write tokens p50 / p95",
             "Route leaderboard",
-            "Median warm semantic TTFT difference versus Direct OpenAI.",
-            "No-gateway control",
-            "baseline",
             "Cold setup",
             "DNS p50 / p95",
             "TCP p50 / p95",
             "TLS p50 / p95",
             "Paired request deltas",
             "Δ response headers",
-            "Δ semantic TTFT",
+            "Δ TTFT",
         ):
             self.assertIn(label, page)
+        self.assertLess(
+            page.index("TTFT p50 / p95"),
+            page.index("Response headers p50 / p95"),
+        )
         self.assertIn("<b>cold blocks </b>30/30", page)
         self.assertIn("<b>warm blocks </b>30/30", page)
         self.assertIn("Complete blocks: 30/30.", page)
+        self.assertIn("TTFT includes DNS, TCP, and TLS setup.", page)
+        self.assertIn("TTFT begins when the measured request is sent.", page)
         self.assertIn("95% CI", page)
         self.assertIn("(0/30)", page)
         self.assertNotIn("Success / availability", page)
@@ -333,12 +338,16 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("charged cost", page.lower())
         self.assertNotIn("Cost p50 / p95", page)
         self.assertIn('class="route-logo"', page)
+        self.assertIn('class="provider-cell"', page)
         self.assertNotIn("<img", page)
+        self.assertNotIn("Semantic TTFT p50 / p95", page)
         self.assertNotIn("CI 88.6%–100.0%", page)
         self.assertNotIn("TTFB", page)
         self.assertNotIn("exploratory", page.lower())
         self.assertNotIn("confirmatory", page.lower())
         self.assertNotIn("Δ stream total", page)
+        paired = page[page.index("Paired request deltas"):]
+        self.assertNotIn(">vs direct<", paired)
 
     def test_probe_route_labels_hide_provider_suffix(self):
         labels = {
@@ -352,43 +361,138 @@ class GatewayProbeFamilyTests(_SiteFixture):
         for arm_id, expected in labels.items():
             self.assertEqual(site._gateway_probe_route_name(arm_id), expected)
 
-    def test_probe_leaderboard_orders_gateways_and_keeps_direct_unranked(self):
-        bundle = {
-            "contrasts": [
-                {
-                    "arm_id": "vercel-openai",
-                    "conditions": {"warm": {
+    def _composite_bundle(self):
+        def arm(arm_id, cold, warm, throughput, successes):
+            def condition(ttft, success):
+                coverage = {
+                    "covered": success,
+                    "total": 10,
+                    "ratio": success / 10,
+                }
+                return {
+                    "denominators": {
+                        "scheduled": 10,
+                        "attempted": 10,
+                        "success": success,
+                        "route_verified": success,
+                    },
+                    "availability": {
+                        "successes": success,
+                        "attempted": 10,
+                    },
+                    "metrics": {
                         "request_to_semantic_ttft_s": {
-                            "median_gateway_minus_direct": 0.058,
-                            "interval": {"low": 0.014, "high": 0.214},
-                            "coverage": {"covered": 30, "total": 30},
+                            "p50": ttft[0],
+                            "p95": ttft[1],
+                            "coverage": coverage,
                         },
-                    }},
-                },
-                {
-                    "arm_id": "openrouter-openai",
-                    "conditions": {"warm": {
-                        "request_to_semantic_ttft_s": {
-                            "median_gateway_minus_direct": -0.054,
-                            "interval": {"low": -0.109, "high": -0.018},
-                            "coverage": {"covered": 30, "total": 30},
+                        "cold_end_to_end_semantic_ttft_s": {
+                            "p50": ttft[0],
+                            "p95": ttft[1],
+                            "coverage": coverage,
                         },
-                    }},
+                        "throughput_tokens_per_s": {
+                            "p50": throughput,
+                            "p95": throughput,
+                            "coverage": coverage,
+                        },
+                    },
+                }
+
+            return {
+                "arm_id": arm_id,
+                "conditions": {
+                    "cold": condition(cold, successes[0]),
+                    "warm": condition(warm, successes[1]),
                 },
+            }
+
+        return {
+            "baseline_arm_id": "direct-openai",
+            "arms": [
+                arm("direct-openai", (1.0, 2.0), (1.0, 2.0), 200.0, (10, 10)),
+                arm("vercel-openai", (2.0, 4.0), (1.0, 3.0), 200.0, (9, 9)),
             ],
         }
-        page = site._gateway_probe_leaderboard(bundle)
-        cards = page[page.index('class="route-leaderboard"'):]
-        self.assertLess(cards.index("OpenRouter"), cards.index("Direct OpenAI"))
-        self.assertLess(cards.index("Direct OpenAI"), cards.index("Vercel"))
-        self.assertIn("-54 ms", page)
-        self.assertIn("+58 ms", page)
-        self.assertIn("95% CI -109 to -18 ms · paired 30/30", page)
-        self.assertEqual(page.count('class="route-position"'), 3)
+
+    def test_probe_composite_uses_absolute_scales_and_linear_success(self):
+        bundle = self._composite_bundle()
+        scores = {
+            row["arm_id"]: row["score"]
+            for row in site._gateway_probe_composite_scores(bundle)
+        }
+
+        # Latency: 30%*90 + 15%*80 + 30%*95 + 15%*85.
+        # Throughput: 10%*100. Combined request success is 18/20.
+        self.assertAlmostEqual(scores["vercel-openai"], 81.225)
+        self.assertEqual(
+            site._GATEWAY_COMPOSITE_WEIGHTS,
+            {
+                ("cold", "p50"): 0.30,
+                ("cold", "p95"): 0.15,
+                ("warm", "p50"): 0.30,
+                ("warm", "p95"): 0.15,
+            },
+        )
+
+        # The gateway score is absolute: changing Direct does not change it.
+        direct = bundle["arms"][0]
+        for condition in direct["conditions"].values():
+            for name in (
+                "request_to_semantic_ttft_s",
+                "cold_end_to_end_semantic_ttft_s",
+            ):
+                condition["metrics"][name].update({
+                    "p50": 19.0,
+                    "p95": 20.0,
+                })
+            condition["metrics"]["throughput_tokens_per_s"]["p50"] = 5.0
+        changed = {
+            row["arm_id"]: row["score"]
+            for row in site._gateway_probe_composite_scores(bundle)
+        }
+        self.assertAlmostEqual(changed["vercel-openai"], 81.225)
+
+    def test_probe_leaderboard_excludes_direct_and_cost(self):
+        page = site._gateway_probe_leaderboard(self._composite_bundle())
+
+        self.assertIn("OpenBench Composite", page)
+        self.assertIn("Vercel", page)
+        self.assertIn(">81.2<", page)
+        self.assertNotIn("price", page.lower())
+        self.assertEqual(page.count('class="route-position"'), 1)
+        ranked_rows = page[page.index('class="route-leaderboard"'):]
+        self.assertNotIn("Direct OpenAI", ranked_rows)
+        self.assertNotIn("cost", ranked_rows.lower())
+
+    def test_probe_composite_withholds_incomplete_verified_telemetry(self):
+        bundle = self._composite_bundle()
+        gateway = bundle["arms"][1]
+        gateway["conditions"]["warm"]["denominators"]["route_verified"] = 8
+
+        scores = {
+            row["arm_id"]: row["score"]
+            for row in site._gateway_probe_composite_scores(bundle)
+        }
+
+        self.assertNotIn("vercel-openai", scores)
+        self.assertIn("direct-openai", scores)
+
+    def test_probe_variance_uses_direct_as_unscored_reference(self):
+        page = site._gateway_probe_variance(self._composite_bundle())
+
+        self.assertIn("Provider variance", page)
+        self.assertIn("Vercel", page)
+        self.assertIn("-12.8", page)
+        self.assertIn("Direct OpenAI", page)
+        self.assertIn("reference", page.lower())
+        self.assertIn('class="variance-delta">-12.8', page)
+        self.assertNotIn(">94.0<", page)
 
     def test_probe_leaderboard_wraps_evidence_on_small_screens(self):
         mobile_css = site._CSS[site._CSS.index("@media(max-width:680px){"):]
         self.assertIn(".route-detail{white-space:normal}", mobile_css)
+        self.assertIn(".variance-delta{display:block}", mobile_css)
 
 
 class CostBasisTests(unittest.TestCase):
@@ -580,6 +684,8 @@ class RenderTests(_SiteFixture):
         self.assertIn("provider_default", page)
         self.assertIn("OpenAI/gpt-4o-mini-2024-07-18", page)
         self.assertIn("100% · tasks 4/5", page)
+        self.assertIn('class="provider-cell"', page)
+        self.assertIn('class="route-logo"', page)
         self.assertIn("cache write 0/10", page)
         self.assertIn("gateway response caching was disabled", page)
         self.assertIn("not cost per solve", page)
@@ -661,6 +767,16 @@ class RenderTests(_SiteFixture):
             "fetch(", "XMLHttpRequest", "WebSocket", "cdn.",
         ):
             self.assertNotIn(forbidden, page)
+
+    def test_contact_links_to_issue_creation_and_x(self):
+        page = site.render_board_html(site.build_board(self.site_dir))
+
+        self.assertIn(">Contact<", page)
+        self.assertIn(
+            'href="https://github.com/minghinmatthewlam/openbench/issues/new"',
+            page,
+        )
+        self.assertIn('href="https://x.com/mattlam_"', page)
 
     def test_site_metadata_emits_safe_social_preview_tags(self):
         _write(
