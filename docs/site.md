@@ -150,11 +150,12 @@ cost contrasts appear separately. Paired cost is labeled per attempted cell,
 not per solve; provider cache-accounting deltas are not ranked.
 
 **Gateway Probe.** Cold and warm request conditions render in separate tables.
-Each shows route and condition; success/availability with Wilson 95% interval;
-route-verification counts; response headers, first body byte, semantic TTFT,
-stream total, and throughput p50/p95; measured frozen-list and separately
-charged cost with coverage; and total, cached-input, and cache-write tokens with
-coverage. Response headers are not labeled TTFB.
+Each shows response headers, first body byte, semantic TTFT, stream total, and
+throughput p50/p95; measured-request frozen-list cost with coverage; and total,
+cached-input, and cache-write tokens with coverage. Charged cost, including the
+warm primer request, remains in the sealed result artifact for spend auditing
+but is not a comparable per-request table metric. Response headers are not
+labeled TTFB.
 
 The board displays exact complete/scheduled block counts for both conditions
 prominently, without a qualitative sample-size label. A compact cold-only table

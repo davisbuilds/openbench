@@ -306,7 +306,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
             "Semantic TTFT p50 / p95",
             "Stream total p50 / p95",
             "Throughput tok/s p50 / p95",
-            "Measured / charged cost p50 / p95",
+            "Cost p50 / p95",
             "Total / cached / cache-write tokens p50 / p95",
             "Cold setup",
             "DNS p50 / p95",
@@ -327,11 +327,24 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("verified 30/30", page)
         self.assertNotIn("unverifiable", page)
         self.assertNotIn("coverage 30/30", page)
+        self.assertNotIn("charged cost", page.lower())
         self.assertNotIn("CI 88.6%–100.0%", page)
         self.assertNotIn("TTFB", page)
         self.assertNotIn("exploratory", page.lower())
         self.assertNotIn("confirmatory", page.lower())
         self.assertNotIn("Δ stream total", page)
+
+    def test_probe_route_labels_hide_provider_suffix(self):
+        labels = {
+            "cloudflare-openai": "Cloudflare",
+            "concentrate-openai": "Concentrate",
+            "direct-openai": "Direct OpenAI",
+            "openrouter-openai": "OpenRouter",
+            "vercel-openai": "Vercel",
+            "custom-route": "custom-route",
+        }
+        for arm_id, expected in labels.items():
+            self.assertEqual(site._gateway_probe_route_name(arm_id), expected)
 
 
 class CostBasisTests(unittest.TestCase):
