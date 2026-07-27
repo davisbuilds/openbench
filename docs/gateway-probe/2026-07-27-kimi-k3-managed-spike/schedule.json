@@ -1,0 +1,32 @@
+{
+  "benchmark": "gateway_probe",
+  "blocks": [
+    {
+      "arm_ids": [
+        "direct-moonshot",
+        "openrouter-moonshot",
+        "vercel-moonshot",
+        "concentrate-moonshot",
+        "cloudflare-moonshot"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 1
+    },
+    {
+      "arm_ids": [
+        "openrouter-moonshot",
+        "vercel-moonshot",
+        "concentrate-moonshot",
+        "cloudflare-moonshot",
+        "direct-moonshot"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 1
+    }
+  ],
+  "schema_version": 1
+}
