@@ -1295,40 +1295,34 @@ def _lede(doc, family="harness"):
                 "time under separately scheduled cold and warm conditions.",
                 ["0 published request bundles"],
             )
-        latest = gateway_bundles[0]
-        complete = latest.get("complete_blocks") or {}
-        scheduled = latest.get("scheduled_blocks_per_condition")
-
-        def block_fact(condition):
-            completed = complete.get(condition, 0)
-            if scheduled is not None:
-                return f"{completed:,}/{scheduled:,} {condition} blocks"
-            return f"{completed:,} complete {condition} blocks"
-
         bundle_count = len(gateway_bundles)
+        models = {
+            bundle.get("model") or bundle.get("title") or bundle.get("id")
+            for bundle in gateway_bundles
+        }
+        route_counts = {
+            len(bundle.get("arms") or []) for bundle in gateway_bundles
+        }
         facts = [
             f"{bundle_count} published "
             f"{'bundle' if bundle_count == 1 else 'bundles'}",
-            f"{len(latest.get('arms') or [])} routes",
+            f"{len(models)} benchmarked "
+            f"{'model' if len(models) == 1 else 'models'}",
         ]
-        if latest.get("model_match"):
-            facts.append(
-                "model match: "
-                f"{str(latest['model_match']).replace('_', ' ')}"
-            )
-        facts.extend([
-            block_fact("cold"),
-            block_fact("warm"),
-            f"{latest.get('result_count') or 0:,} requests",
-        ])
-        if latest.get("date"):
-            facts.append(f"updated {latest['date']}")
+        if len(route_counts) == 1:
+            facts.append(f"{route_counts.pop()} routes per bundle")
+        facts.append("model-specific denominators below")
+        dates = sorted(
+            bundle["date"] for bundle in gateway_bundles if bundle.get("date")
+        )
+        if dates:
+            facts.append(f"updated {dates[-1]}")
         return (
             "Managed AI gateway benchmarks",
             "Compares request latency, throughput, and reliability across "
             "managed AI gateways under separately scheduled cold and warm "
-            "conditions. Run facts below describe the latest published "
-            "bundle; every board keeps separate denominators.",
+            "conditions. Select a model below; each bundle keeps its own "
+            "request counts and matched-block denominators.",
             facts,
         )
 

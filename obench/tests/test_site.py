@@ -234,11 +234,11 @@ class GatewayProbeFamilyTests(_SiteFixture):
 
         _, _, facts = site._lede(doc, "gateway")
         self.assertIn("1 published bundle", facts)
-        self.assertIn("2 routes", facts)
-        self.assertIn("model match: exact revision", facts)
-        self.assertIn("2/2 cold blocks", facts)
-        self.assertIn("2/2 warm blocks", facts)
-        self.assertIn("8 requests", facts)
+        self.assertIn("1 benchmarked model", facts)
+        self.assertIn("2 routes per bundle", facts)
+        self.assertIn("model-specific denominators below", facts)
+        self.assertNotIn("cold blocks", " ".join(facts))
+        self.assertNotIn("requests", " ".join(facts))
         self.assertIn("updated 2026-07-27", facts)
 
         page = site.render_board_html(doc)
@@ -1136,6 +1136,7 @@ class DesignContractTests(_SiteFixture):
         doc["gateway"]["bundle_count"] = 1
         doc["gateway"]["bundles"] = [{
             "arms": [{"arm_id": f"route-{i}"} for i in range(5)],
+            "model": "Synthetic model",
             "model_match": "rolling_alias",
             "complete_blocks": {"cold": 30, "warm": 30},
             "scheduled_blocks_per_condition": 30,
@@ -1159,14 +1160,12 @@ class DesignContractTests(_SiteFixture):
         self.assertEqual(gateway_title, "Managed AI gateway benchmarks")
         self.assertEqual(gateway_facts, [
             "1 published bundle",
-            "5 routes",
-            "model match: rolling alias",
-            "30/30 cold blocks",
-            "30/30 warm blocks",
-            "300 requests",
+            "1 benchmarked model",
+            "5 routes per bundle",
+            "model-specific denominators below",
             "updated 2026-07-27",
         ])
-        self.assertIn("latest published bundle", gateway_deck)
+        self.assertIn("Select a model below", gateway_deck)
         self.assertNotIn("harness", gateway_deck.lower())
         self.assertNotIn("result rows", " ".join(gateway_facts))
 
