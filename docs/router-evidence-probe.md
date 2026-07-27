@@ -22,6 +22,12 @@ obench router evidence-verify results/router-evidence-probe.json
 The OpenRouter probe requires `OPENROUTER_API_KEY`. The Concentrate probe
 requires `CONCENTRATE_API_KEY`.
 
+The repository includes the sanitized 2026-07-27 conformance artifact at
+`data/router-evidence/2026-07-27-native-routing-spike.json`. Its 18 calls cover
+three prompt classes repeated three times per router. OpenRouter reconciled 9/9
+selected routes against its generation trace; Concentrate exposed 9/9 selected
+routes in responses but no independent trace; no call was unverifiable.
+
 The default cases cover an exact-output request, a small debugging request, and
 a small architecture request. They use each router's native catalog rather than
 an OpenBench model allowlist.

@@ -1,0 +1,2038 @@
+{
+  "artifact_sha256": "89c8516c349c9df956d48a6444bb696196a257cd5ae639cef2bae881ae22fb8e",
+  "created_at": "2026-07-27T23:35:06.763487Z",
+  "kind": "router_evidence_probe",
+  "native_routing": true,
+  "probe_id": "1a4e24b2-63bc-4133-8a49-bf6fa6af0ec8",
+  "records": [
+    {
+      "case_id": "architecture",
+      "correlation_id_hash": "d4fd50bbff7d756abe68c730ebbd77e5e3e9cfa8ae912ba1a33f8443405b5ae4",
+      "reconciliation": {
+        "checks": {
+          "auto_router_stage_matches_selected": true,
+          "cost_present": true,
+          "metadata_requested_router_matches": true,
+          "multiple_candidates_observed": true,
+          "one_selected_endpoint": true,
+          "response_header_id_matches": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_cost_matches": true,
+          "trace_id_matches": true,
+          "trace_model_matches_selected": true,
+          "trace_present": true,
+          "trace_provider_matches_selected": true,
+          "trace_provider_response_matches": true,
+          "trace_request_id_present": true,
+          "trace_router_matches": true,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "reconciled"
+      },
+      "repetition": 1,
+      "request": {
+        "endpoint": "https://openrouter.ai/api/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "099418540a8207db2b2a98de2f0f079ef3a6b2606648d1a24e25f97349477fbf",
+        "requested_router": "openrouter/auto-beta",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.incomplete"
+        ],
+        "generation_header_id": "gen-1785195164-JsHm1GhTIncKEA9it7se",
+        "id": "gen-1785195164-JsHm1GhTIncKEA9it7se",
+        "model": "z-ai/glm-5.2",
+        "provider": "z-ai",
+        "status": "incomplete",
+        "timings": {
+          "first_event_s": 0.8290797080262564,
+          "stream_total_s": 1.1426501250243746
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "cost": 0.0003264,
+          "input_tokens": 32,
+          "output_tokens": 64,
+          "reasoning_tokens": 63,
+          "total_tokens": 96,
+          "upstream_inference_cost": 0.0003264
+        }
+      },
+      "route": {
+        "attempt": 1,
+        "attempts": [],
+        "candidate_count": 72,
+        "candidate_models": [
+          "deepseek/deepseek-v4-flash-20260423",
+          "deepseek/deepseek-v4-pro-20260423",
+          "z-ai/glm-5.2-20260616"
+        ],
+        "pipeline": [
+          {
+            "fallback_models": [
+              "deepseek/deepseek-v4-pro-20260423",
+              "deepseek/deepseek-v4-flash-20260423"
+            ],
+            "name": "auto-beta-router",
+            "resolved_to": "z-ai/glm-5.2-20260616",
+            "type": "plugin"
+          }
+        ],
+        "requested": "openrouter/auto-beta",
+        "selected_endpoints": [
+          {
+            "model": "z-ai/glm-5.2-20260616",
+            "provider": "Parasail"
+          }
+        ],
+        "strategy": "direct"
+      },
+      "router": "openrouter",
+      "trace": {
+        "id": "gen-1785195164-JsHm1GhTIncKEA9it7se",
+        "model": "z-ai/glm-5.2-20260616",
+        "native_tokens_completion": 64,
+        "native_tokens_prompt": 32,
+        "provider": "Parasail",
+        "provider_responses": [
+          {
+            "model": "z-ai/glm-5.2-20260616",
+            "provider": "Parasail",
+            "status": 200,
+            "upstream_id_hash": "b5a5821d340d9feb839031f747148135c6243d91f33c7d9e203f39f3817610e9"
+          }
+        ],
+        "request_id": "req-1785195164-iDo9lSSqdqCO815WIHqZ",
+        "router": "openrouter/auto-beta",
+        "tokens_completion": 63,
+        "tokens_prompt": 25,
+        "total_cost": 0.0003264
+      }
+    },
+    {
+      "case_id": "architecture",
+      "correlation_id_hash": "071150f3cb4e047f48be047a7cd7f57575f6df41c29a1bbe8cb404a9d56fd730",
+      "reconciliation": {
+        "checks": {
+          "provider_qualified_model": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_api_available": false,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "observed"
+      },
+      "repetition": 1,
+      "request": {
+        "endpoint": "https://api.concentrate.ai/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "099418540a8207db2b2a98de2f0f079ef3a6b2606648d1a24e25f97349477fbf",
+        "requested_router": "auto",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "id": "msg_011CdTSEqt9S1CihAFWjgDEZ",
+        "model": "anthropic/claude-opus-4-1",
+        "provider": "anthropic",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 2.852745290962048,
+          "stream_total_s": 4.3214394999668
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 30,
+          "output_tokens": 64,
+          "reasoning_tokens": 0,
+          "total_tokens": 94
+        }
+      },
+      "route": {
+        "attempt": null,
+        "attempts": [],
+        "candidate_count": null,
+        "candidate_models": [],
+        "pipeline": [],
+        "requested": "auto",
+        "selected_endpoints": [
+          {
+            "model": "anthropic/claude-opus-4-1",
+            "provider": "anthropic"
+          }
+        ],
+        "strategy": null
+      },
+      "router": "concentrate",
+      "trace": null
+    },
+    {
+      "case_id": "architecture",
+      "correlation_id_hash": "9b676192a4277d3dee7fdca794f7c43a9c7b95988581de462aeb814169e7d3e8",
+      "reconciliation": {
+        "checks": {
+          "auto_router_stage_matches_selected": true,
+          "cost_present": true,
+          "metadata_requested_router_matches": true,
+          "multiple_candidates_observed": true,
+          "one_selected_endpoint": true,
+          "response_header_id_matches": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_cost_matches": true,
+          "trace_id_matches": true,
+          "trace_model_matches_selected": true,
+          "trace_present": true,
+          "trace_provider_matches_selected": true,
+          "trace_provider_response_matches": true,
+          "trace_request_id_present": true,
+          "trace_router_matches": true,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "reconciled"
+      },
+      "repetition": 2,
+      "request": {
+        "endpoint": "https://openrouter.ai/api/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "099418540a8207db2b2a98de2f0f079ef3a6b2606648d1a24e25f97349477fbf",
+        "requested_router": "openrouter/auto-beta",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.incomplete"
+        ],
+        "generation_header_id": "gen-1785195178-LrXgkj1iNTDQzHoHTQ7U",
+        "id": "gen-1785195178-LrXgkj1iNTDQzHoHTQ7U",
+        "model": "z-ai/glm-5.2",
+        "provider": "z-ai",
+        "status": "incomplete",
+        "timings": {
+          "first_event_s": 0.5358439999981783,
+          "stream_total_s": 0.8437343750265427
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "cost": 0.0003264,
+          "input_tokens": 32,
+          "output_tokens": 64,
+          "reasoning_tokens": 59,
+          "total_tokens": 96,
+          "upstream_inference_cost": 0.0003264
+        }
+      },
+      "route": {
+        "attempt": 1,
+        "attempts": [],
+        "candidate_count": 72,
+        "candidate_models": [
+          "deepseek/deepseek-v4-flash-20260423",
+          "deepseek/deepseek-v4-pro-20260423",
+          "z-ai/glm-5.2-20260616"
+        ],
+        "pipeline": [
+          {
+            "fallback_models": [
+              "deepseek/deepseek-v4-pro-20260423",
+              "deepseek/deepseek-v4-flash-20260423"
+            ],
+            "name": "auto-beta-router",
+            "resolved_to": "z-ai/glm-5.2-20260616",
+            "type": "plugin"
+          }
+        ],
+        "requested": "openrouter/auto-beta",
+        "selected_endpoints": [
+          {
+            "model": "z-ai/glm-5.2-20260616",
+            "provider": "Parasail"
+          }
+        ],
+        "strategy": "direct"
+      },
+      "router": "openrouter",
+      "trace": {
+        "id": "gen-1785195178-LrXgkj1iNTDQzHoHTQ7U",
+        "model": "z-ai/glm-5.2-20260616",
+        "native_tokens_completion": 64,
+        "native_tokens_prompt": 32,
+        "provider": "Parasail",
+        "provider_responses": [
+          {
+            "model": "z-ai/glm-5.2-20260616",
+            "provider": "Parasail",
+            "status": 200,
+            "upstream_id_hash": "61974df7c5145027261598a21a560dadb43571fd5d765e7a95e82c613bb62505"
+          }
+        ],
+        "request_id": "req-1785195178-3w4OI05cOMInLDxzELXs",
+        "router": "openrouter/auto-beta",
+        "tokens_completion": 59,
+        "tokens_prompt": 25,
+        "total_cost": 0.0003264
+      }
+    },
+    {
+      "case_id": "architecture",
+      "correlation_id_hash": "9c5e9da0ee39ac7d7dfeae332cae3802105245d450d6d6afa98b10b4f44a0ee6",
+      "reconciliation": {
+        "checks": {
+          "provider_qualified_model": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_api_available": false,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "observed"
+      },
+      "repetition": 2,
+      "request": {
+        "endpoint": "https://api.concentrate.ai/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "099418540a8207db2b2a98de2f0f079ef3a6b2606648d1a24e25f97349477fbf",
+        "requested_router": "auto",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "id": "msg_011CdTSG6xHpFjBnKbPsiKeY",
+        "model": "anthropic/claude-opus-4-1",
+        "provider": "anthropic",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 2.5034998749615625,
+          "stream_total_s": 3.908792625006754
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 30,
+          "output_tokens": 64,
+          "reasoning_tokens": 0,
+          "total_tokens": 94
+        }
+      },
+      "route": {
+        "attempt": null,
+        "attempts": [],
+        "candidate_count": null,
+        "candidate_models": [],
+        "pipeline": [],
+        "requested": "auto",
+        "selected_endpoints": [
+          {
+            "model": "anthropic/claude-opus-4-1",
+            "provider": "anthropic"
+          }
+        ],
+        "strategy": null
+      },
+      "router": "concentrate",
+      "trace": null
+    },
+    {
+      "case_id": "architecture",
+      "correlation_id_hash": "ef51f1e46d4dbab4ba9b28c665340d2423b464263f1064270d55651f58426944",
+      "reconciliation": {
+        "checks": {
+          "auto_router_stage_matches_selected": true,
+          "cost_present": true,
+          "metadata_requested_router_matches": true,
+          "multiple_candidates_observed": true,
+          "one_selected_endpoint": true,
+          "response_header_id_matches": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_cost_matches": true,
+          "trace_id_matches": true,
+          "trace_model_matches_selected": true,
+          "trace_present": true,
+          "trace_provider_matches_selected": true,
+          "trace_provider_response_matches": true,
+          "trace_request_id_present": true,
+          "trace_router_matches": true,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "reconciled"
+      },
+      "repetition": 3,
+      "request": {
+        "endpoint": "https://openrouter.ai/api/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "099418540a8207db2b2a98de2f0f079ef3a6b2606648d1a24e25f97349477fbf",
+        "requested_router": "openrouter/auto-beta",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.incomplete"
+        ],
+        "generation_header_id": "gen-1785195195-NO0HgaFDfi3u7LwlT6si",
+        "id": "gen-1785195195-NO0HgaFDfi3u7LwlT6si",
+        "model": "z-ai/glm-5.2",
+        "provider": "z-ai",
+        "status": "incomplete",
+        "timings": {
+          "first_event_s": 0.6050859170500189,
+          "stream_total_s": 0.9594107090379111
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "cost": 0.0003264,
+          "input_tokens": 32,
+          "output_tokens": 64,
+          "reasoning_tokens": 72,
+          "total_tokens": 96,
+          "upstream_inference_cost": 0.0003264
+        }
+      },
+      "route": {
+        "attempt": 1,
+        "attempts": [],
+        "candidate_count": 72,
+        "candidate_models": [
+          "deepseek/deepseek-v4-flash-20260423",
+          "deepseek/deepseek-v4-pro-20260423",
+          "z-ai/glm-5.2-20260616"
+        ],
+        "pipeline": [
+          {
+            "fallback_models": [
+              "deepseek/deepseek-v4-pro-20260423",
+              "deepseek/deepseek-v4-flash-20260423"
+            ],
+            "name": "auto-beta-router",
+            "resolved_to": "z-ai/glm-5.2-20260616",
+            "type": "plugin"
+          }
+        ],
+        "requested": "openrouter/auto-beta",
+        "selected_endpoints": [
+          {
+            "model": "z-ai/glm-5.2-20260616",
+            "provider": "Parasail"
+          }
+        ],
+        "strategy": "direct"
+      },
+      "router": "openrouter",
+      "trace": {
+        "id": "gen-1785195195-NO0HgaFDfi3u7LwlT6si",
+        "model": "z-ai/glm-5.2-20260616",
+        "native_tokens_completion": 64,
+        "native_tokens_prompt": 32,
+        "provider": "Parasail",
+        "provider_responses": [
+          {
+            "model": "z-ai/glm-5.2-20260616",
+            "provider": "Parasail",
+            "status": 200,
+            "upstream_id_hash": "875739265f8e37ae6bdc80a56603dd60c193e770d910ab02a0168abbd46440bd"
+          }
+        ],
+        "request_id": "req-1785195195-DwCGqpOZLgHjq1ZbG3j9",
+        "router": "openrouter/auto-beta",
+        "tokens_completion": 72,
+        "tokens_prompt": 25,
+        "total_cost": 0.0003264
+      }
+    },
+    {
+      "case_id": "architecture",
+      "correlation_id_hash": "90202e0a1fc3512a299e750e48a77c3e7e13741b7ce17dca51b48b708a81a5cf",
+      "reconciliation": {
+        "checks": {
+          "provider_qualified_model": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_api_available": false,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "observed"
+      },
+      "repetition": 3,
+      "request": {
+        "endpoint": "https://api.concentrate.ai/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "099418540a8207db2b2a98de2f0f079ef3a6b2606648d1a24e25f97349477fbf",
+        "requested_router": "auto",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "id": "msg_011CdTSHW2dxC1nD5FdG2Lya",
+        "model": "anthropic/claude-opus-4-1",
+        "provider": "anthropic",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 2.4301772079779766,
+          "stream_total_s": 4.271575291000772
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 30,
+          "output_tokens": 64,
+          "reasoning_tokens": 0,
+          "total_tokens": 94
+        }
+      },
+      "route": {
+        "attempt": null,
+        "attempts": [],
+        "candidate_count": null,
+        "candidate_models": [],
+        "pipeline": [],
+        "requested": "auto",
+        "selected_endpoints": [
+          {
+            "model": "anthropic/claude-opus-4-1",
+            "provider": "anthropic"
+          }
+        ],
+        "strategy": null
+      },
+      "router": "concentrate",
+      "trace": null
+    },
+    {
+      "case_id": "debug",
+      "correlation_id_hash": "04af22fbd2ebdc0b8f8782e76e653e677d2b0ae3fbd963a680eb015c7e3fcafb",
+      "reconciliation": {
+        "checks": {
+          "auto_router_stage_matches_selected": true,
+          "cost_present": true,
+          "metadata_requested_router_matches": true,
+          "multiple_candidates_observed": true,
+          "one_selected_endpoint": true,
+          "response_header_id_matches": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_cost_matches": true,
+          "trace_id_matches": true,
+          "trace_model_matches_selected": true,
+          "trace_present": true,
+          "trace_provider_matches_selected": true,
+          "trace_provider_response_matches": true,
+          "trace_request_id_present": true,
+          "trace_router_matches": true,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "reconciled"
+      },
+      "repetition": 1,
+      "request": {
+        "endpoint": "https://openrouter.ai/api/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "08cbe0b892063372aaae5b2d651cdc86e031e7d2e209580eea0e5eaed72f85f7",
+        "requested_router": "openrouter/auto-beta",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.incomplete"
+        ],
+        "generation_header_id": "gen-1785195214-62uGs93OkBrHOpm5ga4B",
+        "id": "gen-1785195214-62uGs93OkBrHOpm5ga4B",
+        "model": "deepseek/deepseek-v4-pro",
+        "provider": "deepseek",
+        "status": "incomplete",
+        "timings": {
+          "first_event_s": 0.9579253749689087,
+          "stream_total_s": 1.7791547919623554
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "cost": 0.000182208,
+          "input_tokens": 28,
+          "output_tokens": 64,
+          "reasoning_tokens": 64,
+          "total_tokens": 92,
+          "upstream_inference_cost": 0.000182208
+        }
+      },
+      "route": {
+        "attempt": 1,
+        "attempts": [],
+        "candidate_count": 47,
+        "candidate_models": [
+          "deepseek/deepseek-v4-flash-20260423",
+          "deepseek/deepseek-v4-pro-20260423",
+          "minimax/minimax-m3-20260531"
+        ],
+        "pipeline": [
+          {
+            "fallback_models": [
+              "deepseek/deepseek-v4-flash-20260423",
+              "minimax/minimax-m3-20260531"
+            ],
+            "name": "auto-beta-router",
+            "resolved_to": "deepseek/deepseek-v4-pro-20260423",
+            "type": "plugin"
+          }
+        ],
+        "requested": "openrouter/auto-beta",
+        "selected_endpoints": [
+          {
+            "model": "deepseek/deepseek-v4-pro-20260423",
+            "provider": "Novita"
+          }
+        ],
+        "strategy": "direct"
+      },
+      "router": "openrouter",
+      "trace": {
+        "id": "gen-1785195214-62uGs93OkBrHOpm5ga4B",
+        "model": "deepseek/deepseek-v4-pro-20260423",
+        "native_tokens_completion": 64,
+        "native_tokens_prompt": 28,
+        "provider": "Novita",
+        "provider_responses": [
+          {
+            "model": "deepseek/deepseek-v4-pro-20260423",
+            "provider": "Novita",
+            "status": 200,
+            "upstream_id_hash": "d98ae6693f082fc95b44fc7180d5c898d54f6144b4ecf1ba54ae438ae29265ad"
+          }
+        ],
+        "request_id": "req-1785195214-z1QC52L0SEtFe440Bf7f",
+        "router": "openrouter/auto-beta",
+        "tokens_completion": 78,
+        "tokens_prompt": 31,
+        "total_cost": 0.000182208
+      }
+    },
+    {
+      "case_id": "debug",
+      "correlation_id_hash": "c9590d7d5532780986bc0702a1f59887ce14e5cf7e20495898761c1bf81c9e14",
+      "reconciliation": {
+        "checks": {
+          "provider_qualified_model": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_api_available": false,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "observed"
+      },
+      "repetition": 1,
+      "request": {
+        "endpoint": "https://api.concentrate.ai/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "08cbe0b892063372aaae5b2d651cdc86e031e7d2e209580eea0e5eaed72f85f7",
+        "requested_router": "auto",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "id": "msg_011CdTSJs3i99r3fDzkGD4ay",
+        "model": "anthropic/claude-opus-4-1",
+        "provider": "anthropic",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 2.324201332987286,
+          "stream_total_s": 3.9041237919591367
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 34,
+          "output_tokens": 64,
+          "reasoning_tokens": 0,
+          "total_tokens": 98
+        }
+      },
+      "route": {
+        "attempt": null,
+        "attempts": [],
+        "candidate_count": null,
+        "candidate_models": [],
+        "pipeline": [],
+        "requested": "auto",
+        "selected_endpoints": [
+          {
+            "model": "anthropic/claude-opus-4-1",
+            "provider": "anthropic"
+          }
+        ],
+        "strategy": null
+      },
+      "router": "concentrate",
+      "trace": null
+    },
+    {
+      "case_id": "debug",
+      "correlation_id_hash": "152b50b6e46a115c65076cdb4d26e63419d126e74a3278f9d56a90beda331961",
+      "reconciliation": {
+        "checks": {
+          "auto_router_stage_matches_selected": true,
+          "cost_present": true,
+          "metadata_requested_router_matches": true,
+          "multiple_candidates_observed": true,
+          "one_selected_endpoint": true,
+          "response_header_id_matches": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_cost_matches": true,
+          "trace_id_matches": true,
+          "trace_model_matches_selected": true,
+          "trace_present": true,
+          "trace_provider_matches_selected": true,
+          "trace_provider_response_matches": true,
+          "trace_request_id_present": true,
+          "trace_router_matches": true,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "reconciled"
+      },
+      "repetition": 2,
+      "request": {
+        "endpoint": "https://openrouter.ai/api/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "08cbe0b892063372aaae5b2d651cdc86e031e7d2e209580eea0e5eaed72f85f7",
+        "requested_router": "openrouter/auto-beta",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.incomplete"
+        ],
+        "generation_header_id": "gen-1785195232-pHGIVpnly5FrC7dL4clF",
+        "id": "gen-1785195232-pHGIVpnly5FrC7dL4clF",
+        "model": "deepseek/deepseek-v4-pro",
+        "provider": "deepseek",
+        "status": "incomplete",
+        "timings": {
+          "first_event_s": 1.3066212080302648,
+          "stream_total_s": 2.0254387910244986
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "cost": 0.000182208,
+          "input_tokens": 28,
+          "output_tokens": 64,
+          "reasoning_tokens": 64,
+          "total_tokens": 92,
+          "upstream_inference_cost": 0.000182208
+        }
+      },
+      "route": {
+        "attempt": 1,
+        "attempts": [],
+        "candidate_count": 47,
+        "candidate_models": [
+          "deepseek/deepseek-v4-flash-20260423",
+          "deepseek/deepseek-v4-pro-20260423",
+          "minimax/minimax-m3-20260531"
+        ],
+        "pipeline": [
+          {
+            "fallback_models": [
+              "deepseek/deepseek-v4-flash-20260423",
+              "minimax/minimax-m3-20260531"
+            ],
+            "name": "auto-beta-router",
+            "resolved_to": "deepseek/deepseek-v4-pro-20260423",
+            "type": "plugin"
+          }
+        ],
+        "requested": "openrouter/auto-beta",
+        "selected_endpoints": [
+          {
+            "model": "deepseek/deepseek-v4-pro-20260423",
+            "provider": "Novita"
+          }
+        ],
+        "strategy": "direct"
+      },
+      "router": "openrouter",
+      "trace": {
+        "id": "gen-1785195232-pHGIVpnly5FrC7dL4clF",
+        "model": "deepseek/deepseek-v4-pro-20260423",
+        "native_tokens_completion": 64,
+        "native_tokens_prompt": 28,
+        "provider": "Novita",
+        "provider_responses": [
+          {
+            "model": "deepseek/deepseek-v4-pro-20260423",
+            "provider": "Novita",
+            "status": 200,
+            "upstream_id_hash": "874eeaa9f1c684d52e8c258a7cf12208acff0857e6ae61bddd3cde99632d1d6e"
+          }
+        ],
+        "request_id": "req-1785195232-SqdWc7iri6Jgq5gkyUWv",
+        "router": "openrouter/auto-beta",
+        "tokens_completion": 82,
+        "tokens_prompt": 31,
+        "total_cost": 0.000182208
+      }
+    },
+    {
+      "case_id": "debug",
+      "correlation_id_hash": "1ef1fdbbc46d4f9faeb39b343e47e3bb1c41e431f075ffa0c94e587793fb6004",
+      "reconciliation": {
+        "checks": {
+          "provider_qualified_model": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_api_available": false,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "observed"
+      },
+      "repetition": 2,
+      "request": {
+        "endpoint": "https://api.concentrate.ai/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "08cbe0b892063372aaae5b2d651cdc86e031e7d2e209580eea0e5eaed72f85f7",
+        "requested_router": "auto",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "id": "msg_011CdTSLCHd1xAhNNc244e9W",
+        "model": "anthropic/claude-opus-4-1",
+        "provider": "anthropic",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 2.4251299999887124,
+          "stream_total_s": 3.8878213749849238
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 34,
+          "output_tokens": 64,
+          "reasoning_tokens": 0,
+          "total_tokens": 98
+        }
+      },
+      "route": {
+        "attempt": null,
+        "attempts": [],
+        "candidate_count": null,
+        "candidate_models": [],
+        "pipeline": [],
+        "requested": "auto",
+        "selected_endpoints": [
+          {
+            "model": "anthropic/claude-opus-4-1",
+            "provider": "anthropic"
+          }
+        ],
+        "strategy": null
+      },
+      "router": "concentrate",
+      "trace": null
+    },
+    {
+      "case_id": "debug",
+      "correlation_id_hash": "98d9411b845476f6b9bce9482983131905824c1618a034bcfbcf30624a2553f3",
+      "reconciliation": {
+        "checks": {
+          "auto_router_stage_matches_selected": true,
+          "cost_present": true,
+          "metadata_requested_router_matches": true,
+          "multiple_candidates_observed": true,
+          "one_selected_endpoint": true,
+          "response_header_id_matches": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_cost_matches": true,
+          "trace_id_matches": true,
+          "trace_model_matches_selected": true,
+          "trace_present": true,
+          "trace_provider_matches_selected": true,
+          "trace_provider_response_matches": true,
+          "trace_request_id_present": true,
+          "trace_router_matches": true,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "reconciled"
+      },
+      "repetition": 3,
+      "request": {
+        "endpoint": "https://openrouter.ai/api/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "08cbe0b892063372aaae5b2d651cdc86e031e7d2e209580eea0e5eaed72f85f7",
+        "requested_router": "openrouter/auto-beta",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.incomplete"
+        ],
+        "generation_header_id": "gen-1785195250-WoVxYUxce8Lhx6AcC8PS",
+        "id": "gen-1785195250-WoVxYUxce8Lhx6AcC8PS",
+        "model": "deepseek/deepseek-v4-pro",
+        "provider": "deepseek",
+        "status": "incomplete",
+        "timings": {
+          "first_event_s": 1.0251205409877002,
+          "stream_total_s": 1.870455625001341
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "cost": 0.000182208,
+          "input_tokens": 28,
+          "output_tokens": 64,
+          "reasoning_tokens": 64,
+          "total_tokens": 92,
+          "upstream_inference_cost": 0.000182208
+        }
+      },
+      "route": {
+        "attempt": 1,
+        "attempts": [],
+        "candidate_count": 47,
+        "candidate_models": [
+          "deepseek/deepseek-v4-flash-20260423",
+          "deepseek/deepseek-v4-pro-20260423",
+          "minimax/minimax-m3-20260531"
+        ],
+        "pipeline": [
+          {
+            "fallback_models": [
+              "deepseek/deepseek-v4-flash-20260423",
+              "minimax/minimax-m3-20260531"
+            ],
+            "name": "auto-beta-router",
+            "resolved_to": "deepseek/deepseek-v4-pro-20260423",
+            "type": "plugin"
+          }
+        ],
+        "requested": "openrouter/auto-beta",
+        "selected_endpoints": [
+          {
+            "model": "deepseek/deepseek-v4-pro-20260423",
+            "provider": "Novita"
+          }
+        ],
+        "strategy": "direct"
+      },
+      "router": "openrouter",
+      "trace": {
+        "id": "gen-1785195250-WoVxYUxce8Lhx6AcC8PS",
+        "model": "deepseek/deepseek-v4-pro-20260423",
+        "native_tokens_completion": 64,
+        "native_tokens_prompt": 28,
+        "provider": "Novita",
+        "provider_responses": [
+          {
+            "model": "deepseek/deepseek-v4-pro-20260423",
+            "provider": "Novita",
+            "status": 200,
+            "upstream_id_hash": "51e6234c82e8d0a6d601c04cba5400a5cdfcdaabd822d6721590bef2a117902d"
+          }
+        ],
+        "request_id": "req-1785195250-qnS7PJSlItMkFVhyJxgp",
+        "router": "openrouter/auto-beta",
+        "tokens_completion": 82,
+        "tokens_prompt": 31,
+        "total_cost": 0.000182208
+      }
+    },
+    {
+      "case_id": "debug",
+      "correlation_id_hash": "bf89b12bcefb9bff46838ea1b524ad05a053bc0ad8523d1cf159ef5969177fab",
+      "reconciliation": {
+        "checks": {
+          "provider_qualified_model": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_api_available": false,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "observed"
+      },
+      "repetition": 3,
+      "request": {
+        "endpoint": "https://api.concentrate.ai/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "08cbe0b892063372aaae5b2d651cdc86e031e7d2e209580eea0e5eaed72f85f7",
+        "requested_router": "auto",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "id": "msg_011CdTSMEmyHDzFe9X2quUbu",
+        "model": "anthropic/claude-opus-4-1",
+        "provider": "anthropic",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 2.7516986670088954,
+          "stream_total_s": 4.406705458997749
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 34,
+          "output_tokens": 64,
+          "reasoning_tokens": 0,
+          "total_tokens": 98
+        }
+      },
+      "route": {
+        "attempt": null,
+        "attempts": [],
+        "candidate_count": null,
+        "candidate_models": [],
+        "pipeline": [],
+        "requested": "auto",
+        "selected_endpoints": [
+          {
+            "model": "anthropic/claude-opus-4-1",
+            "provider": "anthropic"
+          }
+        ],
+        "strategy": null
+      },
+      "router": "concentrate",
+      "trace": null
+    },
+    {
+      "case_id": "exact",
+      "correlation_id_hash": "02818c44613a9f191f3f1b87255d585fc1fc484d878e748dabb52e221dad43b4",
+      "reconciliation": {
+        "checks": {
+          "auto_router_stage_matches_selected": true,
+          "cost_present": true,
+          "metadata_requested_router_matches": true,
+          "multiple_candidates_observed": true,
+          "one_selected_endpoint": true,
+          "response_header_id_matches": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_cost_matches": true,
+          "trace_id_matches": true,
+          "trace_model_matches_selected": true,
+          "trace_present": true,
+          "trace_provider_matches_selected": true,
+          "trace_provider_response_matches": true,
+          "trace_request_id_present": true,
+          "trace_router_matches": true,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "reconciled"
+      },
+      "repetition": 1,
+      "request": {
+        "endpoint": "https://openrouter.ai/api/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "9fd4e527ac47a78000606f00fa85e69d0c0f87c7130dc933e9d53550f1a6ef0c",
+        "requested_router": "openrouter/auto-beta",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.output_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "generation_header_id": "gen-1785195265-tAv4Xw7sZZPsEntJoSTz",
+        "id": "gen-1785195265-tAv4Xw7sZZPsEntJoSTz",
+        "model": "deepseek/deepseek-v4-flash",
+        "provider": "deepseek",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 0.9882232919917442,
+          "stream_total_s": 1.1494457079679705
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "cost": 5.915e-06,
+          "input_tokens": 11,
+          "output_tokens": 27,
+          "reasoning_tokens": 23,
+          "total_tokens": 38,
+          "upstream_inference_cost": 5.915e-06
+        }
+      },
+      "route": {
+        "attempt": 1,
+        "attempts": [],
+        "candidate_count": 29,
+        "candidate_models": [
+          "anthropic/claude-4.5-haiku-20251001",
+          "deepseek/deepseek-v4-flash-20260423",
+          "google/gemini-3.6-flash-20260721"
+        ],
+        "pipeline": [
+          {
+            "fallback_models": [
+              "google/gemini-3.6-flash-20260721",
+              "anthropic/claude-4.5-haiku-20251001"
+            ],
+            "name": "auto-beta-router",
+            "resolved_to": "deepseek/deepseek-v4-flash-20260423",
+            "type": "plugin"
+          }
+        ],
+        "requested": "openrouter/auto-beta",
+        "selected_endpoints": [
+          {
+            "model": "deepseek/deepseek-v4-flash-20260423",
+            "provider": "Baidu"
+          }
+        ],
+        "strategy": "direct"
+      },
+      "router": "openrouter",
+      "trace": {
+        "id": "gen-1785195265-tAv4Xw7sZZPsEntJoSTz",
+        "model": "deepseek/deepseek-v4-flash-20260423",
+        "native_tokens_completion": 27,
+        "native_tokens_prompt": 11,
+        "provider": "Baidu",
+        "provider_responses": [
+          {
+            "model": "deepseek/deepseek-v4-flash-20260423",
+            "provider": "Baidu",
+            "status": 200,
+            "upstream_id_hash": "62f99fddb75d3923cb2eac44545dcbe95e43b774d2d2c0211abbe5ad6a25a15f"
+          }
+        ],
+        "request_id": "req-1785195265-oevhIBcPaVrgnXPpePUR",
+        "router": "openrouter/auto-beta",
+        "tokens_completion": 26,
+        "tokens_prompt": 8,
+        "total_cost": 5.915e-06
+      }
+    },
+    {
+      "case_id": "exact",
+      "correlation_id_hash": "fb818069a8f04fbd6aa4840ca95c193dfcfc84c7542806ebb427e3076f839f46",
+      "reconciliation": {
+        "checks": {
+          "provider_qualified_model": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_api_available": false,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "observed"
+      },
+      "repetition": 1,
+      "request": {
+        "endpoint": "https://api.concentrate.ai/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "9fd4e527ac47a78000606f00fa85e69d0c0f87c7130dc933e9d53550f1a6ef0c",
+        "requested_router": "auto",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "id": "msg_011CdTSNEDGPJS1Wsyg96rEo",
+        "model": "anthropic/claude-opus-4-1",
+        "provider": "anthropic",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 2.173313250008505,
+          "stream_total_s": 2.188953458040487
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 14,
+          "output_tokens": 5,
+          "reasoning_tokens": 0,
+          "total_tokens": 19
+        }
+      },
+      "route": {
+        "attempt": null,
+        "attempts": [],
+        "candidate_count": null,
+        "candidate_models": [],
+        "pipeline": [],
+        "requested": "auto",
+        "selected_endpoints": [
+          {
+            "model": "anthropic/claude-opus-4-1",
+            "provider": "anthropic"
+          }
+        ],
+        "strategy": null
+      },
+      "router": "concentrate",
+      "trace": null
+    },
+    {
+      "case_id": "exact",
+      "correlation_id_hash": "361e3e6d9548869dbe2d59f370fd48301c6d78791bcf7b99c77dd8711e7892cf",
+      "reconciliation": {
+        "checks": {
+          "auto_router_stage_matches_selected": true,
+          "cost_present": true,
+          "metadata_requested_router_matches": true,
+          "multiple_candidates_observed": true,
+          "one_selected_endpoint": true,
+          "response_header_id_matches": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_cost_matches": true,
+          "trace_id_matches": true,
+          "trace_model_matches_selected": true,
+          "trace_present": true,
+          "trace_provider_matches_selected": true,
+          "trace_provider_response_matches": true,
+          "trace_request_id_present": true,
+          "trace_router_matches": true,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "reconciled"
+      },
+      "repetition": 2,
+      "request": {
+        "endpoint": "https://openrouter.ai/api/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "9fd4e527ac47a78000606f00fa85e69d0c0f87c7130dc933e9d53550f1a6ef0c",
+        "requested_router": "openrouter/auto-beta",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.output_text.delta",
+          "response.output_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "generation_header_id": "gen-1785195276-op1CYAa4KOXpdOP329Fh",
+        "id": "gen-1785195276-op1CYAa4KOXpdOP329Fh",
+        "model": "deepseek/deepseek-v4-flash",
+        "provider": "deepseek",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 0.8476382090011612,
+          "stream_total_s": 1.2664287919760682
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "cost": 7.735e-06,
+          "input_tokens": 11,
+          "output_tokens": 37,
+          "reasoning_tokens": 33,
+          "total_tokens": 48,
+          "upstream_inference_cost": 7.735e-06
+        }
+      },
+      "route": {
+        "attempt": 1,
+        "attempts": [],
+        "candidate_count": 29,
+        "candidate_models": [
+          "anthropic/claude-4.5-haiku-20251001",
+          "deepseek/deepseek-v4-flash-20260423",
+          "google/gemini-3.6-flash-20260721"
+        ],
+        "pipeline": [
+          {
+            "fallback_models": [
+              "google/gemini-3.6-flash-20260721",
+              "anthropic/claude-4.5-haiku-20251001"
+            ],
+            "name": "auto-beta-router",
+            "resolved_to": "deepseek/deepseek-v4-flash-20260423",
+            "type": "plugin"
+          }
+        ],
+        "requested": "openrouter/auto-beta",
+        "selected_endpoints": [
+          {
+            "model": "deepseek/deepseek-v4-flash-20260423",
+            "provider": "Baidu"
+          }
+        ],
+        "strategy": "direct"
+      },
+      "router": "openrouter",
+      "trace": {
+        "id": "gen-1785195276-op1CYAa4KOXpdOP329Fh",
+        "model": "deepseek/deepseek-v4-flash-20260423",
+        "native_tokens_completion": 37,
+        "native_tokens_prompt": 11,
+        "provider": "Baidu",
+        "provider_responses": [
+          {
+            "model": "deepseek/deepseek-v4-flash-20260423",
+            "provider": "Baidu",
+            "status": 200,
+            "upstream_id_hash": "e0e5b6df46c610a62ac8ff5d7c4072993afe3a4d5f4b41d2601903e101dd6b6d"
+          }
+        ],
+        "request_id": "req-1785195276-SsykeGL89DHT5Uu4X05H",
+        "router": "openrouter/auto-beta",
+        "tokens_completion": 40,
+        "tokens_prompt": 8,
+        "total_cost": 7.735e-06
+      }
+    },
+    {
+      "case_id": "exact",
+      "correlation_id_hash": "3f2a45d6cafc08cfc7e8fbc41156264ff4c730338226b3621d8b63d1380513a9",
+      "reconciliation": {
+        "checks": {
+          "provider_qualified_model": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_api_available": false,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "observed"
+      },
+      "repetition": 2,
+      "request": {
+        "endpoint": "https://api.concentrate.ai/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "9fd4e527ac47a78000606f00fa85e69d0c0f87c7130dc933e9d53550f1a6ef0c",
+        "requested_router": "auto",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "id": "msg_011CdTSPA6VsSpJojGfgGbTY",
+        "model": "anthropic/claude-opus-4-1",
+        "provider": "anthropic",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 3.7480139999534003,
+          "stream_total_s": 3.7482864999910817
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 14,
+          "output_tokens": 5,
+          "reasoning_tokens": 0,
+          "total_tokens": 19
+        }
+      },
+      "route": {
+        "attempt": null,
+        "attempts": [],
+        "candidate_count": null,
+        "candidate_models": [],
+        "pipeline": [],
+        "requested": "auto",
+        "selected_endpoints": [
+          {
+            "model": "anthropic/claude-opus-4-1",
+            "provider": "anthropic"
+          }
+        ],
+        "strategy": null
+      },
+      "router": "concentrate",
+      "trace": null
+    },
+    {
+      "case_id": "exact",
+      "correlation_id_hash": "cb9fc9e57bc178f79e62d8a92a73b58e97ceace2c63126b3ccb77a79dc6c5bab",
+      "reconciliation": {
+        "checks": {
+          "auto_router_stage_matches_selected": true,
+          "cost_present": true,
+          "metadata_requested_router_matches": true,
+          "multiple_candidates_observed": true,
+          "one_selected_endpoint": true,
+          "response_header_id_matches": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_cost_matches": true,
+          "trace_id_matches": true,
+          "trace_model_matches_selected": true,
+          "trace_present": true,
+          "trace_provider_matches_selected": true,
+          "trace_provider_response_matches": true,
+          "trace_request_id_present": true,
+          "trace_router_matches": true,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "reconciled"
+      },
+      "repetition": 3,
+      "request": {
+        "endpoint": "https://openrouter.ai/api/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "9fd4e527ac47a78000606f00fa85e69d0c0f87c7130dc933e9d53550f1a6ef0c",
+        "requested_router": "openrouter/auto-beta",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.delta",
+          "response.reasoning_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.output_text.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "generation_header_id": "gen-1785195290-7rH6EkN3yHAYhArW9ETG",
+        "id": "gen-1785195290-7rH6EkN3yHAYhArW9ETG",
+        "model": "deepseek/deepseek-v4-flash",
+        "provider": "deepseek",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 1.3334300420247018,
+          "stream_total_s": 1.6436191669781692
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "cost": 9.782e-06,
+          "input_tokens": 11,
+          "output_tokens": 31,
+          "reasoning_tokens": 27,
+          "total_tokens": 42,
+          "upstream_inference_cost": 9.782e-06
+        }
+      },
+      "route": {
+        "attempt": 2,
+        "attempts": [
+          {
+            "model": "deepseek/deepseek-v4-flash-20260423",
+            "provider": "Baidu",
+            "status": 429
+          },
+          {
+            "model": "deepseek/deepseek-v4-flash-20260423",
+            "provider": "Alibaba",
+            "status": 200
+          }
+        ],
+        "candidate_count": 29,
+        "candidate_models": [
+          "anthropic/claude-4.5-haiku-20251001",
+          "deepseek/deepseek-v4-flash-20260423",
+          "google/gemini-3.6-flash-20260721"
+        ],
+        "pipeline": [
+          {
+            "fallback_models": [
+              "google/gemini-3.6-flash-20260721",
+              "anthropic/claude-4.5-haiku-20251001"
+            ],
+            "name": "auto-beta-router",
+            "resolved_to": "deepseek/deepseek-v4-flash-20260423",
+            "type": "plugin"
+          }
+        ],
+        "requested": "openrouter/auto-beta",
+        "selected_endpoints": [
+          {
+            "model": "deepseek/deepseek-v4-flash-20260423",
+            "provider": "Alibaba"
+          }
+        ],
+        "strategy": "direct"
+      },
+      "router": "openrouter",
+      "trace": {
+        "id": "gen-1785195290-7rH6EkN3yHAYhArW9ETG",
+        "model": "deepseek/deepseek-v4-flash-20260423",
+        "native_tokens_completion": 31,
+        "native_tokens_prompt": 11,
+        "provider": "Alibaba",
+        "provider_responses": [
+          {
+            "model": "deepseek/deepseek-v4-flash-20260423",
+            "provider": "Baidu",
+            "status": 429,
+            "upstream_id_hash": null
+          },
+          {
+            "model": "deepseek/deepseek-v4-flash-20260423",
+            "provider": "Alibaba",
+            "status": 200,
+            "upstream_id_hash": "65b2b224d4e3c6e6161dcc838dc6e59b7862e246a22f68aff28d74ed8cda88df"
+          }
+        ],
+        "request_id": "req-1785195290-eyjgdC14T8qNqwpTCakZ",
+        "router": "openrouter/auto-beta",
+        "tokens_completion": 31,
+        "tokens_prompt": 8,
+        "total_cost": 9.782e-06
+      }
+    },
+    {
+      "case_id": "exact",
+      "correlation_id_hash": "6f5f6b081b7198cbc2ad78972b94f3c529787139635921f74f5625dd1ca04c3c",
+      "reconciliation": {
+        "checks": {
+          "provider_qualified_model": true,
+          "response_id_present": true,
+          "response_model_present": true,
+          "token_counts_present": true,
+          "token_total_consistent": true,
+          "trace_api_available": false,
+          "usage_present": true
+        },
+        "failures": [],
+        "status": "observed"
+      },
+      "repetition": 3,
+      "request": {
+        "endpoint": "https://api.concentrate.ai/v1/responses",
+        "max_output_tokens": 64,
+        "prompt_sha256": "9fd4e527ac47a78000606f00fa85e69d0c0f87c7130dc933e9d53550f1a6ef0c",
+        "requested_router": "auto",
+        "stream": true
+      },
+      "response": {
+        "event_types": [
+          "response.created",
+          "response.in_progress",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_text.delta",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.completed"
+        ],
+        "id": "msg_011CdTSQPg6PdBLbpNYTjMK7",
+        "model": "anthropic/claude-opus-4-1",
+        "provider": "anthropic",
+        "status": "completed",
+        "timings": {
+          "first_event_s": 2.4856625419924967,
+          "stream_total_s": 2.7866902500391006
+        },
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 14,
+          "output_tokens": 5,
+          "reasoning_tokens": 0,
+          "total_tokens": 19
+        }
+      },
+      "route": {
+        "attempt": null,
+        "attempts": [],
+        "candidate_count": null,
+        "candidate_models": [],
+        "pipeline": [],
+        "requested": "auto",
+        "selected_endpoints": [
+          {
+            "model": "anthropic/claude-opus-4-1",
+            "provider": "anthropic"
+          }
+        ],
+        "strategy": null
+      },
+      "router": "concentrate",
+      "trace": null
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "cases": [
+      "architecture",
+      "debug",
+      "exact"
+    ],
+    "evidence_status": {
+      "observed": 9,
+      "reconciled": 9,
+      "unverifiable": 0
+    },
+    "records": 18,
+    "repetitions": 3,
+    "routers": [
+      "concentrate",
+      "openrouter"
+    ]
+  }
+}
