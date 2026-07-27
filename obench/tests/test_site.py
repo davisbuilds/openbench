@@ -318,7 +318,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
             "Stream total p50 / p95",
             "Throughput tok/s p50 / p95",
             "Total / cached / cache-write tokens p50 / p95",
-            "Route leaderboard",
+            "Gateway leaderboard",
             "Cold setup",
             "DNS p50 / p95",
             "TCP p50 / p95",
