@@ -2444,7 +2444,7 @@ def _gateway_probe_leaderboard(bundle):
         _tag(
             "div",
             {"class": "head"},
-            _tag("h2", {}, "Route leaderboard")
+            _tag("h2", {}, "Gateway leaderboard")
             + _tag(
                 "p",
                 {},
