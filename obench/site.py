@@ -1004,24 +1004,6 @@ tbody tr:hover td:first-child{background:var(--wash)}
   text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3)}
 .provider-cell{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
 .provider-cell .route-logo{width:20px;height:20px;flex-basis:20px}
-.provider-variance{margin:2px 0 40px;border-top:1px solid var(--rule)}
-.variance-row{display:grid;grid-template-columns:34px minmax(170px,1fr)
-  minmax(220px,2fr) 76px;align-items:center;gap:12px;
-  min-height:58px;border-bottom:1px solid var(--rule)}
-.variance-rank{font:600 12px/1 var(--font-mono);color:var(--ink-3);
-  text-align:center}
-.variance-track{position:relative;height:8px;background:var(--track);
-  border-radius:2px}
-.variance-track::before{content:"";position:absolute;left:50%;top:-3px;
-  width:1px;height:14px;background:var(--rule-strong)}
-.variance-bar{position:absolute;top:0;height:100%;border-radius:2px}
-.variance-bar.better{left:50%;background:var(--pole-better)}
-.variance-bar.worse{right:50%;background:var(--pole-worse)}
-.variance-row.baseline .variance-track::after{content:"";position:absolute;
-  left:50%;top:-3px;width:2px;height:14px;background:var(--pole-null)}
-.variance-value{text-align:right;font:600 14px/1 var(--font-mono)}
-.variance-delta{display:none;margin-top:4px;font:10px/1 var(--font-mono);
-  color:var(--ink-3)}
 .contact-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
 .contact-actions a{display:inline-flex;align-items:center;min-height:38px;
   padding:0 14px;border:1px solid var(--rule-strong);border-radius:4px;
@@ -1073,9 +1055,6 @@ footer{color:var(--ink-3);font-size:12.5px;padding:28px 0 60px;
   .route-rank{grid-template-columns:24px minmax(0,1fr) auto;
     align-items:start;padding-left:12px;padding-right:12px}
   .route-detail{white-space:normal}
-  .variance-row{grid-template-columns:26px minmax(135px,1fr) 58px}
-  .variance-track{display:none}
-  .variance-delta{display:block}
   th,td{padding:11px 10px}
 }
 """
@@ -2433,75 +2412,6 @@ def _gateway_probe_leaderboard(bundle):
     )
 
 
-def _gateway_probe_variance(bundle):
-    rows = _gateway_probe_composite_scores(bundle)
-    baseline = next((row for row in rows if row["baseline"]), None)
-    if baseline is None:
-        return ""
-    gateways = sorted(
-        (row for row in rows if not row["baseline"]),
-        key=lambda item: (-item["score"], item["arm_id"]),
-    )
-    max_delta = max(
-        [abs(row["score"] - baseline["score"]) for row in gateways] + [1.0]
-    )
-    rendered = []
-    for position, row in enumerate(gateways, 1):
-        delta = row["score"] - baseline["score"]
-        tone = "better" if delta >= 0 else "worse"
-        rendered.append(_tag(
-            "div",
-            {"class": "variance-row"},
-            _tag("div", {"class": "variance-rank"}, str(position))
-            + _gateway_route_cell(row["arm_id"])
-            + _tag(
-                "div",
-                {"class": "variance-track", "title": f"{delta:+.1f} vs direct"},
-                _tag(
-                    "span",
-                    {
-                        "class": f"variance-bar {tone}",
-                        "style": f"width:{50 * abs(delta) / max_delta:.2f}%",
-                    },
-                    "",
-                ),
-            )
-            + _tag(
-                "div",
-                {"class": "variance-value"},
-                f"{row['score']:.1f}"
-                + _tag(
-                    "span",
-                    {"class": "variance-delta"},
-                    f"{delta:+.1f}",
-                ),
-            ),
-        ))
-    rendered.append(_tag(
-        "div",
-        {"class": "variance-row baseline"},
-        _tag("div", {"class": "variance-rank"}, "—")
-        + _gateway_route_cell(baseline["arm_id"])
-        + _tag("div", {"class": "variance-track"}, "")
-        + _tag("div", {"class": "variance-value"}, "reference"),
-    ))
-    return (
-        _tag(
-            "div",
-            {"class": "head"},
-            _tag("h2", {}, "Provider variance")
-            + _tag(
-                "p",
-                {},
-                "Composite score difference from the unscored Direct OpenAI "
-                "reference; actual gateway scores appear at right. "
-                "Detailed request measurements and paired uncertainty follow.",
-            ),
-        )
-        + _tag("div", {"class": "provider-variance"}, "".join(rendered))
-    )
-
-
 def _gateway_probe_board(bundle):
     title = _esc(bundle["title"])
     if bundle.get("path"):
@@ -2616,6 +2526,13 @@ def _gateway_probe_board(bundle):
                  else "request_to_semantic_ttft_s"
              ),
          ).get("p50")},
+        {"label": "Stream total p50 / p95", "dir": "asc",
+         "cell": lambda row: percentile_cell(
+             row["item"], "request_stream_total_s", seconds
+         ),
+         "key": lambda row: summary(
+             row["item"], "request_stream_total_s"
+         ).get("p50")},
         {"label": "Response headers p50 / p95", "dir": "asc",
          "cell": lambda row: percentile_cell(
              row["item"], "request_to_response_headers_s", seconds
@@ -2630,13 +2547,6 @@ def _gateway_probe_board(bundle):
          "key": lambda row: summary(
              row["item"], "request_to_first_body_byte_s"
          ).get("p50")},
-        {"label": "Stream total p50 / p95", "dir": "asc",
-         "cell": lambda row: percentile_cell(
-             row["item"], "request_stream_total_s", seconds
-         ),
-         "key": lambda row: summary(
-             row["item"], "request_stream_total_s"
-         ).get("p50")},
         {"label": "Throughput tok/s p50 / p95", "dir": "desc",
          "cell": lambda row: percentile_cell(
              row["item"], "throughput_tokens_per_s", decimal
@@ -2648,11 +2558,7 @@ def _gateway_probe_board(bundle):
          "cell": tokens_cell},
     ]
 
-    parts = (
-        head
-        + _gateway_probe_leaderboard(bundle)
-        + _gateway_probe_variance(bundle)
-    )
+    parts = head + _gateway_probe_leaderboard(bundle)
     for condition in ("cold", "warm"):
         rows = [
             {
@@ -2811,8 +2717,10 @@ def _gateway_probe_board(bundle):
             + _tag(
                 "p",
                 {},
-                "Median gateway-minus-direct difference over complete paired "
-                "blocks; bootstrap 95% intervals.",
+                "Every delta is gateway minus Direct OpenAI. These are latency "
+                "metrics, so positive means slower/worse and negative means "
+                "faster/better. Medians use complete paired blocks with "
+                "bootstrap 95% intervals.",
             ),
         )
         parts += _render_table(contrast_columns, contrast_rows)

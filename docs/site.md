@@ -105,10 +105,9 @@ throughput input is the warm p50 reading; cold TTFT includes cold connection
 setup. The weighted score is multiplied by the combined cold-and-warm request
 success rate **linearly**.
 
-Direct OpenAI does not appear in the ranking. It appears only as an unscored
-reference in **Provider variance**, where each gateway's composite delta from
-Direct OpenAI is shown. The detailed cold, warm, connection-setup, and paired
-delta tables remain the factual record, including bootstrap 95% intervals and
+Direct OpenAI does not appear in the ranking. It remains the reference for the
+paired request deltas. The detailed cold, warm, connection-setup, and paired
+delta tables are the factual record, including bootstrap 95% intervals and
 paired-block coverage. Frozen-list prices stay sealed in the bundle for
 reproducibility but are not a composite component and are not displayed because
 market prices drift.
@@ -128,11 +127,11 @@ instead of a potentially biased token figure. Per-solve token traffic sums every
 matched attempt, including failures, and divides by solved cells.
 
 **Gateway Bench.** Cold and warm request conditions render in separate tables.
-Each route row includes the provider logo, followed by TTFT, response headers,
-first body byte, stream total, throughput p50/p95, and total, cached-input, and
-cache-write tokens with coverage. The raw label is **TTFT**, and it appears
-before response headers. Cold TTFT includes DNS, TCP, and TLS setup, matching
-the composite input; warm TTFT starts when the measured request is sent.
+Each route row includes the provider logo, followed by TTFT, stream total,
+response headers, first body byte, throughput p50/p95, and total, cached-input,
+and cache-write tokens with coverage. The raw label is **TTFT**. Cold TTFT
+includes DNS, TCP, and TLS setup, matching the composite input; warm TTFT starts
+when the measured request is sent.
 Response headers are not labeled TTFB. Measured and
 charged cost, including the warm primer request, remain in the sealed result
 artifact for spend auditing but are not displayed or included in the composite.
@@ -141,8 +140,11 @@ The board displays exact complete/scheduled block counts for both conditions
 prominently, without a qualitative sample-size label. A compact cold-only table
 shows provider logos plus DNS, TCP, and TLS setup p50/p95. Paired request
 contrasts are limited to gateway-minus-direct response-headers and TTFT medians
-with bootstrap 95% intervals and pair coverage. Because Direct OpenAI is fixed
-by the experiment, the paired table does not repeat a `vs direct` column.
+with bootstrap 95% intervals and pair coverage. Every delta is gateway minus
+Direct OpenAI. Because both displayed deltas are latency metrics, positive
+values mean the gateway is slower/worse and negative values mean it is
+faster/better. Because Direct OpenAI is fixed by the experiment, the paired
+table does not repeat a `vs direct` column.
 
 ## Contact
 
