@@ -62,9 +62,9 @@ forwarding a request.
   experiment and sent as `cf-aig-gateway-id`; cache is skipped, maximum
   attempts is one, and the requested model remains provider-qualified.
 
-Client retries are zero. Request cache controls are stripped. A returned
-cached-input count is retained as measured provider behavior, not treated as a
-client-requested cache hit.
+Client retries are zero. Gateway response-cache controls are disabled or
+stripped. A returned cached-input count is retained as provider-reported
+prompt-prefix behavior, not treated as a gateway response-cache hit.
 
 Provider prompt-prefix caching is a required, experiment-wide condition:
 
@@ -107,7 +107,11 @@ Reports retain per-metric coverage and use equal task weighting.
 Cell latency is summarized as the median across repetitions within each task,
 then the median across tasks. Its paired contrast applies the same aggregation
 to matched gateway-minus-direct differences. This keeps long agent trajectories
-from dominating the headline while preserving equal task weighting.
+from dominating the headline while preserving equal task weighting. It is
+end-to-end benchmark-cell latency, including the agent trajectory and timeout
+cap. TTFB, semantic TTFT, and output throughput are per-call serving telemetry
+with independent call-coverage denominators; they are not interchangeable with
+the cell-latency headline.
 
 Cost bases are never silently mixed:
 
@@ -115,6 +119,19 @@ Cost bases are never silently mixed:
 - `invoice_reconciled`: later billing reconciliation, when supplied;
 - `frozen_list_estimate`: token usage priced from the experiment's frozen
   price snapshot.
+
+The public cross-route cost column uses `frozen_list_estimate` only when that
+basis completely covers every arm. It never fills missing arms from
+`gateway_reported` or `invoice_reconciled`. The frozen estimate applies its
+dated input and output rates to reported token usage. Unless the frozen price
+contract explicitly defines a separate cache rate, reported cached input is
+still priced at the frozen input rate; the estimate is therefore a standardized
+comparison basis, not an invoice or a claim about each provider's cache
+discount.
+
+Paired frozen-list cost contrasts are cost per attempted cell, including failed
+attempts, not cost per solve. Per-solve cost remains an arm-level outcome and is
+shown only with complete call and cell coverage.
 
 Missing timing, token, cache, or cost evidence reduces only that metric's
 coverage. It does not become zero.

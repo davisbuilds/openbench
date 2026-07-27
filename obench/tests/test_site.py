@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from obench import publish, site
+from obench import gateway_probe_publish, publish, site
 
 
 def _write(path, text):
@@ -141,6 +141,7 @@ class GatewayFamilyTests(_SiteFixture):
                 "mean_checker_score": metric,
                 "availability": metric,
                 "latency_s": metric,
+                "route_distribution": {},
                 "max_calls": {"cells": 0, "total_cells": 1, "ratio": 0.0},
                 "cost": None,
             }],
@@ -156,8 +157,8 @@ class GatewayFamilyTests(_SiteFixture):
 
         page = site._gateway_board(bundle)
 
-        self.assertIn("Median latency", page)
-        self.assertIn("Δ median latency", page)
+        self.assertIn("Median E2E cell latency", page)
+        self.assertIn("Δ median E2E cell latency", page)
 
     def test_missing_gateway_root_is_empty_not_an_error(self):
         doc = site.build_board(self.site_dir)
@@ -188,32 +189,213 @@ class GatewayFamilyTests(_SiteFixture):
         self.assertEqual(doc["gateway"]["bundle_count"], 0)
 
 
+class GatewayProbeFamilyTests(_SiteFixture):
+    def _publish_probe(self, bundle_id="probe-v4"):
+        from obench.tests.test_gateway_probe_publish import (
+            TEST_COMMIT,
+            build_private_run,
+        )
+
+        source_root = os.path.join(self.root, "probe-source-" + bundle_id)
+        os.makedirs(source_root)
+        private_run = build_private_run(source_root)
+        bundle = os.path.join(self.site_dir, "gateway-probe", bundle_id)
+        gateway_probe_publish.publish_bundle(
+            private_run,
+            bundle,
+            verified_with_commit=TEST_COMMIT,
+        )
+        return bundle
+
+    def test_verified_public_probe_bundle_is_a_separate_family(self):
+        self._publish_probe()
+        _write(
+            os.path.join(self.site_dir, "gateway-probe.json"),
+            json.dumps([{
+                "id": "probe-v4",
+                "title": "Managed request probe",
+                "date": "2026-07-27",
+            }]),
+        )
+
+        doc = site.build_board(self.site_dir)
+        family = doc["gateway_probe"]
+
+        self.assertEqual(family["bundle_count"], 1)
+        self.assertEqual(doc["gateway"]["bundle_count"], 0)
+        bundle = family["bundles"][0]
+        self.assertEqual(bundle["title"], "Managed request probe")
+        self.assertEqual(bundle["complete_blocks"], {"cold": 1, "warm": 1})
+        self.assertEqual(bundle["scheduled_blocks_per_condition"], 2)
+        self.assertEqual(bundle["model_match"], "exact_revision")
+        self.assertEqual(len(bundle["arms"]), 2)
+        self.assertEqual(len(bundle["contrasts"]), 1)
+
+        _, _, facts = site._lede(doc)
+        self.assertIn("1 gateway probe bundles", facts)
+        self.assertIn("updated 2026-07-27", facts)
+
+    def test_tampered_probe_bundle_fails_closed(self):
+        bundle = self._publish_probe()
+        _write(os.path.join(bundle, "report.json"), "{}\n")
+
+        doc = site.build_board(self.site_dir)
+
+        self.assertEqual(doc["gateway_probe"]["bundle_count"], 0)
+        self.assertEqual(
+            [item["id"] for item in doc["gateway_probe"]["skipped"]],
+            ["probe-v4"],
+        )
+        self.assertIn(
+            "bundle verification failed",
+            doc["gateway_probe"]["skipped"][0]["reason"],
+        )
+
+    def test_probe_board_renders_factual_30_by_30_contract(self):
+        bundle_dir = self._publish_probe()
+        bundle = site.aggregate_gateway_probe_bundle(bundle_dir)
+        self.assertIsNotNone(bundle)
+        bundle["complete_blocks"] = {"cold": 30, "warm": 30}
+        bundle["scheduled_blocks_per_condition"] = 30
+        availability_low, availability_high = site.stats.wilson_ci(30, 30)
+        for arm in bundle["arms"]:
+            for condition in ("cold", "warm"):
+                item = arm["conditions"][condition]
+                item["denominators"].update({
+                    "scheduled": 30,
+                    "attempted": 30,
+                    "success": 30,
+                    "route_verified": 30,
+                })
+                item["availability"].update({
+                    "successes": 30,
+                    "attempted": 30,
+                    "rate": 1.0,
+                    "wilson95": {
+                        "confidence": 0.95,
+                        "low": availability_low,
+                        "high": availability_high,
+                    },
+                })
+                for name, metric in item["metrics"].items():
+                    covered = 0 if name in {
+                        "cached_input_tokens",
+                        "cache_write_input_tokens",
+                    } else 30
+                    metric["coverage"] = {
+                        "covered": covered,
+                        "total": 30,
+                        "ratio": covered / 30,
+                    }
+        for contrast in bundle["contrasts"]:
+            for condition in ("cold", "warm"):
+                for metric in contrast["conditions"][condition].values():
+                    metric["coverage"] = {
+                        "covered": 30,
+                        "total": 30,
+                        "ratio": 1.0,
+                    }
+
+        page = site._gateway_probe_board(bundle)
+
+        for label in (
+            "Cold requests",
+            "Warm requests",
+            "Success / availability · Wilson 95%",
+            "Route verification",
+            "Response headers p50 / p95",
+            "First body byte p50 / p95",
+            "Semantic TTFT p50 / p95",
+            "Stream total p50 / p95",
+            "Throughput tok/s p50 / p95",
+            "Measured / charged cost p50 / p95",
+            "Total / cached / cache-write tokens p50 / p95",
+            "Cold setup",
+            "DNS p50 / p95",
+            "TCP p50 / p95",
+            "TLS p50 / p95",
+            "Paired request deltas",
+            "Δ response headers",
+            "Δ semantic TTFT",
+        ):
+            self.assertIn(label, page)
+        self.assertIn("<b>cold blocks </b>30/30", page)
+        self.assertIn("<b>warm blocks </b>30/30", page)
+        self.assertIn("Complete blocks: 30/30.", page)
+        self.assertIn("verified 30/30", page)
+        self.assertIn("CI 88.6%–100.0%", page)
+        self.assertIn("95% CI", page)
+        self.assertIn("coverage 30/30", page)
+        self.assertIn("coverage 0/30", page)
+        self.assertNotIn("TTFB", page)
+        self.assertNotIn("exploratory", page.lower())
+        self.assertNotIn("confirmatory", page.lower())
+        self.assertNotIn("Δ stream total", page)
+
+
 class CostBasisTests(unittest.TestCase):
-    def _basis(self, name, covered, per_solve=1.0):
+    def _basis(self, covered, total=10, per_solve=1.0):
         return {
             "attempted_cost_usd": {"estimate": per_solve},
             "cost_per_solve_usd": per_solve,
-            "basis_coverage": {"covered_calls": covered, "ratio": 1.0 if covered else 0.0},
+            "basis_coverage": {
+                "covered_calls": covered,
+                "total_calls": total,
+                "ratio": covered / total,
+                "complete": covered == total,
+            },
         }
 
-    def test_prefers_invoice_over_gateway_reported(self):
-        picked = site._pick_cost({
-            "gateway_reported": self._basis("gateway_reported", 10),
-            "invoice_reconciled": self._basis("invoice_reconciled", 10),
-            "frozen_list_estimate": self._basis("frozen_list_estimate", 10),
-        })
-        self.assertEqual(picked["basis"], "invoice_reconciled")
+    def test_common_cost_basis_requires_complete_frozen_list_for_every_arm(self):
+        complete = {"costs": {"frozen_list_estimate": self._basis(10)}}
+        incomplete = {"costs": {"frozen_list_estimate": self._basis(9)}}
 
-    def test_skips_bases_with_no_covered_calls(self):
-        picked = site._pick_cost({
-            "invoice_reconciled": self._basis("invoice_reconciled", 0),
-            "gateway_reported": self._basis("gateway_reported", 4),
-        })
-        self.assertEqual(picked["basis"], "gateway_reported")
+        self.assertEqual(
+            site._common_complete_cost_basis([complete, complete]),
+            "frozen_list_estimate",
+        )
+        self.assertIsNone(
+            site._common_complete_cost_basis([complete, incomplete])
+        )
 
-    def test_no_covered_basis_returns_none(self):
-        self.assertIsNone(site._pick_cost({"gateway_reported": self._basis("x", 0)}))
-        self.assertIsNone(site._pick_cost({}))
+    def test_gateway_reported_never_substitutes_for_missing_frozen_list(self):
+        arms = [
+            {"costs": {"frozen_list_estimate": self._basis(10)}},
+            {"costs": {"gateway_reported": self._basis(10)}},
+        ]
+
+        self.assertIsNone(site._common_complete_cost_basis(arms))
+
+    def test_zero_solve_arm_keeps_complete_attempted_cost_basis(self):
+        zero_solve = self._basis(10, per_solve=None)
+
+        self.assertEqual(
+            site._common_complete_cost_basis([
+                {"costs": {"frozen_list_estimate": zero_solve}},
+            ]),
+            "frozen_list_estimate",
+        )
+
+    def test_cost_dto_preserves_separate_evidence_bases(self):
+        costs = site._cost_dtos({
+            "gateway_reported": self._basis(10, per_solve=2.0),
+            "frozen_list_estimate": self._basis(10, per_solve=1.0),
+        })
+
+        self.assertEqual(set(costs), {"gateway_reported", "frozen_list_estimate"})
+        self.assertEqual(costs["gateway_reported"]["cost_per_solve_usd"], 2.0)
+        self.assertEqual(costs["frozen_list_estimate"]["cost_per_solve_usd"], 1.0)
+
+    def test_metric_dto_preserves_metric_coverage(self):
+        dto = site._metric_dto({
+            "estimate": 3.0,
+            "interval": {"low": 2.0, "high": 4.0},
+            "call_coverage": {"covered": 8, "total": 10, "ratio": 0.8},
+            "paired_block_coverage": {"covered": 4, "total": 5, "ratio": 0.8},
+        })
+
+        self.assertEqual(dto["call_coverage"]["covered"], 8)
+        self.assertEqual(dto["paired_block_coverage"]["total"], 5)
 
 
 class RenderTests(_SiteFixture):
@@ -237,6 +419,7 @@ class RenderTests(_SiteFixture):
                 "mean_checker_score": metric,
                 "availability": metric,
                 "latency_s": metric,
+                "route_distribution": {},
                 "max_calls": {"cells": 2, "total_cells": 5, "ratio": 0.4},
                 "cost": None,
             }],
@@ -248,6 +431,101 @@ class RenderTests(_SiteFixture):
         self.assertIn("<b>cap-affected blocks </b>2/5", page)
         self.assertIn("20-call cap", page)
         self.assertIn("2/5 (40.0%)", page)
+
+    def test_gateway_board_splits_outcomes_from_serving_telemetry(self):
+        metric = {
+            "estimate": 0.5,
+            "low": 0.4,
+            "high": 0.6,
+            "cell_coverage": {"covered": 5, "total": 5, "ratio": 1.0},
+            "call_coverage": {"covered": 9, "total": 10, "ratio": 0.9},
+            "paired_block_coverage": {"covered": 4, "total": 5, "ratio": 0.8},
+        }
+        arm = {
+            "arm_id": "gateway",
+            "role": "gateway",
+            "requested_provider": "openai",
+            "solve_rate": metric,
+            "mean_checker_score": metric,
+            "availability": metric,
+            "latency_s": metric,
+            "ttfb_s": metric,
+            "semantic_ttft_s": metric,
+            "throughput_tokens_per_s": metric,
+            "mean_input_tokens_per_call": metric,
+            "mean_output_tokens_per_call": metric,
+            "cache_hit_call_rate": metric,
+            "cached_input_fraction": metric,
+            "mean_cached_input_tokens_per_call": metric,
+            "mean_cache_write_input_tokens_per_call": {
+                **metric,
+                "estimate": None,
+                "call_coverage": {"covered": 0, "total": 10, "ratio": 0.0},
+            },
+            "route_distribution": {
+                "OpenAI/gpt-4o-mini-2024-07-18": {
+                    "share": 1.0,
+                    "task_coverage": {"covered": 4, "total": 5, "ratio": 0.8},
+                },
+            },
+            "max_calls": {"cells": 1, "total_cells": 5, "ratio": 0.2},
+            "cost": {
+                "cost_per_solve_usd": 0.0123,
+                "coverage": {"covered_calls": 10, "total_calls": 10},
+            },
+        }
+        contrast = {
+            "arm_id": "gateway",
+            "direct_arm": "direct",
+            "solve_rate": metric,
+            "mean_checker_score": metric,
+            "availability": metric,
+            "latency_s": metric,
+            "ttfb_s": metric,
+            "semantic_ttft_s": metric,
+            "throughput_tokens_per_s": metric,
+            "mean_input_tokens_per_call": metric,
+            "mean_output_tokens_per_call": metric,
+            "attempted_cost_usd": metric,
+        }
+        bundle = {
+            "title": "Gateway run",
+            "track": "gateway_tax",
+            "model_match": "rolling_alias",
+            "provider_prompt_mode": "provider_default",
+            "blocks_included": 5,
+            "blocks_observed": 5,
+            "blocks_excluded": {},
+            "blocks_max_calls_affected": 1,
+            "tasks_included": 1,
+            "budget_max_calls": 20,
+            "arms": [arm],
+            "contrasts": [contrast],
+        }
+
+        page = site._gateway_board(bundle)
+
+        for label in (
+            "Median E2E cell latency",
+            "List-est. $/solve",
+            "Serving telemetry",
+            "Served route",
+            "TTFB",
+            "Semantic TTFT",
+            "Output tok/s",
+            "Cache read / write tok/call",
+            "Serving telemetry tax",
+            "Δ list cost / attempted cell",
+        ):
+            self.assertIn(label, page)
+        self.assertIn("rolling_alias", page)
+        self.assertIn("provider_default", page)
+        self.assertIn("OpenAI/gpt-4o-mini-2024-07-18", page)
+        self.assertIn("100% · tasks 4/5", page)
+        self.assertIn("cache write 0/10", page)
+        self.assertIn("gateway response caching was disabled", page)
+        self.assertIn("not cost per solve", page)
+        self.assertNotIn("Δ list cost / solve", page)
 
     def test_harness_token_columns_render_factual_split_semantics(self):
         page = site.render_board_html(site.build_board(self.site_dir))
@@ -407,10 +685,12 @@ class RenderTests(_SiteFixture):
         self.assertEqual(head.count("<tr data-harness="), 2)
         self.assertNotIn("<tbody>", script)
 
-    def test_both_families_and_methodology_are_present(self):
+    def test_all_families_and_methodology_are_present(self):
         page = site.render_board_html(site.build_board(self.site_dir))
         self.assertIn('id="view-harness"', page)
         self.assertIn('id="view-gateway"', page)
+        self.assertIn('id="view-gateway-probe"', page)
+        self.assertIn('href="#gateway-probe">Gateway Probe</a>', page)
         self.assertIn('id="view-methodology"', page)
         self.assertIn("Gateway Tax", page)
 
@@ -424,6 +704,7 @@ class RenderTests(_SiteFixture):
         self.assertEqual(doc["schema_version"], site.SCHEMA_VERSION)
         self.assertEqual(info["harness_bundles"], 1)
         self.assertEqual(info["gateway_bundles"], 0)
+        self.assertEqual(info["gateway_probe_bundles"], 0)
 
     def test_write_board_rolls_back_both_outputs_on_replace_failure(self):
         info = site.write_board(self.site_dir)
@@ -538,6 +819,12 @@ class DesignContractTests(_SiteFixture):
         doc["gateway"]["bundles"] = [{"date": "2026-07-25"}]
         _, _, facts = site._lede(doc)
         self.assertIn("updated 2026-07-25", facts)
+
+    def test_lede_updated_date_includes_gateway_probe_bundles(self):
+        doc = site.build_board(self.site_dir)
+        doc["gateway_probe"]["bundles"] = [{"date": "2026-07-26"}]
+        _, _, facts = site._lede(doc)
+        self.assertIn("updated 2026-07-26", facts)
 
     def test_harness_metadata_names_counts_and_digests_precisely(self):
         page = site.render_board_html(site.build_board(self.site_dir))

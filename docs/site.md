@@ -2,14 +2,16 @@
 
 `obench site build` writes the GitHub Pages site: **`docs/index.html`** — the
 landing page *is* the leaderboard — plus the machine-readable
-**`docs/board.json`** alongside it. It covers both benchmark families in one
-page, with a tab each:
+**`docs/board.json`** alongside it. It keeps each benchmark family in a
+separate tab:
 
 - **Harness Bench** — verified `results.jsonl` publish bundles, aggregated
   exactly as [`obench leaderboard`](leaderboard.md) does, then enriched with
   median wall time and `$/solve`.
 - **Gateway Bench** — verified evidence bundles, aggregated by
   `obench/gateway_report.py`, including the Gateway Tax contrast table.
+- **Gateway Probe** — verified public request-probe bundles, with cold and warm
+  request telemetry and paired route deltas kept separate from Gateway Bench.
 - **Releases** — the `releases.json` / `community.json` / `packs.json` manifests.
 - **Methodology** — denominators, intervals, token bases, and the
   comparability rules, in one place next to the numbers.
@@ -39,6 +41,7 @@ pack index all rebuild the landing page automatically.
 | `--community-dir PATH` | Extra harness scan root (default: `data/community` when present) |
 | `--no-community-dir` | Only scan `site-dir/releases` + `site-dir/community` |
 | `--gateway-dir PATH` | Gateway bundle root, repeatable (default: `<site-dir>/gateway`) |
+| `--gateway-probe-dir PATH` | Public Gateway Probe bundle root, repeatable (default: `<site-dir>/gateway-probe`) |
 
 The build is deterministic: the same inputs produce byte-identical output, so
 regenerating produces a clean diff.
@@ -73,6 +76,41 @@ manifest keyed by directory name, in the same shape as `releases.json`:
 ]
 ```
 
+## Publishing a Gateway Probe board
+
+The Gateway Probe tab reads public bundles from `docs/gateway-probe/*/`. Each
+directory must be the exact output of `obench gateway probe publish`; the site
+re-verifies it with `gateway_probe_publish.verify_bundle()` before reading its
+schema-v4 report. Digest drift, extra files, symlinks, schema drift, or a report
+that does not exactly recompute is listed as skipped and never rendered.
+
+```bash
+obench gateway probe publish RUN_DIR docs/gateway-probe/2026-07-27-managed
+obench gateway probe verify docs/gateway-probe/2026-07-27-managed
+obench site build
+```
+
+Optional title, date, and page metadata come from `docs/gateway-probe.json`,
+keyed by bundle directory:
+
+```json
+[
+  {
+    "id": "2026-07-27-managed",
+    "title": "Gateway Probe: managed routes",
+    "date": "2026-07-27"
+  }
+]
+```
+
+The verified bundle directory has an exact file set and contains no
+`index.html`. Omit `path` unless a separate release page exists outside that
+directory.
+
+Gateway Probe is a third measurement family, not a Gateway Bench extension.
+Request attempts and complete cold/warm blocks are never merged with coding
+agent cells, task-weighted Gateway Tax estimates, or their claims.
+
 ## What the columns mean
 
 **Harness Bench.** Solve rate on matched task/trial rows with a Wilson 95%
@@ -87,13 +125,37 @@ are never mixed row by row. Incomplete lanes fail closed and display coverage
 instead of a potentially biased token figure. Per-solve token traffic sums every
 matched attempt, including failures, and divides by solved cells.
 
-**Gateway Bench.** Per route: solve rate, mean checker score, availability, and
-latency, each with a task-bootstrap 95% interval; plus `$/solve` on the
-best-covered cost basis, preferring `invoice_reconciled`, then
-`gateway_reported`, then `frozen_list_estimate`. A basis covering less than every
-call is flagged with its coverage. The **Gateway tax** table shows the paired,
-task-weighted difference of each gateway arm from its direct control arm — an
-interval spanning zero is not a detected effect.
+**Gateway Bench.** The scan table keeps route outcomes together: solve rate,
+mean checker score, availability, call-cap pressure, median end-to-end cell
+latency, and `$/solve`. The cost column is present only when
+`frozen_list_estimate` completely covers every arm; gateway-reported and
+invoice-reconciled amounts remain preserved as separate evidence and are never
+mixed into that comparison. Outcome and cost denominators are displayed.
+
+A secondary **Serving telemetry** table shows observed served-route
+distribution, per-call TTFB, semantic TTFT, output throughput, token usage,
+provider-reported prompt-cache accounting, and metric coverage. The
+experiment's model-match policy and provider prompt mode are board metadata.
+Median end-to-end latency is a cell-level outcome, not a per-call latency.
+
+The **Gateway tax** table shows paired, task-weighted outcome differences from
+the direct control; an interval spanning zero is not a detected effect.
+Semantically directional per-call timing, throughput, token, and frozen-list
+cost contrasts appear separately. Paired cost is labeled per attempted cell,
+not per solve; provider cache-accounting deltas are not ranked.
+
+**Gateway Probe.** Cold and warm request conditions render in separate tables.
+Each shows route and condition; success/availability with Wilson 95% interval;
+route-verification counts; response headers, first body byte, semantic TTFT,
+stream total, and throughput p50/p95; measured frozen-list and separately
+charged cost with coverage; and total, cached-input, and cache-write tokens with
+coverage. Response headers are not labeled TTFB.
+
+The board displays exact complete/scheduled block counts for both conditions
+prominently, without a qualitative sample-size label. A compact cold-only table
+shows DNS, TCP, and TLS setup p50/p95. Paired request contrasts are limited to
+gateway-minus-direct response-headers and semantic-TTFT medians with bootstrap
+95% intervals and pair coverage.
 
 ## Design decisions worth keeping
 

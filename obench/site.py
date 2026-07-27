@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Unified static leaderboard site for both OpenBench benchmark families.
+"""Unified static leaderboard site for OpenBench benchmark families.
 
 ``obench site build`` scans the GitHub Pages root and emits two artifacts:
 
 * ``board.json`` — one machine-readable document covering **Harness Bench**
   (verified ``results.jsonl`` publish bundles, aggregated by
   :mod:`obench.leaderboard`) and **Gateway Bench** (verified ``gateway_bench``
-  evidence bundles, aggregated by :mod:`obench.gateway_report`).
+  evidence bundles, aggregated by :mod:`obench.gateway_report`), plus verified
+  request-level **Gateway Probe** bundles.
 * ``index.html`` — the site's landing page, which *is* the leaderboard: family
   tabs, per-board sortable tables, model/harness filters, Wilson and bootstrap
   confidence intervals drawn as bars, and the Gateway Tax contrast table.
@@ -20,8 +21,8 @@ publishes.
 
 Comparability rule, unchanged from ``obench leaderboard``: cells from different
 bundles are never blended into one score. Each bundle is its own ranked board.
-The two families are never merged either — a Gateway Bench arm is a serving
-route, not a harness.
+The families are never merged either — Gateway Bench and Gateway Probe have
+different units and denominators, and neither is a harness ranking.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ from collections import defaultdict
 from . import leaderboard, report_page, stats
 from .paths import SOURCE_ROOT
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 HARNESS_NOTE = (
     "Scores are not comparable across bundles: task sets, trial counts, and "
@@ -46,30 +47,19 @@ HARNESS_NOTE = (
 
 GATEWAY_NOTE = (
     "Each board is one Gateway Tax experiment: a direct control arm against "
-    "gateway arms on the same model revision. Intervals are task-bootstrap."
+    "gateway arms under one declared model-match policy. Intervals are "
+    "task-bootstrap."
+)
+
+GATEWAY_PROBE_NOTE = (
+    "Gateway Probe is request-level transport and serving telemetry. Cold and "
+    "warm denominators are separate and are never merged with Gateway Bench."
 )
 
 CROSS_FAMILY_NOTE = (
     "Each board is one result-sealed bundle, shown with its interval and its "
-    "provenance. The two families share no denominators."
+    "provenance. Benchmark families share no denominators."
 )
-
-# Preferred cost basis when an arm reports several. Invoice reconciliation is
-# ground truth; the gateway's own number is next; a frozen list price is an
-# estimate and is labelled as one in the UI.
-COST_BASIS_PREFERENCE = (
-    "invoice_reconciled",
-    "gateway_reported",
-    "frozen_list_estimate",
-)
-
-# Short column labels; the full basis name stays available on hover.
-COST_BASIS_LABELS = {
-    "invoice_reconciled": "invoice",
-    "gateway_reported": "gateway",
-    "frozen_list_estimate": "list est.",
-}
-
 
 # --------------------------------------------------------------------------
 # Harness Bench
@@ -205,24 +195,66 @@ def _read_jsonl(path):
     return rows
 
 
-def _pick_cost(costs):
-    """Best-covered cost basis for an arm, in preference order."""
+GATEWAY_METRIC_NAMES = (
+    "solve_rate",
+    "mean_checker_score",
+    "availability",
+    "latency_s",
+    "ttfb_s",
+    "semantic_ttft_s",
+    "throughput_tokens_per_s",
+    "mean_input_tokens_per_call",
+    "mean_output_tokens_per_call",
+    "mean_total_tokens_per_call",
+    "cache_hit_call_rate",
+    "cached_input_fraction",
+    "mean_cached_input_tokens_per_call",
+    "mean_cache_write_input_tokens_per_call",
+)
+
+
+def _cost_dtos(costs):
+    """Preserve every evidenced cost basis without selecting across arms."""
     if not isinstance(costs, dict):
-        return None
-    ordered = [b for b in COST_BASIS_PREFERENCE if b in costs]
-    ordered += [b for b in sorted(costs) if b not in COST_BASIS_PREFERENCE]
-    for basis in ordered:
-        entry = costs.get(basis) or {}
+        return {}
+    result = {}
+    for basis, entry in sorted(costs.items()):
+        if not isinstance(entry, dict):
+            continue
         coverage = entry.get("basis_coverage") or {}
         if (coverage.get("covered_calls") or 0) <= 0:
             continue
-        return {
+        interval = entry.get("cost_per_solve_interval") or {}
+        result[basis] = {
             "basis": basis,
-            "attempted_cost_usd": (entry.get("attempted_cost_usd") or {}).get("estimate"),
+            "attempted_cost_usd": _metric_dto(entry.get("attempted_cost_usd")),
             "cost_per_solve_usd": entry.get("cost_per_solve_usd"),
-            "coverage_ratio": coverage.get("ratio"),
+            "cost_per_solve_low": interval.get("low"),
+            "cost_per_solve_high": interval.get("high"),
+            "coverage": dict(coverage),
+            "currencies": list(entry.get("currencies") or []),
+            "effective_at": list(entry.get("effective_at") or []),
         }
-    return None
+    return result
+
+
+def _common_complete_cost_basis(arms):
+    """Return the one comparable cost basis used by the route table.
+
+    Gateway-reported amounts are not available for every serving route. The
+    frozen list estimate is the experiment-wide standardized basis, so the
+    comparison column appears only when it completely covers every arm.
+    """
+    arms = list(arms)
+    basis = "frozen_list_estimate"
+    if not arms:
+        return None
+    for arm in arms:
+        entry = (arm.get("costs") or {}).get(basis) or {}
+        coverage = entry.get("basis_coverage") or {}
+        if not coverage.get("complete"):
+            return None
+    return basis
 
 
 def _metric_dto(metric):
@@ -234,12 +266,23 @@ def _metric_dto(metric):
             "aggregation": None,
         }
     interval = metric.get("interval") or {}
-    return {
+    result = {
         "estimate": metric.get("estimate"),
         "low": interval.get("low"),
         "high": interval.get("high"),
         "aggregation": metric.get("aggregation"),
     }
+    for name in (
+        "task_coverage",
+        "cell_coverage",
+        "call_coverage",
+        "paired_task_coverage",
+        "paired_block_coverage",
+    ):
+        coverage = metric.get(name)
+        if isinstance(coverage, dict):
+            result[name] = dict(coverage)
+    return result
 
 
 def aggregate_gateway_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
@@ -272,27 +315,31 @@ def aggregate_gateway_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
         if isinstance(a, dict) and a.get("arm_id")
     }
 
+    report_arms = report.get("arms") or {}
+    common_cost_basis = _common_complete_cost_basis(report_arms.values())
     arms = []
-    for arm_id, arm in (report.get("arms") or {}).items():
+    for arm_id, arm in report_arms.items():
         metrics = arm.get("metrics") or {}
         spec = arm_spec.get(arm_id, {})
-        arms.append({
+        cost_dtos = _cost_dtos(arm.get("costs"))
+        projected = {
             "arm_id": arm_id,
             "role": arm.get("role"),
             "route_kind": spec.get("route_kind"),
             "requested_model": spec.get("requested_model"),
             "requested_provider": spec.get("requested_provider"),
-            "solve_rate": _metric_dto(metrics.get("solve_rate")),
-            "mean_checker_score": _metric_dto(metrics.get("mean_checker_score")),
-            "availability": _metric_dto(metrics.get("availability")),
-            "latency_s": _metric_dto(metrics.get("latency_s")),
             "max_calls": arm.get("max_calls") or {
                 "cells": 0,
                 "total_cells": arm.get("attempted_cells", 0),
                 "ratio": 0.0,
             },
-            "cost": _pick_cost(arm.get("costs")),
-        })
+            "route_distribution": dict(arm.get("route_distribution") or {}),
+            "costs": cost_dtos,
+            "cost": cost_dtos.get(common_cost_basis),
+        }
+        for name in GATEWAY_METRIC_NAMES:
+            projected[name] = _metric_dto(metrics.get(name))
+        arms.append(projected)
     # Baseline first, then slowest-to-fastest is meaningless before sorting in
     # the UI; keep a deterministic order: direct arms first, then arm_id.
     arms.sort(key=lambda a: (0 if a["role"] == "direct" else 1, a["arm_id"]))
@@ -300,14 +347,16 @@ def aggregate_gateway_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
     contrasts = []
     for arm_id, contrast in (report.get("paired_contrasts") or {}).items():
         metrics = contrast.get("metrics") or {}
-        contrasts.append({
+        projected = {
             "arm_id": arm_id,
             "direct_arm": contrast.get("direct_arm"),
-            "solve_rate": _metric_dto(metrics.get("solve_rate")),
-            "latency_s": _metric_dto(metrics.get("latency_s")),
-            "mean_checker_score": _metric_dto(metrics.get("mean_checker_score")),
-            "availability": _metric_dto(metrics.get("availability")),
-        })
+        }
+        for name in GATEWAY_METRIC_NAMES:
+            projected[name] = _metric_dto(metrics.get(name))
+        projected["attempted_cost_usd"] = _metric_dto(
+            metrics.get(f"cost:{common_cost_basis}") if common_cost_basis else None
+        )
+        contrasts.append(projected)
     contrasts.sort(key=lambda c: c["arm_id"])
 
     entry = dict(manifest_entry or {})
@@ -326,11 +375,15 @@ def aggregate_gateway_bundle(bundle_dir, *, site_dir=None, manifest_entry=None):
             leaderboard._rel_under(site_dir, results_path) if site_dir else results_path
         ),
         "track": report.get("track"),
+        "model_match": report.get("model_match"),
+        "provider_prompt_mode": report.get("provider_prompt_mode"),
         "harness": experiment.get("harness"),
         "experiment_id": experiment.get("experiment_id"),
         "experiment_digest": report.get("experiment_digest"),
         "execution_lane": experiment.get("execution_lane"),
+        "budget": dict(experiment.get("budget") or {}),
         "budget_max_calls": (report.get("budget") or {}).get("max_calls"),
+        "common_cost_basis": common_cost_basis,
         "blocks_included": blocks.get("included"),
         "blocks_observed": blocks.get("observed"),
         "blocks_excluded": blocks.get("excluded_by_reason") or {},
@@ -397,16 +450,182 @@ def build_gateway_family(site_dir, gateway_dirs=None):
     }
 
 
+def gateway_probe_verification_error(bundle_dir):
+    """Return a fail-closed public Probe verification error, else ``None``."""
+    from . import gateway_probe_publish
+
+    try:
+        gateway_probe_publish.verify_bundle(bundle_dir)
+    except Exception as exc:  # noqa: BLE001 - surface any verifier rejection
+        return f"bundle verification failed: {exc}"
+    return None
+
+
+def aggregate_gateway_probe_bundle(
+    bundle_dir, *, site_dir=None, manifest_entry=None
+):
+    """Project one verified public Gateway Probe report-v4 bundle for the site."""
+    from . import gateway_probe_publish
+
+    try:
+        manifest = gateway_probe_publish.verify_bundle(bundle_dir)
+        with open(os.path.join(bundle_dir, "report.json"), encoding="utf-8") as fh:
+            report = json.load(fh)
+        with open(os.path.join(bundle_dir, "experiment.json"), encoding="utf-8") as fh:
+            experiment = json.load(fh)
+    except Exception:  # noqa: BLE001 - any drift makes the board unusable
+        return None
+
+    if (
+        report.get("schema_version") != 4
+        or report.get("benchmark") != "gateway_probe"
+        or not isinstance(report.get("arms"), dict)
+        or not isinstance(report.get("paired_contrasts"), dict)
+    ):
+        return None
+
+    arms = []
+    for arm_id, arm in sorted(
+        report["arms"].items(),
+        key=lambda item: (
+            0 if item[1].get("baseline") else 1,
+            item[0],
+        ),
+    ):
+        arms.append({
+            "arm_id": arm_id,
+            "role": arm.get("role"),
+            "baseline": arm.get("baseline") is True,
+            "conditions": dict(arm.get("conditions") or {}),
+        })
+
+    contrasts = [
+        {
+            "arm_id": arm_id,
+            "direct_arm": report.get("baseline_arm_id"),
+            "conditions": dict(conditions or {}),
+        }
+        for arm_id, conditions in sorted(report["paired_contrasts"].items())
+    ]
+
+    entry = dict(manifest_entry or {})
+    bundle_id = entry.get("id") or os.path.basename(os.path.normpath(bundle_dir))
+    results_path = os.path.join(bundle_dir, "results.jsonl")
+    verification = manifest.get("verification") or {}
+    return {
+        "family": "gateway_probe",
+        "id": bundle_id,
+        "kind": entry.get("kind") or "release",
+        "title": entry.get("title") or bundle_id,
+        "date": entry.get("date") or "",
+        "path": entry.get("path"),
+        "link": entry.get("link"),
+        "submitter": entry.get("submitter"),
+        "results_path": (
+            leaderboard._rel_under(site_dir, results_path)
+            if site_dir else results_path
+        ),
+        "track": experiment.get("track"),
+        "model_match": experiment.get("model_match"),
+        "experiment_id": report.get("experiment_id"),
+        "experiment_digest": report.get("experiment_digest"),
+        "schedule_digest": report.get("schedule_digest"),
+        "price_digest": report.get("price_digest"),
+        "verified_with_commit": verification.get("verified_with_commit"),
+        "result_count": manifest.get("result_count"),
+        "complete_blocks": dict(report.get("complete_blocks") or {}),
+        "scheduled_blocks_per_condition": report.get(
+            "scheduled_blocks_per_condition"
+        ),
+        "baseline_arm_id": report.get("baseline_arm_id"),
+        "arms": arms,
+        "contrasts": contrasts,
+    }
+
+
+def build_gateway_probe_family(site_dir, gateway_probe_dirs=None):
+    """Scan and fail-closed verify public Gateway Probe bundles."""
+    site_dir = os.path.abspath(site_dir)
+    roots = list(gateway_probe_dirs or [])
+    if not roots:
+        default_root = os.path.join(site_dir, "gateway-probe")
+        roots = [default_root] if os.path.isdir(default_root) else []
+
+    manifest = {
+        entry["id"]: entry
+        for entry in leaderboard._load_manifest_list(
+            os.path.join(site_dir, "gateway-probe.json")
+        )
+        if isinstance(entry, dict) and entry.get("id")
+    }
+
+    bundles = []
+    skipped = []
+    seen = set()
+    for root in roots:
+        root = os.path.abspath(root)
+        if not os.path.isdir(root):
+            continue
+        for name in sorted(os.listdir(root)):
+            bundle_dir = os.path.join(root, name)
+            if not os.path.isdir(bundle_dir):
+                continue
+            real = os.path.realpath(bundle_dir)
+            if real in seen:
+                continue
+            seen.add(real)
+            error = gateway_probe_verification_error(bundle_dir)
+            if error:
+                skipped.append({
+                    "id": name,
+                    "kind": "gateway_probe",
+                    "reason": error,
+                })
+                continue
+            aggregated = aggregate_gateway_probe_bundle(
+                bundle_dir,
+                site_dir=site_dir,
+                manifest_entry=manifest.get(name),
+            )
+            if aggregated is None:
+                skipped.append({
+                    "id": name,
+                    "kind": "gateway_probe",
+                    "reason": "verified report did not match Gateway Probe schema v4",
+                })
+                continue
+            bundles.append(aggregated)
+
+    bundles.sort(
+        key=lambda bundle: (
+            -leaderboard._date_key(bundle.get("date")),
+            bundle.get("id") or "",
+        )
+    )
+    skipped.sort(key=lambda item: item.get("id") or "")
+    return {
+        "note": GATEWAY_PROBE_NOTE,
+        "bundle_count": len(bundles),
+        "bundles": bundles,
+        "skipped": skipped,
+    }
+
+
 # --------------------------------------------------------------------------
 # Document
 # --------------------------------------------------------------------------
 
 
-def build_board(site_dir, community_dir=None, gateway_dirs=None):
-    """Build the combined two-family board document."""
+def build_board(
+    site_dir, community_dir=None, gateway_dirs=None, gateway_probe_dirs=None
+):
+    """Build the combined benchmark-family board document."""
     site_dir = os.path.abspath(site_dir)
     harness = build_harness_family(site_dir, community_dir=community_dir)
     gateway = build_gateway_family(site_dir, gateway_dirs=gateway_dirs)
+    gateway_probe = build_gateway_probe_family(
+        site_dir, gateway_probe_dirs=gateway_probe_dirs
+    )
     releases = leaderboard._load_manifest_list(os.path.join(site_dir, "releases.json"))
     community = leaderboard._load_manifest_list(os.path.join(site_dir, "community.json"))
     packs = leaderboard._load_manifest_list(os.path.join(site_dir, "packs.json"))
@@ -416,6 +635,7 @@ def build_board(site_dir, community_dir=None, gateway_dirs=None):
         "cross_family_note": CROSS_FAMILY_NOTE,
         "harness": harness,
         "gateway": gateway,
+        "gateway_probe": gateway_probe,
         "releases": [e for e in releases if isinstance(e, dict)],
         "community": [e for e in community if isinstance(e, dict)],
         "packs": [e for e in packs if isinstance(e, dict)],
@@ -886,7 +1106,7 @@ _JS = r"""
   }
 
   // --- tabs ---------------------------------------------------------------
-  var VIEWS = ["harness", "gateway", "releases", "methodology"];
+  var VIEWS = ["harness", "gateway", "gateway-probe", "releases", "methodology"];
 
   function showView() {
     var hash = (location.hash || "").replace("#", "");
@@ -922,6 +1142,7 @@ def _lede(doc):
     bundles = doc["harness"]["bundles"]
     harness = doc["harness"]
     gateway = doc["gateway"]
+    gateway_probe = doc["gateway_probe"]
     harnesses = {a["harness"] for b in bundles for a in b["arms"]}
     models = {a["model"] for b in bundles for a in b["arms"]}
     valid_rows = sum(b.get("countable_rows") or 0 for b in bundles)
@@ -933,7 +1154,7 @@ def _lede(doc):
     )
     dates = sorted(
         b["date"]
-        for family in (bundles, gateway["bundles"])
+        for family in (bundles, gateway["bundles"], gateway_probe["bundles"])
         for b in family
         if b.get("date")
     )
@@ -947,6 +1168,8 @@ def _lede(doc):
     ]
     if gateway["bundle_count"]:
         facts.append(f"{gateway['bundle_count']} gateway bundles")
+    if gateway_probe["bundle_count"]:
+        facts.append(f"{gateway_probe['bundle_count']} gateway probe bundles")
     if dates:
         facts.append(f"updated {dates[-1]}")
     return (
@@ -970,11 +1193,21 @@ _METHODOLOGY = """
   trusted.</p>
 
   <h3>Gateway Bench</h3>
-  <p>Holds the harness, model, provider, sampling, task, and budget fixed while
-  varying the serving route. An arm is a route. The implemented track is
-  <strong>Gateway Tax</strong>: a direct baseline against one or more gateway
-  arms on the same canonical model revision, with fallbacks, gateway retries,
-  and caching disabled.</p>
+  <p>Holds the harness, requested model policy, provider, sampling, task, and
+  budget fixed while varying the serving route. An arm is a route. The
+  implemented track is <strong>Gateway Tax</strong>: a direct baseline against
+  one or more gateway arms with fallbacks, gateway retries, client retries,
+  and gateway response caching disabled. The declared model-match policy,
+  provider prompt mode, and observed served-route distribution are shown on
+  each board; a rolling alias does not prove one exact served revision.</p>
+
+  <h3>Gateway Probe</h3>
+  <p>Measures one model request at a time under separately scheduled cold and
+  warm transport conditions. It reports request success, route verification,
+  transport and stream phase timing, throughput, usage, and per-request cost.
+  It is not a coding-agent outcome benchmark. Probe requests, Gateway Bench
+  cells, and Harness Bench cells are never pooled or compared as one
+  denominator.</p>
 
   <h2>Denominators and intervals</h2>
   <ul>
@@ -985,6 +1218,11 @@ _METHODOLOGY = """
     <li>Gateway Bench uses task-weighted estimates with bootstrap 95% intervals,
     and includes a block only when every expected arm is present,
     infrastructure-valid, and passes route integrity.</li>
+    <li>Gateway Probe displays complete cold and warm block counts separately.
+    Availability uses a Wilson 95% interval over attempted requests. Phase
+    summaries use successful, route-verified requests and retain metric-specific
+    coverage. Paired deltas use complete gateway/direct blocks and bootstrap
+    95% intervals.</li>
     <li>A gateway-tax interval that spans zero is not a detected effect.</li>
   </ul>
 
@@ -1001,9 +1239,27 @@ _METHODOLOGY = """
     measures attempted traffic required per solve, not the average size of
     successful attempts alone.</li>
     <li>Harness <code>$/solve</code> appears only for models with a configured
-    price. Gateway cost prefers invoice reconciliation, then the gateway's own
-    reported cost, then a frozen list-price estimate, and shows coverage when a
-    basis does not cover every call.</li>
+    price. A Gateway Bench comparison shows <code>$/solve</code> only when one
+    complete frozen-list estimate covers every arm. Gateway-reported and
+    invoice-reconciled amounts remain separate evidence and are never mixed
+    into that comparison column.</li>
+    <li>The frozen-list estimate applies the experiment's dated input and
+    output prices to reported usage. It is not an invoice and does not assume
+    provider-specific prompt-cache discounts unless the frozen price contract
+    explicitly represents them.</li>
+    <li>Gateway median end-to-end latency is a cell-level benchmark outcome,
+    including the agent trajectory and timeout cap. TTFB, semantic TTFT, and
+    output throughput are per-call serving telemetry and have their own
+    coverage denominators.</li>
+    <li>Cache fields are provider-reported prompt-prefix accounting under the
+    displayed provider prompt mode. They do not indicate that gateway response
+    caching was enabled.</li>
+    <li>Gateway Probe response headers are the time until HTTP response headers.
+    First body byte and semantic TTFT are reported separately; response headers
+    are not labeled TTFB.</li>
+    <li>Probe measured cost is the frozen-list request estimate. Charged cost is
+    separately reported billing evidence. Each retains its own request
+    coverage, as do total, cached-input, and cache-write token readings.</li>
     <li>Harness defaults are not clamped.</li>
   </ul>
 
@@ -1467,6 +1723,10 @@ def _gateway_board(bundle):
         ),
         _meta_field("tasks", bundle["tasks_included"]),
         _meta_field("lane", bundle["execution_lane"]) if bundle.get("execution_lane") else None,
+        _meta_field("model match", bundle["model_match"])
+        if bundle.get("model_match") else None,
+        _meta_field("provider prompt", bundle["provider_prompt_mode"])
+        if bundle.get("provider_prompt_mode") else None,
         _meta_field("experiment", (bundle.get("experiment_digest") or "")[:12])
         if bundle.get("experiment_digest") else None,
     ]))
@@ -1478,16 +1738,79 @@ def _gateway_board(bundle):
                 + _tag("div", {"class": "meta"}, meta)
                 + (_tag("div", {"class": "chips"}, chips) if chips else ""))
 
-    def cost_cell(arm):
-        cost = arm.get("cost")
-        if not cost:
+    def metric(arm, name):
+        return arm.get(name) or {}
+
+    def coverage_text(coverage, *, noun=None):
+        coverage = coverage or {}
+        covered = coverage.get("covered")
+        total = coverage.get("total")
+        if covered is None or total is None:
             return "—"
-        label = COST_BASIS_LABELS.get(cost["basis"], cost["basis"])
-        body = _chip(label, title=cost["basis"])
-        ratio = cost.get("coverage_ratio")
-        if ratio is not None and ratio < 1:
-            body += _chip(f"{_fmt_pct(ratio, 0)} covered", "warn")
-        return _tag("div", {"class": "chips"}, body)
+        value = f"{covered}/{total}"
+        return f"{value} {noun}" if noun else value
+
+    def grouped_coverage(row, groups, coverage_name):
+        parts = []
+        for group_label, members in groups:
+            values = [
+                coverage_text(metric(row, name).get(coverage_name))
+                for name, _short_label in members
+            ]
+            if len(set(values)) == 1:
+                parts.append(f"{group_label} {values[0]}")
+            else:
+                parts.extend(
+                    f"{short_label} {value}"
+                    for (_name, short_label), value in zip(members, values)
+                )
+        return " · ".join(parts)
+
+    def route_distribution(arm):
+        routes = arm.get("route_distribution") or {}
+        if not routes:
+            return "—"
+        parts = []
+        for name, evidence in sorted(routes.items()):
+            share = evidence.get("share") if isinstance(evidence, dict) else None
+            task_coverage = (
+                evidence.get("task_coverage") if isinstance(evidence, dict) else None
+            )
+            details = []
+            if share is not None:
+                details.append(_fmt_pct(share, 0))
+            if task_coverage:
+                details.append(
+                    "tasks " + coverage_text(task_coverage)
+                )
+            parts.append(
+                _esc(name)
+                + (
+                    " " + _tag("span", {"class": "sub"}, " · ".join(details))
+                    if details else ""
+                )
+            )
+        return "<br>".join(parts)
+
+    def outcome_coverage(arm):
+        cost = (arm.get("cost") or {}).get("coverage") or {}
+        outcome = grouped_coverage(
+            arm,
+            (("outcome", (
+                ("solve_rate", "solve"),
+                ("mean_checker_score", "score"),
+                ("availability", "availability"),
+                ("latency_s", "latency"),
+            )),),
+            "cell_coverage",
+        )
+        parts = [outcome] if outcome else []
+        if cost:
+            parts.append(
+                "cost "
+                + f"{cost.get('covered_calls', 0)}/{cost.get('total_calls', 0)} calls"
+            )
+        return " · ".join(parts) or "—"
 
     columns = [
         {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
@@ -1520,26 +1843,106 @@ def _gateway_board(bundle):
              f"({_fmt_pct(a['max_calls']['ratio'])})"
          ),
          "key": lambda a: a["max_calls"]["ratio"]},
-        {"label": "Median latency", "dir": "asc",
+        {"label": "Median E2E cell latency", "dir": "asc",
          "cell": lambda a: _fmt_secs(a["latency_s"]["estimate"]),
          "key": lambda a: a["latency_s"]["estimate"]},
-        {"label": "$/solve", "dir": "asc", "skip_if_empty": True,
+        {"label": "List-est. $/solve", "dir": "asc", "skip_if_empty": True,
          "cell": lambda a: _fmt_money((a.get("cost") or {}).get("cost_per_solve_usd"), 4),
          "key": lambda a: (a.get("cost") or {}).get("cost_per_solve_usd")},
-        {"label": "Cost basis", "skip_if_empty": True,
-         "cell": cost_cell,
-         "key": lambda a: a.get("cost") and a["cost"]["basis"]},
+        {"label": "Outcome / cost coverage",
+         "cell": outcome_coverage},
     ]
     parts = head + _render_table(columns, bundle["arms"])
 
+    def telemetry_coverage(arm):
+        groups = (
+            ("timing", (
+                ("ttfb_s", "TTFB"),
+                ("semantic_ttft_s", "TTFT"),
+            )),
+            ("throughput", (("throughput_tokens_per_s", "throughput"),)),
+            ("tokens", (
+                ("mean_input_tokens_per_call", "input"),
+                ("mean_output_tokens_per_call", "output"),
+                ("mean_total_tokens_per_call", "total"),
+            )),
+            ("cache", (
+                ("cache_hit_call_rate", "cache hits"),
+                ("cached_input_fraction", "cached fraction"),
+                ("mean_cached_input_tokens_per_call", "cache read"),
+            )),
+            ("cache write", (
+                ("mean_cache_write_input_tokens_per_call", "cache write"),
+            )),
+        )
+        return grouped_coverage(arm, groups, "call_coverage")
+
+    telemetry_columns = [
+        {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
+         "cell": lambda a: _esc(a["arm_id"]), "key": lambda a: a["arm_id"]},
+        {"label": "Served route",
+         "cell": route_distribution},
+        {"label": "TTFB", "dir": "asc",
+         "cell": lambda a: _fmt_secs(metric(a, "ttfb_s").get("estimate")),
+         "key": lambda a: metric(a, "ttfb_s").get("estimate")},
+        {"label": "Semantic TTFT", "dir": "asc",
+         "cell": lambda a: _fmt_secs(metric(a, "semantic_ttft_s").get("estimate")),
+         "key": lambda a: metric(a, "semantic_ttft_s").get("estimate")},
+        {"label": "Output tok/s", "dir": "desc",
+         "cell": lambda a: (
+             "—" if metric(a, "throughput_tokens_per_s").get("estimate") is None
+             else f"{metric(a, 'throughput_tokens_per_s')['estimate']:.1f}"
+         ),
+         "key": lambda a: metric(a, "throughput_tokens_per_s").get("estimate")},
+        {"label": "Input / output / total tok/call",
+         "cell": lambda a: (
+             f"{_fmt_num(metric(a, 'mean_input_tokens_per_call').get('estimate'))}"
+             f" / {_fmt_num(metric(a, 'mean_output_tokens_per_call').get('estimate'))}"
+             f" / {_fmt_num(metric(a, 'mean_total_tokens_per_call').get('estimate'))}"
+         )},
+        {"label": "Cache-hit calls",
+         "cell": lambda a: _fmt_pct(metric(a, "cache_hit_call_rate").get("estimate"))},
+        {"label": "Cached input",
+         "cell": lambda a: _fmt_pct(metric(a, "cached_input_fraction").get("estimate"))},
+        {"label": "Cache read / write tok/call",
+         "cell": lambda a: (
+             f"{_fmt_num(metric(a, 'mean_cached_input_tokens_per_call').get('estimate'))}"
+             f" / "
+             f"{_fmt_num(metric(a, 'mean_cache_write_input_tokens_per_call').get('estimate'))}"
+         )},
+        {"label": "Telemetry coverage",
+         "cell": telemetry_coverage},
+    ]
+    parts += _tag(
+        "div",
+        {"class": "head"},
+        _tag("h2", {}, "Serving telemetry")
+        + _tag(
+            "p",
+            {},
+            "Per-call proxy telemetry. The median E2E value above is per "
+            "completed or timeout-capped benchmark cell, not request latency. "
+            "Cache fields are provider-reported prompt-prefix behavior under "
+            f"{_tag('code', {}, _esc(bundle.get('provider_prompt_mode') or 'unknown'))}; "
+            "gateway response caching was disabled.",
+        ),
+    )
+    parts += _render_table(telemetry_columns, bundle["arms"])
+
     contrasts = bundle.get("contrasts") or []
     if contrasts:
-        def delta_column(label, key, fmt, higher_is_better, direction="desc"):
+        def delta_column(
+            label, key, fmt, higher_is_better, direction="desc", *,
+            skip_if_empty=False,
+        ):
             domain = _delta_domain(contrasts, key)
             return {
                 "label": label, "dir": direction, "plot": True,
-                "cell": lambda r: _delta_cell(r[key], fmt, higher_is_better, domain),
-                "key": lambda r: r[key]["estimate"],
+                "cell": lambda r: _delta_cell(
+                    r.get(key) or {}, fmt, higher_is_better, domain
+                ),
+                "key": lambda r: (r.get(key) or {}).get("estimate"),
+                "skip_if_empty": skip_if_empty,
             }
 
         tax_columns = [
@@ -1549,7 +1952,7 @@ def _gateway_board(bundle):
             delta_column("Δ solve rate", "solve_rate", _fmt_pct, True),
             delta_column("Δ mean score", "mean_checker_score", _fmt_score, True),
             delta_column("Δ availability", "availability", _fmt_pct, True),
-            delta_column("Δ median latency", "latency_s",
+            delta_column("Δ median E2E cell latency", "latency_s",
                          lambda v: f"{v:.2f}s", False, "asc"),
         ]
         legend = "".join(
@@ -1567,6 +1970,426 @@ def _gateway_board(bundle):
                       + _tag("div", {"class": "legend"}, legend))
         parts += _render_table(tax_columns, contrasts)
 
+        telemetry_tax_columns = [
+            {"label": "Gateway arm", "cls": "name", "type": "str", "dir": "asc",
+             "cell": lambda r: _esc(r["arm_id"]), "key": lambda r: r["arm_id"]},
+            {"label": "vs direct", "cell": lambda r: _esc(r["direct_arm"])},
+            delta_column(
+                "Δ TTFB", "ttfb_s", lambda v: f"{v:.2f}s", False, "asc",
+                skip_if_empty=True,
+            ),
+            delta_column(
+                "Δ semantic TTFT", "semantic_ttft_s",
+                lambda v: f"{v:.2f}s", False, "asc",
+                skip_if_empty=True,
+            ),
+            delta_column(
+                "Δ output tok/s", "throughput_tokens_per_s",
+                lambda v: f"{v:.1f}", True, skip_if_empty=True,
+            ),
+            delta_column(
+                "Δ input tok/call", "mean_input_tokens_per_call",
+                lambda v: f"{v:.0f}", False, "asc",
+                skip_if_empty=True,
+            ),
+            delta_column(
+                "Δ output tok/call", "mean_output_tokens_per_call",
+                lambda v: f"{v:.0f}", False, "asc",
+                skip_if_empty=True,
+            ),
+            delta_column(
+                "Δ list cost / attempted cell", "attempted_cost_usd",
+                lambda v: f"${v:.4f}", False, "asc",
+                skip_if_empty=True,
+            ),
+            {"label": "Paired block coverage",
+             "cell": lambda r: grouped_coverage(
+                 r,
+                 (
+                     ("timing", (
+                         ("ttfb_s", "TTFB"),
+                         ("semantic_ttft_s", "TTFT"),
+                     )),
+                     ("throughput", (
+                         ("throughput_tokens_per_s", "throughput"),
+                     )),
+                     ("tokens", (
+                         ("mean_input_tokens_per_call", "input"),
+                         ("mean_output_tokens_per_call", "output"),
+                     )),
+                     ("cost", (("attempted_cost_usd", "cost"),)),
+                 ),
+                 "paired_block_coverage",
+             )},
+        ]
+        parts += _tag(
+            "div",
+            {"class": "head"},
+            _tag("h2", {}, "Serving telemetry tax")
+            + _tag(
+                "p",
+                {},
+                "Paired gateway-minus-direct per-call telemetry. Cost is the "
+                "frozen-list estimate per attempted cell, not cost per solve. "
+                "Provider cache-accounting deltas are intentionally omitted.",
+            ),
+        )
+        parts += _render_table(telemetry_tax_columns, contrasts)
+
+    return _tag("section", {"class": "board", "data-caveats": "0"}, parts)
+
+
+def _gateway_probe_board(bundle):
+    title = _esc(bundle["title"])
+    if bundle.get("path"):
+        title = _link(bundle["path"], title)
+
+    scheduled = bundle.get("scheduled_blocks_per_condition")
+    complete = bundle.get("complete_blocks") or {}
+    meta = "".join(filter(None, [
+        _meta_field("track", bundle.get("track") or "request_probe"),
+        _meta_field("date", bundle["date"]) if bundle.get("date") else None,
+        _meta_field("model match", bundle["model_match"])
+        if bundle.get("model_match") else None,
+        _meta_field("cold blocks", f"{complete.get('cold', 0)}/{scheduled}"),
+        _meta_field("warm blocks", f"{complete.get('warm', 0)}/{scheduled}"),
+        _meta_field("requests", bundle.get("result_count")),
+        _meta_field(
+            "verified commit",
+            (bundle.get("verified_with_commit") or "")[:12],
+        ) if bundle.get("verified_with_commit") else None,
+        _meta_field(
+            "experiment",
+            (bundle.get("experiment_digest") or "")[:12],
+        ) if bundle.get("experiment_digest") else None,
+    ]))
+    head = _tag(
+        "div",
+        {"class": "head"},
+        _tag("h2", {}, title)
+        + _tag("div", {"class": "meta"}, meta)
+        + _tag(
+            "p",
+            {},
+            "Request-level probe. Cold and warm conditions retain separate "
+            "denominators and are not Gateway Bench cells.",
+        ),
+    )
+
+    def summary(item, name):
+        return (item.get("metrics") or {}).get(name) or {}
+
+    def coverage(value):
+        value = value or {}
+        covered = value.get("covered")
+        total = value.get("total")
+        if covered is None or total is None:
+            return "—"
+        return f"{covered}/{total}"
+
+    def percentile_cell(item, name, fmt):
+        value = summary(item, name)
+        rendered = (
+            f"{fmt(value.get('p50'))} / {fmt(value.get('p95'))}"
+        )
+        return (
+            rendered
+            + _tag(
+                "div",
+                {"class": "sub"},
+                "coverage " + coverage(value.get("coverage")),
+            )
+        )
+
+    def seconds(value):
+        return "—" if value is None else f"{value:.3f}s"
+
+    def decimal(value):
+        return "—" if value is None else f"{value:.1f}"
+
+    def money(value):
+        return "—" if value is None else f"${value:.6f}"
+
+    def availability_cell(row):
+        value = row["item"].get("availability") or {}
+        interval = value.get("wilson95") or {}
+        count = f"{value.get('successes', 0)}/{value.get('attempted', 0)}"
+        low = interval.get("low")
+        high = interval.get("high")
+        detail = count
+        if low is not None and high is not None:
+            detail += f" · CI {_fmt_pct(low)}–{_fmt_pct(high)}"
+        return (
+            _tag("div", {"class": "sub"}, detail)
+            + _interval_cell(
+                value.get("rate"),
+                low,
+                high,
+                _fmt_pct,
+            )
+        )
+
+    def route_cell(row):
+        denominators = row["item"].get("denominators") or {}
+        attempted = denominators.get("attempted", 0)
+        return (
+            f"verified {denominators.get('route_verified', 0)}/{attempted}"
+            + _tag(
+                "div",
+                {"class": "sub"},
+                "unverifiable "
+                f"{denominators.get('route_unverifiable', 0)} · failed "
+                f"{denominators.get('route_failed', 0)}",
+            )
+        )
+
+    def cost_cell(row):
+        item = row["item"]
+        return (
+            "measured "
+            + percentile_cell(item, "measured_cost_usd", money)
+            + "<br>charged "
+            + percentile_cell(item, "charged_cost_usd", money)
+        )
+
+    def tokens_cell(row):
+        item = row["item"]
+        return "<br>".join((
+            "total " + percentile_cell(item, "total_tokens", decimal),
+            "cached " + percentile_cell(item, "cached_input_tokens", decimal),
+            "cache write "
+            + percentile_cell(item, "cache_write_input_tokens", decimal),
+        ))
+
+    request_columns = [
+        {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
+         "cell": lambda row: _esc(row["arm_id"]),
+         "key": lambda row: row["arm_id"]},
+        {"label": "Condition", "type": "str", "dir": "asc",
+         "cell": lambda row: _esc(row["condition"]),
+         "key": lambda row: row["condition"]},
+        {"label": "Success / availability · Wilson 95%", "plot": True,
+         "cell": availability_cell,
+         "key": lambda row: (
+             row["item"].get("availability") or {}
+         ).get("rate")},
+        {"label": "Route verification",
+         "cell": route_cell},
+        {"label": "Response headers p50 / p95", "dir": "asc",
+         "cell": lambda row: percentile_cell(
+             row["item"], "request_to_response_headers_s", seconds
+         ),
+         "key": lambda row: summary(
+             row["item"], "request_to_response_headers_s"
+         ).get("p50")},
+        {"label": "First body byte p50 / p95", "dir": "asc",
+         "cell": lambda row: percentile_cell(
+             row["item"], "request_to_first_body_byte_s", seconds
+         ),
+         "key": lambda row: summary(
+             row["item"], "request_to_first_body_byte_s"
+         ).get("p50")},
+        {"label": "Semantic TTFT p50 / p95", "dir": "asc",
+         "cell": lambda row: percentile_cell(
+             row["item"], "request_to_semantic_ttft_s", seconds
+         ),
+         "key": lambda row: summary(
+             row["item"], "request_to_semantic_ttft_s"
+         ).get("p50")},
+        {"label": "Stream total p50 / p95", "dir": "asc",
+         "cell": lambda row: percentile_cell(
+             row["item"], "request_stream_total_s", seconds
+         ),
+         "key": lambda row: summary(
+             row["item"], "request_stream_total_s"
+         ).get("p50")},
+        {"label": "Throughput tok/s p50 / p95", "dir": "desc",
+         "cell": lambda row: percentile_cell(
+             row["item"], "throughput_tokens_per_s", decimal
+         ),
+         "key": lambda row: summary(
+             row["item"], "throughput_tokens_per_s"
+         ).get("p50")},
+        {"label": "Measured / charged cost p50 / p95",
+         "cell": cost_cell},
+        {"label": "Total / cached / cache-write tokens p50 / p95",
+         "cell": tokens_cell},
+    ]
+
+    parts = head
+    for condition in ("cold", "warm"):
+        rows = [
+            {
+                "arm_id": arm["arm_id"],
+                "role": arm.get("role"),
+                "condition": condition,
+                "item": (arm.get("conditions") or {}).get(condition) or {},
+            }
+            for arm in bundle["arms"]
+        ]
+        parts += _tag(
+            "div",
+            {"class": "head"},
+            _tag("h2", {}, f"{condition.title()} requests")
+            + _tag(
+                "p",
+                {},
+                f"Complete blocks: {complete.get(condition, 0)}/{scheduled}.",
+            ),
+        )
+        parts += _render_table(request_columns, rows)
+
+    setup_columns = [
+        {"label": "Route", "cls": "name", "type": "str", "dir": "asc",
+         "cell": lambda row: _esc(row["arm_id"]),
+         "key": lambda row: row["arm_id"]},
+        {"label": "DNS p50 / p95", "dir": "asc",
+         "cell": lambda row: percentile_cell(row["item"], "setup_dns_s", seconds),
+         "key": lambda row: summary(row["item"], "setup_dns_s").get("p50")},
+        {"label": "TCP p50 / p95", "dir": "asc",
+         "cell": lambda row: percentile_cell(row["item"], "setup_tcp_s", seconds),
+         "key": lambda row: summary(row["item"], "setup_tcp_s").get("p50")},
+        {"label": "TLS p50 / p95", "dir": "asc",
+         "cell": lambda row: percentile_cell(row["item"], "setup_tls_s", seconds),
+         "key": lambda row: summary(row["item"], "setup_tls_s").get("p50")},
+    ]
+    setup_rows = [
+        {
+            "arm_id": arm["arm_id"],
+            "item": (arm.get("conditions") or {}).get("cold") or {},
+        }
+        for arm in bundle["arms"]
+    ]
+    parts += _tag(
+        "div",
+        {"class": "head"},
+        _tag("h2", {}, "Cold setup")
+        + _tag("p", {}, "Connection setup phases for cold requests only."),
+    )
+    parts += _render_table(setup_columns, setup_rows)
+
+    contrast_rows = []
+    for contrast in bundle.get("contrasts") or []:
+        for condition in ("cold", "warm"):
+            metrics = (contrast.get("conditions") or {}).get(condition) or {}
+            contrast_rows.append({
+                "arm_id": contrast["arm_id"],
+                "direct_arm": contrast.get("direct_arm"),
+                "condition": condition,
+                "headers": metrics.get("request_to_response_headers_s") or {},
+                "semantic_ttft": metrics.get(
+                    "request_to_semantic_ttft_s"
+                ) or {},
+            })
+
+    def contrast_metric(value):
+        interval = value.get("interval") or {}
+        return {
+            "estimate": value.get("median_gateway_minus_direct"),
+            "low": interval.get("low"),
+            "high": interval.get("high"),
+        }
+
+    if contrast_rows:
+        headers_domain = max(
+            _delta_domain(
+                [{"value": contrast_metric(row["headers"])}
+                 for row in contrast_rows],
+                "value",
+            ),
+            1e-9,
+        )
+        semantic_domain = max(
+            _delta_domain(
+                [{"value": contrast_metric(row["semantic_ttft"])}
+                 for row in contrast_rows],
+                "value",
+            ),
+            1e-9,
+        )
+
+        def contrast_cell(row, name, domain):
+            value = row[name]
+            metric_value = contrast_metric(value)
+            interval_text = ""
+            if (
+                metric_value["low"] is not None
+                and metric_value["high"] is not None
+            ):
+                interval_text = (
+                    "95% CI "
+                    + _signed(
+                        metric_value["low"], lambda item: f"{item:.3f}s"
+                    )
+                    + " to "
+                    + _signed(
+                        metric_value["high"], lambda item: f"{item:.3f}s"
+                    )
+                    + " · "
+                )
+            return (
+                _delta_cell(
+                    metric_value,
+                    lambda item: f"{item:.3f}s",
+                    False,
+                    domain,
+                )
+                + _tag(
+                    "div",
+                    {"class": "sub"},
+                    interval_text
+                    + "paired "
+                    + coverage(value.get("coverage")),
+                )
+            )
+
+        contrast_columns = [
+            {"label": "Gateway route", "cls": "name", "type": "str", "dir": "asc",
+             "cell": lambda row: _esc(row["arm_id"]),
+             "key": lambda row: row["arm_id"]},
+            {"label": "Condition", "type": "str", "dir": "asc",
+             "cell": lambda row: _esc(row["condition"]),
+             "key": lambda row: row["condition"]},
+            {"label": "vs direct",
+             "cell": lambda row: _esc(row["direct_arm"])},
+            {"label": "Δ response headers", "plot": True,
+             "cell": lambda row: contrast_cell(row, "headers", headers_domain),
+             "key": lambda row: row["headers"].get(
+                 "median_gateway_minus_direct"
+             )},
+            {"label": "Δ semantic TTFT", "plot": True,
+             "cell": lambda row: contrast_cell(
+                 row, "semantic_ttft", semantic_domain
+             ),
+             "key": lambda row: row["semantic_ttft"].get(
+                 "median_gateway_minus_direct"
+             )},
+        ]
+        parts += _tag(
+            "div",
+            {"class": "head"},
+            _tag("h2", {}, "Paired request deltas")
+            + _tag(
+                "p",
+                {},
+                "Median gateway-minus-direct difference over complete paired "
+                "blocks; bootstrap 95% intervals.",
+            ),
+        )
+        parts += _render_table(contrast_columns, contrast_rows)
+
+    links = "".join(filter(None, [
+        _tag("span", {}, _link(bundle["results_path"], "results.jsonl"))
+        if bundle.get("results_path") else None,
+        _tag("span", {}, _link(bundle["path"], "release page"))
+        if bundle.get("path") else None,
+    ]))
+    if links:
+        parts += _tag(
+            "div",
+            {"class": "head"},
+            _tag("div", {"class": "meta"}, links),
+        )
     return _tag("section", {"class": "board", "data-caveats": "0"}, parts)
 
 
@@ -1718,6 +2541,23 @@ def _gateway_view(doc):
     return body
 
 
+def _gateway_probe_view(doc):
+    family = doc["gateway_probe"]
+    body = _tag("p", {"class": "note"}, _esc(family["note"]))
+    if not family["bundles"]:
+        body += _tag("section", {"class": "board"}, _tag(
+            "div", {"class": "empty"},
+            _tag("p", {}, "No verified Gateway Probe bundles published yet.")))
+    body += "".join(_gateway_probe_board(bundle) for bundle in family["bundles"])
+    if family.get("skipped"):
+        body += _skipped_board(
+            f"Not published ({len(family['skipped'])})",
+            "Did not pass public Gateway Probe verification.",
+            family["skipped"],
+        )
+    return body
+
+
 def _releases_view(doc):
     return (_releases_section(doc["releases"])
             + _community_section(doc["community"])
@@ -1737,6 +2577,7 @@ def render_board_html(doc):
         for slug, label in (
             ("harness", "Harness Bench"),
             ("gateway", "Gateway Bench"),
+            ("gateway-probe", "Gateway Probe"),
             ("releases", "Releases"),
             ("methodology", "Methodology"),
         )
@@ -1761,6 +2602,11 @@ def render_board_html(doc):
     views = (
         _tag("main", {"id": "view-harness"}, _harness_view(doc))
         + _tag("main", {"id": "view-gateway"}, _gateway_view(doc))
+        + _tag(
+            "main",
+            {"id": "view-gateway-probe"},
+            _gateway_probe_view(doc),
+        )
         + _tag("main", {"id": "view-releases"}, _releases_view(doc))
         + _tag("main", {"id": "view-methodology"}, _METHODOLOGY)
     )
@@ -1788,10 +2634,20 @@ def render_board_html(doc):
     )
 
 
-def write_board(site_dir, community_dir=None, gateway_dirs=None):
+def write_board(
+    site_dir,
+    community_dir=None,
+    gateway_dirs=None,
+    gateway_probe_dirs=None,
+):
     """Build and write ``index.html`` + ``board.json`` under ``site_dir``."""
     site_dir = os.path.abspath(site_dir)
-    doc = build_board(site_dir, community_dir=community_dir, gateway_dirs=gateway_dirs)
+    doc = build_board(
+        site_dir,
+        community_dir=community_dir,
+        gateway_dirs=gateway_dirs,
+        gateway_probe_dirs=gateway_probe_dirs,
+    )
     json_path = os.path.join(site_dir, "board.json")
     html_path = os.path.join(site_dir, "index.html")
     outputs = (
@@ -1834,14 +2690,22 @@ def write_board(site_dir, community_dir=None, gateway_dirs=None):
         "html_path": html_path,
         "harness_bundles": doc["harness"]["bundle_count"],
         "gateway_bundles": doc["gateway"]["bundle_count"],
-        "skipped": len(doc["harness"]["skipped"]) + len(doc["gateway"]["skipped"]),
+        "gateway_probe_bundles": doc["gateway_probe"]["bundle_count"],
+        "skipped": (
+            len(doc["harness"]["skipped"])
+            + len(doc["gateway"]["skipped"])
+            + len(doc["gateway_probe"]["skipped"])
+        ),
     }
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="obench site",
-        description="Build the unified static leaderboard site (harness + gateway).",
+        description=(
+            "Build the unified static site "
+            "(harness + gateway + gateway probe)."
+        ),
     )
     sub = parser.add_subparsers(dest="command")
     build = sub.add_parser("build", help="write index.html + board.json")
@@ -1866,6 +2730,15 @@ def main(argv=None):
         default=None,
         help="gateway bundle root (repeatable; default: <site-dir>/gateway)",
     )
+    build.add_argument(
+        "--gateway-probe-dir",
+        action="append",
+        default=None,
+        help=(
+            "Gateway Probe public bundle root "
+            "(repeatable; default: <site-dir>/gateway-probe)"
+        ),
+    )
 
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
     if args.command is None:
@@ -1881,12 +2754,14 @@ def main(argv=None):
             args.site_dir,
             community_dir=community_dir,
             gateway_dirs=args.gateway_dir,
+            gateway_probe_dirs=args.gateway_probe_dir,
         )
         print(f"index.html  {info['html_path']}")
         print(f"board.json  {info['json_path']}")
         print(
             f"harness_bundles={info['harness_bundles']} "
             f"gateway_bundles={info['gateway_bundles']} "
+            f"gateway_probe_bundles={info['gateway_probe_bundles']} "
             f"skipped={info['skipped']}"
         )
         return 0
