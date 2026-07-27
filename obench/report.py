@@ -122,6 +122,7 @@ def aggregate(rows):
     arms = []
     tasks = []
     stats = {}
+    rows = _one_row_per_cell(rows)
     for row in rows:
         key = _arm_key(row)
         task = row.get("task")
@@ -186,6 +187,40 @@ def aggregate(rows):
 # limits and infra failures hit LONG-running cells hardest, and long cells are
 # the hard ones, so incomplete coverage biases solve rates UPWARD.
 COVERAGE_PUBLISH_THRESHOLD = 0.95
+
+
+def _one_row_per_cell(rows):
+    """Collapse retry attempts so a cell contributes to the rate exactly once.
+
+    ``succ``/``n`` were counted PER ROW while coverage was tracked per cell, so a
+    retried cell inflated the denominator: on data/tb-mid-corrected.jsonl,
+    winning-avg-corewars#t2 has two attempts both classified wrong_answer, and
+    this reporter said laguna 5/19 = 26.3% where results_query said 5/18 = 28%.
+    The two published numbers for the same file disagreed.
+
+    Retries are routine now that the queue re-runs excluded cells, so this is the
+    common case rather than an edge one. Selection matches
+    ``results_query._rank`` exactly -- a judged verdict beats an excluded
+    attempt, then the latest ts_iso wins -- so the two reporters cannot diverge.
+    """
+    chosen = {}
+    for index, row in enumerate(rows):
+        key = _arm_key(row)
+        task = row.get("task")
+        if key is None or task is None:
+            continue
+        # A cell is (arm, task, trial). Without a trial there is no cell
+        # identity, so two such rows cannot be shown to be the same attempt --
+        # keep them distinct rather than silently merging unrelated results.
+        # Every row in the current corpus carries a trial (3875/3875), so this
+        # only guards older or hand-written data.
+        trial = row.get("trial")
+        cell = (key, task, trial) if trial is not None else ("__no_trial__", index)
+        rank = (not is_excluded_from_solve_rate(row), row.get("ts_iso") or "")
+        prev = chosen.get(cell)
+        if prev is None or rank > prev[0]:
+            chosen[cell] = (rank, row)
+    return [row for _, row in chosen.values()]
 
 
 def coverage(st):

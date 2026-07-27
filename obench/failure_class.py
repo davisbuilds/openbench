@@ -306,9 +306,23 @@ def has_checker_owned_verdict(row, text=""):
         return False
     if row.get("checker_exit") not in (0, 1):
         return False
-    if has_zero_output_and_minimal_turns(row, text):
+    # Affirmative evidence the model actually produced something, NOT merely a
+    # truthy turn counter. has_zero_output_and_minimal_turns is deliberately
+    # suppressed when the transcript carries text, and a provider error IS text
+    # -- so a cell with turns=1, zero output and nothing but a 429 in its
+    # transcript would satisfy that gate and be scored wrong_answer, which is
+    # precisely the "never answered" case this predicate must reject.
+    # No such row exists in the corpus today (of 81 rows this correction
+    # promotes, none has turns<=1 with zero output), so this closes a hole
+    # rather than repairing live data.
+    produced_output = any(
+        isinstance(row.get(field), (int, float)) and not isinstance(row.get(field), bool)
+        and row.get(field) > 0
+        for field in ("tokens_output", "tokens_proxy_output")
+    )
+    if not produced_output and not row.get("workspace_changed"):
         return False
-    if has_near_zero_agent_tokens(row) and not row.get("turns"):
+    if has_zero_output_and_minimal_turns(row, text):
         return False
     return True
 
