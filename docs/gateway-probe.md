@@ -90,6 +90,12 @@ bound into the experiment and sent as `cf-aig-gateway-id`; its response cache
 is skipped and its maximum attempt count is one. Set the credentials declared
 by the selected experiment and a frozen price snapshot:
 
+For a Chat Completions smoke run of Kimi K3 across Direct Moonshot and the same
+four gateways, use
+[`gateway-probe-kimi-k3-five-way-chat.toml`](../obench/examples/gateway-probe-kimi-k3-five-way-chat.toml).
+It schedules five repetitions and caps each generated response at 128 tokens.
+Replace its illustrative 32-hex Cloudflare account ID before running.
+
 ```bash
 export OPENAI_API_KEY=...
 export OPENROUTER_API_KEY=...
@@ -104,6 +110,8 @@ export OPENBENCH_GATEWAY_FROZEN_PRICES_JSON='{
   }
 }'
 ```
+
+The Kimi K3 example uses `MOONSHOT_API_KEY` instead of `OPENAI_API_KEY`.
 
 The prices above illustrate the required shape; verify current prices before a
 real run.

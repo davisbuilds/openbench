@@ -1,0 +1,135 @@
+schema_version = 2
+experiment_id = "kimi-k3-five-way-chat-gateway-bench"
+track = "fixed_model_provider"
+model_match = "rolling_alias"
+provider_prompt_mode = "provider_default"
+harness = "pi"
+tasks = ["make-it-run"]
+repetitions_per_window = 5
+schedule_seed = 20260727
+execution_lane = "local"
+allow_private_endpoint = false
+
+# Replace this illustrative future window with the UTC window for the run.
+[[windows]]
+window_id = "window-a"
+start = "2026-08-04T15:00:00Z"
+end = "2026-08-04T17:00:00Z"
+
+# 1 task x 5 repetitions x 5 arms = 25 cells. At 8 calls per cell, this
+# experiment permits at most 200 paid model calls.
+[budget]
+timeout_s = 600
+max_calls = 8
+max_output_tokens = 12000
+usd_cap = 1.00
+
+[[arms]]
+arm_id = "direct-moonshot"
+route_kind = "direct"
+endpoint = "https://api.moonshot.ai/v1/chat/completions"
+protocol = "openai_chat"
+baseline = true
+canonical_model = "moonshotai/kimi-k3"
+requested_model = "kimi-k3"
+requested_provider = "moonshotai"
+allowed_models = ["kimi-k3"]
+allowed_providers = ["moonshotai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "MOONSHOT_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260727
+
+[[arms]]
+arm_id = "openrouter-moonshot"
+route_kind = "gateway"
+gateway = "openrouter"
+direct_control_arm_id = "direct-moonshot"
+endpoint = "https://openrouter.ai/api/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "moonshotai/kimi-k3"
+requested_model = "moonshotai/kimi-k3"
+requested_provider = "moonshotai"
+allowed_models = ["moonshotai/kimi-k3"]
+allowed_providers = ["moonshotai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "OPENROUTER_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260727
+
+[[arms]]
+arm_id = "vercel-moonshot"
+route_kind = "gateway"
+gateway = "vercel"
+direct_control_arm_id = "direct-moonshot"
+endpoint = "https://ai-gateway.vercel.sh/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "moonshotai/kimi-k3"
+requested_model = "moonshotai/kimi-k3"
+requested_provider = "moonshotai"
+allowed_models = ["moonshotai/kimi-k3"]
+allowed_providers = ["moonshotai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "VERCEL_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260727
+
+[[arms]]
+arm_id = "concentrate-moonshot"
+route_kind = "gateway"
+gateway = "concentrate"
+direct_control_arm_id = "direct-moonshot"
+endpoint = "https://api.concentrate.ai/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "moonshotai/kimi-k3"
+requested_model = "moonshot/kimi-k3"
+requested_provider = "moonshotai"
+allowed_models = ["moonshot/kimi-k3"]
+allowed_providers = ["moonshotai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "CONCENTRATE_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260727
+
+[[arms]]
+arm_id = "cloudflare-moonshot"
+route_kind = "gateway"
+gateway = "cloudflare"
+gateway_id = "openbench-router-bench"
+direct_control_arm_id = "direct-moonshot"
+# Replace this illustrative 32-hex account ID before running.
+endpoint = "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "moonshotai/kimi-k3"
+requested_model = "moonshotai/kimi-k3"
+requested_provider = "moonshotai"
+allowed_models = ["moonshotai/kimi-k3"]
+allowed_providers = ["moonshotai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "CLOUDFLARE_API_TOKEN"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260727

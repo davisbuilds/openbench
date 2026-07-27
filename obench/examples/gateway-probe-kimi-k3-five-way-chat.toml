@@ -1,0 +1,126 @@
+schema_version = 1
+experiment_id = "kimi-k3-five-way-chat-probe"
+track = "request_probe"
+model_match = "rolling_alias"
+repetitions = 5
+schedule_seed = 20260727
+allow_private_endpoint = false
+
+[budget]
+timeout_s = 60
+max_output_tokens = 128
+usd_cap = 0.50
+
+[[cases]]
+case_id = "short-text"
+prompt = "Reply with one short sentence describing a blue circle."
+
+[[arms]]
+arm_id = "direct-moonshot"
+route_kind = "direct"
+endpoint = "https://api.moonshot.ai/v1/chat/completions"
+protocol = "openai_chat"
+baseline = true
+canonical_model = "moonshotai/kimi-k3"
+requested_model = "kimi-k3"
+requested_provider = "moonshotai"
+allowed_models = ["kimi-k3"]
+allowed_providers = ["moonshotai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "MOONSHOT_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260727
+
+[[arms]]
+arm_id = "openrouter-moonshot"
+route_kind = "gateway"
+gateway = "openrouter"
+direct_control_arm_id = "direct-moonshot"
+endpoint = "https://openrouter.ai/api/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "moonshotai/kimi-k3"
+requested_model = "moonshotai/kimi-k3"
+requested_provider = "moonshotai"
+allowed_models = ["moonshotai/kimi-k3"]
+allowed_providers = ["moonshotai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "OPENROUTER_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260727
+
+[[arms]]
+arm_id = "vercel-moonshot"
+route_kind = "gateway"
+gateway = "vercel"
+direct_control_arm_id = "direct-moonshot"
+endpoint = "https://ai-gateway.vercel.sh/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "moonshotai/kimi-k3"
+requested_model = "moonshotai/kimi-k3"
+requested_provider = "moonshotai"
+allowed_models = ["moonshotai/kimi-k3"]
+allowed_providers = ["moonshotai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "VERCEL_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260727
+
+[[arms]]
+arm_id = "concentrate-moonshot"
+route_kind = "gateway"
+gateway = "concentrate"
+direct_control_arm_id = "direct-moonshot"
+endpoint = "https://api.concentrate.ai/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "moonshotai/kimi-k3"
+requested_model = "moonshot/kimi-k3"
+requested_provider = "moonshotai"
+allowed_models = ["moonshot/kimi-k3"]
+allowed_providers = ["moonshotai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "CONCENTRATE_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260727
+
+[[arms]]
+arm_id = "cloudflare-moonshot"
+route_kind = "gateway"
+gateway = "cloudflare"
+gateway_id = "openbench-router-bench"
+direct_control_arm_id = "direct-moonshot"
+# Replace this illustrative 32-hex account ID before running.
+endpoint = "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "moonshotai/kimi-k3"
+requested_model = "moonshotai/kimi-k3"
+requested_provider = "moonshotai"
+allowed_models = ["moonshotai/kimi-k3"]
+allowed_providers = ["moonshotai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "CLOUDFLARE_API_TOKEN"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260727

@@ -7,9 +7,11 @@ import time
 import unittest
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from unittest import mock
 
 from obench import (
+    gateway_profiles,
     gateway_probe_http,
     gateway_probe_spec,
     gateway_run,
@@ -605,6 +607,102 @@ class GatewayProbeHttpTests(unittest.TestCase):
         self.assertEqual(
             responses_body["provider"],
             {"only": ["openai"], "allow_fallbacks": False},
+        )
+
+    def test_kimi_examples_compile_exact_five_way_chat_route_locks(self):
+        examples = Path(__file__).parents[1] / "examples"
+        experiment = gateway_probe_spec.load_experiment(
+            examples / "gateway-probe-kimi-k3-five-way-chat.toml"
+        )
+        auth_envs = {arm.auth_env for arm in experiment.arms}
+        plans, _secrets = gateway_probe_spec.compile_route_plans(
+            experiment,
+            environ={name: f"secret-for-{name}" for name in auth_envs},
+            admitted_auth_envs=auth_envs,
+        )
+        by_id = {plan.arm_id: plan for plan in plans}
+
+        self.assertEqual(experiment.repetitions, 5)
+        self.assertEqual(experiment.budget.max_output_tokens, 128)
+        self.assertEqual(len(plans), 5)
+        self.assertEqual({plan.protocol for plan in plans}, {"openai_chat"})
+        self.assertEqual(
+            {arm_id: plan.endpoint for arm_id, plan in by_id.items()},
+            {
+                "direct-moonshot":
+                    "https://api.moonshot.ai/v1/chat/completions",
+                "openrouter-moonshot":
+                    "https://openrouter.ai/api/v1/chat/completions",
+                "vercel-moonshot":
+                    "https://ai-gateway.vercel.sh/v1/chat/completions",
+                "concentrate-moonshot":
+                    "https://api.concentrate.ai/v1/chat/completions",
+                "cloudflare-moonshot":
+                    "https://api.cloudflare.com/client/v4/accounts/"
+                    "0123456789abcdef0123456789abcdef/ai/v1/chat/completions",
+            },
+        )
+        bodies = {
+            arm_id: json.loads(
+                gateway_probe_http.request_body("prompt", "nonce", plan, 128)
+            )
+            for arm_id, plan in by_id.items()
+        }
+        self.assertEqual(
+            bodies["openrouter-moonshot"]["provider"],
+            {"only": ["moonshotai"], "allow_fallbacks": False},
+        )
+        self.assertEqual(
+            bodies["vercel-moonshot"]["providerOptions"],
+            {"gateway": {"only": ["moonshotai"]}},
+        )
+        self.assertEqual(
+            bodies["concentrate-moonshot"]["routing"],
+            {"providers": ["moonshot"], "models": []},
+        )
+        self.assertEqual(
+            by_id["concentrate-moonshot"].requested_model,
+            "moonshot/kimi-k3",
+        )
+        self.assertEqual(
+            {
+                arm_id: body["model"]
+                for arm_id, body in bodies.items()
+            },
+            {
+                "direct-moonshot": "kimi-k3",
+                "openrouter-moonshot": "moonshotai/kimi-k3",
+                "vercel-moonshot": "moonshotai/kimi-k3",
+                "concentrate-moonshot": "moonshot/kimi-k3",
+                "cloudflare-moonshot": "moonshotai/kimi-k3",
+            },
+        )
+        cloudflare = by_id["cloudflare-moonshot"]
+        self.assertEqual(cloudflare.gateway_id, "openbench-router-bench")
+        self.assertNotIn("provider", bodies["cloudflare-moonshot"])
+        self.assertEqual(
+            gateway_profiles.request_headers(
+                gateway=cloudflare.gateway,
+                gateway_id=cloudflare.gateway_id,
+                secret="secret",
+            )["cf-aig-gateway-id"],
+            "openbench-router-bench",
+        )
+        self.assertTrue(
+            all(body["max_completion_tokens"] == 128 for body in bodies.values())
+        )
+
+        gateway_bench = gateway_spec.load_experiment(
+            examples / "gateway-bench-kimi-k3-five-way-chat.toml"
+        )
+        self.assertEqual(gateway_bench.repetitions_per_window, 5)
+        self.assertEqual(len(gateway_bench.arms), 5)
+        self.assertEqual(
+            {arm.protocol for arm in gateway_bench.arms}, {"openai_chat"}
+        )
+        self.assertEqual(
+            {arm.canonical_model for arm in gateway_bench.arms},
+            {"moonshotai/kimi-k3"},
         )
 
     def test_route_reason_taxonomy_is_explicit_and_fail_closed(self):
