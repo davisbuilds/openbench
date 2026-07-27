@@ -102,6 +102,11 @@ def _provider_identity(value: str) -> str:
     return _PROVIDER_IDENTITY_ALIASES.get(normalized, normalized)
 
 
+def _persisted_provider(value: str) -> str:
+    stripped = value.strip()
+    return _PROVIDER_IDENTITY_ALIASES.get(stripped.casefold(), stripped)
+
+
 def _providers_compatible(first: str, second: str) -> bool:
     first_provider = _model_provider(first)
     second_provider = _model_provider(second)
@@ -366,7 +371,7 @@ def _clean_openrouter_attempts(value: Any) -> tuple[list[dict[str, Any]], bool]:
         model = _identifier(item.get("model"))
         status = _integer(item.get("status"))
         if provider is not None:
-            attempt["provider"] = provider
+            attempt["provider"] = _persisted_provider(provider)
         if model is not None:
             attempt["model"] = model
         if status is not None:
@@ -448,7 +453,7 @@ class GatewayEvidence:
             and _provider_identity(self.provider) != _provider_identity(value)
         ):
             self.profile_reasons.append("provider_conflict")
-        self.provider = value
+        self.provider = _persisted_provider(value)
 
     def _set_model(self, value: str) -> None:
         self._record_model(value)
@@ -692,7 +697,7 @@ class GatewayEvidence:
                 successful_attempts += 1
             attempt = {}
             if provider is not None:
-                attempt["provider"] = provider
+                attempt["provider"] = _persisted_provider(provider)
             if model is not None:
                 attempt["model"] = model
                 self._record_model(model)
