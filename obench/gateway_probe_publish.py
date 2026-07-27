@@ -18,16 +18,18 @@ from typing import Any
 from . import (
     gateway_probe_report,
     gateway_probe_results,
+    gateway_probe_run,
     gateway_probe_spec,
     gateway_spec,
 )
-from .gateway_probe_models import GatewayProbeRunError
+from .gateway_probe_models import GatewayProbeRunError, ProbeBlock
 
 
 PUBLIC_SCHEMA_VERSION = 2
 PUBLIC_BUNDLE_KIND = "gateway_probe_public"
 PUBLIC_FILES = (
     "prices.json",
+    "schedule.json",
     "results.jsonl",
     "report.json",
     "report.md",
@@ -292,6 +294,122 @@ def _project_prices(value: Any) -> dict[str, Any]:
     return projected
 
 
+def _project_schedule(
+    schedule: tuple[ProbeBlock, ...],
+) -> dict[str, Any]:
+    projected = {
+        "schema_version": 1,
+        "benchmark": gateway_probe_results.BENCHMARK,
+        "blocks": [
+            {
+                "case_id": block.case_id,
+                "prompt_digest": block.prompt_digest,
+                "condition": block.condition,
+                "repetition": block.repetition,
+                "arm_ids": list(block.arm_ids),
+            }
+            for block in schedule
+        ],
+    }
+    _validate_public_schedule(projected)
+    return projected
+
+
+def _validate_public_schedule(value: Any) -> tuple[ProbeBlock, ...]:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema_version", "benchmark", "blocks"}
+        or value.get("schema_version") != 1
+        or value.get("benchmark") != gateway_probe_results.BENCHMARK
+        or not isinstance(value.get("blocks"), list)
+        or not value["blocks"]
+    ):
+        raise GatewayProbeRunError("public schedule does not match schema")
+    blocks = []
+    coordinates = set()
+    for raw in value["blocks"]:
+        if (
+            not isinstance(raw, dict)
+            or set(raw) != {
+                "case_id",
+                "prompt_digest",
+                "condition",
+                "repetition",
+                "arm_ids",
+            }
+            or not isinstance(raw.get("case_id"), str)
+            or not raw["case_id"]
+            or raw.get("condition") not in gateway_probe_spec.CONDITIONS
+            or not isinstance(raw.get("repetition"), int)
+            or isinstance(raw.get("repetition"), bool)
+            or raw["repetition"] < 1
+            or not isinstance(raw.get("arm_ids"), list)
+            or len(raw["arm_ids"]) < 2
+            or any(
+                not isinstance(arm_id, str) or not arm_id
+                for arm_id in raw["arm_ids"]
+            )
+            or len(set(raw["arm_ids"])) != len(raw["arm_ids"])
+        ):
+            raise GatewayProbeRunError("public schedule block does not match schema")
+        _sha256_value(raw.get("prompt_digest"), "public schedule prompt_digest")
+        block = ProbeBlock(
+            case_id=raw["case_id"],
+            prompt_digest=raw["prompt_digest"],
+            condition=raw["condition"],
+            repetition=raw["repetition"],
+            arm_ids=tuple(raw["arm_ids"]),
+        )
+        if block.coordinate in coordinates:
+            raise GatewayProbeRunError(
+                "public schedule contains duplicate coordinates"
+            )
+        coordinates.add(block.coordinate)
+        blocks.append(block)
+    arm_sets = {frozenset(block.arm_ids) for block in blocks}
+    counts = {
+        condition: sum(block.condition == condition for block in blocks)
+        for condition in gateway_probe_spec.CONDITIONS
+    }
+    if len(arm_sets) != 1 or counts["cold"] != counts["warm"]:
+        raise GatewayProbeRunError("public schedule is not matched across conditions")
+    _assert_public_safe(value)
+    return tuple(blocks)
+
+
+def _validate_rows_against_public_schedule(
+    rows: list[dict[str, Any]],
+    schedule: tuple[ProbeBlock, ...],
+    experiment_digest: str,
+) -> None:
+    blocks = {block.coordinate: block for block in schedule}
+    for row in rows:
+        identity = row["identity"]
+        schedule_identity = identity["schedule"]
+        coordinate = (
+            identity["case"]["id"],
+            schedule_identity["condition"],
+            schedule_identity["repetition"],
+        )
+        block = blocks.get(coordinate)
+        arm_id = identity["arm"]["id"]
+        if (
+            block is None
+            or identity["case"]["prompt_digest"] != block.prompt_digest
+            or arm_id not in block.arm_ids
+            or row["expected_arm_ids"] != sorted(block.arm_ids)
+            or schedule_identity["block_id"]
+            != gateway_probe_results.block_id(
+                experiment_digest,
+                block,
+                schedule_identity["block_attempt"],
+            )
+        ):
+            raise GatewayProbeRunError(
+                "public results do not match the authenticated schedule"
+            )
+
+
 def _project_result_row(row: Mapping[str, Any]) -> dict[str, Any]:
     gateway_probe_results.validate_row_shape(row)
     projected = {
@@ -332,8 +450,7 @@ def _detect_verifier_commit() -> str:
                 "status",
                 "--porcelain",
                 "--",
-                "obench/gateway_probe_publish.py",
-                "obench/gateway_probe_report.py",
+                "obench",
             ],
             check=True,
             capture_output=True,
@@ -598,7 +715,20 @@ def publish_bundle(
     ):
         raise GatewayProbeRunError("source experiment does not match source manifest")
     prices = _project_prices(_load_json(source / "prices.json", "source prices"))
+    schedule = gateway_probe_run.build_schedule(experiment)
+    projected_schedule = _project_schedule(schedule)
+    schedule_digest = gateway_spec.canonical_digest(
+        projected_schedule["blocks"]
+    )
+    price_digest = gateway_spec.canonical_digest(prices)
     rows = gateway_probe_results.load_results(source / "results.jsonl")
+    gateway_probe_results.validate_resume_rows(
+        rows,
+        experiment=experiment,
+        schedule=schedule,
+        schedule_digest=schedule_digest,
+        price_digest=price_digest,
+    )
     recomputed = gateway_probe_report.aggregate(rows, experiment=experiment)
     _require_complete_report(recomputed)
     _source_report_matches(
@@ -606,8 +736,12 @@ def publish_bundle(
         recomputed,
         (source / "report.md").read_text(encoding="utf-8"),
     )
-    if gateway_spec.canonical_digest(prices) != recomputed["price_digest"]:
+    if price_digest != recomputed["price_digest"]:
         raise GatewayProbeRunError("source prices do not match results price_digest")
+    if schedule_digest != recomputed["schedule_digest"]:
+        raise GatewayProbeRunError(
+            "source schedule does not match results schedule_digest"
+        )
     projected_rows = [_project_result_row(row) for row in rows]
     projected_report = gateway_probe_report.aggregate(projected_rows)
     if projected_report != recomputed:
@@ -622,6 +756,10 @@ def publish_bundle(
     try:
         (temporary / "prices.json").write_text(
             _canonical_json(prices),
+            encoding="ascii",
+        )
+        (temporary / "schedule.json").write_text(
+            _canonical_json(projected_schedule),
             encoding="ascii",
         )
         (temporary / "results.jsonl").write_text(
@@ -666,10 +804,30 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             raise GatewayProbeRunError(f"public artifact digest mismatch: {name}")
 
     prices = _project_prices(_load_json(directory / "prices.json", "public prices"))
+    schedule_value = _load_json(directory / "schedule.json", "public schedule")
+    schedule = _validate_public_schedule(schedule_value)
     rows = gateway_probe_results.load_results(directory / "results.jsonl")
     _validate_public_rows(rows)
     recomputed = gateway_probe_report.aggregate(rows)
     _require_complete_report(recomputed)
+    if (
+        gateway_spec.canonical_digest(schedule_value["blocks"])
+        != recomputed["schedule_digest"]
+    ):
+        raise GatewayProbeRunError("public schedule does not match results")
+    if any(
+        sum(block.condition == condition for block in schedule)
+        != recomputed["scheduled_blocks_per_condition"]
+        for condition in gateway_probe_spec.CONDITIONS
+    ):
+        raise GatewayProbeRunError(
+            "public schedule count does not match results"
+        )
+    _validate_rows_against_public_schedule(
+        rows,
+        schedule,
+        recomputed["experiment_digest"],
+    )
     _report_matches(
         _load_json(directory / "report.json", "public report"),
         recomputed,

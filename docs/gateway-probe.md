@@ -171,8 +171,11 @@ obench gateway probe verify BUNDLE_DIR
 and warm matched block, and recomputes the report before writing an exact public
 file set. No public experiment snapshot is emitted because fields such as
 endpoints, credential names, routing policy, and budget cannot all be
-independently authenticated from sanitized result rows. Prompt digests remain
-in row identities; receipt values and operational generation IDs are removed.
+independently authenticated from sanitized result rows. A sanitized
+`schedule.json` is emitted because its digest is already bound into every row;
+verification uses it to authenticate exact case/repetition coordinates, arm
+membership, prompt digests, and block IDs. Prompt digests remain in row
+identities; receipt values and operational generation IDs are removed.
 `verify` rejects partial schedules, extra files, symlinks, secrets, paths,
 account identifiers, nonempty receipts, digest drift, schema drift, and reports
 that do not exactly match recomputation.

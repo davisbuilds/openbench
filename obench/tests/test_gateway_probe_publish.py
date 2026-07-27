@@ -10,6 +10,7 @@ from obench import (
     gateway_probe_publish,
     gateway_probe_report,
     gateway_probe_results,
+    gateway_probe_run,
     gateway_probe_spec,
     gateway_spec,
 )
@@ -61,7 +62,18 @@ def build_private_run(root, *, prompt="PRIVATE PROMPT must never publish"):
         }],
     }
     price_digest = gateway_spec.canonical_digest(prices)
-    schedule_digest = "f" * 64
+    schedule = gateway_probe_run.build_schedule(experiment)
+    schedule_digest = gateway_spec.canonical_digest([
+        {
+            "case_id": block.case_id,
+            "prompt_digest": block.prompt_digest,
+            "condition": block.condition,
+            "repetition": block.repetition,
+            "arm_ids": list(block.arm_ids),
+        }
+        for block in schedule
+    ])
+    blocks = {block.coordinate: block for block in schedule}
     arms = {arm.arm_id: arm for arm in experiment.arms}
     rows = [
         row(arm_id, condition, repetition, baseline=arm_id == "direct")
@@ -82,6 +94,17 @@ def build_private_run(root, *, prompt="PRIVATE PROMPT must never publish"):
         }
         item["identity"]["comparison"]["price_digest"] = price_digest
         item["identity"]["comparison"]["schedule_digest"] = schedule_digest
+        schedule_identity = item["identity"]["schedule"]
+        block = blocks[(
+            experiment.cases[0].case_id,
+            schedule_identity["condition"],
+            schedule_identity["repetition"],
+        )]
+        schedule_identity["block_id"] = gateway_probe_results.block_id(
+            experiment.digest,
+            block,
+            schedule_identity["block_attempt"],
+        )
         item["scheduled_blocks_per_condition"] = experiment.repetitions
         item["model_match"] = experiment.model_match
         item["request_metrics"]["route"]["gateway_metadata"] = {
@@ -139,6 +162,7 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
             with self.assertRaisesRegex(GatewayProbeRunError, "source is dirty"):
                 gateway_probe_publish._detect_verifier_commit()
         run.assert_called_once()
+        self.assertEqual(run.call_args.args[0][-1], "obench")
 
     def test_migrates_legacy_source_report_without_publishing_its_label(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -198,6 +222,7 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                 {path.name for path in bundle.iterdir()},
                 {
                     "prices.json",
+                    "schedule.json",
                     "results.jsonl",
                     "report.json",
                     "report.md",
@@ -315,6 +340,20 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
             )
             _rewrite_manifest_hash(bundle, "results.jsonl")
             with self.assertRaisesRegex(GatewayProbeRunError, "recomputed report"):
+                gateway_probe_publish.verify_bundle(bundle)
+
+    def test_rejects_rehashed_schedule_coordinate_substitution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            schedule_path = bundle / "schedule.json"
+            schedule = json.loads(schedule_path.read_text())
+            schedule["blocks"][0]["repetition"] = 99
+            schedule_path.write_text(_json(schedule), encoding="ascii")
+            _rewrite_manifest_hash(bundle, "schedule.json")
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "schedule does not match results",
+            ):
                 gateway_probe_publish.verify_bundle(bundle)
 
     def test_rejects_rehashed_report_tamper_and_qualitative_label_injection(self):
