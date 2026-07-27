@@ -306,8 +306,11 @@ class GatewayProbeFamilyTests(_SiteFixture):
             "Semantic TTFT p50 / p95",
             "Stream total p50 / p95",
             "Throughput tok/s p50 / p95",
-            "Cost p50 / p95",
             "Total / cached / cache-write tokens p50 / p95",
+            "Route leaderboard",
+            "Median warm semantic TTFT difference versus Direct OpenAI.",
+            "No-gateway control",
+            "baseline",
             "Cold setup",
             "DNS p50 / p95",
             "TCP p50 / p95",
@@ -328,6 +331,9 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("unverifiable", page)
         self.assertNotIn("coverage 30/30", page)
         self.assertNotIn("charged cost", page.lower())
+        self.assertNotIn("Cost p50 / p95", page)
+        self.assertIn('class="route-logo"', page)
+        self.assertNotIn("<img", page)
         self.assertNotIn("CI 88.6%–100.0%", page)
         self.assertNotIn("TTFB", page)
         self.assertNotIn("exploratory", page.lower())
@@ -345,6 +351,44 @@ class GatewayProbeFamilyTests(_SiteFixture):
         }
         for arm_id, expected in labels.items():
             self.assertEqual(site._gateway_probe_route_name(arm_id), expected)
+
+    def test_probe_leaderboard_orders_gateways_and_keeps_direct_unranked(self):
+        bundle = {
+            "contrasts": [
+                {
+                    "arm_id": "vercel-openai",
+                    "conditions": {"warm": {
+                        "request_to_semantic_ttft_s": {
+                            "median_gateway_minus_direct": 0.058,
+                            "interval": {"low": 0.014, "high": 0.214},
+                            "coverage": {"covered": 30, "total": 30},
+                        },
+                    }},
+                },
+                {
+                    "arm_id": "openrouter-openai",
+                    "conditions": {"warm": {
+                        "request_to_semantic_ttft_s": {
+                            "median_gateway_minus_direct": -0.054,
+                            "interval": {"low": -0.109, "high": -0.018},
+                            "coverage": {"covered": 30, "total": 30},
+                        },
+                    }},
+                },
+            ],
+        }
+        page = site._gateway_probe_leaderboard(bundle)
+        cards = page[page.index('class="route-leaderboard"'):]
+        self.assertLess(cards.index("OpenRouter"), cards.index("Direct OpenAI"))
+        self.assertLess(cards.index("Direct OpenAI"), cards.index("Vercel"))
+        self.assertIn("-54 ms", page)
+        self.assertIn("+58 ms", page)
+        self.assertIn("95% CI -109 to -18 ms · paired 30/30", page)
+        self.assertEqual(page.count('class="route-position"'), 3)
+
+    def test_probe_leaderboard_wraps_evidence_on_small_screens(self):
+        mobile_css = site._CSS[site._CSS.index("@media(max-width:680px){"):]
+        self.assertIn(".route-detail{white-space:normal}", mobile_css)
 
 
 class CostBasisTests(unittest.TestCase):
