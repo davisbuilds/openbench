@@ -307,7 +307,6 @@ class GatewayProbeFamilyTests(_SiteFixture):
             "Cold requests",
             "Warm requests",
             "OpenBench Composite",
-            "Provider variance",
             "TTFT p50 / p95",
             "Response headers p50 / p95",
             "First body byte p50 / p95",
@@ -324,10 +323,24 @@ class GatewayProbeFamilyTests(_SiteFixture):
             "Δ TTFT",
         ):
             self.assertIn(label, page)
-        self.assertLess(
-            page.index("TTFT p50 / p95"),
-            page.index("Response headers p50 / p95"),
+        request_labels = (
+            "Route",
+            "TTFT p50 / p95",
+            "Stream total p50 / p95",
+            "Response headers p50 / p95",
+            "First body byte p50 / p95",
+            "Throughput tok/s p50 / p95",
+            "Total / cached / cache-write tokens p50 / p95",
         )
+        cold_table = page[
+            page.index("Cold requests"):page.index("Warm requests")
+        ]
+        warm_table = page[
+            page.index("Warm requests"):page.index("Cold setup")
+        ]
+        for table in (cold_table, warm_table):
+            positions = [table.index(label) for label in request_labels]
+            self.assertEqual(positions, sorted(positions))
         self.assertIn("<b>cold blocks </b>30/30", page)
         self.assertIn("<b>warm blocks </b>30/30", page)
         self.assertIn("Complete blocks: 30/30.", page)
@@ -351,7 +364,11 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("exploratory", page.lower())
         self.assertNotIn("confirmatory", page.lower())
         self.assertNotIn("Δ stream total", page)
+        self.assertNotIn("Provider variance", page)
         paired = page[page.index("Paired request deltas"):]
+        self.assertIn("Every delta is gateway minus Direct OpenAI.", paired)
+        self.assertIn("positive means slower/worse", paired)
+        self.assertIn("negative means faster/better", paired)
         self.assertNotIn(">vs direct<", paired)
 
     def test_probe_route_labels_hide_provider_suffix(self):
@@ -483,21 +500,9 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("vercel-openai", scores)
         self.assertIn("direct-openai", scores)
 
-    def test_probe_variance_uses_direct_as_unscored_reference(self):
-        page = site._gateway_probe_variance(self._composite_bundle())
-
-        self.assertIn("Provider variance", page)
-        self.assertIn("Vercel", page)
-        self.assertIn("-12.8", page)
-        self.assertIn("Direct OpenAI", page)
-        self.assertIn("reference", page.lower())
-        self.assertIn('class="variance-delta">-12.8', page)
-        self.assertNotIn(">94.0<", page)
-
     def test_probe_leaderboard_wraps_evidence_on_small_screens(self):
         mobile_css = site._CSS[site._CSS.index("@media(max-width:680px){"):]
         self.assertIn(".route-detail{white-space:normal}", mobile_css)
-        self.assertIn(".variance-delta{display:block}", mobile_css)
 
 
 class CostBasisTests(unittest.TestCase):
