@@ -8,10 +8,8 @@ separate tab:
 - **Harness Bench** — verified `results.jsonl` publish bundles, aggregated
   exactly as [`obench leaderboard`](leaderboard.md) does, then enriched with
   median wall time and `$/solve`.
-- **Gateway Bench** — verified evidence bundles, aggregated by
-  `obench/gateway_report.py`, including the Gateway Tax contrast table.
-- **Gateway Probe** — verified public request-probe bundles, with cold and warm
-  request telemetry and paired route deltas kept separate from Gateway Bench.
+- **Gateway Bench** — verified request-level bundles with cold and warm request
+  telemetry, an absolute route leaderboard, and paired route deltas.
 - **Releases** — the `releases.json` / `community.json` / `packs.json` manifests.
 - **Methodology** — denominators, intervals, token bases, and the
   comparability rules, in one place next to the numbers.
@@ -45,49 +43,21 @@ pack index all rebuild the landing page automatically.
 | `--site-dir PATH` | Pages root (default: `docs/`) |
 | `--community-dir PATH` | Extra harness scan root (default: `data/community` when present) |
 | `--no-community-dir` | Only scan `site-dir/releases` + `site-dir/community` |
-| `--gateway-dir PATH` | Gateway bundle root, repeatable (default: `<site-dir>/gateway`) |
-| `--gateway-probe-dir PATH` | Public Gateway Probe bundle root, repeatable (default: `<site-dir>/gateway-probe`) |
+| `--gateway-probe-dir PATH` | Public Gateway Bench bundle root, repeatable (default: `<site-dir>/gateway-probe`) |
 
 The build is deterministic: the same inputs produce byte-identical output, so
 regenerating produces a clean diff.
 
 ## Publishing a Gateway Bench board
 
-The Gateway tab reads verified bundles from `docs/gateway/*/`. Each directory is
-what `obench gateway publish` produces — `provenance.json` with
-`bundle_kind = "gateway_bench"`, the sanitized `results.jsonl`, and the
-`experiment` / `policy` / `catalog` / `prices` snapshots.
-
-```bash
-obench gateway run experiment.toml --results results/gw.jsonl
-obench gateway publish results/gw.jsonl experiment.toml docs/gateway/2026-07-23-gateway-tax
-obench site build
-```
-
-Every bundle is re-verified with `gateway_publish.verify_bundle()` at build time.
-A directory that fails verification, is not a gateway bundle, or whose rows do
-not aggregate into a Gateway Tax report is listed as skipped rather than
-silently dropped. Optional titles and dates come from a `docs/gateway.json`
-manifest keyed by directory name, in the same shape as `releases.json`:
-
-```json
-[
-  {
-    "id": "2026-07-23-gateway-tax",
-    "title": "Gateway Tax: gpt-4o-mini, direct vs OpenRouter / Vercel",
-    "date": "2026-07-23",
-    "path": "gateway/2026-07-23-gateway-tax/index.html"
-  }
-]
-```
-
-## Publishing a Gateway Probe board
-
-The Gateway Probe tab reads public bundles from `docs/gateway-probe/*/`. Each
-directory must be the exact output of `obench gateway probe publish`; the site
-re-verifies it with `gateway_probe_publish.verify_bundle()` before reading its
-schema-v4 report. Digest drift, extra files, symlinks, schema drift, or a report
-that does not exactly recompute is listed as skipped and never rendered.
+The Gateway Bench tab reads public request-level bundles from
+`docs/gateway-probe/*/`. Each directory must be the exact output of
+`obench gateway probe publish`; the site re-verifies it with
+`gateway_probe_publish.verify_bundle()` before reading its schema-v4 report.
+Digest drift, extra files, symlinks, schema drift, or a report that does not
+exactly recompute is listed as skipped and never rendered. The internal
+`gateway_probe` identifiers remain part of the bundle and command contracts;
+they are not a separate public benchmark family.
 
 ```bash
 obench gateway probe publish RUN_DIR docs/gateway-probe/2026-07-27-managed
@@ -102,7 +72,7 @@ keyed by bundle directory:
 [
   {
     "id": "2026-07-27-managed",
-    "title": "Gateway Probe: managed routes",
+    "title": "Gateway Bench: managed routes",
     "date": "2026-07-27"
   }
 ]
@@ -112,9 +82,9 @@ The verified bundle directory has an exact file set and contains no
 `index.html`. Omit `path` unless a separate release page exists outside that
 directory.
 
-Gateway Probe is a third measurement family, not a Gateway Bench extension.
-Request attempts and complete cold/warm blocks are never merged with coding
-agent cells, task-weighted Gateway Tax estimates, or their claims.
+Request attempts and complete cold/warm blocks are never merged with Harness
+Bench coding-agent cells or their claims. Legacy coding-agent gateway workload
+bundles under `docs/gateway/` are not included in the generated site.
 
 The route leaderboard ranks managed gateways by an absolute, cost-free
 **OpenBench Composite** on a 0–100 scale. Before the availability multiplier,
@@ -157,26 +127,7 @@ are never mixed row by row. Incomplete lanes fail closed and display coverage
 instead of a potentially biased token figure. Per-solve token traffic sums every
 matched attempt, including failures, and divides by solved cells.
 
-**Gateway Bench.** The scan table keeps route outcomes together: solve rate,
-mean checker score, availability, call-cap pressure, median end-to-end cell
-latency, and `$/solve`. The cost column is present only when
-`frozen_list_estimate` completely covers every arm; gateway-reported and
-invoice-reconciled amounts remain preserved as separate evidence and are never
-mixed into that comparison. Outcome and cost denominators are displayed.
-
-A secondary **Serving telemetry** table shows observed served-route
-distribution, per-call TTFB, semantic TTFT, output throughput, token usage,
-provider-reported prompt-cache accounting, and metric coverage. The
-experiment's model-match policy and provider prompt mode are board metadata.
-Median end-to-end latency is a cell-level outcome, not a per-call latency.
-
-The **Gateway tax** table shows paired, task-weighted outcome differences from
-the direct control; an interval spanning zero is not a detected effect.
-Semantically directional per-call timing, throughput, token, and frozen-list
-cost contrasts appear separately. Paired cost is labeled per attempted cell,
-not per solve; provider cache-accounting deltas are not ranked.
-
-**Gateway Probe.** Cold and warm request conditions render in separate tables.
+**Gateway Bench.** Cold and warm request conditions render in separate tables.
 Each route row includes the provider logo, followed by TTFT, response headers,
 first body byte, stream total, throughput p50/p95, and total, cached-input, and
 cache-write tokens with coverage. The raw label is **TTFT**, and it appears

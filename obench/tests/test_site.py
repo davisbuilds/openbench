@@ -160,21 +160,22 @@ class GatewayFamilyTests(_SiteFixture):
         self.assertIn("Median E2E cell latency", page)
         self.assertIn("Δ median E2E cell latency", page)
 
-    def test_missing_gateway_root_is_empty_not_an_error(self):
-        doc = site.build_board(self.site_dir)
-        self.assertEqual(doc["gateway"]["bundle_count"], 0)
-        self.assertEqual(doc["gateway"]["bundles"], [])
-
-    def test_non_gateway_directory_is_reported_as_skipped(self):
-        bundle = os.path.join(self.site_dir, "gateway", "not-a-bundle")
-        _write(os.path.join(bundle, "provenance.json"),
-               json.dumps({"bundle_kind": "harness"}))
-        doc = site.build_board(self.site_dir)
-        self.assertEqual(doc["gateway"]["bundle_count"], 0)
-        self.assertEqual(
-            [s["reason"] for s in doc["gateway"]["skipped"]],
-            ["not a gateway_bench bundle"],
+    def test_legacy_gateway_family_is_not_built_or_rendered(self):
+        legacy = os.path.join(self.site_dir, "gateway", "legacy-workload")
+        _write(
+            os.path.join(legacy, "provenance.json"),
+            json.dumps({"bundle_kind": "gateway_bench"}),
         )
+        with mock.patch.object(site, "build_gateway_family") as build_legacy:
+            doc = site.build_board(
+                self.site_dir,
+                gateway_dirs=[os.path.join(self.site_dir, "gateway")],
+            )
+        build_legacy.assert_not_called()
+        self.assertEqual(doc["gateway"]["bundle_count"], 0)
+        self.assertNotIn("gateway_probe", doc)
+        page = site.render_board_html(doc)
+        self.assertNotIn("LEGACY GATEWAY WORKLOAD", page)
 
     def test_tampered_bundle_fails_verification(self):
         bundle = os.path.join(self.site_dir, "gateway", "tampered")
@@ -185,8 +186,6 @@ class GatewayFamilyTests(_SiteFixture):
         }))
         _write(os.path.join(bundle, "results.jsonl"), "{}\n")
         self.assertIsNotNone(site.gateway_verification_error(bundle))
-        doc = site.build_board(self.site_dir)
-        self.assertEqual(doc["gateway"]["bundle_count"], 0)
 
 
 class GatewayProbeFamilyTests(_SiteFixture):
@@ -207,24 +206,24 @@ class GatewayProbeFamilyTests(_SiteFixture):
         )
         return bundle
 
-    def test_verified_public_probe_bundle_is_a_separate_family(self):
+    def test_verified_request_bundle_is_the_public_gateway_bench(self):
         self._publish_probe()
         _write(
             os.path.join(self.site_dir, "gateway-probe.json"),
             json.dumps([{
                 "id": "probe-v4",
-                "title": "Managed request probe",
+                "title": "Gateway Probe: managed request probe",
                 "date": "2026-07-27",
             }]),
         )
 
         doc = site.build_board(self.site_dir)
-        family = doc["gateway_probe"]
+        family = doc["gateway"]
 
         self.assertEqual(family["bundle_count"], 1)
-        self.assertEqual(doc["gateway"]["bundle_count"], 0)
+        self.assertNotIn("gateway_probe", doc)
         bundle = family["bundles"][0]
-        self.assertEqual(bundle["title"], "Managed request probe")
+        self.assertEqual(bundle["title"], "Gateway Bench: managed request benchmark")
         self.assertEqual(bundle["complete_blocks"], {"cold": 2, "warm": 2})
         self.assertEqual(bundle["scheduled_blocks_per_condition"], 2)
         self.assertEqual(bundle["model_match"], "exact_revision")
@@ -232,8 +231,14 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertEqual(len(bundle["contrasts"]), 1)
 
         _, _, facts = site._lede(doc)
-        self.assertIn("1 gateway probe bundles", facts)
+        self.assertIn("1 gateway bundles", facts)
         self.assertIn("updated 2026-07-27", facts)
+
+        page = site.render_board_html(doc)
+        self.assertIn('href="#gateway">Gateway Bench</a>', page)
+        self.assertIn("Gateway Bench: managed request benchmark", page)
+        self.assertNotIn("Gateway Probe", page)
+        self.assertNotIn('id="view-gateway-probe"', page)
 
     def test_tampered_probe_bundle_fails_closed(self):
         bundle = self._publish_probe()
@@ -241,14 +246,14 @@ class GatewayProbeFamilyTests(_SiteFixture):
 
         doc = site.build_board(self.site_dir)
 
-        self.assertEqual(doc["gateway_probe"]["bundle_count"], 0)
+        self.assertEqual(doc["gateway"]["bundle_count"], 0)
         self.assertEqual(
-            [item["id"] for item in doc["gateway_probe"]["skipped"]],
+            [item["id"] for item in doc["gateway"]["skipped"]],
             ["probe-v4"],
         )
         self.assertIn(
             "bundle verification failed",
-            doc["gateway_probe"]["skipped"][0]["reason"],
+            doc["gateway"]["skipped"][0]["reason"],
         )
 
     def test_probe_board_renders_factual_30_by_30_contract(self):
@@ -789,7 +794,7 @@ class RenderTests(_SiteFixture):
         doc = site.build_board(self.site_dir)
         page = site.render_board_html(doc)
 
-        self.assertEqual(doc["schema_version"], 4)
+        self.assertEqual(doc["schema_version"], 5)
         self.assertIn(
             '<link rel="canonical" href="https://openbench.example/">',
             page,
@@ -889,14 +894,17 @@ class RenderTests(_SiteFixture):
         self.assertEqual(head.count("<tr data-harness="), 2)
         self.assertNotIn("<tbody>", script)
 
-    def test_all_families_and_methodology_are_present(self):
+    def test_public_families_and_methodology_use_gateway_bench_only(self):
         page = site.render_board_html(site.build_board(self.site_dir))
         self.assertIn('id="view-harness"', page)
         self.assertIn('id="view-gateway"', page)
-        self.assertIn('id="view-gateway-probe"', page)
-        self.assertIn('href="#gateway-probe">Gateway Probe</a>', page)
+        self.assertIn('href="#gateway">Gateway Bench</a>', page)
+        self.assertNotIn('id="view-gateway-probe"', page)
+        self.assertNotIn("Gateway Probe", page)
+        self.assertIn('if (hash === "gateway-probe")', page)
+        self.assertIn('window.history.replaceState(null, "", "#gateway")', page)
         self.assertIn('id="view-methodology"', page)
-        self.assertIn("Gateway Tax", page)
+        self.assertNotIn("Gateway Tax", page)
 
     def test_write_board_emits_the_landing_page_and_data(self):
         info = site.write_board(self.site_dir)
@@ -908,7 +916,7 @@ class RenderTests(_SiteFixture):
         self.assertEqual(doc["schema_version"], site.SCHEMA_VERSION)
         self.assertEqual(info["harness_bundles"], 1)
         self.assertEqual(info["gateway_bundles"], 0)
-        self.assertEqual(info["gateway_probe_bundles"], 0)
+        self.assertNotIn("gateway_probe_bundles", info)
 
     def test_write_board_rolls_back_both_outputs_on_replace_failure(self):
         info = site.write_board(self.site_dir)
@@ -1020,13 +1028,7 @@ class DesignContractTests(_SiteFixture):
 
     def test_lede_updated_date_includes_gateway_bundles(self):
         doc = site.build_board(self.site_dir)
-        doc["gateway"]["bundles"] = [{"date": "2026-07-25"}]
-        _, _, facts = site._lede(doc)
-        self.assertIn("updated 2026-07-25", facts)
-
-    def test_lede_updated_date_includes_gateway_probe_bundles(self):
-        doc = site.build_board(self.site_dir)
-        doc["gateway_probe"]["bundles"] = [{"date": "2026-07-26"}]
+        doc["gateway"]["bundles"] = [{"date": "2026-07-26"}]
         _, _, facts = site._lede(doc)
         self.assertIn("updated 2026-07-26", facts)
 
