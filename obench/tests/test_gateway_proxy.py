@@ -162,6 +162,8 @@ class GatewayProxyLedgerTests(unittest.TestCase):
         token = "capped-cell"
         max_calls = 8
         self.server.register_cell(token, max_calls=max_calls)
+        max_calls_event = self.server.cell_max_calls_event(token)
+        self.assertFalse(max_calls_event.is_set())
         self.upstream.request_count = 0
         self.upstream.release.set()
         start = threading.Barrier(25)
@@ -198,7 +200,12 @@ class GatewayProxyLedgerTests(unittest.TestCase):
         self.assertEqual([row["status"] for row in requests].count(429), 1)
         rejection = next(row for row in requests if row["status"] == 429)
         self.assertEqual(rejection["error"], "max_calls_exceeded")
+        self.assertTrue(max_calls_event.is_set())
         self.assertNotIn(SECRET, seal.path.read_text(encoding="utf-8"))
+
+    def test_max_calls_signal_requires_registered_cell(self):
+        with self.assertRaisesRegex(KeyError, "cell is not registered"):
+            self.server.cell_max_calls_event("missing")
 
     def test_exhausted_cell_returns_budget_error_while_draining_and_after_seal(self):
         token = "draining-capped-cell"

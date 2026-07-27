@@ -8,8 +8,11 @@ import http.client
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -439,7 +442,9 @@ direct_control_arm_id = "direct"
                 statuses.append(response.status)
                 response.read()
                 conn.close()
-            return {"completed": False, "error": "budget rejection"}
+            raise gateway_run.GatewayRunError(
+                "adapter exited after budget rejection"
+            )
 
         with self._runtime(), mock.patch.object(
             gateway_run, "_invoke_local", side_effect=invoke_many
@@ -507,6 +512,155 @@ direct_control_arm_id = "direct"
         )
         self.assertEqual(ledgers.count('"error":"max_calls_exceeded"'), len(rows))
         self.assertNotIn(SECRET, capped_results.read_text() + ledgers)
+
+    def test_invoke_local_stops_and_reaps_process_group_at_call_cap(self):
+        root = self.root / "invoke-cap"
+        root.mkdir()
+        plan = root / "plan.json"
+        instruction = root / "instruction.txt"
+        workspace = root / "workspace"
+        workspace.mkdir()
+        plan.write_text("{}")
+        instruction.write_text("test")
+        child_pid = root / "child.pid"
+        script = (
+            "import os, pathlib, subprocess, time\n"
+            f"p=subprocess.Popen(['sleep','60'])\n"
+            f"pathlib.Path({str(child_pid)!r}).write_text(str(p.pid))\n"
+            "time.sleep(60)\n"
+        )
+        real_popen = subprocess.Popen
+        with mock.patch.object(
+            gateway_run.subprocess,
+            "Popen",
+            side_effect=lambda *args, **kwargs: real_popen(
+                [sys.executable, "-c", script],
+                stdout=kwargs.get("stdout"),
+                stderr=kwargs.get("stderr"),
+                text=kwargs.get("text"),
+                start_new_session=kwargs.get("start_new_session"),
+            ),
+        ):
+            started = time.monotonic()
+            result = gateway_run._invoke_local(
+                plan_path=plan,
+                instruction_path=instruction,
+                workdir=workspace,
+                proxy_base_url="http://127.0.0.1:1",
+                token="cell",
+                timeout_s=10,
+                adapters_dir=self.adapters,
+                max_calls_exceeded=lambda: child_pid.exists(),
+            )
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertTrue(result["max_calls_exceeded"])
+        pid = int(child_pid.read_text())
+        for _ in range(20):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            self.fail("call-cap child process survived its process-group kill")
+
+    def test_invoke_local_preserves_call_cap_when_entry_exits_immediately(self):
+        root = self.root / "invoke-cap-exit"
+        root.mkdir()
+        plan = root / "plan.json"
+        instruction = root / "instruction.txt"
+        workspace = root / "workspace"
+        workspace.mkdir()
+        plan.write_text("{}")
+        instruction.write_text("test")
+        cap_signal = root / "cap.signal"
+        script = (
+            "import pathlib, sys\n"
+            f"pathlib.Path({str(cap_signal)!r}).touch()\n"
+            "sys.exit(1)\n"
+        )
+        real_popen = subprocess.Popen
+        with mock.patch.object(
+            gateway_run.subprocess,
+            "Popen",
+            side_effect=lambda *args, **kwargs: real_popen(
+                [sys.executable, "-c", script],
+                stdout=kwargs.get("stdout"),
+                stderr=kwargs.get("stderr"),
+                text=kwargs.get("text"),
+                start_new_session=kwargs.get("start_new_session"),
+            ),
+        ):
+            result = gateway_run._invoke_local(
+                plan_path=plan,
+                instruction_path=instruction,
+                workdir=workspace,
+                proxy_base_url="http://127.0.0.1:1",
+                token="cell",
+                timeout_s=10,
+                adapters_dir=self.adapters,
+                max_calls_exceeded=cap_signal.exists,
+            )
+        self.assertTrue(result["max_calls_exceeded"])
+        self.assertFalse(result["entry_timed_out"])
+
+    def test_invoke_local_reaps_process_group_on_interrupt(self):
+        root = self.root / "invoke-interrupt"
+        root.mkdir()
+        plan = root / "plan.json"
+        instruction = root / "instruction.txt"
+        workspace = root / "workspace"
+        workspace.mkdir()
+        plan.write_text("{}")
+        instruction.write_text("test")
+        child_pid = root / "child.pid"
+        script = (
+            "import pathlib, subprocess, time\n"
+            f"p=subprocess.Popen(['sleep','60'])\n"
+            f"pathlib.Path({str(child_pid)!r}).write_text(str(p.pid))\n"
+            "time.sleep(60)\n"
+        )
+        checks = 0
+
+        def interrupt():
+            nonlocal checks
+            checks += 1
+            if child_pid.exists() and checks > 1:
+                raise KeyboardInterrupt
+            return False
+
+        real_popen = subprocess.Popen
+        with mock.patch.object(
+            gateway_run.subprocess,
+            "Popen",
+            side_effect=lambda *args, **kwargs: real_popen(
+                [sys.executable, "-c", script],
+                stdout=kwargs.get("stdout"),
+                stderr=kwargs.get("stderr"),
+                text=kwargs.get("text"),
+                start_new_session=kwargs.get("start_new_session"),
+            ),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                gateway_run._invoke_local(
+                    plan_path=plan,
+                    instruction_path=instruction,
+                    workdir=workspace,
+                    proxy_base_url="http://127.0.0.1:1",
+                    token="cell",
+                    timeout_s=10,
+                    adapters_dir=self.adapters,
+                    max_calls_exceeded=interrupt,
+                )
+        pid = int(child_pid.read_text())
+        for _ in range(20):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            self.fail("interrupted child process survived its process-group kill")
 
     def test_proxy_evidence_honors_parser_integrity_verdict(self):
         experiment = gateway_run.gateway_spec.load_experiment(self.experiment)
