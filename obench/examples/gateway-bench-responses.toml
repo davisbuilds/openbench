@@ -47,6 +47,7 @@ seed = 20260723
 arm_id = "cloudflare-openai-responses"
 route_kind = "gateway"
 gateway = "cloudflare"
+gateway_id = "openbench-gateway-bench"
 # Replace the illustrative account ID before running.
 endpoint = "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1/responses"
 protocol = "openai_responses"

@@ -255,7 +255,11 @@ def _headers(
         "Connection": "keep-alive",
     }
     headers.update(
-        gateway_profiles.request_headers(gateway=plan.gateway, secret=secret)
+        gateway_profiles.request_headers(
+            gateway=plan.gateway,
+            gateway_id=plan.gateway_id,
+            secret=secret,
+        )
     )
     return headers
 

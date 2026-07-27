@@ -4,6 +4,11 @@ Gateway Probe measures request serving through fixed direct and gateway routes.
 It is separate from Gateway Bench: it runs no coding harness, task workspace, or
 checker and makes no solve-rate or output-quality claim.
 
+The headline multi-gateway probe uses managed gateway and billing routes,
+including Cloudflare Unified Billing. Provider-native BYOK passthrough is not
+mixed into that cohort because it uses a materially different upstream account
+and billing path.
+
 ## Contract
 
 Each matched block sends the same case, model, provider, sampling, and output
@@ -77,13 +82,19 @@ resolver call, not proof that a cold request performed an uncached DNS lookup.
 Start from the minimal two-way
 [`gateway-probe-responses.toml`](../obench/examples/gateway-probe-responses.toml),
 or use the
-[`gateway-probe-four-way-responses.toml`](../obench/examples/gateway-probe-four-way-responses.toml)
-comparison across direct OpenAI, OpenRouter, Vercel, and Concentrate. Set the
-credentials declared by the selected experiment and a frozen price snapshot:
+[`gateway-probe-five-way-responses.toml`](../obench/examples/gateway-probe-five-way-responses.toml)
+managed-gateway comparison across direct OpenAI, OpenRouter, Vercel,
+Concentrate, and Cloudflare Unified Billing. Cloudflare's named gateway ID is
+bound into the experiment and sent as `cf-aig-gateway-id`; its response cache
+is skipped and its maximum attempt count is one. Set the credentials declared
+by the selected experiment and a frozen price snapshot:
 
 ```bash
 export OPENAI_API_KEY=...
 export OPENROUTER_API_KEY=...
+export VERCEL_API_KEY=...
+export CONCENTRATE_API_KEY=...
+export CLOUDFLARE_API_TOKEN=...
 export OPENBENCH_GATEWAY_FROZEN_PRICES_JSON='{
   "openai/gpt-4o-mini": {
     "input_per_million": "0.15",

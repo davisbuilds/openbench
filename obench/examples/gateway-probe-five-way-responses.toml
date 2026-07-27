@@ -1,5 +1,5 @@
 schema_version = 1
-experiment_id = "gpt-4o-mini-four-way-responses-probe"
+experiment_id = "gpt-4o-mini-five-way-responses-probe"
 track = "request_probe"
 model_match = "rolling_alias"
 repetitions = 5
@@ -30,6 +30,30 @@ fallback_enabled = false
 retry_count = 0
 cache_enabled = false
 auth_env = "OPENAI_API_KEY"
+[arms.sampling]
+temperature = 0.0
+top_p = 1.0
+seed = 20260725
+
+[[arms]]
+arm_id = "cloudflare-openai"
+route_kind = "gateway"
+gateway = "cloudflare"
+gateway_id = "openbench-gateway-bench"
+direct_control_arm_id = "direct-openai"
+# Replace the illustrative account ID before running.
+endpoint = "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1/responses"
+protocol = "openai_responses"
+baseline = false
+canonical_model = "openai/gpt-4o-mini"
+requested_model = "openai/gpt-4o-mini"
+requested_provider = "openai"
+allowed_models = ["openai/gpt-4o-mini"]
+allowed_providers = ["openai"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "CLOUDFLARE_API_TOKEN"
 [arms.sampling]
 temperature = 0.0
 top_p = 1.0

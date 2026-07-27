@@ -5,6 +5,11 @@ model family, inference provider, sampling, budgets, and repetition schedule
 fixed. It measures the path through a gateway against the provider's direct API
 and against other gateways.
 
+The headline comparison uses each gateway's managed service and billing path.
+Cloudflare therefore uses its Unified Billing REST API, not provider-native
+BYOK passthrough. Provider-native experiments answer a different question and
+must be published as a separate track.
+
 This is not a model-router benchmark. A router chooses a model or provider for
 each request. Gateway Bench forbids that behavior: every arm must request one
 declared model and one declared provider, with fallback, retries, and request
@@ -46,8 +51,9 @@ forwarding a request.
 - Vercel: `providerOptions.gateway.only` contains one provider.
 - Concentrate: `routing.providers` contains one provider and no alternate
   models.
-- Cloudflare: cache is skipped and maximum attempts is one; the requested model
-  remains provider-qualified.
+- Cloudflare Unified Billing: the named managed gateway is bound into the
+  experiment and sent as `cf-aig-gateway-id`; cache is skipped, maximum
+  attempts is one, and the requested model remains provider-qualified.
 
 Client retries are zero. Request cache controls are stripped. A returned
 cached-input count is retained as measured provider behavior, not treated as a
@@ -107,11 +113,12 @@ Gateway Bench supports:
 - `openai_chat` endpoints ending in `/chat/completions`;
 - `openai_responses` endpoints ending in `/responses`.
 
-Concentrate is admitted only through its Responses endpoint. Cloudflare supports
-its AI Gateway REST route for both protocols and its compatibility route for
-Chat Completions. Public experiments require strict known endpoints; private
-test endpoints require `allow_private_endpoint=true` plus an explicit hostname
-or CIDR allowlist.
+Concentrate is admitted only through its Responses endpoint. Cloudflare is
+admitted only through its managed Unified Billing REST route for both
+protocols; provider-native and compatibility/BYOK routes belong in separate
+experiments. Public experiments require strict known endpoints; private test
+endpoints require `allow_private_endpoint=true` plus an explicit hostname or
+CIDR allowlist.
 
 ## Run
 

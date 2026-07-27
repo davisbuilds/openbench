@@ -25,11 +25,7 @@ _CLOUDFLARE_REST_ENDPOINT_RE = re.compile(
     r"(?P<account_id>[0-9a-fA-F]{32})/ai/v1/"
     r"(?P<operation>chat/completions|responses)"
 )
-_CLOUDFLARE_COMPAT_ENDPOINT_RE = re.compile(
-    r"https://gateway\.ai\.cloudflare\.com/v1/"
-    r"(?P<account_id>[0-9a-fA-F]{32})/"
-    r"(?P<gateway_id>[A-Za-z0-9][A-Za-z0-9_-]*)/compat/chat/completions"
-)
+_GATEWAY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _CACHE_KEYS = frozenset({
     "cache",
     "cache_control",
@@ -122,6 +118,7 @@ def validate_arm(
     *,
     route_kind: str,
     gateway: str | None,
+    gateway_id: str | None = None,
     endpoint: str,
     protocol: str,
     requested_model: str,
@@ -132,12 +129,24 @@ def validate_arm(
     if route_kind == "direct":
         if gateway is not None:
             raise GatewayProfileError("direct arm must not declare gateway")
+        if gateway_id is not None:
+            raise GatewayProfileError("direct arm must not declare gateway_id")
         return
     if gateway is None:
         raise GatewayProfileError("gateway arm requires gateway")
     if gateway not in GATEWAYS:
         raise GatewayProfileError(
             f"gateway must be one of: {', '.join(sorted(GATEWAYS))}"
+        )
+    if gateway != "cloudflare" and gateway_id is not None:
+        raise GatewayProfileError(
+            "gateway_id is supported only for cloudflare managed gateway arms"
+        )
+    if gateway == "cloudflare" and (
+        gateway_id is None or _GATEWAY_ID_RE.fullmatch(gateway_id) is None
+    ):
+        raise GatewayProfileError(
+            "cloudflare managed gateway arm requires a valid gateway_id"
         )
     if gateway == "concentrate":
         if (
@@ -151,6 +160,25 @@ def validate_arm(
         if _model_provider(requested_model) != requested_provider.casefold():
             raise GatewayProfileError(
                 "concentrate requested_model must be provider-qualified with "
+                "requested_provider"
+            )
+    if gateway == "cloudflare":
+        rest_match = _CLOUDFLARE_REST_ENDPOINT_RE.fullmatch(endpoint)
+        expected_operation = (
+            "responses" if protocol == "openai_responses" else "chat/completions"
+        )
+        if rest_match is None or rest_match.group("operation") != expected_operation:
+            raise GatewayProfileError(
+                "cloudflare managed endpoint must be "
+                "https://api.cloudflare.com/client/v4/accounts/"
+                "{32-hex-account-id}/ai/v1/{chat/completions|responses}"
+            )
+        if (
+            _model_provider(requested_model) is None
+            or not model_provider_matches(requested_model, requested_provider)
+        ):
+            raise GatewayProfileError(
+                "cloudflare requested_model must be provider-qualified with "
                 "requested_provider"
             )
 
@@ -169,34 +197,6 @@ def validate_arm(
             raise GatewayProfileError(
                 "vercel requested_model must be a provider-qualified model ID"
             )
-    if gateway == "cloudflare":
-        rest_match = _CLOUDFLARE_REST_ENDPOINT_RE.fullmatch(endpoint)
-        compat_match = _CLOUDFLARE_COMPAT_ENDPOINT_RE.fullmatch(endpoint)
-        expected_operation = (
-            "responses" if protocol == "openai_responses" else "chat/completions"
-        )
-        if (
-            (rest_match is None or rest_match.group("operation") != expected_operation)
-            and (compat_match is None or protocol != "openai_chat")
-        ):
-            raise GatewayProfileError(
-                "cloudflare endpoint must be either "
-                "https://api.cloudflare.com/client/v4/accounts/"
-                "{32-hex-account-id}/ai/v1/{chat/completions|responses} or "
-                "https://gateway.ai.cloudflare.com/v1/"
-                "{32-hex-account-id}/{gateway-id}/compat/chat/completions; metadata-only "
-                "Logs API verification is required for other Cloudflare routes"
-            )
-        if (
-            _model_provider(requested_model) is None
-            or not model_provider_matches(requested_model, requested_provider)
-        ):
-            raise GatewayProfileError(
-                "cloudflare requested_model must be provider-qualified with "
-                "requested_provider"
-            )
-
-
 def _strip_cache_controls(value: Any) -> None:
     if isinstance(value, dict):
         for key in list(value):
@@ -269,6 +269,7 @@ def request_headers(
     *,
     gateway: str | None,
     secret: str,
+    gateway_id: str | None = None,
 ) -> dict[str, str]:
     """Return authoritative auth and gateway control headers."""
     headers = {"Authorization": f"Bearer {secret}"}
@@ -280,7 +281,12 @@ def request_headers(
             "X-OpenRouter-Cache": "false",
         })
     elif gateway == "cloudflare":
+        if gateway_id is None or _GATEWAY_ID_RE.fullmatch(gateway_id) is None:
+            raise GatewayProfileError(
+                "cloudflare managed requests require a valid gateway_id"
+            )
         headers.update({
+            "cf-aig-gateway-id": gateway_id,
             "cf-aig-skip-cache": "true",
             "cf-aig-max-attempts": "1",
             "cf-aig-collect-log-payload": "false",

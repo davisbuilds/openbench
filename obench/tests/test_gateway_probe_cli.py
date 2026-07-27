@@ -20,11 +20,11 @@ from obench.tests.test_gateway_probe_spec import manifest
 
 
 class GatewayProbeCliTests(unittest.TestCase):
-    def test_checked_in_minimal_and_four_way_examples_validate_through_cli(self):
+    def test_checked_in_minimal_and_five_way_examples_validate_through_cli(self):
         examples = Path(__file__).parents[1] / "examples"
         cases = (
             ("gateway-probe-responses.toml", "arms=2"),
-            ("gateway-probe-four-way-responses.toml", "arms=4"),
+            ("gateway-probe-five-way-responses.toml", "arms=5"),
         )
         for filename, expected in cases:
             with self.subTest(filename=filename):

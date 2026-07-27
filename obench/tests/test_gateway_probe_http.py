@@ -37,6 +37,9 @@ class _SSEHandler(BaseHTTPRequestHandler):
         type(self).requests.append({
             "connection": id(self.connection),
             "payload": payload,
+            "headers": {
+                key.lower(): value for key, value in self.headers.items()
+            },
         })
         terminal = (
             "failed"
@@ -228,6 +231,44 @@ class GatewayProbeHttpTests(unittest.TestCase):
             Decimal(result["billing"]["charged_cost_usd"]),
             Decimal(result["billing"]["measured_cost_usd"]),
         )
+
+    def test_cloudflare_managed_probe_sends_bound_gateway_controls(self):
+        exp = experiment(self.endpoint)
+        plan = dataclasses.replace(
+            route_plan(exp, self.endpoint),
+            arm_id="cloudflare-managed",
+            route_kind="gateway",
+            requested_model="openai/gpt-test",
+            allowed_models=("openai/gpt-test",),
+            gateway="cloudflare",
+            gateway_id="openbench-gateway-bench",
+        )
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "cold", 1, (plan.arm_id,)
+        )
+
+        result = gateway_probe_http.execute_request(
+            experiment=exp,
+            case=exp.cases[0],
+            block=block,
+            plan=plan,
+            secret="cloudflare-managed-secret",
+            prices=prices(),
+        )
+
+        self.assertTrue(result["outcome"]["success"])
+        headers = _SSEHandler.requests[-1]["headers"]
+        self.assertEqual(
+            headers["authorization"],
+            "Bearer cloudflare-managed-secret",
+        )
+        self.assertEqual(
+            headers["cf-aig-gateway-id"],
+            "openbench-gateway-bench",
+        )
+        self.assertEqual(headers["cf-aig-skip-cache"], "true")
+        self.assertEqual(headers["cf-aig-max-attempts"], "1")
+        self.assertNotIn("cloudflare-managed-secret", json.dumps(result))
 
     def test_warm_measurement_requires_a_successful_verified_primer(self):
         _SSEHandler.fail_first = True
