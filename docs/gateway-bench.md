@@ -46,6 +46,11 @@ Examples:
   direct OpenAI, OpenRouter, Vercel, Concentrate, and Cloudflare.
 - [`gateway-bench-four-way.toml`](../obench/examples/gateway-bench-four-way.toml):
   Chat Completions variant without Concentrate.
+- [`gateway-bench-kimi-k3-five-way-chat.toml`](../obench/examples/gateway-bench-kimi-k3-five-way-chat.toml):
+  Kimi K3 over Chat Completions through Direct Moonshot, OpenRouter, Vercel,
+  Concentrate, and Cloudflare. Its 12,000-token budget is an aggregate
+  coding-agent cell cap; use the 128-token Gateway Probe example for the cheap
+  request-level smoke check.
 
 ## Route Locking
 
@@ -57,7 +62,8 @@ forwarding a request.
   `allow_fallbacks=false`.
 - Vercel: `providerOptions.gateway.only` contains one provider.
 - Concentrate: `routing.providers` contains one provider and no alternate
-  models.
+  models. The Kimi K3 profile translates the cross-route `moonshotai` identity
+  to Concentrate's `moonshot` provider slug.
 - Cloudflare Unified Billing: the named managed gateway is bound into the
   experiment and sent as `cf-aig-gateway-id`; cache is skipped, maximum
   attempts is one, and the requested model remains provider-qualified.
@@ -143,12 +149,12 @@ Gateway Bench supports:
 - `openai_chat` endpoints ending in `/chat/completions`;
 - `openai_responses` endpoints ending in `/responses`.
 
-Concentrate is admitted only through its Responses endpoint. Cloudflare is
-admitted only through its managed Unified Billing REST route for both
-protocols; provider-native and compatibility/BYOK routes belong in separate
-experiments. Public experiments require strict known endpoints; private test
-endpoints require `allow_private_endpoint=true` plus an explicit hostname or
-CIDR allowlist.
+Concentrate is admitted through its exact `/chat/completions` and `/responses`
+endpoints for the matching protocol. Cloudflare is admitted only through its
+managed Unified Billing REST route for both protocols; provider-native and
+compatibility/BYOK routes belong in separate experiments. Public experiments
+require strict known endpoints; private test endpoints require
+`allow_private_endpoint=true` plus an explicit hostname or CIDR allowlist.
 
 ## Run
 
@@ -162,6 +168,9 @@ export VERCEL_API_KEY=...
 export CONCENTRATE_API_KEY=...
 export CLOUDFLARE_API_TOKEN=...
 ```
+
+The Kimi K3 Chat Completions example uses the same gateway credentials and
+`MOONSHOT_API_KEY` for its direct control.
 
 Gateway Bench also requires a frozen price snapshot so the USD cap can be
 enforced before and during the run. Each canonical model used by an arm needs

@@ -54,6 +54,7 @@ class GatewayProbeCliTests(unittest.TestCase):
         cases = (
             ("gateway-probe-responses.toml", "arms=2"),
             ("gateway-probe-five-way-responses.toml", "arms=5"),
+            ("gateway-probe-kimi-k3-five-way-chat.toml", "arms=5"),
         )
         for filename, expected in cases:
             with self.subTest(filename=filename):
