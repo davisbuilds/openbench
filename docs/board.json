@@ -6920,7 +6920,7 @@
         "submitter": "OpenBench",
         "title": "GPT-4o mini managed gateway request probe",
         "track": "request_probe",
-        "verified_with_commit": "02ea4954191593e3fb62010ca1573fff6cda5c35"
+        "verified_with_commit": "080f313037851c3ba265dd1df13a615006e647ad"
       }
     ],
     "note": "Gateway Probe is request-level transport and serving telemetry. Cold and warm denominators are separate and are never merged with Gateway Bench.",
@@ -6928,7 +6928,7 @@
   },
   "generated_by": "obench site",
   "harness": {
-    "bundle_count": 4,
+    "bundle_count": 5,
     "bundles": [
       {
         "also_seen_as": [],
@@ -7506,6 +7506,134 @@
         "table": "matched",
         "task_set_digest": "1c4805e7fcd0fd8ff18912c3f745ad243edd2dfd2448f933efe5d0a79966f5bc",
         "title": "OpenBench: grok-4.5 across 4 harnesses"
+      },
+      {
+        "also_seen_as": [],
+        "arms": [
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 5856.0,
+            "harness": "aider",
+            "median_wall_s": 39.0355,
+            "model": "deepseek-v4-flash",
+            "n": 8,
+            "solve_rate": 1.0,
+            "solved": 8,
+            "token_telemetry_bases": [
+              "proxy_measured"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 8,
+              "native_covered_rows": 0,
+              "proxy_covered_rows": 8,
+              "ratio": 1.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 336.0,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 2307.625,
+            "tokens_output_per_solve": 3548.375,
+            "wilson95": [
+              0.6755843804891231,
+              1.0
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 13669.375,
+            "harness": "opencode",
+            "median_wall_s": 31.720999999999997,
+            "model": "deepseek-v4-flash",
+            "n": 8,
+            "solve_rate": 1.0,
+            "solved": 8,
+            "token_telemetry_bases": [
+              "proxy_measured"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 8,
+              "native_covered_rows": 8,
+              "proxy_covered_rows": 8,
+              "ratio": 1.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 91600.0,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 10327.875,
+            "tokens_output_per_solve": 3341.5,
+            "wilson95": [
+              0.6755843804891231,
+              1.0
+            ]
+          },
+          {
+            "cost_per_solve_usd": null,
+            "fresh_tokens_per_solve": 7742.25,
+            "harness": "pi",
+            "median_wall_s": 26.444,
+            "model": "deepseek-v4-flash",
+            "n": 8,
+            "solve_rate": 1.0,
+            "solved": 8,
+            "token_telemetry_bases": [
+              "proxy_measured"
+            ],
+            "token_telemetry_coverage": {
+              "covered_rows": 8,
+              "native_covered_rows": 8,
+              "proxy_covered_rows": 8,
+              "ratio": 1.0,
+              "total_rows": 8
+            },
+            "token_telemetry_source": "proxy",
+            "tokens_cache_read_per_solve": 35456.0,
+            "tokens_cache_write_per_solve": 0.0,
+            "tokens_input_uncached_per_solve": 4927.75,
+            "tokens_output_per_solve": 2814.5,
+            "wilson95": [
+              0.6755843804891231,
+              1.0
+            ]
+          }
+        ],
+        "caveats": [
+          "Harness mode is not apples-to-apples: aider ran as a one-shot --message invocation, while pi and opencode ran full agentic loops. Token comparison reflects that difference in harness mode, not a pure like-for-like agent loop contest.",
+          "One aider cell excluded: 1 of 9 aider cells was infrastructure-classified and is excluded from solve-rate denominators (aider reported as 8/8). pi and opencode are 9/9.",
+          "Uniform total-token basis: totals include uncached input, output, and cache reads from split fields; the vendor aggregate is never used. Values are 6,192 vs 48,262 vs 111,380 tokens/solve (aider vs pi vs opencode).",
+          "Verifiable bundle: this release includes results.jsonl and provenance.json. Re-check digests with obench verify docs/releases/2026-07-20-aider-showcase."
+        ],
+        "claim": "Seed community submission: the verified aider showcase bundle (same artifact as docs/releases/2026-07-20-aider-showcase).",
+        "countable_rows": 26,
+        "date": "2026-07-20",
+        "excluded_counts": {
+          "infra": 1
+        },
+        "family": "harness",
+        "has_caveats": true,
+        "id": "openbench-aider-showcase",
+        "kind": "community",
+        "link": "https://github.com/minghinmatthewlam/openbench/tree/main/docs/releases/2026-07-20-aider-showcase",
+        "matched": {
+          "duplicate_cells_excluded": 0,
+          "duplicate_rows_excluded": 0,
+          "groups_compared": 3,
+          "matched_cells_per_group": 8,
+          "matched_rows": 24,
+          "unmatched_countable_rows": 2
+        },
+        "models": [
+          "deepseek-v4-flash"
+        ],
+        "path": "../data/community/openbench-aider-showcase/index.html",
+        "raw_rows": 27,
+        "results_path": "../data/community/openbench-aider-showcase/results.jsonl",
+        "results_sha256": "677642cc0649ecfd42231dbdf49fc5aa0b2c2a8161ccb879358bfeec40e45192",
+        "submitter": "openbench",
+        "table": "matched",
+        "task_set_digest": "8b757f8abf3816cac2ddc80e5ceaefa3f4a323c47c2431258a655d4d3b7f2e43",
+        "title": "OpenBench showcase: BYO aider vs pi vs opencode (deepseek-v4-flash)"
       },
       {
         "also_seen_as": [],

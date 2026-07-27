@@ -19,6 +19,9 @@
     },
     "results.jsonl": {
       "sha256": "0757579b108663254a111ff0a6f483ccf16e03f3a45c68f61dd0a5a594f8f549"
+    },
+    "schedule.json": {
+      "sha256": "71f2cc396423c90d4464870939c33668532b0ea12c6eceaf878997de8a48ac48"
     }
   },
   "price_digest": "56ef4049554cc2dc3cb79debc2f5c49d503cfa97c5744d35ffe912815179aea5",
@@ -40,6 +43,6 @@
   "scheduled_blocks_per_condition": 30,
   "schema_version": 2,
   "verification": {
-    "verified_with_commit": "02ea4954191593e3fb62010ca1573fff6cda5c35"
+    "verified_with_commit": "080f313037851c3ba265dd1df13a615006e647ad"
   }
 }
