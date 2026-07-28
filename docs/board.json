@@ -3623,7 +3623,7 @@
         "submitter": "OpenBench",
         "title": "Kimi K3 managed gateway request benchmark",
         "track": "request_probe",
-        "verified_with_commit": "3d4182807e9061344a9acb5b6e72cd0aeb934893"
+        "verified_with_commit": "6d1de84d6c96430c47b50a51bd802a986db5c2ba"
       },
       {
         "arms": [
@@ -7071,7 +7071,61 @@
         "link": null,
         "model": "GPT-4o mini",
         "model_match": "rolling_alias",
-        "output_token_limit_equalities": null,
+        "output_token_limit_equalities": {
+          "arms": {
+            "cloudflare-openai": {
+              "cold": {
+                "equal": 0,
+                "measured": 30
+              },
+              "warm": {
+                "equal": 0,
+                "measured": 30
+              }
+            },
+            "concentrate-openai": {
+              "cold": {
+                "equal": 0,
+                "measured": 30
+              },
+              "warm": {
+                "equal": 0,
+                "measured": 30
+              }
+            },
+            "direct-openai": {
+              "cold": {
+                "equal": 0,
+                "measured": 30
+              },
+              "warm": {
+                "equal": 0,
+                "measured": 30
+              }
+            },
+            "openrouter-openai": {
+              "cold": {
+                "equal": 0,
+                "measured": 30
+              },
+              "warm": {
+                "equal": 0,
+                "measured": 30
+              }
+            },
+            "vercel-openai": {
+              "cold": {
+                "equal": 0,
+                "measured": 30
+              },
+              "warm": {
+                "equal": 0,
+                "measured": 30
+              }
+            }
+          },
+          "configured_limit": 64
+        },
         "path": null,
         "price_digest": "56ef4049554cc2dc3cb79debc2f5c49d503cfa97c5744d35ffe912815179aea5",
         "result_count": 300,
@@ -7081,7 +7135,7 @@
         "submitter": "OpenBench",
         "title": "GPT-4o mini managed gateway request benchmark",
         "track": "request_probe",
-        "verified_with_commit": "3d4182807e9061344a9acb5b6e72cd0aeb934893"
+        "verified_with_commit": "6d1de84d6c96430c47b50a51bd802a986db5c2ba"
       }
     ],
     "note": "Gateway Bench measures request-level transport and serving telemetry. Cold and warm denominators are separate and are never merged.",

@@ -8,6 +8,9 @@
   "experiment_digest": "cd8ea78f91edab07b43848f46d9b7faf095143a641d47b0598ca5d94ff9e955b",
   "experiment_id": "kimi-k3-five-way-chat-comparable-r30-512-2026-07-28",
   "files": {
+    "experiment.json": {
+      "sha256": "f6178339c524c994a9dc3339c0088b05eaf447c6a01d0e3d104a73b28ff0caff"
+    },
     "prices.json": {
       "sha256": "6c383eab3a13335d1261a14b22abe22bb2f28309ce51db1d051a2112794e251d"
     },
@@ -35,14 +38,15 @@
   },
   "sanitization": {
     "case_prompts": "sha256_only",
+    "experiment_private_fields": "omitted",
     "operational_identifiers": "removed",
     "paths_accounts_secrets": "rejected",
     "receipt_values": "removed"
   },
   "schedule_digest": "b26946b856878f28b91c085abab4f586d7df3df3c3b16701db378cfbc5d734d5",
   "scheduled_blocks_per_condition": 30,
-  "schema_version": 2,
+  "schema_version": 3,
   "verification": {
-    "verified_with_commit": "3d4182807e9061344a9acb5b6e72cd0aeb934893"
+    "verified_with_commit": "6d1de84d6c96430c47b50a51bd802a986db5c2ba"
   }
 }
