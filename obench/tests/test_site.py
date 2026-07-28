@@ -1272,6 +1272,17 @@ class RenderTests(_SiteFixture):
         )
         self.assertIn('id="view-methodology"', page)
         self.assertNotIn("Gateway Tax", page)
+        self.assertIn(
+            "Harness Bench denominators are countable cells", page
+        )
+        self.assertIn(
+            "HTTP 429 responses and timeouts remain in\n"
+            "    that denominator",
+            page,
+        )
+        self.assertNotIn(
+            "Denominators are countable cells. Infrastructure", page
+        )
 
     def test_write_board_emits_the_landing_page_and_data(self):
         info = site.write_board(self.site_dir)

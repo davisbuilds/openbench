@@ -428,15 +428,17 @@ footer{color:var(--ink-3);font-size:12.5px;padding:28px 0 60px;
 
   <h2>Denominators and intervals</h2>
   <ul>
-    <li>Denominators are countable cells. Infrastructure and rate-limit failures
-    are excluded; other failures, including timeouts, stay in the denominator.</li>
+    <li>Harness Bench denominators are countable cells. Infrastructure and
+    rate-limit failures are excluded; other failures, including timeouts, stay
+    in the denominator.</li>
     <li>Harness Bench uses Wilson 95% intervals over matched
     <code>(task, trial)</code> cells whenever a bundle has two or more arms.</li>
     <li>Gateway Bench displays complete cold and warm block counts separately.
-    Availability uses a Wilson 95% interval over attempted requests. Phase
-    summaries use successful, route-verified requests and retain metric-specific
-    coverage. Paired deltas use complete gateway/direct blocks and bootstrap
-    95% intervals.</li>
+    Availability uses a Wilson 95% interval over every attempted measured
+    request, so gateway errors such as HTTP 429 responses and timeouts remain in
+    that denominator. Phase summaries use successful, route-verified requests
+    and retain metric-specific coverage. Paired deltas use complete
+    gateway/direct blocks and bootstrap 95% intervals.</li>
   </ul>
 
   <h2>Efficiency and cost</h2>
