@@ -134,7 +134,10 @@
   ],
   "benchmark": "gateway_probe",
   "budget": {
+    "max_input_tokens": 512,
     "max_output_tokens": 4096,
+    "max_total_attempts": 3,
+    "retry_deadline_s": 180,
     "timeout_s": 60,
     "usd_cap": "4.0"
   },
@@ -149,7 +152,7 @@
   "model_match": "rolling_alias",
   "repetitions": 50,
   "schedule_seed": 20260725,
-  "schema_version": 1,
+  "schema_version": 2,
   "source_schema_version": 1,
   "track": "request_probe"
 }

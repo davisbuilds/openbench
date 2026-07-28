@@ -9,7 +9,7 @@
   "experiment_id": "kimi-k3-five-way-chat-r100-4096-retry-v1-2026-07-28",
   "files": {
     "experiment.json": {
-      "sha256": "fab57fd2763e0c2fc68ebf22f790ca138f9f78034a88ff0f7eff95f3ca102aaf"
+      "sha256": "41c313acb18165e896037f05a440b46c67913542aefb4feaf4a41690b2a3d724"
     },
     "prices.json": {
       "sha256": "6c383eab3a13335d1261a14b22abe22bb2f28309ce51db1d051a2112794e251d"
@@ -47,6 +47,6 @@
   "scheduled_blocks_per_condition": 50,
   "schema_version": 3,
   "verification": {
-    "verified_with_commit": "d7423e3bb91eabeb9ed6d3ec345bcacd1b8c9147"
+    "verified_with_commit": "cc47ef5d6923c6be4144be361573a475c88ab88b"
   }
 }
