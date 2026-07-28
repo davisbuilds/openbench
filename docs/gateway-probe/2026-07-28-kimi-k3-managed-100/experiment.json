@@ -1,0 +1,155 @@
+{
+  "allow_private_endpoint": false,
+  "arms": [
+    {
+      "allowed_models": [
+        "kimi-k3"
+      ],
+      "allowed_providers": [
+        "moonshotai"
+      ],
+      "arm_digest": "37f25987adc1c655de20bd7f9e325edd56ac1e109373f51cce1c7d0cb235bde3",
+      "arm_id": "direct-moonshot",
+      "baseline": true,
+      "cache_enabled": false,
+      "canonical_model": "moonshotai/kimi-k3",
+      "direct_control_arm_id": null,
+      "fallback_enabled": false,
+      "gateway": null,
+      "protocol": "openai_chat",
+      "requested_model": "kimi-k3",
+      "requested_provider": "moonshotai",
+      "retry_count": 0,
+      "route_kind": "direct",
+      "sampling": {
+        "seed": 20260725,
+        "temperature": 1.0,
+        "top_p": 0.95
+      }
+    },
+    {
+      "allowed_models": [
+        "moonshotai/kimi-k3"
+      ],
+      "allowed_providers": [
+        "moonshotai"
+      ],
+      "arm_digest": "85df6d05108770f5d1115840e177c73845acaed87bbe13ded326d87edbe50938",
+      "arm_id": "cloudflare-moonshot",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "moonshotai/kimi-k3",
+      "direct_control_arm_id": "direct-moonshot",
+      "fallback_enabled": false,
+      "gateway": "cloudflare",
+      "protocol": "openai_chat",
+      "requested_model": "moonshotai/kimi-k3",
+      "requested_provider": "moonshotai",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {
+        "seed": 20260725,
+        "temperature": 1.0,
+        "top_p": 0.95
+      }
+    },
+    {
+      "allowed_models": [
+        "moonshotai/kimi-k3"
+      ],
+      "allowed_providers": [
+        "moonshotai"
+      ],
+      "arm_digest": "cc0b9b21ccb7a34a68847131f3721fcac0a404fbe077aaa31f82825ca18f04e7",
+      "arm_id": "openrouter-moonshot",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "moonshotai/kimi-k3",
+      "direct_control_arm_id": "direct-moonshot",
+      "fallback_enabled": false,
+      "gateway": "openrouter",
+      "protocol": "openai_chat",
+      "requested_model": "moonshotai/kimi-k3",
+      "requested_provider": "moonshotai",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {
+        "seed": 20260725,
+        "temperature": 1.0,
+        "top_p": 0.95
+      }
+    },
+    {
+      "allowed_models": [
+        "moonshotai/kimi-k3"
+      ],
+      "allowed_providers": [
+        "moonshotai"
+      ],
+      "arm_digest": "7cf66a0a0525020875d2057f4e8418d701152042340d6038340608505884edb6",
+      "arm_id": "vercel-moonshot",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "moonshotai/kimi-k3",
+      "direct_control_arm_id": "direct-moonshot",
+      "fallback_enabled": false,
+      "gateway": "vercel",
+      "protocol": "openai_chat",
+      "requested_model": "moonshotai/kimi-k3",
+      "requested_provider": "moonshotai",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {
+        "seed": 20260725,
+        "temperature": 1.0,
+        "top_p": 0.95
+      }
+    },
+    {
+      "allowed_models": [
+        "moonshot/kimi-k3"
+      ],
+      "allowed_providers": [
+        "moonshotai"
+      ],
+      "arm_digest": "b8f4dac2645ec5fd173436f6577f8b7be7a98940c10a41ca2af3f8c9c2358c25",
+      "arm_id": "concentrate-moonshot",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "moonshotai/kimi-k3",
+      "direct_control_arm_id": "direct-moonshot",
+      "fallback_enabled": false,
+      "gateway": "concentrate",
+      "protocol": "openai_chat",
+      "requested_model": "moonshot/kimi-k3",
+      "requested_provider": "moonshotai",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {
+        "seed": 20260725,
+        "temperature": 1.0,
+        "top_p": 0.95
+      }
+    }
+  ],
+  "benchmark": "gateway_probe",
+  "budget": {
+    "max_output_tokens": 4096,
+    "timeout_s": 60,
+    "usd_cap": "4.0"
+  },
+  "cases": [
+    {
+      "case_id": "short-text",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970"
+    }
+  ],
+  "experiment_digest": "9748aef6256df8feeb4f0a075f7cfce5e009aad22d029c55795e5af354550f6c",
+  "experiment_id": "kimi-k3-five-way-chat-r100-4096-retry-v1-2026-07-28",
+  "model_match": "rolling_alias",
+  "repetitions": 50,
+  "schedule_seed": 20260725,
+  "schema_version": 1,
+  "source_schema_version": 1,
+  "track": "request_probe"
+}
