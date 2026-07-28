@@ -78,6 +78,62 @@ class GatewayProbeSpecTests(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             first.repetitions = 3
 
+    def test_max_total_attempts_is_configurable_and_digest_bound(self):
+        original = gateway_probe_spec.parse_experiment_toml(manifest())
+        configured = gateway_probe_spec.parse_experiment_toml(
+            manifest().replace(
+                "max_output_tokens = 64",
+                "max_output_tokens = 64\n"
+                "max_total_attempts = 3\n"
+                "max_input_tokens = 128\n"
+                "retry_deadline_s = 20",
+            )
+        )
+
+        self.assertEqual(original.budget.max_total_attempts, 1)
+        self.assertNotIn("max_total_attempts", original.to_dict()["budget"])
+        self.assertEqual(configured.budget.max_total_attempts, 3)
+        self.assertEqual(configured.budget.max_input_tokens, 128)
+        self.assertEqual(configured.budget.retry_deadline_s, 20)
+        self.assertEqual(configured.to_dict()["budget"]["max_total_attempts"], 3)
+        self.assertNotEqual(original.digest, configured.digest)
+
+        with self.assertRaisesRegex(
+            gateway_probe_spec.GatewayProbeSpecError,
+            "budget.max_total_attempts",
+        ):
+            gateway_probe_spec.parse_experiment_toml(
+                manifest().replace(
+                    "max_output_tokens = 64",
+                    "max_output_tokens = 64\n"
+                    "max_total_attempts = 0\n"
+                    "max_input_tokens = 128\n"
+                    "retry_deadline_s = 20",
+                )
+            )
+
+        for missing in ("max_input_tokens", "retry_deadline_s"):
+            fields = {
+                "max_input_tokens": "max_input_tokens = 128",
+                "retry_deadline_s": "retry_deadline_s = 20",
+            }
+            configured_fields = "\n".join(
+                value for name, value in fields.items() if name != missing
+            )
+            with self.subTest(missing=missing):
+                with self.assertRaisesRegex(
+                    gateway_probe_spec.GatewayProbeSpecError,
+                    f"budget.{missing}",
+                ):
+                    gateway_probe_spec.parse_experiment_toml(
+                        manifest().replace(
+                            "max_output_tokens = 64",
+                            "max_output_tokens = 64\n"
+                            "max_total_attempts = 3\n"
+                            f"{configured_fields}",
+                        )
+                    )
+
     def test_rejects_agent_fields_and_route_policy_drift(self):
         with self.assertRaisesRegex(
             gateway_probe_spec.GatewayProbeSpecError, "unknown field: harness"

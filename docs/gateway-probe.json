@@ -7,11 +7,11 @@
     "submitter": "OpenBench"
   },
   {
-    "id": "2026-07-28-kimi-k3-managed-30",
-    "title": "Kimi K3 managed gateway request probe",
+    "id": "2026-07-28-kimi-k3-managed-100",
+    "title": "Kimi K3 managed Gateway Bench, 100 requests per route",
     "model": "Kimi K3",
     "date": "2026-07-28",
-    "run_note": "Recovered split-session run. An initial partial block containing an OpenRouter 429 was excluded and all five routes were rerun; a later OpenRouter warm 429 remains in the published 30/30 denominator. Tables exclude the abandoned partial block and its unknown failed-request cost. Routes use rolling Kimi K3 aliases.",
+    "run_note": "Five routes, each with 50 cold and 50 warm measured requests. Warm measurements include a separate primer. Up to three total attempts were allowed for transient pre-token failures, but all 500 measured requests succeeded on their first attempt. The output safety limit was 4,096 tokens and no measured response reached it. Routes use rolling Kimi K3 aliases.",
     "submitter": "OpenBench"
   }
 ]

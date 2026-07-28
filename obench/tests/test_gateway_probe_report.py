@@ -19,7 +19,7 @@ def row(arm, condition, repetition, *, baseline=False, total=1.0, route="verifie
         },
     }
     return {
-        "schema_version": 3,
+        "schema_version": gateway_probe_results.RESULT_SCHEMA_VERSION,
         "benchmark": "gateway_probe",
         "cell_id": gateway_probe_results.cell_id(identity),
         "identity": identity,
@@ -102,7 +102,79 @@ def row(arm, condition, repetition, *, baseline=False, total=1.0, route="verifie
             "primer_cost_usd": "0" if condition == "warm" else None,
             "measured_cost_usd": "0.001",
             "charged_cost_usd": "0.001",
+            "observed_cost_usd": "0.001",
+            "known_observed_cost_usd": "0.001",
+            "budget_debit_usd": "0.001",
+            "cost_status": "observed",
+            "unknown_cost_attempts": 0,
             "stop_required": False,
+        },
+        "retry_evidence": {
+            "max_total_attempts": 1,
+            "max_input_tokens": None,
+            "max_output_tokens": 64,
+            "retry_deadline_s": None,
+            "reservation_input_per_million_usd": "0",
+            "reservation_output_per_million_usd": "0",
+            "attempt_count": 1,
+            "recovered": False,
+            "first_attempt_outcome": {
+                "success": True,
+                "http_status": 200,
+                "timed_out": False,
+                "error_class": None,
+                "error_detail": None,
+                "semantic_output_started": True,
+            },
+            "eventual_outcome": {
+                "success": True,
+                "http_status": 200,
+                "timed_out": False,
+                "error_class": None,
+                "error_detail": None,
+                "semantic_output_started": True,
+            },
+            "recovery_timing": {
+                "initial_request_to_final_response_headers_s": total / 4,
+                "initial_request_to_final_semantic_output_s": total / 2,
+                "initial_request_to_completion_s": total,
+                "final_attempt_request_start_offset_s": 0.0,
+            },
+            "attempts": [{
+                "attempt_number": 1,
+                "phase": "measured",
+                "outcome": {
+                    "success": True,
+                    "http_status": 200,
+                    "timed_out": False,
+                    "error_class": None,
+                    "error_detail": None,
+                    "semantic_output_started": True,
+                },
+                "timing": {
+                    "initial_request_start_offset_s": 0.0,
+                    "request_to_response_headers_s": total / 4,
+                    "request_to_semantic_output_s": total / 2,
+                    "attempt_total_s": total,
+                },
+                "retry": {
+                    "eligible": False,
+                    "retry_after_status": "absent",
+                    "retry_after_s": None,
+                    "wait_requested_s": None,
+                    "wait_actual_s": None,
+                    "not_retried_reason": "semantic_output_started",
+                },
+                "cost": {
+                    "primer_cost_usd": "0" if condition == "warm" else None,
+                    "measured_cost_usd": "0.001",
+                    "observed_cost_usd": "0.001",
+                    "known_observed_cost_usd": "0.001",
+                    "budget_debit_usd": "0.001",
+                    "reservation_usd": "0",
+                    "cost_status": "observed",
+                },
+            }],
         },
     }
 
@@ -126,6 +198,14 @@ class GatewayProbeReportTests(unittest.TestCase):
             "route_verified": 2,
             "route_unverifiable": 0,
             "route_failed": 0,
+        })
+        self.assertEqual(cold["retry_diagnostics"], {
+            "logical_cells": 2,
+            "first_attempt_successes": 2,
+            "eventual_successes": 2,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0,
+            "attempt_count_distribution": {"1": 2},
         })
         self.assertEqual(cold["metrics"]["request_stream_total_s"]["p50"], 2.0)
         availability = cold["availability"]
@@ -184,6 +264,20 @@ class GatewayProbeReportTests(unittest.TestCase):
             "available": False,
             "error_class": "stream",
             "error_detail": "stream_no_semantic_output",
+        })
+        failed_outcome = {
+            "success": False,
+            "http_status": 200,
+            "timed_out": False,
+            "error_class": "stream",
+            "error_detail": "stream_no_semantic_output",
+            "semantic_output_started": False,
+        }
+        gateway["retry_evidence"]["first_attempt_outcome"] = failed_outcome
+        gateway["retry_evidence"]["eventual_outcome"] = failed_outcome
+        gateway["retry_evidence"]["attempts"][0]["outcome"] = failed_outcome
+        gateway["retry_evidence"]["attempts"][0]["retry"].update({
+            "not_retried_reason": "not_retryable",
         })
         warm_direct = row("direct", "warm", 1, baseline=True)
         warm_gateway = row("gateway", "warm", 1)

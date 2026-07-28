@@ -17,7 +17,7 @@ from .gateway_probe_models import GatewayProbeRunError, ProbeBlock
 
 
 BENCHMARK = "gateway_probe"
-RESULT_SCHEMA_VERSION = 3
+RESULT_SCHEMA_VERSION = 4
 RECEIPT_HEADER_ALLOWLIST = frozenset({
     "x-request-id",
     "request-id",
@@ -89,7 +89,7 @@ def make_identity(
 
 
 def cell_id(identity: Mapping[str, Any]) -> str:
-    return "gateway-probe-cell-v3-" + gateway_spec.canonical_digest(identity)
+    return "gateway-probe-cell-v4-" + gateway_spec.canonical_digest(identity)
 
 
 def read_rows(path: Path) -> list[dict[str, Any]]:
@@ -585,12 +585,373 @@ def _validate_money(value: Any, *, nullable: bool) -> bool:
     return amount.is_finite() and amount >= 0
 
 
+def _validate_attempt_outcome(value: Any, label: str) -> Mapping[str, Any]:
+    outcome = _exact_mapping(
+        value,
+        {
+            "success",
+            "http_status",
+            "timed_out",
+            "error_class",
+            "error_detail",
+            "semantic_output_started",
+        },
+        label,
+    )
+    if any(
+        not isinstance(outcome.get(name), bool)
+        for name in (
+            "success",
+            "timed_out",
+            "semantic_output_started",
+        )
+    ):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    status = outcome.get("http_status")
+    if status is not None and (
+        not isinstance(status, int) or isinstance(status, bool)
+    ):
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    if outcome.get("error_class") not in {
+        None,
+        "timeout",
+        "primer",
+        "transport",
+        "http",
+        "stream",
+    } or outcome.get("error_detail") not in {
+        None,
+        "timeout",
+        "primer_invalid",
+        "bad_status_line",
+        "http_protocol",
+        "tls",
+        "dns",
+        "connection_refused",
+        "connection_reset",
+        "connection_closed",
+        "probe_policy",
+        "network_io",
+        "internal",
+        "http_status",
+        "stream_terminal",
+        "stream_incomplete",
+        "stream_no_semantic_output",
+    }:
+        raise GatewayProbeRunError(f"results row has malformed {label}")
+    if (
+        (outcome.get("error_class") is None)
+        is not (outcome.get("error_detail") is None)
+        or outcome.get("timed_out")
+        is not (outcome.get("error_class") == "timeout")
+        or (
+            outcome.get("success")
+            and (
+                not isinstance(status, int)
+                or not 200 <= status < 300
+                or outcome.get("error_class") is not None
+            )
+        )
+    ):
+        raise GatewayProbeRunError(f"results row has inconsistent {label}")
+    return outcome
+
+
+def _validate_retry_evidence(value: Any, *, condition: str) -> None:
+    retry = _exact_mapping(
+        value,
+        {
+            "max_total_attempts",
+            "max_input_tokens",
+            "max_output_tokens",
+            "retry_deadline_s",
+            "reservation_input_per_million_usd",
+            "reservation_output_per_million_usd",
+            "attempt_count",
+            "recovered",
+            "first_attempt_outcome",
+            "eventual_outcome",
+            "recovery_timing",
+            "attempts",
+        },
+        "retry evidence",
+    )
+    max_attempts = retry.get("max_total_attempts")
+    attempt_count = retry.get("attempt_count")
+    attempts = retry.get("attempts")
+    if (
+        not isinstance(max_attempts, int)
+        or isinstance(max_attempts, bool)
+        or max_attempts < 1
+        or not isinstance(attempt_count, int)
+        or isinstance(attempt_count, bool)
+        or not 1 <= attempt_count <= max_attempts
+        or not isinstance(retry.get("recovered"), bool)
+        or (
+            retry.get("max_input_tokens") is not None
+            and (
+                not isinstance(retry.get("max_input_tokens"), int)
+                or isinstance(retry.get("max_input_tokens"), bool)
+                or retry.get("max_input_tokens") < 1
+            )
+        )
+        or not _validate_money(
+            retry.get("reservation_input_per_million_usd"),
+            nullable=False,
+        )
+        or not _validate_money(
+            retry.get("reservation_output_per_million_usd"),
+            nullable=False,
+        )
+        or not isinstance(retry.get("max_output_tokens"), int)
+        or isinstance(retry.get("max_output_tokens"), bool)
+        or retry.get("max_output_tokens") < 1
+        or (
+            retry.get("retry_deadline_s") is not None
+            and (
+                not isinstance(retry.get("retry_deadline_s"), int)
+                or isinstance(retry.get("retry_deadline_s"), bool)
+                or retry.get("retry_deadline_s") < 1
+            )
+        )
+        or not isinstance(attempts, list)
+        or len(attempts) != attempt_count
+    ):
+        raise GatewayProbeRunError("results row has malformed retry evidence")
+    normalized_attempts = []
+    for index, raw in enumerate(attempts, 1):
+        attempt = _exact_mapping(
+            raw,
+            {"attempt_number", "phase", "outcome", "timing", "retry", "cost"},
+            "retry attempt",
+        )
+        if attempt.get("attempt_number") != index or attempt.get("phase") not in {
+            "primer",
+            "measured",
+        }:
+            raise GatewayProbeRunError("results row has malformed retry attempt")
+        attempt_outcome = _validate_attempt_outcome(
+            attempt.get("outcome"),
+            "retry attempt outcome",
+        )
+        timing = _exact_mapping(
+            attempt.get("timing"),
+            {
+                "initial_request_start_offset_s",
+                "request_to_response_headers_s",
+                "request_to_semantic_output_s",
+                "attempt_total_s",
+            },
+            "retry attempt timing",
+        )
+        if any(not _duration(item) for item in timing.values()):
+            raise GatewayProbeRunError(
+                "results row has malformed retry attempt timing"
+            )
+        decision = _exact_mapping(
+            attempt.get("retry"),
+            {
+                "eligible",
+                "retry_after_status",
+                "retry_after_s",
+                "wait_requested_s",
+                "wait_actual_s",
+                "not_retried_reason",
+            },
+            "retry attempt decision",
+        )
+        if (
+            not isinstance(decision.get("eligible"), bool)
+            or decision.get("retry_after_status") not in {
+                "absent",
+                "normalized",
+                "malformed",
+                "over_deadline",
+            }
+            or decision.get("not_retried_reason") not in {
+                None,
+                "attempt_limit",
+                "budget",
+                "deadline",
+                "malformed_retry_after",
+                "not_retryable",
+                "semantic_output_started",
+            }
+            or any(
+                not _duration(decision.get(name))
+                for name in (
+                    "retry_after_s",
+                    "wait_requested_s",
+                    "wait_actual_s",
+                )
+            )
+            or (
+                (decision.get("wait_requested_s") is None)
+                is not (decision.get("wait_actual_s") is None)
+            )
+            or (
+                decision.get("wait_requested_s") is not None
+                and (
+                    not decision.get("eligible")
+                    or index == attempt_count
+                )
+            )
+        ):
+            raise GatewayProbeRunError(
+                "results row has malformed retry attempt decision"
+            )
+        expected_eligible = bool(
+            not attempt_outcome["semantic_output_started"]
+            and (
+                attempt_outcome["http_status"] in {429, 502, 503, 504}
+                or attempt_outcome["timed_out"]
+                or (
+                    attempt_outcome["error_class"] == "transport"
+                    and attempt_outcome["error_detail"] in {
+                        "connection_reset",
+                        "connection_closed",
+                    }
+                )
+            )
+        )
+        if decision["eligible"] is not expected_eligible:
+            raise GatewayProbeRunError(
+                "results row retry eligibility is inconsistent"
+            )
+        if (
+            index < attempt_count
+            and (
+                not decision["eligible"]
+                or decision["wait_requested_s"] is None
+                or decision["not_retried_reason"] is not None
+                or decision["retry_after_status"] in {
+                    "malformed",
+                    "over_deadline",
+                }
+            )
+        ) or (
+            index == attempt_count
+            and (
+                decision["wait_requested_s"] is not None
+                or decision["not_retried_reason"] is None
+            )
+        ):
+            raise GatewayProbeRunError(
+                "results row retry sequence is inconsistent"
+            )
+        cost = _exact_mapping(
+            attempt.get("cost"),
+            {
+                "primer_cost_usd",
+                "measured_cost_usd",
+                "observed_cost_usd",
+                "known_observed_cost_usd",
+                "budget_debit_usd",
+                "reservation_usd",
+                "cost_status",
+            },
+            "retry attempt cost",
+        )
+        if (
+            cost.get("cost_status") not in {"observed", "reserved_unknown"}
+            or not _validate_money(cost.get("primer_cost_usd"), nullable=True)
+            or not _validate_money(cost.get("measured_cost_usd"), nullable=True)
+            or not _validate_money(
+                cost.get("observed_cost_usd"),
+                nullable=True,
+            )
+            or not _validate_money(
+                cost.get("known_observed_cost_usd"),
+                nullable=False,
+            )
+            or not _validate_money(
+                cost.get("budget_debit_usd"),
+                nullable=False,
+            )
+            or not _validate_money(cost.get("reservation_usd"), nullable=False)
+        ):
+            raise GatewayProbeRunError(
+                "results row has malformed retry attempt cost"
+            )
+        known_total = sum(
+            (
+                Decimal(item)
+                for item in (
+                    cost.get("primer_cost_usd"),
+                    cost.get("measured_cost_usd"),
+                )
+                if item is not None
+            ),
+            Decimal(0),
+        )
+        if (
+            Decimal(cost["known_observed_cost_usd"]) != known_total
+            or (
+                cost["cost_status"] == "observed"
+                and (
+                    cost["observed_cost_usd"] is None
+                    or Decimal(cost["observed_cost_usd"]) != known_total
+                    or Decimal(cost["budget_debit_usd"]) != known_total
+                )
+            )
+            or (
+                cost["cost_status"] == "reserved_unknown"
+                and (
+                    cost["observed_cost_usd"] is not None
+                    or Decimal(cost["budget_debit_usd"])
+                    != Decimal(cost["reservation_usd"])
+                    or Decimal(cost["budget_debit_usd"]) < known_total
+                )
+            )
+        ):
+            raise GatewayProbeRunError(
+                "results row retry attempt cost is inconsistent"
+            )
+        expected_reservation = (
+            Decimal(retry["max_input_tokens"] or 0)
+            * Decimal(retry["reservation_input_per_million_usd"])
+            + Decimal(retry["max_output_tokens"])
+            * Decimal(retry["reservation_output_per_million_usd"])
+        ) / Decimal(1_000_000)
+        if condition == "warm":
+            expected_reservation *= 2
+        if Decimal(cost["reservation_usd"]) != expected_reservation:
+            raise GatewayProbeRunError(
+                "results row retry reservation is inconsistent"
+            )
+        normalized_attempts.append((attempt_outcome, decision, cost))
+    if retry.get("first_attempt_outcome") != attempts[0]["outcome"]:
+        raise GatewayProbeRunError(
+            "results row first attempt outcome is inconsistent"
+        )
+    if retry.get("eventual_outcome") != attempts[-1]["outcome"]:
+        raise GatewayProbeRunError(
+            "results row eventual outcome is inconsistent"
+        )
+    if retry.get("recovered") is not (
+        attempt_count > 1 and attempts[-1]["outcome"]["success"] is True
+    ):
+        raise GatewayProbeRunError("results row recovery evidence is inconsistent")
+    recovery_timing = _exact_mapping(
+        retry.get("recovery_timing"),
+        {
+            "initial_request_to_final_response_headers_s",
+            "initial_request_to_final_semantic_output_s",
+            "initial_request_to_completion_s",
+            "final_attempt_request_start_offset_s",
+        },
+        "recovery timing",
+    )
+    if any(not _duration(item) for item in recovery_timing.values()):
+        raise GatewayProbeRunError("results row has malformed recovery timing")
+
+
 def validate_row_shape(row: Mapping[str, Any]) -> None:
     expected_fields = {
         "schema_version", "benchmark", "cell_id", "identity",
         "expected_arm_ids", "scheduled_blocks_per_condition", "arm_role",
         "baseline", "model_match", "outcome", "route_integrity",
-        "request_metrics", "reuse_evidence", "billing",
+        "request_metrics", "reuse_evidence", "billing", "retry_evidence",
     }
     if set(row) != expected_fields:
         raise GatewayProbeRunError("results row does not match schema v3")
@@ -753,6 +1114,31 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
         timing,
         request_metrics.get("stream"),
     )
+    _validate_retry_evidence(
+        row.get("retry_evidence"),
+        condition=condition,
+    )
+    eventual = row["retry_evidence"]["eventual_outcome"]
+    if any(
+        eventual[name] != outcome[name]
+        for name in (
+            "success",
+            "timed_out",
+            "error_class",
+            "error_detail",
+        )
+    ):
+        raise GatewayProbeRunError(
+            "results row eventual outcome does not match cell outcome"
+        )
+    final_attempt = row["retry_evidence"]["attempts"][-1]
+    if (
+        final_attempt["phase"] == "measured"
+        and eventual["http_status"] != outcome["http_status"]
+    ):
+        raise GatewayProbeRunError(
+            "results row eventual status does not match cell outcome"
+        )
     primer_fields = {
         "required", "completed", "http_status", "socket_reused",
         "primer_nonce_sha256", "measured_nonce_sha256", "setup",
@@ -833,15 +1219,27 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
         row.get("billing"),
         {
             "primer_cost_usd", "measured_cost_usd",
-            "charged_cost_usd", "stop_required",
+            "charged_cost_usd", "observed_cost_usd",
+            "known_observed_cost_usd", "budget_debit_usd",
+            "cost_status", "unknown_cost_attempts", "stop_required",
         },
         "billing evidence",
     )
     if (
         not isinstance(billing.get("stop_required"), bool)
+        or billing.get("cost_status") not in {"observed", "reserved_unknown"}
+        or not isinstance(billing.get("unknown_cost_attempts"), int)
+        or isinstance(billing.get("unknown_cost_attempts"), bool)
+        or billing.get("unknown_cost_attempts") < 0
         or not _validate_money(billing.get("primer_cost_usd"), nullable=True)
         or not _validate_money(billing.get("measured_cost_usd"), nullable=True)
-        or not _validate_money(billing.get("charged_cost_usd"), nullable=False)
+        or not _validate_money(billing.get("charged_cost_usd"), nullable=True)
+        or not _validate_money(billing.get("observed_cost_usd"), nullable=True)
+        or not _validate_money(
+            billing.get("known_observed_cost_usd"),
+            nullable=False,
+        )
+        or not _validate_money(billing.get("budget_debit_usd"), nullable=False)
     ):
         raise GatewayProbeRunError("results row billing evidence is malformed")
     component_total = sum(
@@ -855,8 +1253,53 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
         ),
         Decimal(0),
     )
-    if Decimal(billing["charged_cost_usd"]) != component_total:
+    if Decimal(billing["known_observed_cost_usd"]) != component_total:
         raise GatewayProbeRunError("results row charged cost is inconsistent")
+    attempt_costs = row["retry_evidence"]["attempts"]
+    unknown_attempts = sum(
+        attempt["cost"]["cost_status"] == "reserved_unknown"
+        for attempt in attempt_costs
+    )
+    known_attempt_total = sum(
+        (
+            Decimal(attempt["cost"]["known_observed_cost_usd"])
+            for attempt in attempt_costs
+        ),
+        Decimal(0),
+    )
+    debit_total = sum(
+        (
+            Decimal(attempt["cost"]["budget_debit_usd"])
+            for attempt in attempt_costs
+        ),
+        Decimal(0),
+    )
+    if (
+        billing["unknown_cost_attempts"] != unknown_attempts
+        or billing["cost_status"]
+        != ("observed" if unknown_attempts == 0 else "reserved_unknown")
+        or Decimal(billing["known_observed_cost_usd"]) != known_attempt_total
+        or Decimal(billing["budget_debit_usd"]) != debit_total
+        or (
+            unknown_attempts == 0
+            and (
+                billing["observed_cost_usd"] is None
+                or billing["charged_cost_usd"] is None
+                or Decimal(billing["observed_cost_usd"]) != known_attempt_total
+                or Decimal(billing["charged_cost_usd"]) != known_attempt_total
+            )
+        )
+        or (
+            unknown_attempts > 0
+            and (
+                billing["observed_cost_usd"] is not None
+                or billing["charged_cost_usd"] is not None
+            )
+        )
+    ):
+        raise GatewayProbeRunError(
+            "results row aggregate attempt cost is inconsistent"
+        )
 
 
 def validate_resume_rows(
@@ -877,6 +1320,20 @@ def validate_resume_rows(
         if row.get("schema_version") != RESULT_SCHEMA_VERSION:
             raise GatewayProbeRunError("results row has unsupported schema_version")
         validate_row_shape(row)
+        retry_evidence = row["retry_evidence"]
+        if (
+            retry_evidence["max_total_attempts"]
+            != experiment.budget.max_total_attempts
+            or retry_evidence["max_input_tokens"]
+            != experiment.budget.max_input_tokens
+            or retry_evidence["max_output_tokens"]
+            != experiment.budget.max_output_tokens
+            or retry_evidence["retry_deadline_s"]
+            != experiment.budget.retry_deadline_s
+        ):
+            raise GatewayProbeRunError(
+                "results row retry policy does not match experiment"
+            )
         identity = _exact_mapping(
             row.get("identity"),
             {"benchmark", "experiment", "arm", "case", "comparison", "schedule"},
@@ -1021,7 +1478,7 @@ def charged_cost(row: Mapping[str, Any]) -> Decimal:
         raise GatewayProbeRunError(
             "results row has malformed billing evidence"
         )
-    raw = billing.get("charged_cost_usd")
+    raw = billing.get("budget_debit_usd")
     try:
         amount = Decimal(str(raw))
     except (ArithmeticError, ValueError) as exc:

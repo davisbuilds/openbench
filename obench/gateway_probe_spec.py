@@ -25,7 +25,14 @@ _ROOT_FIELDS = {
     "private_host_allowlist", "private_cidr_allowlist", "budget",
     "cases", "arms",
 }
-_BUDGET_FIELDS = {"timeout_s", "max_output_tokens", "usd_cap"}
+_BUDGET_FIELDS = {
+    "timeout_s",
+    "max_output_tokens",
+    "usd_cap",
+    "max_total_attempts",
+    "max_input_tokens",
+    "retry_deadline_s",
+}
 _CASE_FIELDS = {"case_id", "prompt"}
 
 
@@ -67,9 +74,21 @@ class ProbeBudget:
     timeout_s: int
     max_output_tokens: int
     usd_cap: str
+    max_total_attempts: int = 1
+    max_input_tokens: int | None = None
+    retry_deadline_s: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
+        value = {
+            "timeout_s": self.timeout_s,
+            "max_output_tokens": self.max_output_tokens,
+            "usd_cap": self.usd_cap,
+        }
+        if self.max_total_attempts != 1:
+            value["max_total_attempts"] = self.max_total_attempts
+            value["max_input_tokens"] = self.max_input_tokens
+            value["retry_deadline_s"] = self.retry_deadline_s
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +155,22 @@ def _parse_budget(value: Any) -> ProbeBudget:
         raise GatewayProbeSpecError("budget.usd_cap must be a positive decimal") from exc
     if not cap.is_finite() or cap <= 0:
         raise GatewayProbeSpecError("budget.usd_cap must be a positive decimal")
+    max_total_attempts = _integer(
+        table.get("max_total_attempts", 1),
+        "budget.max_total_attempts",
+        1,
+    )
+    max_input_tokens = table.get("max_input_tokens")
+    retry_deadline_s = table.get("retry_deadline_s")
+    if max_total_attempts > 1:
+        if max_input_tokens is None:
+            raise GatewayProbeSpecError(
+                "budget.max_input_tokens is required when retries are enabled"
+            )
+        if retry_deadline_s is None:
+            raise GatewayProbeSpecError(
+                "budget.retry_deadline_s is required when retries are enabled"
+            )
     return ProbeBudget(
         timeout_s=_integer(_required(table, "timeout_s", "budget"), "budget.timeout_s", 1),
         max_output_tokens=_integer(
@@ -144,6 +179,17 @@ def _parse_budget(value: Any) -> ProbeBudget:
             1,
         ),
         usd_cap=str(cap),
+        max_total_attempts=max_total_attempts,
+        max_input_tokens=(
+            None
+            if max_input_tokens is None
+            else _integer(max_input_tokens, "budget.max_input_tokens", 1)
+        ),
+        retry_deadline_s=(
+            None
+            if retry_deadline_s is None
+            else _integer(retry_deadline_s, "budget.retry_deadline_s", 1)
+        ),
     )
 
 

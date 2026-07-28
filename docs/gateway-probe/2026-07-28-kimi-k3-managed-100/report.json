@@ -1,0 +1,3705 @@
+{
+  "arms": {
+    "cloudflare-moonshot": {
+      "baseline": false,
+      "conditions": {
+        "cold": {
+          "availability": {
+            "attempted": 50,
+            "rate": 1.0,
+            "successes": 50,
+            "wilson95": {
+              "confidence": 0.95,
+              "high": 1.0,
+              "low": 0.9286499658256813
+            }
+          },
+          "denominators": {
+            "attempted": 50,
+            "request_failed": 0,
+            "route_failed": 0,
+            "route_unverifiable": 0,
+            "route_verified": 50,
+            "scheduled": 50,
+            "success": 50
+          },
+          "metrics": {
+            "budget_debit_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0020325,
+              "p95": 0.004336349999999999
+            },
+            "cache_write_input_tokens": {
+              "coverage": {
+                "covered": 0,
+                "ratio": 0.0,
+                "total": 50
+              },
+              "p50": null,
+              "p95": null
+            },
+            "cached_input_tokens": {
+              "coverage": {
+                "covered": 30,
+                "ratio": 0.6,
+                "total": 50
+              },
+              "p50": 116.0,
+              "p95": 117.55
+            },
+            "cold_end_to_end_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.861416999978246,
+              "p95": 5.284222987203974
+            },
+            "cold_end_to_end_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.8613371459941845,
+              "p95": 5.284060535297611
+            },
+            "cold_end_to_end_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.8614580829744227,
+              "p95": 5.284300162189174
+            },
+            "cold_end_to_end_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.840523854014464,
+              "p95": 13.278519981409772
+            },
+            "input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 115.0,
+              "p95": 117.55
+            },
+            "measured_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0020325,
+              "p95": 0.004336349999999999
+            },
+            "observed_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0020325,
+              "p95": 0.004336349999999999
+            },
+            "output_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 112.5,
+              "p95": 266.44999999999993
+            },
+            "request_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.78791804148932,
+              "p95": 13.250897272530711
+            },
+            "request_to_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.8314286670065485,
+              "p95": 5.25607548111584
+            },
+            "request_to_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.831348813022487,
+              "p95": 5.255913029209477
+            },
+            "request_to_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.831469750002725,
+              "p95": 5.2561526561010385
+            },
+            "setup_dns_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0015685624675825238,
+              "p95": 0.02148034388956148
+            },
+            "setup_tcp_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.01147183298598975,
+              "p95": 0.012824224834912457
+            },
+            "setup_tls_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.01623614551499486,
+              "p95": 0.019968068579328244
+            },
+            "throughput_tokens_per_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 34.780247510437356,
+              "p95": 47.98312845429244
+            },
+            "total_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 227.5,
+              "p95": 379.65
+            }
+          },
+          "retry_diagnostics": {
+            "attempt_count_distribution": {
+              "1": 50
+            },
+            "eventual_successes": 50,
+            "first_attempt_successes": 50,
+            "logical_cells": 50,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0
+          }
+        },
+        "warm": {
+          "availability": {
+            "attempted": 50,
+            "rate": 1.0,
+            "successes": 50,
+            "wilson95": {
+              "confidence": 0.95,
+              "high": 1.0,
+              "low": 0.9286499658256813
+            }
+          },
+          "denominators": {
+            "attempted": 50,
+            "request_failed": 0,
+            "route_failed": 0,
+            "route_unverifiable": 0,
+            "route_verified": 50,
+            "scheduled": 50,
+            "success": 50
+          },
+          "metrics": {
+            "budget_debit_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0050355,
+              "p95": 0.0070656
+            },
+            "cache_write_input_tokens": {
+              "coverage": {
+                "covered": 0,
+                "ratio": 0.0,
+                "total": 50
+              },
+              "p50": null,
+              "p95": null
+            },
+            "cached_input_tokens": {
+              "coverage": {
+                "covered": 42,
+                "ratio": 0.84,
+                "total": 50
+              },
+              "p50": 116.0,
+              "p95": 119.0
+            },
+            "input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 116.0,
+              "p95": 119.0
+            },
+            "measured_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.002157,
+              "p95": 0.0037338
+            },
+            "observed_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0050355,
+              "p95": 0.0070656
+            },
+            "output_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 120.5,
+              "p95": 225.64999999999998
+            },
+            "request_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 5.965509479487082,
+              "p95": 9.987062258317017
+            },
+            "request_to_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.34417262498755,
+              "p95": 4.020355535333509
+            },
+            "request_to_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.3439068954903632,
+              "p95": 4.020078435036702
+            },
+            "request_to_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.344265291496413,
+              "p95": 4.020493122833431
+            },
+            "throughput_tokens_per_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 34.913792524993696,
+              "p95": 43.99274982798177
+            },
+            "total_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 237.0,
+              "p95": 342.0
+            }
+          },
+          "retry_diagnostics": {
+            "attempt_count_distribution": {
+              "1": 50
+            },
+            "eventual_successes": 50,
+            "first_attempt_successes": 50,
+            "logical_cells": 50,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0
+          }
+        }
+      },
+      "role": "gateway"
+    },
+    "concentrate-moonshot": {
+      "baseline": false,
+      "conditions": {
+        "cold": {
+          "availability": {
+            "attempted": 50,
+            "rate": 1.0,
+            "successes": 50,
+            "wilson95": {
+              "confidence": 0.95,
+              "high": 1.0,
+              "low": 0.9286499658256813
+            }
+          },
+          "denominators": {
+            "attempted": 50,
+            "request_failed": 0,
+            "route_failed": 0,
+            "route_unverifiable": 0,
+            "route_verified": 50,
+            "scheduled": 50,
+            "success": 50
+          },
+          "metrics": {
+            "budget_debit_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.001974,
+              "p95": 0.00384615
+            },
+            "cache_write_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0,
+              "p95": 0.0
+            },
+            "cached_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 114.0,
+              "p95": 117.0
+            },
+            "cold_end_to_end_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.7304988539835904,
+              "p95": 3.893284224980744
+            },
+            "cold_end_to_end_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.7303663335042074,
+              "p95": 3.8932014001155038
+            },
+            "cold_end_to_end_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.7304988539835904,
+              "p95": 3.893284224980744
+            },
+            "cold_end_to_end_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 5.736859499505954,
+              "p95": 10.754648496073788
+            },
+            "input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 115.0,
+              "p95": 117.55
+            },
+            "measured_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.001974,
+              "p95": 0.00384615
+            },
+            "observed_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.001974,
+              "p95": 0.00384615
+            },
+            "output_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 108.5,
+              "p95": 232.74999999999997
+            },
+            "request_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 5.706972437008517,
+              "p95": 10.722715008535307
+            },
+            "request_to_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.699270395503845,
+              "p95": 3.839293262208229
+            },
+            "request_to_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.699137875024462,
+              "p95": 3.83921043734299
+            },
+            "request_to_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.699270395503845,
+              "p95": 3.839293262208229
+            },
+            "setup_dns_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0014466459979303181,
+              "p95": 0.05600984998745842
+            },
+            "setup_tcp_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.011491000012028962,
+              "p95": 0.012474912649486213
+            },
+            "setup_tls_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0176489369769115,
+              "p95": 0.020750364658306354
+            },
+            "throughput_tokens_per_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 36.20658051347921,
+              "p95": 45.27462216917274
+            },
+            "total_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 224.0,
+              "p95": 351.04999999999995
+            }
+          },
+          "retry_diagnostics": {
+            "attempt_count_distribution": {
+              "1": 50
+            },
+            "eventual_successes": 50,
+            "first_attempt_successes": 50,
+            "logical_cells": 50,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0
+          }
+        },
+        "warm": {
+          "availability": {
+            "attempted": 50,
+            "rate": 1.0,
+            "successes": 50,
+            "wilson95": {
+              "confidence": 0.95,
+              "high": 1.0,
+              "low": 0.9286499658256813
+            }
+          },
+          "denominators": {
+            "attempted": 50,
+            "request_failed": 0,
+            "route_failed": 0,
+            "route_unverifiable": 0,
+            "route_verified": 50,
+            "scheduled": 50,
+            "success": 50
+          },
+          "metrics": {
+            "budget_debit_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0043485,
+              "p95": 0.0066783
+            },
+            "cache_write_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0,
+              "p95": 0.0
+            },
+            "cached_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 115.0,
+              "p95": 118.0
+            },
+            "input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 116.0,
+              "p95": 119.0
+            },
+            "measured_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0023610000000000003,
+              "p95": 0.003992699999999999
+            },
+            "observed_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0043485,
+              "p95": 0.0066783
+            },
+            "output_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 134.0,
+              "p95": 243.24999999999994
+            },
+            "request_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.67688958303188,
+              "p95": 10.043060175035498
+            },
+            "request_to_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.5143570005020592,
+              "p95": 3.6910123665293213
+            },
+            "request_to_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.513396646012552,
+              "p95": 3.6908935290761296
+            },
+            "request_to_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.5143570005020592,
+              "p95": 3.6910123665293213
+            },
+            "throughput_tokens_per_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 34.90726580243485,
+              "p95": 44.36400666062325
+            },
+            "total_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 251.5,
+              "p95": 357.9
+            }
+          },
+          "retry_diagnostics": {
+            "attempt_count_distribution": {
+              "1": 50
+            },
+            "eventual_successes": 50,
+            "first_attempt_successes": 50,
+            "logical_cells": 50,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0
+          }
+        }
+      },
+      "role": "gateway"
+    },
+    "direct-moonshot": {
+      "baseline": true,
+      "conditions": {
+        "cold": {
+          "availability": {
+            "attempted": 50,
+            "rate": 1.0,
+            "successes": 50,
+            "wilson95": {
+              "confidence": 0.95,
+              "high": 1.0,
+              "low": 0.9286499658256813
+            }
+          },
+          "denominators": {
+            "attempted": 50,
+            "request_failed": 0,
+            "route_failed": 0,
+            "route_unverifiable": 0,
+            "route_verified": 50,
+            "scheduled": 50,
+            "success": 50
+          },
+          "metrics": {
+            "budget_debit_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0025589999999999996,
+              "p95": 0.00417795
+            },
+            "cache_write_input_tokens": {
+              "coverage": {
+                "covered": 0,
+                "ratio": 0.0,
+                "total": 50
+              },
+              "p50": null,
+              "p95": null
+            },
+            "cached_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 115.0,
+              "p95": 117.55
+            },
+            "cold_end_to_end_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.3408743540057912,
+              "p95": 3.5371219464577734
+            },
+            "cold_end_to_end_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.3407649584987666,
+              "p95": 3.536984777424368
+            },
+            "cold_end_to_end_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.341465187491849,
+              "p95": 3.537503040069714
+            },
+            "cold_end_to_end_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.9630036875314545,
+              "p95": 12.424950442026601
+            },
+            "input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 115.0,
+              "p95": 117.55
+            },
+            "measured_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0025589999999999996,
+              "p95": 0.00417795
+            },
+            "observed_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0025589999999999996,
+              "p95": 0.00417795
+            },
+            "output_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 147.5,
+              "p95": 255.34999999999994
+            },
+            "request_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.932257208507508,
+              "p95": 12.390727415125001
+            },
+            "request_to_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.256427521002479,
+              "p95": 3.493029477560776
+            },
+            "request_to_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.256316937506199,
+              "p95": 3.492892308527371
+            },
+            "request_to_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.2567228745028842,
+              "p95": 3.493410571172717
+            },
+            "setup_dns_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0019542289956007153,
+              "p95": 0.03742405395896639
+            },
+            "setup_tcp_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.011529354000231251,
+              "p95": 0.012927814101567492
+            },
+            "setup_tls_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.01823604150558822,
+              "p95": 0.021717573274509048
+            },
+            "throughput_tokens_per_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 34.556510795925576,
+              "p95": 40.93176376357578
+            },
+            "total_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 263.0,
+              "p95": 370.15
+            }
+          },
+          "retry_diagnostics": {
+            "attempt_count_distribution": {
+              "1": 50
+            },
+            "eventual_successes": 50,
+            "first_attempt_successes": 50,
+            "logical_cells": 50,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0
+          }
+        },
+        "warm": {
+          "availability": {
+            "attempted": 50,
+            "rate": 1.0,
+            "successes": 50,
+            "wilson95": {
+              "confidence": 0.95,
+              "high": 1.0,
+              "low": 0.9286499658256813
+            }
+          },
+          "denominators": {
+            "attempted": 50,
+            "request_failed": 0,
+            "route_failed": 0,
+            "route_unverifiable": 0,
+            "route_verified": 50,
+            "scheduled": 50,
+            "success": 50
+          },
+          "metrics": {
+            "budget_debit_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.004854,
+              "p95": 0.007339499999999997
+            },
+            "cache_write_input_tokens": {
+              "coverage": {
+                "covered": 0,
+                "ratio": 0.0,
+                "total": 50
+              },
+              "p50": null,
+              "p95": null
+            },
+            "cached_input_tokens": {
+              "coverage": {
+                "covered": 30,
+                "ratio": 0.6,
+                "total": 50
+              },
+              "p50": 115.0,
+              "p95": 119.0
+            },
+            "input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 116.0,
+              "p95": 119.0
+            },
+            "measured_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.002424,
+              "p95": 0.004196849999999999
+            },
+            "observed_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.004854,
+              "p95": 0.007339499999999997
+            },
+            "output_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 138.0,
+              "p95": 256.69999999999993
+            },
+            "request_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.7980383959948085,
+              "p95": 11.103674260218394
+            },
+            "request_to_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.350536354468204,
+              "p95": 3.7097707100241677
+            },
+            "request_to_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.3503894789901096,
+              "p95": 3.709603760347818
+            },
+            "request_to_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.3509444585070014,
+              "p95": 3.7102690287836593
+            },
+            "throughput_tokens_per_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 34.24982392998798,
+              "p95": 56.64701735029892
+            },
+            "total_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 256.0,
+              "p95": 372.15
+            }
+          },
+          "retry_diagnostics": {
+            "attempt_count_distribution": {
+              "1": 50
+            },
+            "eventual_successes": 50,
+            "first_attempt_successes": 50,
+            "logical_cells": 50,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0
+          }
+        }
+      },
+      "role": "direct"
+    },
+    "openrouter-moonshot": {
+      "baseline": false,
+      "conditions": {
+        "cold": {
+          "availability": {
+            "attempted": 50,
+            "rate": 1.0,
+            "successes": 50,
+            "wilson95": {
+              "confidence": 0.95,
+              "high": 1.0,
+              "low": 0.9286499658256813
+            }
+          },
+          "denominators": {
+            "attempted": 50,
+            "request_failed": 0,
+            "route_failed": 0,
+            "route_unverifiable": 0,
+            "route_verified": 50,
+            "scheduled": 50,
+            "success": 50
+          },
+          "metrics": {
+            "budget_debit_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.002169,
+              "p95": 0.0039082499999999985
+            },
+            "cache_write_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0,
+              "p95": 0.0
+            },
+            "cached_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0,
+              "p95": 117.0
+            },
+            "cold_end_to_end_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.5931841249985155,
+              "p95": 3.415128739571082
+            },
+            "cold_end_to_end_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.5930756664893124,
+              "p95": 3.4150134478404643
+            },
+            "cold_end_to_end_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.6309518960188143,
+              "p95": 3.4294422376638973
+            },
+            "cold_end_to_end_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.040993520990014,
+              "p95": 10.189295322235555
+            },
+            "input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 115.0,
+              "p95": 117.55
+            },
+            "measured_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.002169,
+              "p95": 0.0039082499999999985
+            },
+            "observed_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.002169,
+              "p95": 0.0039082499999999985
+            },
+            "output_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 121.5,
+              "p95": 237.34999999999997
+            },
+            "request_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.011471833509859,
+              "p95": 10.151878664398097
+            },
+            "request_to_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.537568145489786,
+              "p95": 3.3772392811020833
+            },
+            "request_to_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.537497749493923,
+              "p95": 3.3771239893714657
+            },
+            "request_to_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.5683611670101527,
+              "p95": 3.3915527791948983
+            },
+            "setup_dns_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0014995415403973311,
+              "p95": 0.02194011683168355
+            },
+            "setup_tcp_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.01107883348595351,
+              "p95": 0.012369329636567273
+            },
+            "setup_tls_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.015847895527258515,
+              "p95": 0.018659743608441203
+            },
+            "throughput_tokens_per_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 35.117944885870706,
+              "p95": 47.96639300243133
+            },
+            "total_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 237.0,
+              "p95": 353.34999999999997
+            }
+          },
+          "retry_diagnostics": {
+            "attempt_count_distribution": {
+              "1": 50
+            },
+            "eventual_successes": 50,
+            "first_attempt_successes": 50,
+            "logical_cells": 50,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0
+          }
+        },
+        "warm": {
+          "availability": {
+            "attempted": 50,
+            "rate": 1.0,
+            "successes": 50,
+            "wilson95": {
+              "confidence": 0.95,
+              "high": 1.0,
+              "low": 0.9286499658256813
+            }
+          },
+          "denominators": {
+            "attempted": 50,
+            "request_failed": 0,
+            "route_failed": 0,
+            "route_unverifiable": 0,
+            "route_verified": 50,
+            "scheduled": 50,
+            "success": 50
+          },
+          "metrics": {
+            "budget_debit_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.00489,
+              "p95": 0.0072232500000000005
+            },
+            "cache_write_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0,
+              "p95": 0.0
+            },
+            "cached_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0,
+              "p95": 118.0
+            },
+            "input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 116.0,
+              "p95": 119.0
+            },
+            "measured_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.002517,
+              "p95": 0.0038145
+            },
+            "observed_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.00489,
+              "p95": 0.0072232500000000005
+            },
+            "output_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 144.5,
+              "p95": 231.1
+            },
+            "request_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.579976895503933,
+              "p95": 9.580938294032238
+            },
+            "request_to_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.4234466455236543,
+              "p95": 2.982058181258617
+            },
+            "request_to_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.423233875015285,
+              "p95": 2.9815335019200573
+            },
+            "request_to_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.4363150210119784,
+              "p95": 2.9881874584709296
+            },
+            "throughput_tokens_per_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 34.0894979982138,
+              "p95": 41.12953775944523
+            },
+            "total_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 260.5,
+              "p95": 347.1
+            }
+          },
+          "retry_diagnostics": {
+            "attempt_count_distribution": {
+              "1": 50
+            },
+            "eventual_successes": 50,
+            "first_attempt_successes": 50,
+            "logical_cells": 50,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0
+          }
+        }
+      },
+      "role": "gateway"
+    },
+    "vercel-moonshot": {
+      "baseline": false,
+      "conditions": {
+        "cold": {
+          "availability": {
+            "attempted": 50,
+            "rate": 1.0,
+            "successes": 50,
+            "wilson95": {
+              "confidence": 0.95,
+              "high": 1.0,
+              "low": 0.9286499658256813
+            }
+          },
+          "denominators": {
+            "attempted": 50,
+            "request_failed": 0,
+            "route_failed": 0,
+            "route_unverifiable": 0,
+            "route_verified": 50,
+            "scheduled": 50,
+            "success": 50
+          },
+          "metrics": {
+            "budget_debit_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.002316,
+              "p95": 0.0039037499999999992
+            },
+            "cache_write_input_tokens": {
+              "coverage": {
+                "covered": 0,
+                "ratio": 0.0,
+                "total": 50
+              },
+              "p50": null,
+              "p95": null
+            },
+            "cached_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 113.0,
+              "p95": 117.55
+            },
+            "cold_end_to_end_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.7901442915317602,
+              "p95": 4.549596450017996
+            },
+            "cold_end_to_end_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.781087291514268,
+              "p95": 4.540028418789733
+            },
+            "cold_end_to_end_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.7901442915317602,
+              "p95": 4.549596450017996
+            },
+            "cold_end_to_end_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.574096833006479,
+              "p95": 11.279137716171679
+            },
+            "input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 115.0,
+              "p95": 117.55
+            },
+            "measured_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.002316,
+              "p95": 0.0039037499999999992
+            },
+            "observed_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.002316,
+              "p95": 0.0039037499999999992
+            },
+            "output_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 131.5,
+              "p95": 237.39999999999998
+            },
+            "request_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.541199625004083,
+              "p95": 11.248750870797084
+            },
+            "request_to_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.7338413545221556,
+              "p95": 4.5036803084280095
+            },
+            "request_to_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.725528958515497,
+              "p95": 4.494112277199745
+            },
+            "request_to_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.7338413545221556,
+              "p95": 4.5036803084280095
+            },
+            "setup_dns_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.0019090414862148464,
+              "p95": 0.13546928298310323
+            },
+            "setup_tcp_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.005395728978328407,
+              "p95": 0.006585891672875732
+            },
+            "setup_tls_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.023584353970363736,
+              "p95": 0.05281281424104223
+            },
+            "throughput_tokens_per_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 34.70185523001546,
+              "p95": 48.12506506678979
+            },
+            "total_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 244.5,
+              "p95": 351.65
+            }
+          },
+          "retry_diagnostics": {
+            "attempt_count_distribution": {
+              "1": 50
+            },
+            "eventual_successes": 50,
+            "first_attempt_successes": 50,
+            "logical_cells": 50,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0
+          }
+        },
+        "warm": {
+          "availability": {
+            "attempted": 50,
+            "rate": 1.0,
+            "successes": 50,
+            "wilson95": {
+              "confidence": 0.95,
+              "high": 1.0,
+              "low": 0.9286499658256813
+            }
+          },
+          "denominators": {
+            "attempted": 50,
+            "request_failed": 0,
+            "route_failed": 0,
+            "route_unverifiable": 0,
+            "route_verified": 50,
+            "scheduled": 50,
+            "success": 50
+          },
+          "metrics": {
+            "budget_debit_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.004595999999999999,
+              "p95": 0.007244699999999999
+            },
+            "cache_write_input_tokens": {
+              "coverage": {
+                "covered": 0,
+                "ratio": 0.0,
+                "total": 50
+              },
+              "p50": null,
+              "p95": null
+            },
+            "cached_input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 115.0,
+              "p95": 119.0
+            },
+            "input_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 116.0,
+              "p95": 119.0
+            },
+            "measured_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.002388,
+              "p95": 0.0040272
+            },
+            "observed_cost_usd": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 0.004595999999999999,
+              "p95": 0.007244699999999999
+            },
+            "output_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 136.0,
+              "p95": 245.29999999999998
+            },
+            "request_stream_total_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 6.319876166497124,
+              "p95": 10.412645818750025
+            },
+            "request_to_first_body_byte_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.4590459165046923,
+              "p95": 3.1380958689202085
+            },
+            "request_to_response_headers_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.4588287915103137,
+              "p95": 3.1321478919911896
+            },
+            "request_to_semantic_ttft_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 2.4590459165046923,
+              "p95": 3.1380958689202085
+            },
+            "throughput_tokens_per_s": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 35.13270986441798,
+              "p95": 45.9708967969119
+            },
+            "total_tokens": {
+              "coverage": {
+                "covered": 50,
+                "ratio": 1.0,
+                "total": 50
+              },
+              "p50": 252.0,
+              "p95": 361.2
+            }
+          },
+          "retry_diagnostics": {
+            "attempt_count_distribution": {
+              "1": 50
+            },
+            "eventual_successes": 50,
+            "first_attempt_successes": 50,
+            "logical_cells": 50,
+            "retry_rescues": 0,
+            "unknown_cost_attempts": 0
+          }
+        }
+      },
+      "role": "gateway"
+    }
+  },
+  "baseline_arm_id": "direct-moonshot",
+  "benchmark": "gateway_probe",
+  "complete_blocks": {
+    "cold": 50,
+    "warm": 50
+  },
+  "experiment_digest": "9748aef6256df8feeb4f0a075f7cfce5e009aad22d029c55795e5af354550f6c",
+  "experiment_id": "kimi-k3-five-way-chat-r100-4096-retry-v1-2026-07-28",
+  "paired_contrasts": {
+    "cloudflare-moonshot": {
+      "cold": {
+        "budget_debit_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00027000000000000006,
+            "low": -0.0007426875000000001,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -9.750000000000026e-05
+        },
+        "cache_write_input_tokens": {
+          "coverage": {
+            "covered": 0,
+            "ratio": 0.0,
+            "total": 50
+          },
+          "interval": null,
+          "median_gateway_minus_direct": null
+        },
+        "cached_input_tokens": {
+          "coverage": {
+            "covered": 30,
+            "ratio": 0.6,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "cold_end_to_end_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.6822057920508087,
+            "low": 0.24033536751085194,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.40836185446823947
+        },
+        "cold_end_to_end_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.6821175830555148,
+            "low": 0.23213568751816638,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.40837931248825043
+        },
+        "cold_end_to_end_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.6849017289932817,
+            "low": 0.24036879098275676,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.4081882709870115
+        },
+        "cold_end_to_end_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.3800547230959634,
+            "low": -1.4920864169835113,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.18733412501751445
+        },
+        "input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "measured_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00027000000000000006,
+            "low": -0.0007576875,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -9.750000000000026e-05
+        },
+        "observed_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00027000000000000006,
+            "low": -0.0007650000000000001,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -9.750000000000026e-05
+        },
+        "output_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 18.0,
+            "low": -50.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -6.5
+        },
+        "request_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.4276820624945685,
+            "low": -1.4993268134712707,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.1836243955185637
+        },
+        "request_to_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.6739823125244584,
+            "low": 0.22048431300208904,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.41258220802410506
+        },
+        "request_to_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.6738972285529599,
+            "low": 0.22179816802963614,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.412599666044116
+        },
+        "request_to_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.6739592500089202,
+            "low": 0.22217862505931407,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.4124086245428771
+        },
+        "setup_dns_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": -8.470853208564222e-05,
+            "low": -0.00044774997513741255,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00019064504886046052
+        },
+        "setup_tcp_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00035220797872170806,
+            "low": -0.00035712544922716916,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -5.841749953106046e-05
+        },
+        "setup_tls_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": -0.0011573954834602773,
+            "low": -0.00343504105694592,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.0025443755148444325
+        },
+        "throughput_tokens_per_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 3.8817084575759253,
+            "low": -0.4727888248150727,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 1.0745203233789198
+        },
+        "total_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 18.0,
+            "low": -50.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -6.5
+        }
+      },
+      "warm": {
+        "budget_debit_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0002474999999999999,
+            "low": -0.0006149999999999999,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -7.500000000000041e-05
+        },
+        "cache_write_input_tokens": {
+          "coverage": {
+            "covered": 0,
+            "ratio": 0.0,
+            "total": 50
+          },
+          "interval": null,
+          "median_gateway_minus_direct": null
+        },
+        "cached_input_tokens": {
+          "coverage": {
+            "covered": 22,
+            "ratio": 0.44,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "measured_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00011999999999999988,
+            "low": -0.0007950000000000001,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00018000000000000004
+        },
+        "observed_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00023999999999999976,
+            "low": -0.0005197499999999998,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -7.500000000000041e-05
+        },
+        "output_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 8.0,
+            "low": -53.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -12.0
+        },
+        "request_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.2165948379952123,
+            "low": -2.418671292020008,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.3198478120029904
+        },
+        "request_to_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.14833699065784445,
+            "low": -0.06755643748329021,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.06709331250749528
+        },
+        "request_to_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.15941572899464518,
+            "low": -0.06759045898797922,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.06708529201569036
+        },
+        "request_to_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.1591755619738251,
+            "low": -0.0677384169830475,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.06692560450755991
+        },
+        "throughput_tokens_per_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 4.39026070271299,
+            "low": -1.4148920903602829,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 2.198567063389657
+        },
+        "total_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 9.0,
+            "low": -57.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -12.0
+        }
+      }
+    },
+    "concentrate-moonshot": {
+      "cold": {
+        "budget_debit_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00014249999999999994,
+            "low": -0.0009749999999999997,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00019500000000000008
+        },
+        "cache_write_input_tokens": {
+          "coverage": {
+            "covered": 0,
+            "ratio": 0.0,
+            "total": 50
+          },
+          "interval": null,
+          "median_gateway_minus_direct": null
+        },
+        "cached_input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "cold_end_to_end_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.3930217661647472,
+            "low": 0.05500431201653555,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.20917179150274023
+        },
+        "cold_end_to_end_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.3929418759653345,
+            "low": 0.07266206331405559,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.20910174999153242
+        },
+        "cold_end_to_end_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.3868742997146907,
+            "low": 0.07820137502858415,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.20894820801913738
+        },
+        "cold_end_to_end_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.5973289579560515,
+            "low": -2.051774082996417,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.02572331254486926
+        },
+        "input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "measured_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00013499999999999992,
+            "low": -0.0009824999999999999,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00019500000000000008
+        },
+        "observed_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00014249999999999994,
+            "low": -0.0009824999999999999,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00019500000000000008
+        },
+        "output_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 9.5,
+            "low": -64.0125,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -13.0
+        },
+        "request_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.664924874989083,
+            "low": -2.0705626669805497,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.024639271025080234
+        },
+        "request_to_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.4103910851081286,
+            "low": 0.08604708302300423,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.25081060451339
+        },
+        "request_to_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.39302370900986716,
+            "low": 0.0860375000629574,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.24913983399164863
+        },
+        "request_to_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.3926241250592284,
+            "low": 0.07736402048612945,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.25061056250706315
+        },
+        "setup_dns_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": -0.00011385398101992905,
+            "low": -0.0005720000481233001,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.0002643335028551519
+        },
+        "setup_tcp_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00019458401948213577,
+            "low": -0.000433248991612345,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00024377048248425126
+        },
+        "setup_tls_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 5.339551717042923e-05,
+            "low": -0.0015801669796928763,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.0004316250269766897
+        },
+        "throughput_tokens_per_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 2.510007077664575,
+            "low": -0.47301897680970306,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 1.1016940481901756
+        },
+        "total_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 9.0,
+            "low": -66.5,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -13.0
+        }
+      },
+      "warm": {
+        "budget_debit_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00012000000000000031,
+            "low": -0.0008999999999999998,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00030750000000000005
+        },
+        "cache_write_input_tokens": {
+          "coverage": {
+            "covered": 0,
+            "ratio": 0.0,
+            "total": 50
+          },
+          "interval": null,
+          "median_gateway_minus_direct": null
+        },
+        "cached_input_tokens": {
+          "coverage": {
+            "covered": 30,
+            "ratio": 0.6,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": -112.5,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "measured_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00069,
+            "low": -0.0005550000000000002,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0001200000000000001
+        },
+        "observed_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0001275,
+            "low": -0.0009000000000000002,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00030750000000000005
+        },
+        "output_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 46.0,
+            "low": -35.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 8.0
+        },
+        "request_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.543621791061014,
+            "low": -1.2512867914920207,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.39320156202302314
+        },
+        "request_to_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.28082520805764943,
+            "low": 0.11046170850750059,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.2362370619957801
+        },
+        "request_to_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.28074600000400096,
+            "low": 0.11042906303191558,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.2362701450183522
+        },
+        "request_to_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.30280241649597883,
+            "low": 0.11038214602740481,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.23603631200967357
+        },
+        "throughput_tokens_per_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 2.3157978002251554,
+            "low": -3.402426369001674,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.488899496685395
+        },
+        "total_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 46.0,
+            "low": -35.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 8.0
+        }
+      }
+    },
+    "openrouter-moonshot": {
+      "cold": {
+        "budget_debit_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.00048000000000000007,
+            "low": -0.0006300000000000004,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.0004124999999999999
+        },
+        "cache_write_input_tokens": {
+          "coverage": {
+            "covered": 0,
+            "ratio": 0.0,
+            "total": 50
+          },
+          "interval": null,
+          "median_gateway_minus_direct": null
+        },
+        "cached_input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": -113.0,
+            "low": -115.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -114.0
+        },
+        "cold_end_to_end_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.41198291699402034,
+            "low": 0.08016537496587262,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.23337768798228353
+        },
+        "cold_end_to_end_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.44914772899937816,
+            "low": 0.07672368752537295,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.23340031248517334
+        },
+        "cold_end_to_end_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.42750266697839834,
+            "low": 0.09169000101974234,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.24215775047196075
+        },
+        "cold_end_to_end_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.5509323329897597,
+            "low": -1.6535358329419978,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.4945721665280871
+        },
+        "input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "measured_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0004350000000000003,
+            "low": -0.0006300000000000004,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.0004124999999999999
+        },
+        "observed_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0004350000000000003,
+            "low": -0.0006300000000000004,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.0004124999999999999
+        },
+        "output_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 32.0,
+            "low": -42.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -27.5
+        },
+        "request_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.5767253539524972,
+            "low": -1.6975914380163886,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.5094129790086299
+        },
+        "request_to_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.40981477044988424,
+            "low": 0.07079074997454882,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.25863808300346136
+        },
+        "request_to_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.40853566699661314,
+            "low": 0.07059245886266581,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.2586524369835388
+        },
+        "request_to_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.4201126239495352,
+            "low": 0.09001716700731777,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.27101972899981774
+        },
+        "setup_dns_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": -0.0001827677100664031,
+            "low": -0.0007047080434858799,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.0003369790210854262
+        },
+        "setup_tcp_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": -1.010397681966424e-05,
+            "low": -0.0005656879802700132,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.0003016249684151262
+        },
+        "setup_tls_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": -0.0017642920138314366,
+            "low": -0.003255791962146759,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.0023695209820289165
+        },
+        "throughput_tokens_per_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 4.919683181606988,
+            "low": -1.1588766092378755,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 1.4697893945012979
+        },
+        "total_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 29.0,
+            "low": -42.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -27.5
+        }
+      },
+      "warm": {
+        "budget_debit_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0007049999999999999,
+            "low": -0.0005025000000000003,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00014999999999999996
+        },
+        "cache_write_input_tokens": {
+          "coverage": {
+            "covered": 0,
+            "ratio": 0.0,
+            "total": 50
+          },
+          "interval": null,
+          "median_gateway_minus_direct": null
+        },
+        "cached_input_tokens": {
+          "coverage": {
+            "covered": 30,
+            "ratio": 0.6,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": -114.5,
+            "low": -116.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -115.0
+        },
+        "input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "measured_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0005101874999999988,
+            "low": -0.0005324999999999999,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00013500000000000003
+        },
+        "observed_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0005999999999999998,
+            "low": -0.0005025000000000003,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00014999999999999996
+        },
+        "output_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 39.0,
+            "low": -35.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -9.0
+        },
+        "request_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.6201724994753022,
+            "low": -1.5524240009835921,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.30295506250695325
+        },
+        "request_to_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.37810760451247916,
+            "low": -0.07151372896623798,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.18709006253629923
+        },
+        "request_to_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.3471401250571944,
+            "low": -0.06509566598106176,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.18714883300708607
+        },
+        "request_to_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.37796237503062,
+            "low": -0.07737935348995961,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.192866645520553
+        },
+        "throughput_tokens_per_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 2.3853801632398755,
+            "low": -2.546253124610786,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.44630866589768914
+        },
+        "total_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 33.0,
+            "low": -35.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -9.0
+        }
+      }
+    },
+    "vercel-moonshot": {
+      "cold": {
+        "budget_debit_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": -0.00043500000000000006,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00023999999999999998
+        },
+        "cache_write_input_tokens": {
+          "coverage": {
+            "covered": 0,
+            "ratio": 0.0,
+            "total": 50
+          },
+          "interval": null,
+          "median_gateway_minus_direct": null
+        },
+        "cached_input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": -113.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "cold_end_to_end_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.4829652914777398,
+            "low": 0.11643183400155976,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.30618385353591293
+        },
+        "cold_end_to_end_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.46763537498191,
+            "low": 0.11323948000790551,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.29700564546510577
+        },
+        "cold_end_to_end_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.47388991696061566,
+            "low": 0.11603683396242559,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.30595893700956367
+        },
+        "cold_end_to_end_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.1290579589549452,
+            "low": -1.1103186664986424,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.1286372504546307
+        },
+        "input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "measured_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": -0.00043499999999999995,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00023999999999999998
+        },
+        "observed_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.500000000000004e-05,
+            "low": -0.00043500000000000006,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00023999999999999998
+        },
+        "output_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.0,
+            "low": -29.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -16.0
+        },
+        "request_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.1291821660124697,
+            "low": -1.0472130619746167,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.133951646508649
+        },
+        "request_to_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.49460370794986375,
+            "low": 0.12750541599234566,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.30621181303285994
+        },
+        "request_to_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.4922694780107122,
+            "low": 0.11826262500835583,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.29701895799371414
+        },
+        "request_to_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.4981667494866997,
+            "low": 0.12730983295477927,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.30598366699996404
+        },
+        "setup_dns_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0004861254710704088,
+            "low": -0.0004438891977770254,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 5.231300019659102e-05
+        },
+        "setup_tcp_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": -0.005884960866387706,
+            "low": -0.006372882567666238,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.006230812956346199
+        },
+        "setup_tls_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.005567874992266297,
+            "low": 0.004549832985503599,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0050677919934969395
+        },
+        "throughput_tokens_per_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 2.433766111050348,
+            "low": 0.5777443242864901,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 1.7278861760896582
+        },
+        "total_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.0,
+            "low": -29.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -16.0
+        }
+      },
+      "warm": {
+        "budget_debit_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0005174999999999997,
+            "low": -0.00033000000000000043,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 5.2500000000000246e-05
+        },
+        "cache_write_input_tokens": {
+          "coverage": {
+            "covered": 0,
+            "ratio": 0.0,
+            "total": 50
+          },
+          "interval": null,
+          "median_gateway_minus_direct": null
+        },
+        "cached_input_tokens": {
+          "coverage": {
+            "covered": 30,
+            "ratio": 0.6,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "input_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0,
+            "low": 0.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.0
+        },
+        "measured_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.0003225000000000002,
+            "low": -0.0005999999999999998,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -0.00010500000000000006
+        },
+        "observed_cost_usd": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.000502874999999998,
+            "low": -0.0003375000000000001,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 5.2500000000000246e-05
+        },
+        "output_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 20.5,
+            "low": -40.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -7.0
+        },
+        "request_stream_total_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 1.1453644995053764,
+            "low": -0.8916850004752632,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.3357554165122565
+        },
+        "request_to_first_body_byte_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.2823909370054025,
+            "low": -0.05229558298015036,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.12231924996012822
+        },
+        "request_to_response_headers_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.2712806239724159,
+            "low": -0.05553722047916381,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.11725687448051758
+        },
+        "request_to_semantic_ttft_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 0.2819517284806352,
+            "low": -0.060310375498374924,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.12223410396836698
+        },
+        "throughput_tokens_per_s": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 2.6568343795169227,
+            "low": -1.6771585061636287,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": 0.4888619318136662
+        },
+        "total_tokens": {
+          "coverage": {
+            "covered": 50,
+            "ratio": 1.0,
+            "total": 50
+          },
+          "interval": {
+            "confidence": 0.95,
+            "high": 21.0,
+            "low": -40.0,
+            "replicates": 2000
+          },
+          "median_gateway_minus_direct": -7.0
+        }
+      }
+    }
+  },
+  "price_digest": "cc94c4d7f77608a63623d40a620256840ea09247c4a114dd55a61a8ff5caf0a7",
+  "retry_diagnostics": {
+    "attempts": 500,
+    "budget_debit_usd": "1.843545",
+    "eventual_successes": 500,
+    "first_attempt_successes": 500,
+    "known_observed_cost_usd": "1.843545",
+    "logical_cells": 500,
+    "retry_rescues": 0,
+    "unknown_cost_attempts": 0
+  },
+  "schedule_digest": "07d421331cd2a61539e7cb4cb3d3ff5de3dfc2ed16cc91d85292e71efd60b01c",
+  "scheduled_blocks_per_condition": 50,
+  "schema_version": 4
+}

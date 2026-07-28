@@ -34,6 +34,15 @@ def environment():
 
 
 def canned_result(*, stop_required=False, condition="cold"):
+    amount = "1.00" if stop_required else "0"
+    attempt_outcome = {
+        "success": True,
+        "http_status": 200,
+        "timed_out": False,
+        "error_class": None,
+        "error_detail": None,
+        "semantic_output_started": True,
+    }
     result = {
         "outcome": {
             "attempted": True,
@@ -107,9 +116,60 @@ def canned_result(*, stop_required=False, condition="cold"):
         },
         "billing": {
             "primer_cost_usd": None,
-            "measured_cost_usd": "1.00" if stop_required else "0",
-            "charged_cost_usd": "1.00" if stop_required else "0",
+            "measured_cost_usd": amount,
+            "charged_cost_usd": amount,
+            "observed_cost_usd": amount,
+            "known_observed_cost_usd": amount,
+            "budget_debit_usd": amount,
+            "cost_status": "observed",
+            "unknown_cost_attempts": 0,
             "stop_required": stop_required,
+        },
+        "retry_evidence": {
+            "max_total_attempts": 1,
+            "max_input_tokens": None,
+            "max_output_tokens": 64,
+            "retry_deadline_s": None,
+            "reservation_input_per_million_usd": "0",
+            "reservation_output_per_million_usd": "0",
+            "attempt_count": 1,
+            "recovered": False,
+            "first_attempt_outcome": dict(attempt_outcome),
+            "eventual_outcome": dict(attempt_outcome),
+            "recovery_timing": {
+                "initial_request_to_final_response_headers_s": 0.1,
+                "initial_request_to_final_semantic_output_s": 0.2,
+                "initial_request_to_completion_s": 0.3,
+                "final_attempt_request_start_offset_s": 0.0,
+            },
+            "attempts": [{
+                "attempt_number": 1,
+                "phase": "measured",
+                "outcome": dict(attempt_outcome),
+                "timing": {
+                    "initial_request_start_offset_s": 0.0,
+                    "request_to_response_headers_s": 0.1,
+                    "request_to_semantic_output_s": 0.2,
+                    "attempt_total_s": 0.3,
+                },
+                "retry": {
+                    "eligible": False,
+                    "retry_after_status": "absent",
+                    "retry_after_s": None,
+                    "wait_requested_s": None,
+                    "wait_actual_s": None,
+                    "not_retried_reason": "semantic_output_started",
+                },
+                "cost": {
+                    "primer_cost_usd": None,
+                    "measured_cost_usd": amount,
+                    "observed_cost_usd": amount,
+                    "known_observed_cost_usd": amount,
+                    "budget_debit_usd": amount,
+                    "reservation_usd": "0",
+                    "cost_status": "observed",
+                },
+            }],
         },
     }
     if condition == "warm":
@@ -154,8 +214,39 @@ def cost_unavailable_result(*, condition, reason="measured_cost_unavailable"):
     })
     result["billing"].update({
         "measured_cost_usd": None,
-        "charged_cost_usd": "0",
+        "charged_cost_usd": None,
+        "observed_cost_usd": None,
+        "known_observed_cost_usd": "0",
+        "budget_debit_usd": "0",
+        "cost_status": "reserved_unknown",
+        "unknown_cost_attempts": 1,
         "stop_required": True,
+    })
+    attempt_outcome = {
+        "success": False,
+        "http_status": 429,
+        "timed_out": False,
+        "error_class": "http",
+        "error_detail": "http_status",
+        "semantic_output_started": False,
+    }
+    result["retry_evidence"].update({
+        "first_attempt_outcome": dict(attempt_outcome),
+        "eventual_outcome": dict(attempt_outcome),
+    })
+    attempt = result["retry_evidence"]["attempts"][0]
+    attempt["outcome"] = dict(attempt_outcome)
+    attempt["retry"].update({
+        "eligible": True,
+        "not_retried_reason": "attempt_limit",
+    })
+    attempt["cost"].update({
+        "measured_cost_usd": None,
+        "observed_cost_usd": None,
+        "known_observed_cost_usd": "0",
+        "budget_debit_usd": "0",
+        "reservation_usd": "0",
+        "cost_status": "reserved_unknown",
     })
     return result
 
@@ -167,6 +258,7 @@ def mark_cost_unavailable(row, *, reason="measured_cost_unavailable"):
     )
     row["outcome"] = result["outcome"]
     row["billing"] = result["billing"]
+    row["retry_evidence"] = result["retry_evidence"]
 
 
 def write_rows(path, rows):
@@ -367,7 +459,7 @@ class GatewayProbeRunTests(unittest.TestCase):
                 "measured_cost_unavailable",
                 True,
                 True,
-                "known charged spend below budget.usd_cap",
+                "budget debit below budget.usd_cap",
             ),
         ):
             with self.subTest(
@@ -397,8 +489,26 @@ class GatewayProbeRunTests(unittest.TestCase):
                     if exhaust_known_cap:
                         historical[-1]["billing"].update({
                             "primer_cost_usd": "0.05",
-                            "charged_cost_usd": "0.05",
+                            "known_observed_cost_usd": "0.05",
+                            "budget_debit_usd": "0.05",
                         })
+                        historical[-1]["retry_evidence"]["attempts"][0][
+                            "cost"
+                        ].update({
+                            "primer_cost_usd": "0.05",
+                            "known_observed_cost_usd": "0.05",
+                            "budget_debit_usd": "0.05",
+                            "reservation_usd": "0.05",
+                        })
+                        historical[-1]["retry_evidence"][
+                            "reservation_output_per_million_usd"
+                        ] = (
+                            "390.625"
+                            if historical[-1]["identity"]["schedule"][
+                                "condition"
+                            ] == "warm"
+                            else "781.25"
+                        )
                     write_rows(results_path, historical)
                     with mock.patch.object(
                         gateway_probe_http, "execute_request"

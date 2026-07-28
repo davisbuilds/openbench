@@ -124,7 +124,7 @@ def _validate_historical_cost_unavailable_recovery(
 ) -> None:
     if spent >= usd_cap:
         raise GatewayProbeRunError(
-            "cost-unavailable block recovery requires known charged spend "
+            "cost-unavailable block recovery requires budget debit "
             "below budget.usd_cap"
         )
     for row in stopped_rows:

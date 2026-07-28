@@ -26,7 +26,7 @@ from .gateway_probe_models import GatewayProbeRunError, ProbeBlock
 
 
 PUBLIC_SCHEMA_VERSION = 3
-PUBLIC_EXPERIMENT_SCHEMA_VERSION = 1
+PUBLIC_EXPERIMENT_SCHEMA_VERSION = 2
 PUBLIC_BUNDLE_KIND = "gateway_probe_public"
 PUBLIC_FILES = (
     "experiment.json",
@@ -47,6 +47,7 @@ _PUBLIC_DIRECTORY_FILES = frozenset((*PUBLIC_FILES, "manifest.json"))
 _SOURCE_DIRECTORY_FILES = frozenset((*SOURCE_FILES, "manifest.json"))
 VERIFIER_SOURCE_FILES = (
     "obench/gateway_probe_publish.py",
+    "obench/gateway_probe_http.py",
     "obench/gateway_probe_report.py",
     "obench/gateway_probe_results.py",
     "obench/gateway_probe_run.py",
@@ -97,6 +98,7 @@ _PUBLIC_RESULT_FIELDS = (
     "request_metrics",
     "reuse_evidence",
     "billing",
+    "retry_evidence",
 )
 
 
@@ -263,6 +265,9 @@ def _project_experiment(
             "timeout_s": experiment.budget.timeout_s,
             "max_output_tokens": experiment.budget.max_output_tokens,
             "usd_cap": experiment.budget.usd_cap,
+            "max_total_attempts": experiment.budget.max_total_attempts,
+            "max_input_tokens": experiment.budget.max_input_tokens,
+            "retry_deadline_s": experiment.budget.retry_deadline_s,
         },
         "cases": [
             {
@@ -349,10 +354,35 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
     budget = value.get("budget")
     if (
         not isinstance(budget, dict)
-        or set(budget) != {"timeout_s", "max_output_tokens", "usd_cap"}
+        or set(budget) != {
+            "timeout_s",
+            "max_output_tokens",
+            "usd_cap",
+            "max_total_attempts",
+            "max_input_tokens",
+            "retry_deadline_s",
+        }
         or not _is_integer(budget.get("timeout_s"), minimum=1)
         or not _is_integer(budget.get("max_output_tokens"), minimum=1)
+        or not _is_integer(budget.get("max_total_attempts"), minimum=1)
         or not isinstance(budget.get("usd_cap"), str)
+        or (
+            budget["max_total_attempts"] == 1
+            and (
+                budget.get("max_input_tokens") is not None
+                or budget.get("retry_deadline_s") is not None
+            )
+        )
+        or (
+            budget["max_total_attempts"] > 1
+            and (
+                not _is_integer(budget.get("max_input_tokens"), minimum=1)
+                or not _is_integer(
+                    budget.get("retry_deadline_s"),
+                    minimum=1,
+                )
+            )
+        )
     ):
         raise GatewayProbeRunError("public experiment budget does not match schema")
     try:
@@ -693,6 +723,7 @@ def _validate_public_experiment_bindings(
         case["case_id"]: case["prompt_digest"]
         for case in experiment["cases"]
     }
+    budget = experiment["budget"]
     for row in rows:
         identity = row["identity"]
         arm = identity["arm"]
@@ -704,6 +735,14 @@ def _validate_public_experiment_bindings(
             or row["model_match"] != experiment["model_match"]
             or arm_digests.get(arm["id"]) != arm["digest"]
             or case_digests.get(case["id"]) != case["prompt_digest"]
+            or row["retry_evidence"]["max_total_attempts"]
+            != budget["max_total_attempts"]
+            or row["retry_evidence"]["max_input_tokens"]
+            != budget["max_input_tokens"]
+            or row["retry_evidence"]["max_output_tokens"]
+            != budget["max_output_tokens"]
+            or row["retry_evidence"]["retry_deadline_s"]
+            != budget["retry_deadline_s"]
         ):
             raise GatewayProbeRunError(
                 "public results do not match public experiment"

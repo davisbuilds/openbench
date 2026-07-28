@@ -52,13 +52,24 @@ def build_private_run(
     *,
     prompt="PRIVATE PROMPT must never publish",
     max_output_tokens=64,
+    with_retry=False,
 ):
     run_dir = Path(root, "private-run")
     run_dir.mkdir()
-    experiment_text = manifest(prompt).replace(
-        "max_output_tokens = 64",
-        f"max_output_tokens = {max_output_tokens}",
-    )
+    experiment_text = manifest(prompt)
+    if with_retry:
+        experiment_text = experiment_text.replace(
+            "max_output_tokens = 64",
+            f"max_output_tokens = {max_output_tokens}\n"
+            "max_total_attempts = 2\n"
+            "max_input_tokens = 128\n"
+            "retry_deadline_s = 20",
+        )
+    else:
+        experiment_text = experiment_text.replace(
+            "max_output_tokens = 64",
+            f"max_output_tokens = {max_output_tokens}",
+        )
     (run_dir / "experiment.toml").write_text(experiment_text, encoding="utf-8")
     experiment = gateway_probe_spec.load_experiment(run_dir / "experiment.toml")
     prices = {
@@ -119,6 +130,27 @@ def build_private_run(
         )
         item["scheduled_blocks_per_condition"] = experiment.repetitions
         item["model_match"] = experiment.model_match
+        item["retry_evidence"].update({
+            "max_total_attempts": experiment.budget.max_total_attempts,
+            "max_input_tokens": experiment.budget.max_input_tokens,
+            "max_output_tokens": experiment.budget.max_output_tokens,
+            "retry_deadline_s": experiment.budget.retry_deadline_s,
+            "reservation_input_per_million_usd": (
+                "1" if with_retry else "0"
+            ),
+            "reservation_output_per_million_usd": (
+                "2" if with_retry else "0"
+            ),
+        })
+        if with_retry:
+            reservation = (
+                "0.000512"
+                if schedule_identity["condition"] == "warm"
+                else "0.000256"
+            )
+            item["retry_evidence"]["attempts"][0]["cost"][
+                "reservation_usd"
+            ] = reservation
         item["request_metrics"]["stream"]["finish_reason"] = "length"
         item["request_metrics"]["usage"]["output_tokens_details"] = {
             "reasoning_tokens": 2,
@@ -137,6 +169,68 @@ def build_private_run(
             "generationId": f"generation-{arm_id}-1",
         }
         item["cell_id"] = gateway_probe_results.cell_id(item["identity"])
+    if with_retry:
+        rescued = rows[0]
+        success_attempt = rescued["retry_evidence"]["attempts"][0]
+        success_attempt["attempt_number"] = 2
+        success_attempt["timing"]["initial_request_start_offset_s"] = 0.3
+        failure_outcome = {
+            "success": False,
+            "http_status": 429,
+            "timed_out": False,
+            "error_class": "http",
+            "error_detail": "http_status",
+            "semantic_output_started": False,
+        }
+        failed_attempt = {
+            "attempt_number": 1,
+            "phase": "measured",
+            "outcome": failure_outcome,
+            "timing": {
+                "initial_request_start_offset_s": 0.0,
+                "request_to_response_headers_s": 0.05,
+                "request_to_semantic_output_s": None,
+                "attempt_total_s": 0.1,
+            },
+            "retry": {
+                "eligible": True,
+                "retry_after_status": "normalized",
+                "retry_after_s": 0.2,
+                "wait_requested_s": 0.2,
+                "wait_actual_s": 0.2,
+                "not_retried_reason": None,
+            },
+            "cost": {
+                "primer_cost_usd": None,
+                "measured_cost_usd": None,
+                "observed_cost_usd": None,
+                "known_observed_cost_usd": "0",
+                "budget_debit_usd": "0.000256",
+                "reservation_usd": "0.000256",
+                "cost_status": "reserved_unknown",
+            },
+        }
+        rescued["retry_evidence"].update({
+            "attempt_count": 2,
+            "recovered": True,
+            "first_attempt_outcome": failure_outcome,
+            "eventual_outcome": success_attempt["outcome"],
+            "recovery_timing": {
+                "initial_request_to_final_response_headers_s": 0.4,
+                "initial_request_to_final_semantic_output_s": 0.5,
+                "initial_request_to_completion_s": 0.6,
+                "final_attempt_request_start_offset_s": 0.3,
+            },
+            "attempts": [failed_attempt, success_attempt],
+        })
+        rescued["billing"].update({
+            "charged_cost_usd": None,
+            "observed_cost_usd": None,
+            "known_observed_cost_usd": "0.001",
+            "budget_debit_usd": "0.001256",
+            "cost_status": "reserved_unknown",
+            "unknown_cost_attempts": 1,
+        })
     (run_dir / "prices.json").write_text(_json(prices), encoding="ascii")
     (run_dir / "results.jsonl").write_text(
         "".join(
@@ -161,7 +255,7 @@ def build_private_run(
     source_manifest = {
         "schema_version": 1,
         "benchmark": "gateway_probe",
-        "result_schema_version": 3,
+        "result_schema_version": gateway_probe_results.RESULT_SCHEMA_VERSION,
         "experiment_id": experiment.experiment_id,
         "experiment_digest": experiment.digest,
         "files": {
@@ -288,7 +382,10 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                 (bundle / "experiment.json").read_text(encoding="ascii")
             )
             self.assertEqual(experiment["budget"], {
+                "max_input_tokens": None,
                 "max_output_tokens": 64,
+                "max_total_attempts": 1,
+                "retry_deadline_s": None,
                 "timeout_s": 30,
                 "usd_cap": "0.05",
             })
@@ -345,6 +442,49 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                 for item in rows
                 if item["identity"]["schedule"]["condition"] == "cold"
             ))
+
+    def test_public_bundle_retains_and_verifies_retry_and_unknown_cost_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = build_private_run(tmp, with_retry=True)
+            bundle = Path(tmp, "public")
+            published = gateway_probe_publish.publish_bundle(
+                run_dir,
+                bundle,
+                verified_with_commit=TEST_COMMIT,
+            )
+
+            self.assertEqual(gateway_probe_publish.verify_bundle(bundle), published)
+            rows = gateway_probe_results.load_results(bundle / "results.jsonl")
+            rescued = next(
+                item
+                for item in rows
+                if item["retry_evidence"]["attempt_count"] == 2
+            )
+            self.assertEqual(
+                [
+                    attempt["outcome"]["http_status"]
+                    for attempt in rescued["retry_evidence"]["attempts"]
+                ],
+                [429, 200],
+            )
+            self.assertTrue(rescued["retry_evidence"]["recovered"])
+            self.assertIsNone(rescued["billing"]["observed_cost_usd"])
+            self.assertEqual(
+                rescued["billing"]["cost_status"],
+                "reserved_unknown",
+            )
+            report = json.loads((bundle / "report.json").read_text())
+            self.assertEqual(
+                report["retry_diagnostics"]["unknown_cost_attempts"],
+                1,
+            )
+            self.assertEqual(report["retry_diagnostics"]["retry_rescues"], 1)
+            self.assertEqual(report["retry_diagnostics"]["logical_cells"], 8)
+            self.assertEqual(report["retry_diagnostics"]["attempts"], 9)
+            self.assertIn(
+                "unknown-cost-attempts=1",
+                (bundle / "report.md").read_text(),
+            )
 
     def test_rejects_secret_path_account_and_invalid_verifier_commit(self):
         unsafe = (
@@ -435,7 +575,10 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
                 encoding="ascii",
             )
             _rewrite_manifest_hash(bundle, "results.jsonl")
-            with self.assertRaisesRegex(GatewayProbeRunError, "recomputed report"):
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "charged cost|recomputed report",
+            ):
                 gateway_probe_publish.verify_bundle(bundle)
 
     def test_rejects_rehashed_schedule_coordinate_substitution(self):
@@ -489,6 +632,23 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 GatewayProbeRunError,
                 "public experiment",
+            ):
+                gateway_probe_publish.verify_bundle(bundle)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            experiment_path = bundle / "experiment.json"
+            experiment = json.loads(experiment_path.read_text())
+            experiment["budget"].update({
+                "max_total_attempts": 2,
+                "max_input_tokens": 128,
+                "retry_deadline_s": 20,
+            })
+            experiment_path.write_text(_json(experiment), encoding="ascii")
+            _rewrite_manifest_hash(bundle, "experiment.json")
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "results do not match public experiment",
             ):
                 gateway_probe_publish.verify_bundle(bundle)
 

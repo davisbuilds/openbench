@@ -1,0 +1,52 @@
+{
+  "benchmark": "gateway_probe",
+  "bundle_kind": "gateway_probe_public",
+  "complete_blocks": {
+    "cold": 50,
+    "warm": 50
+  },
+  "experiment_digest": "9748aef6256df8feeb4f0a075f7cfce5e009aad22d029c55795e5af354550f6c",
+  "experiment_id": "kimi-k3-five-way-chat-r100-4096-retry-v1-2026-07-28",
+  "files": {
+    "experiment.json": {
+      "sha256": "41c313acb18165e896037f05a440b46c67913542aefb4feaf4a41690b2a3d724"
+    },
+    "prices.json": {
+      "sha256": "6c383eab3a13335d1261a14b22abe22bb2f28309ce51db1d051a2112794e251d"
+    },
+    "report.json": {
+      "sha256": "111c1b4c072c4c40c87b1b8094c304919f88bc4e2b751435666c2c0c8a857a53"
+    },
+    "report.md": {
+      "sha256": "f3f4404b6bf0c00be6f18ebfd3f57faf70d9b30764f69f8b7281d339a1eae916"
+    },
+    "results.jsonl": {
+      "sha256": "4c2c50ec0c23aca1f47822bb710ec69c4a540a19abffdd9df44845c4e8f3f53b"
+    },
+    "schedule.json": {
+      "sha256": "eaf22c3ffbb42390a8976457d81a42a8bb254c050f92a3e5c3c0fa3ba2137aea"
+    }
+  },
+  "price_digest": "cc94c4d7f77608a63623d40a620256840ea09247c4a114dd55a61a8ff5caf0a7",
+  "report_schema_version": 4,
+  "result_count": 500,
+  "result_schema_version": 4,
+  "run_provenance": {
+    "completed_at": "unknown",
+    "source_commit": "unknown",
+    "started_at": "unknown"
+  },
+  "sanitization": {
+    "case_prompts": "sha256_only",
+    "experiment_private_fields": "omitted",
+    "operational_identifiers": "removed",
+    "paths_accounts_secrets": "rejected",
+    "receipt_values": "removed"
+  },
+  "schedule_digest": "07d421331cd2a61539e7cb4cb3d3ff5de3dfc2ed16cc91d85292e71efd60b01c",
+  "scheduled_blocks_per_condition": 50,
+  "schema_version": 3,
+  "verification": {
+    "verified_with_commit": "cc47ef5d6923c6be4144be361573a475c88ab88b"
+  }
+}
