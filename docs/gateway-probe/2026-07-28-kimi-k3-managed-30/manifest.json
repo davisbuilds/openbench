@@ -5,23 +5,23 @@
     "cold": 30,
     "warm": 30
   },
-  "experiment_digest": "55145119da236d6209d7a70149861a319f035d700e6daadd42e3f649b6ae9c74",
-  "experiment_id": "kimi-k3-five-way-chat-probe",
+  "experiment_digest": "cd8ea78f91edab07b43848f46d9b7faf095143a641d47b0598ca5d94ff9e955b",
+  "experiment_id": "kimi-k3-five-way-chat-comparable-r30-512-2026-07-28",
   "files": {
     "prices.json": {
       "sha256": "6c383eab3a13335d1261a14b22abe22bb2f28309ce51db1d051a2112794e251d"
     },
     "report.json": {
-      "sha256": "d2691fd2cbaf7c36d9b9a114b2f0d50e707cf5ee9ab9856399499dac9c2585c0"
+      "sha256": "228e5c86dc3a305aaf2752c55f4c56ba3267dbb5a261afc596bc07713d321f76"
     },
     "report.md": {
-      "sha256": "e13d318750435c69c9fe2ce1c59278412abc49663b7c9524979f85b3e93eecc8"
+      "sha256": "ec02b8a154b6b6c18cdd53d6adacc88982874189c983615679b5318fa1fd14ee"
     },
     "results.jsonl": {
-      "sha256": "594dbacb1fe74544038eabd574ca6f4a16dbf1e972147b60078ee34b7e1ff80b"
+      "sha256": "1ad9088c8b9ad5c728f66d965fd31b620fef54c3b8da6d601cbd9a5d3347c1ea"
     },
     "schedule.json": {
-      "sha256": "feb2e29c8facb6462bb05f6299310218e87313473a0b09088ad0cbeb7c8340d9"
+      "sha256": "dc01a8a110c554c7f1506758b0eef4f50eb9888254499ba63e2903a5f5605d9c"
     }
   },
   "price_digest": "cc94c4d7f77608a63623d40a620256840ea09247c4a114dd55a61a8ff5caf0a7",
@@ -39,10 +39,10 @@
     "paths_accounts_secrets": "rejected",
     "receipt_values": "removed"
   },
-  "schedule_digest": "d4d78f27d134b3d8cb9eafd7fcdd4e30975b9400d0e95c267bd4d50741b99630",
+  "schedule_digest": "b26946b856878f28b91c085abab4f586d7df3df3c3b16701db378cfbc5d734d5",
   "scheduled_blocks_per_condition": 30,
   "schema_version": 2,
   "verification": {
-    "verified_with_commit": "23de40080e89a1f1d59025e357926672d628bf6c"
+    "verified_with_commit": "3d4182807e9061344a9acb5b6e72cd0aeb934893"
   }
 }

@@ -43,6 +43,6 @@
   "scheduled_blocks_per_condition": 30,
   "schema_version": 2,
   "verification": {
-    "verified_with_commit": "2cd722da4d657d1a7d7aeeee7e92de1f7e0261ff"
+    "verified_with_commit": "3d4182807e9061344a9acb5b6e72cd0aeb934893"
   }
 }
