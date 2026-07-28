@@ -48,11 +48,12 @@ OpenRouter is reconciled through its generation lookup. Concentrate is
 currently response-observed because its public API does not expose a comparable
 generation-by-ID retrieval endpoint.
 
-The live conformance run also proved OpenRouter's declared fallback strategy
-and final selected route. It did not produce an actual failed upstream attempt,
-so provider retry chains remain optional evidence rather than an admission
-requirement. A report must distinguish an empty attempt list from a verified
-absence of retries.
+The live conformance run also proved OpenRouter's declared model fallback
+strategy and final selected route. One call exposed a provider retry from a
+Baidu `429` to an Alibaba `200`; the response metadata and generation trace
+agreed on both attempts and the final route. The other calls' empty attempt
+lists are not proof that no retry occurred. A report must distinguish an empty
+attempt list from a verified absence of retries.
 
 ## Acceptance before Router Bench
 
@@ -60,3 +61,7 @@ Router Bench may only depend on fields that pass this probe on live requests.
 Missing or contradictory identity must remain an explicit evidence status.
 Reports must not upgrade response-observed routes to reconciled routes or infer
 model identity from latency or output behavior.
+
+The proposed benchmark contract is documented in
+[`router-bench.md`](router-bench.md). It treats this probe as adapter admission
+evidence, never as a router-quality score.

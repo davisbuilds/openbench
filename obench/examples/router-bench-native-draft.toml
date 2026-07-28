@@ -1,0 +1,205 @@
+# NON-EXECUTABLE DESIGN ARTIFACT.
+# No current `obench` command accepts this draft schema. Values marked REPLACE
+# are placeholders and must be frozen before any real experiment.
+
+draft_schema = "router_bench_native_v0"
+executable = false
+admission_ready = false
+known_gaps = [
+  "task taxonomy and difficulty require a blinded pilot",
+  "fixed SOTA baseline revisions require preregistration",
+  "capability snapshots and UTC windows require refresh",
+]
+experiment_id = "illustrative-native-router-bench"
+track = "native_auto_route"
+harness = "pi"
+harness_version = "REPLACE_WITH_EXACT_VERSION"
+execution_lane = "local"
+protocol = "openai_responses"
+schedule_seed = 20260727
+client_retry_count = 0
+cache_policy = "gateway_response_cache_disabled"
+provider_prompt_mode = "provider_default"
+
+[research_question]
+primary = "checker_solve_rate"
+checker_is_sole_correctness_judge = true
+contrasts = [
+  "openrouter-auto-minus-fixed-sota-a",
+  "concentrate-auto-minus-fixed-sota-a",
+  "openrouter-auto-minus-concentrate-auto",
+]
+
+[schedule]
+matched_all_arm_blocks = true
+repetitions_per_task_per_window = 5
+randomize_arm_order_within_block = true
+max_replacement_blocks = 2
+replacement_unit = "whole_matched_block"
+selective_reruns_forbidden = true
+
+[[schedule.windows]]
+window_id = "window-a"
+start = "REPLACE_WITH_UTC_START"
+end = "REPLACE_WITH_UTC_END"
+
+[[schedule.windows]]
+window_id = "window-b"
+start = "REPLACE_WITH_UTC_START"
+end = "REPLACE_WITH_UTC_END"
+
+[budget]
+timeout_s_per_cell = 900
+max_model_calls_per_cell = 12
+max_output_tokens_per_call = 16000
+usd_cap_total = 25.0
+
+[[tasks]]
+task_id = "fix-failing-test"
+work_type = "repair_debug"
+scope = "local_edit"
+tool_demand = "edit_and_test"
+context_demand = "small"
+difficulty_band = "REPLACE_FROM_BLINDED_PILOT"
+
+[[tasks]]
+task_id = "add-feature"
+work_type = "feature_implementation"
+scope = "multi_file"
+tool_demand = "iterative_diagnosis"
+context_demand = "medium"
+difficulty_band = "REPLACE_FROM_BLINDED_PILOT"
+
+[[tasks]]
+task_id = "make-ci-green"
+work_type = "test_ci_repair"
+scope = "repository_wide"
+tool_demand = "iterative_diagnosis"
+context_demand = "large"
+difficulty_band = "REPLACE_FROM_BLINDED_PILOT"
+
+[[tasks]]
+task_id = "build-a-cli"
+work_type = "integration_cli"
+scope = "multi_file"
+tool_demand = "edit_and_test"
+context_demand = "medium"
+difficulty_band = "REPLACE_FROM_BLINDED_PILOT"
+
+[[tasks]]
+task_id = "misleading-error"
+work_type = "repair_debug"
+scope = "multi_file"
+tool_demand = "iterative_diagnosis"
+context_demand = "medium"
+difficulty_band = "REPLACE_FROM_BLINDED_PILOT"
+
+[[arms]]
+arm_id = "openrouter-auto"
+kind = "native_router"
+product = "openrouter"
+endpoint = "https://openrouter.ai/api/v1/responses"
+requested_router = "openrouter/auto-beta"
+auth_env = "OPENROUTER_API_KEY"
+native_catalog_unrestricted = true
+adapter_capability_snapshot = "REPLACE_WITH_DIGEST"
+evidence_probe_artifact = "data/router-evidence/2026-07-27-native-routing-spike.json"
+trace_mode = "generation_lookup"
+maximum_evidence_grade = "reconciled"
+
+[[arms]]
+arm_id = "concentrate-auto"
+kind = "native_router"
+product = "concentrate"
+endpoint = "https://api.concentrate.ai/v1/responses"
+requested_router = "auto"
+auth_env = "CONCENTRATE_API_KEY"
+native_catalog_unrestricted = true
+adapter_capability_snapshot = "REPLACE_WITH_DIGEST"
+evidence_probe_artifact = "data/router-evidence/2026-07-27-native-routing-spike.json"
+trace_mode = "response_only"
+maximum_evidence_grade = "observed"
+
+[[arms]]
+arm_id = "fixed-sota-a"
+kind = "fixed_model_baseline"
+product = "direct_provider"
+endpoint = "REPLACE_WITH_DIRECT_PROVIDER_ENDPOINT"
+canonical_model = "REPLACE_WITH_FROZEN_SOTA_MODEL_A_REVISION"
+requested_provider = "REPLACE_WITH_PROVIDER_A"
+auth_env = "REPLACE_WITH_PROVIDER_A_KEY_ENV"
+selection_basis = "preregistered_current_coding_sota"
+selection_date = "REPLACE_WITH_UTC_DATE"
+fallback_enabled = false
+provider_retry_count = 0
+
+[[arms]]
+arm_id = "fixed-sota-b"
+kind = "fixed_model_baseline"
+product = "direct_provider"
+endpoint = "REPLACE_WITH_DIRECT_PROVIDER_ENDPOINT"
+canonical_model = "REPLACE_WITH_FROZEN_SOTA_MODEL_B_REVISION"
+requested_provider = "REPLACE_WITH_PROVIDER_B"
+auth_env = "REPLACE_WITH_PROVIDER_B_KEY_ENV"
+selection_basis = "preregistered_current_coding_sota"
+selection_date = "REPLACE_WITH_UTC_DATE"
+fallback_enabled = false
+provider_retry_count = 0
+
+[route_evidence]
+grades = ["reconciled", "observed", "unverifiable"]
+cell_grade_is_weakest_call = true
+trace_refresh_deadline_s = 120
+refresh_probe_after_final_window = true
+unverifiable_invalidates_matched_block = true
+empty_attempt_list_means_verified_no_retry = false
+
+[metrics]
+equal_task_weighting = true
+checker_solve_rate = true
+mean_checker_score = true
+selected_model_provider_distribution = true
+cell_latency = true
+ttfb = true
+semantic_ttft = true
+stream_total = true
+token_efficiency = true
+cost_efficiency = true
+retry_fallback_evidence = true
+availability = true
+coverage_denominators = true
+
+[uncertainty]
+arm_solve_interval = "wilson_95"
+paired_contrast_interval = "task_clustered_bootstrap_95"
+distribution_interval = "task_clustered_bootstrap_95"
+bootstrap_seed = 20260727
+bootstrap_samples = 10000
+
+[artifacts]
+raw_local_only = [
+  "prompts",
+  "outputs",
+  "transcripts",
+  "credentials",
+  "authorization_headers",
+  "account_identifiers",
+  "provider_request_ids",
+]
+public_bundle = "privacy_safe_tamper_evident"
+hash_correlation_ids = true
+seal_trace_revisions = true
+digest_complete_bundle = true
+
+[publication]
+fail_closed = true
+require_complete_matched_blocks = true
+require_task_and_checker_digests = true
+require_fixed_baseline_revisions = true
+require_capability_snapshots = true
+require_route_identity = true
+require_trace_deadlines_resolved = true
+require_privacy_scan = true
+forbid_evidence_grade_upgrade = true
+forbid_mixed_cost_basis = true
+allow_public_ranking_with_unverifiable_cells = false
