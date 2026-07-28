@@ -309,6 +309,81 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn('class="evidence-depth is-spike"', page)
         self.assertIn("Every delta is gateway minus Direct Moonshot.", page)
 
+    def test_output_limit_disclosure_is_data_driven(self):
+        bundle = site.aggregate_gateway_probe_bundle(
+            self._publish_probe(),
+            manifest_entry={"output_token_limit": 3},
+        )
+
+        disclosure = bundle["output_token_limit_equalities"]
+        self.assertEqual(disclosure["configured_limit"], 3)
+        self.assertEqual(disclosure["arms"]["direct"]["cold"], {
+            "equal": 2,
+            "measured": 2,
+        })
+        self.assertEqual(disclosure["arms"]["gateway"]["warm"], {
+            "equal": 2,
+            "measured": 2,
+        })
+
+        page = site._gateway_probe_board(bundle)
+        self.assertIn("Configured output-limit equality", page)
+        self.assertIn("Configured request output limit: 3 tokens.", page)
+        self.assertIn("Cold equal to 3", page)
+        self.assertIn("Warm equal to 3", page)
+        self.assertIn("Equality is a cap proxy, not proof of truncation", page)
+        self.assertIn("finish reasons are not retained", page)
+        self.assertIn(
+            "Stream-total latency and measured or charged cost are "
+            "generation-length affected.",
+            page,
+        )
+        disclosure_html = page[
+            page.index("Configured output-limit equality"):
+            page.index("Gateway leaderboard")
+        ]
+        self.assertEqual(disclosure_html.count(">2/2<"), 4)
+
+    def test_output_limit_disclosure_omits_missing_or_invalid_metadata(self):
+        bundle_dir = self._publish_probe()
+
+        for value in (None, True, 0, -1, "3", 3.0):
+            with self.subTest(value=value):
+                entry = {} if value is None else {"output_token_limit": value}
+                bundle = site.aggregate_gateway_probe_bundle(
+                    bundle_dir,
+                    manifest_entry=entry,
+                )
+                self.assertIsNone(bundle["output_token_limit_equalities"])
+                page = site._gateway_probe_board(bundle)
+                self.assertNotIn("Configured output-limit equality", page)
+                self.assertNotIn("cap proxy", page)
+
+    def test_output_limit_disclosure_counts_only_measured_output_tokens(self):
+        rows = [
+            {
+                "identity": {
+                    "arm": {"id": "route"},
+                    "schedule": {"condition": "cold"},
+                },
+                "request_metrics": {"usage": {"output_tokens": 128}},
+            },
+            {
+                "identity": {
+                    "arm": {"id": "route"},
+                    "schedule": {"condition": "cold"},
+                },
+                "request_metrics": {"usage": {"output_tokens": None}},
+            },
+        ]
+
+        disclosure = site._output_token_limit_equalities(rows, 128)
+
+        self.assertEqual(disclosure["arms"]["route"]["cold"], {
+            "equal": 1,
+            "measured": 1,
+        })
+
     def test_tampered_probe_bundle_fails_closed(self):
         bundle = self._publish_probe()
         _write(os.path.join(bundle, "report.json"), "{}\n")

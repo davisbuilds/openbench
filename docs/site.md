@@ -73,10 +73,17 @@ keyed by bundle directory:
   {
     "id": "2026-07-27-managed",
     "title": "Gateway Bench: managed routes",
-    "date": "2026-07-27"
+    "date": "2026-07-27",
+    "output_token_limit": 128
   }
 ]
 ```
+
+When `output_token_limit` is a positive integer, the generated bundle panel
+counts verified public rows whose measured `output_tokens` equal that configured
+request limit, split by route and cold/warm condition. Equality is disclosed as
+a cap proxy rather than proof of truncation because public bundles do not retain
+finish reasons. Missing or invalid metadata omits this disclosure.
 
 The verified bundle directory has an exact file set and contains no
 `index.html`. Omit `path` unless a separate release page exists outside that

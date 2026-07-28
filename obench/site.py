@@ -465,6 +465,48 @@ def gateway_probe_verification_error(bundle_dir):
     return None
 
 
+def _output_token_limit_equalities(rows, configured_limit):
+    if (
+        not isinstance(configured_limit, int)
+        or isinstance(configured_limit, bool)
+        or configured_limit <= 0
+    ):
+        return None
+
+    counts = {}
+    for row in rows:
+        identity = row.get("identity") or {}
+        arm_id = (identity.get("arm") or {}).get("id")
+        condition = (identity.get("schedule") or {}).get("condition")
+        if not arm_id or condition not in {"cold", "warm"}:
+            continue
+        usage = (row.get("request_metrics") or {}).get("usage") or {}
+        output_tokens = usage.get("output_tokens")
+        if (
+            not isinstance(output_tokens, int)
+            or isinstance(output_tokens, bool)
+            or output_tokens < 0
+        ):
+            continue
+        item = counts.setdefault(arm_id, {}).setdefault(
+            condition, {"equal": 0, "measured": 0}
+        )
+        item["measured"] += 1
+        if output_tokens == configured_limit:
+            item["equal"] += 1
+
+    return {
+        "configured_limit": configured_limit,
+        "arms": {
+            arm_id: {
+                condition: dict(values)
+                for condition, values in sorted(conditions.items())
+            }
+            for arm_id, conditions in sorted(counts.items())
+        },
+    }
+
+
 def aggregate_gateway_probe_bundle(
     bundle_dir, *, site_dir=None, manifest_entry=None
 ):
@@ -512,6 +554,9 @@ def aggregate_gateway_probe_bundle(
     ]
 
     entry = dict(manifest_entry or {})
+    output_limit_equalities = _output_token_limit_equalities(
+        rows, entry.get("output_token_limit")
+    )
     bundle_id = entry.get("id") or os.path.basename(os.path.normpath(bundle_dir))
     results_path = os.path.join(bundle_dir, "results.jsonl")
     verification = manifest.get("verification") or {}
@@ -546,6 +591,7 @@ def aggregate_gateway_probe_bundle(
             "scheduled_blocks_per_condition"
         ),
         "baseline_arm_id": report.get("baseline_arm_id"),
+        "output_token_limit_equalities": output_limit_equalities,
         "arms": arms,
         "contrasts": contrasts,
     }
@@ -2564,6 +2610,65 @@ def _gateway_probe_board(bundle):
             ),
         ),
     )
+
+    output_limit_equalities = bundle.get("output_token_limit_equalities")
+    if output_limit_equalities:
+        configured_limit = output_limit_equalities["configured_limit"]
+        equality_rows = []
+        for arm in bundle["arms"]:
+            arm_id = arm["arm_id"]
+            conditions = (
+                output_limit_equalities.get("arms", {}).get(arm_id) or {}
+            )
+            equality_rows.append({
+                "arm_id": arm_id,
+                "cold": conditions.get("cold") or {},
+                "warm": conditions.get("warm") or {},
+            })
+
+        def equality_cell(value):
+            equal = value.get("equal")
+            measured = value.get("measured")
+            if equal is None or measured is None:
+                return "—"
+            return f"{equal}/{measured}"
+
+        equality_columns = [
+            {
+                "label": "Route",
+                "cls": "name",
+                "type": "str",
+                "dir": "asc",
+                "cell": lambda row: _gateway_route_cell(row["arm_id"]),
+                "key": lambda row: _gateway_probe_route_name(row["arm_id"]),
+            },
+            {
+                "label": f"Cold equal to {configured_limit}",
+                "cell": lambda row: equality_cell(row["cold"]),
+            },
+            {
+                "label": f"Warm equal to {configured_limit}",
+                "cell": lambda row: equality_cell(row["warm"]),
+            },
+        ]
+        head += (
+            _tag(
+                "div",
+                {"class": "head"},
+                _tag("h2", {}, "Configured output-limit equality")
+                + _tag(
+                    "p",
+                    {},
+                    f"Configured request output limit: {configured_limit} tokens. "
+                    "Counts are measured rows whose output_tokens equal the "
+                    "configured limit. Equality is a cap proxy, not proof of "
+                    "truncation, because finish reasons are not retained in "
+                    "the public bundle. Stream-total latency and measured or "
+                    "charged cost are generation-length affected.",
+                ),
+            )
+            + _render_table(equality_columns, equality_rows)
+        )
 
     def summary(item, name):
         return (item.get("metrics") or {}).get(name) or {}

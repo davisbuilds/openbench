@@ -11,6 +11,7 @@
     "title": "Kimi K3 managed gateway request probe",
     "model": "Kimi K3",
     "date": "2026-07-27",
+    "output_token_limit": 128,
     "submitter": "OpenBench"
   }
 ]

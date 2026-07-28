@@ -3449,6 +3449,7 @@
         "link": null,
         "model": "GPT-4o mini",
         "model_match": "rolling_alias",
+        "output_token_limit_equalities": null,
         "path": null,
         "price_digest": "56ef4049554cc2dc3cb79debc2f5c49d503cfa97c5744d35ffe912815179aea5",
         "result_count": 300,
@@ -6875,6 +6876,61 @@
         "link": null,
         "model": "Kimi K3",
         "model_match": "rolling_alias",
+        "output_token_limit_equalities": {
+          "arms": {
+            "cloudflare-moonshot": {
+              "cold": {
+                "equal": 10,
+                "measured": 30
+              },
+              "warm": {
+                "equal": 15,
+                "measured": 30
+              }
+            },
+            "concentrate-moonshot": {
+              "cold": {
+                "equal": 9,
+                "measured": 30
+              },
+              "warm": {
+                "equal": 15,
+                "measured": 30
+              }
+            },
+            "direct-moonshot": {
+              "cold": {
+                "equal": 9,
+                "measured": 30
+              },
+              "warm": {
+                "equal": 15,
+                "measured": 30
+              }
+            },
+            "openrouter-moonshot": {
+              "cold": {
+                "equal": 16,
+                "measured": 30
+              },
+              "warm": {
+                "equal": 17,
+                "measured": 30
+              }
+            },
+            "vercel-moonshot": {
+              "cold": {
+                "equal": 18,
+                "measured": 30
+              },
+              "warm": {
+                "equal": 13,
+                "measured": 30
+              }
+            }
+          },
+          "configured_limit": 128
+        },
         "path": null,
         "price_digest": "cc94c4d7f77608a63623d40a620256840ea09247c4a114dd55a61a8ff5caf0a7",
         "result_count": 300,
