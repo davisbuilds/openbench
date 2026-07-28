@@ -78,6 +78,32 @@ class GatewayProbeSpecTests(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             first.repetitions = 3
 
+    def test_max_total_attempts_is_configurable_and_digest_bound(self):
+        original = gateway_probe_spec.parse_experiment_toml(manifest())
+        configured = gateway_probe_spec.parse_experiment_toml(
+            manifest().replace(
+                "max_output_tokens = 64",
+                "max_output_tokens = 64\nmax_total_attempts = 3",
+            )
+        )
+
+        self.assertEqual(original.budget.max_total_attempts, 1)
+        self.assertNotIn("max_total_attempts", original.to_dict()["budget"])
+        self.assertEqual(configured.budget.max_total_attempts, 3)
+        self.assertEqual(configured.to_dict()["budget"]["max_total_attempts"], 3)
+        self.assertNotEqual(original.digest, configured.digest)
+
+        with self.assertRaisesRegex(
+            gateway_probe_spec.GatewayProbeSpecError,
+            "budget.max_total_attempts",
+        ):
+            gateway_probe_spec.parse_experiment_toml(
+                manifest().replace(
+                    "max_output_tokens = 64",
+                    "max_output_tokens = 64\nmax_total_attempts = 0",
+                )
+            )
+
     def test_rejects_agent_fields_and_route_policy_drift(self):
         with self.assertRaisesRegex(
             gateway_probe_spec.GatewayProbeSpecError, "unknown field: harness"

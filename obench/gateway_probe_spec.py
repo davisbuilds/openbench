@@ -25,7 +25,12 @@ _ROOT_FIELDS = {
     "private_host_allowlist", "private_cidr_allowlist", "budget",
     "cases", "arms",
 }
-_BUDGET_FIELDS = {"timeout_s", "max_output_tokens", "usd_cap"}
+_BUDGET_FIELDS = {
+    "timeout_s",
+    "max_output_tokens",
+    "usd_cap",
+    "max_total_attempts",
+}
 _CASE_FIELDS = {"case_id", "prompt"}
 
 
@@ -67,9 +72,17 @@ class ProbeBudget:
     timeout_s: int
     max_output_tokens: int
     usd_cap: str
+    max_total_attempts: int = 1
 
     def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
+        value = {
+            "timeout_s": self.timeout_s,
+            "max_output_tokens": self.max_output_tokens,
+            "usd_cap": self.usd_cap,
+        }
+        if self.max_total_attempts != 1:
+            value["max_total_attempts"] = self.max_total_attempts
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +157,11 @@ def _parse_budget(value: Any) -> ProbeBudget:
             1,
         ),
         usd_cap=str(cap),
+        max_total_attempts=_integer(
+            table.get("max_total_attempts", 1),
+            "budget.max_total_attempts",
+            1,
+        ),
     )
 
 
