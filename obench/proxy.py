@@ -364,6 +364,39 @@ class Route:
         self.gateway_route = gateway_route
 
 
+
+# ── Upstream pacing gate ────────────────────────────────────────────────
+# Forensics on 1,694 ledgered requests (2026-07-25/26 laguna storm): requests
+# whose gap from the previous upstream call was >=5s succeeded ~95% EVEN
+# MID-STORM, while <1s gaps 429'd 97.9% of the time -- the shared Poolside pool
+# rejects bursts, and OpenRouter sends NO Retry-After header (live-probed), so
+# pacing must be client-side. A 429 rejects in 0.3s, so an unpaced retry loop
+# manufactures storms. The gate is per upstream HOST, enforced across every
+# concurrent cell in this proxy process (aggregate request rate is what
+# correlates with 429s, corr +0.37; distinct sessions do not, corr -0.01).
+# Costs wall-clock (~gap x turns) -- latency under pacing is NOT comparable to
+# unpaced runs; solve rates are unaffected.
+_PACE_LOCK = threading.Lock()
+_PACE_LAST: dict = {}
+_PACE_HOSTS = {"openrouter.ai": float(os.environ.get("OPENBENCH_PACE_OPENROUTER_S", "5"))}
+
+
+def _pace_upstream(hostname):
+    """Block until at least the per-host minimum gap has passed; record now."""
+    gap = _PACE_HOSTS.get(hostname or "")
+    if not gap:
+        return
+    while True:
+        with _PACE_LOCK:
+            last = _PACE_LAST.get(hostname, 0.0)
+            now = time.monotonic()
+            wait = last + gap - now
+            if wait <= 0:
+                _PACE_LAST[hostname] = now
+                return
+        time.sleep(min(wait, 0.25))
+
+
 class CountingProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "OpenBenchCountingProxy/0.1"
@@ -447,6 +480,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             if not route.upstream.hostname:
                 raise RuntimeError("upstream URL missing host")
             conn = conn_cls(route.upstream.hostname, port=route.upstream.port, timeout=self.server.timeout_s)  # type: ignore[attr-defined]
+            _pace_upstream(route.upstream.hostname)
             conn.request(self.command, route.upstream_path, body=body, headers=headers)
             forwarded_upstream = True
             resp = conn.getresponse()
