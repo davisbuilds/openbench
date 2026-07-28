@@ -96,9 +96,20 @@ class GatewayProbeCliTests(unittest.TestCase):
             with mock.patch.object(
                 gateway_probe_run, "run_experiment", return_value=summary
             ) as run:
-                code = gateway_probe_cli.main(["run", str(spec), "--results", "out.jsonl"])
+                code = gateway_probe_cli.main([
+                    "run",
+                    str(spec),
+                    "--results",
+                    "out.jsonl",
+                    "--allow-cost-unavailable-block-recovery",
+                ])
         self.assertEqual(code, 0)
-        run.assert_called_once()
+        run.assert_called_once_with(
+            str(spec),
+            results_path="out.jsonl",
+            force=False,
+            allow_cost_unavailable_block_recovery=True,
+        )
 
     def test_malformed_prices_and_missing_credentials_exit_two_without_traceback(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -232,6 +243,7 @@ class GatewayProbeCliTests(unittest.TestCase):
                         str(spec),
                         "--output-dir",
                         str(output),
+                        "--allow-cost-unavailable-block-recovery",
                     ])
             self.assertEqual(code, 0)
             self.assertEqual(resumed_code, 0)
@@ -272,6 +284,16 @@ class GatewayProbeCliTests(unittest.TestCase):
                 )
             )
             self.assertEqual(run.call_count, 2)
+            self.assertFalse(
+                run.call_args_list[0].kwargs[
+                    "allow_cost_unavailable_block_recovery"
+                ]
+            )
+            self.assertTrue(
+                run.call_args_list[1].kwargs[
+                    "allow_cost_unavailable_block_recovery"
+                ]
+            )
             self.assertIn(
                 gateway_probe_run.FROZEN_PRICES_ENV,
                 run.call_args.kwargs["environ"],

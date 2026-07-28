@@ -7,6 +7,7 @@ from unittest import mock
 
 from obench import (
     gateway_probe_http,
+    gateway_probe_report,
     gateway_probe_results,
     gateway_probe_run,
     gateway_probe_spec,
@@ -141,6 +142,40 @@ def canned_execute(*, stop_required=False):
     return execute
 
 
+def cost_unavailable_result(*, condition, reason="measured_cost_unavailable"):
+    result = canned_result(condition=condition)
+    result["outcome"].update({
+        "success": False,
+        "available": False,
+        "http_status": 429,
+        "error_class": "http",
+        "error_detail": "http_status",
+        "budget_exhausted_reason": reason,
+    })
+    result["billing"].update({
+        "measured_cost_usd": None,
+        "charged_cost_usd": "0",
+        "stop_required": True,
+    })
+    return result
+
+
+def mark_cost_unavailable(row, *, reason="measured_cost_unavailable"):
+    result = cost_unavailable_result(
+        condition=row["identity"]["schedule"]["condition"],
+        reason=reason,
+    )
+    row["outcome"] = result["outcome"]
+    row["billing"] = result["billing"]
+
+
+def write_rows(path, rows):
+    path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
 class GatewayProbeRunTests(unittest.TestCase):
     def test_schedule_is_deterministic_and_conditions_are_interleaved(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -193,6 +228,7 @@ class GatewayProbeRunTests(unittest.TestCase):
                         spec_path,
                         results_path=results_path,
                         environ=env,
+                        allow_cost_unavailable_block_recovery=True,
                     )
 
     def test_cumulative_cap_stops_after_paid_partial_block_and_on_resume(self):
@@ -215,6 +251,243 @@ class GatewayProbeRunTests(unittest.TestCase):
         self.assertEqual(first.rows_appended, 1)
         self.assertEqual(first.blocks_completed, 0)
         self.assertEqual(second.rows_appended, 0)
+
+    def test_complete_cost_unavailable_block_requires_explicit_recovery_and_stays_in_report(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path = Path(tmp, "probe.toml")
+            results_path = Path(tmp, "probe.jsonl")
+            spec_path.write_text(manifest(), encoding="utf-8")
+            with mock.patch.object(
+                gateway_probe_http,
+                "execute_request",
+                side_effect=canned_execute(),
+            ):
+                gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=results_path,
+                    environ=environment(),
+                )
+            historical = gateway_probe_results.load_results(results_path)[:2]
+            mark_cost_unavailable(historical[-1])
+            write_rows(results_path, historical)
+            historical_bytes = results_path.read_bytes()
+            stopped_arm = historical[-1]["identity"]["arm"]["id"]
+            stopped_condition = historical[-1]["identity"]["schedule"]["condition"]
+
+            with mock.patch.object(
+                gateway_probe_http,
+                "execute_request",
+                side_effect=canned_execute(),
+            ) as execute:
+                refused = gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=results_path,
+                    environ=environment(),
+                )
+                recovered = gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=results_path,
+                    environ=environment(),
+                    allow_cost_unavailable_block_recovery=True,
+                )
+
+            final_rows = gateway_probe_results.load_results(results_path)
+            report = gateway_probe_report.aggregate(final_rows)
+            final_bytes = results_path.read_bytes()
+        self.assertEqual(refused.rows_appended, 0)
+        self.assertEqual(execute.call_count, 6)
+        self.assertEqual(recovered.rows_appended, 6)
+        self.assertEqual(recovered.blocks_completed, 3)
+        self.assertEqual(recovered.blocks_skipped, 1)
+        self.assertTrue(final_bytes.startswith(historical_bytes))
+        self.assertEqual(final_rows[:2], historical)
+        self.assertEqual(report["complete_blocks"], {"cold": 2, "warm": 2})
+        availability = report["arms"][stopped_arm]["conditions"][
+            stopped_condition
+        ]["availability"]
+        self.assertEqual(availability["attempted"], 2)
+        self.assertEqual(availability["successes"], 1)
+
+    def test_cost_unavailable_recovery_refuses_incomplete_historical_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path = Path(tmp, "probe.toml")
+            results_path = Path(tmp, "probe.jsonl")
+            spec_path.write_text(manifest(), encoding="utf-8")
+            with mock.patch.object(
+                gateway_probe_http,
+                "execute_request",
+                side_effect=canned_execute(),
+            ):
+                gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=results_path,
+                    environ=environment(),
+                )
+            historical = gateway_probe_results.load_results(results_path)[:1]
+            mark_cost_unavailable(historical[0])
+            write_rows(results_path, historical)
+            with mock.patch.object(
+                gateway_probe_http, "execute_request"
+            ) as execute:
+                with self.assertRaisesRegex(
+                    GatewayProbeRunError,
+                    "latest complete expected-arm block attempt",
+                ):
+                    gateway_probe_run.run_experiment(
+                        spec_path,
+                        results_path=results_path,
+                        environ=environment(),
+                        allow_cost_unavailable_block_recovery=True,
+                    )
+        execute.assert_not_called()
+
+    def test_cost_unavailable_recovery_refuses_cap_stops_and_known_cap(self):
+        for reason, exhaust_known_cap, stop_required, expected in (
+            (
+                "usd_cap_reached",
+                False,
+                True,
+                "cannot bypass stop reason",
+            ),
+            (
+                "usd_cap_reached_by_primer",
+                False,
+                True,
+                "cannot bypass stop reason",
+            ),
+            (
+                "usd_cap_reached",
+                False,
+                False,
+                "budget stop evidence is inconsistent",
+            ),
+            (
+                "measured_cost_unavailable",
+                True,
+                True,
+                "known charged spend below budget.usd_cap",
+            ),
+        ):
+            with self.subTest(
+                reason=reason,
+                exhaust_known_cap=exhaust_known_cap,
+                stop_required=stop_required,
+            ):
+                with tempfile.TemporaryDirectory() as tmp:
+                    spec_path = Path(tmp, "probe.toml")
+                    results_path = Path(tmp, "probe.jsonl")
+                    spec_path.write_text(manifest(), encoding="utf-8")
+                    with mock.patch.object(
+                        gateway_probe_http,
+                        "execute_request",
+                        side_effect=canned_execute(),
+                    ):
+                        gateway_probe_run.run_experiment(
+                            spec_path,
+                            results_path=results_path,
+                            environ=environment(),
+                        )
+                    historical = gateway_probe_results.load_results(
+                        results_path
+                    )[:2]
+                    mark_cost_unavailable(historical[-1], reason=reason)
+                    historical[-1]["billing"]["stop_required"] = stop_required
+                    if exhaust_known_cap:
+                        historical[-1]["billing"].update({
+                            "primer_cost_usd": "0.05",
+                            "charged_cost_usd": "0.05",
+                        })
+                    write_rows(results_path, historical)
+                    with mock.patch.object(
+                        gateway_probe_http, "execute_request"
+                    ) as execute:
+                        with self.assertRaisesRegex(
+                            GatewayProbeRunError, expected
+                        ):
+                            gateway_probe_run.run_experiment(
+                                spec_path,
+                                results_path=results_path,
+                                environ=environment(),
+                                allow_cost_unavailable_block_recovery=True,
+                            )
+                execute.assert_not_called()
+
+    def test_new_cost_unavailable_recovery_finishes_current_block_only(self):
+        spec_path = (
+            Path(__file__).parents[1]
+            / "examples"
+            / "gateway-probe-five-way-responses.toml"
+        )
+        env = environment()
+        env.update({
+            "CLOUDFLARE_API_TOKEN": "cloudflare-secret",
+            "VERCEL_API_KEY": "vercel-secret",
+            "CONCENTRATE_API_KEY": "concentrate-secret",
+        })
+        summaries = {}
+        rows_by_mode = {}
+        for recovery_enabled in (False, True):
+            with self.subTest(recovery_enabled=recovery_enabled):
+                with tempfile.TemporaryDirectory() as tmp:
+                    results_path = Path(tmp, "probe.jsonl")
+                    call_count = 0
+
+                    def execute(**kwargs):
+                        nonlocal call_count
+                        call_count += 1
+                        if call_count == 1:
+                            return cost_unavailable_result(
+                                condition=kwargs["block"].condition
+                            )
+                        return canned_result(
+                            condition=kwargs["block"].condition
+                        )
+
+                    with mock.patch.object(
+                        gateway_probe_http,
+                        "execute_request",
+                        side_effect=execute,
+                    ):
+                        summaries[recovery_enabled] = (
+                            gateway_probe_run.run_experiment(
+                                spec_path,
+                                results_path=results_path,
+                                environ=env,
+                                allow_cost_unavailable_block_recovery=(
+                                    recovery_enabled
+                                ),
+                            )
+                        )
+                    rows_by_mode[recovery_enabled] = (
+                        gateway_probe_results.load_results(results_path)
+                    )
+
+        self.assertEqual(summaries[False].rows_appended, 1)
+        self.assertEqual(summaries[False].blocks_completed, 0)
+        self.assertEqual(summaries[True].rows_appended, 5)
+        self.assertEqual(summaries[True].blocks_completed, 1)
+        recovered_rows = rows_by_mode[True]
+        self.assertEqual(
+            {row["identity"]["schedule"]["block_id"] for row in recovered_rows},
+            {recovered_rows[0]["identity"]["schedule"]["block_id"]},
+        )
+        self.assertEqual(
+            {row["identity"]["arm"]["id"] for row in recovered_rows},
+            {
+                "direct-openai",
+                "cloudflare-openai",
+                "openrouter-openai",
+                "vercel-openai",
+                "concentrate-openai",
+            },
+        )
+        self.assertEqual(
+            recovered_rows[0]["outcome"]["budget_exhausted_reason"],
+            "measured_cost_unavailable",
+        )
+        self.assertFalse(recovered_rows[0]["outcome"]["available"])
 
     def test_run_resumes_complete_blocks_and_replaces_partial_latest_block(self):
         with tempfile.TemporaryDirectory() as tmp:
