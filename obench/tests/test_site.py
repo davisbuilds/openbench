@@ -295,6 +295,50 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn('ev.key === "Home"', page)
         self.assertIn("selectGatewayModel(modelTabs[0], false)", page)
 
+    def test_run_note_is_carried_and_escaped_below_evidence_depth(self):
+        self._publish_probe()
+        run_note = (
+            'Recovered split-session run; <script>alert("unsafe")</script> '
+            "remained outside metrics."
+        )
+        _write(
+            os.path.join(self.site_dir, "gateway-probe.json"),
+            json.dumps([{
+                "id": "probe-v4",
+                "title": "Gateway benchmark",
+                "run_note": run_note,
+            }]),
+        )
+
+        doc = site.build_board(self.site_dir)
+        bundle = doc["gateway"]["bundles"][0]
+        page = site.render_board_html(doc)
+
+        self.assertEqual(bundle["run_note"], run_note)
+        self.assertIn(
+            "&lt;script&gt;alert(&quot;unsafe&quot;)&lt;/script&gt;",
+            page,
+        )
+        self.assertNotIn("<script>alert", page)
+        self.assertLess(page.index("Evidence depth:"), page.index("Run note:"))
+        self.assertLess(page.index("Run note:"), page.index("Gateway leaderboard"))
+
+    def test_run_note_is_absent_when_unspecified_or_malformed(self):
+        bundle_dir = self._publish_probe()
+
+        bundle = site.aggregate_gateway_probe_bundle(bundle_dir)
+        self.assertNotIn("run_note", bundle)
+        self.assertNotIn("Run note:", site._gateway_probe_board(bundle))
+
+        for run_note in ({"html": "<script>alert(1)</script>"}, "x" * 501):
+            with self.subTest(run_note_type=type(run_note).__name__):
+                bundle = site.aggregate_gateway_probe_bundle(
+                    bundle_dir,
+                    manifest_entry={"run_note": run_note},
+                )
+                self.assertNotIn("run_note", bundle)
+                self.assertNotIn("Run note:", site._gateway_probe_board(bundle))
+
     def test_single_block_bundle_is_plainly_labelled_as_a_spike(self):
         bundle = site.aggregate_gateway_probe_bundle(self._publish_probe())
         bundle["complete_blocks"] = {"cold": 1, "warm": 1}

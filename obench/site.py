@@ -37,6 +37,7 @@ from . import leaderboard, report_page, stats
 from .paths import SOURCE_ROOT
 
 SCHEMA_VERSION = 5
+_MAX_GATEWAY_RUN_NOTE_LENGTH = 500
 
 HARNESS_NOTE = (
     "Scores are not comparable across bundles: task sets, trial counts, and "
@@ -64,6 +65,17 @@ def _public_gateway_title(value):
     """Map legacy public titles onto the sole Gateway Bench product name."""
     value = re.sub(r"\bgateway probe\b", "Gateway Bench", str(value), flags=re.I)
     return re.sub(r"\brequest probe\b", "request benchmark", value, flags=re.I)
+
+
+def _gateway_run_note(value):
+    """Return a short manifest-supplied run disclosure, or ``None``."""
+    if not isinstance(value, str):
+        return None
+    note = value.strip()
+    if not note or len(note) > _MAX_GATEWAY_RUN_NOTE_LENGTH:
+        return None
+    return note
+
 
 # --------------------------------------------------------------------------
 # Harness Bench
@@ -642,7 +654,7 @@ def aggregate_gateway_probe_bundle(
     track = (
         ((first_row.get("identity") or {}).get("benchmark") or {}).get("track")
     )
-    return {
+    bundle = {
         "family": "gateway_probe",
         "id": bundle_id,
         "kind": entry.get("kind") or "release",
@@ -674,6 +686,10 @@ def aggregate_gateway_probe_bundle(
         "arms": arms,
         "contrasts": contrasts,
     }
+    run_note = _gateway_run_note(entry.get("run_note"))
+    if run_note:
+        bundle["run_note"] = run_note
+    return bundle
 
 
 def build_gateway_probe_family(site_dir, gateway_probe_dirs=None):
@@ -2638,6 +2654,7 @@ def _gateway_probe_board(bundle):
     if bundle.get("path"):
         title = _link(bundle["path"], title)
 
+    run_note = _gateway_run_note(bundle.get("run_note"))
     scheduled = bundle.get("scheduled_blocks_per_condition")
     complete = bundle.get("complete_blocks") or {}
     cold_blocks = complete.get("cold", 0)
@@ -2687,6 +2704,14 @@ def _gateway_probe_board(bundle):
                     if is_spike else ""
                 )
             ),
+        )
+        + (
+            _tag(
+                "p",
+                {},
+                _tag("b", {}, "Run note: ") + _esc(run_note),
+            )
+            if run_note else ""
         ),
     )
 
