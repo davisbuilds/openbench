@@ -353,9 +353,14 @@ def _consume(
     cold_started_at: float | None = None,
     expected_socket: tuple[Any, int, Any] | None = None,
     progress: dict[str, Any] | None = None,
+    absolute_deadline: float | None = None,
 ) -> tuple[int, dict[str, Any] | None, bool, dict[str, Any]]:
     operation_started_at = time.monotonic()
     deadline = operation_started_at + float(connection.timeout)
+    if absolute_deadline is not None:
+        deadline = min(deadline, absolute_deadline)
+    if operation_started_at >= deadline:
+        raise TimeoutError("probe request exceeded its total timeout")
     connection.set_request_deadline(deadline)
     connection.request("POST", path, body=body, headers=dict(headers))
     request_sent_at = time.monotonic()
@@ -537,6 +542,7 @@ def _execute_request_once(
     prices: Mapping[str, gateway_run.Price],
     remaining_usd_cap: Decimal | None = None,
     request_timeout_s: float | None = None,
+    absolute_deadline: float | None = None,
 ) -> dict[str, Any]:
     attempt_started_at = time.monotonic()
     connection, path = _new_connection(
@@ -589,6 +595,7 @@ def _execute_request_once(
                 plan,
                 capture_metrics=True,
                 progress=primer_progress,
+                absolute_deadline=absolute_deadline,
             )
             primer["setup"] = dict(connection.phase_s)
             primer["receipt_headers"] = primer_evidence["receipt_headers"]
@@ -669,6 +676,7 @@ def _execute_request_once(
                     primer_socket if block.condition == "warm" else None
                 ),
                 progress=measured_progress,
+                absolute_deadline=absolute_deadline,
             )
             if block.condition == "warm":
                 primer["socket_reused"] = measured_evidence["socket_reused"]
@@ -992,6 +1000,7 @@ def execute_request(
             prices=prices,
             remaining_usd_cap=per_attempt_cap,
             request_timeout_s=request_timeout_s,
+            absolute_deadline=retry_deadline,
         )
         meta = result["_attempt_meta"]
         request_started_at = meta.get("request_started_at")

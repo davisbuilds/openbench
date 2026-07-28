@@ -969,6 +969,28 @@ class GatewayProbeHttpTests(unittest.TestCase):
             ("malformed", None),
         )
 
+    def test_consume_rejects_an_expired_absolute_deadline_before_send(self):
+        connection = mock.Mock()
+        connection.timeout = 5
+        with (
+            mock.patch.object(
+                gateway_probe_http.time,
+                "monotonic",
+                return_value=10.0,
+            ),
+            self.assertRaisesRegex(TimeoutError, "total timeout"),
+        ):
+            gateway_probe_http._consume(
+                connection,
+                "/chat/completions",
+                b"{}",
+                {},
+                route_plan(experiment(self.endpoint), self.endpoint),
+                capture_metrics=True,
+                absolute_deadline=9.0,
+            )
+        connection.request.assert_not_called()
+
     def test_429_then_503_then_success_retains_ordered_attempt_evidence(self):
         _SSEHandler.response_statuses = [429, 503, 200]
         _SSEHandler.retry_after_values = ["0", None, None]
@@ -1192,7 +1214,21 @@ class GatewayProbeHttpTests(unittest.TestCase):
             "case", exp.cases[0].prompt_digest, "warm", 1, ("direct",)
         )
 
-        with mock.patch.object(gateway_probe_http.time, "sleep"):
+        consume = gateway_probe_http._consume
+        absolute_deadlines = []
+
+        def recording_consume(*args, **kwargs):
+            absolute_deadlines.append(kwargs.get("absolute_deadline"))
+            return consume(*args, **kwargs)
+
+        with (
+            mock.patch.object(gateway_probe_http.time, "sleep"),
+            mock.patch.object(
+                gateway_probe_http,
+                "_consume",
+                side_effect=recording_consume,
+            ),
+        ):
             result = gateway_probe_http.execute_request(
                 experiment=exp,
                 case=exp.cases[0],
@@ -1208,6 +1244,9 @@ class GatewayProbeHttpTests(unittest.TestCase):
         self.assertEqual(connections[0], connections[1])
         self.assertEqual(connections[2], connections[3])
         self.assertNotEqual(connections[0], connections[2])
+        self.assertEqual(absolute_deadlines[:2], [None, None])
+        self.assertIsNotNone(absolute_deadlines[2])
+        self.assertEqual(absolute_deadlines[2], absolute_deadlines[3])
         self.assertTrue(result["reuse_evidence"]["completed"])
         self.assertTrue(result["reuse_evidence"]["socket_reused"])
         self.assertGreater(

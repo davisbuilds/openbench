@@ -632,6 +632,23 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
             ):
                 gateway_probe_publish.verify_bundle(bundle)
 
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            experiment_path = bundle / "experiment.json"
+            experiment = json.loads(experiment_path.read_text())
+            experiment["budget"].update({
+                "max_total_attempts": 2,
+                "max_input_tokens": 128,
+                "retry_deadline_s": 20,
+            })
+            experiment_path.write_text(_json(experiment), encoding="ascii")
+            _rewrite_manifest_hash(bundle, "experiment.json")
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "results do not match public experiment",
+            ):
+                gateway_probe_publish.verify_bundle(bundle)
+
     def test_rejects_rehashed_noncanonical_or_private_experiment_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
             bundle = self._bundle(tmp)
