@@ -116,6 +116,15 @@ def build_private_run(root, *, prompt="PRIVATE PROMPT must never publish"):
             "reasoning_tokens": 2,
             "text_tokens": 1,
         }
+        item["reuse_evidence"]["stream"] = (
+            {
+                "done": True,
+                "terminal_status": "completed",
+                "finish_reason": "stop",
+                "finalized": True,
+            }
+            if schedule_identity["condition"] == "warm" else None
+        )
         item["request_metrics"]["route"]["gateway_metadata"] = {
             "generationId": f"generation-{arm_id}-1",
         }
@@ -278,6 +287,16 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                     "text_tokens": 1,
                 }
                 for item in rows
+            ))
+            self.assertTrue(all(
+                item["reuse_evidence"]["stream"]["finish_reason"] == "stop"
+                for item in rows
+                if item["identity"]["schedule"]["condition"] == "warm"
+            ))
+            self.assertTrue(all(
+                item["reuse_evidence"]["stream"] is None
+                for item in rows
+                if item["identity"]["schedule"]["condition"] == "cold"
             ))
 
     def test_rejects_secret_path_account_and_invalid_verifier_commit(self):

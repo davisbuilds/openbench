@@ -39,6 +39,12 @@ _OUTPUT_TOKEN_DETAIL_KEYS = frozenset({
     "text_tokens",
     "video_tokens",
 })
+_PRIMER_STREAM_FIELDS = frozenset({
+    "done",
+    "terminal_status",
+    "finish_reason",
+    "finalized",
+})
 
 
 def block_id(
@@ -451,6 +457,13 @@ def _validate_stream(value: Any, label: str) -> None:
         raise GatewayProbeRunError(f"results row has unsafe {label}")
 
 
+def _validate_primer_stream(value: Any, label: str) -> None:
+    if value is None:
+        return
+    stream = _exact_mapping(value, set(_PRIMER_STREAM_FIELDS), label)
+    _validate_stream(stream, label)
+
+
 def _validate_outcome_evidence(
     outcome: Mapping[str, Any],
     timing: Mapping[str, Any],
@@ -740,15 +753,21 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
         timing,
         request_metrics.get("stream"),
     )
-    primer = _exact_mapping(
-        row.get("reuse_evidence"),
-        {
-            "required", "completed", "http_status", "socket_reused",
-            "primer_nonce_sha256", "measured_nonce_sha256", "setup",
-            "receipt_headers", "route_integrity", "usage", "cache", "costs",
-        },
-        "reuse evidence",
-    )
+    primer_fields = {
+        "required", "completed", "http_status", "socket_reused",
+        "primer_nonce_sha256", "measured_nonce_sha256", "setup",
+        "receipt_headers", "route_integrity", "usage", "cache", "costs",
+    }
+    primer_value = row.get("reuse_evidence")
+    if (
+        not isinstance(primer_value, Mapping)
+        or set(primer_value) not in (
+            primer_fields,
+            primer_fields | {"stream"},
+        )
+    ):
+        raise GatewayProbeRunError("results row has malformed reuse evidence")
+    primer = primer_value
     if (
         not isinstance(primer.get("required"), bool)
         or not isinstance(primer.get("completed"), bool)
@@ -782,6 +801,21 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
     _validate_usage(primer.get("usage"), "primer usage")
     _validate_cache(primer.get("cache"), "primer cache", nullable=True)
     _validate_costs(primer.get("costs"), "primer costs")
+    _validate_primer_stream(primer.get("stream"), "primer stream")
+    primer_stream = primer.get("stream")
+    if (
+        "stream" in primer
+        and primer.get("completed") is True
+        and (
+            not isinstance(primer_stream, Mapping)
+            or primer_stream.get("done") is not True
+            or primer_stream.get("finalized") is not True
+            or primer_stream.get("terminal_status") not in {None, "completed"}
+        )
+    ):
+        raise GatewayProbeRunError(
+            "completed primer stream evidence is inconsistent"
+        )
     if condition == "warm" and outcome.get("success") is True:
         primer_route = primer.get("route_integrity")
         if (

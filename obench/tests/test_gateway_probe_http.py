@@ -27,6 +27,7 @@ class _SSEHandler(BaseHTTPRequestHandler):
     requests = []
     fail_first = False
     close_measured = False
+    chat_finish_reasons = []
 
     def log_message(self, _format, *_args):
         return
@@ -41,19 +42,54 @@ class _SSEHandler(BaseHTTPRequestHandler):
                 key.lower(): value for key, value in self.headers.items()
             },
         })
-        terminal = (
-            "failed"
-            if self.fail_first and len(self.requests) == 1
-            else "completed"
-        )
-        body = (
-            'data: {"type":"response.output_text.delta","delta":"'
-            + PRIVATE_OUTPUT
-            + '"}\n\n'
-            f'data: {{"type":"response.{terminal}","response":'
-            f'{{"status":"{terminal}","model":"gpt-test","provider":"openai",'
-            '"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}}\n\n'
-        ).encode()
+        if self.path == "/chat/completions":
+            request_index = len(type(self).requests) - 1
+            finish_reason = (
+                self.chat_finish_reasons[request_index]
+                if request_index < len(self.chat_finish_reasons)
+                else "stop"
+            )
+            events = (
+                {
+                    "model": "gpt-test",
+                    "provider": "openai",
+                    "choices": [{"delta": {"content": PRIVATE_OUTPUT}}],
+                },
+                {
+                    "model": "gpt-test",
+                    "provider": "openai",
+                    "choices": [{
+                        "delta": {},
+                        "finish_reason": finish_reason,
+                    }],
+                    "usage": {
+                        "prompt_tokens": 5,
+                        "completion_tokens": 3,
+                        "total_tokens": 8,
+                    },
+                },
+            )
+            body = (
+                "".join(
+                    f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
+                    for event in events
+                )
+                + "data: [DONE]\n\n"
+            ).encode()
+        else:
+            terminal = (
+                "failed"
+                if self.fail_first and len(self.requests) == 1
+                else "completed"
+            )
+            body = (
+                'data: {"type":"response.output_text.delta","delta":"'
+                + PRIVATE_OUTPUT
+                + '"}\n\n'
+                f'data: {{"type":"response.{terminal}","response":'
+                f'{{"status":"{terminal}","model":"gpt-test","provider":"openai",'
+                '"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}}\n\n'
+            ).encode()
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("content-length", str(len(body)))
@@ -68,12 +104,12 @@ class _SSEHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
-def experiment(endpoint):
+def experiment(endpoint, *, protocol="openai_responses"):
     arm = gateway_spec.Arm(
         arm_id="direct",
         route_kind="direct",
         endpoint=endpoint,
-        protocol="openai_responses",
+        protocol=protocol,
         baseline=True,
         canonical_model="openai/gpt-test",
         requested_model="gpt-test",
@@ -110,7 +146,7 @@ def route_plan(exp, endpoint):
         arm_id="direct",
         route_kind="direct",
         endpoint=endpoint,
-        protocol="openai_responses",
+        protocol=exp.arms[0].protocol,
         canonical_model="openai/gpt-test",
         requested_model="gpt-test",
         requested_provider="openai",
@@ -143,6 +179,7 @@ class GatewayProbeHttpTests(unittest.TestCase):
         _SSEHandler.requests = []
         _SSEHandler.fail_first = False
         _SSEHandler.close_measured = False
+        _SSEHandler.chat_finish_reasons = []
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), _SSEHandler)
         self.thread = threading.Thread(
             target=self.server.serve_forever, daemon=True
@@ -231,6 +268,39 @@ class GatewayProbeHttpTests(unittest.TestCase):
             Decimal(result["billing"]["charged_cost_usd"]),
             Decimal(result["billing"]["measured_cost_usd"]),
         )
+
+    def test_warm_primer_retains_bounded_completion_stream_evidence(self):
+        _SSEHandler.chat_finish_reasons = ["stop", "length"]
+        endpoint = self.endpoint.replace("/responses", "/chat/completions")
+        exp = experiment(endpoint, protocol="openai_chat")
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "warm", 1, ("direct",)
+        )
+
+        result = gateway_probe_http.execute_request(
+            experiment=exp,
+            case=exp.cases[0],
+            block=block,
+            plan=route_plan(exp, endpoint),
+            secret="test-secret",
+            prices=prices(),
+        )
+
+        self.assertTrue(result["outcome"]["success"])
+        self.assertEqual(
+            result["reuse_evidence"]["stream"],
+            {
+                "done": True,
+                "terminal_status": "completed",
+                "finish_reason": "stop",
+                "finalized": True,
+            },
+        )
+        self.assertEqual(
+            result["request_metrics"]["stream"]["finish_reason"],
+            "length",
+        )
+        self.assertNotIn(PRIVATE_OUTPUT, json.dumps(result, sort_keys=True))
 
     def test_cloudflare_managed_probe_sends_bound_gateway_controls(self):
         exp = experiment(self.endpoint)

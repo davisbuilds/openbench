@@ -425,6 +425,15 @@ def _route_status(
     return status, normalized_reasons
 
 
+def _completion_stream_evidence(stream: Any) -> dict[str, Any] | None:
+    if not isinstance(stream, Mapping):
+        return None
+    return {
+        name: stream.get(name)
+        for name in ("done", "terminal_status", "finish_reason", "finalized")
+    }
+
+
 def _transport_error_detail(exc: Exception) -> str:
     if isinstance(exc, http.client.BadStatusLine):
         return "bad_status_line"
@@ -473,6 +482,7 @@ def execute_request(
         "usage": None,
         "cache": None,
         "costs": {},
+        "stream": None,
     }
     status = None
     metrics = None
@@ -513,6 +523,7 @@ def execute_request(
                 if isinstance(primer_metrics, Mapping)
                 else None
             )
+            primer["stream"] = _completion_stream_evidence(primer_stream)
             primer_terminal = (
                 primer_stream.get("terminal_status")
                 if isinstance(primer_stream, Mapping)

@@ -107,6 +107,15 @@ def bound_row(experiment, block, schedule_digest, price_digest):
             "usage": None,
             "cache": None,
             "costs": {},
+            "stream": (
+                {
+                    "done": True,
+                    "terminal_status": "completed",
+                    "finish_reason": "stop",
+                    "finalized": True,
+                }
+                if not cold else None
+            ),
         },
         "billing": {
             "primer_cost_usd": None,
@@ -208,6 +217,14 @@ class GatewayProbeResultsTests(unittest.TestCase):
             variants["numeric_socket_reuse"]["reuse_evidence"][
                 "socket_reused"
             ] = 1
+            variants["unsafe_primer_finish_reason"] = copy.deepcopy(warm_base)
+            variants["unsafe_primer_finish_reason"]["reuse_evidence"]["stream"][
+                "finish_reason"
+            ] = "Stop"
+            variants["unbounded_primer_stream"] = copy.deepcopy(warm_base)
+            variants["unbounded_primer_stream"]["reuse_evidence"]["stream"][
+                "events"
+            ] = 2
             variants["warm_without_reuse"] = copy.deepcopy(warm_base)
             variants["warm_without_reuse"]["reuse_evidence"][
                 "socket_reused"
