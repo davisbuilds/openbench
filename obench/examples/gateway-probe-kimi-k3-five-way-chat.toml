@@ -11,6 +11,8 @@ timeout_s = 60
 max_output_tokens = 128
 usd_cap = 0.50
 max_total_attempts = 3
+max_input_tokens = 512
+retry_deadline_s = 180
 
 [[cases]]
 case_id = "short-text"

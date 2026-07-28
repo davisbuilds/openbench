@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import email.utils
 import hashlib
 import http.client
 import ipaddress
 import json
+import math
 import queue
 import socket
 import ssl
@@ -21,6 +23,15 @@ from . import gateway_metrics, gateway_profiles, gateway_run, gateway_spec
 from . import gateway_probe_results as probe_results
 from . import gateway_probe_spec as probe_spec
 from .gateway_probe_models import GatewayProbeRunError, PrimerError, ProbeBlock
+
+
+_RETRYABLE_HTTP_STATUSES = frozenset({429, 502, 503, 504})
+_RETRYABLE_TRANSPORT_DETAILS = frozenset({
+    "connection_reset",
+    "connection_closed",
+})
+_DEFAULT_RETRY_WAIT_S = 1.0
+_MAX_RETRY_AFTER_S = 86_400.0
 
 
 _ROUTE_REASON_STATUS = {
@@ -290,6 +301,37 @@ def _receipt_headers(headers: list[tuple[str, str]]) -> dict[str, str]:
     return receipts
 
 
+def _retry_after_seconds(
+    headers: list[tuple[str, str]],
+    *,
+    now: dt.datetime | None = None,
+) -> tuple[str, float | None]:
+    values = [
+        value.strip()
+        for name, value in headers
+        if name.lower() == "retry-after"
+    ]
+    if not values:
+        return "absent", None
+    if len(values) != 1 or not values[0]:
+        return "malformed", None
+    raw = values[0]
+    try:
+        seconds = float(raw)
+    except ValueError:
+        try:
+            target = email.utils.parsedate_to_datetime(raw)
+        except (TypeError, ValueError, OverflowError):
+            return "malformed", None
+        if target.tzinfo is None:
+            target = target.replace(tzinfo=dt.timezone.utc)
+        current = now or dt.datetime.now(dt.timezone.utc)
+        seconds = (target.astimezone(dt.timezone.utc) - current).total_seconds()
+    if not math.isfinite(seconds) or seconds < 0 or seconds > _MAX_RETRY_AFTER_S:
+        return "malformed", None
+    return "normalized", seconds
+
+
 def _same_socket(connection: Any, expected: tuple[Any, int, Any]) -> bool:
     socket_object, socket_fileno, socket_peer = expected
     return bool(
@@ -310,12 +352,15 @@ def _consume(
     capture_metrics: bool,
     cold_started_at: float | None = None,
     expected_socket: tuple[Any, int, Any] | None = None,
+    progress: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any] | None, bool, dict[str, Any]]:
     operation_started_at = time.monotonic()
     deadline = operation_started_at + float(connection.timeout)
     connection.set_request_deadline(deadline)
     connection.request("POST", path, body=body, headers=dict(headers))
     request_sent_at = time.monotonic()
+    if progress is not None:
+        progress["request_started_at"] = request_sent_at
     socket_reused = (
         _same_socket(connection, expected_socket)
         if expected_socket is not None
@@ -329,6 +374,16 @@ def _consume(
     response_headers_at = time.monotonic()
     raw_response_headers = response.getheaders()
     response_headers = {key.lower(): value for key, value in raw_response_headers}
+    retry_after_status, retry_after_s = _retry_after_seconds(
+        raw_response_headers
+    )
+    if progress is not None:
+        progress.update({
+            "http_status": response.status,
+            "response_headers_at": response_headers_at,
+            "retry_after_status": retry_after_status,
+            "retry_after_s": retry_after_s,
+        })
     parser = None
     if capture_metrics and "text/event-stream" in response_headers.get(
         "content-type", ""
@@ -356,7 +411,19 @@ def _consume(
             break
         if parser is not None:
             parser.feed(chunk, time.monotonic())
+            if progress is not None:
+                snapshot = parser.snapshot()
+                progress["semantic_output_started"] = (
+                    snapshot["timing"]["semantic_ttft_s"] is not None
+                )
+                progress["semantic_output_at"] = (
+                    None
+                    if snapshot["timing"]["semantic_ttft_s"] is None
+                    else request_sent_at + snapshot["timing"]["semantic_ttft_s"]
+                )
     completed_at = time.monotonic()
+    if progress is not None:
+        progress["completed_at"] = completed_at
     metrics = parser.finalize(completed_at) if parser is not None else None
     first_body_byte_s = None
     semantic_ttft_s = None
@@ -396,6 +463,8 @@ def _consume(
         "timing": timing,
         "receipt_headers": _receipt_headers(raw_response_headers),
         "socket_reused": socket_reused,
+        "retry_after_status": retry_after_status,
+        "retry_after_s": retry_after_s,
     }
     return response.status, metrics, response.will_close, evidence
 
@@ -435,6 +504,8 @@ def _completion_stream_evidence(stream: Any) -> dict[str, Any] | None:
 
 
 def _transport_error_detail(exc: Exception) -> str:
+    if isinstance(exc, http.client.RemoteDisconnected):
+        return "connection_closed"
     if isinstance(exc, http.client.BadStatusLine):
         return "bad_status_line"
     if isinstance(exc, http.client.HTTPException):
@@ -456,7 +527,7 @@ def _transport_error_detail(exc: Exception) -> str:
     return "internal"
 
 
-def execute_request(
+def _execute_request_once(
     *,
     experiment: probe_spec.GatewayProbeExperiment,
     case: probe_spec.ProbeCase,
@@ -466,6 +537,7 @@ def execute_request(
     prices: Mapping[str, gateway_run.Price],
     remaining_usd_cap: Decimal | None = None,
 ) -> dict[str, Any]:
+    attempt_started_at = time.monotonic()
     connection, path = _new_connection(plan, experiment.budget.timeout_s)
     primer_nonce = nonce(experiment.digest, block, "primer")
     measured_nonce = nonce(experiment.digest, block, "measured")
@@ -496,6 +568,9 @@ def execute_request(
     measured_amount = None
     budget_reason = None
     stop_for_budget = False
+    primer_progress: dict[str, Any] = {}
+    measured_progress: dict[str, Any] = {}
+    active_progress = primer_progress if block.condition == "warm" else measured_progress
     try:
         if block.condition == "warm":
             primer_attempted = True
@@ -509,6 +584,7 @@ def execute_request(
                 _headers(plan, secret, body),
                 plan,
                 capture_metrics=True,
+                progress=primer_progress,
             )
             primer["setup"] = dict(connection.phase_s)
             primer["receipt_headers"] = primer_evidence["receipt_headers"]
@@ -576,6 +652,7 @@ def execute_request(
                 time.monotonic() if block.condition == "cold" else None
             )
             measured_attempted = True
+            active_progress = measured_progress
             status, metrics, _closed, measured_evidence = _consume(
                 connection,
                 path,
@@ -587,6 +664,7 @@ def execute_request(
                 expected_socket=(
                     primer_socket if block.condition == "warm" else None
                 ),
+                progress=measured_progress,
             )
             if block.condition == "warm":
                 primer["socket_reused"] = measured_evidence["socket_reused"]
@@ -604,6 +682,10 @@ def execute_request(
         error_detail = _transport_error_detail(exc)
     finally:
         connection.close()
+    if measured_attempted and status is None:
+        progress_status = measured_progress.get("http_status")
+        status = progress_status if isinstance(progress_status, int) else None
+    semantic_output_started = active_progress.get("semantic_output_started") is True
     route_status, route_reasons = _route_status(metrics)
     costs: dict[str, Any] = {}
     cache = {"cached_input_tokens": None, "cache_write_input_tokens": None}
@@ -671,7 +753,7 @@ def execute_request(
             "cold_end_to_end_stream_total_s": None,
         }
     )
-    return {
+    result = {
         "outcome": {
             "attempted": measured_attempted,
             "success": available,
@@ -723,3 +805,333 @@ def execute_request(
             "stop_required": stop_for_budget,
         },
     }
+    result["_attempt_meta"] = {
+        "attempt_started_at": attempt_started_at,
+        "request_started_at": active_progress.get("request_started_at"),
+        "response_headers_at": active_progress.get("response_headers_at"),
+        "semantic_output_at": active_progress.get("semantic_output_at"),
+        "completed_at": active_progress.get("completed_at", time.monotonic()),
+        "semantic_output_started": semantic_output_started,
+        "retry_after_s": active_progress.get("retry_after_s"),
+        "retry_after_status": active_progress.get(
+            "retry_after_status",
+            "absent",
+        ),
+        "phase": "measured" if measured_attempted else (
+            "primer" if primer_attempted else "measured"
+        ),
+    }
+    return result
+
+
+def _retryable(result: Mapping[str, Any]) -> bool:
+    meta = result["_attempt_meta"]
+    if meta["semantic_output_started"]:
+        return False
+    outcome = result["outcome"]
+    status = outcome.get("http_status")
+    if meta["phase"] == "primer":
+        status = result["reuse_evidence"].get("http_status")
+    return bool(
+        status in _RETRYABLE_HTTP_STATUSES
+        or outcome.get("timed_out") is True
+        or (
+            outcome.get("error_class") == "transport"
+            and outcome.get("error_detail") in _RETRYABLE_TRANSPORT_DETAILS
+        )
+    )
+
+
+def _attempt_public_evidence(
+    result: Mapping[str, Any],
+    *,
+    attempt_number: int,
+    initial_request_started_at: float,
+    retry_eligible: bool,
+    reservation_usd: Decimal,
+) -> dict[str, Any]:
+    meta = result["_attempt_meta"]
+    outcome = result["outcome"]
+    status = outcome.get("http_status")
+    if meta["phase"] == "primer":
+        status = result["reuse_evidence"].get("http_status")
+    request_started_at = meta.get("request_started_at")
+    response_headers_at = meta.get("response_headers_at")
+    semantic_output_at = meta.get("semantic_output_at")
+    completed_at = meta["completed_at"]
+    billing = result["billing"]
+    cost_complete = (
+        (billing["primer_cost_usd"] is not None or meta["phase"] != "primer")
+        and (
+            billing["measured_cost_usd"] is not None
+            or meta["phase"] != "measured"
+        )
+    )
+    observed_cost = (
+        billing["charged_cost_usd"] if cost_complete else None
+    )
+    budget_debit = (
+        Decimal(observed_cost) if observed_cost is not None else reservation_usd
+    )
+    return {
+        "attempt_number": attempt_number,
+        "phase": meta["phase"],
+        "outcome": {
+            "success": outcome["success"],
+            "http_status": status,
+            "timed_out": outcome["timed_out"],
+            "error_class": outcome["error_class"],
+            "error_detail": outcome["error_detail"],
+            "semantic_output_started": meta["semantic_output_started"],
+        },
+        "timing": {
+            "initial_request_start_offset_s": (
+                None
+                if not isinstance(request_started_at, (int, float))
+                else max(0.0, request_started_at - initial_request_started_at)
+            ),
+            "request_to_response_headers_s": (
+                None
+                if not all(
+                    isinstance(value, (int, float))
+                    for value in (request_started_at, response_headers_at)
+                )
+                else response_headers_at - request_started_at
+            ),
+            "request_to_semantic_output_s": (
+                None
+                if not all(
+                    isinstance(value, (int, float))
+                    for value in (request_started_at, semantic_output_at)
+                )
+                else semantic_output_at - request_started_at
+            ),
+            "attempt_total_s": completed_at - meta["attempt_started_at"],
+        },
+        "retry": {
+            "eligible": retry_eligible,
+            "retry_after_status": meta["retry_after_status"],
+            "retry_after_s": meta.get("retry_after_s"),
+            "wait_requested_s": None,
+            "wait_actual_s": None,
+            "not_retried_reason": None,
+        },
+        "cost": {
+            "primer_cost_usd": billing["primer_cost_usd"],
+            "measured_cost_usd": billing["measured_cost_usd"],
+            "observed_cost_usd": observed_cost,
+            "known_observed_cost_usd": billing["charged_cost_usd"],
+            "budget_debit_usd": str(budget_debit),
+            "cost_status": (
+                "observed" if cost_complete else "reserved_unknown"
+            ),
+        },
+    }
+
+
+def execute_request(
+    *,
+    experiment: probe_spec.GatewayProbeExperiment,
+    case: probe_spec.ProbeCase,
+    block: ProbeBlock,
+    plan: gateway_spec.RoutePlan,
+    secret: str,
+    prices: Mapping[str, gateway_run.Price],
+    remaining_usd_cap: Decimal | None = None,
+) -> dict[str, Any]:
+    attempt_results = []
+    attempts = []
+    known_observed = Decimal(0)
+    budget_debit = Decimal(0)
+    price = prices.get(plan.canonical_model)
+    call_reservation = (
+        Decimal(0)
+        if price is None
+        else (
+            Decimal(experiment.budget.max_input_tokens or 0)
+            * price.input_per_million
+            + Decimal(experiment.budget.max_output_tokens)
+            * price.output_per_million
+        )
+        / Decimal(1_000_000)
+    )
+    attempt_reservation = call_reservation * (
+        2 if block.condition == "warm" else 1
+    )
+    initial_request_started_at = None
+    result = None
+    for attempt_number in range(1, experiment.budget.max_total_attempts + 1):
+        per_attempt_cap = (
+            None
+            if remaining_usd_cap is None
+            else max(Decimal(0), remaining_usd_cap - budget_debit)
+        )
+        result = _execute_request_once(
+            experiment=experiment,
+            case=case,
+            block=block,
+            plan=plan,
+            secret=secret,
+            prices=prices,
+            remaining_usd_cap=per_attempt_cap,
+        )
+        meta = result["_attempt_meta"]
+        request_started_at = meta.get("request_started_at")
+        if initial_request_started_at is None:
+            if (
+                block.condition == "warm"
+                and meta["phase"] == "primer"
+            ):
+                initial_request_started_at = meta["completed_at"]
+            else:
+                initial_request_started_at = (
+                    request_started_at
+                    if isinstance(request_started_at, (int, float))
+                    else meta["attempt_started_at"]
+                )
+        eligible = _retryable(result)
+        evidence = _attempt_public_evidence(
+            result,
+            attempt_number=attempt_number,
+            initial_request_started_at=initial_request_started_at,
+            retry_eligible=eligible,
+            reservation_usd=attempt_reservation,
+        )
+        attempts.append(evidence)
+        attempt_results.append(result)
+        known_observed += Decimal(
+            evidence["cost"]["known_observed_cost_usd"]
+        )
+        budget_debit += Decimal(evidence["cost"]["budget_debit_usd"])
+        if (
+            not eligible
+            or attempt_number == experiment.budget.max_total_attempts
+            or (
+                remaining_usd_cap is not None
+                and budget_debit + attempt_reservation > remaining_usd_cap
+            )
+        ):
+            if not eligible:
+                evidence["retry"]["not_retried_reason"] = (
+                    "semantic_output_started"
+                    if meta["semantic_output_started"]
+                    else "not_retryable"
+                )
+            elif attempt_number == experiment.budget.max_total_attempts:
+                evidence["retry"]["not_retried_reason"] = "attempt_limit"
+            else:
+                evidence["retry"]["not_retried_reason"] = "budget"
+            break
+        if meta["retry_after_status"] == "malformed":
+            evidence["retry"]["not_retried_reason"] = "malformed_retry_after"
+            break
+        wait_requested = (
+            meta["retry_after_s"]
+            if isinstance(meta.get("retry_after_s"), (int, float))
+            else _DEFAULT_RETRY_WAIT_S
+        )
+        retry_deadline = (
+            initial_request_started_at
+            + float(experiment.budget.retry_deadline_s or 0)
+        )
+        if time.monotonic() + wait_requested > retry_deadline:
+            evidence["retry"]["retry_after_status"] = "over_deadline"
+            evidence["retry"]["not_retried_reason"] = "deadline"
+            break
+        wait_started = time.monotonic()
+        time.sleep(wait_requested)
+        wait_actual = time.monotonic() - wait_started
+        evidence["retry"]["wait_requested_s"] = wait_requested
+        evidence["retry"]["wait_actual_s"] = wait_actual
+
+    assert result is not None
+    final_meta = result.pop("_attempt_meta")
+    for prior in attempt_results[:-1]:
+        prior.pop("_attempt_meta", None)
+    unknown_cost_attempts = sum(
+        attempt["cost"]["cost_status"] == "reserved_unknown"
+        for attempt in attempts
+    )
+    final_retryable_unknown = (
+        attempts[-1]["retry"]["eligible"]
+        and attempts[-1]["cost"]["cost_status"] == "reserved_unknown"
+    )
+    original_stop_required = result["billing"]["stop_required"]
+    original_budget_reason = result["outcome"]["budget_exhausted_reason"]
+    if final_retryable_unknown and original_budget_reason in {
+        "primer_cost_unavailable",
+        "measured_cost_unavailable",
+    }:
+        original_stop_required = False
+        original_budget_reason = None
+    if attempts[-1]["retry"]["not_retried_reason"] == "budget":
+        original_stop_required = True
+        original_budget_reason = "usd_cap_reached"
+    result["outcome"]["budget_exhausted_reason"] = original_budget_reason
+    result["billing"] = {
+        "primer_cost_usd": _sum_known_costs(
+            attempts, "primer_cost_usd"
+        ),
+        "measured_cost_usd": _sum_known_costs(
+            attempts, "measured_cost_usd"
+        ),
+        "charged_cost_usd": (
+            str(known_observed) if unknown_cost_attempts == 0 else None
+        ),
+        "observed_cost_usd": (
+            str(known_observed) if unknown_cost_attempts == 0 else None
+        ),
+        "known_observed_cost_usd": str(known_observed),
+        "budget_debit_usd": str(budget_debit),
+        "cost_status": (
+            "observed" if unknown_cost_attempts == 0 else "reserved_unknown"
+        ),
+        "unknown_cost_attempts": unknown_cost_attempts,
+        "stop_required": original_stop_required,
+    }
+    final_request_started_at = final_meta.get("request_started_at")
+    result["retry_evidence"] = {
+        "max_total_attempts": experiment.budget.max_total_attempts,
+        "attempt_count": len(attempts),
+        "recovered": len(attempts) > 1 and result["outcome"]["success"],
+        "first_attempt_outcome": dict(attempts[0]["outcome"]),
+        "eventual_outcome": dict(attempts[-1]["outcome"]),
+        "recovery_timing": {
+            "initial_request_to_final_response_headers_s": _elapsed_from(
+                initial_request_started_at,
+                final_meta.get("response_headers_at"),
+            ),
+            "initial_request_to_final_semantic_output_s": _elapsed_from(
+                initial_request_started_at,
+                final_meta.get("semantic_output_at"),
+            ),
+            "initial_request_to_completion_s": _elapsed_from(
+                initial_request_started_at,
+                final_meta.get("completed_at"),
+            ),
+            "final_attempt_request_start_offset_s": _elapsed_from(
+                initial_request_started_at,
+                final_request_started_at,
+            ),
+        },
+        "attempts": attempts,
+    }
+    return result
+
+
+def _elapsed_from(start: Any, end: Any) -> float | None:
+    if not all(isinstance(value, (int, float)) for value in (start, end)):
+        return None
+    return max(0.0, end - start)
+
+
+def _sum_known_costs(
+    attempts: list[Mapping[str, Any]],
+    field: str,
+) -> str | None:
+    values = [
+        Decimal(value)
+        for attempt in attempts
+        if (value := attempt["cost"][field]) is not None
+    ]
+    return str(sum(values, Decimal(0))) if values else None

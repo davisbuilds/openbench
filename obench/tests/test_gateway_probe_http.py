@@ -1,4 +1,6 @@
 import dataclasses
+import datetime as dt
+import email.utils
 import http.client
 import json
 import socket
@@ -30,6 +32,8 @@ class _SSEHandler(BaseHTTPRequestHandler):
     fail_first = False
     close_measured = False
     chat_finish_reasons = []
+    response_statuses = []
+    retry_after_values = []
 
     def log_message(self, _format, *_args):
         return
@@ -39,13 +43,32 @@ class _SSEHandler(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(size))
         type(self).requests.append({
             "connection": id(self.connection),
+            "peer": self.client_address,
             "payload": payload,
             "headers": {
                 key.lower(): value for key, value in self.headers.items()
             },
         })
+        request_index = len(type(self).requests) - 1
+        status = (
+            self.response_statuses[request_index]
+            if request_index < len(self.response_statuses)
+            else 200
+        )
+        if status != 200:
+            body = b'{"error":"transient"}'
+            self.send_response(status)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            if request_index < len(self.retry_after_values):
+                retry_after = self.retry_after_values[request_index]
+                if retry_after is not None:
+                    self.send_header("retry-after", retry_after)
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+            return
         if self.path == "/chat/completions":
-            request_index = len(type(self).requests) - 1
             finish_reason = (
                 self.chat_finish_reasons[request_index]
                 if request_index < len(self.chat_finish_reasons)
@@ -182,6 +205,8 @@ class GatewayProbeHttpTests(unittest.TestCase):
         _SSEHandler.fail_first = False
         _SSEHandler.close_measured = False
         _SSEHandler.chat_finish_reasons = []
+        _SSEHandler.response_statuses = []
+        _SSEHandler.retry_after_values = []
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), _SSEHandler)
         self.thread = threading.Thread(
             target=self.server.serve_forever, daemon=True
@@ -917,6 +942,280 @@ class GatewayProbeHttpTests(unittest.TestCase):
         )
         self.assertNotIn(private_server_bytes, serialized)
         self.assertNotIn("test-secret", serialized)
+
+    def test_retry_after_normalizes_delta_seconds_and_http_date(self):
+        now = dt.datetime(2026, 7, 28, 12, 0, tzinfo=dt.timezone.utc)
+        future = email.utils.format_datetime(
+            now + dt.timedelta(seconds=17),
+            usegmt=True,
+        )
+
+        self.assertEqual(
+            gateway_probe_http._retry_after_seconds([
+                ("Retry-After", "2"),
+            ], now=now),
+            ("normalized", 2.0),
+        )
+        self.assertEqual(
+            gateway_probe_http._retry_after_seconds([
+                ("Retry-After", future),
+            ], now=now),
+            ("normalized", 17.0),
+        )
+        self.assertEqual(
+            gateway_probe_http._retry_after_seconds([
+                ("Retry-After", "private malformed value"),
+            ], now=now),
+            ("malformed", None),
+        )
+
+    def test_429_then_503_then_success_retains_ordered_attempt_evidence(self):
+        _SSEHandler.response_statuses = [429, 503, 200]
+        _SSEHandler.retry_after_values = ["0", None, None]
+        exp = dataclasses.replace(
+            experiment(self.endpoint),
+            budget=gateway_probe_spec.ProbeBudget(
+                5,
+                16,
+                "1",
+                max_total_attempts=3,
+                max_input_tokens=32,
+                retry_deadline_s=10,
+            ),
+        )
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "cold", 1, ("direct",)
+        )
+
+        with mock.patch.object(gateway_probe_http.time, "sleep"):
+            result = gateway_probe_http.execute_request(
+                experiment=exp,
+                case=exp.cases[0],
+                block=block,
+                plan=route_plan(exp, self.endpoint),
+                secret="test-secret",
+                prices=prices(),
+            )
+
+        evidence = result["retry_evidence"]
+        self.assertTrue(result["outcome"]["success"])
+        self.assertTrue(evidence["recovered"])
+        self.assertEqual(evidence["attempt_count"], 3)
+        self.assertEqual(
+            [
+                attempt["outcome"]["http_status"]
+                for attempt in evidence["attempts"]
+            ],
+            [429, 503, 200],
+        )
+        self.assertEqual(
+            evidence["attempts"][0]["retry"],
+            {
+                "eligible": True,
+                "retry_after_status": "normalized",
+                "retry_after_s": 0.0,
+                "wait_requested_s": 0.0,
+                "wait_actual_s": mock.ANY,
+                "not_retried_reason": None,
+            },
+        )
+        self.assertEqual(
+            [attempt["cost"]["cost_status"] for attempt in evidence["attempts"]],
+            ["reserved_unknown", "reserved_unknown", "observed"],
+        )
+        self.assertEqual(result["billing"]["unknown_cost_attempts"], 2)
+        self.assertIsNone(result["billing"]["observed_cost_usd"])
+        self.assertIsNone(result["billing"]["charged_cost_usd"])
+        self.assertGreater(
+            Decimal(result["billing"]["budget_debit_usd"]),
+            Decimal(result["billing"]["known_observed_cost_usd"]),
+        )
+        self.assertFalse(result["billing"]["stop_required"])
+        self.assertIsNone(result["outcome"]["budget_exhausted_reason"])
+        self.assertGreater(
+            evidence["recovery_timing"][
+                "initial_request_to_final_semantic_output_s"
+            ],
+            result["request_metrics"]["timing"][
+                "request_to_semantic_ttft_s"
+            ],
+        )
+
+    def test_exhausted_transients_remain_one_failed_cell(self):
+        _SSEHandler.response_statuses = [429, 503, 504]
+        _SSEHandler.retry_after_values = ["0", None, None]
+        exp = dataclasses.replace(
+            experiment(self.endpoint),
+            budget=gateway_probe_spec.ProbeBudget(
+                5,
+                16,
+                "1",
+                max_total_attempts=3,
+                max_input_tokens=32,
+                retry_deadline_s=10,
+            ),
+        )
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "cold", 1, ("direct",)
+        )
+
+        with mock.patch.object(gateway_probe_http.time, "sleep"):
+            result = gateway_probe_http.execute_request(
+                experiment=exp,
+                case=exp.cases[0],
+                block=block,
+                plan=route_plan(exp, self.endpoint),
+                secret="test-secret",
+                prices=prices(),
+            )
+
+        self.assertFalse(result["outcome"]["success"])
+        self.assertEqual(result["outcome"]["http_status"], 504)
+        self.assertEqual(result["retry_evidence"]["attempt_count"], 3)
+        self.assertEqual(
+            result["retry_evidence"]["attempts"][-1]["retry"][
+                "not_retried_reason"
+            ],
+            "attempt_limit",
+        )
+        self.assertEqual(result["billing"]["unknown_cost_attempts"], 3)
+        self.assertFalse(result["billing"]["stop_required"])
+
+    def test_malformed_and_over_deadline_retry_after_fail_closed(self):
+        for value, reason, status in (
+            ("not-a-delay", "malformed_retry_after", "malformed"),
+            ("11", "deadline", "over_deadline"),
+        ):
+            with self.subTest(value=value):
+                _SSEHandler.requests = []
+                _SSEHandler.response_statuses = [429, 200]
+                _SSEHandler.retry_after_values = [value, None]
+                exp = dataclasses.replace(
+                    experiment(self.endpoint),
+                    budget=gateway_probe_spec.ProbeBudget(
+                        5,
+                        16,
+                        "1",
+                        max_total_attempts=2,
+                        max_input_tokens=32,
+                        retry_deadline_s=10,
+                    ),
+                )
+                block = ProbeBlock(
+                    "case",
+                    exp.cases[0].prompt_digest,
+                    "cold",
+                    1,
+                    ("direct",),
+                )
+                result = gateway_probe_http.execute_request(
+                    experiment=exp,
+                    case=exp.cases[0],
+                    block=block,
+                    plan=route_plan(exp, self.endpoint),
+                    secret="test-secret",
+                    prices=prices(),
+                )
+                retry = result["retry_evidence"]["attempts"][0]["retry"]
+                self.assertEqual(result["retry_evidence"]["attempt_count"], 1)
+                self.assertEqual(retry["not_retried_reason"], reason)
+                self.assertEqual(retry["retry_after_status"], status)
+
+    def test_connection_reset_after_semantic_output_is_not_retried(self):
+        exp = dataclasses.replace(
+            experiment(self.endpoint),
+            budget=gateway_probe_spec.ProbeBudget(
+                5,
+                16,
+                "1",
+                max_total_attempts=3,
+                max_input_tokens=32,
+                retry_deadline_s=10,
+            ),
+        )
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "cold", 1, ("direct",)
+        )
+
+        def interrupted(*_args, **kwargs):
+            progress = kwargs["progress"]
+            started = time.monotonic()
+            progress.update({
+                "request_started_at": started,
+                "response_headers_at": started + 0.01,
+                "semantic_output_started": True,
+                "semantic_output_at": started + 0.02,
+                "http_status": 200,
+                "retry_after_status": "absent",
+                "retry_after_s": None,
+            })
+            raise ConnectionResetError
+
+        with mock.patch.object(
+            gateway_probe_http,
+            "_consume",
+            side_effect=interrupted,
+        ):
+            result = gateway_probe_http.execute_request(
+                experiment=exp,
+                case=exp.cases[0],
+                block=block,
+                plan=route_plan(exp, self.endpoint),
+                secret="test-secret",
+                prices=prices(),
+            )
+
+        self.assertEqual(result["retry_evidence"]["attempt_count"], 1)
+        attempt = result["retry_evidence"]["attempts"][0]
+        self.assertTrue(attempt["outcome"]["semantic_output_started"])
+        self.assertFalse(attempt["retry"]["eligible"])
+        self.assertEqual(
+            attempt["retry"]["not_retried_reason"],
+            "semantic_output_started",
+        )
+
+    def test_warm_retry_uses_a_verified_replacement_primer_and_socket(self):
+        _SSEHandler.response_statuses = [200, 429, 200, 200]
+        _SSEHandler.retry_after_values = [None, "0", None, None]
+        exp = dataclasses.replace(
+            experiment(self.endpoint),
+            budget=gateway_probe_spec.ProbeBudget(
+                5,
+                16,
+                "1",
+                max_total_attempts=2,
+                max_input_tokens=32,
+                retry_deadline_s=10,
+            ),
+        )
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "warm", 1, ("direct",)
+        )
+
+        with mock.patch.object(gateway_probe_http.time, "sleep"):
+            result = gateway_probe_http.execute_request(
+                experiment=exp,
+                case=exp.cases[0],
+                block=block,
+                plan=route_plan(exp, self.endpoint),
+                secret="test-secret",
+                prices=prices(),
+            )
+
+        self.assertTrue(result["outcome"]["success"])
+        self.assertEqual(result["retry_evidence"]["attempt_count"], 2)
+        connections = [request["peer"] for request in _SSEHandler.requests]
+        self.assertEqual(connections[0], connections[1])
+        self.assertEqual(connections[2], connections[3])
+        self.assertNotEqual(connections[0], connections[2])
+        self.assertTrue(result["reuse_evidence"]["completed"])
+        self.assertTrue(result["reuse_evidence"]["socket_reused"])
+        self.assertGreater(
+            result["retry_evidence"]["recovery_timing"][
+                "final_attempt_request_start_offset_s"
+            ],
+            0,
+        )
 
 
 if __name__ == "__main__":

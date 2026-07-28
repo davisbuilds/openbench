@@ -161,7 +161,7 @@ def build_private_run(
     source_manifest = {
         "schema_version": 1,
         "benchmark": "gateway_probe",
-        "result_schema_version": 3,
+        "result_schema_version": gateway_probe_results.RESULT_SCHEMA_VERSION,
         "experiment_id": experiment.experiment_id,
         "experiment_digest": experiment.digest,
         "files": {
@@ -233,7 +233,7 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                 json.loads((bundle / "report.json").read_text())[
                     "schema_version"
                 ],
-                4,
+                5,
             )
 
     def test_publish_projects_only_public_dto_and_removes_operational_ids(self):

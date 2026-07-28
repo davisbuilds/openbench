@@ -47,6 +47,7 @@ _PUBLIC_DIRECTORY_FILES = frozenset((*PUBLIC_FILES, "manifest.json"))
 _SOURCE_DIRECTORY_FILES = frozenset((*SOURCE_FILES, "manifest.json"))
 VERIFIER_SOURCE_FILES = (
     "obench/gateway_probe_publish.py",
+    "obench/gateway_probe_http.py",
     "obench/gateway_probe_report.py",
     "obench/gateway_probe_results.py",
     "obench/gateway_probe_run.py",
@@ -97,6 +98,7 @@ _PUBLIC_RESULT_FIELDS = (
     "request_metrics",
     "reuse_evidence",
     "billing",
+    "retry_evidence",
 )
 
 

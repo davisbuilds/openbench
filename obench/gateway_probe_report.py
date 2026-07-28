@@ -7,6 +7,7 @@ import math
 import random
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
+from decimal import Decimal
 from typing import Any
 
 from . import gateway_probe_results, gateway_probe_spec, stats
@@ -16,7 +17,7 @@ class GatewayProbeReportError(ValueError):
     """Raised when probe rows cannot support an unambiguous report."""
 
 
-REPORT_SCHEMA_VERSION = 4
+REPORT_SCHEMA_VERSION = 5
 
 
 _METRICS = {
@@ -62,7 +63,8 @@ _METRICS = {
     "measured_cost_usd": (
         "request_metrics", "costs", "frozen_list_estimate", "amount_usd",
     ),
-    "charged_cost_usd": ("billing", "charged_cost_usd"),
+    "observed_cost_usd": ("billing", "observed_cost_usd"),
+    "budget_debit_usd": ("billing", "budget_debit_usd"),
 }
 
 _PHASE_METRIC_LABELS = (
@@ -394,6 +396,28 @@ def aggregate(
                 for status in ("verified", "unverifiable", "failed")
             }
             availability_low, availability_high = stats.wilson_ci(success, attempted)
+            first_attempt_success = sum(
+                row["retry_evidence"]["first_attempt_outcome"]["success"] is True
+                for row in selected
+            )
+            retry_rescues = sum(
+                row["retry_evidence"]["recovered"] is True
+                for row in selected
+            )
+            unknown_cost_attempts = sum(
+                row["billing"]["unknown_cost_attempts"]
+                for row in selected
+            )
+            attempt_count_distribution = {
+                str(count): sum(
+                    row["retry_evidence"]["attempt_count"] == count
+                    for row in selected
+                )
+                for count in sorted({
+                    row["retry_evidence"]["attempt_count"]
+                    for row in selected
+                })
+            }
             arm_report = arms.setdefault(arm, {
                 "role": arm_metadata[arm][1],
                 "baseline": arm_metadata[arm][2],
@@ -418,6 +442,14 @@ def aggregate(
                         "low": availability_low,
                         "high": availability_high,
                     },
+                },
+                "retry_diagnostics": {
+                    "logical_cells": len(selected),
+                    "first_attempt_successes": first_attempt_success,
+                    "eventual_successes": success,
+                    "retry_rescues": retry_rescues,
+                    "unknown_cost_attempts": unknown_cost_attempts,
+                    "attempt_count_distribution": attempt_count_distribution,
                 },
                 "metrics": {
                     name: _summary(
@@ -479,6 +511,25 @@ def aggregate(
             arm_contrasts[condition] = metrics
         contrasts[arm] = arm_contrasts
 
+    all_attempts = [
+        attempt
+        for row in latest_rows
+        for attempt in row["retry_evidence"]["attempts"]
+    ]
+    known_observed_cost = sum(
+        (
+            Decimal(attempt["cost"]["known_observed_cost_usd"])
+            for attempt in all_attempts
+        ),
+        Decimal(0),
+    )
+    budget_debit = sum(
+        (
+            Decimal(attempt["cost"]["budget_debit_usd"])
+            for attempt in all_attempts
+        ),
+        Decimal(0),
+    )
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "benchmark": gateway_probe_results.BENCHMARK,
@@ -492,6 +543,27 @@ def aggregate(
         },
         "scheduled_blocks_per_condition": scheduled_blocks,
         "baseline_arm_id": baseline,
+        "retry_diagnostics": {
+            "logical_cells": len(latest_rows),
+            "attempts": len(all_attempts),
+            "first_attempt_successes": sum(
+                row["retry_evidence"]["first_attempt_outcome"]["success"] is True
+                for row in latest_rows
+            ),
+            "eventual_successes": sum(
+                row["outcome"]["success"] is True for row in latest_rows
+            ),
+            "retry_rescues": sum(
+                row["retry_evidence"]["recovered"] is True
+                for row in latest_rows
+            ),
+            "unknown_cost_attempts": sum(
+                attempt["cost"]["cost_status"] == "reserved_unknown"
+                for attempt in all_attempts
+            ),
+            "known_observed_cost_usd": str(known_observed_cost),
+            "budget_debit_usd": str(budget_debit),
+        },
         "arms": arms,
         "paired_contrasts": contrasts,
     }
@@ -567,6 +639,18 @@ def render_text(report: Mapping[str, Any]) -> str:
             f"{report['scheduled_blocks_per_condition']} "
             f"warm={report['complete_blocks']['warm']}/"
             f"{report['scheduled_blocks_per_condition']}"
+        ),
+        (
+            "retry evidence "
+            f"cells={report['retry_diagnostics']['logical_cells']} "
+            f"attempts={report['retry_diagnostics']['attempts']} "
+            f"first-attempt-successes="
+            f"{report['retry_diagnostics']['first_attempt_successes']} "
+            f"rescues={report['retry_diagnostics']['retry_rescues']} "
+            f"unknown-cost-attempts="
+            f"{report['retry_diagnostics']['unknown_cost_attempts']} "
+            "budget-debit=$"
+            f"{Decimal(report['retry_diagnostics']['budget_debit_usd']):.6f}"
         ),
         "",
         (

@@ -271,7 +271,10 @@ class GatewayProbeCliTests(unittest.TestCase):
                 (output / "report.md").read_text(),
             )
             manifest_data = json.loads((output / "manifest.json").read_text())
-            self.assertEqual(manifest_data["result_schema_version"], 3)
+            self.assertEqual(
+                manifest_data["result_schema_version"],
+                gateway_probe_results.RESULT_SCHEMA_VERSION,
+            )
             self.assertEqual(set(manifest_data["files"]), {
                 "experiment.toml",
                 "prices.json",
