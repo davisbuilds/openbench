@@ -465,6 +465,48 @@ def gateway_probe_verification_error(bundle_dir):
     return None
 
 
+def _output_token_limit_equalities(rows, configured_limit):
+    if (
+        not isinstance(configured_limit, int)
+        or isinstance(configured_limit, bool)
+        or configured_limit <= 0
+    ):
+        return None
+
+    counts = {}
+    for row in rows:
+        identity = row.get("identity") or {}
+        arm_id = (identity.get("arm") or {}).get("id")
+        condition = (identity.get("schedule") or {}).get("condition")
+        if not arm_id or condition not in {"cold", "warm"}:
+            continue
+        usage = (row.get("request_metrics") or {}).get("usage") or {}
+        output_tokens = usage.get("output_tokens")
+        if (
+            not isinstance(output_tokens, int)
+            or isinstance(output_tokens, bool)
+            or output_tokens < 0
+        ):
+            continue
+        item = counts.setdefault(arm_id, {}).setdefault(
+            condition, {"equal": 0, "measured": 0}
+        )
+        item["measured"] += 1
+        if output_tokens == configured_limit:
+            item["equal"] += 1
+
+    return {
+        "configured_limit": configured_limit,
+        "arms": {
+            arm_id: {
+                condition: dict(values)
+                for condition, values in sorted(conditions.items())
+            }
+            for arm_id, conditions in sorted(counts.items())
+        },
+    }
+
+
 def aggregate_gateway_probe_bundle(
     bundle_dir, *, site_dir=None, manifest_entry=None
 ):
@@ -512,6 +554,9 @@ def aggregate_gateway_probe_bundle(
     ]
 
     entry = dict(manifest_entry or {})
+    output_limit_equalities = _output_token_limit_equalities(
+        rows, entry.get("output_token_limit")
+    )
     bundle_id = entry.get("id") or os.path.basename(os.path.normpath(bundle_dir))
     results_path = os.path.join(bundle_dir, "results.jsonl")
     verification = manifest.get("verification") or {}
@@ -524,6 +569,7 @@ def aggregate_gateway_probe_bundle(
         "id": bundle_id,
         "kind": entry.get("kind") or "release",
         "title": _public_gateway_title(entry.get("title") or bundle_id),
+        "model": entry.get("model") or entry.get("title") or bundle_id,
         "date": entry.get("date") or "",
         "path": entry.get("path"),
         "link": entry.get("link"),
@@ -545,6 +591,7 @@ def aggregate_gateway_probe_bundle(
             "scheduled_blocks_per_condition"
         ),
         "baseline_arm_id": report.get("baseline_arm_id"),
+        "output_token_limit_equalities": output_limit_equalities,
         "arms": arms,
         "contrasts": contrasts,
     }
@@ -873,6 +920,18 @@ button.theme svg{width:15px;height:15px}
 /* --- asides ------------------------------------------------------------- */
 .note{margin:22px 0 0;padding:0;color:var(--ink-2);font-size:15px;max-width:78ch}
 .note strong{color:var(--ink);font-weight:600}
+.gateway-model-tabs{display:flex;gap:0;margin-top:26px;border-bottom:1px solid var(--rule);
+  overflow-x:auto}
+.gateway-model-tabs button{appearance:none;background:none;border:0;
+  border-bottom:2px solid transparent;color:var(--ink-3);cursor:pointer;
+  padding:12px 18px 10px;font:600 14px/1.2 var(--font-sans);white-space:nowrap}
+.gateway-model-tabs button:first-child{padding-left:0}
+.gateway-model-tabs button[aria-selected="true"]{border-bottom-color:var(--ink);
+  color:var(--ink)}
+.gateway-model-tabs .tab-depth{display:block;margin-top:5px;
+  font:10.5px/1.25 var(--font-mono);font-weight:400;color:var(--ink-3)}
+.evidence-depth{border-left:3px solid var(--rule-strong);padding-left:12px}
+.evidence-depth.is-spike{border-left-color:var(--warn-rule);color:var(--warn-ink)}
 
 /* --- boards, as records rather than cards ------------------------------- */
 .board{padding:52px 0 8px;border-bottom:1px solid var(--rule)}
@@ -1163,6 +1222,46 @@ _JS = r"""
     });
   }
 
+  // --- gateway model tabs ------------------------------------------------
+  var modelTabs = Array.prototype.slice.call(
+    document.querySelectorAll("[data-gateway-model-tab]")
+  );
+  var modelPanels = Array.prototype.slice.call(
+    document.querySelectorAll("[data-gateway-model-panel]")
+  );
+
+  function selectGatewayModel(tab, moveFocus) {
+    modelTabs.forEach(function (candidate) {
+      var selected = candidate === tab;
+      candidate.setAttribute("aria-selected", selected ? "true" : "false");
+      candidate.setAttribute("tabindex", selected ? "0" : "-1");
+    });
+    modelPanels.forEach(function (panel) {
+      panel.hidden = panel.id !== tab.getAttribute("aria-controls");
+    });
+    if (moveFocus) tab.focus();
+  }
+
+  modelTabs.forEach(function (tab, index) {
+    tab.addEventListener("click", function () {
+      selectGatewayModel(tab, false);
+    });
+    tab.addEventListener("keydown", function (ev) {
+      var next = null;
+      if (ev.key === "ArrowRight") next = (index + 1) % modelTabs.length;
+      if (ev.key === "ArrowLeft") {
+        next = (index - 1 + modelTabs.length) % modelTabs.length;
+      }
+      if (ev.key === "Home") next = 0;
+      if (ev.key === "End") next = modelTabs.length - 1;
+      if (next !== null) {
+        ev.preventDefault();
+        selectGatewayModel(modelTabs[next], true);
+      }
+    });
+  });
+  if (modelTabs.length) selectGatewayModel(modelTabs[0], false);
+
   // --- tabs ---------------------------------------------------------------
   var VIEWS = [
     "harness", "gateway", "releases", "methodology", "contact"
@@ -1242,40 +1341,34 @@ def _lede(doc, family="harness"):
                 "time under separately scheduled cold and warm conditions.",
                 ["0 published request bundles"],
             )
-        latest = gateway_bundles[0]
-        complete = latest.get("complete_blocks") or {}
-        scheduled = latest.get("scheduled_blocks_per_condition")
-
-        def block_fact(condition):
-            completed = complete.get(condition, 0)
-            if scheduled is not None:
-                return f"{completed:,}/{scheduled:,} {condition} blocks"
-            return f"{completed:,} complete {condition} blocks"
-
         bundle_count = len(gateway_bundles)
+        models = {
+            bundle.get("model") or bundle.get("title") or bundle.get("id")
+            for bundle in gateway_bundles
+        }
+        route_counts = {
+            len(bundle.get("arms") or []) for bundle in gateway_bundles
+        }
         facts = [
             f"{bundle_count} published "
             f"{'bundle' if bundle_count == 1 else 'bundles'}",
-            f"{len(latest.get('arms') or [])} routes",
+            f"{len(models)} benchmarked "
+            f"{'model' if len(models) == 1 else 'models'}",
         ]
-        if latest.get("model_match"):
-            facts.append(
-                "model match: "
-                f"{str(latest['model_match']).replace('_', ' ')}"
-            )
-        facts.extend([
-            block_fact("cold"),
-            block_fact("warm"),
-            f"{latest.get('result_count') or 0:,} requests",
-        ])
-        if latest.get("date"):
-            facts.append(f"updated {latest['date']}")
+        if len(route_counts) == 1:
+            facts.append(f"{route_counts.pop()} routes per bundle")
+        facts.append("model-specific denominators below")
+        dates = sorted(
+            bundle["date"] for bundle in gateway_bundles if bundle.get("date")
+        )
+        if dates:
+            facts.append(f"updated {dates[-1]}")
         return (
             "Managed AI gateway benchmarks",
             "Compares request latency, throughput, and reliability across "
             "managed AI gateways under separately scheduled cold and warm "
-            "conditions. Run facts below describe the latest published "
-            "bundle; every board keeps separate denominators.",
+            "conditions. Select a model below; each bundle keeps its own "
+            "request counts and matched-block denominators.",
             facts,
         )
 
@@ -1312,7 +1405,7 @@ _METHODOLOGY = """
   Latency scores linearly from 100 at zero to zero at 20 seconds; throughput
   scores linearly from zero at 5 tok/s to 100 at 200 tok/s. The weighted result
   is multiplied by request success.
-  Cost is excluded. Direct OpenAI is an unranked reference, and the detailed
+  Cost is excluded. The direct-provider arm is an unranked reference, and the detailed
   measurements below the score remain the factual record.</p>
 
   <h2>Denominators and intervals</h2>
@@ -2136,12 +2229,12 @@ def _gateway_board(bundle):
 
 def _gateway_route_key(arm_id):
     arm_id = arm_id or ""
+    for provider in ("cloudflare", "concentrate", "openrouter", "vercel"):
+        if arm_id.startswith(provider + "-"):
+            return provider + "-openai"
     for key in (
-        "cloudflare-openai",
-        "concentrate-openai",
         "direct-openai",
-        "openrouter-openai",
-        "vercel-openai",
+        "direct-moonshot",
     ):
         if arm_id == key or arm_id.startswith(key + "-"):
             return key
@@ -2153,6 +2246,7 @@ def _gateway_probe_route_name(arm_id):
         "cloudflare-openai": "Cloudflare",
         "concentrate-openai": "Concentrate",
         "direct-openai": "Direct OpenAI",
+        "direct-moonshot": "Direct Moonshot",
         "openrouter-openai": "OpenRouter",
         "vercel-openai": "Vercel",
     }.get(_gateway_route_key(arm_id), arm_id)
@@ -2402,6 +2496,7 @@ def _gateway_probe_leaderboard(bundle):
     rows = _gateway_probe_composite_scores(bundle)
     if not rows:
         return ""
+    baseline_name = _gateway_probe_route_name(bundle.get("baseline_arm_id"))
 
     gateway_rows = sorted(
         (row for row in rows if not row["baseline"]),
@@ -2450,7 +2545,9 @@ def _gateway_probe_leaderboard(bundle):
                 {},
                 "OpenBench Composite: absolute TTFT latency, output throughput, "
                 "and request success on a 0–100 scale. Higher is better; cost "
-                "is excluded and Direct OpenAI is an unranked reference.",
+                "is excluded and "
+                + _esc(baseline_name)
+                + " is an unranked reference.",
             ),
         )
         + _tag("div", {"class": "route-leaderboard"}, "".join(entries))
@@ -2464,6 +2561,10 @@ def _gateway_probe_board(bundle):
 
     scheduled = bundle.get("scheduled_blocks_per_condition")
     complete = bundle.get("complete_blocks") or {}
+    cold_blocks = complete.get("cold", 0)
+    warm_blocks = complete.get("warm", 0)
+    is_spike = scheduled == 1
+    baseline_name = _gateway_probe_route_name(bundle.get("baseline_arm_id"))
     meta = "".join(filter(None, [
         _meta_field("date", bundle["date"]) if bundle.get("date") else None,
         _meta_field("model match", bundle["model_match"])
@@ -2490,8 +2591,84 @@ def _gateway_probe_board(bundle):
             {},
             "Request-level benchmark. Cold and warm conditions retain "
             "separate denominators from Harness Bench cells.",
+        )
+        + _tag(
+            "p",
+            {
+                "class": (
+                    "evidence-depth is-spike" if is_spike else "evidence-depth"
+                )
+            },
+            (
+                f"Evidence depth: {cold_blocks} cold + {warm_blocks} warm "
+                "matched blocks per route."
+                + (
+                    " This is a spike denominator and is not maturity-equivalent "
+                    "to bundles with larger matched-block denominators."
+                    if is_spike else ""
+                )
+            ),
         ),
     )
+
+    output_limit_equalities = bundle.get("output_token_limit_equalities")
+    if output_limit_equalities:
+        configured_limit = output_limit_equalities["configured_limit"]
+        equality_rows = []
+        for arm in bundle["arms"]:
+            arm_id = arm["arm_id"]
+            conditions = (
+                output_limit_equalities.get("arms", {}).get(arm_id) or {}
+            )
+            equality_rows.append({
+                "arm_id": arm_id,
+                "cold": conditions.get("cold") or {},
+                "warm": conditions.get("warm") or {},
+            })
+
+        def equality_cell(value):
+            equal = value.get("equal")
+            measured = value.get("measured")
+            if equal is None or measured is None:
+                return "—"
+            return f"{equal}/{measured}"
+
+        equality_columns = [
+            {
+                "label": "Route",
+                "cls": "name",
+                "type": "str",
+                "dir": "asc",
+                "cell": lambda row: _gateway_route_cell(row["arm_id"]),
+                "key": lambda row: _gateway_probe_route_name(row["arm_id"]),
+            },
+            {
+                "label": f"Cold equal to {configured_limit}",
+                "cell": lambda row: equality_cell(row["cold"]),
+            },
+            {
+                "label": f"Warm equal to {configured_limit}",
+                "cell": lambda row: equality_cell(row["warm"]),
+            },
+        ]
+        head += (
+            _tag(
+                "div",
+                {"class": "head"},
+                _tag("h2", {}, "Configured output-limit equality")
+                + _tag(
+                    "p",
+                    {},
+                    f"Configured request output limit: {configured_limit} tokens. "
+                    "Counts are measured rows whose output_tokens equal the "
+                    "configured limit. Equality is a cap proxy, not proof of "
+                    "truncation, because finish reasons are not retained in "
+                    "the public bundle. Stream-total latency and measured or "
+                    "charged cost are generation-length affected.",
+                ),
+            )
+            + _render_table(equality_columns, equality_rows)
+        )
 
     def summary(item, name):
         return (item.get("metrics") or {}).get(name) or {}
@@ -2762,7 +2939,9 @@ def _gateway_probe_board(bundle):
             + _tag(
                 "p",
                 {},
-                "Every delta is gateway minus Direct OpenAI. These are latency "
+                "Every delta is gateway minus "
+                + _esc(baseline_name)
+                + ". These are latency "
                 "metrics, so positive means slower/worse and negative means "
                 "faster/better. Medians use complete paired blocks with "
                 "bootstrap 95% intervals.",
@@ -2924,7 +3103,55 @@ def _gateway_probe_view(doc):
         body += _tag("section", {"class": "board"}, _tag(
             "div", {"class": "empty"},
             _tag("p", {}, "No verified Gateway Bench bundles published yet.")))
-    body += "".join(_gateway_probe_board(bundle) for bundle in family["bundles"])
+    else:
+        tabs = []
+        panels = []
+        for index, bundle in enumerate(family["bundles"]):
+            suffix = re.sub(r"[^a-z0-9_-]+", "-", bundle["id"].lower()).strip("-")
+            tab_id = f"gateway-model-tab-{suffix}"
+            panel_id = f"gateway-model-panel-{suffix}"
+            complete = bundle.get("complete_blocks") or {}
+            tabs.append(_tag(
+                "button",
+                {
+                    "type": "button",
+                    "role": "tab",
+                    "id": tab_id,
+                    "aria-controls": panel_id,
+                    "aria-selected": "true" if index == 0 else "false",
+                    "tabindex": "0" if index == 0 else "-1",
+                    "data-gateway-model-tab": "",
+                },
+                _esc(bundle.get("model") or bundle["title"])
+                + _tag(
+                    "span",
+                    {"class": "tab-depth"},
+                    _esc(
+                        f"{complete.get('cold', 0)} cold + "
+                        f"{complete.get('warm', 0)} warm matched blocks"
+                    ),
+                ),
+            ))
+            panels.append(_tag(
+                "section",
+                {
+                    "role": "tabpanel",
+                    "id": panel_id,
+                    "aria-labelledby": tab_id,
+                    "data-gateway-model-panel": "",
+                },
+                _gateway_probe_board(bundle),
+            ))
+        body += _tag(
+            "div",
+            {
+                "class": "gateway-model-tabs",
+                "role": "tablist",
+                "aria-label": "Benchmark model",
+            },
+            "".join(tabs),
+        )
+        body += "".join(panels)
     if family.get("skipped"):
         body += _skipped_board(
             f"Not published ({len(family['skipped'])})",

@@ -2,7 +2,16 @@
   {
     "id": "2026-07-27-gpt4o-mini-managed-30",
     "title": "GPT-4o mini managed gateway request probe",
+    "model": "GPT-4o mini",
     "date": "2026-07-27",
+    "submitter": "OpenBench"
+  },
+  {
+    "id": "2026-07-27-kimi-k3-managed-30",
+    "title": "Kimi K3 managed gateway request probe",
+    "model": "Kimi K3",
+    "date": "2026-07-27",
+    "output_token_limit": 128,
     "submitter": "OpenBench"
   }
 ]

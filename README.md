@@ -25,7 +25,9 @@ routes, see [`docs/gateway-bench.md`](docs/gateway-bench.md) (`obench gateway
 validate|doctor|run|report|publish|verify`). For direct request latency,
 accounting, and route-integrity probes without a coding harness, see
 [`docs/gateway-probe.md`](docs/gateway-probe.md) (`obench gateway probe
-validate|doctor|run|report`).
+validate|doctor|run|report`). The proposed native automatic-routing benchmark is
+specified separately in [`docs/router-bench.md`](docs/router-bench.md); it is a
+design draft, not an implemented runner.
 
 **Live results:** https://openbench.run/ — the landing
 page is the leaderboard itself, with a tab each for Harness Bench and Gateway
@@ -50,7 +52,9 @@ requests without Pi, tasks, checkers, or correctness scores.
 
 Automatic model or provider selection is a different product surface. A future
 **Router Bench** will own that work under `obench router`; Gateway Bench does
-not make routing decisions.
+not make routing decisions. The current
+[`Router Bench draft`](docs/router-bench.md) defines its evidence and publication
+contract without claiming a working runner.
 
 Current Harness Bench tiers:
 

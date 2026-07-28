@@ -213,6 +213,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
             json.dumps([{
                 "id": "probe-v4",
                 "title": "Gateway Probe: managed request probe",
+                "model": "Synthetic model",
                 "date": "2026-07-27",
             }]),
         )
@@ -224,6 +225,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("gateway_probe", doc)
         bundle = family["bundles"][0]
         self.assertEqual(bundle["title"], "Gateway Bench: managed request benchmark")
+        self.assertEqual(bundle["model"], "Synthetic model")
         self.assertEqual(bundle["complete_blocks"], {"cold": 2, "warm": 2})
         self.assertEqual(bundle["scheduled_blocks_per_condition"], 2)
         self.assertEqual(bundle["model_match"], "exact_revision")
@@ -232,11 +234,11 @@ class GatewayProbeFamilyTests(_SiteFixture):
 
         _, _, facts = site._lede(doc, "gateway")
         self.assertIn("1 published bundle", facts)
-        self.assertIn("2 routes", facts)
-        self.assertIn("model match: exact revision", facts)
-        self.assertIn("2/2 cold blocks", facts)
-        self.assertIn("2/2 warm blocks", facts)
-        self.assertIn("8 requests", facts)
+        self.assertIn("1 benchmarked model", facts)
+        self.assertIn("2 routes per bundle", facts)
+        self.assertIn("model-specific denominators below", facts)
+        self.assertNotIn("cold blocks", " ".join(facts))
+        self.assertNotIn("requests", " ".join(facts))
         self.assertIn("updated 2026-07-27", facts)
 
         page = site.render_board_html(doc)
@@ -244,6 +246,143 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn("Gateway Bench: managed request benchmark", page)
         self.assertNotIn("Gateway Probe", page)
         self.assertNotIn('id="view-gateway-probe"', page)
+
+    def test_multiple_probe_bundles_render_as_accessible_model_tabs(self):
+        self._publish_probe("gpt-bundle")
+        self._publish_probe("kimi-bundle")
+        _write(
+            os.path.join(self.site_dir, "gateway-probe.json"),
+            json.dumps([
+                {
+                    "id": "gpt-bundle",
+                    "title": "GPT benchmark",
+                    "model": "GPT-4o mini",
+                    "date": "2026-07-27",
+                },
+                {
+                    "id": "kimi-bundle",
+                    "title": "Kimi benchmark",
+                    "model": "Kimi K3",
+                    "date": "2026-07-27",
+                },
+            ]),
+        )
+
+        doc = site.build_board(self.site_dir)
+        page = site.render_board_html(doc)
+
+        self.assertEqual(
+            [bundle["model"] for bundle in doc["gateway"]["bundles"]],
+            ["GPT-4o mini", "Kimi K3"],
+        )
+        self.assertEqual(page.count('role="tab"'), 2)
+        self.assertEqual(page.count('role="tabpanel"'), 2)
+        self.assertIn('role="tablist" aria-label="Benchmark model"', page)
+        self.assertIn(
+            'id="gateway-model-tab-gpt-bundle" '
+            'aria-controls="gateway-model-panel-gpt-bundle"',
+            page,
+        )
+        self.assertIn(
+            'id="gateway-model-panel-kimi-bundle" '
+            'aria-labelledby="gateway-model-tab-kimi-bundle"',
+            page,
+        )
+        self.assertIn("GPT benchmark", page)
+        self.assertIn("Kimi benchmark", page)
+        self.assertIn("2 cold + 2 warm matched blocks", page)
+        self.assertIn('ev.key === "ArrowRight"', page)
+        self.assertIn('ev.key === "Home"', page)
+        self.assertIn("selectGatewayModel(modelTabs[0], false)", page)
+
+    def test_single_block_bundle_is_plainly_labelled_as_a_spike(self):
+        bundle = site.aggregate_gateway_probe_bundle(self._publish_probe())
+        bundle["complete_blocks"] = {"cold": 1, "warm": 1}
+        bundle["scheduled_blocks_per_condition"] = 1
+        bundle["baseline_arm_id"] = "direct-moonshot"
+
+        page = site._gateway_probe_board(bundle)
+
+        self.assertIn("Evidence depth: 1 cold + 1 warm matched blocks per route.", page)
+        self.assertIn("This is a spike denominator", page)
+        self.assertIn("not maturity-equivalent", page)
+        self.assertIn('class="evidence-depth is-spike"', page)
+        self.assertIn("Every delta is gateway minus Direct Moonshot.", page)
+
+    def test_output_limit_disclosure_is_data_driven(self):
+        bundle = site.aggregate_gateway_probe_bundle(
+            self._publish_probe(),
+            manifest_entry={"output_token_limit": 3},
+        )
+
+        disclosure = bundle["output_token_limit_equalities"]
+        self.assertEqual(disclosure["configured_limit"], 3)
+        self.assertEqual(disclosure["arms"]["direct"]["cold"], {
+            "equal": 2,
+            "measured": 2,
+        })
+        self.assertEqual(disclosure["arms"]["gateway"]["warm"], {
+            "equal": 2,
+            "measured": 2,
+        })
+
+        page = site._gateway_probe_board(bundle)
+        self.assertIn("Configured output-limit equality", page)
+        self.assertIn("Configured request output limit: 3 tokens.", page)
+        self.assertIn("Cold equal to 3", page)
+        self.assertIn("Warm equal to 3", page)
+        self.assertIn("Equality is a cap proxy, not proof of truncation", page)
+        self.assertIn("finish reasons are not retained", page)
+        self.assertIn(
+            "Stream-total latency and measured or charged cost are "
+            "generation-length affected.",
+            page,
+        )
+        disclosure_html = page[
+            page.index("Configured output-limit equality"):
+            page.index("Gateway leaderboard")
+        ]
+        self.assertEqual(disclosure_html.count(">2/2<"), 4)
+
+    def test_output_limit_disclosure_omits_missing_or_invalid_metadata(self):
+        bundle_dir = self._publish_probe()
+
+        for value in (None, True, 0, -1, "3", 3.0):
+            with self.subTest(value=value):
+                entry = {} if value is None else {"output_token_limit": value}
+                bundle = site.aggregate_gateway_probe_bundle(
+                    bundle_dir,
+                    manifest_entry=entry,
+                )
+                self.assertIsNone(bundle["output_token_limit_equalities"])
+                page = site._gateway_probe_board(bundle)
+                self.assertNotIn("Configured output-limit equality", page)
+                self.assertNotIn("cap proxy", page)
+
+    def test_output_limit_disclosure_counts_only_measured_output_tokens(self):
+        rows = [
+            {
+                "identity": {
+                    "arm": {"id": "route"},
+                    "schedule": {"condition": "cold"},
+                },
+                "request_metrics": {"usage": {"output_tokens": 128}},
+            },
+            {
+                "identity": {
+                    "arm": {"id": "route"},
+                    "schedule": {"condition": "cold"},
+                },
+                "request_metrics": {"usage": {"output_tokens": None}},
+            },
+        ]
+
+        disclosure = site._output_token_limit_equalities(rows, 128)
+
+        self.assertEqual(disclosure["arms"]["route"]["cold"], {
+            "equal": 1,
+            "measured": 1,
+        })
 
     def test_tampered_probe_bundle_fails_closed(self):
         bundle = self._publish_probe()
@@ -371,7 +510,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("Δ stream total", page)
         self.assertNotIn("Provider variance", page)
         paired = page[page.index("Paired request deltas"):]
-        self.assertIn("Every delta is gateway minus Direct OpenAI.", paired)
+        self.assertIn("Every delta is gateway minus direct.", paired)
         self.assertIn("positive means slower/worse", paired)
         self.assertIn("negative means faster/better", paired)
         self.assertNotIn(">vs direct<", paired)
@@ -381,6 +520,11 @@ class GatewayProbeFamilyTests(_SiteFixture):
             "cloudflare-openai": "Cloudflare",
             "concentrate-openai": "Concentrate",
             "direct-openai": "Direct OpenAI",
+            "direct-moonshot": "Direct Moonshot",
+            "cloudflare-moonshot": "Cloudflare",
+            "concentrate-moonshot": "Concentrate",
+            "openrouter-moonshot": "OpenRouter",
+            "vercel-moonshot": "Vercel",
             "openrouter-openai": "OpenRouter",
             "vercel-openai": "Vercel",
             "custom-route": "custom-route",
@@ -491,6 +635,16 @@ class GatewayProbeFamilyTests(_SiteFixture):
         ranked_rows = page[page.index('class="route-leaderboard"'):]
         self.assertNotIn("Direct OpenAI", ranked_rows)
         self.assertNotIn("cost", ranked_rows.lower())
+
+    def test_probe_leaderboard_names_the_bundle_baseline(self):
+        bundle = self._composite_bundle()
+        bundle["baseline_arm_id"] = "direct-moonshot"
+        bundle["arms"][0]["arm_id"] = "direct-moonshot"
+
+        page = site._gateway_probe_leaderboard(bundle)
+
+        self.assertIn("Direct Moonshot is an unranked reference.", page)
+        self.assertNotIn("Direct OpenAI is an unranked reference.", page)
 
     def test_probe_composite_withholds_incomplete_verified_telemetry(self):
         bundle = self._composite_bundle()
@@ -1069,6 +1223,7 @@ class DesignContractTests(_SiteFixture):
         doc["gateway"]["bundle_count"] = 1
         doc["gateway"]["bundles"] = [{
             "arms": [{"arm_id": f"route-{i}"} for i in range(5)],
+            "model": "Synthetic model",
             "model_match": "rolling_alias",
             "complete_blocks": {"cold": 30, "warm": 30},
             "scheduled_blocks_per_condition": 30,
@@ -1092,14 +1247,12 @@ class DesignContractTests(_SiteFixture):
         self.assertEqual(gateway_title, "Managed AI gateway benchmarks")
         self.assertEqual(gateway_facts, [
             "1 published bundle",
-            "5 routes",
-            "model match: rolling alias",
-            "30/30 cold blocks",
-            "30/30 warm blocks",
-            "300 requests",
+            "1 benchmarked model",
+            "5 routes per bundle",
+            "model-specific denominators below",
             "updated 2026-07-27",
         ])
-        self.assertIn("latest published bundle", gateway_deck)
+        self.assertIn("Select a model below", gateway_deck)
         self.assertNotIn("harness", gateway_deck.lower())
         self.assertNotIn("result rows", " ".join(gateway_facts))
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Umbrella CLI for the OpenBench harness benchmarking framework.
 
-    obench run | report | doctor | validate | gateway | gate | compare | init |
+    obench run | report | doctor | validate | gateway | router | gate | compare | init |
          publish | verify | community | leaderboard | site | pack | export | import
          [args...]
 """
@@ -31,6 +31,11 @@ def main(argv=None):
     sub.add_parser(
         "gateway",
         help="compare fixed model/provider routes through AI gateways",
+        add_help=False,
+    )
+    sub.add_parser(
+        "router",
+        help="inspect and benchmark native model-router behavior",
         add_help=False,
     )
     sub.add_parser("gate", help="BYO candidate admission gate", add_help=False)
@@ -78,7 +83,7 @@ def main(argv=None):
         return 0
 
     known = {
-        "run", "report", "doctor", "validate", "gateway", "gate", "compare", "init",
+        "run", "report", "doctor", "validate", "gateway", "router", "gate", "compare", "init",
         "matrix", "results", "publish", "verify", "community", "leaderboard",
         "site", "pack", "export",
         "import",
@@ -86,7 +91,7 @@ def main(argv=None):
     if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, report, doctor, "
-            "validate, gateway, gate, compare, init, publish, verify, community, "
+            "validate, gateway, router, gate, compare, init, publish, verify, community, "
             "leaderboard, results, site, pack, export, import"
         )
 
@@ -111,6 +116,9 @@ def main(argv=None):
     if command == "gateway":
         from .gateway_cli import main as gateway_main
         return gateway_main(rest)
+    if command == "router":
+        from .router_cli import main as router_main
+        return router_main(rest)
     if command == "gate":
         from .candidate_gate import main as gate_main
         return gate_main(rest)
