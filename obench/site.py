@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import os
 import re
 import sys
@@ -1704,15 +1705,15 @@ _METHODOLOGY = """
   transport and stream phase timing, throughput, usage, and per-request cost.
   It is not a coding-agent outcome benchmark. Gateway Bench requests and
   Harness Bench cells are never pooled or compared as one denominator.</p>
-  <p>The Gateway Bench leaderboard uses an absolute summary score: 30% cold
-  TTFT median, 15% cold TTFT p95, 30% warm TTFT median, 15% warm TTFT p95,
-  and 10% warm median output throughput. TTFT starts when the measured request
-  is sent; cold DNS, TCP, and TLS setup are reported separately.
-  Latency scores linearly from 100 at zero to zero at 20 seconds; throughput
-  scores linearly from zero at 5 tok/s to 100 at 200 tok/s. The weighted result
-  is multiplied by request success.
-  Cost is excluded. The direct-provider arm is an unranked reference, and the detailed
-  measurements below the score remain the factual record.</p>
+  <p>The Gateway Bench leaderboard scores each gateway relative to the matched
+  direct-provider arm for the same model; the previous score used fixed absolute
+  latency and throughput ceilings. Direct performance anchors each metric at 75,
+  with 25% cold TTFT median, 20% cold TTFT p95, 25% warm TTFT median, 20% warm
+  TTFT p95, and 10% warm median output throughput; the weighted result is
+  multiplied by request success. TTFT starts when the measured request is sent;
+  cold DNS, TCP, and TLS setup are reported separately. Cost is excluded, the
+  direct-provider arm is unranked, and the detailed measurements below the score
+  remain the factual record.</p>
 
   <h2>Denominators and intervals</h2>
   <ul>
@@ -2698,19 +2699,20 @@ def _gateway_route_cell(arm_id):
 
 
 _GATEWAY_COMPOSITE_WEIGHTS = {
-    ("cold", "p50"): 0.30,
-    ("cold", "p95"): 0.15,
-    ("warm", "p50"): 0.30,
-    ("warm", "p95"): 0.15,
+    ("cold", "p50"): 0.25,
+    ("cold", "p95"): 0.20,
+    ("warm", "p50"): 0.25,
+    ("warm", "p95"): 0.20,
 }
 
 
 def _gateway_probe_composite_scores(bundle):
-    """Return absolute, cost-free route scores on fixed 0-100 scales."""
+    """Return cost-free route scores relative to the direct-provider arm."""
     arms = {arm["arm_id"]: arm for arm in bundle.get("arms") or []}
     baseline_id = bundle.get("baseline_arm_id")
     if baseline_id not in arms:
         return []
+    baseline = arms[baseline_id]
 
     def metric(arm, condition, name, percentile):
         condition_data = (arm.get("conditions") or {}).get(condition) or {}
@@ -2750,11 +2752,22 @@ def _gateway_probe_composite_scores(bundle):
             attempted += value["attempted"]
         return successes / attempted if attempted else None
 
-    def score_latency(value):
-        return max(0.0, min(100.0, 100.0 * (1.0 - value / 20.0)))
-
-    def score_throughput(value):
-        return max(0.0, min(100.0, (value - 5.0) / 195.0 * 100.0))
+    def score_ratio(value, reference, *, higher_is_better):
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not isinstance(reference, (int, float))
+            or isinstance(reference, bool)
+            or value <= 0
+            or reference <= 0
+        ):
+            return None
+        ratio = value / reference
+        direction = 1.0 if higher_is_better else -1.0
+        return max(
+            0.0,
+            min(100.0, 75.0 + direction * 25.0 * math.log2(ratio)),
+        )
 
     rows = []
     for arm in arms.values():
@@ -2765,27 +2778,44 @@ def _gateway_probe_composite_scores(bundle):
             value = metric(
                 arm, condition, metric_name, percentile
             )
-            if value is None or not metric_complete(
-                arm, condition, metric_name
+            reference = metric(
+                baseline, condition, metric_name, percentile
+            )
+            subscore = score_ratio(
+                value, reference, higher_is_better=False
+            )
+            if (
+                subscore is None
+                or not metric_complete(arm, condition, metric_name)
+                or not metric_complete(baseline, condition, metric_name)
             ):
                 complete = False
                 break
-            weighted_score += weight * score_latency(value)
+            weighted_score += weight * subscore
 
         throughput = metric(
             arm, "warm", "throughput_tokens_per_s", "p50"
         )
+        reference_throughput = metric(
+            baseline, "warm", "throughput_tokens_per_s", "p50"
+        )
+        throughput_score = score_ratio(
+            throughput, reference_throughput, higher_is_better=True
+        )
         route_availability = availability(arm)
         if (
             not complete
-            or throughput is None
+            or throughput_score is None
             or not metric_complete(
                 arm, "warm", "throughput_tokens_per_s"
+            )
+            or not metric_complete(
+                baseline, "warm", "throughput_tokens_per_s"
             )
             or route_availability is None
         ):
             continue
-        weighted_score += 0.10 * score_throughput(throughput)
+        weighted_score += 0.10 * throughput_score
         score = weighted_score * route_availability
         rows.append({
             "arm_id": arm["arm_id"],
@@ -2847,9 +2877,10 @@ def _gateway_probe_leaderboard(bundle):
             + _tag(
                 "p",
                 {},
-                "OpenBench Composite: absolute TTFT latency, output throughput, "
-                "and request success on a 0–100 scale. Higher is better; cost "
-                "is excluded and "
+                "OpenBench Composite compares TTFT and output throughput with "
+                "the matched direct-provider arm; the previous score used fixed "
+                "absolute ceilings. Direct performance equals 75 before request "
+                "success is applied; higher is better, cost is excluded, and "
                 + _esc(baseline_name)
                 + " is an unranked reference.",
             ),

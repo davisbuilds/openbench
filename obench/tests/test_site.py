@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 import unittest
@@ -914,27 +915,35 @@ class GatewayProbeFamilyTests(_SiteFixture):
             ],
         }
 
-    def test_probe_composite_uses_absolute_scales_and_linear_success(self):
+    def test_probe_composite_uses_direct_relative_scales_and_linear_success(self):
         bundle = self._composite_bundle()
         scores = {
             row["arm_id"]: row["score"]
             for row in site._gateway_probe_composite_scores(bundle)
         }
 
-        # Latency: 30%*90 + 15%*80 + 30%*95 + 15%*85.
-        # Throughput: 10%*100. Combined request success is 18/20.
-        self.assertAlmostEqual(scores["vercel-openai"], 81.225)
+        # Latency ratios: cold 2x/2x, warm 1x/1.5x. Throughput is 1x.
+        # Combined request success is 18/20.
+        expected = (
+            0.25 * 50.0
+            + 0.20 * 50.0
+            + 0.25 * 75.0
+            + 0.20 * (75.0 - 25.0 * math.log2(1.5))
+            + 0.10 * 75.0
+        ) * 0.9
+        self.assertAlmostEqual(scores["vercel-openai"], expected)
+        self.assertAlmostEqual(scores["direct-openai"], 75.0)
         self.assertEqual(
             site._GATEWAY_COMPOSITE_WEIGHTS,
             {
-                ("cold", "p50"): 0.30,
-                ("cold", "p95"): 0.15,
-                ("warm", "p50"): 0.30,
-                ("warm", "p95"): 0.15,
+                ("cold", "p50"): 0.25,
+                ("cold", "p95"): 0.20,
+                ("warm", "p50"): 0.25,
+                ("warm", "p95"): 0.20,
             },
         )
 
-        # The gateway score is absolute: changing Direct does not change it.
+        # Slower direct-provider performance improves the gateway-relative score.
         direct = bundle["arms"][0]
         for condition in direct["conditions"].values():
             for name in (
@@ -942,22 +951,24 @@ class GatewayProbeFamilyTests(_SiteFixture):
                 "cold_end_to_end_semantic_ttft_s",
             ):
                 condition["metrics"][name].update({
-                    "p50": 19.0,
-                    "p95": 20.0,
+                    "p50": 2.0,
+                    "p95": 4.0,
                 })
-            condition["metrics"]["throughput_tokens_per_s"]["p50"] = 5.0
+            condition["metrics"]["throughput_tokens_per_s"]["p50"] = 200.0
         changed = {
             row["arm_id"]: row["score"]
             for row in site._gateway_probe_composite_scores(bundle)
         }
-        self.assertAlmostEqual(changed["vercel-openai"], 81.225)
+        self.assertGreater(changed["vercel-openai"], scores["vercel-openai"])
 
     def test_probe_leaderboard_excludes_direct_and_cost(self):
         page = site._gateway_probe_leaderboard(self._composite_bundle())
 
         self.assertIn("OpenBench Composite", page)
         self.assertIn("Vercel", page)
-        self.assertIn(">81.2<", page)
+        self.assertIn(">54.7<", page)
+        self.assertIn("Direct performance equals 75", page)
+        self.assertIn("previous score used fixed absolute ceilings", page)
         self.assertNotIn("price", page.lower())
         self.assertEqual(page.count('class="route-position"'), 1)
         ranked_rows = page[page.index('class="route-leaderboard"'):]

@@ -9,7 +9,8 @@ separate tab:
   exactly as [`obench leaderboard`](leaderboard.md) does, then enriched with
   median wall time and `$/solve`.
 - **Gateway Bench** — verified request-level bundles with cold and warm request
-  telemetry, an absolute route leaderboard, and paired route deltas.
+  telemetry, a direct-provider-relative route leaderboard, and paired route
+  deltas.
 - **Releases** — the `releases.json` / `community.json` / `packs.json` manifests.
 - **Methodology** — denominators, intervals, token bases, and the
   comparability rules, in one place next to the numbers.
@@ -93,24 +94,28 @@ Request attempts and complete cold/warm blocks are never merged with Harness
 Bench coding-agent cells or their claims. Legacy coding-agent gateway workload
 bundles under `docs/gateway/` are not included in the generated site.
 
-The route leaderboard ranks managed gateways by an absolute, cost-free
-**OpenBench Composite** on a 0–100 scale. Before the availability multiplier,
-the normalized weights are:
+The route leaderboard ranks gateways by a direct-provider-relative, cost-free
+**OpenBench Composite** on a 0–100 scale. The previous score used fixed absolute
+latency and throughput ceilings; the current score normalizes each model against
+its matched direct-provider reference. Before the availability multiplier, the
+normalized weights are:
 
 | Component | Weight |
 |-----------|-------:|
-| Cold TTFT p50 | 30% |
-| Cold TTFT p95 | 15% |
-| Warm TTFT p50 | 30% |
-| Warm TTFT p95 | 15% |
+| Cold TTFT p50 | 25% |
+| Cold TTFT p95 | 20% |
+| Warm TTFT p50 | 25% |
+| Warm TTFT p95 | 20% |
 | Output throughput | 10% |
 
-For a latency value `t` in seconds, its subscore is
-`clamp(100 × (1 - t / 20), 0, 100)`. For output throughput `r` in tokens per
-second, its subscore is `clamp((r - 5) / (200 - 5) × 100, 0, 100)`. The
-throughput input is the warm p50 reading; cold TTFT includes cold connection
-setup. The weighted score is multiplied by the combined cold-and-warm request
-success rate **linearly**.
+For each latency bucket, `ratio = gateway / direct` and the subscore is
+`clamp(75 - 25 × log2(ratio), 0, 100)`. For warm p50 output throughput,
+`ratio = gateway / direct` and the subscore is
+`clamp(75 + 25 × log2(ratio), 0, 100)`. Direct performance therefore maps to
+75, twice-as-fast performance maps to 100, and twice-as-slow performance maps
+to 50. TTFT begins when the measured request is sent; cold DNS, TCP, and TLS
+setup are excluded from the score and reported separately. The weighted score
+is multiplied by the combined cold-and-warm request success rate **linearly**.
 
 Direct OpenAI does not appear in the ranking. It remains the reference for the
 paired request deltas. The detailed cold, warm, connection-setup, and paired
