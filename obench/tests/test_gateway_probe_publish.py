@@ -111,6 +111,11 @@ def build_private_run(root, *, prompt="PRIVATE PROMPT must never publish"):
         )
         item["scheduled_blocks_per_condition"] = experiment.repetitions
         item["model_match"] = experiment.model_match
+        item["request_metrics"]["stream"]["finish_reason"] = "length"
+        item["request_metrics"]["usage"]["output_tokens_details"] = {
+            "reasoning_tokens": 2,
+            "text_tokens": 1,
+        }
         item["request_metrics"]["route"]["gateway_metadata"] = {
             "generationId": f"generation-{arm_id}-1",
         }
@@ -264,6 +269,14 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
             self.assertTrue(all(
                 not item["request_metrics"]["receipt_headers"]
                 and not item["reuse_evidence"]["receipt_headers"]
+                for item in rows
+            ))
+            self.assertTrue(all(
+                item["request_metrics"]["stream"]["finish_reason"] == "length"
+                and item["request_metrics"]["usage"]["output_tokens_details"] == {
+                    "reasoning_tokens": 2,
+                    "text_tokens": 1,
+                }
                 for item in rows
             ))
 

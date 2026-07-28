@@ -29,6 +29,16 @@ RECEIPT_HEADER_ALLOWLIST = frozenset({
 RECEIPT_VALUE_MAX_LENGTH = 256
 _SAFE_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9._:/@+\-]{1,256}")
 RECEIPT_VALUE_RE = re.compile(r"[A-Za-z0-9._:/@+=\-]{1,256}")
+_NORMALIZED_REASON_RE = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*")
+_OUTPUT_TOKEN_DETAIL_KEYS = frozenset({
+    "accepted_prediction_tokens",
+    "audio_tokens",
+    "image_tokens",
+    "reasoning_tokens",
+    "rejected_prediction_tokens",
+    "text_tokens",
+    "video_tokens",
+})
 
 
 def block_id(
@@ -256,6 +266,7 @@ def _validate_usage(value: Any, label: str) -> None:
         "output_tokens",
         "total_tokens",
         "input_tokens_details",
+        "output_tokens_details",
     }
     if not set(usage) <= allowed or any(
         not _count(usage.get(name))
@@ -280,6 +291,27 @@ def _validate_usage(value: Any, label: str) -> None:
         ):
             raise GatewayProbeRunError(
                 f"results row has malformed {label} details"
+            )
+    output_details = usage.get("output_tokens_details")
+    if output_details is not None:
+        output_details = _exact_mapping(
+            output_details,
+            (
+                set(output_details)
+                if isinstance(output_details, Mapping)
+                else set()
+            ),
+            f"{label} output details",
+        )
+        if (
+            not set(output_details) <= _OUTPUT_TOKEN_DETAIL_KEYS
+            or any(
+                not _count(item, nullable=False)
+                for item in output_details.values()
+            )
+        ):
+            raise GatewayProbeRunError(
+                f"results row has malformed {label} output details"
             )
 
 
@@ -398,6 +430,7 @@ def _validate_stream(value: Any, label: str) -> None:
         "malformed_events",
         "done",
         "terminal_status",
+        "finish_reason",
         "finalized",
     }:
         raise GatewayProbeRunError(f"results row has malformed {label}")
@@ -407,8 +440,13 @@ def _validate_stream(value: Any, label: str) -> None:
     for name in ("done", "finalized"):
         if name in value and not isinstance(value[name], bool):
             raise GatewayProbeRunError(f"results row has malformed {label}")
-    if "terminal_status" in value and not _safe_identifier(
-        value["terminal_status"]
+    if "terminal_status" in value and not _safe_identifier(value["terminal_status"]):
+        raise GatewayProbeRunError(f"results row has unsafe {label}")
+    finish_reason = value.get("finish_reason")
+    if finish_reason is not None and (
+        not isinstance(finish_reason, str)
+        or len(finish_reason) > 64
+        or _NORMALIZED_REASON_RE.fullmatch(finish_reason) is None
     ):
         raise GatewayProbeRunError(f"results row has unsafe {label}")
 

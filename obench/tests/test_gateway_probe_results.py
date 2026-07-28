@@ -67,7 +67,15 @@ def bound_row(experiment, block, schedule_digest, price_digest):
                 "cold_end_to_end_stream_total_s": 0.36 if cold else None,
             },
             "receipt_headers": {},
-            "usage": None,
+            "usage": {
+                "input_tokens": 5,
+                "output_tokens": 4,
+                "total_tokens": 9,
+                "output_tokens_details": {
+                    "reasoning_tokens": 3,
+                    "text_tokens": 1,
+                },
+            },
             "generation": None,
             "cache": {
                 "cached_input_tokens": None,
@@ -78,6 +86,7 @@ def bound_row(experiment, block, schedule_digest, price_digest):
             "stream": {
                 "done": True,
                 "terminal_status": "completed",
+                "finish_reason": "length",
                 "finalized": True,
             },
             "coverage": None,
@@ -187,6 +196,14 @@ class GatewayProbeResultsTests(unittest.TestCase):
             })
             variants["success_without_stream"] = copy.deepcopy(base)
             variants["success_without_stream"]["request_metrics"]["stream"] = None
+            variants["malformed_finish_reason"] = copy.deepcopy(base)
+            variants["malformed_finish_reason"]["request_metrics"]["stream"][
+                "finish_reason"
+            ] = "Length"
+            variants["unsafe_output_details"] = copy.deepcopy(base)
+            variants["unsafe_output_details"]["request_metrics"]["usage"][
+                "output_tokens_details"
+            ]["private_detail"] = 1
             variants["numeric_socket_reuse"] = copy.deepcopy(base)
             variants["numeric_socket_reuse"]["reuse_evidence"][
                 "socket_reused"
