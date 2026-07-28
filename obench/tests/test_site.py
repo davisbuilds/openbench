@@ -443,7 +443,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
             manifest_entry={"output_token_limit": 3},
         )
 
-        self.assertIsNone(bundle["completion_integrity"])
+        self.assertIsNotNone(bundle["completion_integrity"])
         disclosure = bundle["output_token_limit_equalities"]
         self.assertEqual(disclosure["configured_limit"], 3)
         self.assertEqual(disclosure["arms"]["direct"]["cold"], {
@@ -462,9 +462,12 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn("Warm equal to 3", page)
         self.assertIn("Equality is a cap proxy, not proof of truncation", page)
         self.assertIn("secondary legacy/cap diagnostic", page)
-        self.assertIn("finish reasons are not retained", page)
-        self.assertIn("no completion reason is inferred", page)
-        self.assertNotIn("Completion integrity", page)
+        self.assertIn("Completion integrity", page)
+        self.assertIn(
+            "Explicit finish reasons are reported separately", page
+        )
+        self.assertNotIn("finish reasons are not retained", page)
+        self.assertNotIn("no completion reason is inferred", page)
         self.assertIn(
             "Stream-total latency and measured or charged cost are "
             "generation-length affected.",
