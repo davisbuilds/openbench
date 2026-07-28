@@ -612,7 +612,7 @@ def _retry_timing_summary(values):
     }
 
 
-def _gateway_probe_retry_summary(rows):
+def _gateway_probe_retry_summary(rows, expected_output_limit=None):
     """Derive retry diagnostics from verified public result rows."""
     if not rows or not all(
         isinstance(row.get("retry_evidence"), dict) for row in rows
@@ -673,6 +673,10 @@ def _gateway_probe_retry_summary(rows):
             or not isinstance(output_limit, int)
             or isinstance(output_limit, bool)
             or output_limit <= 0
+            or (
+                expected_output_limit is not None
+                and output_limit != expected_output_limit
+            )
             or not isinstance(retry.get("first_attempt_outcome"), dict)
             or not isinstance(retry.get("eventual_outcome"), dict)
             or not isinstance(retry.get("recovery_timing"), dict)
@@ -834,14 +838,14 @@ def aggregate_gateway_probe_bundle(
     ]
 
     entry = dict(manifest_entry or {})
-    retry_summary = _gateway_probe_retry_summary(rows)
+    configured_output_limit = experiment["budget"]["max_output_tokens"]
+    retry_summary = _gateway_probe_retry_summary(
+        rows,
+        expected_output_limit=configured_output_limit,
+    )
     output_limit_equalities = _output_token_limit_equalities(
         rows,
-        (
-            None
-            if retry_summary is not None
-            else experiment["budget"]["max_output_tokens"]
-        ),
+        configured_output_limit,
     )
     completion_integrity = _gateway_probe_completion_integrity(rows)
     bundle_id = entry.get("id") or os.path.basename(os.path.normpath(bundle_dir))
@@ -1694,7 +1698,8 @@ _METHODOLOGY = """
   Harness Bench cells are never pooled or compared as one denominator.</p>
   <p>The Gateway Bench leaderboard uses an absolute summary score: 30% cold
   TTFT median, 15% cold TTFT p95, 30% warm TTFT median, 15% warm TTFT p95,
-  and 10% warm median output throughput. Cold TTFT includes DNS, TCP, and TLS.
+  and 10% warm median output throughput. TTFT starts when the measured request
+  is sent; cold DNS, TCP, and TLS setup are reported separately.
   Latency scores linearly from 100 at zero to zero at 20 seconds; throughput
   scores linearly from zero at 5 tok/s to 100 at 200 tok/s. The weighted result
   is multiplied by request success.
@@ -2748,11 +2753,7 @@ def _gateway_probe_composite_scores(bundle):
         weighted_score = 0.0
         complete = True
         for (condition, percentile), weight in _GATEWAY_COMPOSITE_WEIGHTS.items():
-            metric_name = (
-                "cold_end_to_end_semantic_ttft_s"
-                if condition == "cold"
-                else "request_to_semantic_ttft_s"
-            )
+            metric_name = "request_to_semantic_ttft_s"
             value = metric(
                 arm, condition, metric_name, percentile
             )
@@ -3280,20 +3281,12 @@ def _gateway_probe_board(bundle):
         {"label": "TTFT p50 / p95", "dir": "asc",
          "cell": lambda row: percentile_cell(
              row["item"],
-             (
-                 "cold_end_to_end_semantic_ttft_s"
-                 if row["condition"] == "cold"
-                 else "request_to_semantic_ttft_s"
-             ),
+             "request_to_semantic_ttft_s",
              seconds,
          ),
          "key": lambda row: summary(
              row["item"],
-             (
-                 "cold_end_to_end_semantic_ttft_s"
-                 if row["condition"] == "cold"
-                 else "request_to_semantic_ttft_s"
-             ),
+             "request_to_semantic_ttft_s",
          ).get("p50")},
         {"label": "Stream total p50 / p95", "dir": "asc",
          "cell": lambda row: percentile_cell(
@@ -3346,11 +3339,8 @@ def _gateway_probe_board(bundle):
                 "p",
                 {},
                 f"Complete blocks: {complete.get(condition, 0)}/{scheduled}. "
-                + (
-                    "TTFT includes DNS, TCP, and TLS setup."
-                    if condition == "cold"
-                    else "TTFT begins when the measured request is sent."
-                ),
+                "TTFT begins when the measured request is sent; connection "
+                "setup is reported separately.",
             ),
         )
         parts += _render_table(request_columns, rows)

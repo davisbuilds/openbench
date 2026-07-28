@@ -590,7 +590,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
                 })
             row["retry_evidence"] = {
                 "max_total_attempts": 2,
-                "max_output_tokens": 7,
+                "max_output_tokens": 3,
                 "attempt_count": len(attempts),
                 "attempts": attempts,
                 "first_attempt_outcome": {"success": success and not rescued},
@@ -602,7 +602,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
                 },
             }
             row["request_metrics"]["usage"]["output_tokens"] = (
-                7 if index % 3 == 0 else 5
+                3 if index % 3 == 0 else 2
             )
 
         stale = json.loads(json.dumps(rows[0]))
@@ -651,9 +651,12 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertEqual(retry["retry_after_s"]["count"], 2)
         self.assertEqual(retry["wait_actual_s"]["median"], 1.6)
         self.assertEqual(
-            retry["output_limits"]["7"], {"equal": 3, "measured": 8}
+            retry["output_limits"]["3"], {"equal": 3, "measured": 8}
         )
-        self.assertIsNone(bundle["output_token_limit_equalities"])
+        self.assertEqual(
+            bundle["output_token_limit_equalities"]["configured_limit"],
+            3,
+        )
 
         page = site._gateway_probe_board(bundle)
         self.assertIn(
@@ -671,9 +674,9 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn("actual waits 2", page)
         self.assertIn("1.600s median · 1.600s max", page)
         self.assertIn("completion 2.500s median · 2.500s max", page)
-        self.assertIn("1/2 equal 7 tokens", page)
+        self.assertIn("1/2 equal 3 tokens", page)
         self.assertIn("results.jsonl retains every attempts[]", page)
-        self.assertNotIn("Configured request output limit: 512", page)
+        self.assertIn("Configured request output limit: 3 tokens", page)
 
     def test_retry_summary_rejects_partial_or_malformed_evidence(self):
         base = {
@@ -803,8 +806,11 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn("<b>cold blocks </b>30/30", page)
         self.assertIn("<b>warm blocks </b>30/30", page)
         self.assertIn("Complete blocks: 30/30.", page)
-        self.assertIn("TTFT includes DNS, TCP, and TLS setup.", page)
-        self.assertIn("TTFT begins when the measured request is sent.", page)
+        self.assertIn(
+            "TTFT begins when the measured request is sent; connection "
+            "setup is reported separately.",
+            page,
+        )
         self.assertIn("95% CI", page)
         self.assertIn("(0/30)", page)
         self.assertNotIn("Success / availability", page)
@@ -884,10 +890,17 @@ class GatewayProbeFamilyTests(_SiteFixture):
                     },
                 }
 
+            cold_condition = condition(cold, successes[0])
+            cold_condition["metrics"][
+                "cold_end_to_end_semantic_ttft_s"
+            ].update({
+                "p50": cold[0] + 5.0,
+                "p95": cold[1] + 5.0,
+            })
             return {
                 "arm_id": arm_id,
                 "conditions": {
-                    "cold": condition(cold, successes[0]),
+                    "cold": cold_condition,
                     "warm": condition(warm, successes[1]),
                 },
             }
