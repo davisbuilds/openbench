@@ -309,12 +309,141 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn('class="evidence-depth is-spike"', page)
         self.assertIn("Every delta is gateway minus Direct Moonshot.", page)
 
+    def test_completion_integrity_requires_explicit_finish_reason_evidence(self):
+        rows = [{
+            "identity": {
+                "arm": {"id": "legacy-route"},
+                "schedule": {"condition": "warm"},
+            },
+            "request_metrics": {
+                "stream": {"terminal_status": "completed"},
+                "usage": {"output_tokens": 3},
+            },
+            "reuse_evidence": {"stream": {"done": True}},
+        }]
+
+        self.assertIsNone(site._gateway_probe_completion_integrity(rows))
+
+        rows[0]["request_metrics"]["stream"]["finish_reason"] = None
+        integrity = site._gateway_probe_completion_integrity(rows)
+
+        self.assertEqual(
+            integrity["arms"]["legacy-route"]["warm"]["measured"],
+            {
+                "natural_stop": 0,
+                "length": 0,
+                "missing": 1,
+                "other": 0,
+                "total": 1,
+            },
+        )
+        self.assertEqual(
+            integrity["arms"]["legacy-route"]["warm"]["warm_primer"],
+            {
+                "natural_stop": 0,
+                "length": 0,
+                "missing": 1,
+                "other": 0,
+                "total": 1,
+            },
+        )
+
+    def test_completion_integrity_aggregates_and_renders_future_rows(self):
+        bundle_dir = self._publish_probe()
+        rows = site._read_jsonl(os.path.join(bundle_dir, "results.jsonl"))
+        measured_reasons = {
+            ("direct", "cold", 1): "stop",
+            ("direct", "cold", 2): "length",
+            ("direct", "warm", 1): None,
+            ("direct", "warm", 2): "tool_calls",
+            ("gateway", "cold", 1): "stop",
+            ("gateway", "cold", 2): "stop",
+            ("gateway", "warm", 1): "length",
+            ("gateway", "warm", 2): None,
+        }
+        primer_reasons = {
+            ("direct", 1): "stop",
+            ("direct", 2): "length",
+            ("gateway", 1): "stop",
+            ("gateway", 2): None,
+        }
+        for row in rows:
+            identity = row["identity"]
+            arm_id = identity["arm"]["id"]
+            schedule = identity["schedule"]
+            condition = schedule["condition"]
+            repetition = schedule["repetition"]
+            row["request_metrics"]["stream"]["finish_reason"] = (
+                measured_reasons[(arm_id, condition, repetition)]
+            )
+            if condition == "warm":
+                row["reuse_evidence"]["stream"] = {
+                    "finish_reason": primer_reasons[(arm_id, repetition)],
+                }
+
+        with mock.patch.object(site, "_read_jsonl", return_value=rows):
+            bundle = site.aggregate_gateway_probe_bundle(
+                bundle_dir,
+                manifest_entry={"output_token_limit": 3},
+            )
+
+        integrity = bundle["completion_integrity"]["arms"]
+        self.assertEqual(integrity["direct"]["cold"]["measured"], {
+            "natural_stop": 1,
+            "length": 1,
+            "missing": 0,
+            "other": 0,
+            "total": 2,
+        })
+        self.assertEqual(integrity["direct"]["warm"]["measured"], {
+            "natural_stop": 0,
+            "length": 0,
+            "missing": 1,
+            "other": 1,
+            "total": 2,
+        })
+        self.assertEqual(integrity["gateway"]["warm"]["warm_primer"], {
+            "natural_stop": 1,
+            "length": 0,
+            "missing": 1,
+            "other": 0,
+            "total": 2,
+        })
+
+        page = site._gateway_probe_board(bundle)
+        self.assertIn("Completion integrity", page)
+        self.assertIn("Measured natural-stop", page)
+        self.assertIn("Measured length", page)
+        self.assertIn("Measured missing", page)
+        self.assertIn("Measured other", page)
+        self.assertIn("Warm-primer natural-stop", page)
+        self.assertIn("missing is never treated as stop", page)
+        self.assertLess(
+            page.index("Completion integrity"),
+            page.index("Configured output-limit equality"),
+        )
+        self.assertLess(
+            page.index("Configured output-limit equality"),
+            page.index("Gateway leaderboard"),
+        )
+        completion_html = page[
+            page.index("Completion integrity"):
+            page.index("Configured output-limit equality")
+        ]
+        self.assertEqual(completion_html.count(">1/2<"), 2)
+        self.assertIn(
+            "Explicit finish reasons are reported separately in Completion "
+            "integrity; missing reasons are not inferred.",
+            page,
+        )
+
     def test_output_limit_disclosure_is_data_driven(self):
         bundle = site.aggregate_gateway_probe_bundle(
             self._publish_probe(),
             manifest_entry={"output_token_limit": 3},
         )
 
+        self.assertIsNone(bundle["completion_integrity"])
         disclosure = bundle["output_token_limit_equalities"]
         self.assertEqual(disclosure["configured_limit"], 3)
         self.assertEqual(disclosure["arms"]["direct"]["cold"], {
@@ -332,7 +461,10 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn("Cold equal to 3", page)
         self.assertIn("Warm equal to 3", page)
         self.assertIn("Equality is a cap proxy, not proof of truncation", page)
+        self.assertIn("secondary legacy/cap diagnostic", page)
         self.assertIn("finish reasons are not retained", page)
+        self.assertIn("no completion reason is inferred", page)
+        self.assertNotIn("Completion integrity", page)
         self.assertIn(
             "Stream-total latency and measured or charged cost are "
             "generation-length affected.",
