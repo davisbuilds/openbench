@@ -596,6 +596,192 @@ def _gateway_probe_completion_integrity(rows):
     }
 
 
+def _retry_timing_summary(values):
+    values = [
+        value for value in values
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value >= 0
+        )
+    ]
+    return {
+        "count": len(values),
+        "median": stats.median(values) if values else None,
+        "max": max(values) if values else None,
+    }
+
+
+def _gateway_probe_retry_summary(rows):
+    """Derive retry diagnostics from verified public result rows."""
+    if not rows or not all(
+        isinstance(row.get("retry_evidence"), dict) for row in rows
+    ):
+        return None
+
+    latest_by_coordinate = {}
+    for row in rows:
+        identity = row.get("identity") or {}
+        case_id = (identity.get("case") or {}).get("id")
+        schedule = identity.get("schedule") or {}
+        condition = schedule.get("condition")
+        repetition = schedule.get("repetition")
+        block_attempt = schedule.get("block_attempt")
+        if (
+            not case_id
+            or condition not in {"cold", "warm"}
+            or not isinstance(repetition, int)
+            or isinstance(repetition, bool)
+            or not isinstance(block_attempt, int)
+            or isinstance(block_attempt, bool)
+            or block_attempt < 0
+        ):
+            return None
+        coordinate = (case_id, condition, repetition)
+        latest = latest_by_coordinate.get(coordinate)
+        if latest is None or block_attempt > latest[0]:
+            latest_by_coordinate[coordinate] = (block_attempt, [row])
+        elif block_attempt == latest[0]:
+            latest[1].append(row)
+
+    rows = [
+        row
+        for _attempt, selected in latest_by_coordinate.values()
+        for row in selected
+    ]
+    groups = defaultdict(list)
+    for row in rows:
+        identity = row.get("identity") or {}
+        arm_id = (identity.get("arm") or {}).get("id")
+        condition = (identity.get("schedule") or {}).get("condition")
+        retry = row["retry_evidence"]
+        attempts = retry.get("attempts")
+        attempt_count = retry.get("attempt_count")
+        max_attempts = retry.get("max_total_attempts")
+        output_limit = retry.get("max_output_tokens")
+        if (
+            not arm_id
+            or condition not in {"cold", "warm"}
+            or not isinstance(attempts, list)
+            or not attempts
+            or not isinstance(attempt_count, int)
+            or isinstance(attempt_count, bool)
+            or attempt_count != len(attempts)
+            or not isinstance(max_attempts, int)
+            or isinstance(max_attempts, bool)
+            or max_attempts < attempt_count
+            or not isinstance(output_limit, int)
+            or isinstance(output_limit, bool)
+            or output_limit <= 0
+            or not isinstance(retry.get("first_attempt_outcome"), dict)
+            or not isinstance(retry.get("eventual_outcome"), dict)
+            or not isinstance(retry.get("recovery_timing"), dict)
+            or not isinstance(retry.get("recovered"), bool)
+        ):
+            return None
+        groups[(arm_id, condition)].append(row)
+
+    def summarize(selected):
+        attempt_distribution = defaultdict(int)
+        retry_after_values = []
+        wait_values = []
+        recovery_completion_values = []
+        final_attempt_offset_values = []
+        limits = defaultdict(lambda: {"equal": 0, "measured": 0})
+        attempts_total = 0
+        first_successes = 0
+        eventual_successes = 0
+        retried = 0
+        rescued = 0
+        exhausted = 0
+
+        for row in selected:
+            retry = row["retry_evidence"]
+            attempt_count = retry["attempt_count"]
+            eventual_success = (
+                retry["eventual_outcome"].get("success") is True
+            )
+            attempts_total += attempt_count
+            attempt_distribution[attempt_count] += 1
+            first_successes += (
+                retry["first_attempt_outcome"].get("success") is True
+            )
+            eventual_successes += eventual_success
+            retried += attempt_count > 1
+            rescued += retry["recovered"] is True
+            exhausted += (
+                attempt_count == retry["max_total_attempts"]
+                and not eventual_success
+            )
+
+            if attempt_count > 1:
+                timing = retry["recovery_timing"]
+                recovery_completion_values.append(
+                    timing.get("initial_request_to_completion_s")
+                )
+                final_attempt_offset_values.append(
+                    timing.get("final_attempt_request_start_offset_s")
+                )
+
+            for attempt in retry["attempts"]:
+                retry_attempt = (
+                    attempt.get("retry")
+                    if isinstance(attempt, dict) else None
+                ) or {}
+                retry_after_values.append(retry_attempt.get("retry_after_s"))
+                wait_values.append(retry_attempt.get("wait_actual_s"))
+
+            limit = retry["max_output_tokens"]
+            usage = (row.get("request_metrics") or {}).get("usage") or {}
+            output_tokens = usage.get("output_tokens")
+            if (
+                isinstance(output_tokens, int)
+                and not isinstance(output_tokens, bool)
+                and output_tokens >= 0
+            ):
+                limits[limit]["measured"] += 1
+                if output_tokens == limit:
+                    limits[limit]["equal"] += 1
+
+        return {
+            "logical_cells": len(selected),
+            "attempts": attempts_total,
+            "first_attempt_successes": first_successes,
+            "eventual_successes": eventual_successes,
+            "retried": retried,
+            "rescued": rescued,
+            "exhausted": exhausted,
+            "attempt_distribution": {
+                str(count): frequency
+                for count, frequency in sorted(attempt_distribution.items())
+            },
+            "retry_after_s": _retry_timing_summary(retry_after_values),
+            "wait_actual_s": _retry_timing_summary(wait_values),
+            "recovery_completion_s": _retry_timing_summary(
+                recovery_completion_values
+            ),
+            "final_attempt_start_offset_s": _retry_timing_summary(
+                final_attempt_offset_values
+            ),
+            "output_limits": {
+                str(limit): dict(counts)
+                for limit, counts in sorted(limits.items())
+            },
+        }
+
+    return {
+        "overall": summarize(rows),
+        "groups": [
+            {
+                "arm_id": arm_id,
+                "condition": condition,
+                **summarize(selected),
+            }
+            for (arm_id, condition), selected in sorted(groups.items())
+        ],
+    }
+
+
 def aggregate_gateway_probe_bundle(
     bundle_dir, *, site_dir=None, manifest_entry=None
 ):
@@ -648,8 +834,14 @@ def aggregate_gateway_probe_bundle(
     ]
 
     entry = dict(manifest_entry or {})
+    retry_summary = _gateway_probe_retry_summary(rows)
     output_limit_equalities = _output_token_limit_equalities(
-        rows, experiment["budget"]["max_output_tokens"]
+        rows,
+        (
+            None
+            if retry_summary is not None
+            else experiment["budget"]["max_output_tokens"]
+        ),
     )
     completion_integrity = _gateway_probe_completion_integrity(rows)
     bundle_id = entry.get("id") or os.path.basename(os.path.normpath(bundle_dir))
@@ -687,6 +879,7 @@ def aggregate_gateway_probe_bundle(
         ),
         "baseline_arm_id": report.get("baseline_arm_id"),
         "completion_integrity": completion_integrity,
+        "retry_summary": retry_summary,
         "output_token_limit_equalities": output_limit_equalities,
         "arms": arms,
         "contrasts": contrasts,
@@ -2801,6 +2994,155 @@ def _gateway_probe_board(bundle):
                 ),
             )
             + _render_table(completion_columns, completion_rows)
+        )
+
+    retry_summary = bundle.get("retry_summary")
+    if retry_summary:
+        overall = retry_summary["overall"]
+
+        def fraction(value, total):
+            return f"{value}/{total}"
+
+        def attempt_distribution(value):
+            return " · ".join(
+                f"{count} attempt{'s' if count != '1' else ''}: {frequency}"
+                for count, frequency in value.items()
+            )
+
+        def timing(value):
+            if value.get("count") == 0:
+                return "—"
+            return (
+                f"{value['median']:.3f}s median · "
+                f"{value['max']:.3f}s max"
+            )
+
+        def retry_after_cell(row):
+            observed = row["retry_after_s"]
+            waits = row["wait_actual_s"]
+            return (
+                f"Retry-After {observed['count']}"
+                + (
+                    "<br>" + _tag(
+                        "span", {"class": "sub"}, timing(observed)
+                    )
+                    if observed["count"] else ""
+                )
+                + f"<br>actual waits {waits['count']}"
+                + (
+                    "<br>" + _tag(
+                        "span", {"class": "sub"}, timing(waits)
+                    )
+                    if waits["count"] else ""
+                )
+            )
+
+        def recovery_cell(row):
+            if row["retried"] == 0:
+                return "—"
+            return (
+                "completion " + timing(row["recovery_completion_s"])
+                + "<br>"
+                + _tag(
+                    "span",
+                    {"class": "sub"},
+                    "final attempt start "
+                    + timing(row["final_attempt_start_offset_s"]),
+                )
+            )
+
+        def output_limit_cell(row):
+            values = []
+            for limit, counts in row["output_limits"].items():
+                values.append(
+                    f"{counts['equal']}/{counts['measured']} equal "
+                    f"{limit} tokens"
+                )
+            return "<br>".join(values) if values else "—"
+
+        retry_columns = [
+            {
+                "label": "Route",
+                "cls": "name",
+                "type": "str",
+                "dir": "asc",
+                "cell": lambda row: _gateway_route_cell(row["arm_id"]),
+                "key": lambda row: _gateway_probe_route_name(row["arm_id"]),
+            },
+            {
+                "label": "Condition",
+                "type": "str",
+                "dir": "asc",
+                "cell": lambda row: _esc(row["condition"]),
+                "key": lambda row: row["condition"],
+            },
+            {
+                "label": "First → eventual success",
+                "cell": lambda row: (
+                    fraction(
+                        row["first_attempt_successes"],
+                        row["logical_cells"],
+                    )
+                    + " → "
+                    + fraction(
+                        row["eventual_successes"],
+                        row["logical_cells"],
+                    )
+                ),
+            },
+            {
+                "label": "Retried / rescued / exhausted",
+                "cell": lambda row: (
+                    f"{row['retried']} / {row['rescued']} / "
+                    f"{row['exhausted']}"
+                ),
+            },
+            {
+                "label": "Attempt distribution",
+                "cell": lambda row: attempt_distribution(
+                    row["attempt_distribution"]
+                ),
+            },
+            {
+                "label": "Retry-After / wait",
+                "cell": retry_after_cell,
+            },
+            {
+                "label": "Recovery timing",
+                "cell": recovery_cell,
+            },
+            {
+                "label": "Output-limit equality",
+                "cell": output_limit_cell,
+            },
+        ]
+        head += _tag(
+            "details",
+            {"class": "caveats retry-evidence"},
+            _tag(
+                "summary",
+                {},
+                (
+                    f"Retry evidence: {overall['first_attempt_successes']}/"
+                    f"{overall['logical_cells']} first-attempt successes, "
+                    f"{overall['eventual_successes']}/"
+                    f"{overall['logical_cells']} eventual successes, "
+                    f"{overall['retried']} retried, "
+                    f"{overall['rescued']} rescued, "
+                    f"{overall['exhausted']} exhausted"
+                ),
+            )
+            + _tag(
+                "p",
+                {},
+                f"{overall['attempts']} physical attempts across "
+                f"{overall['logical_cells']} logical requests. "
+                "Output-limit equality is a cap-hit proxy, not proof of "
+                "truncation. The linked results.jsonl retains every attempts[] "
+                "record, Retry-After decision, recovery timestamp, and retry "
+                "billing field.",
+            )
+            + _render_table(retry_columns, retry_summary["groups"]),
         )
 
     output_limit_equalities = bundle.get("output_token_limit_equalities")

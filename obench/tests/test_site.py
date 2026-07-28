@@ -564,6 +564,141 @@ class GatewayProbeFamilyTests(_SiteFixture):
             "measured": 1,
         })
 
+    def test_retry_evidence_is_derived_from_verified_public_rows(self):
+        bundle_dir = self._publish_probe()
+        rows_path = os.path.join(bundle_dir, "results.jsonl")
+        with open(rows_path, encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh]
+
+        for index, row in enumerate(rows):
+            success = index % 4 != 0
+            rescued = index % 4 == 1
+            attempts = [{
+                "attempt_number": 1,
+                "retry": {
+                    "retry_after_s": 1.5 if rescued else None,
+                    "wait_actual_s": 1.6 if rescued else None,
+                },
+            }]
+            if rescued or not success:
+                attempts.append({
+                    "attempt_number": 2,
+                    "retry": {
+                        "retry_after_s": None,
+                        "wait_actual_s": None,
+                    },
+                })
+            row["retry_evidence"] = {
+                "max_total_attempts": 2,
+                "max_output_tokens": 7,
+                "attempt_count": len(attempts),
+                "attempts": attempts,
+                "first_attempt_outcome": {"success": success and not rescued},
+                "eventual_outcome": {"success": success},
+                "recovered": rescued,
+                "recovery_timing": {
+                    "initial_request_to_completion_s": 2.5,
+                    "final_attempt_request_start_offset_s": 1.75,
+                },
+            }
+            row["request_metrics"]["usage"]["output_tokens"] = (
+                7 if index % 3 == 0 else 5
+            )
+
+        stale = json.loads(json.dumps(rows[0]))
+        stale_schedule = stale["identity"]["schedule"]
+        for row in rows:
+            schedule = row["identity"]["schedule"]
+            if (
+                row["identity"]["case"]["id"]
+                == stale["identity"]["case"]["id"]
+                and schedule["condition"] == stale_schedule["condition"]
+                and schedule["repetition"] == stale_schedule["repetition"]
+            ):
+                schedule["block_attempt"] += 1
+        stale["retry_evidence"]["attempt_count"] = 2
+        stale["retry_evidence"]["attempts"].append({
+            "attempt_number": 2,
+            "retry": {
+                "retry_after_s": 99.0,
+                "wait_actual_s": 99.0,
+            },
+        })
+        rows.append(stale)
+
+        manifest = {
+            "verification": {"verified_with_commit": "f" * 40},
+            "result_count": len(rows),
+        }
+        with mock.patch.object(
+            gateway_probe_publish, "verify_bundle", return_value=manifest
+        ) as verify:
+            with mock.patch.object(site, "_read_jsonl", return_value=rows):
+                bundle = site.aggregate_gateway_probe_bundle(bundle_dir)
+
+        verify.assert_called_once_with(bundle_dir)
+        retry = bundle["retry_summary"]["overall"]
+        self.assertEqual(retry["logical_cells"], 8)
+        self.assertEqual(retry["first_attempt_successes"], 4)
+        self.assertEqual(retry["eventual_successes"], 6)
+        self.assertEqual(retry["retried"], 4)
+        self.assertEqual(retry["rescued"], 2)
+        self.assertEqual(retry["exhausted"], 2)
+        self.assertEqual(retry["attempts"], 12)
+        self.assertEqual(
+            retry["attempt_distribution"], {"1": 4, "2": 4}
+        )
+        self.assertEqual(retry["retry_after_s"]["count"], 2)
+        self.assertEqual(retry["wait_actual_s"]["median"], 1.6)
+        self.assertEqual(
+            retry["output_limits"]["7"], {"equal": 3, "measured": 8}
+        )
+        self.assertIsNone(bundle["output_token_limit_equalities"])
+
+        page = site._gateway_probe_board(bundle)
+        self.assertIn(
+            "Retry evidence: 4/8 first-attempt successes, "
+            "6/8 eventual successes, 4 retried, 2 rescued, 2 exhausted",
+            page,
+        )
+        self.assertIn("12 physical attempts across 8 logical requests", page)
+        self.assertIn("First → eventual success", page)
+        self.assertIn("Retried / rescued / exhausted", page)
+        self.assertIn("1 attempt: 2", page)
+        self.assertIn("2 attempts: 2", page)
+        self.assertIn("Retry-After 2", page)
+        self.assertIn("1.500s median · 1.500s max", page)
+        self.assertIn("actual waits 2", page)
+        self.assertIn("1.600s median · 1.600s max", page)
+        self.assertIn("completion 2.500s median · 2.500s max", page)
+        self.assertIn("1/2 equal 7 tokens", page)
+        self.assertIn("results.jsonl retains every attempts[]", page)
+        self.assertNotIn("Configured request output limit: 512", page)
+
+    def test_retry_summary_rejects_partial_or_malformed_evidence(self):
+        base = {
+            "identity": {
+                "arm": {"id": "route"},
+                "schedule": {"condition": "cold"},
+            },
+        }
+        self.assertIsNone(site._gateway_probe_retry_summary([base]))
+
+        malformed = dict(base)
+        malformed["retry_evidence"] = {
+            "max_total_attempts": 2,
+            "max_output_tokens": 7,
+            "attempt_count": 2,
+            "attempts": [{}],
+            "first_attempt_outcome": {},
+            "eventual_outcome": {},
+            "recovered": False,
+            "recovery_timing": {},
+        }
+        self.assertIsNone(
+            site._gateway_probe_retry_summary([malformed])
+        )
+
     def test_tampered_probe_bundle_fails_closed(self):
         bundle = self._publish_probe()
         _write(os.path.join(bundle, "report.json"), "{}\n")
