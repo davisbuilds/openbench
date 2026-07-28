@@ -30,31 +30,49 @@ def build_schedule(
     experiment: probe_spec.GatewayProbeExperiment,
 ) -> tuple[ProbeBlock, ...]:
     """Interleave cold and warm matched blocks deterministically."""
-    rng = random.Random(experiment.schedule_seed)
-    by_condition: dict[str, list[tuple[probe_spec.ProbeCase, int]]] = {}
+    return _build_schedule_from_controls(
+        schedule_seed=experiment.schedule_seed,
+        repetitions=experiment.repetitions,
+        cases=tuple(
+            (case.case_id, case.prompt_digest)
+            for case in experiment.cases
+        ),
+        arm_ids=tuple(arm.arm_id for arm in experiment.arms),
+    )
+
+
+def _build_schedule_from_controls(
+    *,
+    schedule_seed: int,
+    repetitions: int,
+    cases: tuple[tuple[str, str], ...],
+    arm_ids: tuple[str, ...],
+) -> tuple[ProbeBlock, ...]:
+    """Build the schedule from the controls retained in public bundles."""
+    rng = random.Random(schedule_seed)
+    by_condition: dict[str, list[tuple[tuple[str, str], int]]] = {}
     for condition in probe_spec.CONDITIONS:
         coordinates = [
             (case, repetition)
-            for repetition in range(1, experiment.repetitions + 1)
-            for case in experiment.cases
+            for repetition in range(1, repetitions + 1)
+            for case in cases
         ]
         rng.shuffle(coordinates)
         by_condition[condition] = coordinates
     first = rng.randrange(2)
     blocks = []
-    arm_ids = [arm.arm_id for arm in experiment.arms]
     total_per_condition = len(by_condition["cold"])
     for index in range(total_per_condition * 2):
         condition = probe_spec.CONDITIONS[(index + first) % 2]
-        case, repetition = by_condition[condition].pop()
+        (case_id, prompt_digest), repetition = by_condition[condition].pop()
         order = list(arm_ids)
         rotation = len(blocks) % len(order)
         order = order[rotation:] + order[:rotation]
         if (len(blocks) // len(order)) % 2:
             order.reverse()
         blocks.append(ProbeBlock(
-            case.case_id,
-            case.prompt_digest,
+            case_id,
+            prompt_digest,
             condition,
             repetition,
             tuple(order),

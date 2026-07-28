@@ -47,10 +47,18 @@ def _rewrite_manifest_hash(bundle, name):
     path.write_text(_json(value), encoding="ascii")
 
 
-def build_private_run(root, *, prompt="PRIVATE PROMPT must never publish"):
+def build_private_run(
+    root,
+    *,
+    prompt="PRIVATE PROMPT must never publish",
+    max_output_tokens=64,
+):
     run_dir = Path(root, "private-run")
     run_dir.mkdir()
-    experiment_text = manifest(prompt)
+    experiment_text = manifest(prompt).replace(
+        "max_output_tokens = 64",
+        f"max_output_tokens = {max_output_tokens}",
+    )
     (run_dir / "experiment.toml").write_text(experiment_text, encoding="utf-8")
     experiment = gateway_probe_spec.load_experiment(run_dir / "experiment.toml")
     prices = {
@@ -243,6 +251,7 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
             self.assertEqual(
                 {path.name for path in bundle.iterdir()},
                 {
+                    "experiment.json",
                     "prices.json",
                     "schedule.json",
                     "results.jsonl",
@@ -252,6 +261,7 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                 },
             )
             self.assertEqual(published["report_schema_version"], 4)
+            self.assertEqual(published["schema_version"], 3)
             self.assertEqual(published["complete_blocks"], {"cold": 2, "warm": 2})
             self.assertEqual(published["scheduled_blocks_per_condition"], 2)
             self.assertNotIn("label", published)
@@ -274,6 +284,43 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
             self.assertNotIn("receipt-direct", public_text)
             self.assertNotIn("exploratory", public_text)
             self.assertNotIn("confirmatory", public_text)
+            experiment = json.loads(
+                (bundle / "experiment.json").read_text(encoding="ascii")
+            )
+            self.assertEqual(experiment["budget"], {
+                "max_output_tokens": 64,
+                "timeout_s": 30,
+                "usd_cap": "0.05",
+            })
+            self.assertEqual(experiment["repetitions"], 2)
+            self.assertEqual(experiment["schedule_seed"], 17)
+            self.assertEqual(experiment["cases"], [{
+                "case_id": "short",
+                "prompt_digest": gateway_probe_spec.load_experiment(
+                    run_dir / "experiment.toml"
+                ).cases[0].prompt_digest,
+            }])
+            self.assertTrue(all(
+                set(arm) == {
+                    "allowed_models",
+                    "allowed_providers",
+                    "arm_digest",
+                    "arm_id",
+                    "baseline",
+                    "cache_enabled",
+                    "canonical_model",
+                    "direct_control_arm_id",
+                    "fallback_enabled",
+                    "gateway",
+                    "protocol",
+                    "requested_model",
+                    "requested_provider",
+                    "retry_count",
+                    "route_kind",
+                    "sampling",
+                }
+                for arm in experiment["arms"]
+            ))
             rows = gateway_probe_results.load_results(bundle / "results.jsonl")
             self.assertTrue(all(
                 not item["request_metrics"]["receipt_headers"]
@@ -401,7 +448,73 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
             _rewrite_manifest_hash(bundle, "schedule.json")
             with self.assertRaisesRegex(
                 GatewayProbeRunError,
-                "schedule does not match results",
+                "schedule does not match public experiment controls",
+            ):
+                gateway_probe_publish.verify_bundle(bundle)
+
+    def test_experiment_snapshot_is_hashed_and_bound_to_schedule_and_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            experiment_path = bundle / "experiment.json"
+            experiment = json.loads(experiment_path.read_text())
+            experiment["budget"]["max_output_tokens"] = 65
+            experiment_path.write_text(_json(experiment), encoding="ascii")
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "artifact digest mismatch: experiment.json",
+            ):
+                gateway_probe_publish.verify_bundle(bundle)
+
+        for field, value, error in (
+            ("schedule_seed", 99, "experiment controls"),
+            ("experiment_digest", "0" * 64, "public experiment"),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                bundle = self._bundle(tmp)
+                experiment_path = bundle / "experiment.json"
+                experiment = json.loads(experiment_path.read_text())
+                experiment[field] = value
+                experiment_path.write_text(_json(experiment), encoding="ascii")
+                _rewrite_manifest_hash(bundle, "experiment.json")
+                with self.assertRaisesRegex(GatewayProbeRunError, error):
+                    gateway_probe_publish.verify_bundle(bundle)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            experiment_path = bundle / "experiment.json"
+            experiment = json.loads(experiment_path.read_text())
+            experiment["arms"][0]["arm_digest"] = "0" * 64
+            experiment_path.write_text(_json(experiment), encoding="ascii")
+            _rewrite_manifest_hash(bundle, "experiment.json")
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "public experiment",
+            ):
+                gateway_probe_publish.verify_bundle(bundle)
+
+    def test_rejects_rehashed_noncanonical_or_private_experiment_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            experiment_path = bundle / "experiment.json"
+            experiment = json.loads(experiment_path.read_text())
+            experiment_path.write_text(
+                json.dumps(experiment, sort_keys=True) + "\n",
+                encoding="ascii",
+            )
+            _rewrite_manifest_hash(bundle, "experiment.json")
+            with self.assertRaisesRegex(GatewayProbeRunError, "not canonical"):
+                gateway_probe_publish.verify_bundle(bundle)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            experiment_path = bundle / "experiment.json"
+            experiment = json.loads(experiment_path.read_text())
+            experiment["arms"][0]["auth_env"] = "PRIVATE_AUTH_ENV"
+            experiment_path.write_text(_json(experiment), encoding="ascii")
+            _rewrite_manifest_hash(bundle, "experiment.json")
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "experiment arms do not match schema",
             ):
                 gateway_probe_publish.verify_bundle(bundle)
 

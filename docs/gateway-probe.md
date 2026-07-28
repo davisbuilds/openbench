@@ -175,18 +175,25 @@ obench gateway probe publish RUN_DIR BUNDLE_DIR
 obench gateway probe verify BUNDLE_DIR
 ```
 
-`publish` verifies every private artifact digest, requires every scheduled cold
-and warm matched block, and recomputes the report before writing an exact public
-file set. No public experiment snapshot is emitted because fields such as
-endpoints, credential names, routing policy, and budget cannot all be
-independently authenticated from sanitized result rows. A sanitized
-`schedule.json` is emitted because its digest is already bound into every row;
-verification uses it to authenticate exact case/repetition coordinates, arm
-membership, prompt digests, and block IDs. Prompt digests remain in row
-identities; receipt values and operational generation IDs are removed.
-`verify` rejects partial schedules, extra files, symlinks, secrets, paths,
-account identifiers, nonempty receipts, digest drift, schema drift, and reports
-that do not exactly match recomputation.
+`publish` verifies every private artifact digest, parses the exact private
+experiment, requires every scheduled cold and warm matched block, and
+recomputes the report before writing an exact public file set. Canonical
+`experiment.json` retains the experiment and arm digests plus public-safe
+controls: repetitions, schedule seed, model matching, timeout, output-token and
+spend ceilings, case IDs and prompt digests, protocol/model/provider selection,
+sampling, direct-control relationships, and fallback/retry/cache settings.
+Endpoints, credential environment names, named gateway IDs, account IDs,
+private allowlists, prompt text, and secrets are omitted.
+
+The manifest hashes `experiment.json`. Verification validates its exact schema
+and canonical encoding, reconstructs `schedule.json` from its retained controls,
+and binds its experiment, case, and arm digests to the public rows. The
+sanitized schedule authenticates exact case/repetition coordinates, arm
+membership, prompt digests, and block IDs. Receipt values and operational
+generation IDs are removed. `verify` rejects partial schedules, extra files,
+symlinks, secrets, paths, account identifiers, nonempty receipts, digest drift,
+schema drift, experiment/schedule/row binding drift, and reports that do not
+exactly match recomputation.
 
 Public report schema v4 has no qualitative sample-size classification. It
 records complete and scheduled cold/warm blocks, p50/p95 values, metric

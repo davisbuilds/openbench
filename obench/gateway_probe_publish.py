@@ -25,9 +25,11 @@ from . import (
 from .gateway_probe_models import GatewayProbeRunError, ProbeBlock
 
 
-PUBLIC_SCHEMA_VERSION = 2
+PUBLIC_SCHEMA_VERSION = 3
+PUBLIC_EXPERIMENT_SCHEMA_VERSION = 1
 PUBLIC_BUNDLE_KIND = "gateway_probe_public"
 PUBLIC_FILES = (
+    "experiment.json",
     "prices.json",
     "schedule.json",
     "results.jsonl",
@@ -243,6 +245,243 @@ def _validate_source_manifest(run_dir: Path) -> dict[str, Any]:
     return manifest
 
 
+def _project_experiment(
+    experiment: gateway_probe_spec.GatewayProbeExperiment,
+) -> dict[str, Any]:
+    projected = {
+        "schema_version": PUBLIC_EXPERIMENT_SCHEMA_VERSION,
+        "benchmark": gateway_probe_results.BENCHMARK,
+        "source_schema_version": experiment.schema_version,
+        "experiment_id": experiment.experiment_id,
+        "experiment_digest": experiment.digest,
+        "track": experiment.track,
+        "model_match": experiment.model_match,
+        "repetitions": experiment.repetitions,
+        "schedule_seed": experiment.schedule_seed,
+        "allow_private_endpoint": experiment.allow_private_endpoint,
+        "budget": {
+            "timeout_s": experiment.budget.timeout_s,
+            "max_output_tokens": experiment.budget.max_output_tokens,
+            "usd_cap": experiment.budget.usd_cap,
+        },
+        "cases": [
+            {
+                "case_id": case.case_id,
+                "prompt_digest": case.prompt_digest,
+            }
+            for case in experiment.cases
+        ],
+        "arms": [
+            {
+                "arm_id": arm.arm_id,
+                "arm_digest": arm.digest,
+                "route_kind": arm.route_kind,
+                "protocol": arm.protocol,
+                "baseline": arm.baseline,
+                "canonical_model": arm.canonical_model,
+                "requested_model": arm.requested_model,
+                "requested_provider": arm.requested_provider,
+                "allowed_models": list(arm.allowed_models),
+                "allowed_providers": list(arm.allowed_providers),
+                "fallback_enabled": arm.fallback_enabled,
+                "retry_count": arm.retry_count,
+                "cache_enabled": arm.cache_enabled,
+                "sampling": arm.sampling.to_dict(),
+                "direct_control_arm_id": arm.direct_control_arm_id,
+                "gateway": arm.gateway,
+            }
+            for arm in experiment.arms
+        ],
+    }
+    return _validate_public_experiment(projected)
+
+
+def _is_integer(value: Any, *, minimum: int = 0) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= minimum
+    )
+
+
+def _is_string_list(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(item, str) and bool(item) for item in value)
+        and len(set(value)) == len(value)
+    )
+
+
+def _validate_public_experiment(value: Any) -> dict[str, Any]:
+    expected = {
+        "schema_version",
+        "benchmark",
+        "source_schema_version",
+        "experiment_id",
+        "experiment_digest",
+        "track",
+        "model_match",
+        "repetitions",
+        "schedule_seed",
+        "allow_private_endpoint",
+        "budget",
+        "cases",
+        "arms",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected
+        or value.get("schema_version") != PUBLIC_EXPERIMENT_SCHEMA_VERSION
+        or value.get("benchmark") != gateway_probe_results.BENCHMARK
+        or value.get("source_schema_version") != gateway_probe_spec.SCHEMA_VERSION
+        or not isinstance(value.get("experiment_id"), str)
+        or not value["experiment_id"]
+        or value.get("track") != gateway_probe_spec.TRACK
+        or value.get("model_match") not in gateway_spec.MODEL_MATCHES
+        or not _is_integer(value.get("repetitions"), minimum=1)
+        or not _is_integer(value.get("schedule_seed"))
+        or not isinstance(value.get("allow_private_endpoint"), bool)
+    ):
+        raise GatewayProbeRunError("public experiment does not match schema")
+    _sha256_value(value.get("experiment_digest"), "public experiment digest")
+
+    budget = value.get("budget")
+    if (
+        not isinstance(budget, dict)
+        or set(budget) != {"timeout_s", "max_output_tokens", "usd_cap"}
+        or not _is_integer(budget.get("timeout_s"), minimum=1)
+        or not _is_integer(budget.get("max_output_tokens"), minimum=1)
+        or not isinstance(budget.get("usd_cap"), str)
+    ):
+        raise GatewayProbeRunError("public experiment budget does not match schema")
+    try:
+        usd_cap = Decimal(budget["usd_cap"])
+    except InvalidOperation as exc:
+        raise GatewayProbeRunError(
+            "public experiment budget does not match schema"
+        ) from exc
+    if not usd_cap.is_finite() or usd_cap <= 0:
+        raise GatewayProbeRunError("public experiment budget does not match schema")
+
+    cases = value.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise GatewayProbeRunError("public experiment cases do not match schema")
+    case_ids = set()
+    for case in cases:
+        if (
+            not isinstance(case, dict)
+            or set(case) != {"case_id", "prompt_digest"}
+            or not isinstance(case.get("case_id"), str)
+            or not case["case_id"]
+            or case["case_id"] in case_ids
+        ):
+            raise GatewayProbeRunError(
+                "public experiment cases do not match schema"
+            )
+        case_ids.add(case["case_id"])
+        _sha256_value(
+            case.get("prompt_digest"),
+            "public experiment case prompt_digest",
+        )
+
+    arms = value.get("arms")
+    arm_fields = {
+        "arm_id",
+        "arm_digest",
+        "route_kind",
+        "protocol",
+        "baseline",
+        "canonical_model",
+        "requested_model",
+        "requested_provider",
+        "allowed_models",
+        "allowed_providers",
+        "fallback_enabled",
+        "retry_count",
+        "cache_enabled",
+        "sampling",
+        "direct_control_arm_id",
+        "gateway",
+    }
+    if not isinstance(arms, list) or len(arms) < 2:
+        raise GatewayProbeRunError("public experiment arms do not match schema")
+    arm_ids = set()
+    baselines = 0
+    for arm in arms:
+        sampling = arm.get("sampling") if isinstance(arm, dict) else None
+        if (
+            not isinstance(arm, dict)
+            or set(arm) != arm_fields
+            or not isinstance(arm.get("arm_id"), str)
+            or not arm["arm_id"]
+            or arm["arm_id"] in arm_ids
+            or arm.get("route_kind") not in {"direct", "gateway"}
+            or arm.get("protocol") not in gateway_spec.PROTOCOLS
+            or not isinstance(arm.get("baseline"), bool)
+            or any(
+                not isinstance(arm.get(name), str) or not arm[name]
+                for name in (
+                    "canonical_model",
+                    "requested_model",
+                    "requested_provider",
+                )
+            )
+            or not _is_string_list(arm.get("allowed_models"))
+            or not _is_string_list(arm.get("allowed_providers"))
+            or not isinstance(arm.get("fallback_enabled"), bool)
+            or not _is_integer(arm.get("retry_count"))
+            or not isinstance(arm.get("cache_enabled"), bool)
+            or not isinstance(sampling, dict)
+            or set(sampling) != {"temperature", "top_p", "seed"}
+            or any(
+                isinstance(sampling.get(name), bool)
+                or not isinstance(sampling.get(name), (int, float))
+                for name in ("temperature", "top_p")
+            )
+            or not _is_integer(sampling.get("seed"))
+            or (
+                arm.get("direct_control_arm_id") is not None
+                and (
+                    not isinstance(arm["direct_control_arm_id"], str)
+                    or not arm["direct_control_arm_id"]
+                )
+            )
+            or (
+                arm.get("gateway") is not None
+                and (
+                    not isinstance(arm["gateway"], str)
+                    or not arm["gateway"]
+                )
+            )
+        ):
+            raise GatewayProbeRunError(
+                "public experiment arms do not match schema"
+            )
+        _sha256_value(arm.get("arm_digest"), "public experiment arm_digest")
+        arm_ids.add(arm["arm_id"])
+        baselines += int(arm["baseline"])
+    if baselines != 1:
+        raise GatewayProbeRunError(
+            "public experiment must contain exactly one baseline arm"
+        )
+    for arm in arms:
+        control = arm["direct_control_arm_id"]
+        if (
+            (arm["route_kind"] == "direct" and control is not None)
+            or (
+                arm["route_kind"] == "gateway"
+                and (control not in arm_ids or control == arm["arm_id"])
+            )
+        ):
+            raise GatewayProbeRunError(
+                "public experiment direct controls do not match arms"
+            )
+
+    _assert_public_safe(value)
+    return value
+
+
 def _project_prices(value: Any) -> dict[str, Any]:
     expected_root = {"schema_version", "price_id", "currency", "prices"}
     if (
@@ -417,6 +656,57 @@ def _validate_rows_against_public_schedule(
         ):
             raise GatewayProbeRunError(
                 "public results do not match the authenticated schedule"
+            )
+
+
+def _validate_public_experiment_bindings(
+    experiment: Mapping[str, Any],
+    schedule: tuple[ProbeBlock, ...],
+    rows: list[dict[str, Any]],
+    report: Mapping[str, Any],
+) -> None:
+    expected_schedule = gateway_probe_run._build_schedule_from_controls(
+        schedule_seed=experiment["schedule_seed"],
+        repetitions=experiment["repetitions"],
+        cases=tuple(
+            (case["case_id"], case["prompt_digest"])
+            for case in experiment["cases"]
+        ),
+        arm_ids=tuple(arm["arm_id"] for arm in experiment["arms"]),
+    )
+    if schedule != expected_schedule:
+        raise GatewayProbeRunError(
+            "public schedule does not match public experiment controls"
+        )
+    if report["scheduled_blocks_per_condition"] != (
+        experiment["repetitions"] * len(experiment["cases"])
+    ):
+        raise GatewayProbeRunError(
+            "public report count does not match public experiment controls"
+        )
+
+    arm_digests = {
+        arm["arm_id"]: arm["arm_digest"]
+        for arm in experiment["arms"]
+    }
+    case_digests = {
+        case["case_id"]: case["prompt_digest"]
+        for case in experiment["cases"]
+    }
+    for row in rows:
+        identity = row["identity"]
+        arm = identity["arm"]
+        case = identity["case"]
+        row_experiment = identity["experiment"]
+        if (
+            row_experiment["id"] != experiment["experiment_id"]
+            or row_experiment["digest"] != experiment["experiment_digest"]
+            or row["model_match"] != experiment["model_match"]
+            or arm_digests.get(arm["id"]) != arm["digest"]
+            or case_digests.get(case["id"]) != case["prompt_digest"]
+        ):
+            raise GatewayProbeRunError(
+                "public results do not match public experiment"
             )
 
 
@@ -662,6 +952,7 @@ def _validate_manifest(value: Any) -> dict[str, Any]:
     _commit_value(verification.get("verified_with_commit"), "verified_with_commit")
     if value.get("sanitization") != {
         "case_prompts": "sha256_only",
+        "experiment_private_fields": "omitted",
         "receipt_values": "removed",
         "operational_identifiers": "removed",
         "paths_accounts_secrets": "rejected",
@@ -777,6 +1068,7 @@ def _manifest_for(
         },
         "sanitization": {
             "case_prompts": "sha256_only",
+            "experiment_private_fields": "omitted",
             "receipt_values": "removed",
             "operational_identifiers": "removed",
             "paths_accounts_secrets": "rejected",
@@ -811,6 +1103,7 @@ def publish_bundle(
         or experiment.digest != source_manifest["experiment_digest"]
     ):
         raise GatewayProbeRunError("source experiment does not match source manifest")
+    projected_experiment = _project_experiment(experiment)
     prices = _project_prices(_load_json(source / "prices.json", "source prices"))
     schedule = gateway_probe_run.build_schedule(experiment)
     projected_schedule = _project_schedule(schedule)
@@ -851,6 +1144,10 @@ def publish_bundle(
         dir=destination.parent,
     ))
     try:
+        (temporary / "experiment.json").write_text(
+            _canonical_json(projected_experiment),
+            encoding="ascii",
+        )
         (temporary / "prices.json").write_text(
             _canonical_json(prices),
             encoding="ascii",
@@ -901,6 +1198,12 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         if _sha256(directory / name) != manifest["files"][name]["sha256"]:
             raise GatewayProbeRunError(f"public artifact digest mismatch: {name}")
 
+    experiment_path = directory / "experiment.json"
+    experiment = _validate_public_experiment(
+        _load_json(experiment_path, "public experiment")
+    )
+    if experiment_path.read_text(encoding="ascii") != _canonical_json(experiment):
+        raise GatewayProbeRunError("public experiment is not canonical JSON")
     prices = _project_prices(_load_json(directory / "prices.json", "public prices"))
     schedule_value = _load_json(directory / "schedule.json", "public schedule")
     schedule = _validate_public_schedule(schedule_value)
@@ -908,6 +1211,12 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     _validate_public_rows(rows)
     recomputed = gateway_probe_report.aggregate(rows)
     _require_complete_report(recomputed)
+    _validate_public_experiment_bindings(
+        experiment,
+        schedule,
+        rows,
+        recomputed,
+    )
     if (
         gateway_spec.canonical_digest(schedule_value["blocks"])
         != recomputed["schedule_digest"]
@@ -933,8 +1242,8 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     )
 
     bindings = {
-        "experiment_id": recomputed["experiment_id"],
-        "experiment_digest": recomputed["experiment_digest"],
+        "experiment_id": experiment["experiment_id"],
+        "experiment_digest": experiment["experiment_digest"],
         "schedule_digest": recomputed["schedule_digest"],
         "price_digest": recomputed["price_digest"],
         "result_count": len(rows),
