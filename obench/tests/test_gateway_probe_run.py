@@ -130,6 +130,8 @@ def canned_result(*, stop_required=False, condition="cold"):
             "max_input_tokens": None,
             "max_output_tokens": 64,
             "retry_deadline_s": None,
+            "reservation_input_per_million_usd": "0",
+            "reservation_output_per_million_usd": "0",
             "attempt_count": 1,
             "recovered": False,
             "first_attempt_outcome": dict(attempt_outcome),
@@ -215,7 +217,7 @@ def cost_unavailable_result(*, condition, reason="measured_cost_unavailable"):
         "charged_cost_usd": None,
         "observed_cost_usd": None,
         "known_observed_cost_usd": "0",
-        "budget_debit_usd": "0.001",
+        "budget_debit_usd": "0",
         "cost_status": "reserved_unknown",
         "unknown_cost_attempts": 1,
         "stop_required": True,
@@ -242,8 +244,8 @@ def cost_unavailable_result(*, condition, reason="measured_cost_unavailable"):
         "measured_cost_usd": None,
         "observed_cost_usd": None,
         "known_observed_cost_usd": "0",
-        "budget_debit_usd": "0.001",
-        "reservation_usd": "0.001",
+        "budget_debit_usd": "0",
+        "reservation_usd": "0",
         "cost_status": "reserved_unknown",
     })
     return result
@@ -498,6 +500,15 @@ class GatewayProbeRunTests(unittest.TestCase):
                             "budget_debit_usd": "0.05",
                             "reservation_usd": "0.05",
                         })
+                        historical[-1]["retry_evidence"][
+                            "reservation_output_per_million_usd"
+                        ] = (
+                            "390.625"
+                            if historical[-1]["identity"]["schedule"][
+                                "condition"
+                            ] == "warm"
+                            else "781.25"
+                        )
                     write_rows(results_path, historical)
                     with mock.patch.object(
                         gateway_probe_http, "execute_request"

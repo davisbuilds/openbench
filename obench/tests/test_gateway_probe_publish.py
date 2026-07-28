@@ -135,7 +135,22 @@ def build_private_run(
             "max_input_tokens": experiment.budget.max_input_tokens,
             "max_output_tokens": experiment.budget.max_output_tokens,
             "retry_deadline_s": experiment.budget.retry_deadline_s,
+            "reservation_input_per_million_usd": (
+                "1" if with_retry else "0"
+            ),
+            "reservation_output_per_million_usd": (
+                "2" if with_retry else "0"
+            ),
         })
+        if with_retry:
+            reservation = (
+                "0.000512"
+                if schedule_identity["condition"] == "warm"
+                else "0.000256"
+            )
+            item["retry_evidence"]["attempts"][0]["cost"][
+                "reservation_usd"
+            ] = reservation
         item["request_metrics"]["stream"]["finish_reason"] = "length"
         item["request_metrics"]["usage"]["output_tokens_details"] = {
             "reasoning_tokens": 2,
@@ -461,6 +476,8 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                 1,
             )
             self.assertEqual(report["retry_diagnostics"]["retry_rescues"], 1)
+            self.assertEqual(report["retry_diagnostics"]["logical_cells"], 8)
+            self.assertEqual(report["retry_diagnostics"]["attempts"], 9)
             self.assertIn(
                 "unknown-cost-attempts=1",
                 (bundle / "report.md").read_text(),

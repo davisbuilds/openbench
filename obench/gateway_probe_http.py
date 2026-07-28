@@ -536,9 +536,13 @@ def _execute_request_once(
     secret: str,
     prices: Mapping[str, gateway_run.Price],
     remaining_usd_cap: Decimal | None = None,
+    request_timeout_s: float | None = None,
 ) -> dict[str, Any]:
     attempt_started_at = time.monotonic()
-    connection, path = _new_connection(plan, experiment.budget.timeout_s)
+    connection, path = _new_connection(
+        plan,
+        request_timeout_s or experiment.budget.timeout_s,
+    )
     primer_nonce = nonce(experiment.digest, block, "primer")
     measured_nonce = nonce(experiment.digest, block, "measured")
     primer = {
@@ -961,7 +965,19 @@ def execute_request(
     )
     initial_request_started_at = None
     result = None
+    retry_deadline = None
     for attempt_number in range(1, experiment.budget.max_total_attempts + 1):
+        request_timeout_s = None
+        if retry_deadline is not None:
+            remaining_retry_s = retry_deadline - time.monotonic()
+            if remaining_retry_s <= 0:
+                attempts[-1]["retry"]["retry_after_status"] = "over_deadline"
+                attempts[-1]["retry"]["not_retried_reason"] = "deadline"
+                break
+            request_timeout_s = min(
+                float(experiment.budget.timeout_s),
+                remaining_retry_s,
+            )
         per_attempt_cap = (
             None
             if remaining_usd_cap is None
@@ -975,6 +991,7 @@ def execute_request(
             secret=secret,
             prices=prices,
             remaining_usd_cap=per_attempt_cap,
+            request_timeout_s=request_timeout_s,
         )
         meta = result["_attempt_meta"]
         request_started_at = meta.get("request_started_at")
@@ -990,6 +1007,12 @@ def execute_request(
                     if isinstance(request_started_at, (int, float))
                     else meta["attempt_started_at"]
                 )
+            retry_deadline = (
+                initial_request_started_at
+                + float(experiment.budget.retry_deadline_s or 0)
+                if experiment.budget.retry_deadline_s is not None
+                else None
+            )
         eligible = _retryable(result)
         evidence = _attempt_public_evidence(
             result,
@@ -1031,11 +1054,10 @@ def execute_request(
             if isinstance(meta.get("retry_after_s"), (int, float))
             else _DEFAULT_RETRY_WAIT_S
         )
-        retry_deadline = (
-            initial_request_started_at
-            + float(experiment.budget.retry_deadline_s or 0)
-        )
-        if time.monotonic() + wait_requested > retry_deadline:
+        if (
+            retry_deadline is not None
+            and time.monotonic() + wait_requested > retry_deadline
+        ):
             evidence["retry"]["retry_after_status"] = "over_deadline"
             evidence["retry"]["not_retried_reason"] = "deadline"
             break
@@ -1056,6 +1078,7 @@ def execute_request(
     final_retryable_unknown = (
         attempts[-1]["retry"]["eligible"]
         and attempts[-1]["cost"]["cost_status"] == "reserved_unknown"
+        and experiment.budget.max_input_tokens is not None
     )
     original_stop_required = result["billing"]["stop_required"]
     original_budget_reason = result["outcome"]["budget_exhausted_reason"]
@@ -1096,6 +1119,12 @@ def execute_request(
         "max_input_tokens": experiment.budget.max_input_tokens,
         "max_output_tokens": experiment.budget.max_output_tokens,
         "retry_deadline_s": experiment.budget.retry_deadline_s,
+        "reservation_input_per_million_usd": (
+            str(price.input_per_million) if price is not None else "0"
+        ),
+        "reservation_output_per_million_usd": (
+            str(price.output_per_million) if price is not None else "0"
+        ),
         "attempt_count": len(attempts),
         "recovered": len(attempts) > 1 and result["outcome"]["success"],
         "first_attempt_outcome": dict(attempts[0]["outcome"]),

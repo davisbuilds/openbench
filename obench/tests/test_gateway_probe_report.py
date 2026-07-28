@@ -114,6 +114,8 @@ def row(arm, condition, repetition, *, baseline=False, total=1.0, route="verifie
             "max_input_tokens": None,
             "max_output_tokens": 64,
             "retry_deadline_s": None,
+            "reservation_input_per_million_usd": "0",
+            "reservation_output_per_million_usd": "0",
             "attempt_count": 1,
             "recovered": False,
             "first_attempt_outcome": {
@@ -262,6 +264,20 @@ class GatewayProbeReportTests(unittest.TestCase):
             "available": False,
             "error_class": "stream",
             "error_detail": "stream_no_semantic_output",
+        })
+        failed_outcome = {
+            "success": False,
+            "http_status": 200,
+            "timed_out": False,
+            "error_class": "stream",
+            "error_detail": "stream_no_semantic_output",
+            "semantic_output_started": False,
+        }
+        gateway["retry_evidence"]["first_attempt_outcome"] = failed_outcome
+        gateway["retry_evidence"]["eventual_outcome"] = failed_outcome
+        gateway["retry_evidence"]["attempts"][0]["outcome"] = failed_outcome
+        gateway["retry_evidence"]["attempts"][0]["retry"].update({
+            "not_retried_reason": "not_retryable",
         })
         warm_direct = row("direct", "warm", 1, baseline=True)
         warm_gateway = row("gateway", "warm", 1)

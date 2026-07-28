@@ -657,7 +657,7 @@ def _validate_attempt_outcome(value: Any, label: str) -> Mapping[str, Any]:
     return outcome
 
 
-def _validate_retry_evidence(value: Any) -> None:
+def _validate_retry_evidence(value: Any, *, condition: str) -> None:
     retry = _exact_mapping(
         value,
         {
@@ -665,6 +665,8 @@ def _validate_retry_evidence(value: Any) -> None:
             "max_input_tokens",
             "max_output_tokens",
             "retry_deadline_s",
+            "reservation_input_per_million_usd",
+            "reservation_output_per_million_usd",
             "attempt_count",
             "recovered",
             "first_attempt_outcome",
@@ -692,6 +694,14 @@ def _validate_retry_evidence(value: Any) -> None:
                 or isinstance(retry.get("max_input_tokens"), bool)
                 or retry.get("max_input_tokens") < 1
             )
+        )
+        or not _validate_money(
+            retry.get("reservation_input_per_million_usd"),
+            nullable=False,
+        )
+        or not _validate_money(
+            retry.get("reservation_output_per_million_usd"),
+            nullable=False,
         )
         or not isinstance(retry.get("max_output_tokens"), int)
         or isinstance(retry.get("max_output_tokens"), bool)
@@ -808,6 +818,27 @@ def _validate_retry_evidence(value: Any) -> None:
             raise GatewayProbeRunError(
                 "results row retry eligibility is inconsistent"
             )
+        if (
+            index < attempt_count
+            and (
+                not decision["eligible"]
+                or decision["wait_requested_s"] is None
+                or decision["not_retried_reason"] is not None
+                or decision["retry_after_status"] in {
+                    "malformed",
+                    "over_deadline",
+                }
+            )
+        ) or (
+            index == attempt_count
+            and (
+                decision["wait_requested_s"] is not None
+                or decision["not_retried_reason"] is None
+            )
+        ):
+            raise GatewayProbeRunError(
+                "results row retry sequence is inconsistent"
+            )
         cost = _exact_mapping(
             attempt.get("cost"),
             {
@@ -875,6 +906,18 @@ def _validate_retry_evidence(value: Any) -> None:
         ):
             raise GatewayProbeRunError(
                 "results row retry attempt cost is inconsistent"
+            )
+        expected_reservation = (
+            Decimal(retry["max_input_tokens"] or 0)
+            * Decimal(retry["reservation_input_per_million_usd"])
+            + Decimal(retry["max_output_tokens"])
+            * Decimal(retry["reservation_output_per_million_usd"])
+        ) / Decimal(1_000_000)
+        if condition == "warm":
+            expected_reservation *= 2
+        if Decimal(cost["reservation_usd"]) != expected_reservation:
+            raise GatewayProbeRunError(
+                "results row retry reservation is inconsistent"
             )
         normalized_attempts.append((attempt_outcome, decision, cost))
     if retry.get("first_attempt_outcome") != attempts[0]["outcome"]:
@@ -1071,7 +1114,31 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
         timing,
         request_metrics.get("stream"),
     )
-    _validate_retry_evidence(row.get("retry_evidence"))
+    _validate_retry_evidence(
+        row.get("retry_evidence"),
+        condition=condition,
+    )
+    eventual = row["retry_evidence"]["eventual_outcome"]
+    if any(
+        eventual[name] != outcome[name]
+        for name in (
+            "success",
+            "timed_out",
+            "error_class",
+            "error_detail",
+        )
+    ):
+        raise GatewayProbeRunError(
+            "results row eventual outcome does not match cell outcome"
+        )
+    final_attempt = row["retry_evidence"]["attempts"][-1]
+    if (
+        final_attempt["phase"] == "measured"
+        and eventual["http_status"] != outcome["http_status"]
+    ):
+        raise GatewayProbeRunError(
+            "results row eventual status does not match cell outcome"
+        )
     primer_fields = {
         "required", "completed", "http_status", "socket_reused",
         "primer_nonce_sha256", "measured_nonce_sha256", "setup",

@@ -133,6 +133,8 @@ def bound_row(experiment, block, schedule_digest, price_digest):
             "max_input_tokens": None,
             "max_output_tokens": 64,
             "retry_deadline_s": None,
+            "reservation_input_per_million_usd": "0",
+            "reservation_output_per_million_usd": "0",
             "attempt_count": 1,
             "recovered": False,
             "first_attempt_outcome": {
