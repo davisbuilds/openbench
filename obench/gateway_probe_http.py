@@ -922,6 +922,7 @@ def _attempt_public_evidence(
             "observed_cost_usd": observed_cost,
             "known_observed_cost_usd": billing["charged_cost_usd"],
             "budget_debit_usd": str(budget_debit),
+            "reservation_usd": str(reservation_usd),
             "cost_status": (
                 "observed" if cost_complete else "reserved_unknown"
             ),
@@ -1092,6 +1093,9 @@ def execute_request(
     final_request_started_at = final_meta.get("request_started_at")
     result["retry_evidence"] = {
         "max_total_attempts": experiment.budget.max_total_attempts,
+        "max_input_tokens": experiment.budget.max_input_tokens,
+        "max_output_tokens": experiment.budget.max_output_tokens,
+        "retry_deadline_s": experiment.budget.retry_deadline_s,
         "attempt_count": len(attempts),
         "recovered": len(attempts) > 1 and result["outcome"]["success"],
         "first_attempt_outcome": dict(attempts[0]["outcome"]),

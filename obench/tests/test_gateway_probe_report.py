@@ -111,6 +111,9 @@ def row(arm, condition, repetition, *, baseline=False, total=1.0, route="verifie
         },
         "retry_evidence": {
             "max_total_attempts": 1,
+            "max_input_tokens": None,
+            "max_output_tokens": 64,
+            "retry_deadline_s": None,
             "attempt_count": 1,
             "recovered": False,
             "first_attempt_outcome": {
@@ -166,6 +169,7 @@ def row(arm, condition, repetition, *, baseline=False, total=1.0, route="verifie
                     "observed_cost_usd": "0.001",
                     "known_observed_cost_usd": "0.001",
                     "budget_debit_usd": "0.001",
+                    "reservation_usd": "0",
                     "cost_status": "observed",
                 },
             }],

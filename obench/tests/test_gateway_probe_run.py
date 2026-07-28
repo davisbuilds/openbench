@@ -127,6 +127,9 @@ def canned_result(*, stop_required=False, condition="cold"):
         },
         "retry_evidence": {
             "max_total_attempts": 1,
+            "max_input_tokens": None,
+            "max_output_tokens": 64,
+            "retry_deadline_s": None,
             "attempt_count": 1,
             "recovered": False,
             "first_attempt_outcome": dict(attempt_outcome),
@@ -161,6 +164,7 @@ def canned_result(*, stop_required=False, condition="cold"):
                     "observed_cost_usd": amount,
                     "known_observed_cost_usd": amount,
                     "budget_debit_usd": amount,
+                    "reservation_usd": "0",
                     "cost_status": "observed",
                 },
             }],
@@ -239,6 +243,7 @@ def cost_unavailable_result(*, condition, reason="measured_cost_unavailable"):
         "observed_cost_usd": None,
         "known_observed_cost_usd": "0",
         "budget_debit_usd": "0.001",
+        "reservation_usd": "0.001",
         "cost_status": "reserved_unknown",
     })
     return result
@@ -491,6 +496,7 @@ class GatewayProbeRunTests(unittest.TestCase):
                             "primer_cost_usd": "0.05",
                             "known_observed_cost_usd": "0.05",
                             "budget_debit_usd": "0.05",
+                            "reservation_usd": "0.05",
                         })
                     write_rows(results_path, historical)
                     with mock.patch.object(

@@ -130,6 +130,9 @@ def bound_row(experiment, block, schedule_digest, price_digest):
         },
         "retry_evidence": {
             "max_total_attempts": 1,
+            "max_input_tokens": None,
+            "max_output_tokens": 64,
+            "retry_deadline_s": None,
             "attempt_count": 1,
             "recovered": False,
             "first_attempt_outcome": {
@@ -185,6 +188,7 @@ def bound_row(experiment, block, schedule_digest, price_digest):
                     "observed_cost_usd": "0",
                     "known_observed_cost_usd": "0",
                     "budget_debit_usd": "0",
+                    "reservation_usd": "0",
                     "cost_status": "observed",
                 },
             }],

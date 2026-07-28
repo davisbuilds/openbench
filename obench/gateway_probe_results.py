@@ -662,6 +662,9 @@ def _validate_retry_evidence(value: Any) -> None:
         value,
         {
             "max_total_attempts",
+            "max_input_tokens",
+            "max_output_tokens",
+            "retry_deadline_s",
             "attempt_count",
             "recovered",
             "first_attempt_outcome",
@@ -682,6 +685,25 @@ def _validate_retry_evidence(value: Any) -> None:
         or isinstance(attempt_count, bool)
         or not 1 <= attempt_count <= max_attempts
         or not isinstance(retry.get("recovered"), bool)
+        or (
+            retry.get("max_input_tokens") is not None
+            and (
+                not isinstance(retry.get("max_input_tokens"), int)
+                or isinstance(retry.get("max_input_tokens"), bool)
+                or retry.get("max_input_tokens") < 1
+            )
+        )
+        or not isinstance(retry.get("max_output_tokens"), int)
+        or isinstance(retry.get("max_output_tokens"), bool)
+        or retry.get("max_output_tokens") < 1
+        or (
+            retry.get("retry_deadline_s") is not None
+            and (
+                not isinstance(retry.get("retry_deadline_s"), int)
+                or isinstance(retry.get("retry_deadline_s"), bool)
+                or retry.get("retry_deadline_s") < 1
+            )
+        )
         or not isinstance(attempts, list)
         or len(attempts) != attempt_count
     ):
@@ -768,6 +790,24 @@ def _validate_retry_evidence(value: Any) -> None:
             raise GatewayProbeRunError(
                 "results row has malformed retry attempt decision"
             )
+        expected_eligible = bool(
+            not attempt_outcome["semantic_output_started"]
+            and (
+                attempt_outcome["http_status"] in {429, 502, 503, 504}
+                or attempt_outcome["timed_out"]
+                or (
+                    attempt_outcome["error_class"] == "transport"
+                    and attempt_outcome["error_detail"] in {
+                        "connection_reset",
+                        "connection_closed",
+                    }
+                )
+            )
+        )
+        if decision["eligible"] is not expected_eligible:
+            raise GatewayProbeRunError(
+                "results row retry eligibility is inconsistent"
+            )
         cost = _exact_mapping(
             attempt.get("cost"),
             {
@@ -776,6 +816,7 @@ def _validate_retry_evidence(value: Any) -> None:
                 "observed_cost_usd",
                 "known_observed_cost_usd",
                 "budget_debit_usd",
+                "reservation_usd",
                 "cost_status",
             },
             "retry attempt cost",
@@ -796,6 +837,7 @@ def _validate_retry_evidence(value: Any) -> None:
                 cost.get("budget_debit_usd"),
                 nullable=False,
             )
+            or not _validate_money(cost.get("reservation_usd"), nullable=False)
         ):
             raise GatewayProbeRunError(
                 "results row has malformed retry attempt cost"
@@ -825,6 +867,8 @@ def _validate_retry_evidence(value: Any) -> None:
                 cost["cost_status"] == "reserved_unknown"
                 and (
                     cost["observed_cost_usd"] is not None
+                    or Decimal(cost["budget_debit_usd"])
+                    != Decimal(cost["reservation_usd"])
                     or Decimal(cost["budget_debit_usd"]) < known_total
                 )
             )
@@ -1209,6 +1253,20 @@ def validate_resume_rows(
         if row.get("schema_version") != RESULT_SCHEMA_VERSION:
             raise GatewayProbeRunError("results row has unsupported schema_version")
         validate_row_shape(row)
+        retry_evidence = row["retry_evidence"]
+        if (
+            retry_evidence["max_total_attempts"]
+            != experiment.budget.max_total_attempts
+            or retry_evidence["max_input_tokens"]
+            != experiment.budget.max_input_tokens
+            or retry_evidence["max_output_tokens"]
+            != experiment.budget.max_output_tokens
+            or retry_evidence["retry_deadline_s"]
+            != experiment.budget.retry_deadline_s
+        ):
+            raise GatewayProbeRunError(
+                "results row retry policy does not match experiment"
+            )
         identity = _exact_mapping(
             row.get("identity"),
             {"benchmark", "experiment", "arm", "case", "comparison", "schedule"},
