@@ -327,7 +327,7 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                 json.loads((bundle / "report.json").read_text())[
                     "schema_version"
                 ],
-                5,
+                4,
             )
 
     def test_publish_projects_only_public_dto_and_removes_operational_ids(self):

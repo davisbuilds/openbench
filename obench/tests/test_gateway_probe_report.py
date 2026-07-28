@@ -187,7 +187,7 @@ class GatewayProbeReportTests(unittest.TestCase):
                 rows.append(row("direct", condition, repetition, baseline=True, total=direct_total))
                 rows.append(row("gateway", condition, repetition, total=direct_total + 0.5))
         report = gateway_probe_report.aggregate(rows, bootstrap_replicates=100)
-        self.assertEqual(report["schema_version"], 5)
+        self.assertEqual(report["schema_version"], 4)
         self.assertNotIn("label", report)
         cold = report["arms"]["gateway"]["conditions"]["cold"]
         self.assertEqual(cold["denominators"], {

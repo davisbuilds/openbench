@@ -17,7 +17,7 @@ class GatewayProbeReportError(ValueError):
     """Raised when probe rows cannot support an unambiguous report."""
 
 
-REPORT_SCHEMA_VERSION = 5
+REPORT_SCHEMA_VERSION = 4
 
 
 _METRICS = {
