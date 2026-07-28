@@ -382,7 +382,10 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                 (bundle / "experiment.json").read_text(encoding="ascii")
             )
             self.assertEqual(experiment["budget"], {
+                "max_input_tokens": None,
                 "max_output_tokens": 64,
+                "max_total_attempts": 1,
+                "retry_deadline_s": None,
                 "timeout_s": 30,
                 "usd_cap": "0.05",
             })
