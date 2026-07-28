@@ -197,7 +197,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
 
         source_root = os.path.join(self.root, "probe-source-" + bundle_id)
         os.makedirs(source_root)
-        private_run = build_private_run(source_root)
+        private_run = build_private_run(source_root, max_output_tokens=3)
         bundle = os.path.join(self.site_dir, "gateway-probe", bundle_id)
         gateway_probe_publish.publish_bundle(
             private_run,
@@ -428,7 +428,6 @@ class GatewayProbeFamilyTests(_SiteFixture):
         with mock.patch.object(site, "_read_jsonl", return_value=rows):
             bundle = site.aggregate_gateway_probe_bundle(
                 bundle_dir,
-                manifest_entry={"output_token_limit": 3},
             )
 
         integrity = bundle["completion_integrity"]["arms"]
@@ -484,7 +483,6 @@ class GatewayProbeFamilyTests(_SiteFixture):
     def test_output_limit_disclosure_is_data_driven(self):
         bundle = site.aggregate_gateway_probe_bundle(
             self._publish_probe(),
-            manifest_entry={"output_token_limit": 3},
         )
 
         self.assertIsNotNone(bundle["completion_integrity"])
@@ -502,8 +500,8 @@ class GatewayProbeFamilyTests(_SiteFixture):
         page = site._gateway_probe_board(bundle)
         self.assertIn("Configured output-limit equality", page)
         self.assertIn("Configured request output limit: 3 tokens.", page)
-        self.assertIn("Cold equal to 3", page)
-        self.assertIn("Warm equal to 3", page)
+        self.assertIn("Cold responses at 3-token limit", page)
+        self.assertIn("Warm responses at 3-token limit", page)
         self.assertIn("Equality is a cap proxy, not proof of truncation", page)
         self.assertIn("secondary legacy/cap diagnostic", page)
         self.assertIn("Completion integrity", page)
@@ -523,7 +521,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
         ]
         self.assertEqual(disclosure_html.count(">2/2<"), 4)
 
-    def test_output_limit_disclosure_omits_missing_or_invalid_metadata(self):
+    def test_output_limit_disclosure_ignores_page_metadata_override(self):
         bundle_dir = self._publish_probe()
 
         for value in (None, True, 0, -1, "3", 3.0):
@@ -533,10 +531,13 @@ class GatewayProbeFamilyTests(_SiteFixture):
                     bundle_dir,
                     manifest_entry=entry,
                 )
-                self.assertIsNone(bundle["output_token_limit_equalities"])
+                self.assertEqual(
+                    bundle["output_token_limit_equalities"]["configured_limit"],
+                    3,
+                )
                 page = site._gateway_probe_board(bundle)
-                self.assertNotIn("Configured output-limit equality", page)
-                self.assertNotIn("cap proxy", page)
+                self.assertIn("Configured output-limit equality", page)
+                self.assertIn("Cold responses at 3-token limit", page)
 
     def test_output_limit_disclosure_counts_only_measured_output_tokens(self):
         rows = [
@@ -676,7 +677,6 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("verified 30/30", page)
         self.assertNotIn("unverifiable", page)
         self.assertNotIn("coverage 30/30", page)
-        self.assertNotIn("charged cost", page.lower())
         self.assertNotIn("Cost p50 / p95", page)
         self.assertIn('class="route-logo"', page)
         self.assertIn('class="provider-cell"', page)

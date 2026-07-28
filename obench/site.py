@@ -604,6 +604,11 @@ def aggregate_gateway_probe_bundle(
 
     try:
         manifest = gateway_probe_publish.verify_bundle(bundle_dir)
+        with open(
+            os.path.join(bundle_dir, "experiment.json"),
+            encoding="ascii",
+        ) as fh:
+            experiment = json.load(fh)
         with open(os.path.join(bundle_dir, "report.json"), encoding="utf-8") as fh:
             report = json.load(fh)
         rows = _read_jsonl(os.path.join(bundle_dir, "results.jsonl"))
@@ -644,7 +649,7 @@ def aggregate_gateway_probe_bundle(
 
     entry = dict(manifest_entry or {})
     output_limit_equalities = _output_token_limit_equalities(
-        rows, entry.get("output_token_limit")
+        rows, experiment["budget"]["max_output_tokens"]
     )
     completion_integrity = _gateway_probe_completion_integrity(rows)
     bundle_id = entry.get("id") or os.path.basename(os.path.normpath(bundle_dir))
@@ -2830,11 +2835,15 @@ def _gateway_probe_board(bundle):
                 "key": lambda row: _gateway_probe_route_name(row["arm_id"]),
             },
             {
-                "label": f"Cold equal to {configured_limit}",
+                "label": (
+                    f"Cold responses at {configured_limit}-token limit"
+                ),
                 "cell": lambda row: equality_cell(row["cold"]),
             },
             {
-                "label": f"Warm equal to {configured_limit}",
+                "label": (
+                    f"Warm responses at {configured_limit}-token limit"
+                ),
                 "cell": lambda row: equality_cell(row["warm"]),
             },
         ]
