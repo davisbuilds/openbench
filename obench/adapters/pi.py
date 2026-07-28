@@ -115,6 +115,8 @@ def _empty_token_usage():
         "tokens_reasoning": None,
         "usage_raw": None,
         "token_basis": None,
+        "replies_ok": None,
+        "replies_throttled": None,
     }
 
 
@@ -703,6 +705,28 @@ def _parse_json_with_usage(stdout):
                 transcript.append(part["text"])
 
     tail = "\n".join(transcript)[-2000:]
+
+    # Reply health: how many assistant replies actually arrived vs died on a
+    # provider throttle. This is the signal that made a 429 storm invisible at
+    # the row level -- a storm cell completes, produces SOME tokens, and gets a
+    # real checker verdict, so failure_class/error/turns/tokens all look like an
+    # ordinary wrong answer. wide25 laguna: 38 of 50 cells had more 429-killed
+    # replies than delivered ones (370 messages ending in "429: ... temporarily
+    # rate-limited") while deepseek ran 0/50 -- and the row for such a cell read
+    # `wrong_answer, error=None, turns=16`. Rows must carry what the verdict
+    # depends on, or every row-level tool inherits the blindness.
+    ok = throttled = 0
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        if msg.get("stopReason") == "error":
+            err = str(msg.get("errorMessage") or "")
+            if "429" in err or "rate limit" in err.lower() or "rate-limit" in err.lower():
+                throttled += 1
+        else:
+            ok += 1
+    token_usage["replies_ok"] = ok
+    token_usage["replies_throttled"] = throttled
     return _legacy_tokens(token_usage), turns, tail, token_usage
 
 

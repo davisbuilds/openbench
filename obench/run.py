@@ -98,6 +98,8 @@ ROW_FIELDS = (
     "workspace_source",
     "last_activity_age_s",
     "host",
+    "replies_ok",
+    "replies_throttled",
     "model_context_window",
     "model_max_tokens",
 )
@@ -1660,6 +1662,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "last_activity_age_s": None,
         "model_context_window": None,
         "model_max_tokens": None,
+        "replies_ok": None,
+        "replies_throttled": None,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
@@ -1790,6 +1794,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["tokens_output"] = result.get("tokens_output")
         row["tokens_reasoning"] = result.get("tokens_reasoning")
         row["usage_raw"] = result.get("usage_raw")
+        row["replies_ok"] = result.get("replies_ok")
+        row["replies_throttled"] = result.get("replies_throttled")
         row["model_context_window"] = result.get("model_context_window")
         row["model_max_tokens"] = result.get("model_max_tokens")
         row["token_basis"] = ("unmetered" if candidate is not None

@@ -180,6 +180,28 @@ def has_per_reply_truncation(row, cap=None, ratio=0.99):
 STARVED_OUTPUT_BUDGET = 64
 
 
+def has_throttle_dominated_replies(row):
+    """True when more assistant replies died on a provider throttle than arrived.
+
+    The signal the checker-owned-verdict rule cannot see on its own: a cell can
+    complete, produce SOME tokens, touch the workspace, and receive a real
+    checker FAIL -- while most of its model calls were 429-killed. That is a
+    measurement of provider capacity, not of the model. wide25: laguna had 38 of
+    50 cells in this state (370 replies ending "429 ... temporarily
+    rate-limited") while deepseek ran 0 of 50; laguna's published 6% was
+    starvation wearing a verdict.
+
+    Requires the adapter-reported ``replies_ok``/``replies_throttled`` fields.
+    Rows that predate them return False here -- their storms are only visible in
+    transcripts (see the backfill tool).
+    """
+    row = row or {}
+    ok, throttled = row.get("replies_ok"), row.get("replies_throttled")
+    if not isinstance(throttled, int) or not isinstance(ok, int):
+        return False
+    return throttled > ok
+
+
 def has_starved_output_budget(row):
     """True when a request was sent with an output budget too small to answer.
 
@@ -432,6 +454,10 @@ def classify_failure(row, adapter_output="", timeout_s=None):
     # wrong_answer. A model given a 1-token budget never got to answer.
     if has_starved_output_budget(row):
         return "infra"
+    # Also before the checker-owned verdict: a throttle-dominated cell has a
+    # verdict about a starved run, not about the model.
+    if has_throttle_dominated_replies(row):
+        return "rate_limited"
     # A transient provider hiccup does NOT erase a verdict the checker already
     # reached. When the agent ran to completion, did real work, and the checker
     # exited with a real verdict (0/1), the checker owns the oracle -- fall
@@ -499,6 +525,9 @@ def class_for_report(row):
         if stored not in EXCLUDED_FROM_SOLVE_RATE and not row.get("success") \
                 and has_starved_output_budget(row):
             return "infra"
+        if stored not in EXCLUDED_FROM_SOLVE_RATE and not row.get("success") \
+                and has_throttle_dominated_replies(row):
+            return "rate_limited"
         if stored in EXCLUDED_FROM_SOLVE_RATE and has_checker_owned_verdict(row):
             return "timeout" if row.get("checker_exit") == "timeout" else "wrong_answer"
         return stored
