@@ -197,7 +197,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
 
         source_root = os.path.join(self.root, "probe-source-" + bundle_id)
         os.makedirs(source_root)
-        private_run = build_private_run(source_root)
+        private_run = build_private_run(source_root, max_output_tokens=3)
         bundle = os.path.join(self.site_dir, "gateway-probe", bundle_id)
         gateway_probe_publish.publish_bundle(
             private_run,
@@ -295,6 +295,50 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn('ev.key === "Home"', page)
         self.assertIn("selectGatewayModel(modelTabs[0], false)", page)
 
+    def test_run_note_is_carried_and_escaped_below_evidence_depth(self):
+        self._publish_probe()
+        run_note = (
+            'Recovered split-session run; <script>alert("unsafe")</script> '
+            "remained outside metrics."
+        )
+        _write(
+            os.path.join(self.site_dir, "gateway-probe.json"),
+            json.dumps([{
+                "id": "probe-v4",
+                "title": "Gateway benchmark",
+                "run_note": run_note,
+            }]),
+        )
+
+        doc = site.build_board(self.site_dir)
+        bundle = doc["gateway"]["bundles"][0]
+        page = site.render_board_html(doc)
+
+        self.assertEqual(bundle["run_note"], run_note)
+        self.assertIn(
+            "&lt;script&gt;alert(&quot;unsafe&quot;)&lt;/script&gt;",
+            page,
+        )
+        self.assertNotIn("<script>alert", page)
+        self.assertLess(page.index("Evidence depth:"), page.index("Run note:"))
+        self.assertLess(page.index("Run note:"), page.index("Gateway leaderboard"))
+
+    def test_run_note_is_absent_when_unspecified_or_malformed(self):
+        bundle_dir = self._publish_probe()
+
+        bundle = site.aggregate_gateway_probe_bundle(bundle_dir)
+        self.assertNotIn("run_note", bundle)
+        self.assertNotIn("Run note:", site._gateway_probe_board(bundle))
+
+        for run_note in ({"html": "<script>alert(1)</script>"}, "x" * 501):
+            with self.subTest(run_note_type=type(run_note).__name__):
+                bundle = site.aggregate_gateway_probe_bundle(
+                    bundle_dir,
+                    manifest_entry={"run_note": run_note},
+                )
+                self.assertNotIn("run_note", bundle)
+                self.assertNotIn("Run note:", site._gateway_probe_board(bundle))
+
     def test_single_block_bundle_is_plainly_labelled_as_a_spike(self):
         bundle = site.aggregate_gateway_probe_bundle(self._publish_probe())
         bundle["complete_blocks"] = {"cold": 1, "warm": 1}
@@ -309,12 +353,139 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertIn('class="evidence-depth is-spike"', page)
         self.assertIn("Every delta is gateway minus Direct Moonshot.", page)
 
+    def test_completion_integrity_requires_explicit_finish_reason_evidence(self):
+        rows = [{
+            "identity": {
+                "arm": {"id": "legacy-route"},
+                "schedule": {"condition": "warm"},
+            },
+            "request_metrics": {
+                "stream": {"terminal_status": "completed"},
+                "usage": {"output_tokens": 3},
+            },
+            "reuse_evidence": {"stream": {"done": True}},
+        }]
+
+        self.assertIsNone(site._gateway_probe_completion_integrity(rows))
+
+        rows[0]["request_metrics"]["stream"]["finish_reason"] = None
+        integrity = site._gateway_probe_completion_integrity(rows)
+
+        self.assertEqual(
+            integrity["arms"]["legacy-route"]["warm"]["measured"],
+            {
+                "natural_stop": 0,
+                "length": 0,
+                "missing": 1,
+                "other": 0,
+                "total": 1,
+            },
+        )
+        self.assertEqual(
+            integrity["arms"]["legacy-route"]["warm"]["warm_primer"],
+            {
+                "natural_stop": 0,
+                "length": 0,
+                "missing": 1,
+                "other": 0,
+                "total": 1,
+            },
+        )
+
+    def test_completion_integrity_aggregates_and_renders_future_rows(self):
+        bundle_dir = self._publish_probe()
+        rows = site._read_jsonl(os.path.join(bundle_dir, "results.jsonl"))
+        measured_reasons = {
+            ("direct", "cold", 1): "stop",
+            ("direct", "cold", 2): "length",
+            ("direct", "warm", 1): None,
+            ("direct", "warm", 2): "tool_calls",
+            ("gateway", "cold", 1): "stop",
+            ("gateway", "cold", 2): "stop",
+            ("gateway", "warm", 1): "length",
+            ("gateway", "warm", 2): None,
+        }
+        primer_reasons = {
+            ("direct", 1): "stop",
+            ("direct", 2): "length",
+            ("gateway", 1): "stop",
+            ("gateway", 2): None,
+        }
+        for row in rows:
+            identity = row["identity"]
+            arm_id = identity["arm"]["id"]
+            schedule = identity["schedule"]
+            condition = schedule["condition"]
+            repetition = schedule["repetition"]
+            row["request_metrics"]["stream"]["finish_reason"] = (
+                measured_reasons[(arm_id, condition, repetition)]
+            )
+            if condition == "warm":
+                row["reuse_evidence"]["stream"] = {
+                    "finish_reason": primer_reasons[(arm_id, repetition)],
+                }
+
+        with mock.patch.object(site, "_read_jsonl", return_value=rows):
+            bundle = site.aggregate_gateway_probe_bundle(
+                bundle_dir,
+            )
+
+        integrity = bundle["completion_integrity"]["arms"]
+        self.assertEqual(integrity["direct"]["cold"]["measured"], {
+            "natural_stop": 1,
+            "length": 1,
+            "missing": 0,
+            "other": 0,
+            "total": 2,
+        })
+        self.assertEqual(integrity["direct"]["warm"]["measured"], {
+            "natural_stop": 0,
+            "length": 0,
+            "missing": 1,
+            "other": 1,
+            "total": 2,
+        })
+        self.assertEqual(integrity["gateway"]["warm"]["warm_primer"], {
+            "natural_stop": 1,
+            "length": 0,
+            "missing": 1,
+            "other": 0,
+            "total": 2,
+        })
+
+        page = site._gateway_probe_board(bundle)
+        self.assertIn("Completion integrity", page)
+        self.assertIn("Measured natural-stop", page)
+        self.assertIn("Measured length", page)
+        self.assertIn("Measured missing", page)
+        self.assertIn("Measured other", page)
+        self.assertIn("Warm-primer natural-stop", page)
+        self.assertIn("missing is never treated as stop", page)
+        self.assertLess(
+            page.index("Completion integrity"),
+            page.index("Configured output-limit equality"),
+        )
+        self.assertLess(
+            page.index("Configured output-limit equality"),
+            page.index("Gateway leaderboard"),
+        )
+        completion_html = page[
+            page.index("Completion integrity"):
+            page.index("Configured output-limit equality")
+        ]
+        self.assertEqual(completion_html.count(">1/2<"), 2)
+        self.assertIn(
+            "Explicit finish reasons are reported separately in Completion "
+            "integrity; missing reasons are not inferred.",
+            page,
+        )
+
     def test_output_limit_disclosure_is_data_driven(self):
         bundle = site.aggregate_gateway_probe_bundle(
             self._publish_probe(),
-            manifest_entry={"output_token_limit": 3},
         )
 
+        self.assertIsNotNone(bundle["completion_integrity"])
         disclosure = bundle["output_token_limit_equalities"]
         self.assertEqual(disclosure["configured_limit"], 3)
         self.assertEqual(disclosure["arms"]["direct"]["cold"], {
@@ -329,10 +500,16 @@ class GatewayProbeFamilyTests(_SiteFixture):
         page = site._gateway_probe_board(bundle)
         self.assertIn("Configured output-limit equality", page)
         self.assertIn("Configured request output limit: 3 tokens.", page)
-        self.assertIn("Cold equal to 3", page)
-        self.assertIn("Warm equal to 3", page)
+        self.assertIn("Cold responses at 3-token limit", page)
+        self.assertIn("Warm responses at 3-token limit", page)
         self.assertIn("Equality is a cap proxy, not proof of truncation", page)
-        self.assertIn("finish reasons are not retained", page)
+        self.assertIn("secondary legacy/cap diagnostic", page)
+        self.assertIn("Completion integrity", page)
+        self.assertIn(
+            "Explicit finish reasons are reported separately", page
+        )
+        self.assertNotIn("finish reasons are not retained", page)
+        self.assertNotIn("no completion reason is inferred", page)
         self.assertIn(
             "Stream-total latency and measured or charged cost are "
             "generation-length affected.",
@@ -344,7 +521,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
         ]
         self.assertEqual(disclosure_html.count(">2/2<"), 4)
 
-    def test_output_limit_disclosure_omits_missing_or_invalid_metadata(self):
+    def test_output_limit_disclosure_ignores_page_metadata_override(self):
         bundle_dir = self._publish_probe()
 
         for value in (None, True, 0, -1, "3", 3.0):
@@ -354,10 +531,13 @@ class GatewayProbeFamilyTests(_SiteFixture):
                     bundle_dir,
                     manifest_entry=entry,
                 )
-                self.assertIsNone(bundle["output_token_limit_equalities"])
+                self.assertEqual(
+                    bundle["output_token_limit_equalities"]["configured_limit"],
+                    3,
+                )
                 page = site._gateway_probe_board(bundle)
-                self.assertNotIn("Configured output-limit equality", page)
-                self.assertNotIn("cap proxy", page)
+                self.assertIn("Configured output-limit equality", page)
+                self.assertIn("Cold responses at 3-token limit", page)
 
     def test_output_limit_disclosure_counts_only_measured_output_tokens(self):
         rows = [
@@ -497,7 +677,6 @@ class GatewayProbeFamilyTests(_SiteFixture):
         self.assertNotIn("verified 30/30", page)
         self.assertNotIn("unverifiable", page)
         self.assertNotIn("coverage 30/30", page)
-        self.assertNotIn("charged cost", page.lower())
         self.assertNotIn("Cost p50 / p95", page)
         self.assertIn('class="route-logo"', page)
         self.assertIn('class="provider-cell"', page)
@@ -1093,6 +1272,17 @@ class RenderTests(_SiteFixture):
         )
         self.assertIn('id="view-methodology"', page)
         self.assertNotIn("Gateway Tax", page)
+        self.assertIn(
+            "Harness Bench denominators are countable cells", page
+        )
+        self.assertIn(
+            "HTTP 429 responses and timeouts remain in\n"
+            "    that denominator",
+            page,
+        )
+        self.assertNotIn(
+            "Denominators are countable cells. Infrastructure", page
+        )
 
     def test_write_board_emits_the_landing_page_and_data(self):
         info = site.write_board(self.site_dir)

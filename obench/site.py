@@ -37,6 +37,7 @@ from . import leaderboard, report_page, stats
 from .paths import SOURCE_ROOT
 
 SCHEMA_VERSION = 5
+_MAX_GATEWAY_RUN_NOTE_LENGTH = 500
 
 HARNESS_NOTE = (
     "Scores are not comparable across bundles: task sets, trial counts, and "
@@ -64,6 +65,17 @@ def _public_gateway_title(value):
     """Map legacy public titles onto the sole Gateway Bench product name."""
     value = re.sub(r"\bgateway probe\b", "Gateway Bench", str(value), flags=re.I)
     return re.sub(r"\brequest probe\b", "request benchmark", value, flags=re.I)
+
+
+def _gateway_run_note(value):
+    """Return a short manifest-supplied run disclosure, or ``None``."""
+    if not isinstance(value, str):
+        return None
+    note = value.strip()
+    if not note or len(note) > _MAX_GATEWAY_RUN_NOTE_LENGTH:
+        return None
+    return note
+
 
 # --------------------------------------------------------------------------
 # Harness Bench
@@ -507,6 +519,83 @@ def _output_token_limit_equalities(rows, configured_limit):
     }
 
 
+def _finish_reason_bucket(stream):
+    if not isinstance(stream, dict) or "finish_reason" not in stream:
+        return "missing", False
+    finish_reason = stream.get("finish_reason")
+    if finish_reason == "stop":
+        return "natural_stop", True
+    if finish_reason == "length":
+        return "length", True
+    if finish_reason is None or finish_reason == "":
+        return "missing", True
+    return "other", True
+
+
+def _gateway_probe_completion_integrity(rows):
+    counts = {}
+    has_finish_reason_evidence = False
+
+    def increment(item, bucket):
+        item["total"] += 1
+        item[bucket] += 1
+
+    for row in rows:
+        identity = row.get("identity") or {}
+        arm_id = (identity.get("arm") or {}).get("id")
+        condition = (identity.get("schedule") or {}).get("condition")
+        if not arm_id or condition not in {"cold", "warm"}:
+            continue
+
+        item = counts.setdefault(arm_id, {}).setdefault(condition, {
+            "measured": {
+                "natural_stop": 0,
+                "length": 0,
+                "missing": 0,
+                "other": 0,
+                "total": 0,
+            },
+        })
+        request_stream = (
+            (row.get("request_metrics") or {}).get("stream")
+        )
+        bucket, has_evidence = _finish_reason_bucket(request_stream)
+        has_finish_reason_evidence = (
+            has_finish_reason_evidence or has_evidence
+        )
+        increment(item["measured"], bucket)
+
+        if condition == "warm":
+            primer = item.setdefault("warm_primer", {
+                "natural_stop": 0,
+                "length": 0,
+                "missing": 0,
+                "other": 0,
+                "total": 0,
+            })
+            primer_stream = (
+                (row.get("reuse_evidence") or {}).get("stream")
+            )
+            bucket, has_evidence = _finish_reason_bucket(primer_stream)
+            has_finish_reason_evidence = (
+                has_finish_reason_evidence or has_evidence
+            )
+            increment(primer, bucket)
+
+    if not has_finish_reason_evidence:
+        return None
+    return {
+        "arms": {
+            arm_id: {
+                condition: conditions[condition]
+                for condition in ("cold", "warm")
+                if condition in conditions
+            }
+            for arm_id, conditions in sorted(counts.items())
+        },
+    }
+
+
 def aggregate_gateway_probe_bundle(
     bundle_dir, *, site_dir=None, manifest_entry=None
 ):
@@ -515,6 +604,11 @@ def aggregate_gateway_probe_bundle(
 
     try:
         manifest = gateway_probe_publish.verify_bundle(bundle_dir)
+        with open(
+            os.path.join(bundle_dir, "experiment.json"),
+            encoding="ascii",
+        ) as fh:
+            experiment = json.load(fh)
         with open(os.path.join(bundle_dir, "report.json"), encoding="utf-8") as fh:
             report = json.load(fh)
         rows = _read_jsonl(os.path.join(bundle_dir, "results.jsonl"))
@@ -555,8 +649,9 @@ def aggregate_gateway_probe_bundle(
 
     entry = dict(manifest_entry or {})
     output_limit_equalities = _output_token_limit_equalities(
-        rows, entry.get("output_token_limit")
+        rows, experiment["budget"]["max_output_tokens"]
     )
+    completion_integrity = _gateway_probe_completion_integrity(rows)
     bundle_id = entry.get("id") or os.path.basename(os.path.normpath(bundle_dir))
     results_path = os.path.join(bundle_dir, "results.jsonl")
     verification = manifest.get("verification") or {}
@@ -564,7 +659,7 @@ def aggregate_gateway_probe_bundle(
     track = (
         ((first_row.get("identity") or {}).get("benchmark") or {}).get("track")
     )
-    return {
+    bundle = {
         "family": "gateway_probe",
         "id": bundle_id,
         "kind": entry.get("kind") or "release",
@@ -591,10 +686,15 @@ def aggregate_gateway_probe_bundle(
             "scheduled_blocks_per_condition"
         ),
         "baseline_arm_id": report.get("baseline_arm_id"),
+        "completion_integrity": completion_integrity,
         "output_token_limit_equalities": output_limit_equalities,
         "arms": arms,
         "contrasts": contrasts,
     }
+    run_note = _gateway_run_note(entry.get("run_note"))
+    if run_note:
+        bundle["run_note"] = run_note
+    return bundle
 
 
 def build_gateway_probe_family(site_dir, gateway_probe_dirs=None):
@@ -1410,15 +1510,17 @@ _METHODOLOGY = """
 
   <h2>Denominators and intervals</h2>
   <ul>
-    <li>Denominators are countable cells. Infrastructure and rate-limit failures
-    are excluded; other failures, including timeouts, stay in the denominator.</li>
+    <li>Harness Bench denominators are countable cells. Infrastructure and
+    rate-limit failures are excluded; other failures, including timeouts, stay
+    in the denominator.</li>
     <li>Harness Bench uses Wilson 95% intervals over matched
     <code>(task, trial)</code> cells whenever a bundle has two or more arms.</li>
     <li>Gateway Bench displays complete cold and warm block counts separately.
-    Availability uses a Wilson 95% interval over attempted requests. Phase
-    summaries use successful, route-verified requests and retain metric-specific
-    coverage. Paired deltas use complete gateway/direct blocks and bootstrap
-    95% intervals.</li>
+    Availability uses a Wilson 95% interval over every attempted measured
+    request, so gateway errors such as HTTP 429 responses and timeouts remain in
+    that denominator. Phase summaries use successful, route-verified requests
+    and retain metric-specific coverage. Paired deltas use complete
+    gateway/direct blocks and bootstrap 95% intervals.</li>
   </ul>
 
   <h2>Efficiency and cost</h2>
@@ -2559,6 +2661,7 @@ def _gateway_probe_board(bundle):
     if bundle.get("path"):
         title = _link(bundle["path"], title)
 
+    run_note = _gateway_run_note(bundle.get("run_note"))
     scheduled = bundle.get("scheduled_blocks_per_condition")
     complete = bundle.get("complete_blocks") or {}
     cold_blocks = complete.get("cold", 0)
@@ -2608,8 +2711,97 @@ def _gateway_probe_board(bundle):
                     if is_spike else ""
                 )
             ),
+        )
+        + (
+            _tag(
+                "p",
+                {},
+                _tag("b", {}, "Run note: ") + _esc(run_note),
+            )
+            if run_note else ""
         ),
     )
+
+    completion_integrity = bundle.get("completion_integrity")
+    if completion_integrity:
+        completion_rows = []
+        integrity_arms = completion_integrity.get("arms") or {}
+        for arm in bundle["arms"]:
+            arm_id = arm["arm_id"]
+            conditions = integrity_arms.get(arm_id) or {}
+            for condition in ("cold", "warm"):
+                if condition not in conditions:
+                    continue
+                completion_rows.append({
+                    "arm_id": arm_id,
+                    "condition": condition,
+                    "item": conditions[condition],
+                })
+
+        def completion_count(row, name):
+            value = (row["item"].get("measured") or {}).get(name)
+            return "—" if value is None else str(value)
+
+        def primer_coverage(row):
+            if row["condition"] != "warm":
+                return "—"
+            primer = row["item"].get("warm_primer") or {}
+            natural_stop = primer.get("natural_stop")
+            total = primer.get("total")
+            if natural_stop is None or total is None:
+                return "—"
+            return f"{natural_stop}/{total}"
+
+        completion_columns = [
+            {
+                "label": "Route",
+                "cls": "name",
+                "type": "str",
+                "dir": "asc",
+                "cell": lambda row: _gateway_route_cell(row["arm_id"]),
+                "key": lambda row: _gateway_probe_route_name(row["arm_id"]),
+            },
+            {
+                "label": "Condition",
+                "cell": lambda row: _esc(row["condition"].title()),
+            },
+            {
+                "label": "Measured natural-stop",
+                "cell": lambda row: completion_count(row, "natural_stop"),
+            },
+            {
+                "label": "Measured length",
+                "cell": lambda row: completion_count(row, "length"),
+            },
+            {
+                "label": "Measured missing",
+                "cell": lambda row: completion_count(row, "missing"),
+            },
+            {
+                "label": "Measured other",
+                "cell": lambda row: completion_count(row, "other"),
+            },
+            {
+                "label": "Warm-primer natural-stop",
+                "cell": primer_coverage,
+            },
+        ]
+        head += (
+            _tag(
+                "div",
+                {"class": "head"},
+                _tag("h2", {}, "Completion integrity")
+                + _tag(
+                    "p",
+                    {},
+                    "Explicit stream finish reasons only. Measured requests "
+                    "are counted as stop (natural-stop), length, missing, or "
+                    "other; missing is never treated as stop. Warm-primer "
+                    "coverage is stop / warm-primer rows.",
+                ),
+            )
+            + _render_table(completion_columns, completion_rows)
+        )
 
     output_limit_equalities = bundle.get("output_token_limit_equalities")
     if output_limit_equalities:
@@ -2643,11 +2835,15 @@ def _gateway_probe_board(bundle):
                 "key": lambda row: _gateway_probe_route_name(row["arm_id"]),
             },
             {
-                "label": f"Cold equal to {configured_limit}",
+                "label": (
+                    f"Cold responses at {configured_limit}-token limit"
+                ),
                 "cell": lambda row: equality_cell(row["cold"]),
             },
             {
-                "label": f"Warm equal to {configured_limit}",
+                "label": (
+                    f"Warm responses at {configured_limit}-token limit"
+                ),
                 "cell": lambda row: equality_cell(row["warm"]),
             },
         ]
@@ -2661,10 +2857,19 @@ def _gateway_probe_board(bundle):
                     {},
                     f"Configured request output limit: {configured_limit} tokens. "
                     "Counts are measured rows whose output_tokens equal the "
-                    "configured limit. Equality is a cap proxy, not proof of "
-                    "truncation, because finish reasons are not retained in "
-                    "the public bundle. Stream-total latency and measured or "
-                    "charged cost are generation-length affected.",
+                    "configured limit. This is a secondary legacy/cap "
+                    "diagnostic. Equality is a cap proxy, not proof of "
+                    "truncation. "
+                    + (
+                        "Explicit finish reasons are reported separately in "
+                        "Completion integrity; missing reasons are not inferred. "
+                        if completion_integrity
+                        else
+                        "Because finish reasons are not retained in this "
+                        "legacy bundle, no completion reason is inferred. "
+                    )
+                    + "Stream-total latency and measured or charged cost are "
+                    "generation-length affected.",
                 ),
             )
             + _render_table(equality_columns, equality_rows)

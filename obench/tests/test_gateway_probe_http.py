@@ -7,9 +7,11 @@ import time
 import unittest
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from unittest import mock
 
 from obench import (
+    gateway_profiles,
     gateway_probe_http,
     gateway_probe_spec,
     gateway_run,
@@ -27,6 +29,7 @@ class _SSEHandler(BaseHTTPRequestHandler):
     requests = []
     fail_first = False
     close_measured = False
+    chat_finish_reasons = []
 
     def log_message(self, _format, *_args):
         return
@@ -41,19 +44,54 @@ class _SSEHandler(BaseHTTPRequestHandler):
                 key.lower(): value for key, value in self.headers.items()
             },
         })
-        terminal = (
-            "failed"
-            if self.fail_first and len(self.requests) == 1
-            else "completed"
-        )
-        body = (
-            'data: {"type":"response.output_text.delta","delta":"'
-            + PRIVATE_OUTPUT
-            + '"}\n\n'
-            f'data: {{"type":"response.{terminal}","response":'
-            f'{{"status":"{terminal}","model":"gpt-test","provider":"openai",'
-            '"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}}\n\n'
-        ).encode()
+        if self.path == "/chat/completions":
+            request_index = len(type(self).requests) - 1
+            finish_reason = (
+                self.chat_finish_reasons[request_index]
+                if request_index < len(self.chat_finish_reasons)
+                else "stop"
+            )
+            events = (
+                {
+                    "model": "gpt-test",
+                    "provider": "openai",
+                    "choices": [{"delta": {"content": PRIVATE_OUTPUT}}],
+                },
+                {
+                    "model": "gpt-test",
+                    "provider": "openai",
+                    "choices": [{
+                        "delta": {},
+                        "finish_reason": finish_reason,
+                    }],
+                    "usage": {
+                        "prompt_tokens": 5,
+                        "completion_tokens": 3,
+                        "total_tokens": 8,
+                    },
+                },
+            )
+            body = (
+                "".join(
+                    f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
+                    for event in events
+                )
+                + "data: [DONE]\n\n"
+            ).encode()
+        else:
+            terminal = (
+                "failed"
+                if self.fail_first and len(self.requests) == 1
+                else "completed"
+            )
+            body = (
+                'data: {"type":"response.output_text.delta","delta":"'
+                + PRIVATE_OUTPUT
+                + '"}\n\n'
+                f'data: {{"type":"response.{terminal}","response":'
+                f'{{"status":"{terminal}","model":"gpt-test","provider":"openai",'
+                '"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}}\n\n'
+            ).encode()
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("content-length", str(len(body)))
@@ -68,12 +106,12 @@ class _SSEHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
-def experiment(endpoint):
+def experiment(endpoint, *, protocol="openai_responses"):
     arm = gateway_spec.Arm(
         arm_id="direct",
         route_kind="direct",
         endpoint=endpoint,
-        protocol="openai_responses",
+        protocol=protocol,
         baseline=True,
         canonical_model="openai/gpt-test",
         requested_model="gpt-test",
@@ -110,7 +148,7 @@ def route_plan(exp, endpoint):
         arm_id="direct",
         route_kind="direct",
         endpoint=endpoint,
-        protocol="openai_responses",
+        protocol=exp.arms[0].protocol,
         canonical_model="openai/gpt-test",
         requested_model="gpt-test",
         requested_provider="openai",
@@ -143,6 +181,7 @@ class GatewayProbeHttpTests(unittest.TestCase):
         _SSEHandler.requests = []
         _SSEHandler.fail_first = False
         _SSEHandler.close_measured = False
+        _SSEHandler.chat_finish_reasons = []
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), _SSEHandler)
         self.thread = threading.Thread(
             target=self.server.serve_forever, daemon=True
@@ -231,6 +270,39 @@ class GatewayProbeHttpTests(unittest.TestCase):
             Decimal(result["billing"]["charged_cost_usd"]),
             Decimal(result["billing"]["measured_cost_usd"]),
         )
+
+    def test_warm_primer_retains_bounded_completion_stream_evidence(self):
+        _SSEHandler.chat_finish_reasons = ["stop", "length"]
+        endpoint = self.endpoint.replace("/responses", "/chat/completions")
+        exp = experiment(endpoint, protocol="openai_chat")
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "warm", 1, ("direct",)
+        )
+
+        result = gateway_probe_http.execute_request(
+            experiment=exp,
+            case=exp.cases[0],
+            block=block,
+            plan=route_plan(exp, endpoint),
+            secret="test-secret",
+            prices=prices(),
+        )
+
+        self.assertTrue(result["outcome"]["success"])
+        self.assertEqual(
+            result["reuse_evidence"]["stream"],
+            {
+                "done": True,
+                "terminal_status": "completed",
+                "finish_reason": "stop",
+                "finalized": True,
+            },
+        )
+        self.assertEqual(
+            result["request_metrics"]["stream"]["finish_reason"],
+            "length",
+        )
+        self.assertNotIn(PRIVATE_OUTPUT, json.dumps(result, sort_keys=True))
 
     def test_cloudflare_managed_probe_sends_bound_gateway_controls(self):
         exp = experiment(self.endpoint)
@@ -605,6 +677,120 @@ class GatewayProbeHttpTests(unittest.TestCase):
         self.assertEqual(
             responses_body["provider"],
             {"only": ["openai"], "allow_fallbacks": False},
+        )
+
+    def test_kimi_examples_compile_exact_five_way_chat_route_locks(self):
+        examples = Path(__file__).parents[1] / "examples"
+        experiment = gateway_probe_spec.load_experiment(
+            examples / "gateway-probe-kimi-k3-five-way-chat.toml"
+        )
+        auth_envs = {arm.auth_env for arm in experiment.arms}
+        plans, _secrets = gateway_probe_spec.compile_route_plans(
+            experiment,
+            environ={name: f"secret-for-{name}" for name in auth_envs},
+            admitted_auth_envs=auth_envs,
+        )
+        by_id = {plan.arm_id: plan for plan in plans}
+
+        self.assertEqual(experiment.repetitions, 5)
+        self.assertEqual(experiment.budget.max_output_tokens, 128)
+        self.assertEqual(len(plans), 5)
+        self.assertEqual({plan.protocol for plan in plans}, {"openai_chat"})
+        self.assertEqual(
+            {arm_id: plan.endpoint for arm_id, plan in by_id.items()},
+            {
+                "direct-moonshot":
+                    "https://api.moonshot.ai/v1/chat/completions",
+                "openrouter-moonshot":
+                    "https://openrouter.ai/api/v1/chat/completions",
+                "vercel-moonshot":
+                    "https://ai-gateway.vercel.sh/v1/chat/completions",
+                "concentrate-moonshot":
+                    "https://api.concentrate.ai/v1/chat/completions",
+                "cloudflare-moonshot":
+                    "https://api.cloudflare.com/client/v4/accounts/"
+                    "0123456789abcdef0123456789abcdef/ai/v1/chat/completions",
+            },
+        )
+        bodies = {
+            arm_id: json.loads(
+                gateway_probe_http.request_body("prompt", "nonce", plan, 128)
+            )
+            for arm_id, plan in by_id.items()
+        }
+        self.assertEqual(
+            bodies["openrouter-moonshot"]["provider"],
+            {"only": ["moonshotai"], "allow_fallbacks": False},
+        )
+        self.assertEqual(
+            bodies["vercel-moonshot"]["providerOptions"],
+            {"gateway": {"only": ["moonshotai"]}},
+        )
+        self.assertEqual(
+            bodies["concentrate-moonshot"]["routing"],
+            {"providers": ["moonshot"], "models": []},
+        )
+        self.assertEqual(bodies["concentrate-moonshot"]["seed"], "20260727")
+        self.assertTrue(
+            all(
+                body["seed"] == 20260727
+                for arm_id, body in bodies.items()
+                if arm_id != "concentrate-moonshot"
+            )
+        )
+        self.assertEqual(
+            by_id["concentrate-moonshot"].requested_model,
+            "moonshot/kimi-k3",
+        )
+        self.assertEqual(
+            {
+                arm_id: body["model"]
+                for arm_id, body in bodies.items()
+            },
+            {
+                "direct-moonshot": "kimi-k3",
+                "openrouter-moonshot": "moonshotai/kimi-k3",
+                "vercel-moonshot": "moonshotai/kimi-k3",
+                "concentrate-moonshot": "moonshot/kimi-k3",
+                "cloudflare-moonshot": "moonshotai/kimi-k3",
+            },
+        )
+        cloudflare = by_id["cloudflare-moonshot"]
+        self.assertEqual(cloudflare.gateway_id, "openbench-router-bench")
+        self.assertNotIn("provider", bodies["cloudflare-moonshot"])
+        self.assertEqual(
+            gateway_profiles.request_headers(
+                gateway=cloudflare.gateway,
+                gateway_id=cloudflare.gateway_id,
+                secret="secret",
+            )["cf-aig-gateway-id"],
+            "openbench-router-bench",
+        )
+        self.assertTrue(
+            all(body["max_completion_tokens"] == 128 for body in bodies.values())
+        )
+        self.assertTrue(
+            all(body["temperature"] == 1.0 for body in bodies.values())
+        )
+        self.assertTrue(all(body["top_p"] == 0.95 for body in bodies.values()))
+
+        gateway_bench = gateway_spec.load_experiment(
+            examples / "gateway-bench-kimi-k3-five-way-chat.toml"
+        )
+        self.assertEqual(gateway_bench.repetitions_per_window, 5)
+        self.assertEqual(len(gateway_bench.arms), 5)
+        self.assertEqual(
+            {arm.protocol for arm in gateway_bench.arms}, {"openai_chat"}
+        )
+        self.assertEqual(
+            {arm.canonical_model for arm in gateway_bench.arms},
+            {"moonshotai/kimi-k3"},
+        )
+        self.assertEqual(
+            {arm.sampling.temperature for arm in gateway_bench.arms}, {1.0}
+        )
+        self.assertEqual(
+            {arm.sampling.top_p for arm in gateway_bench.arms}, {0.95}
         )
 
     def test_route_reason_taxonomy_is_explicit_and_fail_closed(self):

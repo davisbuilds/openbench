@@ -11,6 +11,7 @@ from __future__ import annotations
 import codecs
 import json
 import math
+import re
 from collections.abc import Mapping
 from typing import Any, Iterable
 
@@ -18,6 +19,21 @@ from . import gateway_profiles
 
 
 _SEMANTIC_DELTA_KEYS = ("content", "reasoning_content", "reasoning", "refusal")
+_OUTPUT_TOKEN_DETAIL_KEYS = (
+    "accepted_prediction_tokens",
+    "audio_tokens",
+    "image_tokens",
+    "reasoning_tokens",
+    "rejected_prediction_tokens",
+    "text_tokens",
+    "video_tokens",
+)
+_TERMINATION_REASON_RE = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*")
+_FINISH_REASON_ALIASES = {
+    "max_completion_tokens": "length",
+    "max_output_tokens": "length",
+    "max_tokens": "length",
+}
 
 
 def _timestamp(value: Any, name: str) -> float:
@@ -40,6 +56,26 @@ def _token_count(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
     return value
+
+
+def _normalized_termination_reason(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip().casefold().replace("-", "_")
+    if (
+        not value
+        or len(value) > 64
+        or _TERMINATION_REASON_RE.fullmatch(value) is None
+    ):
+        return None
+    return value
+
+
+def _normalized_finish_reason(value: Any) -> str | None:
+    reason = _normalized_termination_reason(value)
+    if reason is None:
+        return None
+    return _FINISH_REASON_ALIASES.get(reason, reason)
 
 
 def _has_text(value: Any) -> bool:
@@ -152,6 +188,7 @@ class OpenAIChatSSEParser:
         self._malformed_events = 0
         self._done_seen = False
         self._terminal_status: str | None = None
+        self._finish_reasons: set[str] = set()
         self._finalized = False
 
     def feed(self, chunk: bytes | str, received_at: float) -> None:
@@ -299,6 +336,7 @@ class OpenAIChatSSEParser:
                 "malformed_events": self._malformed_events,
                 "done": self._done_seen,
                 "terminal_status": self._terminal_status,
+                "finish_reason": self._single_value(self._finish_reasons),
                 "finalized": self._finalized,
             },
         }
@@ -308,6 +346,12 @@ class OpenAIChatSSEParser:
         if end is None or start is None:
             return None
         return max(0.0, end - start)
+
+    @staticmethod
+    def _single_value(values: set[str]) -> str | None:
+        if len(values) != 1:
+            return None
+        return next(iter(values))
 
     def _consume_text(self, text: str, timestamp: float) -> None:
         for char in text:
@@ -352,7 +396,7 @@ class OpenAIChatSSEParser:
         if data.strip() == "[DONE]":
             if self._accept_done_marker():
                 self._done_seen = True
-                self._terminal_status = "completed"
+                self._set_terminal_status("completed")
             self._events += 1
             return
         try:
@@ -365,11 +409,7 @@ class OpenAIChatSSEParser:
             return
         if self._is_terminal_event(obj):
             self._done_seen = True
-            response = obj.get("response")
-            if isinstance(response, dict) and isinstance(response.get("status"), str):
-                self._terminal_status = response["status"]
-            else:
-                self._terminal_status = obj["type"].removeprefix("response.")
+            self._record_terminal_event(obj)
         if self._observe(obj, event_data_at):
             self._events += 1
         else:
@@ -387,9 +427,52 @@ class OpenAIChatSSEParser:
     def _has_semantic_content(self, obj: dict[str, Any]) -> bool:
         return _has_semantic_delta(obj)
 
+    def _record_terminal_event(self, obj: dict[str, Any]) -> None:
+        event_status = _normalized_termination_reason(
+            obj["type"].removeprefix("response.")
+        ) or "invalid"
+        self._set_terminal_status(event_status)
+        response = obj.get("response")
+        if not isinstance(response, Mapping):
+            return
+        status = response.get("status")
+        if status is None:
+            return
+        self._set_terminal_status(
+            _normalized_termination_reason(status) or "invalid"
+        )
+
+    def _set_terminal_status(self, status: str) -> None:
+        if self._terminal_status is None or (
+            self._terminal_status == "completed" and status != "completed"
+        ):
+            self._terminal_status = status
+
+    def _record_finish_reason(self, value: Any) -> None:
+        normalized = _normalized_finish_reason(value)
+        if normalized is not None:
+            self._finish_reasons.add(normalized)
+
+    def _observe_termination(self, obj: dict[str, Any]) -> bool:
+        choices = obj.get("choices")
+        if not isinstance(choices, list):
+            return False
+        observed = False
+        for choice in choices:
+            if (
+                not isinstance(choice, Mapping)
+                or "finish_reason" not in choice
+                or choice.get("finish_reason") is None
+            ):
+                continue
+            observed = True
+            self._record_finish_reason(choice["finish_reason"])
+        return observed
+
     def _observe(self, obj: dict[str, Any], timestamp: float) -> bool:
         gateway_metadata_observed = False
         usage_observed = False
+        termination_observed = self._observe_termination(obj)
         for metric_obj in self._metric_objects(obj):
             if self._gateway_evidence is not None:
                 gateway_metadata_observed = (
@@ -453,8 +536,39 @@ class OpenAIChatSSEParser:
                             details[key] = count
                     if details:
                         clean["input_tokens_details"] = details
+                raw_output_details = usage.get("output_tokens_details")
+                if raw_output_details is None:
+                    raw_output_details = usage.get("completion_tokens_details")
+                if isinstance(raw_output_details, Mapping):
+                    output_details = {}
+                    for key in _OUTPUT_TOKEN_DETAIL_KEYS:
+                        count = _token_count(raw_output_details.get(key))
+                        if count is not None:
+                            output_details[key] = count
+                    if output_details:
+                        clean["output_tokens_details"] = output_details
                 if clean:
-                    self._usage = clean
+                    previous = self._usage or {}
+                    merged = {**previous, **clean}
+                    for detail_name in (
+                        "input_tokens_details",
+                        "output_tokens_details",
+                    ):
+                        details = {
+                            **(
+                                previous.get(detail_name, {})
+                                if isinstance(previous.get(detail_name), Mapping)
+                                else {}
+                            ),
+                            **(
+                                clean.get(detail_name, {})
+                                if isinstance(clean.get(detail_name), Mapping)
+                                else {}
+                            ),
+                        }
+                        if details:
+                            merged[detail_name] = details
+                    self._usage = merged
                     usage_observed = True
 
         semantic = self._has_semantic_content(obj)
@@ -464,6 +578,7 @@ class OpenAIChatSSEParser:
             semantic
             or gateway_metadata_observed
             or usage_observed
+            or termination_observed
             or self._is_terminal_event(obj)
         )
 
@@ -552,6 +667,29 @@ class OpenAIResponsesSSEParser(OpenAIChatSSEParser):
 
     def _has_semantic_content(self, obj: dict[str, Any]) -> bool:
         return _has_responses_semantic_delta(obj)
+
+    def _observe_termination(self, obj: dict[str, Any]) -> bool:
+        if not self._is_terminal_event(obj):
+            return False
+        response = obj.get("response")
+        if not isinstance(response, Mapping):
+            return False
+
+        response_status = _normalized_termination_reason(response.get("status"))
+        if (
+            obj.get("type") != "response.incomplete"
+            and response_status != "incomplete"
+        ):
+            return False
+        incomplete_details = response.get("incomplete_details")
+        if not isinstance(incomplete_details, Mapping):
+            return incomplete_details is not None
+        if (
+            "reason" in incomplete_details
+            and incomplete_details.get("reason") is not None
+        ):
+            self._record_finish_reason(incomplete_details["reason"])
+        return True
 
 
 def sse_parser(protocol: str, **kwargs: Any) -> OpenAIChatSSEParser:

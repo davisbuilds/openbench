@@ -45,6 +45,9 @@ def _run(args: argparse.Namespace) -> int:
         args.experiment,
         results_path=results_path,
         force=args.force,
+        allow_cost_unavailable_block_recovery=(
+            args.allow_cost_unavailable_block_recovery
+        ),
     )
     print(
         f"results={summary.results_path} rows_appended={summary.rows_appended} "
@@ -278,6 +281,9 @@ def _benchmark(args: argparse.Namespace) -> int:
         results_path=results_path,
         environ=run_environ,
         force=args.force,
+        allow_cost_unavailable_block_recovery=(
+            args.allow_cost_unavailable_block_recovery
+        ),
     )
     rows = gateway_probe_results.load_results(results_path)
     report = gateway_probe_report.aggregate(rows, experiment=experiment)
@@ -315,7 +321,16 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="run or resume a probe experiment")
     run.add_argument("experiment")
     run.add_argument("--results")
-    run.add_argument("--force", action="store_true")
+    run_mode = run.add_mutually_exclusive_group()
+    run_mode.add_argument("--force", action="store_true")
+    run_mode.add_argument(
+        "--allow-cost-unavailable-block-recovery",
+        action="store_true",
+        help=(
+            "resume past complete cost-unavailable blocks and finish only the "
+            "current block after a new cost-unavailable stop"
+        ),
+    )
     run.set_defaults(handler=_run)
     report = sub.add_parser("report", help="report probe results")
     report.add_argument("results")
@@ -327,7 +342,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     benchmark.add_argument("experiment")
     benchmark.add_argument("--output-dir")
-    benchmark.add_argument("--force", action="store_true")
+    benchmark_mode = benchmark.add_mutually_exclusive_group()
+    benchmark_mode.add_argument("--force", action="store_true")
+    benchmark_mode.add_argument(
+        "--allow-cost-unavailable-block-recovery",
+        action="store_true",
+        help=(
+            "resume past complete cost-unavailable blocks and finish only the "
+            "current block after a new cost-unavailable stop"
+        ),
+    )
     benchmark.set_defaults(handler=_benchmark)
     publish = sub.add_parser(
         "publish",

@@ -29,6 +29,22 @@ RECEIPT_HEADER_ALLOWLIST = frozenset({
 RECEIPT_VALUE_MAX_LENGTH = 256
 _SAFE_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9._:/@+\-]{1,256}")
 RECEIPT_VALUE_RE = re.compile(r"[A-Za-z0-9._:/@+=\-]{1,256}")
+_NORMALIZED_REASON_RE = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*")
+_OUTPUT_TOKEN_DETAIL_KEYS = frozenset({
+    "accepted_prediction_tokens",
+    "audio_tokens",
+    "image_tokens",
+    "reasoning_tokens",
+    "rejected_prediction_tokens",
+    "text_tokens",
+    "video_tokens",
+})
+_PRIMER_STREAM_FIELDS = frozenset({
+    "done",
+    "terminal_status",
+    "finish_reason",
+    "finalized",
+})
 
 
 def block_id(
@@ -256,6 +272,7 @@ def _validate_usage(value: Any, label: str) -> None:
         "output_tokens",
         "total_tokens",
         "input_tokens_details",
+        "output_tokens_details",
     }
     if not set(usage) <= allowed or any(
         not _count(usage.get(name))
@@ -280,6 +297,27 @@ def _validate_usage(value: Any, label: str) -> None:
         ):
             raise GatewayProbeRunError(
                 f"results row has malformed {label} details"
+            )
+    output_details = usage.get("output_tokens_details")
+    if output_details is not None:
+        output_details = _exact_mapping(
+            output_details,
+            (
+                set(output_details)
+                if isinstance(output_details, Mapping)
+                else set()
+            ),
+            f"{label} output details",
+        )
+        if (
+            not set(output_details) <= _OUTPUT_TOKEN_DETAIL_KEYS
+            or any(
+                not _count(item, nullable=False)
+                for item in output_details.values()
+            )
+        ):
+            raise GatewayProbeRunError(
+                f"results row has malformed {label} output details"
             )
 
 
@@ -398,6 +436,7 @@ def _validate_stream(value: Any, label: str) -> None:
         "malformed_events",
         "done",
         "terminal_status",
+        "finish_reason",
         "finalized",
     }:
         raise GatewayProbeRunError(f"results row has malformed {label}")
@@ -407,10 +446,22 @@ def _validate_stream(value: Any, label: str) -> None:
     for name in ("done", "finalized"):
         if name in value and not isinstance(value[name], bool):
             raise GatewayProbeRunError(f"results row has malformed {label}")
-    if "terminal_status" in value and not _safe_identifier(
-        value["terminal_status"]
+    if "terminal_status" in value and not _safe_identifier(value["terminal_status"]):
+        raise GatewayProbeRunError(f"results row has unsafe {label}")
+    finish_reason = value.get("finish_reason")
+    if finish_reason is not None and (
+        not isinstance(finish_reason, str)
+        or len(finish_reason) > 64
+        or _NORMALIZED_REASON_RE.fullmatch(finish_reason) is None
     ):
         raise GatewayProbeRunError(f"results row has unsafe {label}")
+
+
+def _validate_primer_stream(value: Any, label: str) -> None:
+    if value is None:
+        return
+    stream = _exact_mapping(value, set(_PRIMER_STREAM_FIELDS), label)
+    _validate_stream(stream, label)
 
 
 def _validate_outcome_evidence(
@@ -702,15 +753,21 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
         timing,
         request_metrics.get("stream"),
     )
-    primer = _exact_mapping(
-        row.get("reuse_evidence"),
-        {
-            "required", "completed", "http_status", "socket_reused",
-            "primer_nonce_sha256", "measured_nonce_sha256", "setup",
-            "receipt_headers", "route_integrity", "usage", "cache", "costs",
-        },
-        "reuse evidence",
-    )
+    primer_fields = {
+        "required", "completed", "http_status", "socket_reused",
+        "primer_nonce_sha256", "measured_nonce_sha256", "setup",
+        "receipt_headers", "route_integrity", "usage", "cache", "costs",
+    }
+    primer_value = row.get("reuse_evidence")
+    if (
+        not isinstance(primer_value, Mapping)
+        or set(primer_value) not in (
+            primer_fields,
+            primer_fields | {"stream"},
+        )
+    ):
+        raise GatewayProbeRunError("results row has malformed reuse evidence")
+    primer = primer_value
     if (
         not isinstance(primer.get("required"), bool)
         or not isinstance(primer.get("completed"), bool)
@@ -744,6 +801,21 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
     _validate_usage(primer.get("usage"), "primer usage")
     _validate_cache(primer.get("cache"), "primer cache", nullable=True)
     _validate_costs(primer.get("costs"), "primer costs")
+    _validate_primer_stream(primer.get("stream"), "primer stream")
+    primer_stream = primer.get("stream")
+    if (
+        "stream" in primer
+        and primer.get("completed") is True
+        and (
+            not isinstance(primer_stream, Mapping)
+            or primer_stream.get("done") is not True
+            or primer_stream.get("finalized") is not True
+            or primer_stream.get("terminal_status") not in {None, "completed"}
+        )
+    ):
+        raise GatewayProbeRunError(
+            "completed primer stream evidence is inconsistent"
+        )
     if condition == "warm" and outcome.get("success") is True:
         primer_route = primer.get("route_integrity")
         if (

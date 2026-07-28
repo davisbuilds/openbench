@@ -7,11 +7,11 @@
     "submitter": "OpenBench"
   },
   {
-    "id": "2026-07-27-kimi-k3-managed-30",
+    "id": "2026-07-28-kimi-k3-managed-30",
     "title": "Kimi K3 managed gateway request probe",
     "model": "Kimi K3",
-    "date": "2026-07-27",
-    "output_token_limit": 128,
+    "date": "2026-07-28",
+    "run_note": "Recovered split-session run. An initial partial block containing an OpenRouter 429 was excluded and all five routes were rerun; a later OpenRouter warm 429 remains in the published 30/30 denominator. Tables exclude the abandoned partial block and its unknown failed-request cost. Routes use rolling Kimi K3 aliases.",
     "submitter": "OpenBench"
   }
 ]

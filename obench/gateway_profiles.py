@@ -19,7 +19,16 @@ _VERCEL_ENDPOINTS = {
     "openai_chat": "https://ai-gateway.vercel.sh/v1/chat/completions",
     "openai_responses": "https://ai-gateway.vercel.sh/v1/responses",
 }
-_CONCENTRATE_RESPONSES_ENDPOINT = "https://api.concentrate.ai/v1/responses"
+_CONCENTRATE_ENDPOINTS = {
+    "openai_chat": "https://api.concentrate.ai/v1/chat/completions",
+    "openai_responses": "https://api.concentrate.ai/v1/responses",
+}
+_CONCENTRATE_PROVIDER_SLUGS = {
+    "moonshotai": "moonshot",
+}
+_PROVIDER_IDENTITY_ALIASES = {
+    "moonshot ai": "moonshotai",
+}
 _CLOUDFLARE_REST_ENDPOINT_RE = re.compile(
     r"https://api\.cloudflare\.com/client/v4/accounts/"
     r"(?P<account_id>[0-9a-fA-F]{32})/ai/v1/"
@@ -42,7 +51,7 @@ _SCHEMA_KEYS = frozenset({
     "parameters",
     "schema",
 })
-_DATED_REVISION_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$")
+_DATED_REVISION_RE = re.compile(r"-(?:\d{4}-\d{2}-\d{2}|\d{8})$")
 
 
 class GatewayProfileError(ValueError):
@@ -88,20 +97,34 @@ def _model_provider(value: str) -> str | None:
     return normalized.rsplit("/", 1)[0]
 
 
+def _provider_identity(value: str) -> str:
+    normalized = value.strip().casefold()
+    return _PROVIDER_IDENTITY_ALIASES.get(normalized, normalized)
+
+
+def _persisted_provider(value: str) -> str:
+    stripped = value.strip()
+    return _PROVIDER_IDENTITY_ALIASES.get(stripped.casefold(), stripped)
+
+
 def _providers_compatible(first: str, second: str) -> bool:
     first_provider = _model_provider(first)
     second_provider = _model_provider(second)
     return (
         first_provider is None
         or second_provider is None
-        or first_provider == second_provider
+        or _provider_identity(first_provider)
+        == _provider_identity(second_provider)
     )
 
 
 def model_provider_matches(value: str, expected_provider: str) -> bool:
     """Allow an unqualified model ID, but reject a contradictory qualifier."""
     provider = _model_provider(value)
-    return provider is None or provider == expected_provider.casefold()
+    return (
+        provider is None
+        or _provider_identity(provider) == _provider_identity(expected_provider)
+    )
 
 
 def concrete_model_revision(value: str) -> str | None:
@@ -112,6 +135,11 @@ def concrete_model_revision(value: str) -> str | None:
 
 def _model_alias(value: str) -> str:
     return _DATED_REVISION_RE.sub("", _model_id(value))
+
+
+def _concentrate_provider_slug(value: str) -> str:
+    provider = _provider_identity(value)
+    return _CONCENTRATE_PROVIDER_SLUGS.get(provider, provider)
 
 
 def validate_arm(
@@ -149,18 +177,19 @@ def validate_arm(
             "cloudflare managed gateway arm requires a valid gateway_id"
         )
     if gateway == "concentrate":
+        expected_endpoint = _CONCENTRATE_ENDPOINTS.get(protocol)
+        if endpoint != expected_endpoint:
+            raise GatewayProfileError(
+                "concentrate endpoint must be "
+                f"{expected_endpoint} for protocol {protocol}"
+            )
         if (
-            endpoint != _CONCENTRATE_RESPONSES_ENDPOINT
-            or protocol != "openai_responses"
+            _model_provider(requested_model)
+            != _concentrate_provider_slug(requested_provider)
         ):
             raise GatewayProfileError(
-                "concentrate supports only "
-                f"{_CONCENTRATE_RESPONSES_ENDPOINT} with protocol openai_responses"
-            )
-        if _model_provider(requested_model) != requested_provider.casefold():
-            raise GatewayProfileError(
                 "concentrate requested_model must be provider-qualified with "
-                "requested_provider"
+                "the Concentrate provider slug for requested_provider"
             )
     if gateway == "cloudflare":
         rest_match = _CLOUDFLARE_REST_ENDPOINT_RE.fullmatch(endpoint)
@@ -257,8 +286,11 @@ def shape_body(
             "router", "plugins", "routes", "fallback", "fallbacks",
         ):
             payload.pop(key, None)
+        seed = payload.get("seed")
+        if isinstance(seed, int) and not isinstance(seed, bool):
+            payload["seed"] = str(seed)
         payload["routing"] = {
-            "providers": [requested_provider],
+            "providers": [_concentrate_provider_slug(requested_provider)],
             "models": [],
         }
         return
@@ -339,7 +371,7 @@ def _clean_openrouter_attempts(value: Any) -> tuple[list[dict[str, Any]], bool]:
         model = _identifier(item.get("model"))
         status = _integer(item.get("status"))
         if provider is not None:
-            attempt["provider"] = provider
+            attempt["provider"] = _persisted_provider(provider)
         if model is not None:
             attempt["model"] = model
         if status is not None:
@@ -416,9 +448,12 @@ class GatewayEvidence:
         return True
 
     def _set_provider(self, value: str) -> None:
-        if self.provider is not None and self.provider.casefold() != value.casefold():
+        if (
+            self.provider is not None
+            and _provider_identity(self.provider) != _provider_identity(value)
+        ):
             self.profile_reasons.append("provider_conflict")
-        self.provider = value
+        self.provider = _persisted_provider(value)
 
     def _set_model(self, value: str) -> None:
         self._record_model(value)
@@ -662,7 +697,7 @@ class GatewayEvidence:
                 successful_attempts += 1
             attempt = {}
             if provider is not None:
-                attempt["provider"] = provider
+                attempt["provider"] = _persisted_provider(provider)
             if model is not None:
                 attempt["model"] = model
                 self._record_model(model)
@@ -700,11 +735,24 @@ class GatewayEvidence:
         if (
             self.provider
             and self.requested_provider
-            and self.provider.casefold() != self.requested_provider.casefold()
+            and not self._provider_matches(
+                self.provider, self.requested_provider
+            )
         ):
             reasons.append("provider_conflict")
-        allowed = {provider.casefold() for provider in self.allowed_providers}
-        if self.provider and allowed and self.provider.casefold() not in allowed:
+        allowed = {
+            _provider_identity(
+                _concentrate_provider_slug(provider)
+                if self.gateway == "concentrate"
+                else provider
+            )
+            for provider in self.allowed_providers
+        }
+        if (
+            self.provider
+            and allowed
+            and _provider_identity(self.provider) not in allowed
+        ):
             reasons.append("provider_not_allowed")
         if self.gateway in {"openrouter", "vercel"}:
             if not self.metadata_requested_model:
@@ -733,10 +781,11 @@ class GatewayEvidence:
                 reasons.append("missing_attempt_provider")
             elif (
                 self.provider
-                and provider.casefold() != self.provider.casefold()
+                and _provider_identity(provider)
+                != _provider_identity(self.provider)
             ):
                 reasons.append("fallback_attempt")
-            elif allowed and provider.casefold() not in allowed:
+            elif allowed and _provider_identity(provider) not in allowed:
                 reasons.append("attempt_provider_not_allowed")
             if model is None:
                 reasons.append("missing_attempt_model")
@@ -749,3 +798,11 @@ class GatewayEvidence:
             elif not 200 <= status < 300:
                 reasons.append("unsuccessful_attempt")
         return list(dict.fromkeys(reasons))
+
+    def _provider_matches(self, observed: str, expected: str) -> bool:
+        expected_slug = (
+            _concentrate_provider_slug(expected)
+            if self.gateway == "concentrate"
+            else expected
+        )
+        return _provider_identity(observed) == _provider_identity(expected_slug)

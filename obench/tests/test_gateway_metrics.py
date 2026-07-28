@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Contract tests for protocol-aware, privacy-safe gateway metrics."""
 
+import copy
 import json
 import unittest
 
@@ -165,6 +166,53 @@ class GatewayMetricsTests(unittest.TestCase):
         self.assertEqual(result["generation"]["output_tokens"], 4)
         self.assertEqual(result["generation"]["duration_s"], 3.0)
         self.assertEqual(result["generation"]["tokens_per_second"], 4 / 3)
+
+    def test_stop_and_length_finish_reasons_preserve_completion_details(self):
+        for finish_reason in ("stop", "length"):
+            with self.subTest(finish_reason=finish_reason):
+                final = copy.deepcopy(self.final)
+                final["choices"][0]["finish_reason"] = finish_reason
+                final["usage"]["completion_tokens_details"] = {
+                    "reasoning_tokens": 3,
+                    "text_tokens": 1,
+                    "accepted_prediction_tokens": None,
+                }
+                result = self.parse([
+                    (10.2, sse(self.token)),
+                    (12.2, sse(final, "[DONE]")),
+                ], completed_at=13.2)
+
+                self.assertEqual(
+                    result["stream"]["finish_reason"],
+                    finish_reason,
+                )
+                self.assertEqual(
+                    result["usage"]["output_tokens_details"],
+                    {"reasoning_tokens": 3, "text_tokens": 1},
+                )
+                self.assertTrue(result["route_evidence"]["pass"])
+
+    def test_conflicting_or_malformed_finish_reason_fails_closed(self):
+        length_final = copy.deepcopy(self.final)
+        length_final["choices"][0]["finish_reason"] = "length"
+        conflict = self.parse([(11.0, sse(
+            {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+            length_final,
+            "[DONE]",
+        ))])
+        self.assertIsNone(conflict["stream"]["finish_reason"])
+        self.assertEqual(conflict["stream"]["terminal_status"], "completed")
+        self.assertTrue(conflict["route_evidence"]["pass"])
+
+        malformed_final = copy.deepcopy(self.final)
+        malformed_final["choices"][0]["finish_reason"] = {
+            "private": self.secret,
+        }
+        malformed = self.parse([(11.0, sse(malformed_final, "[DONE]"))])
+        self.assertIsNone(malformed["stream"]["finish_reason"])
+        self.assertEqual(malformed["stream"]["terminal_status"], "completed")
+        self.assertTrue(malformed["route_evidence"]["pass"])
+        self.assertNotIn(self.secret, json.dumps(malformed))
 
     def test_route_evidence_extracts_provider_attempts_and_passes(self):
         result = self.parse([(11.0, self.payload())])
@@ -410,6 +458,10 @@ class ResponsesGatewayMetricsTests(unittest.TestCase):
                             "cache_write_tokens": 0,
                         },
                         "output_tokens": 3,
+                        "output_tokens_details": {
+                            "reasoning_tokens": 2,
+                            "text_tokens": 1,
+                        },
                         "total_tokens": 16,
                     },
                 },
@@ -434,11 +486,16 @@ class ResponsesGatewayMetricsTests(unittest.TestCase):
                 "cache_write_tokens": 0,
             },
             "output_tokens": 3,
+            "output_tokens_details": {
+                "reasoning_tokens": 2,
+                "text_tokens": 1,
+            },
             "total_tokens": 16,
         })
         self.assertEqual(result["timing"]["semantic_ttft_s"], 0.5)
         self.assertTrue(result["stream"]["done"])
         self.assertEqual(result["stream"]["terminal_status"], "completed")
+        self.assertIsNone(result["stream"]["finish_reason"])
         self.assertTrue(result["route_evidence"]["pass"])
         self.assertNotIn(secret, json.dumps(result))
 
@@ -472,6 +529,10 @@ class ResponsesGatewayMetricsTests(unittest.TestCase):
                     "usage": {
                         "input_tokens": 13,
                         "output_tokens": 16_384,
+                        "output_tokens_details": {
+                            "reasoning_tokens": 16_300,
+                            "text_tokens": 84,
+                        },
                         "total_tokens": 16_397,
                     },
                 },
@@ -488,8 +549,13 @@ class ResponsesGatewayMetricsTests(unittest.TestCase):
 
         self.assertTrue(result["stream"]["done"])
         self.assertEqual(result["stream"]["terminal_status"], "incomplete")
+        self.assertEqual(result["stream"]["finish_reason"], "length")
         self.assertTrue(result["route_evidence"]["pass"])
         self.assertEqual(result["usage"]["output_tokens"], 16_384)
+        self.assertEqual(result["usage"]["output_tokens_details"], {
+            "reasoning_tokens": 16_300,
+            "text_tokens": 84,
+        })
 
     def test_response_failed_is_a_terminal_event(self):
         result = gateway_metrics.parse_responses_sse(
@@ -516,6 +582,28 @@ class ResponsesGatewayMetricsTests(unittest.TestCase):
 
         self.assertTrue(result["stream"]["done"])
         self.assertEqual(result["stream"]["terminal_status"], "failed")
+        self.assertTrue(result["route_evidence"]["pass"])
+
+    def test_conflicting_responses_terminal_status_fails_closed(self):
+        result = gateway_metrics.parse_responses_sse(
+            [(1.0, sse({
+                "type": "response.completed",
+                "response": {
+                    "status": "incomplete",
+                    "model": "gpt-4o-mini-2024-07-18",
+                },
+            }))],
+            requested_model="gpt-4o-mini",
+            started_at=0.0,
+            completed_at=2.0,
+            route_kind="direct",
+            requested_provider="openai",
+            allowed_models=("gpt-4o-mini",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+
+        self.assertEqual(result["stream"]["terminal_status"], "incomplete")
         self.assertTrue(result["route_evidence"]["pass"])
 
     def test_response_cancelled_is_a_terminal_event(self):

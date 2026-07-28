@@ -8,6 +8,9 @@
   "experiment_digest": "e3649dbc6dc423c5209cdc09c73f0d1275bfa6c231a5fa8300e444dc89e6f943",
   "experiment_id": "gpt-4o-mini-five-way-managed-probe-r30-2026-07-27",
   "files": {
+    "experiment.json": {
+      "sha256": "c7ff0b260efe45222bcc7abc052452132a731edd6f62c5c922d8efff77f2934d"
+    },
     "prices.json": {
       "sha256": "12bdd3aee5d3dfc10aed09c3753cad58e2dd865045efdcef2bc91cef19d29636"
     },
@@ -35,14 +38,15 @@
   },
   "sanitization": {
     "case_prompts": "sha256_only",
+    "experiment_private_fields": "omitted",
     "operational_identifiers": "removed",
     "paths_accounts_secrets": "rejected",
     "receipt_values": "removed"
   },
   "schedule_digest": "e6b8e2ac79abf1e3b6c6b4ce6b691747a1f9f6bf76c3c78bdb00051e99c097be",
   "scheduled_blocks_per_condition": 30,
-  "schema_version": 2,
+  "schema_version": 3,
   "verification": {
-    "verified_with_commit": "2cd722da4d657d1a7d7aeeee7e92de1f7e0261ff"
+    "verified_with_commit": "6d1de84d6c96430c47b50a51bd802a986db5c2ba"
   }
 }
