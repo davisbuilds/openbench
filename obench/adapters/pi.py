@@ -840,21 +840,21 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             # Open model: register the provider via a temp extension (env key
             # supplies auth). No subscription auth.json needed.
             spec = OPEN_MODELS[model]
-            # Retry tuning for storm-prone providers, from forensics on the laguna
-        # 429 storm: pi's default first retry lands at 2s, squarely in the
-        # 82%-failure spacing band, and the SDK-layer retry defaults to ZERO
-        # attempts. Base 6s puts retries in the >=5s band that succeeded ~95%
-        # mid-storm. Written into the isolated HOME so the user's real
-        # settings.json is never touched.
-        settings_dir = os.path.join(iso_home, ".pi", "agent")
-        os.makedirs(settings_dir, exist_ok=True)
-        settings_path = os.path.join(settings_dir, "settings.json")
-        if not os.path.exists(settings_path):
-            with open(settings_path, "w", encoding="utf-8") as fh:
-                json.dump({"retry": {"enabled": True, "maxRetries": 5,
-                                     "baseDelayMs": 6000,
-                                     "provider": {"maxRetries": 1}}}, fh)
-        ext_path = os.path.join(iso_home, "open-provider.mjs")
+            # Retry tuning for storm-prone providers, from forensics on the
+            # laguna 429 storm: pi's default first retry lands at 2s, squarely
+            # in the 82%-failure spacing band, and the SDK-layer retry defaults
+            # to ZERO attempts. Base 6s puts retries in the >=5s band that
+            # succeeded ~95% mid-storm. Written into the ISOLATED home so the
+            # user's real settings.json is never touched.
+            settings_dir = os.path.join(iso_home, ".pi", "agent")
+            os.makedirs(settings_dir, exist_ok=True)
+            settings_path = os.path.join(settings_dir, "settings.json")
+            if not os.path.exists(settings_path):
+                with open(settings_path, "w", encoding="utf-8") as fh:
+                    json.dump({"retry": {"enabled": True, "maxRetries": 5,
+                                         "baseDelayMs": 6000,
+                                         "provider": {"maxRetries": 1}}}, fh)
+            ext_path = os.path.join(iso_home, "open-provider.mjs")
             with open(ext_path, "w", encoding="utf-8") as fh:
                 fh.write(_pi_provider_ext(spec, model))
             cmd = [
