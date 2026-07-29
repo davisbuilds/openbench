@@ -14,7 +14,9 @@ command = [
 version_command = ["pool", "--version"]
 pass_env = ["POOLSIDE_API_KEY"]
 base_url_env = "POOLSIDE_STANDALONE_BASE_URL"
-proxy_route = "chat/openrouter/api/v1"
+# Direct Poolside endpoint (dedicated key) — OpenRouter's shared laguna pool
+# storms independently of our traffic; the direct route sidesteps it.
+proxy_route = "chat/poolside/v1"
 
 [models]
 "laguna-s-2.1" = "poolside/laguna-s-2.1"

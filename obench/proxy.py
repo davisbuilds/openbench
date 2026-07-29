@@ -57,6 +57,8 @@ DEFAULT_CHAT_UPSTREAMS = {
     "zai": "https://api.z.ai",
     "moonshot": "https://api.moonshot.ai",
     "openrouter": "https://openrouter.ai",
+    # Direct Poolside inference — dedicated key, skips OpenRouter's shared pool.
+    "poolside": "https://inference.poolside.ai",
 }
 DEFAULT_ANTHROPIC_UPSTREAMS = {
     "default": "https://api.anthropic.com",
