@@ -382,10 +382,17 @@ _PACE_HOSTS = {"openrouter.ai": float(os.environ.get("OPENBENCH_PACE_OPENROUTER_
 
 
 def _pace_upstream(hostname):
-    """Block until at least the per-host minimum gap has passed; record now."""
+    """Block until at least the per-host minimum gap has passed; record now.
+
+    Returns the seconds actually waited so the ledger can carry it: pacing
+    inflates wall-clock (the wait lands inside wall_time_s), and latency is only
+    comparable across paced and unpaced runs if the wait is measured and can be
+    subtracted, not merely footnoted.
+    """
     gap = _PACE_HOSTS.get(hostname or "")
     if not gap:
-        return
+        return 0.0
+    start = time.monotonic()
     while True:
         with _PACE_LOCK:
             last = _PACE_LAST.get(hostname, 0.0)
@@ -393,7 +400,7 @@ def _pace_upstream(hostname):
             wait = last + gap - now
             if wait <= 0:
                 _PACE_LAST[hostname] = now
-                return
+                return now - start
         time.sleep(min(wait, 0.25))
 
 
@@ -480,7 +487,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             if not route.upstream.hostname:
                 raise RuntimeError("upstream URL missing host")
             conn = conn_cls(route.upstream.hostname, port=route.upstream.port, timeout=self.server.timeout_s)  # type: ignore[attr-defined]
-            _pace_upstream(route.upstream.hostname)
+            paced_wait_s = _pace_upstream(route.upstream.hostname)
             conn.request(self.command, route.upstream_path, body=body, headers=headers)
             forwarded_upstream = True
             resp = conn.getresponse()
@@ -577,6 +584,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 "sampling_observed": recorded_sampling,
                 "sampling_source": "http_request" if sampling else (meta.get("source") if recorded_sampling else None),
                 "duration_ms": round((time.time() - started) * 1000),
+                "paced_wait_ms": round(locals().get("paced_wait_s", 0.0) * 1000),
             }
             if route is not None:
                 rec["route"] = route.route

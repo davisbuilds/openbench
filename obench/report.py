@@ -109,7 +109,13 @@ def aggregate(rows):
           "taxonomy":    {failure_class: count},  # all cells, including excluded
           "scores":      [float, ...],  # per-countable-cell score (derived from success
                                         #   when the row predates the field)
-          "wall_times":  [float, ...],  # per-cell wall-clock seconds
+          "wall_times":  [float, ...],  # per-cell wall seconds, MINUS any
+                                        # provider-pacing wait (paced_wait_s):
+                                        # the proxy's anti-throttle gap is
+                                        # infrastructure time, not model time,
+                                        # and leaving it in makes paced runs
+                                        # read slower than unpaced ones. Raw
+                                        # wall stays on the row.
           "token_vals":  [int, ...],    # per-cell effective tokens, non-null only
           "token_bases": {str, ...},    # bases that contributed to token_vals
           "turn_vals":   [int, ...],    # per-cell turns, non-null only
@@ -169,6 +175,9 @@ def aggregate(rows):
 
         wt = row.get("wall_time_s")
         if isinstance(wt, (int, float)) and not isinstance(wt, bool):
+            paced = row.get("paced_wait_s")
+            if isinstance(paced, (int, float)) and not isinstance(paced, bool):
+                wt = max(0.0, wt - paced)
             st["wall_times"].append(wt)
         tok, basis = effective_tokens(row)
         if tok is not None:

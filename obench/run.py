@@ -100,6 +100,7 @@ ROW_FIELDS = (
     "host",
     "replies_ok",
     "replies_throttled",
+    "paced_wait_s",
     "model_context_window",
     "model_max_tokens",
 )
@@ -1487,6 +1488,11 @@ def apply_proxy_ledger(row, ledger_rows):
     calls = [r for r in records if isinstance(r.get("usage"), dict)]
     # Zero is meaningful evidence for admission checks; do not collapse it to None.
     row["tokens_proxy_calls"] = len(calls)
+    # Provider-pacing wait injected by the proxy (sums over every request, not
+    # just usage-bearing ones): the wait lands inside wall_time_s, so latency is
+    # only comparable across paced and unpaced runs when this is subtracted.
+    paced_ms = sum(r.get("paced_wait_ms") or 0 for r in records)
+    row["paced_wait_s"] = round(paced_ms / 1000.0, 3)
     if not calls:
         return row
     totals = _empty_proxy_usage()
@@ -1664,6 +1670,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "model_max_tokens": None,
         "replies_ok": None,
         "replies_throttled": None,
+        "paced_wait_s": None,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
