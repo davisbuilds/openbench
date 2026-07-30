@@ -39,7 +39,7 @@ from contextlib import contextmanager
 from .bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
                         image_pin_mismatches, parse_image_pin_labels,
                         pinned_versions, reported_version, resolve_pin_key)
-from .failure_class import classify_failure, classify_failure_reason
+from .failure_class import STALLED, classify_failure, classify_failure_reason
 from .config import load_config
 from .paths import (PACKAGE_DIR, SOURCE_ROOT, TasksDirError,
                     default_adapters_dir, default_results_path,
@@ -1059,6 +1059,11 @@ def run_checker(task_dir, workdir, timeout_s, checker_env=None, task_image=None)
     checker = os.path.join(task_dir, "checker.sh")
     env = dict(os.environ) if checker_env is None else dict(checker_env)
     env["TASK_DIR"] = os.path.abspath(task_dir)
+    # Checkers mktemp their verifier log dirs under ${TMPDIR:-/tmp}, then bind-
+    # mount them into a container. colima only shares $HOME, so a /tmp mount
+    # resolves VM-local and the verifier's reward file vanishes on the host
+    # (third occurrence of the docker_workdir_parent() wall; see paths.py).
+    env["TMPDIR"] = docker_workdir_parent()
     if task_image:
         env["BENCH_TASK_IMAGE"] = str(task_image)
     env.pop("OPENBENCH_SOLUTION_OVERLAY", None)
@@ -1772,7 +1777,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 row["last_activity_age_s"] = round(
                     proxy_ctx.get("_proxy_server", proxy_ctx).cell_last_activity_age(cell_token) or 0, 1
                 ) if hasattr(proxy_ctx.get("_proxy_server", proxy_ctx), "cell_last_activity_age") else None
-                row["failure_class"] = "stalled"
+                row["failure_class"] = STALLED
             else:
                 row["failure_class"] = classify_failure(row, "", timeout_s)
             return _populate_proxy_row(row, active_proxy_ctx, cell_token, wait_s=2.0)
@@ -1826,7 +1831,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             ps = proxy_ctx.get("_proxy_server", proxy_ctx)
             if hasattr(ps, "cell_last_activity_age"):
                 row["last_activity_age_s"] = round(ps.cell_last_activity_age(cell_token) or 0, 1)
-            row["failure_class"] = "stalled"
+            row["failure_class"] = STALLED
             return _populate_proxy_row(row, active_proxy_ctx, cell_token)
 
         # Persist the full agent transcript LOCAL-ONLY (prefer the untruncated

@@ -29,8 +29,10 @@ the model's ability to solve the task.
 
 import re
 
-FAILURE_CLASSES = ("solved", "wrong_answer", "timeout", "rate_limited", "infra", "stalled")
-EXCLUDED_FROM_SOLVE_RATE = ("rate_limited", "infra", "stalled")
+STALLED = "stalled"
+
+FAILURE_CLASSES = ("solved", "wrong_answer", "timeout", "rate_limited", "infra", STALLED)
+EXCLUDED_FROM_SOLVE_RATE = ("rate_limited", "infra", STALLED)
 NEAR_ZERO_TOKEN_LIMIT = 100
 _TOKEN_FIELDS = (
     "tokens", "tokens_fresh", "tokens_input_uncached", "tokens_cache_read",
@@ -519,6 +521,17 @@ def class_for_report(row):
     row = row or {}
     stored = row.get("failure_class")
     if stored in FAILURE_CLASSES:
+        # A checker that could not run its verifier container never reached a
+        # verdict: the imported tb2 checkers print this marker and exit 1 when
+        # the reward file is missing (image absent -> docker exit 125, or the
+        # verifier's /tmp log mount resolving VM-local under colima), which the
+        # write path recorded as wrong_answer. The marker never appears on a
+        # genuinely judged run -- the verifier writes reward.txt for pass AND
+        # fail -- so it is proof of infra, not capability. 100% of tb2-tier
+        # wide25 rows carried it (missing checker images on the mini).
+        if stored not in EXCLUDED_FROM_SOLVE_RATE and not row.get("success") \
+                and "verifier did not produce" in (row.get("checker_stdout") or ""):
+            return "infra"
         # Correct the other direction too: a stored VERDICT on a cell whose
         # request budget was starved is not a capability result. sampling_observed
         # is persisted, so unlike the 429 case this is recoverable from history.
