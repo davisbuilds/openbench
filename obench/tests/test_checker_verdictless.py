@@ -53,11 +53,14 @@ class CheckerVerdictlessTests(unittest.TestCase):
                    checker_exit=0, checker_stdout="SCORE: 1")
         self.assertEqual(class_for_report(row), "solved")
 
-    def test_negative_control_excluded_row_not_double_corrected(self):
-        # Already-excluded rows (e.g. rate_limited) keep their class even if
-        # a checker marker is present; they are excluded either way.
-        row = _row(failure_class="rate_limited")
-        self.assertIn(class_for_report(row), ("rate_limited", "infra"))
+    def test_excluded_row_with_marker_never_promoted_to_verdict(self):
+        # A stored-excluded row (rate_limited storm) carrying the marker must
+        # NOT be promoted to wrong_answer by the checker-owned-verdict rule:
+        # its checker_exit=1 is the wrapper's verifier-missing branch, not a
+        # judgment. Found live on 8 pi x laguna tb2 cells.
+        row = _row(failure_class="rate_limited", completed=True,
+                   checker_workspace_files=["a.py"])
+        self.assertEqual(class_for_report(row), "infra")
         self.assertTrue(is_excluded_from_solve_rate(row))
 
 

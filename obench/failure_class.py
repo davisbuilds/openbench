@@ -529,7 +529,14 @@ def class_for_report(row):
         # genuinely judged run -- the verifier writes reward.txt for pass AND
         # fail -- so it is proof of infra, not capability. 100% of tb2-tier
         # wide25 rows carried it (missing checker images on the mini).
-        if stored not in EXCLUDED_FROM_SOLVE_RATE and not row.get("success") \
+        # This must take precedence over EVERY other correction, including the
+        # checker-owned-verdict promotion below: a checker_exit of 1 that came
+        # from the wrapper's own "verifier missing" branch is not a verdict, so
+        # a stored-excluded row (e.g. rate_limited during a 429 storm) carrying
+        # the marker must stay excluded rather than be promoted to wrong_answer.
+        # (Found live: 8 pi x laguna tb2 cells stored rate_limited were being
+        # promoted to phantom wrong-answers, skewing that arm's denominator.)
+        if not row.get("success") \
                 and "verifier did not produce" in (row.get("checker_stdout") or ""):
             return "infra"
         # Correct the other direction too: a stored VERDICT on a cell whose
