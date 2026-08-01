@@ -199,12 +199,23 @@ class PublishBundleTests(unittest.TestCase):
         provenance_path = os.path.join(self.out, "provenance.json")
         with open(provenance_path, encoding="utf-8") as fh:
             provenance = json.load(fh)
-        provenance["tasks"] = [1]
-        with open(provenance_path, "w", encoding="utf-8") as fh:
-            json.dump(provenance, fh)
-        checks = publish.verify_bundle(self.out, tasks_dirs=[self.tasks])
-        manifest = next(c for c in checks if c["name"] == "task_manifest")
-        self.assertEqual(manifest["status"], "FAIL")
+        for malformed in ([1], 1):
+            provenance["tasks"] = malformed
+            with open(provenance_path, "w", encoding="utf-8") as fh:
+                json.dump(provenance, fh)
+            checks = publish.verify_bundle(self.out, tasks_dirs=[self.tasks])
+            manifest = next(c for c in checks if c["name"] == "task_manifest")
+            self.assertEqual(manifest["status"], "FAIL")
+
+    def test_gate_lookup_requires_exact_version_stamp(self):
+        digest = hashlib.sha256(b"mycli-spec").hexdigest()
+        self.assertIsNone(publish.find_candidate_gate_record(
+            "mycli",
+            search_dirs=[self.gate_dir],
+            candidate_digest=digest,
+            model="model-x",
+            harness_version=None,
+        ))
 
     def test_pii_refusal(self):
         dirty = os.path.join(self.tmp.name, "dirty.jsonl")

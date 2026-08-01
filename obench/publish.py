@@ -339,10 +339,7 @@ def find_candidate_gate_record(
                         and record.get("pass") is True
                         and record.get("candidate_digest") == candidate_digest
                         and record.get("model") == model
-                        and (
-                            not harness_version
-                            or record.get("version") == harness_version
-                        )
+                        and record.get("version") == harness_version
                     ):
                         return path
     return None
@@ -445,6 +442,7 @@ def gate_missing_warnings(rows, search_dirs=None):
         if (
             not candidate_digest
             or not model
+            or not harness_version
             or find_candidate_gate_record(
                 name,
                 search_dirs=search_dirs,
@@ -910,8 +908,9 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
     })
 
     declared_tasks = provenance.get("tasks")
+    task_entries = declared_tasks if isinstance(declared_tasks, list) else []
     declared_names = {
-        item.get("task") for item in declared_tasks or []
+        item.get("task") for item in task_entries
         if isinstance(item, dict) and isinstance(item.get("task"), str)
     }
     row_tasks = {
@@ -922,7 +921,7 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
         and declared_names == row_tasks
         and all(
             isinstance(item, dict) and item.get("content_digest")
-            for item in declared_tasks
+            for item in task_entries
         )
     )
     checks.append({
@@ -950,7 +949,7 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
         tasks_dirs = [discovered] if discovered else []
     roots = stats.parse_tasks_dirs(tasks_dirs) if tasks_dirs else []
 
-    for task_entry in provenance.get("tasks") or []:
+    for task_entry in task_entries:
         if not isinstance(task_entry, dict):
             continue
         task = task_entry.get("task")
