@@ -117,10 +117,15 @@ class PromotionPrecedenceTests(unittest.TestCase):
                    sampling_observed=[{"max_tokens": 1}])
         self.assertEqual(fc.class_for_report(row), "infra")
 
-    def test_throttle_dominated_stored_rate_limited_is_not_promoted(self):
+    def test_throttle_dominated_with_verdict_is_still_promoted(self):
+        # Standing campaign rule: a checker-owned verdict with affirmative
+        # work counts even when most replies were throttled (recovered-with-
+        # tokens = genuine). 23 pi x laguna wide25 cells depend on this;
+        # flipping it moves a published denominator and is a rerun decision,
+        # not a classification one.
         row = _row(failure_class="rate_limited",
                    replies_ok=2, replies_throttled=9)
-        self.assertEqual(fc.class_for_report(row), "rate_limited")
+        self.assertEqual(fc.class_for_report(row), "wrong_answer")
 
 
 if __name__ == "__main__":

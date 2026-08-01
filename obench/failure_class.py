@@ -561,13 +561,16 @@ def class_for_report(row):
         if stored not in EXCLUDED_FROM_SOLVE_RATE and not row.get("success") \
                 and has_throttle_dominated_replies(row):
             return "rate_limited"
-        # Promotion must mirror the write path's precedence: a starved or
-        # throttle-dominated cell completes and carries a real checker_exit,
-        # so has_checker_owned_verdict alone would flip a correctly-stored
-        # exclusion back into a phantom wrong_answer.
+        # Promotion must not resurrect a cell whose request budget was starved:
+        # such a cell completes with a real checker_exit, so
+        # has_checker_owned_verdict alone would flip the correctly-stored
+        # exclusion back into a phantom wrong_answer. Throttle-domination is
+        # deliberately NOT a gate here: the campaign's standing rule is that a
+        # checker-owned verdict backed by affirmative work counts even when
+        # most replies were throttled (recovered-with-tokens = genuine); the
+        # per-cell contamination call is made by rerunning, not classifying.
         if stored in EXCLUDED_FROM_SOLVE_RATE and has_checker_owned_verdict(row) \
-                and not has_starved_output_budget(row) \
-                and not has_throttle_dominated_replies(row):
+                and not has_starved_output_budget(row):
             return "timeout" if row.get("checker_exit") == "timeout" else "wrong_answer"
         return stored
     return classify_failure(row, row.get("output_tail") or "")
