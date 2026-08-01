@@ -1,0 +1,30 @@
+# Close the 11 cells that 3 refill passes could not fill. The plain runner
+# skipped them: once a cell had a rate_limited row its run_id looked "done".
+# The queue re-queues cells whose only rows are excluded-class.
+results_path = "results/laguna-inkling-20260721T193000Z/laguna-inkling.jsonl"
+ledger_dir = "results/laguna-inkling-20260721T193000Z/ledger"
+timeout = 1200
+exec_mode = "local"
+trials = 3
+proxy = true
+
+[retry]
+infra = 3
+stall = 1
+rate_limited = 6
+rate_limited_backoff_start = 120
+
+[[arm]]
+harness = "pi"
+model = "laguna-s-2.1"
+
+[[arm]]
+harness = "opencode"
+model = "laguna-s-2.1"
+
+[[arm]]
+harness = "pi"
+model = "inkling"
+
+[[task_group]]
+tasks = ["webcore"]

@@ -1,0 +1,26 @@
+# Pool x laguna coverage completion, bracketed by pi control probes.
+# Pool arm runs to full coverage; pi probes before AND after establish whether
+# provider conditions drifted during pool window (429 rates swing 0->53%).
+results_path = "results/pool-vs-pi-n3.jsonl"
+ledger_dir = "results/pool-vs-pi-ledger"
+timeout = 2400
+trials = 3
+proxy = true
+
+[retry]
+infra = 2
+rate_limited = 4
+rate_limited_backoff_start = 300
+
+[[arm]]
+harness = "pi"
+model = "laguna-s-2.1"
+
+[[arm]]
+candidate = "experiments/candidates/pool.toml"
+model = "laguna-s-2.1"
+
+[[task_group]]
+tasks = ["adaptive-rejection-sampler", "query-optimize", "merge-diff-arc-agi-task", "overfull-hbox", "sanitize-git-repo"]
+tasks_dir = ".openbench/packs/openbench/tb-mid/1.0.0"
+exec_mode = "docker"
