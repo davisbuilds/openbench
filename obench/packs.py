@@ -397,8 +397,21 @@ def resolve_install_identity(spec: str, meta: dict) -> dict:
 
 
 def default_packs_root(start: str | None = None) -> str:
-    """``.openbench/packs`` under ``start`` (default: cwd)."""
-    base = os.path.abspath(start or os.getcwd())
+    """Project-scoped ``.openbench/packs`` discovered from any subdirectory."""
+    from .config import load_config
+    cfg = load_config(start)
+    base = cfg.project_root
+    if base is None:
+        base = os.path.abspath(start or os.getcwd())
+        probe = base
+        while True:
+            if os.path.isdir(os.path.join(probe, "tasks")):
+                base = probe
+                break
+            parent = os.path.dirname(probe)
+            if parent == probe:
+                break
+            probe = parent
     return os.path.join(base, DEFAULT_PACKS_DIRNAME)
 
 
@@ -1553,7 +1566,7 @@ def main(argv=None):
                 for row in results:
                     status = "ok" if row["ok"] else "MISMATCH"
                     if row["missing_expected"]:
-                        status = "ok (no recorded digest)"
+                        status = "MISSING EXPECTED DIGEST"
                     if not row["ok"]:
                         failed += 1
                     label = row.get("task") or row.get("manifest") or "?"

@@ -183,7 +183,7 @@ pip install "git+https://github.com/minghinmatthewlam/openbench.git"
 ```
 
 Then use the umbrella CLI: `obench init`, `obench run`, `obench report`,
-`obench doctor`, `obench validate`, `obench gate`, `obench compare`,
+`obench doctor`, `obench validate`, `obench admit`, `obench gate`, `obench compare`,
 `obench publish`, `obench verify`, `obench pack`, `obench export`,
 `obench import`, and `obench gateway validate|doctor|run|report|publish|verify`. Legacy
 `python3 bench/run.py` (and friends) still forward with a deprecation note.
@@ -440,6 +440,11 @@ at 0/n and n/n, which the naive formula does not.
   auth bind-mounted read-only at runtime (never baked into the image). Docker is
   fail-closed by default; pass `--docker-fallback` to opt into whole-run local
   homogenization when the daemon/image is unavailable (mixed lanes still abort).
+- **Trust boundary.** Task setup and `checker.sh` run on the host in both modes,
+  and `--exec local` also runs the harness on the host. Treat task packs,
+  candidate adapters, and checkers as executable code: inspect them before use
+  and do not run untrusted packs on a machine containing unrelated secrets.
+  Docker isolates the harness cell; it is not a sandbox for the task oracle.
 - **Docker image is partial.** `codex`, `pi`, and open-model `claude` are installed
   and version-checked in the default image; `opencode`, `cursor`, and `devin` are
   behind `--build-arg INSTALL_UNVERIFIED=true` and their Linux installs are not

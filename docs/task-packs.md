@@ -162,7 +162,8 @@ Each listed manifest is loaded through `obench.candidates.load_candidate`
 `pack_source.json` records `manifest_digests` / `spec_sha256` (file SHA-256 per
 manifest, identical to candidate provenance `spec_sha256`).
 
-`obench pack verify` recomputes digests and fails on mismatch.
+`obench pack verify` recomputes digests and fails on mismatch **or when the
+installed pack has no recorded expected digest**.
 
 ## Static pack index (`docs/packs.json`)
 

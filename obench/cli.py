@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Umbrella CLI for the OpenBench harness benchmarking framework.
 
-    obench run | report | doctor | validate | gateway | router | gate | compare | init |
+    obench run | report | doctor | validate | admit | gateway | router | gate | compare | init |
          publish | verify | community | leaderboard | site | pack | export | import
          [args...]
 """
@@ -28,6 +28,7 @@ def main(argv=None):
     sub.add_parser("report", help="aggregate results.jsonl", add_help=False)
     sub.add_parser("doctor", help="preflight CLI/auth/model checks", add_help=False)
     sub.add_parser("validate", help="check task checker polarity", add_help=False)
+    sub.add_parser("admit", help="run the full task admission gate", add_help=False)
     sub.add_parser(
         "gateway",
         help="compare fixed model/provider routes through AI gateways",
@@ -83,7 +84,7 @@ def main(argv=None):
         return 0
 
     known = {
-        "run", "report", "doctor", "validate", "gateway", "router", "gate", "compare", "init",
+        "run", "report", "doctor", "validate", "admit", "gateway", "router", "gate", "compare", "init",
         "matrix", "results", "publish", "verify", "community", "leaderboard",
         "site", "pack", "export",
         "import",
@@ -91,7 +92,7 @@ def main(argv=None):
     if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, report, doctor, "
-            "validate, gateway, router, gate, compare, init, publish, verify, community, "
+            "validate, admit, gateway, router, gate, compare, init, publish, verify, community, "
             "leaderboard, results, site, pack, export, import"
         )
 
@@ -113,6 +114,9 @@ def main(argv=None):
     if command == "validate":
         from .validate_tasks import main as validate_main
         return validate_main(rest)
+    if command == "admit":
+        from .admission_gate import main as admission_main
+        return admission_main(rest)
     if command == "gateway":
         from .gateway_cli import main as gateway_main
         return gateway_main(rest)
