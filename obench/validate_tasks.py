@@ -121,6 +121,11 @@ def run_checker(task_dir, overlay_solution_flag):
 
         env = dict(os.environ)
         env["TASK_DIR"] = task_dir
+        # Imported Docker-backed checkers create a second host directory for
+        # `/logs/verifier`. Keep that mount under the same Colima-visible root
+        # as the workspace; inheriting macOS's /var/folders TMPDIR makes tests
+        # pass in-container while reward.txt disappears from the host.
+        env["TMPDIR"] = docker_workdir_parent()
         # Same contract as obench.run.run_checker: the task's pinned image is
         # resolved from task.toml and handed to the checker, so the checker
         # never depends on its own hardcoded copy. Found the hard way: the
