@@ -293,8 +293,10 @@ def rows_reference_transcripts(rows):
     return problems
 
 
-def find_candidate_gate_record(candidate_name, search_dirs=None):
-    """Return a valid live PASS gate archive for ``candidate_name``, if any."""
+def find_candidate_gate_record(
+        candidate_name, search_dirs=None, *, candidate_digest, model,
+        harness_version=None):
+    """Return a live PASS gate bound to the exact candidate arm."""
     roots = list(search_dirs or [])
     if not roots:
         cwd = os.getcwd()
@@ -335,6 +337,12 @@ def find_candidate_gate_record(candidate_name, search_dirs=None):
                         and record.get("mode") == "live"
                         and record.get("status") == "PASS"
                         and record.get("pass") is True
+                        and record.get("candidate_digest") == candidate_digest
+                        and record.get("model") == model
+                        and (
+                            not harness_version
+                            or record.get("version") == harness_version
+                        )
                     ):
                         return path
     return None
@@ -423,12 +431,32 @@ def gate_missing_warnings(rows, search_dirs=None):
         if not _is_candidate_row(row):
             continue
         name = _candidate_name(row)
-        if not name or name in seen:
+        provenance = row.get("candidate_provenance") or {}
+        candidate_digest = (
+            provenance.get("candidate_digest")
+            or provenance.get("identity_digest")
+        )
+        model = row.get("model")
+        harness_version = row.get("harness_version")
+        identity = (name, candidate_digest, model, harness_version)
+        if not name or identity in seen:
             continue
-        seen.add(name)
-        if find_candidate_gate_record(name, search_dirs=search_dirs) is None:
+        seen.add(identity)
+        if (
+            not candidate_digest
+            or not model
+            or find_candidate_gate_record(
+                name,
+                search_dirs=search_dirs,
+                candidate_digest=candidate_digest,
+                model=model,
+                harness_version=harness_version,
+            ) is None
+        ):
             warnings.append(
-                f"candidate {name!r} has no candidate-gate PASS record under "
+                f"candidate {name!r} digest={candidate_digest!r} "
+                f"model={model!r} version={harness_version!r} has no matching "
+                "live candidate-gate PASS record under "
                 "data/, .openbench/gate/, or results/gate/ — run "
                 f"`obench gate <spec> --model ...` (and archive the JSON) "
                 "before treating this claim as admission-ready"
@@ -923,6 +951,8 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
     roots = stats.parse_tasks_dirs(tasks_dirs) if tasks_dirs else []
 
     for task_entry in provenance.get("tasks") or []:
+        if not isinstance(task_entry, dict):
+            continue
         task = task_entry.get("task")
         expected_digest = task_entry.get("content_digest")
         name = f"task_digest:{task}"

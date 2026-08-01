@@ -1125,6 +1125,15 @@ def verify_pack(pack_dir: str) -> list[dict]:
                 "ok": exp is not None and exp == actual,
                 "missing_expected": exp is None,
             })
+        for filename in sorted(set(expected) - set(manifests)):
+            results.append({
+                "manifest": filename,
+                "digest": "",
+                "expected": expected[filename],
+                "ok": False,
+                "missing_expected": False,
+                "missing_member": True,
+            })
         return results
 
     tasks = discover_pack_tasks(pack_dir, meta)
@@ -1140,6 +1149,15 @@ def verify_pack(pack_dir: str) -> list[dict]:
             "expected": exp,
             "ok": exp is not None and exp == actual,
             "missing_expected": exp is None,
+        })
+    for task in sorted(set(expected) - set(tasks)):
+        results.append({
+            "task": task,
+            "digest": "",
+            "expected": expected[task],
+            "ok": False,
+            "missing_expected": False,
+            "missing_member": True,
         })
     return results
 

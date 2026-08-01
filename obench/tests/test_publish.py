@@ -96,6 +96,9 @@ class PublishBundleTests(unittest.TestCase):
             json.dump({
                 "candidate": "mycli", "mode": "live",
                 "status": "PASS", "pass": True,
+                "candidate_digest": hashlib.sha256(
+                    b"mycli-spec").hexdigest(),
+                "model": "model-x", "version": "1.0",
             }, fh)
 
         rows = []
@@ -184,6 +187,25 @@ class PublishBundleTests(unittest.TestCase):
         self.assertEqual(sha_check["status"], "FAIL")
         self.assertEqual(publish.print_verify_report(checks), 1)
 
+    def test_verify_malformed_task_manifest_fails_without_crashing(self):
+        publish.create_bundle(
+            self.results,
+            self.out,
+            candidate_specs=["mycli"],
+            tasks_dirs=[self.tasks],
+            gate_search_dirs=[self.gate_dir],
+            scrub_ctx=self.scrub_ctx,
+        )
+        provenance_path = os.path.join(self.out, "provenance.json")
+        with open(provenance_path, encoding="utf-8") as fh:
+            provenance = json.load(fh)
+        provenance["tasks"] = [1]
+        with open(provenance_path, "w", encoding="utf-8") as fh:
+            json.dump(provenance, fh)
+        checks = publish.verify_bundle(self.out, tasks_dirs=[self.tasks])
+        manifest = next(c for c in checks if c["name"] == "task_manifest")
+        self.assertEqual(manifest["status"], "FAIL")
+
     def test_pii_refusal(self):
         dirty = os.path.join(self.tmp.name, "dirty.jsonl")
         rows = [
@@ -267,7 +289,7 @@ class PublishBundleTests(unittest.TestCase):
         )
         joined = " ".join(provenance["warnings"])
         self.assertIn("different task sets", joined)
-        self.assertIn("no candidate-gate PASS record", joined)
+        self.assertIn("no matching live candidate-gate PASS record", joined)
         self.assertIn("orphan", joined)
         warn_html = os.path.join(self.tmp.name, "warn-bundle", "index.html")
         with open(warn_html, encoding="utf-8") as fh:
@@ -281,6 +303,9 @@ class PublishBundleTests(unittest.TestCase):
             json.dump({
                 "candidate": "mycli", "mode": "live",
                 "status": "PASS", "pass": True,
+                "candidate_digest": hashlib.sha256(
+                    b"mycli-spec").hexdigest(),
+                "model": "model-x", "version": "1.0",
             }, fh)
 
         proc = subprocess.run(

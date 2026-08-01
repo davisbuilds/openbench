@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import io
+import shutil
 import tarfile
 import subprocess
 import sys
@@ -247,6 +248,21 @@ class InitInstallListTests(unittest.TestCase):
             self.assertTrue(results)
             self.assertTrue(all(r["missing_expected"] for r in results))
             self.assertTrue(all(not r["ok"] for r in results))
+
+    def test_verify_detects_deleted_recorded_task(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "src")
+            _make_pack(src)
+            info = packs.install_pack(
+                "acme/smoke@1.0.0", src,
+                packs_root=os.path.join(td, "packs"),
+            )
+            shutil.rmtree(os.path.join(info["dest"], "alpha"))
+            results = packs.verify_pack(info["dest"])
+            missing = [r for r in results if r.get("task") == "alpha"]
+            self.assertEqual(len(missing), 1)
+            self.assertFalse(missing[0]["ok"])
+            self.assertTrue(missing[0]["missing_member"])
 
     def test_install_from_zip_url_via_local_https_source_classification(self):
         # Materialize https path using a file://-like flow is awkward; exercise

@@ -1804,8 +1804,6 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         # Liveness is model-call ARRIVAL, so a legitimately long streaming turn
         # does NOT trigger the kill.
         stalled = False
-        descendant_tracker_stop = None
-        descendant_tracker_thread = None
         watchdog_stop = None
         watchdog_thread = None
         if stall_timeout and active_proxy_ctx and cell_token and proxy_ctx:
@@ -1817,30 +1815,26 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 _STALLED_EVENT = stall_event
 
                 def _docker_kill():
-                    cname = cell_ctx.get('container_name')
+                    # Docker setup can outlast a very short stall timeout. Wait
+                    # until run_in_container publishes its pre-launch name so
+                    # the one-shot watchdog cannot fire too early and disarm.
+                    cname = cell_ctx.get("container_name")
+                    while cname is None and not watchdog_stop.wait(0.05):
+                        cname = cell_ctx.get("container_name")
                     if cname:
                         from .docker_exec import force_remove_container
                         force_remove_container(cname)
 
                 def _local_kill():
-                    seen = cell_ctx.get("descendant_pids", set())
-                    seen.update(_descendant_pids(os.getpid()))
-                    _kill_pids(seen)
+                    # Intersect two live ancestry snapshots. Each scan's short-
+                    # lived `ps` child disappears from the other snapshot, and
+                    # exited descendants are never retained long enough for PID
+                    # reuse to target unrelated host work.
+                    first = _descendant_pids(os.getpid())
+                    second = _descendant_pids(os.getpid())
+                    _kill_pids(first & second)
 
                 kill_fn = _docker_kill if exec_mode == 'docker' else _local_kill
-                if exec_mode == "local":
-                    descendant_tracker_stop = threading.Event()
-                    cell_ctx["descendant_pids"] = set()
-                    descendant_tracker_thread = threading.Thread(
-                        target=_track_descendants,
-                        args=(
-                            os.getpid(),
-                            cell_ctx["descendant_pids"],
-                            descendant_tracker_stop,
-                        ),
-                        daemon=True,
-                    )
-                    descendant_tracker_thread.start()
                 watchdog_stop = threading.Event()
                 watchdog_thread = threading.Thread(
                     target=_stall_watchdog_loop,
@@ -1895,10 +1889,6 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 watchdog_stop.set()
             if watchdog_thread is not None:
                 watchdog_thread.join(timeout=1.0)
-            if descendant_tracker_stop is not None:
-                descendant_tracker_stop.set()
-            if descendant_tracker_thread is not None:
-                descendant_tracker_thread.join(timeout=1.0)
         row["wall_time_s"] = _adapter_wall_time_s(start, result, exec_used)
         row["t_agent_s"] = _agent_wall_time_s(start, result, exec_used)
         _add_host_env_setup_s(row, result, exec_used)
