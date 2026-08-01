@@ -51,7 +51,8 @@ def _default_task_dirs():
 
 
 DEFAULT_TASK_DIRS = _default_task_dirs()
-EXCLUDED_FAILURE_CLASSES = {"infra", "rate_limited"}
+# Defined below from failure_class -- the single source of truth. A locally
+# hardcoded copy here silently missed "stalled" when it was added.
 GROUP_CHOICES = ("harness,model", "model", "harness")
 PROVENANCE_CORE_FIELDS = ("image_digest", "harness_version", "harness_version_source", "timeout_s")
 PROVENANCE_CHECKER_FIELDS = (
@@ -66,6 +67,9 @@ PROVENANCE_CHECKER_FIELDS = (
 Z_95 = 1.96
 
 from .failure_class import class_for_report
+from .failure_class import EXCLUDED_FROM_SOLVE_RATE as _EXCLUDED_FROM_SOLVE_RATE
+
+EXCLUDED_FAILURE_CLASSES = set(_EXCLUDED_FROM_SOLVE_RATE)
 
 
 def is_number(value):
