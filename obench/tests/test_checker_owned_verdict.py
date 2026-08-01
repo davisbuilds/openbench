@@ -103,5 +103,25 @@ class QueueSatisfactionTests(unittest.TestCase):
         self.assertFalse(cell_is_satisfied(row))
 
 
+class PromotionPrecedenceTests(unittest.TestCase):
+    """Promotion must mirror the write path: starved/throttled outrank it.
+
+    A starved or throttle-dominated cell completes with a real checker_exit,
+    so has_checker_owned_verdict alone is satisfied -- the read path used to
+    flip these correctly-stored exclusions back into wrong_answer (found by
+    infra audit: 2 deepseek trial-3 cells re-entered the denominator).
+    """
+
+    def test_starved_stored_infra_is_not_promoted(self):
+        row = _row(failure_class="infra",
+                   sampling_observed=[{"max_tokens": 1}])
+        self.assertEqual(fc.class_for_report(row), "infra")
+
+    def test_throttle_dominated_stored_rate_limited_is_not_promoted(self):
+        row = _row(failure_class="rate_limited",
+                   replies_ok=2, replies_throttled=9)
+        self.assertEqual(fc.class_for_report(row), "rate_limited")
+
+
 if __name__ == "__main__":
     unittest.main()

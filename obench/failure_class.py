@@ -383,8 +383,13 @@ def _has_model_work_evidence(row, text):
 
 def _has_no_work_evidence(row, text):
     # Cap-rider handling predates the completed-run heuristic and intentionally
-    # treats any nonzero aggregate token report as evidence of work.
-    return not row.get("tokens") and not row.get("turns") and len(_meaningful_work_text(text)) < 200
+    # treats any nonzero aggregate token report as evidence of work. Proxy-
+    # metered tokens count too: a BYO cell killed at the cap reports
+    # tokens=None while the proxy saw hundreds of real calls -- that is a
+    # genuine capability timeout, not a silent hang.
+    any_tokens = any(row.get(field) for field in _TOKEN_FIELDS)
+    return (not any_tokens and not row.get("turns")
+            and len(_meaningful_work_text(text)) < 200)
 
 
 def is_silent_no_model_call(row, adapter_output=""):
@@ -498,6 +503,14 @@ def classify_failure(row, adapter_output="", timeout_s=None):
         return "infra"
     if row.get("checker_exit") == "timeout" or _TIMEOUT_RE.search(structured_status) or rode_cap:
         return "timeout"
+    # wrong_answer must be checker-owned (exit 1). A row with NO checker exit
+    # whose error is a Python traceback means the runner's own checker path
+    # raised (evidence capture, scrub, or run_checker itself) -- that measures
+    # our infrastructure, not the model. Narrow to tracebacks: plain error
+    # strings (budget exhaustion, adapter messages) are legitimate unsolved
+    # outcomes and must keep counting against the model.
+    if row.get("checker_exit") is None and "Traceback" in str(row.get("error") or ""):
+        return "infra"
     return "wrong_answer"
 
 
@@ -548,7 +561,13 @@ def class_for_report(row):
         if stored not in EXCLUDED_FROM_SOLVE_RATE and not row.get("success") \
                 and has_throttle_dominated_replies(row):
             return "rate_limited"
-        if stored in EXCLUDED_FROM_SOLVE_RATE and has_checker_owned_verdict(row):
+        # Promotion must mirror the write path's precedence: a starved or
+        # throttle-dominated cell completes and carries a real checker_exit,
+        # so has_checker_owned_verdict alone would flip a correctly-stored
+        # exclusion back into a phantom wrong_answer.
+        if stored in EXCLUDED_FROM_SOLVE_RATE and has_checker_owned_verdict(row) \
+                and not has_starved_output_budget(row) \
+                and not has_throttle_dominated_replies(row):
             return "timeout" if row.get("checker_exit") == "timeout" else "wrong_answer"
         return stored
     return classify_failure(row, row.get("output_tail") or "")

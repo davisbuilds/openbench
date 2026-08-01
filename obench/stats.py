@@ -588,6 +588,12 @@ def _add_row(acc, row, pricing):
         acc["solved"] += 1
         wall = row.get("wall_time_s")
         if is_nonnegative_number(wall):
+            # Proxy-injected pacing waits are measurement plumbing, not model
+            # latency; report.py already subtracts them and every reader must
+            # agree (paced arms would otherwise look slower than unpaced ones).
+            paced = row.get("paced_wait_s")
+            if is_nonnegative_number(paced):
+                wall = max(0.0, wall - paced)
             acc["solved_wall_time_s"].append(wall)
         agent_time = row.get("t_agent_s")
         if is_nonnegative_number(agent_time):

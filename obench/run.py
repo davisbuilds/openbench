@@ -1564,6 +1564,12 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              candidate=None, version_drift=False, workspace_observer=None,
              stall_timeout=None):
     global _STALLED_EVENT, _ACTIVE_CELL_CONTEXT
+    # A prior cell's event (or a leftover daemon watchdog setting it) must
+    # never leak into this cell: the post-adapter is_set() check runs
+    # unconditionally, so a stale set event would mark a healthy cell stalled
+    # and skip its checker.
+    _STALLED_EVENT = None
+    _ACTIVE_CELL_CONTEXT = None
     """Execute one (task, harness, trial) cell and return its results row.
 
     Materializes the task workspace into a temp dir (snapshot ``workspace/``

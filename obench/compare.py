@@ -110,8 +110,19 @@ def _unique_cells(rows):
 def _measurement(row, field):
     value = row.get(field)
     if stats.is_nonnegative_number(value):
+        if field == "wall_time_s":
+            # Agree with report.py/stats.py: proxy pacing waits are not latency.
+            paced = row.get("paced_wait_s")
+            if stats.is_nonnegative_number(paced):
+                value = max(0.0, value - paced)
         return value
     if field.startswith("tokens_"):
+        # Honor the certification stats.py enforces: a truncated proxy capture
+        # is not a full meter, so its per-request totals must not be summed as
+        # if they were (68% of pool-vs-pi rows were truncated -- folding them
+        # in silently diverges the compare/HTML totals from stats).
+        if row.get("token_basis_proxy") != "proxy_measured":
+            return None
         proxy_value = row.get("tokens_proxy_" + field.removeprefix("tokens_"))
         if stats.is_nonnegative_number(proxy_value):
             return proxy_value
