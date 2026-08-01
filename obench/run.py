@@ -731,7 +731,7 @@ def hydrate_image_workdir(image, container_workdir, workdir):
 def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                    adapters_dir, docker_image, docker_fallback,
                    proxy_ctx=None, cell_token=None, candidate=None,
-                   container_workdir="/work"):
+                   container_workdir="/work", execution_context=None):
     """Run the harness for one cell, honoring the execution mode.
 
     Returns ``(result_dict, exec_used)`` where ``exec_used`` is ``"local"`` or
@@ -766,6 +766,10 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 candidate_persist_auth=bool(
                     candidate is not None and getattr(candidate, "persist_auth", False)),
                 container_workdir=container_workdir,
+                container_observer=(
+                    (lambda name: execution_context.__setitem__("container_name", name))
+                    if execution_context is not None else None
+                ),
             )
             return result, "docker"
         except docker_exec.DockerUnavailable as exc:
@@ -1525,7 +1529,39 @@ def _populate_proxy_row(row, proxy_ctx, cell_token, wait_s=0.0):
         row, read_proxy_ledger(proxy_ctx.get("ledger_dir"), cell_token, wait_s=wait_s))
 
 
-def _stall_watchdog_loop(proxy_server, cell_token, stall_timeout, kill_callback, poll_interval=10.0):
+def _finalize_proxy_cell(row, proxy_ctx, cell_token):
+    """Seal a managed cell and populate only complete proxy accounting."""
+    if not proxy_ctx or not cell_token:
+        return row
+    server = proxy_ctx.get("_proxy_server")
+    if server is None or not server.cell_is_registered(cell_token):
+        row["proxy_capture_truncated"] = True
+        row["token_basis_proxy"] = None
+        return row
+    try:
+        server.seal_cell(cell_token, timeout_s=5.0)
+        ledger_rows = read_proxy_ledger(
+            proxy_ctx.get("ledger_dir"), cell_token, wait_s=0.0)
+        if not ledger_rows or ledger_rows[-1].get("record_type") != "ledger_seal":
+            raise ResultsLogError("managed proxy ledger is missing its durable seal")
+        seal = ledger_rows[-1]
+        requests = [
+            record for record in ledger_rows
+            if record.get("record_type") == "request"
+        ]
+        if seal.get("record_count") != len(requests):
+            raise ResultsLogError("managed proxy ledger record count does not match seal")
+        row = apply_proxy_ledger(row, requests)
+    except Exception as exc:  # noqa: BLE001 - preserve the checker verdict
+        row["proxy_capture_truncated"] = True
+        row["token_basis_proxy"] = None
+        if row.get("error") is None:
+            row["error"] = f"proxy ledger finalization failed: {exc}"
+    return row
+
+
+def _stall_watchdog_loop(proxy_server, cell_token, stall_timeout, kill_callback,
+                         poll_interval=10.0, stop_event=None):
     """Daemon watchdog: monitor proxy liveness and kill on stall.
 
     Polls the proxy's cell_last_activity_age(cell_token) every
@@ -1538,10 +1574,18 @@ def _stall_watchdog_loop(proxy_server, cell_token, stall_timeout, kill_callback,
     ledger, so a legitimately long model turn (minutes of streaming) does
     NOT trigger the watchdog.
     """
+    # Capture the cell-owned event once. Reading the mutable global on every
+    # iteration lets a retiring watchdog accidentally arm itself with the next
+    # cell's event.
+    event = _STALLED_EVENT
+    if event is None:
+        return
     while True:
-        time.sleep(poll_interval)
-        event = _STALLED_EVENT
-        if event is None or event.is_set():
+        if stop_event is not None and stop_event.wait(poll_interval):
+            return
+        if stop_event is None:
+            time.sleep(poll_interval)
+        if event.is_set():
             return
         try:
             age = proxy_server.cell_last_activity_age(cell_token)
@@ -1608,6 +1652,10 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     if active_proxy_ctx:
         from . import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
         cell_token = counting_proxy.new_cell_token()
+        proxy_server = active_proxy_ctx.get("_proxy_server")
+        if proxy_server is None:
+            raise RuntimeError("proxy context is missing its server")
+        proxy_server.register_cell(cell_token)
         _write_proxy_cell_metadata(active_proxy_ctx, cell_token, proxy_harness, model)
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
     # correctly regardless of the caller's cwd or a relative --tasks-dir.
@@ -1732,6 +1780,10 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         # Liveness is model-call ARRIVAL, so a legitimately long streaming turn
         # does NOT trigger the kill.
         stalled = False
+        descendant_tracker_stop = None
+        descendant_tracker_thread = None
+        watchdog_stop = None
+        watchdog_thread = None
         if stall_timeout and active_proxy_ctx and cell_token and proxy_ctx:
             proxy_server = proxy_ctx.get('_proxy_server')
             if proxy_server is not None:
@@ -1746,10 +1798,36 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                         from .docker_exec import force_remove_container
                         force_remove_container(cname)
 
-                kill_fn = _docker_kill if exec_mode == 'docker' else (lambda: None)
+                def _local_kill():
+                    seen = cell_ctx.get("descendant_pids", set())
+                    seen.update(_descendant_pids(os.getpid()))
+                    _kill_pids(seen)
+
+                kill_fn = _docker_kill if exec_mode == 'docker' else _local_kill
+                if exec_mode == "local":
+                    descendant_tracker_stop = threading.Event()
+                    cell_ctx["descendant_pids"] = set()
+                    descendant_tracker_thread = threading.Thread(
+                        target=_track_descendants,
+                        args=(
+                            os.getpid(),
+                            cell_ctx["descendant_pids"],
+                            descendant_tracker_stop,
+                        ),
+                        daemon=True,
+                    )
+                    descendant_tracker_thread.start()
+                watchdog_stop = threading.Event()
                 watchdog_thread = threading.Thread(
                     target=_stall_watchdog_loop,
-                    args=(proxy_server, cell_token, stall_timeout, kill_fn, 10.0),
+                    args=(
+                        proxy_server,
+                        cell_token,
+                        stall_timeout,
+                        kill_fn,
+                        min(10.0, max(stall_timeout / 4.0, 0.05)),
+                        watchdog_stop,
+                    ),
                     daemon=True,
                 )
                 watchdog_thread.start()
@@ -1759,6 +1837,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 adapters_dir, docker_image, docker_fallback,
                 proxy_ctx=active_proxy_ctx, cell_token=cell_token,
                 candidate=candidate, container_workdir=task_workdir,
+                execution_context=_ACTIVE_CELL_CONTEXT,
             )
             if _STALLED_EVENT is not None and _STALLED_EVENT.is_set():
                 stalled = True
@@ -1787,6 +1866,15 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
             else:
                 row["failure_class"] = classify_failure(row, "", timeout_s)
             return _populate_proxy_row(row, active_proxy_ctx, cell_token, wait_s=2.0)
+        finally:
+            if watchdog_stop is not None:
+                watchdog_stop.set()
+            if watchdog_thread is not None:
+                watchdog_thread.join(timeout=1.0)
+            if descendant_tracker_stop is not None:
+                descendant_tracker_stop.set()
+            if descendant_tracker_thread is not None:
+                descendant_tracker_thread.join(timeout=1.0)
         row["wall_time_s"] = _adapter_wall_time_s(start, result, exec_used)
         row["t_agent_s"] = _agent_wall_time_s(start, result, exec_used)
         _add_host_env_setup_s(row, result, exec_used)
@@ -1886,6 +1974,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["failure_reason"] = classify_failure_reason(row, classifier_output)
         return _populate_proxy_row(row, active_proxy_ctx, cell_token)
     finally:
+        _finalize_proxy_cell(row, active_proxy_ctx, cell_token)
         if workspace_observer is not None:
             try:
                 workspace_observer(workdir)

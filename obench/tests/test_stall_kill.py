@@ -9,6 +9,9 @@ Covers:
   - Stall-kill is disabled when proxy is off (no liveness signal)
 """
 
+import json
+import os
+import pathlib
 import threading
 import time
 import unittest
@@ -43,9 +46,10 @@ class ProxyLivenessTrackingTests(unittest.TestCase):
         self.server_thread.join(timeout=5)
 
     def test_fresh_cell_has_no_activity(self):
-        """A newly registered cell with no requests reports no activity."""
+        """Registration starts the no-first-call stall clock."""
         age = self.server.cell_last_activity_age("test-cell-1")
-        self.assertIsNone(age)
+        self.assertIsNotNone(age)
+        self.assertLess(age, 0.5)
 
     def test_after_request_age_is_small(self):
         """After a completed request, last_activity_age is near zero."""
@@ -217,6 +221,83 @@ class LastActivityAgeInRowFields(unittest.TestCase):
 
     def test_field_in_row_fields(self):
         self.assertIn("last_activity_age_s", bench_run.ROW_FIELDS)
+
+
+class StallWatchdogEndToEndTests(unittest.TestCase):
+    """Exercise a real runner cell, child process, proxy, and durable ledger."""
+
+    def test_no_first_model_call_kills_local_adapter_and_seals_stalled_row(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="stall_e2e_") as root:
+            root = pathlib.Path(root)
+            task = root / "tasks" / "fake"
+            (task / "workspace").mkdir(parents=True)
+            (task / "instruction.md").write_text("wait forever\n", encoding="utf-8")
+            checker = task / "checker.sh"
+            checker.write_text(
+                "#!/usr/bin/env bash\n"
+                "echo checker-must-not-run >&2\n"
+                "exit 99\n",
+                encoding="utf-8",
+            )
+            checker.chmod(0o755)
+
+            adapters = root / "adapters"
+            adapters.mkdir()
+            (adapters / "pi.py").write_text(
+                "import subprocess\n"
+                "def run(*_args):\n"
+                "    proc = subprocess.run(['sleep', '30'])\n"
+                "    return {'completed': proc.returncode == 0, "
+                "'error': f'exit {proc.returncode}', 'tokens': None, "
+                "'turns': None, 'cmd': ['sleep', '30'], 'output_tail': ''}\n",
+                encoding="utf-8",
+            )
+
+            ledger_dir = root / "ledgers"
+            server, thread = counting_proxy.start_in_thread(
+                "127.0.0.1", 0, ledger_dir)
+            port = server.server_address[1]
+            proxy_ctx = {
+                "ledger_dir": str(ledger_dir),
+                "local_base_url": f"http://127.0.0.1:{port}",
+                "docker_base_url": f"http://host.docker.internal:{port}",
+                "_proxy_server": server,
+            }
+            started = time.monotonic()
+            try:
+                row = bench_run.run_cell(
+                    "pi",
+                    "fake",
+                    "deepseek-v4-flash",
+                    1,
+                    30,
+                    str(root / "tasks"),
+                    str(adapters),
+                    5,
+                    proxy_ctx=proxy_ctx,
+                    stall_timeout=0.2,
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertEqual(row["failure_class"], "stalled")
+            self.assertIsNone(row["checker_exit"])
+            self.assertNotIn("checker-must-not-run", row.get("checker_stderr") or "")
+            ledgers = list(ledger_dir.glob("*.jsonl"))
+            self.assertEqual(len(ledgers), 1)
+            records = [
+                json.loads(line)
+                for line in ledgers[0].read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(records[-1]["record_type"], "ledger_seal")
+            self.assertEqual(records[-1]["record_count"], 0)
+            self.assertTrue(os.path.isfile(
+                ledger_dir / f"{ledgers[0].stem}.meta.json"))
 
 
 if __name__ == "__main__":
