@@ -93,7 +93,10 @@ class PublishBundleTests(unittest.TestCase):
         self.gate_dir = os.path.join(self.tmp.name, "gate")
         os.makedirs(self.gate_dir)
         with open(os.path.join(self.gate_dir, "mycli-gate.json"), "w", encoding="utf-8") as fh:
-            json.dump({"candidate": "mycli", "status": "PASS", "pass": True}, fh)
+            json.dump({
+                "candidate": "mycli", "mode": "live",
+                "status": "PASS", "pass": True,
+            }, fh)
 
         rows = []
         for trial in (1, 2):
@@ -234,7 +237,7 @@ class PublishBundleTests(unittest.TestCase):
             )
         self.assertIn("LOCAL-ONLY", str(ctx.exception))
 
-    def test_unmatched_arm_and_missing_gate_warnings(self):
+    def test_unmatched_arm_and_missing_gate_require_explicit_override(self):
         mismatched = os.path.join(self.tmp.name, "mismatch.jsonl")
         rows = [
             _row("null", "alpha", 1, False),
@@ -244,13 +247,23 @@ class PublishBundleTests(unittest.TestCase):
             _row("orphan", "beta", 1, True, candidate="orphan"),
         ]
         _write_jsonl(mismatched, rows)
+        with self.assertRaises(publish.PublishError):
+            publish.create_bundle(
+                mismatched,
+                os.path.join(self.tmp.name, "blocked-bundle"),
+                candidate_specs=["orphan"],
+                tasks_dirs=[self.tasks],
+                gate_search_dirs=[self.gate_dir],
+                scrub_ctx=self.scrub_ctx,
+            )
         provenance = publish.create_bundle(
             mismatched,
             os.path.join(self.tmp.name, "warn-bundle"),
             candidate_specs=["orphan"],
             tasks_dirs=[self.tasks],
-            gate_search_dirs=[self.gate_dir],  # no orphan record
+            gate_search_dirs=[self.gate_dir],
             scrub_ctx=self.scrub_ctx,
+            allow_incomplete=True,
         )
         joined = " ".join(provenance["warnings"])
         self.assertIn("different task sets", joined)
@@ -265,7 +278,10 @@ class PublishBundleTests(unittest.TestCase):
         data_dir = os.path.join(self.tmp.name, "data")
         os.makedirs(data_dir, exist_ok=True)
         with open(os.path.join(data_dir, "mycli.json"), "w", encoding="utf-8") as fh:
-            json.dump({"candidate": "mycli", "status": "PASS"}, fh)
+            json.dump({
+                "candidate": "mycli", "mode": "live",
+                "status": "PASS", "pass": True,
+            }, fh)
 
         proc = subprocess.run(
             [sys.executable, "-m", "obench.cli", "publish",

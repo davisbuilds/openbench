@@ -25,7 +25,7 @@ import sys
 import tomllib
 from collections import defaultdict
 
-from . import stats
+from . import publish, stats
 from .paths import SOURCE_ROOT
 
 METHODOLOGY_NOTE = (
@@ -93,26 +93,18 @@ def _load_manifest_list(path):
 
 
 def _results_verification_error(bundle_dir):
-    """Return why a result bundle is not digest-verified, else ``None``."""
+    """Return why a result bundle fails intrinsic publish verification."""
     results_path = os.path.join(bundle_dir, "results.jsonl")
     provenance_path = os.path.join(bundle_dir, "provenance.json")
     if not os.path.isfile(results_path):
         return "no results.jsonl (HTML-only release page)"
     if not os.path.isfile(provenance_path):
         return "missing provenance.json (results are not verified)"
-    try:
-        provenance = _read_json(provenance_path)
-    except (OSError, json.JSONDecodeError):
-        return "invalid provenance.json (results are not verified)"
-    expected = provenance.get("results_sha256") if isinstance(provenance, dict) else None
-    if not isinstance(expected, str) or not expected:
-        return "missing results_sha256 in provenance.json"
-    digest = hashlib.sha256()
-    with open(results_path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    if digest.hexdigest() != expected:
-        return "results_sha256 mismatch"
+    checks = publish.verify_bundle(
+        bundle_dir, tasks_dirs=[], verify_task_trees=False)
+    failed = [item for item in checks if item["status"] != "PASS"]
+    if failed:
+        return "; ".join(f"{item['name']}: {item['detail']}" for item in failed)
     return None
 
 

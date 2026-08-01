@@ -66,6 +66,7 @@ def _publish_bundle(out_dir, tasks_dir, rows, *, title="Test card"):
     _write_results(results, rows)
     return publish.create_bundle(
         results, out_dir, tasks_dirs=[tasks_dir], title=title,
+        allow_incomplete=True,
     )
 
 
