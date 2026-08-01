@@ -10,10 +10,10 @@ prove a claim, share the bundle, let others re-verify digests locally.
 ```bash
 # 1. Admit the candidate (schema dry-run first; --live spends tokens).
 obench gate path/to/my-cli.toml --model deepseek-v4-flash
-# Archive the printed JSON somewhere durable, e.g.:
-#   mkdir -p data && obench gate ... > data/my-cli-gate.json
 # Live checks (when you are ready to spend):
-obench gate path/to/my-cli.toml --model deepseek-v4-flash --live
+mkdir -p data
+obench gate path/to/my-cli.toml \
+  --model deepseek-v4-flash --live > data/my-cli-gate.json
 
 # 2. Run a matrix: candidate + stock arms, same tasks / model / trials.
 obench run --harness null,pi \
@@ -59,9 +59,11 @@ Default output directory: `./openbench-publish/<timestamp>/` (override with
   username, hostname). Digests intentionally look like hex blobs and are not
   treated as PII here. Hits refuse the publish; `--allow-pii-override` continues
   with a loud warning and is documented as dangerous.
-- **Comparability warnings** (terminal + HTML) when arms disagree on task sets,
-  models, or trial counts, and when a candidate has no archived gate PASS
-  record under `data/`, `.openbench/gate/`, or `results/gate/`.
+- **Completeness is fail-closed.** Publish refuses when arms disagree on task
+  sets, models, or trial cells, or when a candidate has no exact live PASS gate
+  record under `data/`, `.openbench/gate/`, or `results/gate/`. Use
+  `--allow-incomplete` only for an intentionally caveated artifact; the
+  resulting warnings remain in terminal output, provenance, and HTML.
 
 ## What `obench verify` proves
 

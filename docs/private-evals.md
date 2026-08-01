@@ -133,6 +133,12 @@ Docker (`--exec docker`) stages on the **host** before the container starts
 (same as snapshot mode) and bind-mounts the staged tree — git mode works
 there without in-container git.
 
+> **Trust boundary:** setup and `checker.sh` execute on the host, even when the
+> harness uses `--exec docker`. Local execution also runs the harness on the
+> host. Only run task packs, candidate adapters, setup commands, and checkers
+> that you trust and have reviewed; Docker currently isolates the harness cell,
+> not the task oracle.
+
 ## 4. Polarity validation
 
 Prove the checker fails on the untouched workspace and passes with `solution/`
@@ -145,6 +151,12 @@ obench validate
 ```
 
 Fix checkers until every task shows PASS.
+
+Before sharing or installing a task publicly, run the stricter admission gate:
+
+```bash
+obench admit .openbench/tasks/my-task
+```
 
 ## 5. Doctor preflight (no token spend)
 

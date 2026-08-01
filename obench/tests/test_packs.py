@@ -131,6 +131,16 @@ class PackTomlTests(unittest.TestCase):
 
 
 class InitInstallListTests(unittest.TestCase):
+    def test_default_root_discovers_project_from_subdirectory(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.makedirs(os.path.join(td, "tasks"))
+            nested = os.path.join(td, "src", "pkg")
+            os.makedirs(nested)
+            self.assertEqual(
+                packs.default_packs_root(nested),
+                os.path.join(td, ".openbench", "packs"),
+            )
+
     def test_init_scaffold(self):
         with tempfile.TemporaryDirectory() as td:
             path = packs.init_pack(td, org="org", name="pack", version="0.2.0")
