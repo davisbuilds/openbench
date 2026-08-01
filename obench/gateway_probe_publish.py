@@ -865,7 +865,8 @@ def _assert_verifier_tree_matches(commit: str) -> None:
         )
 
 
-def _verified_with_commit(explicit: str | None) -> str:
+def _verified_with_commit(
+        explicit: str | None, *, require_tree_match: bool = True) -> str:
     if explicit is None:
         commit = _detect_verifier_commit()
     else:
@@ -905,7 +906,8 @@ def _verified_with_commit(explicit: str | None) -> str:
                 "verified_with_commit must resolve to a git commit containing "
                 "obench/gateway_probe_publish.py"
             ) from exc
-    _assert_verifier_tree_matches(commit)
+    if require_tree_match:
+        _assert_verifier_tree_matches(commit)
     return commit
 
 
@@ -1232,7 +1234,16 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     directory = bundle_input.resolve()
     _exact_directory(directory, _PUBLIC_DIRECTORY_FILES, "public Gateway Probe bundle")
     manifest = _validate_manifest(_load_json(directory / "manifest.json", "manifest"))
-    _verified_with_commit(manifest["verification"]["verified_with_commit"])
+    # The manifest records which clean verifier created the bundle. Historical
+    # bundles must remain verifiable as the current verifier evolves; requiring
+    # today's source tree to equal that historical commit made every verifier
+    # improvement invalidate all prior public evidence. The commit must still
+    # exist and contain the verifier, while the current implementation
+    # independently recomputes and validates every public artifact below.
+    _verified_with_commit(
+        manifest["verification"]["verified_with_commit"],
+        require_tree_match=False,
+    )
     for name in PUBLIC_FILES:
         if _sha256(directory / name) != manifest["files"][name]["sha256"]:
             raise GatewayProbeRunError(f"public artifact digest mismatch: {name}")

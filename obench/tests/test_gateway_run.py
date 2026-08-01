@@ -255,9 +255,19 @@ direct_control_arm_id = "direct"
         class PlainHTTPSConnection(http.client.HTTPConnection):
             pass
 
+        active_schedule = gateway_run._active_schedule
+
+        def fixture_schedule(experiment, schedule, now=None):
+            if now is None:
+                now = gateway_run.datetime.fromisoformat(
+                    "2026-07-15T00:00:00+00:00")
+            return active_schedule(experiment, schedule, now)
+
         with (
             mock.patch.object(proxy.http.client, "HTTPSConnection", PlainHTTPSConnection),
             mock.patch.object(gateway_run.pi, "version", return_value="fake-pi 1.0"),
+            mock.patch.object(
+                gateway_run, "_active_schedule", side_effect=fixture_schedule),
             mock.patch.dict(os.environ, self.env, clear=False),
         ):
             yield
