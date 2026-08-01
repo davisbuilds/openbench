@@ -19,6 +19,7 @@ subprocess, never the ``timeout`` command).
 """
 
 import argparse
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -1177,14 +1178,31 @@ def load_existing_run_ids(results_path):
     return ids
 
 
-def append_row(results_path, row):
-    """Append one JSON line (ordered by ROW_FIELDS) to the results log."""
+def append_row(results_path, row, *, reject_duplicate=False):
+    """Append one durable JSON line while serializing concurrent writers.
+
+    When ``reject_duplicate`` is true, the run id is checked under the same
+    lock as the append. This closes the race where two resumed invocations both
+    observe a missing cell and append it after running concurrently.
+    """
     os.makedirs(os.path.dirname(os.path.abspath(results_path)), exist_ok=True)
     ordered = {key: row.get(key) for key in ROW_FIELDS}
-    with open(results_path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(ordered) + "\n")
-        fh.flush()
-        os.fsync(fh.fileno())
+    lock_path = os.path.abspath(results_path) + ".lock"
+    lock_fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        os.fchmod(lock_fd, 0o600)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        if reject_duplicate and ordered.get("run_id") in load_existing_run_ids(
+                results_path):
+            return False
+        with open(results_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(ordered) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        return True
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
 
 
 def preflight_results_path(results_path):
@@ -1300,16 +1318,22 @@ def write_transcript(path, row, body):
     before sharing any transcript. The runner writes originals here and builds
     no publishing path of any kind.
     """
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    os.chmod(parent, 0o700)
     header = (
         f"# transcript {row['run_id']}\n"
         f"# harness={row['harness']} model={row['model']} "
         f"task={row['task']} trial={row['trial']} ts={row['ts_iso']}\n"
         "# LOCAL-ONLY -- unscrubbed. Review with obench/scrub.py --check before sharing.\n\n"
     )
-    with open(path, "w", encoding="utf-8") as fh:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(header)
         fh.write(body or "")
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def _adapter_wall_time_s(start_monotonic, result, exec_used):
@@ -2307,7 +2331,13 @@ def main(argv=None):
                             file=sys.stderr,
                         )
                         return 2
-                    append_row(args.results_path, row)
+                    appended = append_row(
+                        args.results_path, row, reject_duplicate=not args.force)
+                    if not appended:
+                        skipped += 1
+                        existing.add(run_id)
+                        print(f"SKIP-RACE {run_id}")
+                        continue
                     existing.add(run_id)
                     ran += 1
                     status = "ok" if row["success"] else "fail"
