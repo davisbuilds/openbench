@@ -170,6 +170,26 @@ class SolutionOverlayTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(work, "root.txt")))
         self.assertFalse(os.path.isfile(os.path.join(work, "solve.sh")))
 
+    def test_solve_sh_overlays_shell_deliverables(self):
+        tmp = tempfile.mkdtemp(prefix="obench_harbor_shell_sol_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        solution = os.path.join(tmp, "solution")
+        os.makedirs(solution)
+        _write(os.path.join(solution, "solve.sh"), eh.render_solve_sh())
+        _write(os.path.join(solution, "tool.sh"), "#!/bin/sh\necho fixed\n")
+        work = os.path.join(tmp, "work")
+        os.makedirs(work)
+        proc = subprocess.run(
+            ["bash", os.path.join(solution, "solve.sh")],
+            cwd=work,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertTrue(os.path.isfile(os.path.join(work, "tool.sh")))
+
 
 class ExportTaskTests(unittest.TestCase):
     def setUp(self):
@@ -229,6 +249,22 @@ class ExportTaskTests(unittest.TestCase):
         r0, r1 = eh.round_trip_polarity(out)
         self.assertEqual(r0, 0.0)
         self.assertEqual(r1, 1.0)
+
+    def test_export_preserves_procedural_solution(self):
+        procedural = "#!/usr/bin/env bash\nprintf 'hi\\n' > greeting.txt\n"
+        solve = os.path.join(self.task, "solution", "solve.sh")
+        _write(solve, procedural)
+        os.chmod(solve, 0o700)
+        os.unlink(os.path.join(self.task, "solution", "greeting.txt"))
+
+        out = os.path.join(self.tmp, "harbor", "procedural")
+        eh.export_task(self.task, out)
+        exported = os.path.join(out, "solution", "solve.sh")
+        with open(exported, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), procedural)
+        self.assertTrue(os.stat(exported).st_mode & 0o100)
+        r0, r1 = eh.round_trip_polarity(out)
+        self.assertEqual((r0, r1), (0.0, 1.0))
 
     def test_git_mode_records_sha(self):
         root = os.path.join(self.tmp, "gitroot")

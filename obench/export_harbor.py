@@ -231,11 +231,11 @@ set -euo pipefail
 SOLUTION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Harbor copies solution/ to /solution and runs solve.sh from the workdir.
-# Overlay every file except this script (and other *.sh helpers if any).
+# Overlay every solution file except this generated runner itself.
 while IFS= read -r -d '' src; do
   rel="${src#"$SOLUTION_DIR"/}"
   case "$rel" in
-    solve.sh|*.sh) continue ;;
+    solve.sh) continue ;;
   esac
   dest="./$rel"
   mkdir -p "$(dirname "$dest")"
@@ -368,11 +368,14 @@ def export_task(
                     os.path.join(root, fname),
                     os.path.join(target_root, fname),
                 )
-        _write_text(
-            os.path.join(solution_dest, "solve.sh"),
-            render_solve_sh(),
-            mode=0o755,
-        )
+        solve_dest = os.path.join(solution_dest, "solve.sh")
+        if os.path.isfile(solve_dest):
+            # Procedural task oracles are already Harbor-compatible: Harbor
+            # invokes solution/solve.sh from the agent workspace. Preserve the
+            # task author's procedure instead of replacing it with an overlay.
+            os.chmod(solve_dest, os.stat(solve_dest).st_mode | 0o100)
+        else:
+            _write_text(solve_dest, render_solve_sh(), mode=0o755)
 
     return {
         "task_name": name,

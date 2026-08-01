@@ -26,9 +26,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import ntpath
 import os
 import re
 import shutil
+import stat
 import sys
 import tarfile
 import tempfile
@@ -670,21 +672,60 @@ def _materialize_https(source: str, dest: str) -> dict:
 
 
 def _extract_archive(archive_path: str, dest: str, url: str) -> None:
+    dest = os.path.abspath(dest)
+
+    def safe_destination(name: str) -> str:
+        normalized = name.replace("\\", "/")
+        drive, _tail = ntpath.splitdrive(normalized)
+        if (
+            not normalized
+            or "\x00" in normalized
+            or drive
+            or normalized.startswith("/")
+        ):
+            raise PackError(f"unsafe archive member path in {url}: {name!r}")
+        target = os.path.abspath(os.path.join(dest, normalized))
+        try:
+            contained = os.path.commonpath((dest, target)) == dest
+        except ValueError:
+            contained = False
+        if not contained:
+            raise PackError(f"unsafe archive member path in {url}: {name!r}")
+        return target
+
     lower = url.lower().split("?", 1)[0]
     if lower.endswith(".zip"):
         try:
             with zipfile.ZipFile(archive_path) as zf:
+                for member in zf.infolist():
+                    safe_destination(member.filename)
+                    mode = (member.external_attr >> 16) & 0o170000
+                    if mode == stat.S_IFLNK:
+                        raise PackError(
+                            f"archive links are not allowed in {url}: "
+                            f"{member.filename!r}"
+                        )
                 zf.extractall(dest)
         except zipfile.BadZipFile as exc:
             raise PackError(f"invalid zip archive: {url}") from exc
         return
     try:
         with tarfile.open(archive_path) as tf:
-            # filter="data" is 3.12+; fall back without it on older runtimes.
+            members = tf.getmembers()
+            for member in members:
+                safe_destination(member.name)
+                if not (member.isfile() or member.isdir()):
+                    raise PackError(
+                        f"only regular files and directories are allowed in "
+                        f"{url}: {member.name!r}"
+                    )
+            # Python 3.11.4+ provides the data filter. Earlier supported
+            # runtimes use the same prevalidated member list, never an
+            # unrestricted extraction fallback.
             try:
-                tf.extractall(dest, filter="data")
+                tf.extractall(dest, members=members, filter="data")
             except TypeError:
-                tf.extractall(dest)
+                tf.extractall(dest, members=members)
     except tarfile.TarError as exc:
         raise PackError(f"invalid tar archive: {url}") from exc
 
@@ -1050,7 +1091,7 @@ def list_installed_packs(packs_root: str | None = None) -> list[dict]:
 
 
 def verify_pack(pack_dir: str) -> list[dict]:
-    """Recompute digests and compare to ``pack_source.json`` if present."""
+    """Recompute digests and fail closed without recorded expectations."""
     pack_dir = os.path.abspath(pack_dir)
     meta = load_pack_toml(os.path.join(pack_dir, PACK_TOML))
     kind = meta.get("kind", PACK_KIND_TASKS)
@@ -1068,7 +1109,7 @@ def verify_pack(pack_dir: str) -> list[dict]:
                 "manifest": filename,
                 "digest": actual,
                 "expected": exp,
-                "ok": exp is None or exp == actual,
+                "ok": exp is not None and exp == actual,
                 "missing_expected": exp is None,
             })
         return results
@@ -1084,7 +1125,7 @@ def verify_pack(pack_dir: str) -> list[dict]:
             "task": task,
             "digest": actual,
             "expected": exp,
-            "ok": exp is None or exp == actual,
+            "ok": exp is not None and exp == actual,
             "missing_expected": exp is None,
         })
     return results
