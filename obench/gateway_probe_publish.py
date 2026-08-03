@@ -294,6 +294,11 @@ def _project_experiment(
                 "sampling": arm.sampling.to_dict(),
                 "direct_control_arm_id": arm.direct_control_arm_id,
                 "gateway": arm.gateway,
+                **(
+                    {"inference": arm.inference.to_dict()}
+                    if arm.inference is not None
+                    else {}
+                ),
             }
             for arm in experiment.arms
         ],
@@ -440,9 +445,13 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
     baselines = 0
     for arm in arms:
         sampling = arm.get("sampling") if isinstance(arm, dict) else None
+        expected_arm_fields = arm_fields | (
+            {"inference"} if isinstance(arm, dict) and "inference" in arm else set()
+        )
+        inference = arm.get("inference") if isinstance(arm, dict) else None
         if (
             not isinstance(arm, dict)
-            or set(arm) != arm_fields
+            or set(arm) != expected_arm_fields
             or not isinstance(arm.get("arm_id"), str)
             or not arm["arm_id"]
             or arm["arm_id"] in arm_ids
@@ -470,6 +479,16 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
                 for name in ("temperature", "top_p")
             )
             or not _is_integer(sampling.get("seed"))
+            or (
+                inference is not None
+                and (
+                    not isinstance(inference, dict)
+                    or set(inference) != {"thinking", "reasoning_effort"}
+                    or inference.get("thinking") != "enabled"
+                    or inference.get("reasoning_effort") not in {"low", "high", "max"}
+                    or arm.get("protocol") != "openai_chat"
+                )
+            )
             or (
                 arm.get("direct_control_arm_id") is not None
                 and (
@@ -755,14 +774,24 @@ def _project_result_row(row: Mapping[str, Any]) -> dict[str, Any]:
         name: copy.deepcopy(row[name])
         for name in _PUBLIC_RESULT_FIELDS
     }
-    projected["request_metrics"]["receipt_headers"] = {}
-    projected["reuse_evidence"]["receipt_headers"] = {}
-    route = projected["request_metrics"].get("route")
-    if isinstance(route, dict) and isinstance(route.get("gateway_metadata"), dict):
-        route["gateway_metadata"].pop("generationId", None)
+    _scrub_public_operational_evidence(projected)
     gateway_probe_results.validate_row_shape(projected)
     _assert_public_safe(projected)
     return projected
+
+
+def _scrub_public_operational_evidence(value: Any) -> None:
+    if isinstance(value, dict):
+        for key in list(value):
+            if key == "receipt_headers":
+                value[key] = {}
+            elif key == "generationId":
+                value.pop(key)
+            else:
+                _scrub_public_operational_evidence(value[key])
+    elif isinstance(value, list):
+        for item in value:
+            _scrub_public_operational_evidence(item)
 
 
 def _canonical_jsonl(rows: list[dict[str, Any]]) -> str:

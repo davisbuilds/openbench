@@ -119,6 +119,15 @@ class Sampling:
 
 
 @dataclass(frozen=True, slots=True)
+class InferenceControls:
+    thinking: str
+    reasoning_effort: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class Arm:
     arm_id: str
     route_kind: str
@@ -135,6 +144,7 @@ class Arm:
     cache_enabled: bool
     auth_env: str
     sampling: Sampling
+    inference: InferenceControls | None = None
     direct_control_arm_id: str | None = None
     gateway: str | None = None
     gateway_id: str | None = None
@@ -158,6 +168,8 @@ class Arm:
             "sampling": self.sampling.to_dict(),
             "direct_control_arm_id": self.direct_control_arm_id,
         }
+        if self.inference is not None:
+            result["inference"] = self.inference.to_dict()
         if self.gateway is not None:
             result["gateway"] = self.gateway
         if self.gateway_id is not None:
@@ -241,6 +253,7 @@ class RoutePlan:
     allow_private_endpoint: bool
     private_host_allowlist: tuple[str, ...]
     private_cidr_allowlist: tuple[str, ...]
+    inference: InferenceControls | None = None
     # Proxy-only controls. They are bound by arm_digest but intentionally
     # omitted from the adapter-facing route-plan JSON.
     gateway: str | None = None
@@ -250,7 +263,7 @@ class RoutePlan:
     provider_prompt_mode: str = "provider_default"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "experiment_digest": self.experiment_digest,
             "arm_digest": self.arm_digest,
@@ -272,6 +285,9 @@ class RoutePlan:
             "private_host_allowlist": list(self.private_host_allowlist),
             "private_cidr_allowlist": list(self.private_cidr_allowlist),
         }
+        if self.inference is not None:
+            result["inference"] = self.inference.to_dict()
+        return result
 
     @property
     def canonical_json(self) -> str:
@@ -322,11 +338,13 @@ _ROOT_FIELDS = {
 _WINDOW_FIELDS = {"window_id", "start", "end"}
 _BUDGET_FIELDS = {"timeout_s", "max_calls", "max_output_tokens", "usd_cap"}
 _SAMPLING_FIELDS = {"temperature", "top_p", "seed"}
+_INFERENCE_FIELDS = {"thinking", "reasoning_effort"}
 _ARM_FIELDS = {
     "arm_id", "route_kind", "endpoint", "protocol", "baseline",
     "canonical_model", "requested_model", "requested_provider", "allowed_models",
     "allowed_providers", "fallback_enabled", "retry_count", "cache_enabled",
-    "auth_env", "sampling", "direct_control_arm_id", "gateway", "gateway_id",
+    "auth_env", "sampling", "inference", "direct_control_arm_id", "gateway",
+    "gateway_id",
 }
 
 
@@ -472,6 +490,22 @@ def _parse_sampling(value: Any, path: str) -> Sampling:
     )
 
 
+def _parse_inference(value: Any, path: str) -> InferenceControls:
+    table = _table(value, path, _INFERENCE_FIELDS)
+    thinking = _string(_required(table, "thinking", path), f"{path}.thinking")
+    if thinking != "enabled":
+        raise GatewaySpecError(f"{path}.thinking must be 'enabled'")
+    effort = _string(
+        _required(table, "reasoning_effort", path),
+        f"{path}.reasoning_effort",
+    )
+    if effort not in {"low", "high", "max"}:
+        raise GatewaySpecError(
+            f"{path}.reasoning_effort must be one of: low, high, max"
+        )
+    return InferenceControls(thinking=thinking, reasoning_effort=effort)
+
+
 def _validate_endpoint(
     value: Any,
     path: str,
@@ -573,6 +607,13 @@ def _parse_arm(
     gateway_id = table.get("gateway_id")
     if gateway_id is not None:
         gateway_id = _string(gateway_id, f"{path}.gateway_id", _ID_RE)
+    inference = table.get("inference")
+    if inference is not None:
+        if protocol != "openai_chat":
+            raise GatewaySpecError(
+                f"{path}.inference is supported only for openai_chat"
+            )
+        inference = _parse_inference(inference, f"{path}.inference")
     arm = Arm(
         arm_id=_string(_required(table, "arm_id", path), f"{path}.arm_id", _ID_RE),
         route_kind=route_kind,
@@ -597,6 +638,7 @@ def _parse_arm(
                                f"{path}.cache_enabled"),
         auth_env=_string(_required(table, "auth_env", path), f"{path}.auth_env", _ENV_RE),
         sampling=_parse_sampling(_required(table, "sampling", path), f"{path}.sampling"),
+        inference=inference,
         direct_control_arm_id=direct_control,
         gateway=gateway,
         gateway_id=gateway_id,
@@ -666,7 +708,7 @@ def _validate_gateway_controls(arms: tuple[Arm, ...]) -> None:
             )
         comparable = (
             "protocol", "canonical_model", "requested_provider",
-            "allowed_providers", "sampling",
+            "allowed_providers", "sampling", "inference",
         )
         for field in comparable:
             if getattr(arm, field) != getattr(control, field):
@@ -956,6 +998,7 @@ def compile_fixed_route_plans(
             cache_enabled=arm.cache_enabled,
             auth_env=arm.auth_env,
             sampling=arm.sampling,
+            inference=arm.inference,
             allow_private_endpoint=allow_private_endpoint,
             private_host_allowlist=hosts,
             private_cidr_allowlist=cidrs,

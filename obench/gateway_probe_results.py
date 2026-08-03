@@ -17,6 +17,8 @@ from .gateway_probe_models import GatewayProbeRunError, ProbeBlock
 
 
 BENCHMARK = "gateway_probe"
+# V4 admits additive primer route and retry receipt evidence so checked-in
+# published bundles remain independently verifiable.
 RESULT_SCHEMA_VERSION = 4
 RECEIPT_HEADER_ALLOWLIST = frozenset({
     "x-request-id",
@@ -573,6 +575,39 @@ def _validate_route_integrity(value: Any, label: str) -> None:
         raise GatewayProbeRunError(f"results row {label} is malformed")
 
 
+def _recovered_primer_attempts_valid(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    attempts = value.get("attempts")
+    if not isinstance(attempts, list) or len(attempts) < 2:
+        return False
+    normalized = []
+    for attempt in attempts:
+        if (
+            not isinstance(attempt, Mapping)
+            or set(attempt) != {"provider", "model", "status"}
+            or not isinstance(attempt.get("provider"), str)
+            or not attempt["provider"]
+            or not isinstance(attempt.get("model"), str)
+            or not attempt["model"]
+            or not isinstance(attempt.get("status"), int)
+            or isinstance(attempt.get("status"), bool)
+        ):
+            return False
+        normalized.append((
+            attempt["provider"],
+            attempt["model"],
+            attempt["status"],
+        ))
+    routes = {(provider, model) for provider, model, _status in normalized}
+    success_flags = [200 <= status < 300 for _, _, status in normalized]
+    return (
+        len(routes) == 1
+        and success_flags[-1] is True
+        and not any(success_flags[:-1])
+    )
+
+
 def _validate_money(value: Any, *, nullable: bool) -> bool:
     if value is None:
         return nullable
@@ -720,11 +755,14 @@ def _validate_retry_evidence(value: Any, *, condition: str) -> None:
         raise GatewayProbeRunError("results row has malformed retry evidence")
     normalized_attempts = []
     for index, raw in enumerate(attempts, 1):
-        attempt = _exact_mapping(
-            raw,
-            {"attempt_number", "phase", "outcome", "timing", "retry", "cost"},
-            "retry attempt",
-        )
+        attempt_fields = {
+            "attempt_number", "phase", "outcome", "timing", "retry", "cost",
+        }
+        if isinstance(raw, Mapping) and "receipt_headers" in raw:
+            attempt_fields.add("receipt_headers")
+        if isinstance(raw, Mapping) and "primer_evidence" in raw:
+            attempt_fields.add("primer_evidence")
+        attempt = _exact_mapping(raw, attempt_fields, "retry attempt")
         if attempt.get("attempt_number") != index or attempt.get("phase") not in {
             "primer",
             "measured",
@@ -747,6 +785,37 @@ def _validate_retry_evidence(value: Any, *, condition: str) -> None:
         if any(not _duration(item) for item in timing.values()):
             raise GatewayProbeRunError(
                 "results row has malformed retry attempt timing"
+            )
+        if "receipt_headers" in attempt:
+            _validate_receipts(
+                attempt.get("receipt_headers"),
+                "retry attempt receipts",
+            )
+        if attempt.get("phase") == "primer" and "primer_evidence" not in attempt:
+            raise GatewayProbeRunError(
+                "primer retry attempt lacks primer evidence"
+            )
+        if "primer_evidence" in attempt:
+            if attempt.get("phase") != "primer":
+                raise GatewayProbeRunError(
+                    "measured retry attempt contains primer evidence"
+                )
+            primer_evidence = _exact_mapping(
+                attempt.get("primer_evidence"),
+                {"route_integrity", "route", "stream"},
+                "retry attempt primer evidence",
+            )
+            _validate_route_integrity(
+                primer_evidence.get("route_integrity"),
+                "retry attempt primer route integrity",
+            )
+            _validate_route(
+                primer_evidence.get("route"),
+                "retry attempt primer route",
+            )
+            _validate_primer_stream(
+                primer_evidence.get("stream"),
+                "retry attempt primer stream",
             )
         decision = _exact_mapping(
             attempt.get("retry"),
@@ -800,17 +869,25 @@ def _validate_retry_evidence(value: Any, *, condition: str) -> None:
             raise GatewayProbeRunError(
                 "results row has malformed retry attempt decision"
             )
+        primer_invalid = (
+            attempt.get("phase") == "primer"
+            and attempt_outcome["error_class"] == "primer"
+            and attempt_outcome["error_detail"] == "primer_invalid"
+        )
         expected_eligible = bool(
-            not attempt_outcome["semantic_output_started"]
-            and (
-                attempt_outcome["http_status"] in {429, 502, 503, 504}
-                or attempt_outcome["timed_out"]
-                or (
-                    attempt_outcome["error_class"] == "transport"
-                    and attempt_outcome["error_detail"] in {
-                        "connection_reset",
-                        "connection_closed",
-                    }
+            primer_invalid
+            or (
+                not attempt_outcome["semantic_output_started"]
+                and (
+                    attempt_outcome["http_status"] in {429, 502, 503, 504}
+                    or attempt_outcome["timed_out"]
+                    or (
+                        attempt_outcome["error_class"] == "transport"
+                        and attempt_outcome["error_detail"] in {
+                            "connection_reset",
+                            "connection_closed",
+                        }
+                    )
                 )
             )
         )
@@ -1147,10 +1224,8 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
     primer_value = row.get("reuse_evidence")
     if (
         not isinstance(primer_value, Mapping)
-        or set(primer_value) not in (
-            primer_fields,
-            primer_fields | {"stream"},
-        )
+        or not primer_fields <= set(primer_value)
+        or not set(primer_value) <= primer_fields | {"route", "stream"}
     ):
         raise GatewayProbeRunError("results row has malformed reuse evidence")
     primer = primer_value
@@ -1184,6 +1259,8 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
     _validate_route_integrity(
         primer.get("route_integrity"), "primer route integrity"
     )
+    if "route" in primer:
+        _validate_route(primer.get("route"), "primer route")
     _validate_usage(primer.get("usage"), "primer usage")
     _validate_cache(primer.get("cache"), "primer cache", nullable=True)
     _validate_costs(primer.get("costs"), "primer costs")
@@ -1204,6 +1281,19 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
         )
     if condition == "warm" and outcome.get("success") is True:
         primer_route = primer.get("route_integrity")
+        primer_reasons = (
+            primer_route.get("reasons")
+            if isinstance(primer_route, Mapping)
+            else None
+        )
+        recovered_primer = set(primer_reasons or ()) == {
+            "multiple_attempts",
+            "unsuccessful_attempt",
+        }
+        recovered_attempts_valid = (
+            recovered_primer
+            and _recovered_primer_attempts_valid(primer.get("route"))
+        )
         if (
             primer.get("completed") is not True
             or primer.get("socket_reused") is not True
@@ -1211,6 +1301,10 @@ def validate_row_shape(row: Mapping[str, Any]) -> None:
             or not 200 <= primer["http_status"] < 300
             or not isinstance(primer_route, Mapping)
             or primer_route.get("status") != "verified"
+            or (
+                primer_reasons
+                and not recovered_attempts_valid
+            )
         ):
             raise GatewayProbeRunError(
                 "successful warm row lacks verified reuse evidence"

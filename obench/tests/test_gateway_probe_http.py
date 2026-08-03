@@ -799,6 +799,55 @@ class GatewayProbeHttpTests(unittest.TestCase):
         )
         self.assertTrue(all(body["top_p"] == 0.95 for body in bodies.values()))
 
+        deepseek_probe = gateway_probe_spec.load_experiment(
+            examples / "gateway-probe-deepseek-v4-flash-five-way-chat.toml"
+        )
+        deepseek_plans, _ = gateway_probe_spec.compile_route_plans(
+            deepseek_probe,
+            environ={
+                arm.auth_env: "secret"
+                for arm in deepseek_probe.arms
+            },
+            admitted_auth_envs={
+                arm.auth_env
+                for arm in deepseek_probe.arms
+            },
+        )
+        deepseek_bodies = {
+            plan.arm_id: json.loads(
+                gateway_probe_http.request_body(
+                    "probe", "nonce", plan, deepseek_probe.budget.max_output_tokens
+                )
+            )
+            for plan in deepseek_plans
+        }
+        self.assertEqual(deepseek_probe.repetitions, 50)
+        self.assertEqual(len(deepseek_probe.arms), 5)
+        self.assertTrue(
+            all(body["thinking"] == {"type": "enabled"}
+                for body in deepseek_bodies.values())
+        )
+        self.assertTrue(
+            all(body["reasoning_effort"] == "high"
+                for body in deepseek_bodies.values())
+        )
+        self.assertTrue(
+            all(body["max_tokens"] == 4096
+                for body in deepseek_bodies.values())
+        )
+        self.assertTrue(all(
+            "max_completion_tokens" not in body and "seed" not in body
+            for body in deepseek_bodies.values()
+        ))
+        self.assertEqual(
+            deepseek_bodies["openrouter-deepseek"]["model"],
+            "deepseek/deepseek-v4-flash-0731",
+        )
+        self.assertEqual(
+            deepseek_bodies["vercel-deepseek"]["model"],
+            "deepseek/deepseek-v4-flash",
+        )
+
         gateway_bench = gateway_spec.load_experiment(
             examples / "gateway-bench-kimi-k3-five-way-chat.toml"
         )
@@ -914,6 +963,83 @@ class GatewayProbeHttpTests(unittest.TestCase):
                 "route_evidence": {"pass": False, "reasons": "not-a-list"}
             }),
             ("failed", ["malformed_route_evidence"]),
+        )
+
+    def test_primer_only_admits_complete_same_route_recovery_evidence(self):
+        attempts = [
+            {"provider": "openai", "model": "gpt-test", "status": 504},
+            {"provider": "openai", "model": "gpt-test", "status": 200},
+        ]
+        metrics = {
+            "route_evidence": {
+                "pass": False,
+                "reasons": ["multiple_attempts", "unsuccessful_attempt"],
+            },
+            "route": {"attempts": attempts},
+        }
+        self.assertEqual(
+            gateway_probe_http._primer_route_status(metrics),
+            (
+                "verified",
+                ["multiple_attempts", "unsuccessful_attempt"],
+            ),
+        )
+        self.assertEqual(
+            gateway_probe_http._route_status(metrics),
+            (
+                "failed",
+                ["multiple_attempts", "unsuccessful_attempt"],
+            ),
+        )
+
+        variants = {
+            "fallback": [
+                attempts[0],
+                {"provider": "other", "model": "gpt-test", "status": 200},
+            ],
+            "model_change": [
+                attempts[0],
+                {"provider": "openai", "model": "other", "status": 200},
+            ],
+            "multiple_successes": [
+                {"provider": "openai", "model": "gpt-test", "status": 200},
+                attempts[1],
+            ],
+            "success_not_terminal": [
+                attempts[1],
+                {"provider": "openai", "model": "gpt-test", "status": 504},
+            ],
+            "malformed": [
+                {"provider": "openai", "model": "gpt-test"},
+                attempts[1],
+            ],
+            "incomplete": [attempts[1]],
+        }
+        for name, variant in variants.items():
+            with self.subTest(name=name):
+                candidate = {
+                    **metrics,
+                    "route": {"attempts": variant},
+                }
+                self.assertEqual(
+                    gateway_probe_http._primer_route_status(candidate)[0],
+                    "failed",
+                )
+
+        candidate = {
+            **metrics,
+            "route_evidence": {
+                "pass": False,
+                "reasons": [
+                    "multiple_attempts",
+                    "unsuccessful_attempt",
+                    "fallback_attempt",
+                ],
+            },
+        }
+        self.assertEqual(
+            gateway_probe_http._primer_route_status(candidate)[0],
+            "failed",
         )
 
     def test_bad_status_line_never_persists_server_or_exception_text(self):
@@ -1255,6 +1381,267 @@ class GatewayProbeHttpTests(unittest.TestCase):
             ],
             0,
         )
+
+    def test_primer_timeout_then_malformed_primer_reaches_clean_final_socket(self):
+        exp = dataclasses.replace(
+            experiment(self.endpoint),
+            budget=gateway_probe_spec.ProbeBudget(
+                5,
+                16,
+                "1",
+                max_total_attempts=3,
+                max_input_tokens=32,
+                retry_deadline_s=10,
+            ),
+        )
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "warm", 1, ("direct",)
+        )
+        consume = gateway_probe_http._consume
+        call_count = 0
+        absolute_deadlines = []
+
+        def recovered_consume(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            absolute_deadlines.append(kwargs.get("absolute_deadline"))
+            progress = kwargs["progress"]
+            if call_count == 1:
+                now = time.monotonic()
+                progress.update({
+                    "request_started_at": now - 0.05,
+                    "response_headers_at": now - 0.04,
+                    "http_status": 200,
+                    "receipt_headers": {"x-request-id": "timed-out-primer"},
+                    "retry_after_status": "absent",
+                    "retry_after_s": None,
+                })
+                raise socket.timeout
+            status, metrics, closed, evidence = consume(*args, **kwargs)
+            if call_count == 2:
+                metrics["route_evidence"] = {
+                    "pass": False,
+                    "reasons": [
+                        "multiple_attempts",
+                        "malformed_attempts",
+                        "unsuccessful_attempt",
+                    ],
+                }
+                metrics["route"] = {
+                    "requested_model": "gpt-test",
+                    "served_model": "gpt-test",
+                    "provider": "openai",
+                    "attempts": [
+                        {
+                            "provider": "openai",
+                            "model": "gpt-test",
+                            "status": 504,
+                        },
+                        {
+                            "provider": "openai",
+                            "model": "gpt-test",
+                            "status": 200,
+                        },
+                    ],
+                }
+            return status, metrics, closed, evidence
+
+        with (
+            mock.patch.object(gateway_probe_http.time, "sleep"),
+            mock.patch.object(
+                gateway_probe_http,
+                "_consume",
+                side_effect=recovered_consume,
+            ),
+        ):
+            result = gateway_probe_http.execute_request(
+                experiment=exp,
+                case=exp.cases[0],
+                block=block,
+                plan=route_plan(exp, self.endpoint),
+                secret="test-secret",
+                prices=prices(),
+            )
+
+        self.assertTrue(result["outcome"]["success"])
+        self.assertEqual(call_count, 4)
+        self.assertEqual(len(_SSEHandler.requests), 3)
+        self.assertNotEqual(
+            _SSEHandler.requests[0]["peer"],
+            _SSEHandler.requests[1]["peer"],
+        )
+        self.assertEqual(
+            _SSEHandler.requests[1]["peer"],
+            _SSEHandler.requests[2]["peer"],
+        )
+        self.assertIsNone(absolute_deadlines[0])
+        self.assertTrue(all(
+            deadline == absolute_deadlines[1]
+            for deadline in absolute_deadlines[1:]
+        ))
+        self.assertIsNotNone(absolute_deadlines[1])
+        self.assertTrue(result["reuse_evidence"]["socket_reused"])
+        attempts = result["retry_evidence"]["attempts"]
+        self.assertEqual([attempt["phase"] for attempt in attempts], [
+            "primer",
+            "primer",
+            "measured",
+        ])
+        self.assertEqual(attempts[0]["outcome"]["http_status"], 200)
+        self.assertEqual(
+            attempts[0]["receipt_headers"],
+            {"x-request-id": "timed-out-primer"},
+        )
+        self.assertTrue(attempts[1]["outcome"]["semantic_output_started"])
+        self.assertTrue(attempts[1]["retry"]["eligible"])
+        self.assertEqual(
+            attempts[1]["primer_evidence"]["route_integrity"],
+            {
+                "status": "failed",
+                "pass": False,
+                "reasons": [
+                    "multiple_attempts",
+                    "malformed_attempts",
+                    "unsuccessful_attempt",
+                ],
+            },
+        )
+        self.assertEqual(
+            attempts[1]["primer_evidence"]["route"]["attempts"],
+            [
+                {"provider": "openai", "model": "gpt-test", "status": 504},
+                {"provider": "openai", "model": "gpt-test", "status": 200},
+            ],
+        )
+        self.assertEqual(
+            attempts[1]["receipt_headers"],
+            {"x-request-id": "receipt-123"},
+        )
+        self.assertEqual(
+            attempts[-1]["timing"]["request_to_semantic_output_s"],
+            result["request_metrics"]["timing"][
+                "request_to_semantic_ttft_s"
+            ],
+        )
+
+    def test_invalid_primers_exhaust_attempt_limit_without_measuring(self):
+        exp = dataclasses.replace(
+            experiment(self.endpoint),
+            budget=gateway_probe_spec.ProbeBudget(
+                5,
+                16,
+                "1",
+                max_total_attempts=2,
+                max_input_tokens=32,
+                retry_deadline_s=10,
+            ),
+        )
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "warm", 1, ("direct",)
+        )
+        consume = gateway_probe_http._consume
+
+        def invalid_primer(*args, **kwargs):
+            status, metrics, closed, evidence = consume(*args, **kwargs)
+            metrics["route_evidence"] = {
+                "pass": False,
+                "reasons": [
+                    "multiple_attempts",
+                    "malformed_attempts",
+                    "unsuccessful_attempt",
+                ],
+            }
+            metrics["route"] = {
+                "attempts": [
+                    {"provider": "openai", "model": "gpt-test", "status": 504},
+                    {"provider": "openai", "model": "gpt-test", "status": 200},
+                ],
+            }
+            return status, metrics, closed, evidence
+
+        with (
+            mock.patch.object(gateway_probe_http.time, "sleep"),
+            mock.patch.object(
+                gateway_probe_http,
+                "_consume",
+                side_effect=invalid_primer,
+            ),
+        ):
+            result = gateway_probe_http.execute_request(
+                experiment=exp,
+                case=exp.cases[0],
+                block=block,
+                plan=route_plan(exp, self.endpoint),
+                secret="test-secret",
+                prices=prices(),
+            )
+
+        self.assertFalse(result["outcome"]["success"])
+        self.assertFalse(result["outcome"]["attempted"])
+        self.assertEqual(len(_SSEHandler.requests), 2)
+        attempts = result["retry_evidence"]["attempts"]
+        self.assertEqual([attempt["phase"] for attempt in attempts], [
+            "primer",
+            "primer",
+        ])
+        self.assertTrue(all(
+            attempt["outcome"]["semantic_output_started"]
+            and attempt["primer_evidence"]["route_integrity"]["status"]
+            == "failed"
+            for attempt in attempts
+        ))
+        self.assertEqual(
+            attempts[-1]["retry"]["not_retried_reason"],
+            "attempt_limit",
+        )
+
+    def test_invalid_primer_retry_cannot_cross_retry_deadline(self):
+        exp = dataclasses.replace(
+            experiment(self.endpoint),
+            budget=gateway_probe_spec.ProbeBudget(
+                5,
+                16,
+                "1",
+                max_total_attempts=3,
+                max_input_tokens=32,
+                retry_deadline_s=1,
+            ),
+        )
+        block = ProbeBlock(
+            "case", exp.cases[0].prompt_digest, "warm", 1, ("direct",)
+        )
+        consume = gateway_probe_http._consume
+
+        def invalid_primer(*args, **kwargs):
+            status, metrics, closed, evidence = consume(*args, **kwargs)
+            metrics["route_evidence"] = {
+                "pass": False,
+                "reasons": ["malformed_attempts"],
+            }
+            return status, metrics, closed, evidence
+
+        with mock.patch.object(
+            gateway_probe_http,
+            "_consume",
+            side_effect=invalid_primer,
+        ):
+            result = gateway_probe_http.execute_request(
+                experiment=exp,
+                case=exp.cases[0],
+                block=block,
+                plan=route_plan(exp, self.endpoint),
+                secret="test-secret",
+                prices=prices(),
+            )
+
+        self.assertEqual(result["retry_evidence"]["attempt_count"], 1)
+        self.assertEqual(
+            result["retry_evidence"]["attempts"][0]["retry"][
+                "not_retried_reason"
+            ],
+            "deadline",
+        )
+        self.assertEqual(len(_SSEHandler.requests), 1)
 
 
 if __name__ == "__main__":

@@ -26,8 +26,14 @@ _CONCENTRATE_ENDPOINTS = {
 _CONCENTRATE_PROVIDER_SLUGS = {
     "moonshotai": "moonshot",
 }
+_OPENROUTER_PROVIDER_SLUGS = {
+    "deepseek": "DeepSeek",
+}
 _PROVIDER_IDENTITY_ALIASES = {
     "moonshot ai": "moonshotai",
+}
+_MODEL_ID_ALIASES = {
+    "deepseek-v4-flash-0731": "deepseek-v4-flash-20260731",
 }
 _CLOUDFLARE_REST_ENDPOINT_RE = re.compile(
     r"https://api\.cloudflare\.com/client/v4/accounts/"
@@ -51,7 +57,9 @@ _SCHEMA_KEYS = frozenset({
     "parameters",
     "schema",
 })
-_DATED_REVISION_RE = re.compile(r"-(?:\d{4}-\d{2}-\d{2}|\d{8})$")
+_DATED_REVISION_RE = re.compile(
+    r"-(?:\d{4}-\d{2}-\d{2}|\d{8})$"
+)
 
 
 class GatewayProfileError(ValueError):
@@ -81,13 +89,21 @@ def model_evidence_consistent(first: str, second: str, mode: str) -> bool:
     second_id = _model_id(second)
     if first_id == second_id:
         return True
-    if _DATED_REVISION_RE.search(first_id) and _DATED_REVISION_RE.search(second_id):
-        return False
+    first_revision = _dated_revision(first_id)
+    second_revision = _dated_revision(second_id)
+    if first_revision and second_revision:
+        first_base, first_date = first_revision
+        second_base, second_date = second_revision
+        return (
+            first_base == second_base
+            and first_date == second_date
+        )
     return _model_alias(first_id) == _model_alias(second_id)
 
 
 def _model_id(value: str) -> str:
-    return value.casefold().rsplit("/", 1)[-1]
+    model_id = value.casefold().rsplit("/", 1)[-1]
+    return _MODEL_ID_ALIASES.get(model_id, model_id)
 
 
 def _model_provider(value: str) -> str | None:
@@ -133,6 +149,13 @@ def concrete_model_revision(value: str) -> str | None:
     return model_id if _DATED_REVISION_RE.search(model_id) else None
 
 
+def _dated_revision(value: str) -> tuple[str, str] | None:
+    match = _DATED_REVISION_RE.search(value)
+    if match is None:
+        return None
+    return value[:match.start()], match.group(0)[1:].replace("-", "")
+
+
 def _model_alias(value: str) -> str:
     return _DATED_REVISION_RE.sub("", _model_id(value))
 
@@ -140,6 +163,11 @@ def _model_alias(value: str) -> str:
 def _concentrate_provider_slug(value: str) -> str:
     provider = _provider_identity(value)
     return _CONCENTRATE_PROVIDER_SLUGS.get(provider, provider)
+
+
+def _openrouter_provider_slug(value: str) -> str:
+    provider = _provider_identity(value)
+    return _OPENROUTER_PROVIDER_SLUGS.get(provider, provider)
 
 
 def validate_arm(
@@ -244,6 +272,20 @@ def strip_cache_controls(payload: dict[str, Any]) -> None:
     _strip_cache_controls(payload)
 
 
+def shape_provider_body(
+    payload: dict[str, Any],
+    *,
+    requested_provider: str,
+) -> None:
+    """Apply provider-native request fields shared by direct and gateway arms."""
+    if requested_provider.casefold() != "deepseek":
+        return
+    max_output_tokens = payload.pop("max_completion_tokens", None)
+    if max_output_tokens is not None:
+        payload["max_tokens"] = max_output_tokens
+    payload.pop("seed", None)
+
+
 def shape_body(
     payload: dict[str, Any],
     *,
@@ -261,7 +303,7 @@ def shape_body(
         for key in routing_keys:
             payload.pop(key, None)
         payload["provider"] = {
-            "only": [requested_provider],
+            "only": [_openrouter_provider_slug(requested_provider)],
             "allow_fallbacks": False,
         }
         return
@@ -471,9 +513,14 @@ class GatewayEvidence:
             return
         revision = concrete_model_revision(value)
         if revision is not None:
-            self._dated_model_ids.add(revision)
-            if len(self._dated_model_ids) > 1:
+            if any(
+                not model_evidence_consistent(
+                    existing, revision, self.model_match
+                )
+                for existing in self._dated_model_ids
+            ):
                 self.profile_reasons.append("served_model_conflict")
+            self._dated_model_ids.add(revision)
 
     def _observe_openrouter(self, obj: Mapping[str, Any]) -> bool:
         usage = obj.get("usage")

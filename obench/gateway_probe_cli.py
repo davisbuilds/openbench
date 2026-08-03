@@ -23,6 +23,18 @@ from . import (
 from .gateway_probe_models import GatewayProbeRunError
 
 
+def _positive_integer(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "must be a positive integer"
+        ) from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def _validate(args: argparse.Namespace) -> int:
     experiment = gateway_probe_run.validate_experiment(args.experiment)
     print(
@@ -48,6 +60,7 @@ def _run(args: argparse.Namespace) -> int:
         allow_cost_unavailable_block_recovery=(
             args.allow_cost_unavailable_block_recovery
         ),
+        max_blocks=args.max_blocks,
     )
     print(
         f"results={summary.results_path} rows_appended={summary.rows_appended} "
@@ -284,6 +297,7 @@ def _benchmark(args: argparse.Namespace) -> int:
         allow_cost_unavailable_block_recovery=(
             args.allow_cost_unavailable_block_recovery
         ),
+        max_blocks=args.max_blocks,
     )
     rows = gateway_probe_results.load_results(results_path)
     report = gateway_probe_report.aggregate(rows, experiment=experiment)
@@ -321,6 +335,11 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="run or resume a probe experiment")
     run.add_argument("experiment")
     run.add_argument("--results")
+    run.add_argument(
+        "--max-blocks",
+        type=_positive_integer,
+        help="process at most this many complete matched blocks",
+    )
     run_mode = run.add_mutually_exclusive_group()
     run_mode.add_argument("--force", action="store_true")
     run_mode.add_argument(
@@ -342,6 +361,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     benchmark.add_argument("experiment")
     benchmark.add_argument("--output-dir")
+    benchmark.add_argument(
+        "--max-blocks",
+        type=_positive_integer,
+        help="process at most this many complete matched blocks",
+    )
     benchmark_mode = benchmark.add_mutually_exclusive_group()
     benchmark_mode.add_argument("--force", action="store_true")
     benchmark_mode.add_argument(

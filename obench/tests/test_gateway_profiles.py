@@ -31,6 +31,17 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "prompt_cache_key": "attacker-key",
         }
 
+    def test_deepseek_provider_uses_native_output_limit_without_seed(self):
+        body = {
+            "max_completion_tokens": 4096,
+            "seed": 20260803,
+        }
+        gateway_profiles.shape_provider_body(
+            body,
+            requested_provider="deepseek",
+        )
+        self.assertEqual(body, {"max_tokens": 4096})
+
     def test_openrouter_fixed_profile_replaces_routing_and_session_controls(self):
         body = self.base_body()
         body.update({
@@ -64,6 +75,47 @@ class GatewayRequestProfileTests(unittest.TestCase):
                 "X-OpenRouter-Metadata": "enabled",
                 "X-OpenRouter-Cache": "false",
             },
+        )
+
+    def test_openrouter_maps_only_deepseek_to_its_request_provider_slug(self):
+        expected_slugs = {
+            "deepseek": "DeepSeek",
+            "openai": "openai",
+            "moonshotai": "moonshotai",
+        }
+        for provider, expected_slug in expected_slugs.items():
+            with self.subTest(provider=provider):
+                body = self.base_body()
+                gateway_profiles.shape_body(
+                    body,
+                    gateway="openrouter",
+                    requested_provider=provider,
+                )
+                self.assertEqual(body["provider"], {
+                    "only": [expected_slug],
+                    "allow_fallbacks": False,
+                })
+
+    def test_rolling_alias_accepts_only_known_deepseek_release_alias(self):
+        shorthand = "deepseek/deepseek-v4-flash-0731"
+        canonical = "deepseek/deepseek-v4-flash-20260731"
+
+        self.assertTrue(
+            gateway_profiles.models_match(shorthand, canonical, "rolling_alias")
+        )
+        self.assertFalse(
+            gateway_profiles.models_match(
+                shorthand,
+                "deepseek/deepseek-v4-flash-20250731",
+                "rolling_alias",
+            )
+        )
+        self.assertFalse(
+            gateway_profiles.models_match(
+                shorthand,
+                "deepseek/deepseek-v4-flash-20260801",
+                "rolling_alias",
+            )
         )
 
     def test_vercel_sends_only_provider_filter_and_no_routing_or_cache_options(self):
@@ -784,6 +836,92 @@ class GatewayEvidenceTests(unittest.TestCase):
         self.assertIn(
             "provider_conflict", contradictory["route_evidence"]["reasons"]
         )
+
+    def test_openrouter_keeps_deepseek_display_evidence_and_strict_comparison(self):
+        requested = "deepseek/deepseek-v4-flash"
+
+        def payload(provider):
+            return sse(
+                {
+                    "model": requested,
+                    "provider": provider,
+                    "choices": [{"delta": {"content": "x"}}],
+                    "openrouter_metadata": {
+                        "requested": requested,
+                        "endpoints": {"available": [{
+                            "provider": provider,
+                            "model": requested,
+                            "selected": True,
+                        }]},
+                        "attempts": [{
+                            "provider": provider,
+                            "model": requested,
+                            "status": 200,
+                        }],
+                    },
+                },
+                "[DONE]",
+            )
+
+        result = self.parse(
+            payload("DeepSeek"),
+            gateway="openrouter",
+            requested_model=requested,
+            requested_provider="deepseek",
+            allowed_models=(requested,),
+            allowed_providers=("deepseek",),
+            model_match="rolling_alias",
+        )
+        self.assertTrue(result["route_evidence"]["pass"], result)
+        self.assertEqual(result["route"]["provider"], "DeepSeek")
+        self.assertEqual(
+            result["route"]["attempts"],
+            [{"provider": "DeepSeek", "model": requested, "status": 200}],
+        )
+
+        contradictory = self.parse(
+            payload("DeepSeek AI"),
+            gateway="openrouter",
+            requested_model=requested,
+            requested_provider="deepseek",
+            allowed_models=(requested,),
+            allowed_providers=("deepseek",),
+            model_match="rolling_alias",
+        )
+        self.assertFalse(contradictory["route_evidence"]["pass"])
+        self.assertIn(
+            "provider_conflict", contradictory["route_evidence"]["reasons"]
+        )
+
+    def test_openrouter_accepts_equivalent_deepseek_revision_spellings(self):
+        requested = "deepseek/deepseek-v4-flash-0731"
+        canonical = "deepseek/deepseek-v4-flash-20260731"
+        result = self.parse(
+            sse(
+                {
+                    "model": requested,
+                    "provider": "DeepSeek",
+                    "choices": [{"delta": {"content": "x"}}],
+                    "openrouter_metadata": {
+                        "requested": requested,
+                        "endpoints": {"available": [{
+                            "provider": "DeepSeek",
+                            "model": canonical,
+                            "selected": True,
+                        }]},
+                    },
+                },
+                "[DONE]",
+            ),
+            gateway="openrouter",
+            requested_model=requested,
+            requested_provider="deepseek",
+            allowed_models=(requested,),
+            allowed_providers=("deepseek",),
+            model_match="rolling_alias",
+        )
+
+        self.assertTrue(result["route_evidence"]["pass"], result)
 
     def test_openrouter_rejects_selected_endpoint_from_other_model_family(self):
         requested = "openai/gpt-4o-mini"

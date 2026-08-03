@@ -96,6 +96,13 @@ four gateways, use
 It schedules five repetitions and caps each generated response at 128 tokens.
 Replace its illustrative 32-hex Cloudflare account ID before running.
 
+For the publish-sized DeepSeek V4 Flash comparison, use
+[`gateway-probe-deepseek-v4-flash-five-way-chat.toml`](../obench/examples/gateway-probe-deepseek-v4-flash-five-way-chat.toml).
+It schedules 50 cold and 50 warm requests per route, locks every gateway to the
+DeepSeek provider, and seals thinking mode with `reasoning_effort = "high"` in
+the experiment and public evidence. Chat Completions is used because all five
+managed routes support that common protocol for this model.
+
 ```bash
 export OPENAI_API_KEY=...
 export OPENROUTER_API_KEY=...
@@ -112,6 +119,8 @@ export OPENBENCH_GATEWAY_FROZEN_PRICES_JSON='{
 ```
 
 The Kimi K3 example uses `MOONSHOT_API_KEY` instead of `OPENAI_API_KEY`.
+The DeepSeek V4 Flash example uses `DEEPSEEK_API_KEY` instead of
+`OPENAI_API_KEY`.
 
 The prices above illustrate the required shape; verify current prices before a
 real run.
@@ -149,6 +158,24 @@ obench gateway probe benchmark \
   --output-dir results/gateway-probe-ci
 ```
 
+For long experiments with short-lived credentials, bound each invocation to a
+fixed number of complete matched blocks and resume against the same directory:
+
+```bash
+obench gateway probe benchmark \
+  obench/examples/gateway-probe-responses.toml \
+  --output-dir results/gateway-probe-ci \
+  --max-blocks 10
+```
+
+`--max-blocks` accepts a positive integer on both `benchmark` and the lower-level
+`run` command. It stops only after complete matched blocks. A complete
+replacement attempt consumes one block from the invocation bound; already
+complete blocks skipped during resume do not. Repeating the command preserves
+the experiment, schedule, price, and row identities and continues with the next
+unfinished schedule coordinate. Omitting the option retains the unbounded
+behavior.
+
 On resume, the exact experiment and canonical price snapshots must match the
 existing directory. The results JSONL is fsynced and resumes only rows bound to
 the immutable experiment, schedule, and price digests. Reports and the manifest
@@ -160,6 +187,12 @@ measured requests and paid warm primers; execution stops
 after the first request that reaches the cap, or after a request whose cost
 cannot be accounted. A partial latest block is replaced as a complete new
 attempt.
+
+A bounded `benchmark` invocation also regenerates the local report and manifest.
+The report's `complete_blocks` and `scheduled_blocks_per_condition` values show
+that the experiment is partial; the local manifest only binds artifact digests
+and does not assert completion. `publish` remains fail-closed until every
+scheduled cold and warm block is complete.
 
 The lower-level `validate`, `doctor`, `run`, and `report` commands remain
 available. `validate`, `doctor`, and `report` make no model API calls.

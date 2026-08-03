@@ -32,6 +32,10 @@ _RETRYABLE_TRANSPORT_DETAILS = frozenset({
 })
 _DEFAULT_RETRY_WAIT_S = 1.0
 _MAX_RETRY_AFTER_S = 86_400.0
+_PRIMER_RECOVERY_REASONS = frozenset({
+    "multiple_attempts",
+    "unsuccessful_attempt",
+})
 
 
 _ROUTE_REASON_STATUS = {
@@ -224,6 +228,13 @@ def request_body(
         "temperature": plan.sampling.temperature,
         "top_p": plan.sampling.top_p,
     })
+    if plan.inference is not None:
+        payload["thinking"] = {"type": plan.inference.thinking}
+        payload["reasoning_effort"] = plan.inference.reasoning_effort
+    gateway_profiles.shape_provider_body(
+        payload,
+        requested_provider=plan.requested_provider,
+    )
     gateway_profiles.strip_cache_controls(payload)
     if plan.route_kind == "gateway":
         if plan.gateway is None:
@@ -385,6 +396,7 @@ def _consume(
     if progress is not None:
         progress.update({
             "http_status": response.status,
+            "receipt_headers": _receipt_headers(raw_response_headers),
             "response_headers_at": response_headers_at,
             "retry_after_status": retry_after_status,
             "retry_after_s": retry_after_s,
@@ -499,6 +511,48 @@ def _route_status(
     return status, normalized_reasons
 
 
+def _primer_route_status(
+    metrics: Mapping[str, Any] | None,
+) -> tuple[str, list[str]]:
+    status, reasons = _route_status(metrics)
+    if status != "failed" or set(reasons) != _PRIMER_RECOVERY_REASONS:
+        return status, reasons
+    route = metrics.get("route") if isinstance(metrics, Mapping) else None
+    attempts = route.get("attempts") if isinstance(route, Mapping) else None
+    if not isinstance(attempts, list) or len(attempts) < 2:
+        return status, reasons
+    normalized = []
+    for attempt in attempts:
+        if (
+            not isinstance(attempt, Mapping)
+            or set(attempt) != {"provider", "model", "status"}
+            or not isinstance(attempt.get("provider"), str)
+            or not attempt["provider"]
+            or not isinstance(attempt.get("model"), str)
+            or not attempt["model"]
+            or not isinstance(attempt.get("status"), int)
+            or isinstance(attempt.get("status"), bool)
+        ):
+            return status, reasons
+        normalized.append((
+            attempt["provider"],
+            attempt["model"],
+            attempt["status"],
+        ))
+    routes = {(provider, model) for provider, model, _status in normalized}
+    success_flags = [
+        200 <= attempt_status < 300
+        for _, _, attempt_status in normalized
+    ]
+    if (
+        len(routes) != 1
+        or success_flags[-1] is not True
+        or any(success_flags[:-1])
+    ):
+        return status, reasons
+    return "verified", reasons
+
+
 def _completion_stream_evidence(stream: Any) -> dict[str, Any] | None:
     if not isinstance(stream, Mapping):
         return None
@@ -561,6 +615,7 @@ def _execute_request_once(
         "setup": {"dns_s": None, "tcp_s": None, "tls_s": None},
         "receipt_headers": {},
         "route_integrity": None,
+        "route": None,
         "usage": None,
         "cache": None,
         "costs": {},
@@ -599,7 +654,9 @@ def _execute_request_once(
             )
             primer["setup"] = dict(connection.phase_s)
             primer["receipt_headers"] = primer_evidence["receipt_headers"]
-            primer_route_status, primer_route_reasons = _route_status(primer_metrics)
+            primer_route_status, primer_route_reasons = _primer_route_status(
+                primer_metrics
+            )
             primer["route_integrity"] = {
                 "status": primer_route_status,
                 "pass": primer_route_status == "verified",
@@ -631,6 +688,7 @@ def _execute_request_once(
                 primer["usage"] = primer_metrics.get("usage")
                 primer["cache"] = gateway_run.cache_accounting(primer_metrics)
                 primer["costs"] = primer_costs
+                primer["route"] = primer_metrics.get("route")
             primer.update({
                 "completed": (
                     200 <= primer_status < 300
@@ -694,6 +752,17 @@ def _execute_request_once(
         error_detail = _transport_error_detail(exc)
     finally:
         connection.close()
+    if primer_attempted:
+        primer["setup"] = dict(connection.phase_s)
+        progress_status = primer_progress.get("http_status")
+        if primer["http_status"] is None and isinstance(progress_status, int):
+            primer["http_status"] = progress_status
+        progress_receipts = primer_progress.get("receipt_headers")
+        if (
+            not primer["receipt_headers"]
+            and isinstance(progress_receipts, Mapping)
+        ):
+            primer["receipt_headers"] = dict(progress_receipts)
     if measured_attempted and status is None:
         progress_status = measured_progress.get("http_status")
         status = progress_status if isinstance(progress_status, int) else None
@@ -829,6 +898,7 @@ def _execute_request_once(
             "retry_after_status",
             "absent",
         ),
+        "receipt_headers": active_progress.get("receipt_headers", {}),
         "phase": "measured" if measured_attempted else (
             "primer" if primer_attempted else "measured"
         ),
@@ -838,14 +908,20 @@ def _execute_request_once(
 
 def _retryable(result: Mapping[str, Any]) -> bool:
     meta = result["_attempt_meta"]
-    if meta["semantic_output_started"]:
-        return False
     outcome = result["outcome"]
+    primer_invalid = (
+        meta["phase"] == "primer"
+        and outcome.get("error_class") == "primer"
+        and outcome.get("error_detail") == "primer_invalid"
+    )
+    if meta["semantic_output_started"] and not primer_invalid:
+        return False
     status = outcome.get("http_status")
     if meta["phase"] == "primer":
         status = result["reuse_evidence"].get("http_status")
     return bool(
-        status in _RETRYABLE_HTTP_STATUSES
+        primer_invalid
+        or status in _RETRYABLE_HTTP_STATUSES
         or outcome.get("timed_out") is True
         or (
             outcome.get("error_class") == "transport"
@@ -885,7 +961,7 @@ def _attempt_public_evidence(
     budget_debit = (
         Decimal(observed_cost) if observed_cost is not None else reservation_usd
     )
-    return {
+    evidence = {
         "attempt_number": attempt_number,
         "phase": meta["phase"],
         "outcome": {
@@ -920,6 +996,7 @@ def _attempt_public_evidence(
             ),
             "attempt_total_s": completed_at - meta["attempt_started_at"],
         },
+        "receipt_headers": dict(meta["receipt_headers"]),
         "retry": {
             "eligible": retry_eligible,
             "retry_after_status": meta["retry_after_status"],
@@ -940,6 +1017,14 @@ def _attempt_public_evidence(
             ),
         },
     }
+    if meta["phase"] == "primer":
+        primer = result["reuse_evidence"]
+        evidence["primer_evidence"] = {
+            "route_integrity": primer.get("route_integrity"),
+            "route": primer.get("route"),
+            "stream": primer.get("stream"),
+        }
+    return evidence
 
 
 def execute_request(

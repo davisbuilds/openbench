@@ -12,7 +12,16 @@
     "title": "Kimi K3 Gateway Bench, 100 requests per route",
     "model": "Kimi K3",
     "date": "2026-07-28",
+    "default": true,
     "run_note": "Five routes, each with 50 cold and 50 warm measured requests. Warm measurements include a separate primer. Routes use rolling Kimi K3 aliases.",
+    "submitter": "OpenBench"
+  },
+  {
+    "id": "2026-08-03-deepseek-v4-flash-100",
+    "title": "DeepSeek V4 Flash Gateway Bench, 100 requests per route",
+    "model": "DeepSeek V4 Flash",
+    "date": "2026-08-03",
+    "run_note": "Five routes, each with 50 cold and 50 warm measured requests. Warm measurements include a separate primer. Gateway routes lock to DeepSeek with fallbacks and response caching disabled. Token counts are route-reported; Cloudflare reported a different input-token denominator from the other routes.",
     "submitter": "OpenBench"
   }
 ]

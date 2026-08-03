@@ -168,6 +168,15 @@ def build_private_run(
         item["request_metrics"]["route"]["gateway_metadata"] = {
             "generationId": f"generation-{arm_id}-1",
         }
+        if schedule_identity["condition"] == "warm":
+            item["reuse_evidence"]["route"] = {
+                "requested_model": "openai/gpt-4o-mini",
+                "served_model": "openai/gpt-4o-mini",
+                "provider": "openai",
+                "gateway_metadata": {
+                    "generationId": f"primer-generation-{arm_id}-1",
+                },
+            }
         item["cell_id"] = gateway_probe_results.cell_id(item["identity"])
     if with_retry:
         rescued = rows[0]
@@ -199,6 +208,9 @@ def build_private_run(
                 "wait_requested_s": 0.2,
                 "wait_actual_s": 0.2,
                 "not_retried_reason": None,
+            },
+            "receipt_headers": {
+                "x-request-id": "private-retry-receipt",
             },
             "cost": {
                 "primer_cost_usd": None,
@@ -422,6 +434,21 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
             self.assertTrue(all(
                 not item["request_metrics"]["receipt_headers"]
                 and not item["reuse_evidence"]["receipt_headers"]
+                and all(
+                    not attempt.get("receipt_headers")
+                    for attempt in item["retry_evidence"]["attempts"]
+                )
+                for item in rows
+            ))
+            self.assertTrue(all(
+                "generationId"
+                not in (
+                    item["request_metrics"].get("route") or {}
+                ).get("gateway_metadata", {})
+                and "generationId"
+                not in (
+                    item["reuse_evidence"].get("route") or {}
+                ).get("gateway_metadata", {})
                 for item in rows
             ))
             self.assertTrue(all(
