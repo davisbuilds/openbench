@@ -66,6 +66,25 @@ class GatewayRequestProfileTests(unittest.TestCase):
             },
         )
 
+    def test_openrouter_maps_only_deepseek_to_its_request_provider_slug(self):
+        expected_slugs = {
+            "deepseek": "DeepSeek",
+            "openai": "openai",
+            "moonshotai": "moonshotai",
+        }
+        for provider, expected_slug in expected_slugs.items():
+            with self.subTest(provider=provider):
+                body = self.base_body()
+                gateway_profiles.shape_body(
+                    body,
+                    gateway="openrouter",
+                    requested_provider=provider,
+                )
+                self.assertEqual(body["provider"], {
+                    "only": [expected_slug],
+                    "allow_fallbacks": False,
+                })
+
     def test_vercel_sends_only_provider_filter_and_no_routing_or_cache_options(self):
         body = self.base_body()
         body["providerOptions"] = {
@@ -778,6 +797,62 @@ class GatewayEvidenceTests(unittest.TestCase):
             requested_provider="moonshotai",
             allowed_models=(requested,),
             allowed_providers=("moonshotai",),
+            model_match="rolling_alias",
+        )
+        self.assertFalse(contradictory["route_evidence"]["pass"])
+        self.assertIn(
+            "provider_conflict", contradictory["route_evidence"]["reasons"]
+        )
+
+    def test_openrouter_keeps_deepseek_display_evidence_and_strict_comparison(self):
+        requested = "deepseek/deepseek-v4-flash"
+
+        def payload(provider):
+            return sse(
+                {
+                    "model": requested,
+                    "provider": provider,
+                    "choices": [{"delta": {"content": "x"}}],
+                    "openrouter_metadata": {
+                        "requested": requested,
+                        "endpoints": {"available": [{
+                            "provider": provider,
+                            "model": requested,
+                            "selected": True,
+                        }]},
+                        "attempts": [{
+                            "provider": provider,
+                            "model": requested,
+                            "status": 200,
+                        }],
+                    },
+                },
+                "[DONE]",
+            )
+
+        result = self.parse(
+            payload("DeepSeek"),
+            gateway="openrouter",
+            requested_model=requested,
+            requested_provider="deepseek",
+            allowed_models=(requested,),
+            allowed_providers=("deepseek",),
+            model_match="rolling_alias",
+        )
+        self.assertTrue(result["route_evidence"]["pass"], result)
+        self.assertEqual(result["route"]["provider"], "DeepSeek")
+        self.assertEqual(
+            result["route"]["attempts"],
+            [{"provider": "DeepSeek", "model": requested, "status": 200}],
+        )
+
+        contradictory = self.parse(
+            payload("DeepSeek AI"),
+            gateway="openrouter",
+            requested_model=requested,
+            requested_provider="deepseek",
+            allowed_models=(requested,),
+            allowed_providers=("deepseek",),
             model_match="rolling_alias",
         )
         self.assertFalse(contradictory["route_evidence"]["pass"])

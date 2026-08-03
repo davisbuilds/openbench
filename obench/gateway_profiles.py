@@ -26,6 +26,9 @@ _CONCENTRATE_ENDPOINTS = {
 _CONCENTRATE_PROVIDER_SLUGS = {
     "moonshotai": "moonshot",
 }
+_OPENROUTER_PROVIDER_SLUGS = {
+    "deepseek": "DeepSeek",
+}
 _PROVIDER_IDENTITY_ALIASES = {
     "moonshot ai": "moonshotai",
 }
@@ -140,6 +143,11 @@ def _model_alias(value: str) -> str:
 def _concentrate_provider_slug(value: str) -> str:
     provider = _provider_identity(value)
     return _CONCENTRATE_PROVIDER_SLUGS.get(provider, provider)
+
+
+def _openrouter_provider_slug(value: str) -> str:
+    provider = _provider_identity(value)
+    return _OPENROUTER_PROVIDER_SLUGS.get(provider, provider)
 
 
 def validate_arm(
@@ -261,7 +269,7 @@ def shape_body(
         for key in routing_keys:
             payload.pop(key, None)
         payload["provider"] = {
-            "only": [requested_provider],
+            "only": [_openrouter_provider_slug(requested_provider)],
             "allow_fallbacks": False,
         }
         return
