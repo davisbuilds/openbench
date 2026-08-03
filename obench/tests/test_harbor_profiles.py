@@ -31,7 +31,10 @@ class HarborProfileTests(unittest.TestCase):
     def test_resolves_exact_agent_identity_versions_models_and_flags(self):
         expected = {
             "codex": (
-                "obench.harbor_agents.codex:OpenBenchCodexOAuth",
+                (
+                    "obench.harbor_agents.codex_profile:"
+                    "OpenBenchCodexOAuthProfile"
+                ),
                 "0.144.5",
                 "gpt-5.6-sol",
                 {"reasoning_effort": "medium"},
@@ -87,9 +90,12 @@ class HarborProfileTests(unittest.TestCase):
             {
                 "name": None,
                 "import_path": (
-                    "obench.harbor_agents.codex:OpenBenchCodexOAuth"
+                    "obench.harbor_agents.codex_profile:"
+                    "OpenBenchCodexOAuthProfile"
                 ),
                 "model_name": "gpt-5.6-sol",
+                "n_concurrent": 1,
+                "concurrency_group": "openbench-oauth-codex",
                 "kwargs": {
                     "version": "0.144.5",
                     "reasoning_effort": "medium",
@@ -133,6 +139,10 @@ class HarborProfileTests(unittest.TestCase):
                 self.assertTrue(profile.auth.persist_back)
                 self.assertTrue(profile.auth.lease_required)
                 self.assertEqual(profile.auth.max_concurrent_uses, 1)
+                self.assertEqual(
+                    profile.auth.concurrency_group,
+                    f"openbench-oauth-{harness}",
+                )
 
     def test_proxy_contract_and_injection_are_explicit(self):
         codex = resolve_harbor_profile(

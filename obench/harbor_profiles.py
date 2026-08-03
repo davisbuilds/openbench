@@ -15,7 +15,9 @@ from typing import Any
 HARBOR_VERSION = "0.20.0"
 AUTH_STRATEGY_OAUTH = "oauth"
 
-_CODEX_IMPORT = "obench.harbor_agents.codex:OpenBenchCodexOAuth"
+_CODEX_IMPORT = (
+    "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile"
+)
 _PI_IMPORT = "obench.harbor_agents.pi:OpenBenchPiOAuth"
 _OPENCODE_IMPORT = "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth"
 
@@ -42,6 +44,7 @@ class HarborAuthContract:
     persist_back: bool = True
     lease_required: bool = True
     max_concurrent_uses: int = 1
+    concurrency_group: str = ""
 
 
 @dataclass(frozen=True)
@@ -105,6 +108,8 @@ class HarborHarnessProfile:
             "name": None,
             "import_path": self.agent_import_path,
             "model_name": self.harbor_model_name,
+            "n_concurrent": self.auth.max_concurrent_uses,
+            "concurrency_group": self.auth.concurrency_group,
             "kwargs": self.agent_kwargs(),
             "env": env,
         }
@@ -116,12 +121,14 @@ _AUTH = {
         source_candidates=("~/.codex/auth.json",),
         input_env="CODEX_AUTH_JSON_PATH",
         return_env="OPENBENCH_CODEX_AUTH_RETURN_PATH",
+        concurrency_group="openbench-oauth-codex",
     ),
     "pi": HarborAuthContract(
         strategy=AUTH_STRATEGY_OAUTH,
         source_candidates=("~/.pi/agent/auth.json",),
         input_env="OPENBENCH_PI_AUTH_JSON_PATH",
         return_env="OPENBENCH_PI_AUTH_RETURN_PATH",
+        concurrency_group="openbench-oauth-pi",
     ),
     "opencode": HarborAuthContract(
         strategy=AUTH_STRATEGY_OAUTH,
@@ -131,6 +138,7 @@ _AUTH = {
         ),
         input_env="OPENBENCH_OPENCODE_AUTH_JSON_PATH",
         return_env="OPENBENCH_OPENCODE_AUTH_RETURN_PATH",
+        concurrency_group="openbench-oauth-opencode",
     ),
 }
 
