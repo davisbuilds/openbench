@@ -23,6 +23,26 @@ no separate fallback page.
 
 The page is generated, never edited by hand.
 
+## Finalized release boundary
+
+`docs/releases/` is an allowlisted publication root, not a directory-discovery
+source. A Harness Bench release appears on the public site only when its
+`docs/releases.json` entry explicitly contains `"status": "final"` and its
+directory is present under `docs/releases/<id>/`.
+
+The boundary fails closed. `obench site build` rejects the entire build when a
+release entry is missing `status`, has any status other than `final`, names a
+missing directory, uses any path other than
+`releases/<id>/index.html`, lacks that canonical regular HTML file, or when
+`docs/releases/` contains an unlisted directory or non-directory entry.
+Verification and smoke artifacts that are not publication decisions belong
+under `data/verification/`, where `obench verify` can still check them without
+exposing them through GitHub Pages.
+
+`obench report --site-dir ...` creates finalized releases and writes
+`"status": "final"` into the generated manifest entry. Do not use the site
+publisher for draft or internal evidence.
+
 An optional `site-meta.json` in the site root supplies the official
 deployment's canonical URL and absolute social-preview image URL. Only
 HTTP(S) values render. The preview remains a committed site asset, so it can
