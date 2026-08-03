@@ -24,6 +24,7 @@ from obench.harbor_results import (
     load_rows,
 )
 from obench.harbor_oauth import AGENT_IMPORT_PATH
+from obench.harbor_profiles import OPENCODE_PROFILE_IMPORT
 from obench.run import ROW_FIELDS
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -983,6 +984,43 @@ class HarborResultsTests(unittest.TestCase):
 
         self.assertEqual(
             load_rows(fixture.root)[0]["model"],
+            "openai/gpt-5.6-sol",
+        )
+
+    def test_profile_atif_steps_accept_only_the_canonical_model_identity(self):
+        fixture = self.qualified_model_fixture(
+            "profile-canonical-step-model",
+            top_level_model="openai/gpt-5.6-sol",
+            step_model="gpt-5.6-sol",
+        )
+        lock_path = fixture.trial() / "lock.json"
+        trial_lock = json.loads(lock_path.read_text())
+        trial_lock["agent"].pop("name")
+        trial_lock["agent"]["import_path"] = OPENCODE_PROFILE_IMPORT
+        _write_json(lock_path, trial_lock)
+
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"][0] = trial_lock
+        _write_json(job_lock_path, job_lock)
+
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["config"]["agent"]["name"] = None
+        result["config"]["agent"]["import_path"] = OPENCODE_PROFILE_IMPORT
+        result["agent_info"]["name"] = "opencode"
+        _write_json(result_path, result)
+
+        trajectory_path = fixture.trial() / "agent" / "trajectory.json"
+        trajectory = json.loads(trajectory_path.read_text())
+        trajectory["agent"]["name"] = "opencode"
+        _write_json(trajectory_path, trajectory)
+
+        row = load_rows(fixture.root)[0]
+
+        self.assertEqual(row["model"], "gpt-5.6-sol")
+        self.assertEqual(
+            row["candidate_provenance"]["harbor_model_name"],
             "openai/gpt-5.6-sol",
         )
 

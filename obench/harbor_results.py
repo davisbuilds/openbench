@@ -1140,6 +1140,7 @@ def _validate_atif(
     agent_name: str,
     agent_version: str,
     lock_model: str,
+    canonical_model: str,
     reported_model_name: str,
     location: str,
 ) -> tuple[Path, dict[str, Any], int, dict[str, Any]]:
@@ -1161,6 +1162,7 @@ def _validate_atif(
         None,
         reported_model_name,
         lock_model,
+        canonical_model,
     ):
         raise _fail(
             f"{location}.ATIF.agent.model_name",
@@ -1170,7 +1172,11 @@ def _validate_atif(
         if (
             isinstance(step, dict)
             and step.get("source") == "agent"
-            and step.get("model_name") not in (None, lock_model)
+            and step.get("model_name") not in (
+                None,
+                lock_model,
+                canonical_model,
+            )
         ):
             raise _fail(
                 f"{location}.ATIF.steps[{index}].model_name",
@@ -1386,6 +1392,7 @@ def _validate_trial(
         agent_name,
         agent_version,
         model,
+        canonical_model,
         model_name,
         location,
     )
