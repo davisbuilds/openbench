@@ -7,19 +7,12 @@ under :mod:`obench.harbor_agents.codex` performs that import lazily.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import os
-from pathlib import Path
 import shutil
 import stat
 import tempfile
 
 from . import auth_persist
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - OpenBench runners are Unix hosts
-    fcntl = None
 
 
 CODEX_AUTH_JSON_PATH = "CODEX_AUTH_JSON_PATH"
@@ -77,10 +70,6 @@ class HarborOAuthConfig:
         return {"extra_env": self.agent_extra_env()}
 
 
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
 def _read_regular_file(path: str, *, label: str) -> bytes:
     try:
         info = os.lstat(path)
@@ -92,65 +81,30 @@ def _read_regular_file(path: str, *, label: str) -> bytes:
         return fh.read()
 
 
-def _atomic_replace_bytes(path: str, content: bytes) -> None:
-    parent = os.path.dirname(os.path.abspath(path))
-    fd, temp_path = tempfile.mkstemp(prefix=".harbor-auth-persist-", dir=parent)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as fh:
-            fd = -1
-            fh.write(content)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(temp_path, path)
-        temp_path = ""
-        os.chmod(path, 0o600)
-        try:
-            dir_fd = os.open(parent, os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except OSError:
-            pass
-    finally:
-        if fd >= 0:
-            os.close(fd)
-        if temp_path:
-            try:
-                os.unlink(temp_path)
-            except FileNotFoundError:
-                pass
-
-
 def persist_auth_file_cas(
     copy_path: str,
     master_path: str,
     expected_sha256: str,
 ) -> bool:
     """Persist a valid rotation only if the staged master generation is current."""
-    updated = _read_regular_file(copy_path, label="returned auth.json")
-    resolved_master = os.path.realpath(master_path)
-
-    with auth_persist._lock(resolved_master):
-        try:
-            with open(resolved_master, "rb") as fh:
-                current = fh.read()
-        except FileNotFoundError as exc:
-            raise HarborOAuthSetupError("auth master disappeared during the trial") from exc
-
-        if _sha256(current) != expected_sha256:
-            raise StaleCredentialError(
-                "auth master changed after Harbor staged its credential; "
-                "refusing stale persist-back"
-            )
-        if current == updated:
-            return False
-
-        # Reuse OpenBench's schema and immutable-account validator.
-        auth_persist._validated_auth_bytes(current, updated)
-        _atomic_replace_bytes(resolved_master, updated)
-    return True
+    _read_regular_file(copy_path, label="returned auth.json")
+    try:
+        with auth_persist.auth_file_lease(master_path) as lease:
+            if lease.generation != expected_sha256:
+                raise StaleCredentialError(
+                    "auth master changed after Harbor staged its credential; "
+                    "refusing stale persist-back"
+                )
+            return lease.persist(copy_path)
+    except FileNotFoundError as exc:
+        raise HarborOAuthSetupError(
+            "auth master disappeared during the trial"
+        ) from exc
+    except auth_persist.StaleCredentialGenerationError as exc:
+        raise StaleCredentialError(
+            "auth master changed after Harbor staged its credential; "
+            "refusing stale persist-back"
+        ) from exc
 
 
 class HarborOAuthCredential:
@@ -162,54 +116,44 @@ class HarborOAuthCredential:
         self._temp_dir: str | None = None
         self._input_path: str | None = None
         self._return_path: str | None = None
-        self._expected_sha256: str | None = None
-        self._run_lock_fd: int | None = None
+        self._lease: auth_persist.AuthFileLease | None = None
         self._entered = False
         self.persisted = False
 
-    def _acquire_run_lock(self) -> None:
-        if fcntl is None:
-            raise HarborOAuthSetupError(
-                "Harbor OAuth credential locking requires fcntl on a Unix host"
-            )
-        lock_path = self._resolved_master + ".harbor-oauth-run.lock"
-        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-        os.chmod(lock_path, 0o600)
+    def _acquire_lease(self) -> None:
+        lease = auth_persist.auth_file_lease(
+            self._resolved_master, blocking=False
+        )
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            os.close(fd)
+            lease.__enter__()
+        except auth_persist.CredentialLeaseUnavailableError as exc:
             raise ConcurrentCredentialUseError(
-                "a Harbor OAuth trial already owns this credential"
+                "another OpenBench or Harbor run already owns this credential"
             ) from exc
-        self._run_lock_fd = fd
+        except (OSError, RuntimeError) as exc:
+            raise HarborOAuthSetupError(
+                "Harbor OAuth credential locking is unavailable"
+            ) from exc
+        self._lease = lease
 
-    def _release_run_lock(self) -> None:
-        if self._run_lock_fd is None:
+    def _release_lease(self) -> None:
+        if self._lease is None:
             return
-        try:
-            fcntl.flock(self._run_lock_fd, fcntl.LOCK_UN)
-        finally:
-            os.close(self._run_lock_fd)
-            self._run_lock_fd = None
+        lease = self._lease
+        self._lease = None
+        lease.__exit__(None, None, None)
 
     def __enter__(self) -> "HarborOAuthCredential":
         if self._entered:
             raise HarborOAuthSetupError("HarborOAuthCredential contexts are single-use")
         self._entered = True
         try:
-            self._acquire_run_lock()
-            original = _read_regular_file(
-                self._resolved_master, label="Codex auth master"
-            )
-            self._expected_sha256 = _sha256(original)
+            self._acquire_lease()
             self._temp_dir = tempfile.mkdtemp(prefix="obench_harbor_oauth_")
             os.chmod(self._temp_dir, 0o700)
             self._input_path = os.path.join(self._temp_dir, "auth.json")
             self._return_path = os.path.join(self._temp_dir, "auth-return.json")
-            with open(self._input_path, "wb") as fh:
-                fh.write(original)
-            os.chmod(self._input_path, 0o600)
+            self._lease.stage(self._input_path)
             return self
         except BaseException:
             self._cleanup()
@@ -230,11 +174,13 @@ class HarborOAuthCredential:
                 "Harbor Codex did not return auth.json before cleanup"
             )
         os.chmod(self._return_path, 0o600)
-        self.persisted = persist_auth_file_cas(
-            self._return_path,
-            self._resolved_master,
-            self._expected_sha256 or "",
-        )
+        try:
+            self.persisted = self._lease.persist(self._return_path)
+        except auth_persist.StaleCredentialGenerationError as exc:
+            raise StaleCredentialError(
+                "auth master changed after Harbor staged its credential; "
+                "refusing stale persist-back"
+            ) from exc
 
     def _cleanup(self) -> None:
         if self._temp_dir:
@@ -242,8 +188,7 @@ class HarborOAuthCredential:
         self._temp_dir = None
         self._input_path = None
         self._return_path = None
-        self._expected_sha256 = None
-        self._release_run_lock()
+        self._release_lease()
 
     def __exit__(self, exc_type, exc, traceback) -> bool:
         try:

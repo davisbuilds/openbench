@@ -15,6 +15,7 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest import mock
 
+from obench import auth_persist
 from obench import harbor_oauth
 from obench.harbor_agents import codex as harbor_codex_agent
 
@@ -182,6 +183,23 @@ class HostOAuthContextTests(unittest.TestCase):
         with first as active:
             with self.assertRaises(harbor_oauth.ConcurrentCredentialUseError):
                 second.__enter__()
+            _copy_input_to_return(active.config)
+
+    def test_rejects_harbor_while_native_consumer_owns_shared_lease(self):
+        with auth_persist.auth_file_lease(self.master):
+            with self.assertRaises(harbor_oauth.ConcurrentCredentialUseError):
+                with harbor_oauth.build_harbor_oauth_context(self.master):
+                    self.fail("Harbor unexpectedly acquired the native lease")
+
+    def test_harbor_lease_blocks_other_shared_consumer(self):
+        with harbor_oauth.build_harbor_oauth_context(self.master) as active:
+            with self.assertRaises(
+                auth_persist.CredentialLeaseUnavailableError
+            ):
+                with auth_persist.auth_file_lease(
+                    self.master, blocking=False
+                ):
+                    self.fail("native consumer unexpectedly acquired Harbor lease")
             _copy_input_to_return(active.config)
 
     def test_cas_rejects_stale_rotation_without_overwriting_newer_master(self):
