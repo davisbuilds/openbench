@@ -756,6 +756,8 @@ def _validate_retry_evidence(value: Any, *, condition: str) -> None:
         }
         if isinstance(raw, Mapping) and "receipt_headers" in raw:
             attempt_fields.add("receipt_headers")
+        if isinstance(raw, Mapping) and "primer_evidence" in raw:
+            attempt_fields.add("primer_evidence")
         attempt = _exact_mapping(raw, attempt_fields, "retry attempt")
         if attempt.get("attempt_number") != index or attempt.get("phase") not in {
             "primer",
@@ -784,6 +786,28 @@ def _validate_retry_evidence(value: Any, *, condition: str) -> None:
             _validate_receipts(
                 attempt.get("receipt_headers"),
                 "retry attempt receipts",
+            )
+        if "primer_evidence" in attempt:
+            if attempt.get("phase") != "primer":
+                raise GatewayProbeRunError(
+                    "measured retry attempt contains primer evidence"
+                )
+            primer_evidence = _exact_mapping(
+                attempt.get("primer_evidence"),
+                {"route_integrity", "route", "stream"},
+                "retry attempt primer evidence",
+            )
+            _validate_route_integrity(
+                primer_evidence.get("route_integrity"),
+                "retry attempt primer route integrity",
+            )
+            _validate_route(
+                primer_evidence.get("route"),
+                "retry attempt primer route",
+            )
+            _validate_primer_stream(
+                primer_evidence.get("stream"),
+                "retry attempt primer stream",
             )
         decision = _exact_mapping(
             attempt.get("retry"),
@@ -837,17 +861,25 @@ def _validate_retry_evidence(value: Any, *, condition: str) -> None:
             raise GatewayProbeRunError(
                 "results row has malformed retry attempt decision"
             )
+        primer_invalid = (
+            attempt.get("phase") == "primer"
+            and attempt_outcome["error_class"] == "primer"
+            and attempt_outcome["error_detail"] == "primer_invalid"
+        )
         expected_eligible = bool(
-            not attempt_outcome["semantic_output_started"]
-            and (
-                attempt_outcome["http_status"] in {429, 502, 503, 504}
-                or attempt_outcome["timed_out"]
-                or (
-                    attempt_outcome["error_class"] == "transport"
-                    and attempt_outcome["error_detail"] in {
-                        "connection_reset",
-                        "connection_closed",
-                    }
+            primer_invalid
+            or (
+                not attempt_outcome["semantic_output_started"]
+                and (
+                    attempt_outcome["http_status"] in {429, 502, 503, 504}
+                    or attempt_outcome["timed_out"]
+                    or (
+                        attempt_outcome["error_class"] == "transport"
+                        and attempt_outcome["error_detail"] in {
+                            "connection_reset",
+                            "connection_closed",
+                        }
+                    )
                 )
             )
         )

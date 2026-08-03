@@ -897,14 +897,20 @@ def _execute_request_once(
 
 def _retryable(result: Mapping[str, Any]) -> bool:
     meta = result["_attempt_meta"]
-    if meta["semantic_output_started"]:
-        return False
     outcome = result["outcome"]
+    primer_invalid = (
+        meta["phase"] == "primer"
+        and outcome.get("error_class") == "primer"
+        and outcome.get("error_detail") == "primer_invalid"
+    )
+    if meta["semantic_output_started"] and not primer_invalid:
+        return False
     status = outcome.get("http_status")
     if meta["phase"] == "primer":
         status = result["reuse_evidence"].get("http_status")
     return bool(
-        status in _RETRYABLE_HTTP_STATUSES
+        primer_invalid
+        or status in _RETRYABLE_HTTP_STATUSES
         or outcome.get("timed_out") is True
         or (
             outcome.get("error_class") == "transport"
@@ -944,7 +950,7 @@ def _attempt_public_evidence(
     budget_debit = (
         Decimal(observed_cost) if observed_cost is not None else reservation_usd
     )
-    return {
+    evidence = {
         "attempt_number": attempt_number,
         "phase": meta["phase"],
         "outcome": {
@@ -1000,6 +1006,14 @@ def _attempt_public_evidence(
             ),
         },
     }
+    if meta["phase"] == "primer":
+        primer = result["reuse_evidence"]
+        evidence["primer_evidence"] = {
+            "route_integrity": primer.get("route_integrity"),
+            "route": primer.get("route"),
+            "stream": primer.get("stream"),
+        }
+    return evidence
 
 
 def execute_request(
