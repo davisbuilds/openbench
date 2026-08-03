@@ -1,6 +1,7 @@
 """Regression tests for rotating OAuth credential persist-back."""
 
 import importlib.util
+import hashlib
 import os
 
 BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -108,6 +109,71 @@ class TestAtomicPersist(unittest.TestCase):
                                side_effect=PermissionError("synthetic")), \
                 mock.patch.object(auth_persist.sys, "stderr"):
             self.assertFalse(auth_persist.try_persist_auth_file("copy", "master"))
+
+
+class TestAuthFileLease(unittest.TestCase):
+    def test_lease_stages_generation_and_persists_rotation(self):
+        with tempfile.TemporaryDirectory() as td:
+            master = os.path.join(td, "auth.json")
+            copy = os.path.join(td, "isolated", "auth.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+
+            with auth_persist.auth_file_lease(master) as lease:
+                lease.stage(copy)
+                self.assertEqual(
+                    lease.generation,
+                    hashlib.sha256(
+                        b'{"account_id":"owner","refresh_token":"old"}'
+                    ).hexdigest(),
+                )
+                with open(copy, "wb") as fh:
+                    fh.write(b'{"account_id":"owner","refresh_token":"new"}')
+                self.assertTrue(lease.persist(copy))
+
+            with open(master, "rb") as fh:
+                self.assertEqual(
+                    fh.read(),
+                    b'{"account_id":"owner","refresh_token":"new"}',
+                )
+            self.assertEqual(stat.S_IMODE(os.stat(master).st_mode), 0o600)
+
+    def test_nonblocking_consumer_rejects_active_lease(self):
+        with tempfile.TemporaryDirectory() as td:
+            master = os.path.join(td, "auth.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"refresh_token":"old"}')
+
+            with auth_persist.auth_file_lease(master):
+                with self.assertRaises(
+                    auth_persist.CredentialLeaseUnavailableError
+                ):
+                    with auth_persist.auth_file_lease(master, blocking=False):
+                        self.fail("second lease unexpectedly acquired")
+
+    def test_cas_rejects_noncooperating_master_replacement(self):
+        with tempfile.TemporaryDirectory() as td:
+            master = os.path.join(td, "auth.json")
+            copy = os.path.join(td, "copy.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+
+            with auth_persist.auth_file_lease(master) as lease:
+                lease.stage(copy)
+                with open(copy, "wb") as fh:
+                    fh.write(b'{"account_id":"owner","refresh_token":"rotated"}')
+                with open(master, "wb") as fh:
+                    fh.write(b'{"account_id":"owner","refresh_token":"newer"}')
+                with self.assertRaises(
+                    auth_persist.StaleCredentialGenerationError
+                ):
+                    lease.persist(copy)
+
+            with open(master, "rb") as fh:
+                self.assertEqual(
+                    fh.read(),
+                    b'{"account_id":"owner","refresh_token":"newer"}',
+                )
 
 
 class TestLocalAdapterPersist(unittest.TestCase):
