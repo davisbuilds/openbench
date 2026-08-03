@@ -766,13 +766,18 @@ def _local_adapter_worker_main(spec_path, result_path):
             "error": f"{type(exc).__name__}: {exc}",
             "traceback": traceback.format_exc(limit=8),
         }
-    fd = os.open(result_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    pending_path = result_path + ".pending"
+    fd = os.open(pending_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(payload, fh)
         fh.flush()
         os.fsync(fh.fileno())
-    return 0 if payload["ok"] else 1
+    os.replace(pending_path, result_path)
+    # Keep the session leader alive until the supervisor has consumed the
+    # durable payload and terminates the complete process group.
+    while True:
+        signal.pause()
 
 
 def _owned_process_group_exists(pgid):
@@ -854,19 +859,30 @@ def _run_local_adapter_supervised(
             start_new_session=True,
         )
         execution_context["local_process"] = proc
-        returncode = proc.wait()
-        if not os.path.isfile(result_path):
-            raise RuntimeError(
-                f"local adapter worker exited {returncode} without a result"
-            )
-        with open(result_path, encoding="utf-8") as fh:
-            payload = json.load(fh)
-        if not payload.get("ok"):
-            raise RuntimeError(
-                "local adapter worker failed: "
-                + str(payload.get("error") or payload.get("traceback"))
-            )
-        return payload["result"]
+        try:
+            while not os.path.isfile(result_path):
+                returncode = proc.poll()
+                if returncode is not None:
+                    raise RuntimeError(
+                        f"local adapter worker exited {returncode} without a result"
+                    )
+                time.sleep(0.01)
+            with open(result_path, encoding="utf-8") as fh:
+                payload = json.load(fh)
+            if not payload.get("ok"):
+                raise RuntimeError(
+                    "local adapter worker failed: "
+                    + str(payload.get("error") or payload.get("traceback"))
+                )
+            return payload["result"]
+        finally:
+            terminated = _terminate_owned_process_group(proc)
+            if execution_context.get("local_process") is proc:
+                execution_context.pop("local_process", None)
+            if not terminated:
+                raise RuntimeError(
+                    "local adapter worker process group survived bounded cleanup"
+                )
 
 
 def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,

@@ -188,6 +188,60 @@ class FailureClassStalledTests(unittest.TestCase):
 
 
 class StallTerminationTests(unittest.TestCase):
+    def test_successful_local_worker_reaps_descendants_and_preserves_result(self):
+        with tempfile.TemporaryDirectory(prefix="local_worker_success_") as root_value:
+            root = pathlib.Path(root_value)
+            adapters = root / "adapters"
+            adapters.mkdir()
+            child_pid_path = root / "child.pid"
+            expected = {
+                "completed": True,
+                "error": None,
+                "tokens": 17,
+                "turns": 2,
+                "cmd": ["fixture"],
+                "output_tail": "finished",
+            }
+            (adapters / "pi.py").write_text(
+                "import pathlib, subprocess\n"
+                "def run(_instruction, _workdir, _model, _timeout):\n"
+                "    child = subprocess.Popen(['sleep', '30'])\n"
+                f"    pathlib.Path({str(child_pid_path)!r}).write_text(str(child.pid))\n"
+                f"    return {expected!r}\n",
+                encoding="utf-8",
+            )
+            unrelated = subprocess.Popen(
+                ["sleep", "30"], start_new_session=True)
+            child_pid = None
+            try:
+                result = bench_run._run_local_adapter_supervised(
+                    "pi",
+                    "finish",
+                    str(root),
+                    "fixture-model",
+                    5,
+                    str(adapters),
+                    None,
+                    {},
+                    {"activate": lambda: None},
+                )
+                child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+
+                self.assertEqual(result, expected)
+                self.assertIsNone(unrelated.poll())
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(child_pid, 0)
+            finally:
+                if child_pid is None and child_pid_path.exists():
+                    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, bench_run.signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                unrelated.terminate()
+                unrelated.wait(timeout=5)
+
     def test_watchdog_sets_event_only_after_bounded_termination(self):
         proxy_server = mock.Mock()
         proxy_server.cell_last_activity_age.return_value = 10_000.0
