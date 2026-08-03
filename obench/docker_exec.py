@@ -763,14 +763,16 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             setattr(exc, "bench_agent_wall_time_s", 0.0)
         raise
     finally:
-        if auth_return_dir is not None:
-            try:
-                _persist_returned_auth(
-                    auth_return_dir, auth_persist_targets, auth_leases
-                )
-            finally:
-                shutil.rmtree(auth_return_dir, ignore_errors=True)
-        auth_lease_stack.close()
+        try:
+            if auth_return_dir is not None:
+                try:
+                    _persist_returned_auth(
+                        auth_return_dir, auth_persist_targets, auth_leases
+                    )
+                finally:
+                    shutil.rmtree(auth_return_dir, ignore_errors=True)
+        finally:
+            auth_lease_stack.close()
         if instruction_path is not None:
             os.unlink(instruction_path)
         if candidate_spec_path is not None:

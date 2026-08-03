@@ -311,6 +311,67 @@ class TestDockerPersistPlumbing(unittest.TestCase):
             with open(master, "rb") as fh:
                 self.assertIn(b'"rotated"', fh.read())
 
+    def test_container_releases_lease_when_persist_raises_unexpectedly(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = os.path.join(td, "home")
+            scratch = os.path.join(td, "scratch")
+            os.makedirs(os.path.join(home, ".codex"))
+            master = os.path.join(home, ".codex", "auth.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+            original_expanduser = os.path.expanduser
+            proc = SimpleNamespace(
+                timed_out=False,
+                stdout=(
+                    docker_exec.RESULT_SENTINEL
+                    + ' {"completed": true}\n'
+                ),
+                stderr="",
+                returncode=0,
+                host_wall_time_s=0.01,
+            )
+
+            with mock.patch.dict(
+                os.environ, {"OPENBENCH_DOCKER_TMPDIR": scratch}, clear=False
+            ), mock.patch.object(
+                os.path,
+                "expanduser",
+                side_effect=lambda path: (
+                    home if path == "~" else original_expanduser(path)
+                ),
+            ), mock.patch.object(
+                docker_exec, "preflight"
+            ), mock.patch.object(
+                docker_exec, "image_digest", return_value=None
+            ), mock.patch.object(
+                docker_exec,
+                "_run_docker_client_with_deadline",
+                return_value=proc,
+            ), mock.patch.object(
+                docker_exec, "_force_remove_container", return_value=True
+            ), mock.patch.object(
+                docker_exec,
+                "_persist_returned_auth",
+                side_effect=RuntimeError("synthetic unexpected failure"),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "synthetic unexpected failure"
+                ):
+                    docker_exec.run_in_container(
+                        "codex",
+                        "task",
+                        td,
+                        "gpt-5.5-medium",
+                        10,
+                        ADAPTERS_DIR,
+                        image="synthetic",
+                    )
+
+            with auth_persist.auth_file_lease(
+                master, blocking=False
+            ):
+                pass
+
     def test_build_command_mounts_writable_return_directory(self):
         with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as returned:
             auth = os.path.join(home, ".pi", "agent", "auth.json")
