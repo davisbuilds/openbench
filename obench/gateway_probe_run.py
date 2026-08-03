@@ -177,7 +177,17 @@ def run_experiment(
     environ: Mapping[str, str] | None = None,
     force: bool = False,
     allow_cost_unavailable_block_recovery: bool = False,
+    max_blocks: int | None = None,
 ) -> RunSummary:
+    if (
+        max_blocks is not None
+        and (
+            not isinstance(max_blocks, int)
+            or isinstance(max_blocks, bool)
+            or max_blocks < 1
+        )
+    ):
+        raise GatewayProbeRunError("max_blocks must be a positive integer")
     if force and allow_cost_unavailable_block_recovery:
         raise GatewayProbeRunError(
             "cost-unavailable block recovery cannot be combined with force"
@@ -232,7 +242,7 @@ def run_experiment(
         row for row in rows if _budget_stop_reason(row) is not None
     ]
     stop_for_budget = spent >= usd_cap or bool(stopped_rows)
-    appended = completed = replaced = skipped = 0
+    appended = completed = replaced = skipped = processed = 0
     expected = {arm.arm_id for arm in experiment.arms}
     if allow_cost_unavailable_block_recovery and stopped_rows:
         _validate_historical_cost_unavailable_recovery(
@@ -245,7 +255,9 @@ def run_experiment(
         stop_for_budget = False
     scheduled_per_condition = len(experiment.cases) * experiment.repetitions
     for block in schedule:
-        if stop_for_budget:
+        if stop_for_budget or (
+            max_blocks is not None and processed >= max_blocks
+        ):
             break
         attempts = by_coordinate.get(block.coordinate, {})
         latest = max(attempts) if attempts else -1
@@ -324,6 +336,7 @@ def run_experiment(
         if not block_completed:
             break
         completed += 1
+        processed += 1
         if stop_after_block:
             stop_for_budget = True
             break

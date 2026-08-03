@@ -102,6 +102,8 @@ class GatewayProbeCliTests(unittest.TestCase):
                     str(spec),
                     "--results",
                     "out.jsonl",
+                    "--max-blocks",
+                    "3",
                     "--allow-cost-unavailable-block-recovery",
                 ])
         self.assertEqual(code, 0)
@@ -110,7 +112,29 @@ class GatewayProbeCliTests(unittest.TestCase):
             results_path="out.jsonl",
             force=False,
             allow_cost_unavailable_block_recovery=True,
+            max_blocks=3,
         )
+
+    def test_run_and_benchmark_reject_invalid_max_blocks(self):
+        for command in ("run", "benchmark"):
+            for value in ("0", "-1", "not-an-integer"):
+                with self.subTest(command=command, value=value):
+                    stderr = io.StringIO()
+                    with (
+                        contextlib.redirect_stderr(stderr),
+                        self.assertRaises(SystemExit) as raised,
+                    ):
+                        gateway_probe_cli.main([
+                            command,
+                            "probe.toml",
+                            "--max-blocks",
+                            value,
+                        ])
+                    self.assertEqual(raised.exception.code, 2)
+                    self.assertIn(
+                        "must be a positive integer",
+                        stderr.getvalue(),
+                    )
 
     def test_malformed_prices_and_missing_credentials_exit_two_without_traceback(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -244,6 +268,8 @@ class GatewayProbeCliTests(unittest.TestCase):
                         str(spec),
                         "--output-dir",
                         str(output),
+                        "--max-blocks",
+                        "1",
                         "--allow-cost-unavailable-block-recovery",
                     ])
             self.assertEqual(code, 0)
@@ -298,6 +324,8 @@ class GatewayProbeCliTests(unittest.TestCase):
                     "allow_cost_unavailable_block_recovery"
                 ]
             )
+            self.assertIsNone(run.call_args_list[0].kwargs["max_blocks"])
+            self.assertEqual(run.call_args_list[1].kwargs["max_blocks"], 1)
             self.assertIn(
                 gateway_probe_run.FROZEN_PRICES_ENV,
                 run.call_args.kwargs["environ"],
@@ -391,13 +419,15 @@ class GatewayProbeCliTests(unittest.TestCase):
                     gateway_probe_run,
                     "run_experiment",
                     side_effect=partial_run,
-                ),
+                ) as run,
             ):
                 code = gateway_probe_cli.main([
                     "benchmark",
                     str(spec),
                     "--output-dir",
                     str(output),
+                    "--max-blocks",
+                    "1",
                 ])
             self.assertEqual(code, 0)
             report = json.loads((output / "report.json").read_text())
@@ -413,7 +443,13 @@ class GatewayProbeCliTests(unittest.TestCase):
                 ]["coverage"],
                 {"covered": 0, "ratio": 0.0, "total": 0},
             )
-            self.assertTrue((output / "manifest.json").exists())
+            self.assertTrue(all(
+                count < report["scheduled_blocks_per_condition"]
+                for count in report["complete_blocks"].values()
+            ))
+            self.assertEqual(run.call_args.kwargs["max_blocks"], 1)
+            manifest_data = json.loads((output / "manifest.json").read_text())
+            self.assertNotIn("complete", manifest_data)
 
 
 if __name__ == "__main__":

@@ -344,6 +344,127 @@ class GatewayProbeRunTests(unittest.TestCase):
         self.assertEqual(first.blocks_completed, 0)
         self.assertEqual(second.rows_appended, 0)
 
+    def test_max_blocks_stops_after_exact_complete_block_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path = Path(tmp, "probe.toml")
+            results_path = Path(tmp, "probe.jsonl")
+            spec_path.write_text(manifest(), encoding="utf-8")
+            with mock.patch.object(
+                gateway_probe_http,
+                "execute_request",
+                side_effect=canned_execute(),
+            ) as execute:
+                summary = gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=results_path,
+                    environ=environment(),
+                    max_blocks=2,
+                )
+            rows = gateway_probe_results.load_results(results_path)
+
+        block_ids = {
+            item["identity"]["schedule"]["block_id"] for item in rows
+        }
+        self.assertEqual(execute.call_count, 4)
+        self.assertEqual(summary.rows_appended, 4)
+        self.assertEqual(summary.blocks_completed, 2)
+        self.assertEqual(len(block_ids), 2)
+        for block_id in block_ids:
+            self.assertEqual(
+                {
+                    item["identity"]["arm"]["id"]
+                    for item in rows
+                    if item["identity"]["schedule"]["block_id"] == block_id
+                },
+                {"direct", "gateway"},
+            )
+
+    def test_bounded_resume_matches_default_unlimited_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path = Path(tmp, "probe.toml")
+            bounded_path = Path(tmp, "bounded.jsonl")
+            unlimited_path = Path(tmp, "unlimited.jsonl")
+            spec_path.write_text(manifest(), encoding="utf-8")
+            with mock.patch.object(
+                gateway_probe_http,
+                "execute_request",
+                side_effect=canned_execute(),
+            ):
+                first = gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=bounded_path,
+                    environ=environment(),
+                    max_blocks=2,
+                )
+                second = gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=bounded_path,
+                    environ=environment(),
+                    max_blocks=2,
+                )
+                repeated = gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=bounded_path,
+                    environ=environment(),
+                    max_blocks=2,
+                )
+                unlimited = gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=unlimited_path,
+                    environ=environment(),
+                )
+
+            bounded_rows = gateway_probe_results.load_results(bounded_path)
+            unlimited_rows = gateway_probe_results.load_results(unlimited_path)
+
+        self.assertEqual(first.blocks_completed, 2)
+        self.assertEqual(second.blocks_completed, 2)
+        self.assertEqual(second.blocks_skipped, 2)
+        self.assertEqual(repeated.rows_appended, 0)
+        self.assertEqual(repeated.blocks_skipped, 4)
+        self.assertEqual(unlimited.blocks_completed, 4)
+        self.assertEqual(bounded_rows, unlimited_rows)
+        self.assertEqual(len({item["cell_id"] for item in bounded_rows}), 8)
+
+    def test_replacement_consumes_max_blocks_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path = Path(tmp, "probe.toml")
+            results_path = Path(tmp, "probe.jsonl")
+            spec_path.write_text(manifest(), encoding="utf-8")
+            with mock.patch.object(
+                gateway_probe_http,
+                "execute_request",
+                side_effect=canned_execute(),
+            ):
+                gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=results_path,
+                    environ=environment(),
+                    max_blocks=2,
+                )
+                lines = results_path.read_text(encoding="utf-8").splitlines()
+                results_path.write_text(
+                    "\n".join(lines[:-1]) + "\n",
+                    encoding="utf-8",
+                )
+                repaired = gateway_probe_run.run_experiment(
+                    spec_path,
+                    results_path=results_path,
+                    environ=environment(),
+                    max_blocks=1,
+                )
+            rows = gateway_probe_results.load_results(results_path)
+
+        attempts = {
+            item["identity"]["schedule"]["block_attempt"] for item in rows
+        }
+        self.assertEqual(repaired.rows_appended, 2)
+        self.assertEqual(repaired.blocks_completed, 1)
+        self.assertEqual(repaired.blocks_replaced, 1)
+        self.assertEqual(repaired.blocks_skipped, 1)
+        self.assertEqual(attempts, {0, 1})
+        self.assertEqual(len(rows), 5)
+
     def test_complete_cost_unavailable_block_requires_explicit_recovery_and_stays_in_report(
         self,
     ):
