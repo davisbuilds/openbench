@@ -50,15 +50,36 @@ POLL_INTERVAL_S = 2.0
 # Retry budgets: how many times a cell with a given failure class is re-queued.
 DEFAULT_RETRY: dict[str, int] = {
     "infra": 2,
-    "stall": 1,
+    fc_mod.STALLED: 1,
     "rate_limited": 3,
 }
+LEGACY_RETRY_ALIASES = {"stall": fc_mod.STALLED}
 DEFAULT_RATE_LIMITED_BACKOFF_START_S = 60
 DEFAULT_STALL_TIMEOUT = 600
 
 
 class SpecError(ValueError):
     """Raised when the TOML spec is invalid or incomplete."""
+
+
+def resolve_retry_budgets(retry_cfg: Any) -> dict[str, int]:
+    """Return retry budgets keyed by canonical failure-class names.
+
+    ``stall`` was the original public TOML key even though the runner has
+    always emitted ``stalled``. Keep it as an input alias so existing matrix
+    specs continue to work, but never retain it in the runtime lookup map.
+    """
+    budgets = dict(DEFAULT_RETRY)
+    if not isinstance(retry_cfg, dict):
+        return budgets
+
+    for legacy, canonical in LEGACY_RETRY_ALIASES.items():
+        if legacy in retry_cfg and canonical not in retry_cfg:
+            budgets[canonical] = int(retry_cfg[legacy])
+    for failure_class in DEFAULT_RETRY:
+        if failure_class in retry_cfg:
+            budgets[failure_class] = int(retry_cfg[failure_class])
+    return budgets
 
 
 def load_spec(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -297,22 +318,39 @@ class ArmState:
             return 0
         return self.budgets.get(failure_class, 0)
 
-    def should_exhaust(self, failure_class: str | None, attempts: int) -> bool:
+    def should_exhaust(self, failure_class: str | None, failed_attempts: int) -> bool:
         """True when a cell has used up its retries for this failure class.
 
-        ``attempts == 0`` is the first run of the cell, never an exhaustion:
+        ``failed_attempts == 0`` is the first run of the cell, never an exhaustion:
         charging it against a retry budget marked every cell EXHAUSTED before
         it ever executed (observed on first live use: 0/9 satisfied).
+
+        The first failed attempt is the original run, not a retry. Therefore a
+        retry budget of one is exhausted only after two failed attempts.
         """
-        if attempts == 0:
+        if failed_attempts == 0:
             return False
-        return attempts >= self.retry_budget(failure_class)
+        return failed_attempts > self.retry_budget(failure_class)
+
+    def retries_remaining(self, failure_class: str | None, failed_attempts: int) -> int:
+        """Retries left after ``failed_attempts`` including the original run."""
+        retries_used = max(0, failed_attempts - 1)
+        return max(0, self.retry_budget(failure_class) - retries_used)
 
     def record_excluded(self) -> None:
         self.consecutive_excluded += 1
 
     def record_included(self) -> None:
         self.consecutive_excluded = 0
+
+    def record_satisfied(self, run_id: str) -> None:
+        """Record a verdict and clear any stale exhaustion for the same cell."""
+        self.satisfied_cells.add(run_id)
+        self.exhausted_cells = [
+            exhausted_id for exhausted_id in self.exhausted_cells
+            if exhausted_id != run_id
+        ]
+        self.record_included()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -327,8 +365,18 @@ class ArmState:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ArmState":
-        self = cls(d["name"], d.get("budgets"))
+    def from_dict(
+        cls, d: dict[str, Any], retry_budgets: dict[str, int] | None = None,
+    ) -> "ArmState":
+        # The active spec is authoritative on resume. Without an explicit
+        # override, normalize old persisted ``stall`` keys for standalone
+        # callers loading legacy queue state.
+        budgets = (
+            dict(retry_budgets)
+            if retry_budgets is not None
+            else resolve_retry_budgets(d.get("budgets"))
+        )
+        self = cls(d["name"], budgets)
         self.consecutive_excluded = d.get("consecutive_excluded", 0)
         self.paused = d.get("paused", False)
         self.satisfied_cells = set(d.get("satisfied_cells") or [])
@@ -340,11 +388,14 @@ class ArmState:
 
 # ── Cell satisfaction check ─────────────────────────────────────────────
 
-def load_results_ids(results_path: str) -> dict[str, dict[str, Any]]:
-    """Load results JSONL into {run_id: row} mapping (last row wins per id)."""
+def load_results_snapshot(
+    results_path: str,
+) -> tuple[dict[str, dict[str, Any]], dict[str, int]]:
+    """Load latest rows and trailing excluded-attempt counts per run ID."""
     rows: dict[str, dict[str, Any]] = {}
+    excluded_attempts: dict[str, int] = {}
     if not os.path.isfile(results_path):
-        return rows
+        return rows, excluded_attempts
     with open(results_path, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -359,6 +410,16 @@ def load_results_ids(results_path: str) -> dict[str, dict[str, Any]]:
             rid = row.get("run_id")
             if rid:
                 rows[rid] = row
+                if cell_is_satisfied(row):
+                    excluded_attempts[rid] = 0
+                else:
+                    excluded_attempts[rid] = excluded_attempts.get(rid, 0) + 1
+    return rows, excluded_attempts
+
+
+def load_results_ids(results_path: str) -> dict[str, dict[str, Any]]:
+    """Load results JSONL into {run_id: row} mapping (last row wins per id)."""
+    rows, _excluded_attempts = load_results_snapshot(results_path)
     return rows
 
 
@@ -375,11 +436,29 @@ def cell_is_satisfied(row: dict[str, Any] | None) -> bool:
     return fc not in fc_mod.EXCLUDED_FROM_SOLVE_RATE
 
 
+def effective_failed_attempts(
+    row: dict[str, Any] | None,
+    persisted_attempts: int,
+    result_attempts: int = 0,
+) -> int:
+    """Count a saved excluded result as its original failed attempt.
+
+    A seeded results file can exist without queue state. Treating its row as
+    attempt zero grants one more retry than the configured budget.
+    """
+    recorded = max(persisted_attempts, result_attempts)
+    if recorded > 0:
+        return recorded
+    if row is not None and not cell_is_satisfied(row):
+        return 1
+    return 0
+
+
 def row_failure_class(row: dict[str, Any] | None) -> str | None:
-    """Return the failure class for a row, or None if no row."""
+    """Return the row's effective canonical failure class, if available."""
     if row is None:
         return None
-    fc = row.get("failure_class")
+    fc = fc_mod.class_for_report(row)
     if fc in fc_mod.FAILURE_CLASSES:
         return fc
     return None
@@ -504,12 +583,8 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     if stall_timeout is None and spec.get("proxy", False):
         stall_timeout = DEFAULT_STALL_TIMEOUT
 
-    retry_budgets = dict(DEFAULT_RETRY)
     retry_cfg = spec.get("retry", {})
-    if isinstance(retry_cfg, dict):
-        for fc in ("infra", "stall", "rate_limited"):
-            if fc in retry_cfg:
-                retry_budgets[fc] = int(retry_cfg[fc])
+    retry_budgets = resolve_retry_budgets(retry_cfg)
     rate_limited_backoff = float(
         retry_cfg.get("rate_limited_backoff_start", DEFAULT_RATE_LIMITED_BACKOFF_START_S)
         if isinstance(retry_cfg, dict) else DEFAULT_RATE_LIMITED_BACKOFF_START_S
@@ -563,7 +638,8 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     for arm in arms:
         name = f"{arm['harness']} x {arm['model']}"
         if name in arm_states_raw:
-            arm_states[name] = ArmState.from_dict(arm_states_raw[name])
+            arm_states[name] = ArmState.from_dict(
+                arm_states_raw[name], retry_budgets=retry_budgets)
         else:
             as_ = ArmState(name, retry_budgets)
             as_.planned = sum(1 for c in all_cells if c["arm"] == name)
@@ -620,17 +696,21 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         run_id = cell["run_id"]
 
         # Check if cell is already satisfied
-        existing = load_results_ids(results_path)
+        existing, result_attempt_counts = load_results_snapshot(results_path)
         row = existing.get(run_id)
         if cell_is_satisfied(row):
-            as_.satisfied_cells.add(run_id)
+            as_.record_satisfied(run_id)
             print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
             state.set("arm_states", {n: a.to_dict() for n, a in arm_states.items()})
             state.save()
             continue
 
         # Check retry budget
-        attempt = retry_counts.get(run_id, 0)
+        attempt = effective_failed_attempts(
+            row,
+            retry_counts.get(run_id, 0),
+            result_attempt_counts.get(run_id, 0),
+        )
         fc = row_failure_class(row)
         budget = as_.retry_budget(fc)
         if as_.should_exhaust(fc, attempt):
@@ -656,11 +736,10 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
             print(f"    WARN runner exit={rc} for {run_id}", file=sys.stderr)
 
         # Re-check satisfaction
-        existing = load_results_ids(results_path)
+        existing, result_attempt_counts = load_results_snapshot(results_path)
         row = existing.get(run_id)
         if cell_is_satisfied(row):
-            as_.satisfied_cells.add(run_id)
-            as_.record_included()
+            as_.record_satisfied(run_id)
             print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
         elif row is None:
             # The runner wrote NO row for this cell. A completed cell -- even a
@@ -688,16 +767,19 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
             paused_arms = [(n, i, c) for n, i, c in paused_arms if n != arm_name]
         else:
             new_fc = row_failure_class(row)
-            retry_counts[run_id] = retry_counts.get(run_id, 0) + 1
+            retry_counts[run_id] = max(
+                attempt + 1, result_attempt_counts.get(run_id, 0))
             if new_fc is not None and new_fc in fc_mod.EXCLUDED_FROM_SOLVE_RATE:
                 as_.record_excluded()
                 # Re-queue if budget allows
-                budget_remaining = as_.retry_budget(new_fc) - retry_counts.get(run_id, 0)
+                budget_remaining = as_.retries_remaining(
+                    new_fc, retry_counts.get(run_id, 0))
                 if budget_remaining > 0:
                     pending.insert(0, (arm_name, arm_idx, cell))
                     print(f"    RE-QUEUED {run_id} (fc={new_fc} retry={budget_remaining} left)")
                 else:
-                    as_.exhausted_cells.append(run_id)
+                    if run_id not in as_.exhausted_cells:
+                        as_.exhausted_cells.append(run_id)
                     print(f"    EXHAUSTED {run_id} (fc={new_fc} retry budget exhausted)")
 
         # Arm pause check (skip if the arm just hit a config error and stopped)

@@ -101,7 +101,7 @@ tasks = ["hello"]
 results_path = "results.jsonl"
 [retry]
 infra = 5
-stall = 2
+stalled = 2
 rate_limited = 1
 
 [[arm]]
@@ -113,7 +113,7 @@ tasks = ["hello"]
         spec = mq.load_spec(path)
         retry = spec.get("retry", {})
         self.assertEqual(retry["infra"], 5)
-        self.assertEqual(retry["stall"], 2)
+        self.assertEqual(retry["stalled"], 2)
         self.assertEqual(retry["rate_limited"], 1)
 
     def test_expand_cells(self):
@@ -240,6 +240,17 @@ class LoadResultsIdsTests(unittest.TestCase):
         rows = mq.load_results_ids(path)
         self.assertEqual(rows["a"]["failure_class"], "solved")
 
+    def test_snapshot_counts_only_trailing_excluded_attempts(self):
+        path = os.path.join(self.tmp, "results.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"run_id": "a", "failure_class": "infra"}) + "\n")
+            fh.write(json.dumps({"run_id": "a", "failure_class": "solved"}) + "\n")
+            fh.write(json.dumps({"run_id": "a", "failure_class": "stalled"}) + "\n")
+            fh.write(json.dumps({"run_id": "a", "failure_class": "stalled"}) + "\n")
+        rows, attempts = mq.load_results_snapshot(path)
+        self.assertEqual(rows["a"]["failure_class"], "stalled")
+        self.assertEqual(attempts["a"], 2)
+
 
 class RetryBudgetTests(unittest.TestCase):
     """Verify retry budget logic."""
@@ -247,15 +258,89 @@ class RetryBudgetTests(unittest.TestCase):
     def test_default_budgets(self):
         arm = mq.ArmState("pi")
         self.assertEqual(arm.retry_budget("infra"), 2)
-        self.assertEqual(arm.retry_budget("stall"), 1)
+        self.assertEqual(arm.retry_budget("stalled"), 1)
+        self.assertEqual(arm.retry_budget("stall"), 0)
         self.assertEqual(arm.retry_budget("rate_limited"), 3)
         self.assertEqual(arm.retry_budget("wrong_answer"), 0)
         self.assertEqual(arm.retry_budget("solved"), 0)
+        self.assertFalse(arm.should_exhaust("stalled", 1))
+        self.assertTrue(arm.should_exhaust("stalled", 2))
+        self.assertEqual(arm.retries_remaining("stalled", 1), 1)
+        self.assertEqual(arm.retries_remaining("stalled", 2), 0)
 
     def test_custom_budgets(self):
-        arm = mq.ArmState("pi", {"infra": 5, "stall": 0})
+        arm = mq.ArmState("pi", {"infra": 5, "stalled": 0})
         self.assertEqual(arm.retry_budget("infra"), 5)
+        self.assertEqual(arm.retry_budget("stalled"), 0)
+
+    def test_legacy_stall_config_maps_to_stalled_failure_class(self):
+        budgets = mq.resolve_retry_budgets({"stall": 2})
+        self.assertEqual(budgets["stalled"], 2)
+        self.assertNotIn("stall", budgets)
+
+    def test_canonical_stalled_config_wins_over_legacy_alias(self):
+        budgets = mq.resolve_retry_budgets({"stall": 5, "stalled": 2})
+        self.assertEqual(budgets["stalled"], 2)
+
+    def test_legacy_persisted_arm_budget_is_canonicalized(self):
+        arm = mq.ArmState.from_dict({
+            "name": "pi x m",
+            "budgets": {"infra": 2, "stall": 1, "rate_limited": 3},
+        })
+        self.assertEqual(arm.retry_budget("stalled"), 1)
         self.assertEqual(arm.retry_budget("stall"), 0)
+
+    def test_active_spec_budgets_override_persisted_arm_budget(self):
+        arm = mq.ArmState.from_dict(
+            {"name": "pi x m", "budgets": {"stall": 5}},
+            retry_budgets={"infra": 2, "stalled": 2, "rate_limited": 3},
+        )
+        self.assertEqual(arm.retry_budget("stalled"), 2)
+
+    def test_seeded_stalled_row_consumes_original_attempt(self):
+        row = {"run_id": "cell", "failure_class": "stalled"}
+        failed_attempts = mq.effective_failed_attempts(row, persisted_attempts=0)
+        arm = mq.ArmState("pi x m", {"stalled": 1})
+        self.assertEqual(failed_attempts, 1)
+        self.assertFalse(arm.should_exhaust("stalled", failed_attempts))
+        self.assertEqual(
+            arm.retries_remaining("stalled", failed_attempts + 1), 0)
+
+    def test_seeded_corrected_row_uses_effective_retry_class(self):
+        row = {
+            "run_id": "cell",
+            "failure_class": "wrong_answer",
+            "success": False,
+            "completed": True,
+            "checker_exit": 1,
+            "turns": 2,
+            "tokens_output": 10,
+            "sampling_observed": [{"max_completion_tokens": 1}],
+        }
+        self.assertEqual(mq.row_failure_class(row), "infra")
+        self.assertEqual(
+            mq.effective_failed_attempts(row, persisted_attempts=0), 1)
+
+    def test_seeded_legacy_row_derives_effective_retry_class(self):
+        row = {
+            "run_id": "cell",
+            "success": False,
+            "completed": False,
+            "checker_exit": None,
+            "error": "docker daemon not reachable (is Docker Desktop running?)",
+            "tokens": None,
+        }
+        self.assertEqual(mq.row_failure_class(row), "infra")
+        self.assertEqual(
+            mq.effective_failed_attempts(row, persisted_attempts=0), 1)
+
+    def test_result_history_wins_if_state_save_missed_latest_attempt(self):
+        row = {"run_id": "cell", "failure_class": "stalled"}
+        failed_attempts = mq.effective_failed_attempts(
+            row, persisted_attempts=1, result_attempts=2)
+        arm = mq.ArmState("pi x m", {"stalled": 1})
+        self.assertEqual(failed_attempts, 2)
+        self.assertTrue(arm.should_exhaust("stalled", failed_attempts))
 
     def test_backoff_rate_limited(self):
         d1 = mq.backoff_for_failure("rate_limited", 1, 60)
@@ -331,6 +416,16 @@ class CoverageSummaryTests(unittest.TestCase):
         self.assertEqual(len(arm.exhausted_cells), 1)
         self.assertEqual(arm.satisfied, 1)
 
+    def test_record_satisfied_clears_stale_exhaustion(self):
+        run_id = "pi:t1:m:trial1"
+        arm = mq.ArmState("pi")
+        arm.exhausted_cells = [run_id]
+        arm.consecutive_excluded = 2
+        arm.record_satisfied(run_id)
+        self.assertEqual(arm.satisfied_cells, {run_id})
+        self.assertEqual(arm.exhausted_cells, [])
+        self.assertEqual(arm.consecutive_excluded, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -354,7 +449,8 @@ class FirstAttemptIsNotARetryTests(unittest.TestCase):
     def test_retry_budget_still_bounds_retries(self):
         arm = mq.ArmState("pi x m", {"rate_limited": 2})
         self.assertFalse(arm.should_exhaust("rate_limited", 1))
-        self.assertTrue(arm.should_exhaust("rate_limited", 2))
+        self.assertFalse(arm.should_exhaust("rate_limited", 2))
+        self.assertTrue(arm.should_exhaust("rate_limited", 3))
 
     def test_unknown_failure_class_exhausts_after_one_attempt(self):
         arm = mq.ArmState("pi x m", {"rate_limited": 3})

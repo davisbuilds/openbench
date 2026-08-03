@@ -2,7 +2,7 @@
 #
 # Arms: pi on laguna-s-2.1, aider on inkling
 # Tasks: make-it-run (smoke), hello-world, fibonacci
-# Retry budgets: infra=2, stall=1, rate_limited=3 with exponential backoff
+# Retry budgets: infra=2, stalled=1, rate_limited=3 with exponential backoff
 # Running: obench matrix --spec experiments/specs/laguna-inkling.toml
 
 results_path = "results/laguna-inkling.jsonl"
@@ -15,7 +15,7 @@ stall_timeout = 600
 
 [retry]
 infra = 2
-stall = 1
+stalled = 1
 rate_limited = 3
 rate_limited_backoff_start = 60
 

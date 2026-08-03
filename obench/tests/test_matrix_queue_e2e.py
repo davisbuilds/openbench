@@ -161,6 +161,94 @@ class MatrixQueueE2ETests(unittest.TestCase):
         self.assertEqual(line_count, 2, "the runner must append a NEW row, not skip the cell")
         self.assertIn("null x control: 1/1 (100.0%)", proc.stdout)
 
+    def test_successful_resumed_retry_clears_legacy_exhausted_marker(self):
+        run_id = "null:trivial:control:trial1"
+        _write(self.results_path,
+               json.dumps({"run_id": run_id, "harness": "null", "model": "control",
+                           "task": "trivial", "trial": 1, "success": False,
+                           "failure_class": "stalled"}) + "\n")
+        ledger = os.path.join(self.tmp, "out", "ledger", "queue-state.json")
+        _write(ledger, json.dumps({
+            "arm_states": {
+                "null x control": {
+                    "name": "null x control",
+                    "budgets": {"stall": 1},
+                    "planned": 1,
+                    "exhausted_cells": [run_id],
+                },
+            },
+            "retry_counts": {run_id: 1},
+            "pending": [],
+        }))
+        spec = self._write_spec(f"""
+            results_path = "{self.results_rel}"
+            ledger_dir = "out/ledger"
+            timeout = 60
+            trials = 1
+
+            [retry]
+            stalled = 1
+
+            [[arm]]
+            harness = "null"
+            model = "control"
+
+            [[task_group]]
+            tasks_dir = "tasks"
+            tasks = ["trivial"]
+        """)
+
+        proc = self._run_matrix(spec)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("null x control: 1/1 (100.0%)", proc.stdout)
+        with open(ledger, encoding="utf-8") as fh:
+            state = json.load(fh)
+        arm = state["arm_states"]["null x control"]
+        self.assertEqual(arm["budgets"]["stalled"], 1)
+        self.assertNotIn("stall", arm["budgets"])
+        self.assertEqual(arm["exhausted_cells"], [])
+
+    def test_already_satisfied_resume_clears_legacy_exhausted_marker(self):
+        run_id = "null:trivial:control:trial1"
+        _write(self.results_path,
+               json.dumps({"run_id": run_id, "harness": "null", "model": "control",
+                           "task": "trivial", "trial": 1, "success": True,
+                           "failure_class": "solved"}) + "\n")
+        ledger = os.path.join(self.tmp, "out", "ledger", "queue-state.json")
+        _write(ledger, json.dumps({
+            "arm_states": {
+                "null x control": {
+                    "name": "null x control",
+                    "budgets": {"stall": 1},
+                    "planned": 1,
+                    "exhausted_cells": [run_id],
+                },
+            },
+            "pending": [],
+        }))
+        spec = self._write_spec(f"""
+            results_path = "{self.results_rel}"
+            ledger_dir = "out/ledger"
+            timeout = 60
+            trials = 1
+
+            [[arm]]
+            harness = "null"
+            model = "control"
+
+            [[task_group]]
+            tasks_dir = "tasks"
+            tasks = ["trivial"]
+        """)
+
+        proc = self._run_matrix(spec)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("null x control: 1/1 (100.0%)", proc.stdout)
+        with open(ledger, encoding="utf-8") as fh:
+            state = json.load(fh)
+        arm = state["arm_states"]["null x control"]
+        self.assertEqual(arm["exhausted_cells"], [])
+
     # ── (b) a failed runner invocation is noticed, not silently exhausted ────
 
     def test_no_row_nonzero_exit_stops_arm_as_config_error(self):
