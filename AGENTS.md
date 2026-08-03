@@ -82,10 +82,13 @@ Match [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 ```bash
 pip install -e .
 python3 -m unittest discover -s obench/tests -v
-obench validate
+obench validate --no-imported
+obench validate --tasks-dir tasks-imported/terminal-bench
+obench validate --tasks-dir tasks-imported/exercism
 ```
 
-No live harness or model-API calls; stdlib-only.
+No live harness or model-API calls; stdlib-only. Docker-backed imported tiers,
+including Terminal-Bench 2, require a separately provisioned validation lane.
 
 ## Dangerous zones
 
