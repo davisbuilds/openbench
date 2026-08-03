@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import html
 import json
+import math
 import os
 import re
 import shutil
@@ -50,6 +51,59 @@ PUBLISH_PII_CATEGORIES = frozenset({
     "email", "api-key", "github-token", "slack-token", "aws-key",
     "home-path", "username", "hostname",
 })
+HARBOR_PROVENANCE_KEYS = frozenset({
+    "kind",
+    "harbor_version",
+    "harbor_git_commit_hash",
+    "harbor_job_id",
+    "harbor_trial_id",
+    "harbor_trial_name",
+    "job_lock_sha256",
+    "job_result_sha256",
+    "trial_lock_sha256",
+    "trial_result_sha256",
+    "reward_sha256",
+    "openbench_verifier_evidence_sha256",
+    "atif_sha256",
+    "artifact_manifest_sha256",
+    "final_workspace_sha256",
+    "task_digest",
+    "harbor_task_checksum",
+    "harbor_agent_config_name",
+    "harbor_verifier_time_s",
+    "usage_source",
+    "proxy_measured",
+    "trial_mapping",
+    "temporal_matched_block_claim",
+})
+HARBOR_DIGEST_KEYS = frozenset({
+    "job_lock_sha256",
+    "job_result_sha256",
+    "trial_lock_sha256",
+    "trial_result_sha256",
+    "reward_sha256",
+    "openbench_verifier_evidence_sha256",
+    "atif_sha256",
+    "artifact_manifest_sha256",
+    "final_workspace_sha256",
+    "harbor_task_checksum",
+})
+HARBOR_PUBLISH_ROW_KEYS = (
+    "run_id", "ts_iso", "harness", "model", "task", "trial",
+    "success", "completed", "error", "wall_time_s", "t_env_setup_s",
+    "t_agent_s", "t_checker_s", "tokens", "tokens_input_uncached",
+    "tokens_cache_read", "tokens_cache_write", "tokens_output",
+    "tokens_reasoning", "usage_raw", "token_basis", "tokens_fresh", "turns",
+    "checker_exit", "exec_mode", "score", "harness_version",
+    "harness_version_source", "failure_class", "candidate_provenance",
+    "version_drift", "workspace_source",
+)
+HARBOR_PROXY_ROW_KEYS = (
+    "tokens_proxy_input_uncached", "tokens_proxy_cache_read",
+    "tokens_proxy_cache_write", "tokens_proxy_output",
+    "tokens_proxy_reasoning", "tokens_proxy_calls", "token_basis_proxy",
+    "proxy_capture_truncated",
+)
 PUBLISH_METHODOLOGY = """## What this card is
 
 A self-contained OpenBench comparison bundle: candidate harness arm(s)
@@ -241,8 +295,202 @@ def _redact_local_path(value):
     return value
 
 
+def _is_harbor_row(row):
+    provenance = row.get("candidate_provenance")
+    workspace = row.get("workspace_source")
+    return (
+        row.get("exec_mode") == "harbor"
+        or (isinstance(provenance, dict) and provenance.get("kind") == "harbor_job")
+        or (isinstance(workspace, dict) and workspace.get("kind") == "harbor_artifact")
+    )
+
+
+def _is_nonnegative_number(value):
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
+def _validate_harbor_usage(row, provenance):
+    basis = row.get("token_basis")
+    if basis not in ("harbor_agent_reported", "unmetered"):
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: unsupported token_basis {basis!r}"
+        )
+    if provenance["usage_source"] != basis:
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: usage_source does not "
+            "match token_basis"
+        )
+    if provenance["proxy_measured"] is not False:
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: proxy_measured must be false"
+        )
+    nonempty_proxy = [key for key in HARBOR_PROXY_ROW_KEYS if row.get(key) is not None]
+    if nonempty_proxy:
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: proxy fields must be null: "
+            + ", ".join(sorted(nonempty_proxy))
+        )
+
+    usage = row.get("usage_raw")
+    usage_fields = (
+        "tokens", "tokens_input_uncached", "tokens_cache_read",
+        "tokens_output", "tokens_fresh",
+    )
+    if basis == "unmetered":
+        nonempty = [key for key in usage_fields if row.get(key) is not None]
+        if usage is not None or nonempty:
+            raise PublishError(
+                f"Harbor row {row.get('run_id', '?')!r}: unmetered usage "
+                "must not contain token counts"
+            )
+        return
+
+    expected_usage_keys = {
+        "source", "n_input_tokens", "n_cache_tokens", "n_output_tokens", "cost_usd"
+    }
+    if not isinstance(usage, dict) or set(usage) != expected_usage_keys:
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: malformed usage_raw"
+        )
+    if usage["source"] != "harbor_agent_result":
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: invalid usage_raw source"
+        )
+    for key in ("n_input_tokens", "n_cache_tokens", "n_output_tokens"):
+        value = usage[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise PublishError(
+                f"Harbor row {row.get('run_id', '?')!r}: invalid usage_raw {key}"
+            )
+    cost = usage["cost_usd"]
+    if cost is not None and not _is_nonnegative_number(cost):
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: invalid usage_raw cost_usd"
+        )
+    input_tokens = usage["n_input_tokens"]
+    cache_tokens = usage["n_cache_tokens"]
+    output_tokens = usage["n_output_tokens"]
+    if cache_tokens > input_tokens:
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: cache tokens exceed input"
+        )
+    uncached = input_tokens - cache_tokens
+    expected = {
+        "tokens": uncached + output_tokens,
+        "tokens_input_uncached": uncached,
+        "tokens_cache_read": cache_tokens,
+        "tokens_output": output_tokens,
+        "tokens_fresh": uncached + output_tokens,
+    }
+    mismatched = [key for key, value in expected.items() if row.get(key) != value]
+    if mismatched:
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: usage totals disagree: "
+            + ", ".join(sorted(mismatched))
+        )
+    if row.get("tokens_cache_write") is not None or row.get("tokens_reasoning") is not None:
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: unsupported usage fields "
+            "must be null"
+        )
+
+
+def _validate_harbor_row(row):
+    run_id = row.get("run_id", "?")
+    provenance = row.get("candidate_provenance")
+    workspace = row.get("workspace_source")
+    if row.get("exec_mode") != "harbor":
+        raise PublishError(f"Harbor row {run_id!r}: exec_mode must be 'harbor'")
+    provenance_keys = set(provenance) if isinstance(provenance, dict) else set()
+    if provenance_keys != HARBOR_PROVENANCE_KEYS:
+        missing = sorted(HARBOR_PROVENANCE_KEYS - provenance_keys)
+        extra = sorted(provenance_keys - HARBOR_PROVENANCE_KEYS)
+        raise PublishError(
+            f"Harbor row {run_id!r}: malformed candidate_provenance "
+            f"(missing={missing}, extra={extra})"
+        )
+    if provenance["kind"] != "harbor_job":
+        raise PublishError(
+            f"Harbor row {run_id!r}: candidate_provenance.kind must be 'harbor_job'"
+        )
+    for key in HARBOR_DIGEST_KEYS:
+        if not isinstance(provenance[key], str) or re.fullmatch(
+                r"[0-9a-f]{64}", provenance[key]) is None:
+            raise PublishError(f"Harbor row {run_id!r}: invalid {key}")
+    if not isinstance(provenance["task_digest"], str) or re.fullmatch(
+            r"sha256:[0-9a-f]{64}", provenance["task_digest"]) is None:
+        raise PublishError(f"Harbor row {run_id!r}: invalid task_digest")
+    if not isinstance(provenance["harbor_git_commit_hash"], str) or re.fullmatch(
+            r"[0-9a-f]{40}", provenance["harbor_git_commit_hash"]) is None:
+        raise PublishError(f"Harbor row {run_id!r}: invalid harbor_git_commit_hash")
+    for key in (
+        "harbor_version", "harbor_job_id", "harbor_trial_id",
+        "harbor_trial_name", "harbor_agent_config_name",
+    ):
+        value = provenance[key]
+        if (
+            not isinstance(value, str)
+            or not value
+            or "/" in value
+            or "\\" in value
+            or value.startswith("~")
+        ):
+            raise PublishError(f"Harbor row {run_id!r}: invalid {key}")
+    if not _is_nonnegative_number(provenance["harbor_verifier_time_s"]):
+        raise PublishError(f"Harbor row {run_id!r}: invalid harbor_verifier_time_s")
+    if provenance["trial_mapping"] != "lexicographic_name_within_task_agent_model":
+        raise PublishError(f"Harbor row {run_id!r}: invalid trial_mapping")
+    if provenance["temporal_matched_block_claim"] is not False:
+        raise PublishError(
+            f"Harbor row {run_id!r}: temporal_matched_block_claim must be false"
+        )
+    if (
+        not isinstance(workspace, dict)
+        or set(workspace) != {"kind", "sha256"}
+        or workspace.get("kind") != "harbor_artifact"
+        or workspace.get("sha256") != provenance["final_workspace_sha256"]
+    ):
+        raise PublishError(
+            f"Harbor row {run_id!r}: workspace_source must bind "
+            "final_workspace_sha256"
+        )
+    if row.get("error") is not None:
+        raise PublishError(f"Harbor row {run_id!r}: imported error must be null")
+    _validate_harbor_usage(row, provenance)
+
+
+def _sanitize_harbor_row(row):
+    _validate_harbor_row(row)
+    return {key: row.get(key) for key in HARBOR_PUBLISH_ROW_KEYS}
+
+
+def _harbor_import_evidence(rows):
+    evidence = []
+    for row in rows:
+        if not _is_harbor_row(row):
+            continue
+        _validate_harbor_row(row)
+        evidence.append({
+            "run_id": row["run_id"],
+            "candidate_provenance": dict(row["candidate_provenance"]),
+            "usage": {
+                "token_basis": row["token_basis"],
+                "usage_raw": row["usage_raw"],
+            },
+            "workspace_source": dict(row["workspace_source"]),
+        })
+    return sorted(evidence, key=lambda item: item["run_id"])
+
+
 def sanitize_row_for_publish(row):
     """Strip transcripts and redact absolute local paths from provenance fields."""
+    if _is_harbor_row(row):
+        return _sanitize_harbor_row(row)
     cleaned = strip_transcript_fields(row)
     prov = cleaned.get("candidate_provenance")
     if isinstance(prov, dict):
@@ -535,9 +783,12 @@ def build_provenance(rows, results_sha256, tasks_dirs=None, warnings=None,
                 "workspace_source_samples": [],
             }
         if task and isinstance(row.get("workspace_source"), dict):
-            sample = sanitize_row_for_publish({"workspace_source": row["workspace_source"]})[
-                "workspace_source"
-            ]
+            if _is_harbor_row(row):
+                sample = dict(row["workspace_source"])
+            else:
+                sample = sanitize_row_for_publish(
+                    {"workspace_source": row["workspace_source"]}
+                )["workspace_source"]
             if sample not in tasks[task]["workspace_source_samples"]:
                 tasks[task]["workspace_source_samples"].append(sample)
 
@@ -553,7 +804,7 @@ def build_provenance(rows, results_sha256, tasks_dirs=None, warnings=None,
         f"{h}/{t}/{m}": sorted(trials)
         for (h, t, m), trials in sorted(trial_counts.items())
     }
-    return {
+    provenance = {
         "obench_version": obench_version or __version__,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "results_sha256": results_sha256,
@@ -566,6 +817,10 @@ def build_provenance(rows, results_sha256, tasks_dirs=None, warnings=None,
         "highlight_arms": list(highlight or []),
         "warnings": list(warnings or []),
     }
+    harbor_evidence = _harbor_import_evidence(rows)
+    if harbor_evidence:
+        provenance["harbor_import_evidence"] = harbor_evidence
+    return provenance
 
 
 def default_out_dir(name=None):
@@ -906,6 +1161,29 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
         "status": "FAIL" if row_error or not rows else "PASS",
         "detail": row_error or f"{len(rows)} valid result row(s)",
     })
+
+    try:
+        expected_harbor_evidence = _harbor_import_evidence(rows)
+        harbor_evidence_error = None
+    except PublishError as exc:
+        expected_harbor_evidence = []
+        harbor_evidence_error = str(exc)
+    declared_harbor_evidence = provenance.get("harbor_import_evidence")
+    if expected_harbor_evidence or declared_harbor_evidence is not None:
+        harbor_evidence_ok = (
+            harbor_evidence_error is None
+            and isinstance(declared_harbor_evidence, list)
+            and declared_harbor_evidence == expected_harbor_evidence
+        )
+        checks.append({
+            "name": "harbor_import_evidence",
+            "status": "PASS" if harbor_evidence_ok else "FAIL",
+            "detail": (
+                harbor_evidence_error
+                or f"declared={len(declared_harbor_evidence) if isinstance(declared_harbor_evidence, list) else 'invalid'} "
+                   f"rows={len(expected_harbor_evidence)}"
+            ),
+        })
 
     declared_tasks = provenance.get("tasks")
     task_entries = declared_tasks if isinstance(declared_tasks, list) else []

@@ -62,6 +62,60 @@ def _row(harness, task, trial, success, *, candidate=None, model="model-x", **ex
     return row
 
 
+def _harbor_row(**extra):
+    digest = "a" * 64
+    row = _row("codex", "alpha", 1, True)
+    row.update({
+        "exec_mode": "harbor",
+        "tokens": 115,
+        "tokens_input_uncached": 75,
+        "tokens_cache_read": 25,
+        "tokens_cache_write": None,
+        "tokens_output": 40,
+        "tokens_reasoning": None,
+        "tokens_fresh": 115,
+        "usage_raw": {
+            "source": "harbor_agent_result",
+            "n_input_tokens": 100,
+            "n_cache_tokens": 25,
+            "n_output_tokens": 40,
+            "cost_usd": 0.5,
+        },
+        "token_basis": "harbor_agent_reported",
+        "candidate_provenance": {
+            "kind": "harbor_job",
+            "harbor_version": "0.20.0",
+            "harbor_git_commit_hash": "b" * 40,
+            "harbor_job_id": "job-1",
+            "harbor_trial_id": "trial-1",
+            "harbor_trial_name": "alpha__trial-1",
+            "job_lock_sha256": digest,
+            "job_result_sha256": digest,
+            "trial_lock_sha256": digest,
+            "trial_result_sha256": digest,
+            "reward_sha256": digest,
+            "openbench_verifier_evidence_sha256": digest,
+            "atif_sha256": digest,
+            "artifact_manifest_sha256": digest,
+            "final_workspace_sha256": digest,
+            "task_digest": "sha256:" + digest,
+            "harbor_task_checksum": digest,
+            "harbor_agent_config_name": "codex__model-x__openbench",
+            "harbor_verifier_time_s": 1.25,
+            "usage_source": "harbor_agent_reported",
+            "proxy_measured": False,
+            "trial_mapping": "lexicographic_name_within_task_agent_model",
+            "temporal_matched_block_claim": False,
+        },
+        "workspace_source": {
+            "kind": "harbor_artifact",
+            "sha256": digest,
+        },
+    })
+    row.update(extra)
+    return row
+
+
 def _write_jsonl(path, rows):
     with open(path, "w", encoding="utf-8") as fh:
         for row in rows:
@@ -123,6 +177,128 @@ class PublishBundleTests(unittest.TestCase):
         cleaned = publish.sanitize_row_for_publish(row)
         self.assertNotIn("_source", cleaned)
         self.assertNotIn("_lineno", cleaned)
+
+    def test_harbor_publish_binds_safe_evidence_and_drops_private_fields(self):
+        harbor_results = os.path.join(self.tmp.name, "harbor.jsonl")
+        row = _harbor_row(
+            trajectory_path="/private/job/agent/trajectory.json",
+            session_path="/private/session.json",
+            transcript_blob="private transcript",
+            workspace_path="/private/job/artifacts/workspace",
+            credential_material="secret-token",
+        )
+        _write_jsonl(harbor_results, [row])
+
+        provenance = publish.create_bundle(
+            harbor_results,
+            self.out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+        evidence = provenance["harbor_import_evidence"]
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(
+            evidence[0]["candidate_provenance"]["atif_sha256"], "a" * 64
+        )
+        self.assertEqual(
+            evidence[0]["candidate_provenance"][
+                "openbench_verifier_evidence_sha256"
+            ],
+            "a" * 64,
+        )
+        self.assertEqual(
+            evidence[0]["candidate_provenance"]["final_workspace_sha256"],
+            "a" * 64,
+        )
+        self.assertEqual(
+            evidence[0]["usage"]["token_basis"], "harbor_agent_reported"
+        )
+
+        with open(os.path.join(self.out, "results.jsonl"), encoding="utf-8") as fh:
+            published_row = json.loads(fh.readline())
+        for key in (
+            "trajectory_path", "session_path", "transcript_blob",
+            "workspace_path", "credential_material",
+        ):
+            self.assertNotIn(key, published_row)
+        serialized = json.dumps(provenance) + json.dumps(published_row)
+        self.assertNotIn("/private/", serialized)
+        self.assertNotIn("secret-token", serialized)
+        self.assertNotIn("private transcript", serialized)
+
+        checks = publish.verify_bundle(self.out, tasks_dirs=[self.tasks])
+        harbor_check = next(
+            item for item in checks if item["name"] == "harbor_import_evidence"
+        )
+        self.assertEqual(harbor_check["status"], "PASS", harbor_check)
+
+    def test_harbor_publish_rejects_partial_or_inconsistent_provenance(self):
+        cases = []
+        for key in (
+            "atif_sha256", "openbench_verifier_evidence_sha256",
+            "final_workspace_sha256", "usage_source",
+        ):
+            row = _harbor_row()
+            del row["candidate_provenance"][key]
+            cases.append((f"missing-{key}", row))
+        row = _harbor_row()
+        row["candidate_provenance"]["credential_path"] = "/private/credentials"
+        cases.append(("extra-private-field", row))
+        row = _harbor_row()
+        row["workspace_source"]["sha256"] = "c" * 64
+        cases.append(("workspace-digest-mismatch", row))
+        cases.append(("missing-harbor-provenance", _row(
+            "codex", "alpha", 1, True, exec_mode="harbor"
+        )))
+
+        for name, row in cases:
+            with self.subTest(name=name):
+                path = os.path.join(self.tmp.name, f"{name}.jsonl")
+                out = os.path.join(self.tmp.name, f"{name}-bundle")
+                _write_jsonl(path, [row])
+                with self.assertRaises(publish.PublishError):
+                    publish.create_bundle(
+                        path,
+                        out,
+                        tasks_dirs=[self.tasks],
+                        scrub_ctx=self.scrub_ctx,
+                    )
+                self.assertFalse(os.path.exists(out))
+
+    def test_verify_rejects_harbor_evidence_manifest_tampering(self):
+        harbor_results = os.path.join(self.tmp.name, "harbor.jsonl")
+        _write_jsonl(harbor_results, [_harbor_row()])
+        publish.create_bundle(
+            harbor_results,
+            self.out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+        provenance_path = os.path.join(self.out, "provenance.json")
+        with open(provenance_path, encoding="utf-8") as fh:
+            provenance = json.load(fh)
+        provenance["harbor_import_evidence"][0]["candidate_provenance"][
+            "atif_sha256"
+        ] = "c" * 64
+        with open(provenance_path, "w", encoding="utf-8") as fh:
+            json.dump(provenance, fh)
+
+        checks = publish.verify_bundle(self.out, tasks_dirs=[self.tasks])
+        harbor_check = next(
+            item for item in checks if item["name"] == "harbor_import_evidence"
+        )
+        self.assertEqual(harbor_check["status"], "FAIL", harbor_check)
+
+    def test_non_harbor_publish_schema_remains_compatible(self):
+        row = _row("null", "alpha", 1, False, safe_extension="kept")
+        cleaned = publish.sanitize_row_for_publish(row)
+        self.assertEqual(cleaned["safe_extension"], "kept")
+        provenance = publish.build_provenance(
+            [cleaned],
+            "a" * 64,
+            tasks_dirs=[self.tasks],
+        )
+        self.assertNotIn("harbor_import_evidence", provenance)
 
     def test_bundle_creation_and_provenance_hash(self):
         provenance = publish.create_bundle(
