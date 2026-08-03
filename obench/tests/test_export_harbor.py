@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 from obench import export_harbor as eh
@@ -60,7 +62,13 @@ class TaskTomlTests(unittest.TestCase):
             description="Get the script running.",
             workspace_provenance=None,
         )
-        self.assertIn('schema_version = "1.3"', text)
+        config = tomllib.loads(text)
+        self.assertEqual(config["schema_version"], "1.4")
+        self.assertEqual(config["task"]["version"], "1.0.0")
+        self.assertEqual(
+            config["artifacts"],
+            [{"source": "/app", "destination": "workspace"}],
+        )
         self.assertIn('name = "openbench/make-it-run"', text)
         self.assertIn('origin = "openbench"', text)
         self.assertIn('difficulty = "unknown"', text)
@@ -115,13 +123,29 @@ class TestShScoreMappingTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertEqual(eh.read_reward_file(reward_dir), 0.4)
+        with open(
+            os.path.join(reward_dir, eh.VERIFIER_EVIDENCE_FILENAME),
+            encoding="utf-8",
+        ) as fh:
+            evidence = json.load(fh)
+        self.assertEqual(
+            evidence["schema_version"], "openbench-verifier-evidence-v1"
+        )
+        self.assertEqual(evidence["checker_exit"], 7)
+        self.assertEqual(evidence["parsed_score"], 0.4)
+        self.assertEqual(evidence["reward"], 0.4)
+        self.assertIsInstance(evidence["verifier_duration_seconds"], int)
+        self.assertGreaterEqual(evidence["verifier_duration_seconds"], 0)
 
     def test_exit_zero_writes_one(self):
         tmp = tempfile.mkdtemp(prefix="obench_harbor_ok_")
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         tests = os.path.join(tmp, "tests")
         os.makedirs(tests)
-        _write(os.path.join(tests, "checker.sh"), "#!/usr/bin/env bash\nexit 0\n")
+        _write(
+            os.path.join(tests, "checker.sh"),
+            "#!/usr/bin/env bash\necho 'SCORE: 0.2'\nexit 0\n",
+        )
         os.chmod(os.path.join(tests, "checker.sh"), 0o755)
         _write(os.path.join(tests, "test.sh"), eh.render_test_sh())
         os.chmod(os.path.join(tests, "test.sh"), 0o755)
@@ -141,6 +165,87 @@ class TestShScoreMappingTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertEqual(eh.read_reward_file(reward_dir), 1.0)
+        with open(
+            os.path.join(reward_dir, eh.VERIFIER_EVIDENCE_FILENAME),
+            encoding="utf-8",
+        ) as fh:
+            evidence = json.load(fh)
+        self.assertEqual(evidence["checker_exit"], 0)
+        self.assertEqual(evidence["parsed_score"], 0.2)
+        self.assertEqual(evidence["reward"], 1.0)
+
+    def test_generated_test_sh_clamps_score_and_records_evidence(self):
+        tmp = tempfile.mkdtemp(prefix="obench_harbor_clamp_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        tests = os.path.join(tmp, "tests")
+        os.makedirs(tests)
+        _write(
+            os.path.join(tests, "checker.sh"),
+            "#!/usr/bin/env bash\n"
+            "echo 'SCORE: malformed'\n"
+            "echo 'SCORE: 1.5'\n"
+            "exit 9\n",
+        )
+        os.chmod(os.path.join(tests, "checker.sh"), 0o755)
+        _write(os.path.join(tests, "test.sh"), eh.render_test_sh())
+        os.chmod(os.path.join(tests, "test.sh"), 0o755)
+        reward_dir = os.path.join(tmp, "reward")
+        env = dict(os.environ)
+        env["VERIFIER_LOGS_DIR"] = reward_dir
+        proc = subprocess.run(
+            ["bash", os.path.join(tests, "test.sh")],
+            cwd=tmp,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertEqual(eh.read_reward_file(reward_dir), 1.0)
+        with open(
+            os.path.join(reward_dir, eh.VERIFIER_EVIDENCE_FILENAME),
+            encoding="utf-8",
+        ) as fh:
+            evidence = json.load(fh)
+        self.assertEqual(evidence["checker_exit"], 9)
+        self.assertEqual(evidence["parsed_score"], 1.0)
+        self.assertEqual(evidence["reward"], 1.0)
+
+    def test_nonzero_without_score_records_null_evidence(self):
+        tmp = tempfile.mkdtemp(prefix="obench_harbor_no_score_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        tests = os.path.join(tmp, "tests")
+        os.makedirs(tests)
+        _write(
+            os.path.join(tests, "checker.sh"),
+            "#!/usr/bin/env bash\necho 'no score available'\nexit 3\n",
+        )
+        os.chmod(os.path.join(tests, "checker.sh"), 0o755)
+        _write(os.path.join(tests, "test.sh"), eh.render_test_sh())
+        os.chmod(os.path.join(tests, "test.sh"), 0o755)
+        reward_dir = os.path.join(tmp, "reward")
+        env = dict(os.environ)
+        env["VERIFIER_LOGS_DIR"] = reward_dir
+        proc = subprocess.run(
+            ["bash", os.path.join(tests, "test.sh")],
+            cwd=tmp,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertEqual(eh.read_reward_file(reward_dir), 0.0)
+        with open(
+            os.path.join(reward_dir, eh.VERIFIER_EVIDENCE_FILENAME),
+            encoding="utf-8",
+        ) as fh:
+            evidence = json.load(fh)
+        self.assertEqual(evidence["checker_exit"], 3)
+        self.assertIsNone(evidence["parsed_score"])
+        self.assertEqual(evidence["reward"], 0.0)
 
 
 class SolutionOverlayTests(unittest.TestCase):
@@ -359,7 +464,7 @@ class CoreTasksHarborRoundTripTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(out, "make-it-run", "task.toml")))
         with open(os.path.join(out, "make-it-run", "task.toml"), encoding="utf-8") as fh:
             body = fh.read()
-        self.assertRegex(body, re.compile(r'schema_version\s*=\s*"1\.3"'))
+        self.assertRegex(body, re.compile(r'schema_version\s*=\s*"1\.4"'))
 
 
 if __name__ == "__main__":

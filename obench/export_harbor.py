@@ -7,8 +7,8 @@ This module maps OpenBench's files-plus-checker contract onto Harbor's
 optional ``solution/solve.sh`` layout so companies can run OpenBench suites
 on Harbor while keeping OpenBench as the comparison/stats layer.
 
-Format verified against Harbor docs (schema_version 1.3, Jul 2026):
-https://www.harborframework.com/docs/tasks
+Format pinned to Harbor 0.20.0 source at commit
+72bc40b1e58b47a9cc6e0f14c29aced3a9e53767 (schema_version 1.4).
 """
 
 from __future__ import annotations
@@ -30,13 +30,15 @@ from .workspace import (
     resolve_workspace_mode,
 )
 
-# Harbor task config default as of Jul 2026 docs / TB challenges.
-HARBOR_SCHEMA_VERSION = "1.3"
+# Harbor 0.20.0 task contract pinned at commit 72bc40b1e58b.
+HARBOR_SCHEMA_VERSION = "1.4"
+HARBOR_TASK_VERSION = "1.0.0"
 HARBOR_WORKDIR = "/app"
 DEFAULT_BASE_IMAGE = "python:3.11-slim"
 
 # Reward log dir: Harbor uses /logs/verifier; local round-trips use a fallback.
 REWARD_FILENAME = "reward.txt"
+VERIFIER_EVIDENCE_FILENAME = "openbench-verifier-evidence.json"
 
 
 class ExportError(ValueError):
@@ -85,15 +87,20 @@ def render_task_toml(
     agent_timeout_sec: float = 600.0,
     verifier_timeout_sec: float = 120.0,
 ) -> str:
-    """Render Harbor ``task.toml`` (schema_version 1.3)."""
+    """Render Harbor ``task.toml`` (schema_version 1.4)."""
     tags = list(tags) if tags else ["openbench"]
     keywords = ["openbench"]
     harbor_name = f"openbench/{task_name}"
     lines = [
         f"schema_version = {_toml_str(HARBOR_SCHEMA_VERSION)}",
+        "artifacts = [",
+        f"    {{ source = {_toml_str(HARBOR_WORKDIR)}, "
+        f"destination = {_toml_str('workspace')} }},",
+        "]",
         "",
         "[task]",
         f"name = {_toml_str(harbor_name)}",
+        f"version = {_toml_str(HARBOR_TASK_VERSION)}",
         f"description = {_toml_str(description)}",
         "authors = []",
         f"keywords = {_toml_str_list(keywords)}",
@@ -166,8 +173,8 @@ def render_dockerfile(*, base_image: str = DEFAULT_BASE_IMAGE) -> str:
 def render_test_sh() -> str:
     """Harbor verifier wrapper around OpenBench ``checker.sh``.
 
-    Writes ``reward.txt`` under Harbor's ``/logs/verifier`` when that directory
-    exists (or is creatable). For local round-trip tests without Harbor's
+    Writes scalar ``reward.txt`` plus machine-readable verifier evidence under
+    Harbor's ``/logs/verifier``. For local round-trip tests without Harbor's
     filesystem layout, honors ``VERIFIER_LOGS_DIR`` and otherwise falls back to
     ``./logs-verifier`` relative to the agent workspace cwd.
     """
@@ -189,6 +196,7 @@ else
 fi
 mkdir -p "$REWARD_DIR"
 
+START_EPOCH="$(date +%s 2>/dev/null || true)"
 OUT_FILE="$(mktemp)"
 set +e
 bash "$TESTS_DIR/checker.sh" >"$OUT_FILE" 2>&1
@@ -196,27 +204,58 @@ RC=$?
 set -e
 cat "$OUT_FILE"
 
+PARSED_SCORE="$(
+  awk '
+    /^[[:space:]]*SCORE:[[:space:]]*/ {
+      line=$0
+      sub(/^[[:space:]]*SCORE:[[:space:]]*/, "", line)
+      split(line, a, /[[:space:]]+/)
+      candidate=a[1]
+      if (candidate ~ /^[-+]?(([0-9]+([.][0-9]*)?)|([.][0-9]+))([eE][-+]?[0-9]+)?$/) {
+        value=candidate + 0
+        if (value < 0) value=0
+        if (value > 1) value=1
+        last=sprintf("%.17g", value)
+      }
+    }
+    END { if (last != "") print last }
+  ' "$OUT_FILE"
+)"
+
 if [ "$RC" -eq 0 ]; then
   REWARD="1.0"
+elif [ -n "$PARSED_SCORE" ]; then
+  REWARD="$PARSED_SCORE"
 else
-  REWARD="$(
-    awk '
-      /^[[:space:]]*SCORE:[[:space:]]*/ {
-        line=$0
-        sub(/^[[:space:]]*SCORE:[[:space:]]*/, "", line)
-        split(line, a, /[[:space:]]+/)
-        if (a[1] != "") last=a[1]
-      }
-      END { if (last != "") print last; else print "0.0" }
-    ' "$OUT_FILE"
-  )"
-  # Reject non-numeric SCORE payloads.
-  case "$REWARD" in
-    ''|*[!0-9.+-]* ) REWARD="0.0" ;;
-  esac
+  REWARD="0.0"
 fi
 
 printf '%s\n' "$REWARD" >"$REWARD_DIR/reward.txt"
+END_EPOCH="$(date +%s 2>/dev/null || true)"
+case "$START_EPOCH:$END_EPOCH" in
+  :*|*:|*[!0-9:]*) DURATION_JSON="null" ;;
+  *)
+    if [ "$END_EPOCH" -ge "$START_EPOCH" ]; then
+      DURATION_JSON="$((END_EPOCH - START_EPOCH))"
+    else
+      DURATION_JSON="null"
+    fi
+    ;;
+esac
+if [ -n "$PARSED_SCORE" ]; then
+  PARSED_SCORE_JSON="$PARSED_SCORE"
+else
+  PARSED_SCORE_JSON="null"
+fi
+cat >"$REWARD_DIR/openbench-verifier-evidence.json" <<EOF
+{
+  "schema_version": "openbench-verifier-evidence-v1",
+  "checker_exit": $RC,
+  "parsed_score": $PARSED_SCORE_JSON,
+  "reward": $REWARD,
+  "verifier_duration_seconds": $DURATION_JSON
+}
+EOF
 rm -f "$OUT_FILE"
 exit 0
 """
