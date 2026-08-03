@@ -43,6 +43,25 @@ class _UsageUpstreamHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
         self.close_connection = True
 
+    def do_GET(self):  # noqa: N802
+        self.server.observed.append(  # type: ignore[attr-defined]
+            {
+                "path": self.path,
+                "authorization": self.headers.get("authorization"),
+                "account": self.headers.get("chatgpt-account-id"),
+                "originator": self.headers.get("originator"),
+                "body": b"",
+            }
+        )
+        payload = b"{}"
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(payload)))
+        self.send_header("connection", "close")
+        self.end_headers()
+        self.wfile.write(payload)
+        self.close_connection = True
+
 
 class HarborMeteringSessionTests(unittest.TestCase):
     def setUp(self):
@@ -155,6 +174,10 @@ class HarborMeteringSessionTests(unittest.TestCase):
                 "output_tokens": 4,
             },
         )
+        self.assertEqual(
+            evidence["request_counts"],
+            {"total": 1, "model": 1, "auxiliary": 0},
+        )
 
         public_bytes = (evidence_root / "harbor-metering.json").read_bytes()
         private_bytes = b"".join(
@@ -190,6 +213,36 @@ class HarborMeteringSessionTests(unittest.TestCase):
             expected_agent_usage=harbor_metering.UsageCounters(1, 12, 3, 4),
         )
         self.assertEqual(verified["reconciliation"]["status"], "exact")
+
+    def test_auxiliary_get_is_retained_but_not_counted_as_model_call(self):
+        with self._session("auxiliary-get") as session:
+            endpoint = urlsplit(
+                session.process_env({})[
+                    harbor_metering.HARBOR_BASE_URL_SOURCE_ENV
+                ]
+                + "/models"
+            )
+            connection = http.client.HTTPConnection(
+                endpoint.hostname,
+                endpoint.port,
+                timeout=5,
+            )
+            connection.request("GET", endpoint.path)
+            response = connection.getresponse()
+            response.read()
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(self._post_model_call(session), 200)
+            evidence = session.seal(
+                harbor_metering.UsageCounters(1, 12, 3, 4)
+            )
+
+        self.assertEqual(evidence["reconciliation"]["status"], "exact")
+        self.assertEqual(
+            evidence["request_counts"],
+            {"total": 2, "model": 1, "auxiliary": 1},
+        )
+        self.assertEqual(evidence["proxy_measured"]["calls"], 1)
 
     def test_durable_evidence_must_match_the_validated_atif_counters(self):
         with self._session("atif-mismatch") as session:

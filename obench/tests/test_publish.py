@@ -295,9 +295,12 @@ class PublishBundleTests(unittest.TestCase):
         )
         row["candidate_provenance"]["proxy_measured"] = True
         row["candidate_provenance"]["harbor_metering"] = {
-            "schema_version": "openbench.harbor-metering.v1",
+            "schema_version": "openbench.harbor-metering.v2",
             "reconciliation_status": "exact",
             "ledger_root_hash": "1" * 64,
+            "ledger_record_count": 2,
+            "model_call_count": 1,
+            "auxiliary_request_count": 1,
             "publication": {
                 "eligible": True,
                 "blocking_reasons": [],
@@ -347,9 +350,12 @@ class PublishBundleTests(unittest.TestCase):
         )
         row["candidate_provenance"]["proxy_measured"] = True
         row["candidate_provenance"]["harbor_metering"] = {
-            "schema_version": "openbench.harbor-metering.v1",
+            "schema_version": "openbench.harbor-metering.v2",
             "reconciliation_status": "exact",
             "ledger_root_hash": "1" * 64,
+            "ledger_record_count": 2,
+            "model_call_count": 1,
+            "auxiliary_request_count": 1,
             "publication": {
                 "eligible": True,
                 "blocking_reasons": [],

@@ -92,6 +92,12 @@ Normalized row `turns` is not used as a call count. When ATIF omits the optional
 extension, the reconciliation field is `proxy_only`; the sealed, hash-chained
 ledger remains the independently recomputed call-count source.
 
+Only `POST .../responses` and `POST .../chat/completions` records are model
+calls. Endpoint probes and model-discovery requests remain in the ledger as
+auxiliary requests, but they are not misreported as generations and do not
+require token usage. Public provenance retains total, model-call, and auxiliary
+request counts.
+
 The evidence status is:
 
 - `exact`: the ledger is complete and all ATIF token totals match. A missing

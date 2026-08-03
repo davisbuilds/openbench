@@ -370,6 +370,9 @@ def _validate_harbor_usage(row, provenance):
             "schema_version",
             "reconciliation_status",
             "ledger_root_hash",
+            "ledger_record_count",
+            "model_call_count",
+            "auxiliary_request_count",
             "publication",
             "proxy_required",
             "evidence_sha256",
@@ -380,7 +383,7 @@ def _validate_harbor_usage(row, provenance):
                 f"Harbor row {row.get('run_id', '?')!r}: malformed metering evidence"
             )
         if (
-            metering["schema_version"] != "openbench.harbor-metering.v1"
+            metering["schema_version"] != "openbench.harbor-metering.v2"
             or metering["reconciliation_status"] != "exact"
             or metering["proxy_required"] is not True
             or not isinstance(metering["publication"], dict)
@@ -390,6 +393,30 @@ def _validate_harbor_usage(row, provenance):
             raise PublishError(
                 f"Harbor row {row.get('run_id', '?')!r}: proxy metering is "
                 "not publication-eligible"
+            )
+        for key in (
+            "ledger_record_count",
+            "model_call_count",
+            "auxiliary_request_count",
+        ):
+            if (
+                not isinstance(metering[key], int)
+                or isinstance(metering[key], bool)
+                or metering[key] < 0
+            ):
+                raise PublishError(
+                    f"Harbor row {row.get('run_id', '?')!r}: invalid "
+                    f"metering {key}"
+                )
+        if (
+            metering["ledger_record_count"]
+            != metering["model_call_count"]
+            + metering["auxiliary_request_count"]
+            or metering["model_call_count"] != row.get("tokens_proxy_calls")
+        ):
+            raise PublishError(
+                f"Harbor row {row.get('run_id', '?')!r}: metering request "
+                "counts disagree"
             )
         for key in ("ledger_root_hash", "evidence_sha256", "ledger_sha256"):
             if not isinstance(metering[key], str) or re.fullmatch(

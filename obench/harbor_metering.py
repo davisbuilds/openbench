@@ -14,7 +14,7 @@ from typing import Any, Mapping
 from obench import proxy
 from obench.run import proxy_split_from_usage
 
-SCHEMA_VERSION = "openbench.harbor-metering.v1"
+SCHEMA_VERSION = "openbench.harbor-metering.v2"
 HARBOR_BASE_URL_ENV = "OPENAI_BASE_URL"
 HARBOR_BASE_URL_SOURCE_ENV = "OPENBENCH_HARBOR_METERING_BASE_URL"
 STATUSES = {"exact", "mismatch", "incomplete"}
@@ -211,6 +211,11 @@ def apply_to_imported_row(
         "schema_version": evidence.get("schema_version"),
         "reconciliation_status": evidence.get("reconciliation", {}).get("status"),
         "ledger_root_hash": evidence.get("ledger_seal", {}).get("root_hash"),
+        "ledger_record_count": evidence.get("request_counts", {}).get("total"),
+        "model_call_count": evidence.get("request_counts", {}).get("model"),
+        "auxiliary_request_count": evidence.get("request_counts", {}).get(
+            "auxiliary"
+        ),
         "publication": publication_decision(
             evidence, proxy_required=proxy_required
         ),
@@ -364,6 +369,11 @@ class HarborMeteringSession:
         errors: list[str] = []
         seal_data: dict[str, Any] | None = None
         proxy_usage = UsageCounters(None, None, None, None)
+        request_counts = {
+            "total": None,
+            "model": None,
+            "auxiliary": None,
+        }
         proxy_complete = False
         try:
             seal = self._server.seal_cell(self._token, timeout_s=timeout_s)
@@ -381,7 +391,7 @@ class HarborMeteringSession:
                 or seal_record["root_hash"] != seal.root_hash
             ):
                 raise HarborMeteringError("in-memory and durable ledger seals differ")
-            proxy_usage, usage_errors = _proxy_totals(records)
+            proxy_usage, usage_errors, request_counts = _proxy_totals(records)
             errors.extend(usage_errors)
             proxy_complete = not errors
         except Exception as exc:
@@ -403,6 +413,7 @@ class HarborMeteringSession:
             },
             "agent_reported": asdict(agent_reported),
             "proxy_measured": asdict(proxy_usage),
+            "request_counts": request_counts,
             "proxy_complete": proxy_complete,
             "ledger_seal": seal_data,
             "reconciliation": {
@@ -521,9 +532,11 @@ def verify_evidence_dir(
     if dict(declared_seal) != expected_seal:
         raise HarborMeteringError("metering evidence does not bind the durable ledger")
 
-    measured, errors = _proxy_totals(records)
+    measured, errors, request_counts = _proxy_totals(records)
     if errors or asdict(measured) != evidence.get("proxy_measured"):
         raise HarborMeteringError("metering proxy totals do not recompute exactly")
+    if request_counts != evidence.get("request_counts"):
+        raise HarborMeteringError("metering request classes do not recompute exactly")
     reported_value = evidence.get("agent_reported")
     if not isinstance(reported_value, Mapping) or set(reported_value) != set(
         COUNTER_FIELDS
@@ -553,8 +566,10 @@ def verify_evidence_dir(
 
 def _proxy_totals(
     records: list[dict[str, Any]],
-) -> tuple[UsageCounters, list[str]]:
+) -> tuple[UsageCounters, list[str], dict[str, int]]:
     errors: list[str] = []
+    model_records = []
+    auxiliary_records = []
     totals = {
         "input_uncached": 0,
         "cache_read": 0,
@@ -566,6 +581,15 @@ def _proxy_totals(
             errors.append(f"request_{index}_capture_truncated")
         if record.get("error"):
             errors.append(f"request_{index}_proxy_error")
+        path = str(record.get("path") or "").split("?", 1)[0].rstrip("/")
+        is_model_call = (
+            record.get("method") == "POST"
+            and path.endswith(("/responses", "/chat/completions"))
+        )
+        if not is_model_call:
+            auxiliary_records.append(record)
+            continue
+        model_records.append(record)
         usage = record.get("usage")
         split = proxy_split_from_usage(usage)
         values = {
@@ -582,11 +606,20 @@ def _proxy_totals(
             continue
         for name, value in values.items():
             totals[name] += value
+    request_counts = {
+        "total": len(records),
+        "model": len(model_records),
+        "auxiliary": len(auxiliary_records),
+    }
     if errors:
-        return UsageCounters(len(records), None, None, None), errors
+        return (
+            UsageCounters(len(model_records), None, None, None),
+            errors,
+            request_counts,
+        )
     return (
         UsageCounters(
-            calls=len(records),
+            calls=len(model_records),
             input_tokens=(
                 totals["input_uncached"]
                 + totals["cache_read"]
@@ -596,6 +629,7 @@ def _proxy_totals(
             output_tokens=totals["output"],
         ),
         errors,
+        request_counts,
     )
 
 
