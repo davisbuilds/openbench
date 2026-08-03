@@ -1,0 +1,375 @@
+import hashlib
+import json
+import os
+import tempfile
+import unittest
+from dataclasses import replace
+from pathlib import Path
+
+from obench import harbor_job as hj
+
+
+class HarborJobTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="obench-harbor-job-")
+        self.root = Path(self.tmp.name)
+        self.task_set = self.root / "exported"
+        self.task_set.mkdir()
+        self._make_task("zeta")
+        self._make_task("alpha")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _make_task(self, name, *, config=True, instruction=True):
+        task = self.task_set / name
+        task.mkdir()
+        if config:
+            (task / "task.toml").write_text('schema_version = "1.4"\n')
+        if instruction:
+            (task / "instruction.md").write_text(f"# {name}\n")
+        return task
+
+    def _local_spec(self, **changes):
+        spec = hj.HarborJobSpec(
+            job_name="openbench-smoke",
+            jobs_dir=self.root / "jobs",
+            source=hj.LocalTaskSet(self.task_set),
+            agent_profiles=(hj.AgentProfile(profile_id="codex", name="codex"),),
+            models=("openai/gpt-5",),
+            attempts=2,
+            concurrency=hj.ConcurrencyPolicy(n_concurrent_trials=3),
+            retry=hj.RetryPolicy(max_retries=1),
+        )
+        return replace(spec, **changes)
+
+    def test_deterministic_golden_native_job_config(self):
+        self.assertEqual(hj.HARBOR_VERSION, "0.20.0")
+        self.assertEqual(
+            hj.HARBOR_GIT_COMMIT,
+            "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        )
+        self.assertIn(hj.HARBOR_GIT_COMMIT, hj.HARBOR_JOB_CONFIG_SOURCE)
+        spec = hj.HarborJobSpec(
+            job_name="community-proof",
+            jobs_dir="/tmp/openbench-harbor-jobs",
+            source=hj.Dataset(
+                name="openbench/core-smoke",
+                ref="sha256:0123456789abcdef",
+                task_names=("make-it-run", "fix-tests"),
+            ),
+            agent_profiles=(
+                hj.AgentProfile(
+                    profile_id="candidate",
+                    import_path="company.harbor:CandidateAgent",
+                    n_concurrent=2,
+                    concurrency_group="company-api",
+                    kwargs={"mode": "strict", "temperature": 0},
+                    env={"OPENAI_BASE_URL": "${OPENBENCH_PROXY_URL}"},
+                    extra_allowed_hosts=("proxy.internal",),
+                ),
+            ),
+            models=("openai/gpt-5",),
+            attempts=3,
+            concurrency=hj.ConcurrencyPolicy(n_concurrent_trials=4),
+            retry=hj.RetryPolicy(
+                max_retries=2,
+                include_exceptions=("EnvironmentStartError",),
+                exclude_exceptions=("AgentAuthenticationError", "ModelNotFoundError"),
+                wait_multiplier=2,
+                min_wait_sec=3,
+                max_wait_sec=30,
+            ),
+        )
+
+        artifact = hj.build_job_config(spec)
+
+        expected = """{
+  "agents": [
+    {
+      "concurrency_group": "company-api",
+      "env": {
+        "OPENAI_BASE_URL": "${OPENBENCH_PROXY_URL}"
+      },
+      "extra_allowed_hosts": [
+        "proxy.internal"
+      ],
+      "import_path": "company.harbor:CandidateAgent",
+      "kwargs": {
+        "mode": "strict",
+        "temperature": 0
+      },
+      "model_name": "openai/gpt-5",
+      "n_concurrent": 2
+    }
+  ],
+  "datasets": [
+    {
+      "name": "openbench/core-smoke",
+      "ref": "sha256:0123456789abcdef",
+      "task_names": [
+        "make-it-run",
+        "fix-tests"
+      ]
+    }
+  ],
+  "job_name": "community-proof",
+  "jobs_dir": "/tmp/openbench-harbor-jobs",
+  "n_attempts": 3,
+  "n_concurrent_trials": 4,
+  "retry": {
+    "exclude_exceptions": [
+      "AgentAuthenticationError",
+      "ModelNotFoundError"
+    ],
+    "include_exceptions": [
+      "EnvironmentStartError"
+    ],
+    "max_retries": 2,
+    "max_wait_sec": 30.0,
+    "min_wait_sec": 3.0,
+    "wait_multiplier": 2.0
+  },
+  "tasks": []
+}
+"""
+        self.assertEqual(artifact.json_bytes.decode(), expected)
+        self.assertEqual(
+            artifact.sha256,
+            hashlib.sha256(expected.encode()).hexdigest(),
+        )
+        self.assertEqual(artifact.as_dict(), json.loads(expected))
+        self.assertIsNone(artifact.trial_count)
+
+    def test_local_task_set_expands_profiles_models_and_attempts(self):
+        profiles = (
+            hj.AgentProfile(profile_id="codex", name="codex"),
+            hj.AgentProfile(
+                profile_id="custom",
+                import_path="acme.agent:Agent",
+                n_concurrent=2,
+                env={"ACME_CONFIG": "${ACME_CONFIG_PATH}"},
+            ),
+        )
+        artifact = hj.build_job_config(
+            self._local_spec(
+                agent_profiles=profiles,
+                models=("provider/model-b", "provider/model-a"),
+                attempts=3,
+            )
+        )
+        config = artifact.as_dict()
+
+        self.assertEqual(
+            config["datasets"],
+            [
+                {
+                    "path": str(self.task_set.resolve()),
+                    "task_names": ["alpha", "zeta"],
+                }
+            ],
+        )
+        self.assertEqual(config["tasks"], [])
+        self.assertEqual(
+            [(agent.get("name", agent.get("import_path")), agent["model_name"])
+             for agent in config["agents"]],
+            [
+                ("codex", "provider/model-b"),
+                ("codex", "provider/model-a"),
+                ("acme.agent:Agent", "provider/model-b"),
+                ("acme.agent:Agent", "provider/model-a"),
+            ],
+        )
+        self.assertEqual(artifact.source_task_count, 2)
+        self.assertEqual(artifact.trial_count, 24)
+        self.assertEqual(artifact.json_bytes, hj.build_job_config(
+            self._local_spec(
+                agent_profiles=profiles,
+                models=("provider/model-b", "provider/model-a"),
+                attempts=3,
+            )
+        ).json_bytes)
+
+    def test_local_task_selection_is_sorted_and_exact(self):
+        artifact = hj.build_job_config(
+            self._local_spec(
+                source=hj.LocalTaskSet(self.task_set, task_names=("zeta", "alpha"))
+            )
+        )
+        self.assertEqual(
+            artifact.as_dict()["datasets"][0]["task_names"], ["alpha", "zeta"]
+        )
+
+    def test_local_source_rejects_one_task_partial_and_unknown_selection(self):
+        with self.assertRaisesRegex(hj.HarborJobError, "points to one task"):
+            hj.build_job_config(self._local_spec(source=hj.LocalTaskSet(
+                self.task_set / "alpha"
+            )))
+
+        self._make_task("partial", instruction=False)
+        with self.assertRaisesRegex(hj.HarborJobError, "partial Harbor tasks"):
+            hj.build_job_config(self._local_spec())
+
+        (self.task_set / "partial").rename(self.root / "partial-away")
+        with self.assertRaisesRegex(hj.HarborJobError, "selected tasks"):
+            hj.build_job_config(self._local_spec(source=hj.LocalTaskSet(
+                self.task_set, task_names=("missing",)
+            )))
+
+    def test_dataset_requires_immutable_unambiguous_reference(self):
+        cases = (
+            hj.Dataset(name="terminal-bench"),
+            hj.Dataset(name="terminal-bench", ref="main"),
+            hj.Dataset(name="org/tasks"),
+            hj.Dataset(name="org/tasks", version="2", ref="sha256:abc"),
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                with self.assertRaises(hj.HarborJobError):
+                    hj.build_job_config(self._local_spec(source=source))
+
+    def test_agent_profile_requires_one_identity_and_safe_runtime_hooks(self):
+        cases = (
+            hj.AgentProfile(profile_id="none"),
+            hj.AgentProfile(
+                profile_id="both", name="codex", import_path="acme.agent:Agent"
+            ),
+            hj.AgentProfile(profile_id="bad-import", import_path="acme.agent"),
+            hj.AgentProfile(
+                profile_id="literal", name="codex", env={"TOKEN": "secret"}
+            ),
+            hj.AgentProfile(
+                profile_id="secret-kwarg", name="codex", kwargs={"api_token": "x"}
+            ),
+        )
+        for profile in cases:
+            with self.subTest(profile=profile.profile_id):
+                with self.assertRaises(hj.HarborJobError):
+                    hj.build_job_config(self._local_spec(agent_profiles=(profile,)))
+
+    def test_rejects_duplicate_or_partial_matrix_dimensions(self):
+        with self.assertRaisesRegex(hj.HarborJobError, "models must not contain"):
+            hj.build_job_config(self._local_spec(models=("model", "model")))
+        with self.assertRaisesRegex(hj.HarborJobError, "attempts"):
+            hj.build_job_config(self._local_spec(attempts=0))
+        duplicate_profiles = (
+            hj.AgentProfile(profile_id="same", name="codex"),
+            hj.AgentProfile(profile_id="same", name="pi"),
+        )
+        with self.assertRaisesRegex(hj.HarborJobError, "duplicate profile_id"):
+            hj.build_job_config(
+                self._local_spec(agent_profiles=duplicate_profiles)
+            )
+
+    def test_rejects_concurrency_conflicts(self):
+        too_large = hj.AgentProfile(
+            profile_id="large", name="codex", n_concurrent=4
+        )
+        with self.assertRaisesRegex(hj.HarborJobError, "between 1 and 3"):
+            hj.build_job_config(self._local_spec(agent_profiles=(too_large,)))
+
+        profiles = (
+            hj.AgentProfile(
+                profile_id="one", name="codex", n_concurrent=1,
+                concurrency_group="shared"
+            ),
+            hj.AgentProfile(
+                profile_id="two", name="pi", n_concurrent=2,
+                concurrency_group="shared"
+            ),
+        )
+        with self.assertRaisesRegex(hj.HarborJobError, "conflicting limits"):
+            hj.build_job_config(self._local_spec(agent_profiles=profiles))
+
+    def test_rejects_ambiguous_or_invalid_retry_policy(self):
+        overlap = hj.RetryPolicy(
+            max_retries=1,
+            include_exceptions=("AgentTimeoutError",),
+            exclude_exceptions=("AgentTimeoutError",),
+        )
+        with self.assertRaisesRegex(hj.HarborJobError, "must not overlap"):
+            hj.build_job_config(self._local_spec(retry=overlap))
+
+        backwards = hj.RetryPolicy(
+            max_retries=1, min_wait_sec=10, max_wait_sec=2
+        )
+        with self.assertRaisesRegex(hj.HarborJobError, "must not exceed"):
+            hj.build_job_config(self._local_spec(retry=backwards))
+
+    def test_write_is_atomic_idempotent_and_refuses_replacement(self):
+        artifact = hj.build_job_config(self._local_spec())
+        path = self.root / "configs" / "job.json"
+
+        self.assertEqual(hj.write_job_config(artifact, path), path.resolve())
+        self.assertEqual(hj.write_job_config(artifact, path), path.resolve())
+        self.assertEqual(path.read_bytes(), artifact.json_bytes)
+
+        different = hj.build_job_config(self._local_spec(attempts=3))
+        with self.assertRaisesRegex(hj.HarborJobError, "refusing to overwrite"):
+            hj.write_job_config(different, path)
+
+    def test_command_plan_binds_digest_and_uses_native_config_command(self):
+        artifact = hj.build_job_config(self._local_spec())
+        config_path = hj.write_job_config(artifact, self.root / "job.json")
+
+        plan = hj.build_command_plan(
+            artifact, config_path, harbor_binary="/opt/harbor-0.20.0/bin/harbor"
+        )
+
+        self.assertEqual(
+            plan.argv,
+            ("/opt/harbor-0.20.0/bin/harbor", "run", "-c", str(config_path)),
+        )
+        self.assertEqual(plan.config_sha256, artifact.sha256)
+        self.assertEqual(plan.expected_job_path, self.root / "jobs" / "openbench-smoke")
+        self.assertFalse(plan.resumes_existing_job)
+        self.assertEqual(plan.harbor_version, "0.20.0")
+
+    def test_command_plan_delegates_partial_and_complete_resume_state_to_harbor(self):
+        artifact = hj.build_job_config(self._local_spec())
+        config_path = hj.write_job_config(artifact, self.root / "job.json")
+        job_path = self.root / "jobs" / "openbench-smoke"
+        job_path.mkdir(parents=True)
+
+        plan = hj.build_command_plan(artifact, config_path)
+        self.assertFalse(plan.resumes_existing_job)
+
+        (job_path / "config.json").write_text("{}\n")
+        plan = hj.build_command_plan(artifact, config_path)
+        self.assertTrue(plan.resumes_existing_job)
+        (job_path / "lock.json").write_text("{}\n")
+        plan = hj.build_command_plan(artifact, config_path)
+        self.assertTrue(plan.resumes_existing_job)
+        self.assertEqual(plan.argv[:3], ("harbor", "run", "-c"))
+
+    def test_command_plan_rejects_modified_or_symlinked_config(self):
+        artifact = hj.build_job_config(self._local_spec())
+        config_path = hj.write_job_config(artifact, self.root / "job.json")
+        config_path.write_text("{}\n")
+        with self.assertRaisesRegex(hj.HarborJobError, "does not match"):
+            hj.build_command_plan(artifact, config_path)
+
+        link = self.root / "linked.json"
+        link.symlink_to(config_path)
+        with self.assertRaisesRegex(hj.HarborJobError, "symlink"):
+            hj.build_command_plan(artifact, link)
+
+    def test_write_rejects_symlinked_config(self):
+        artifact = hj.build_job_config(self._local_spec())
+        target = self.root / "target.json"
+        target.write_text("{}\n")
+        link = self.root / "linked-write.json"
+        link.symlink_to(target)
+        with self.assertRaisesRegex(hj.HarborJobError, "symlink"):
+            hj.write_job_config(artifact, link)
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
+    def test_local_task_set_rejects_symlink_root(self):
+        link = self.root / "export-link"
+        link.symlink_to(self.task_set, target_is_directory=True)
+        with self.assertRaisesRegex(hj.HarborJobError, "must not be a symlink"):
+            hj.build_job_config(self._local_spec(source=hj.LocalTaskSet(link)))
+
+
+if __name__ == "__main__":
+    unittest.main()
