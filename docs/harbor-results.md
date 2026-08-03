@@ -77,6 +77,9 @@ Publication also deterministically re-exports that local task with the
 evidence-bound `base_image` and `network_mode`, reproduces Harbor 0.20.0's
 package content hash, and requires equality with `TrialLock.task.digest`. This
 rejects exports changed after the OpenBench digest was embedded.
+Canonical publication is deliberately non-executing: git workspaces with
+`setup` hooks and remote git workspaces are rejected instead of running task
+code or fetching network content during publish or verify.
 
 Published Harbor rows use an allowlist. They retain the normalized result
 metrics, Harbor/ATIF/verifier/artifact/final-workspace digests, task hashes,

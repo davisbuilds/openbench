@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from obench import publish
 from obench import scrub
@@ -360,6 +361,37 @@ class PublishBundleTests(unittest.TestCase):
                 scrub_ctx=self.scrub_ctx,
             )
         self.assertFalse(os.path.exists(self.out))
+
+    def test_harbor_binding_never_executes_workspace_setup(self):
+        task = os.path.join(self.tasks, "alpha")
+        os.remove(os.path.join(task, "workspace", "main.py"))
+        os.rmdir(os.path.join(task, "workspace"))
+        with open(os.path.join(task, "workspace.toml"), "w", encoding="utf-8") as fh:
+            fh.write(
+                'kind = "git"\n'
+                'repo = "."\n'
+                'ref = "' + "a" * 40 + '"\n'
+                'setup = "setup.sh"\n'
+            )
+
+        with mock.patch(
+            "obench.workspace._run_setup_script",
+            side_effect=AssertionError("setup hook executed"),
+        ) as setup:
+            with self.assertRaisesRegex(
+                publish.PublishError,
+                "cannot safely reproduce workspace setup hooks",
+            ):
+                publish._canonical_harbor_export_digest(
+                    task,
+                    "alpha",
+                    {
+                        "schema_version": 1,
+                        "base_image": "python:3.11-slim",
+                        "network_mode": "no-network",
+                    },
+                )
+        setup.assert_not_called()
 
     def test_verify_rechecks_executed_task_digest_binding(self):
         harbor_results = os.path.join(self.tmp.name, "harbor-binding.jsonl")

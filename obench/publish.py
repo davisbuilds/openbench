@@ -593,6 +593,30 @@ def _harbor_packager_content_hash(task_dir):
 
 def _canonical_harbor_export_digest(task_dir, task_name, export_config):
     from .export_harbor import ExportError, export_task
+    from .workspace import (
+        WorkspaceError,
+        load_git_workspace_spec,
+        resolve_workspace_mode,
+    )
+
+    try:
+        workspace_mode = resolve_workspace_mode(task_dir)
+        if workspace_mode == "git":
+            workspace_spec = load_git_workspace_spec(task_dir)
+            if workspace_spec.setup:
+                raise PublishError(
+                    f"Harbor task {task_name!r}: publication cannot safely "
+                    "reproduce workspace setup hooks"
+                )
+            if "://" in workspace_spec.repo or workspace_spec.repo.startswith("git@"):
+                raise PublishError(
+                    f"Harbor task {task_name!r}: publication cannot safely "
+                    "reproduce remote git workspaces"
+                )
+    except WorkspaceError as exc:
+        raise PublishError(
+            f"cannot inspect Harbor export workspace for {task_name!r}: {exc}"
+        ) from exc
 
     with tempfile.TemporaryDirectory(prefix="obench-publish-harbor-") as temp_dir:
         export_dir = os.path.join(temp_dir, "task")
