@@ -97,6 +97,9 @@ safely ordered or chained. Run trials sequentially instead: after the first
 context persists its returned rotation, the next invocation stages that newer
 master.
 
-The master credential also has a nonblocking per-file lock. Distinct processes
-cannot concurrently use the same `auth.json`, and compare-and-swap validation
-prevents a stale trial from silently overwriting a newer generation.
+The master credential uses the same mode-`0600` per-file lease as native
+OpenBench Codex runs, Codex ablations, and container runs. The lease spans
+generation snapshot, staging, execution, and persist-back. Harbor acquires it
+nonblocking and fails if another consumer owns the credential; native runs wait.
+Compare-and-swap validation immediately before atomic replacement also rejects
+a generation changed by a non-cooperating writer.
