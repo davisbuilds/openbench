@@ -279,6 +279,7 @@ class BuildLeaderboardTests(unittest.TestCase):
         )
         return {
             "id": rid,
+            "status": "final",
             "title": title or rid,
             "date": date,
             "models": sorted({r["model"] for r in rows}),
@@ -375,9 +376,45 @@ class BuildLeaderboardTests(unittest.TestCase):
         self.assertEqual(len(aliases), 1)
         self.assertEqual(aliases[0]["id"], "seed-copy")
 
+    def test_final_release_gate_preserves_community_bundles(self):
+        release = self._release_bundle(
+            "official", [_row("pi", "alpha", 1, True)]
+        )
+        _write(
+            os.path.join(self.site, "releases.json"),
+            json.dumps([release], indent=2) + "\n",
+        )
+        community_dir = os.path.join(self.site, "community", "community-one")
+        _publish_bundle(
+            community_dir,
+            self.tasks,
+            [_row("codex", "alpha", 1, False)],
+            title="Community one",
+        )
+        _write(
+            os.path.join(self.site, "community.json"),
+            json.dumps([{
+                "id": "community-one",
+                "submitter": "openbench",
+                "date": "2026-07-21",
+                "claim": "community evidence",
+                "title": "Community one",
+                "path": "community/community-one/index.html",
+            }], indent=2) + "\n",
+        )
+
+        doc = leaderboard.build_leaderboard(self.site)
+
+        self.assertEqual(doc["bundle_count"], 2)
+        self.assertEqual(
+            {(bundle["id"], bundle["kind"]) for bundle in doc["bundles"]},
+            {("official", "release"), ("community-one", "community")},
+        )
+
     def test_skips_html_only_releases(self):
         html_only = {
             "id": "html-only",
+            "status": "final",
             "title": "HTML only",
             "date": "2026-07-01",
             "models": ["m"],
@@ -402,12 +439,14 @@ class BuildLeaderboardTests(unittest.TestCase):
     def test_skips_results_without_verified_provenance(self):
         release = {
             "id": "unverified", "title": "Unverified", "date": "2026-07-20",
+            "status": "final",
             "models": ["model-x"], "path": "releases/unverified/index.html",
         }
         bundle = os.path.join(self.site, "releases", "unverified")
         _write_results(os.path.join(bundle, "results.jsonl"), [
             _row("pi", "alpha", 1, True),
         ])
+        _write(os.path.join(bundle, "index.html"), "<html></html>")
         _write(os.path.join(self.site, "releases.json"), json.dumps([release]))
         _write(os.path.join(self.site, "community.json"), "[]\n")
         doc = leaderboard.build_leaderboard(self.site)
@@ -416,6 +455,64 @@ class BuildLeaderboardTests(unittest.TestCase):
         page = site.render_board_html(site.build_board(self.site))
         self.assertIn("Not ranked", page)
         self.assertIn("missing provenance.json", page)
+
+    def test_rejects_missing_and_non_final_release_status(self):
+        rows = [_row("pi", "alpha", 1, True)]
+        release = self._release_bundle("candidate", rows)
+        manifest_path = os.path.join(self.site, "releases.json")
+
+        release.pop("status")
+        _write(manifest_path, json.dumps([release]))
+        with self.assertRaisesRegex(ValueError, "publication status missing"):
+            leaderboard.build_leaderboard(self.site)
+
+        release["status"] = "draft"
+        _write(manifest_path, json.dumps([release]))
+        with self.assertRaisesRegex(ValueError, "publication status 'draft'"):
+            leaderboard.build_leaderboard(self.site)
+
+    def test_rejects_missing_and_noncanonical_release_path(self):
+        release = self._release_bundle(
+            "candidate", [_row("pi", "alpha", 1, True)]
+        )
+        manifest_path = os.path.join(self.site, "releases.json")
+
+        release.pop("path")
+        _write(manifest_path, json.dumps([release]))
+        with self.assertRaisesRegex(ValueError, "must use canonical path"):
+            leaderboard.build_leaderboard(self.site)
+
+        release["path"] = "releases/other/index.html"
+        _write(manifest_path, json.dumps([release]))
+        with self.assertRaisesRegex(
+            ValueError, "releases/candidate/index.html"
+        ):
+            leaderboard.build_leaderboard(self.site)
+
+    def test_rejects_unlisted_release_directory(self):
+        os.makedirs(os.path.join(self.site, "releases", "internal-smoke"))
+        _write(os.path.join(self.site, "releases.json"), "[]\n")
+
+        with self.assertRaisesRegex(
+            ValueError, "unlisted public release directory.*internal-smoke"
+        ):
+            leaderboard.build_leaderboard(self.site)
+
+    def test_rejects_final_release_without_canonical_index_file(self):
+        release = self._release_bundle(
+            "candidate", [_row("pi", "alpha", 1, True)]
+        )
+        _write(
+            os.path.join(self.site, "releases.json"), json.dumps([release])
+        )
+        os.remove(os.path.join(
+            self.site, "releases", "candidate", "index.html"
+        ))
+
+        with self.assertRaisesRegex(
+            ValueError, "missing its canonical regular file"
+        ):
+            leaderboard.build_leaderboard(self.site)
 
     def test_current_tree_drift_is_disclosed_without_erasing_archive(self):
         rows = [

@@ -1,6 +1,7 @@
 [
   {
     "id": "2026-07-02-m3",
+    "status": "final",
     "title": "OpenBench M3 — Harness Comparison",
     "date": "2026-07-02",
     "models": [
@@ -10,6 +11,7 @@
   },
   {
     "id": "2026-07-09-glm52",
+    "status": "final",
     "title": "OpenBench: GLM 5.2 quarantine-safe archive",
     "date": "2026-07-09",
     "models": [
@@ -19,6 +21,7 @@
   },
   {
     "id": "2026-07-20-grok45",
+    "status": "final",
     "title": "OpenBench: grok-4.5 across 4 harnesses",
     "date": "2026-07-20",
     "models": [
@@ -28,6 +31,7 @@
   },
   {
     "id": "2026-07-20-kimi-k3",
+    "status": "final",
     "title": "OpenBench: kimi-k3 across 3 harnesses",
     "date": "2026-07-20",
     "models": [
@@ -37,6 +41,7 @@
   },
   {
     "id": "2026-07-20-deepseek",
+    "status": "final",
     "title": "OpenBench: deepseek across 5 harnesses",
     "date": "2026-07-20",
     "models": [
@@ -46,20 +51,12 @@
   },
   {
     "id": "2026-07-21-gpt56",
+    "status": "final",
     "title": "OpenBench: gpt-5.6 across 7 harnesses",
     "date": "2026-07-21",
     "models": [
       "gpt-5.6-sol"
     ],
     "path": "releases/2026-07-21-gpt56/index.html"
-  },
-  {
-    "id": "2026-08-03-gpt56-harbor-oauth-smoke",
-    "title": "OpenBench: Harbor OAuth harness execution smoke",
-    "date": "2026-08-03",
-    "models": [
-      "gpt-5.6-sol"
-    ],
-    "path": "releases/2026-08-03-gpt56-harbor-oauth-smoke/index.html"
   }
 ]

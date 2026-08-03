@@ -91,6 +91,84 @@ def _load_manifest_list(path):
     return data
 
 
+FINAL_RELEASE_STATUS = "final"
+_RELEASE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def load_final_releases(site_dir):
+    """Load and validate the exact set of finalized public release dirs.
+
+    ``docs/releases`` is a publication boundary, not a discovery root. Every
+    directory must be listed and every listed entry must explicitly opt in with
+    ``status: final``. Any ambiguity fails the whole public-site build.
+    """
+    site_dir = os.path.abspath(site_dir)
+    manifest_path = os.path.join(site_dir, "releases.json")
+    releases = _load_manifest_list(manifest_path)
+    by_id = {}
+    for index, entry in enumerate(releases):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{manifest_path} entry {index} must contain a JSON object"
+            )
+        release_id = entry.get("id")
+        if not isinstance(release_id, str) or not _RELEASE_ID_RE.fullmatch(release_id):
+            raise ValueError(
+                f"{manifest_path} entry {index} has an invalid release id"
+            )
+        if release_id in by_id:
+            raise ValueError(f"duplicate release id in {manifest_path}: {release_id}")
+        status = entry.get("status")
+        if status != FINAL_RELEASE_STATUS:
+            shown = "missing" if status is None else repr(status)
+            raise ValueError(
+                f"release {release_id!r} has publication status {shown}; "
+                f"public releases require status {FINAL_RELEASE_STATUS!r}"
+            )
+        expected_path = f"releases/{release_id}/index.html"
+        if entry.get("path") != expected_path:
+            raise ValueError(
+                f"final release {release_id!r} must use canonical path "
+                f"{expected_path!r}"
+            )
+        by_id[release_id] = entry
+
+    releases_dir = os.path.join(site_dir, "releases")
+    present = set()
+    if os.path.exists(releases_dir):
+        if not os.path.isdir(releases_dir) or os.path.islink(releases_dir):
+            raise ValueError(f"public release root must be a directory: {releases_dir}")
+        for item in os.scandir(releases_dir):
+            if item.is_symlink() or not item.is_dir(follow_symlinks=False):
+                raise ValueError(
+                    f"unexpected non-directory entry under public release root: {item.path}"
+                )
+            present.add(item.name)
+
+    unlisted = sorted(present - set(by_id))
+    if unlisted:
+        raise ValueError(
+            "unlisted public release director"
+            + ("y" if len(unlisted) == 1 else "ies")
+            + f" under {releases_dir}: {', '.join(unlisted)}"
+        )
+    missing = sorted(set(by_id) - present)
+    if missing:
+        raise ValueError(
+            "final release director"
+            + ("y is" if len(missing) == 1 else "ies are")
+            + f" missing under {releases_dir}: {', '.join(missing)}"
+        )
+    for release_id in by_id:
+        index_path = os.path.join(releases_dir, release_id, "index.html")
+        if os.path.islink(index_path) or not os.path.isfile(index_path):
+            raise ValueError(
+                f"final release {release_id!r} is missing its canonical "
+                f"regular file: {index_path}"
+            )
+    return releases
+
+
 
 def _default_tasks_dirs(site_dir):
     """Resolve source-backed task roots for repository leaderboard builds."""
@@ -275,8 +353,8 @@ def _bundle_meta(bundle_dir, kind, manifest_entry=None):
 def discover_bundle_dirs(site_dir, community_dir=None):
     """Yield candidate bundle dirs as ``(kind, abs_dir, manifest_entry|None)``.
 
-    Order is deterministic: releases (manifest order, then leftover dirs
-    sorted), then site community, then optional data/community leftovers.
+    Order is deterministic: finalized releases in manifest order, then site
+    community, then optional data/community leftovers.
     """
     site_dir = os.path.abspath(site_dir)
     seen_real = set()
@@ -303,11 +381,12 @@ def discover_bundle_dirs(site_dir, community_dir=None):
             seen_real.add(real)
             yield kind, path, manifest_by_id.get(name)
 
-    releases_manifest = {
-        e["id"]: e for e in _load_manifest_list(os.path.join(site_dir, "releases.json"))
-        if isinstance(e, dict) and e.get("id")
-    }
-    yield from _emit("release", "releases", releases_manifest)
+    releases_manifest = {e["id"]: e for e in load_final_releases(site_dir)}
+    for release_id, entry in releases_manifest.items():
+        path = os.path.join(site_dir, "releases", release_id)
+        real = os.path.realpath(path)
+        seen_real.add(real)
+        yield "release", path, entry
 
     community_manifest = {
         e["id"]: e for e in _load_manifest_list(os.path.join(site_dir, "community.json"))
@@ -553,9 +632,7 @@ def build_leaderboard(site_dir, community_dir=None, tasks_dirs=None):
     by_sha = {}
 
     # HTML-only releases from the manifest (no results.jsonl).
-    for entry in _load_manifest_list(os.path.join(site_dir, "releases.json")):
-        if not isinstance(entry, dict) or not entry.get("id"):
-            continue
+    for entry in load_final_releases(site_dir):
         bundle_dir = os.path.join(site_dir, "releases", entry["id"])
         verification_error = _results_verification_error(bundle_dir, tasks_dirs)
         if verification_error:

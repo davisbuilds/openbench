@@ -254,6 +254,7 @@ class ReportPageTest(unittest.TestCase):
         with open(os.path.join(site, "releases.json"), encoding="utf-8") as fh:
             manifest = json.load(fh)
         self.assertEqual(manifest[0]["models"], ["model-x"])
+        self.assertEqual(manifest[0]["status"], "final")
         with open(os.path.join(site, "index.html"), encoding="utf-8") as fh:
             index = fh.read()
         self.assertIn('href="releases/2026-07-20-synthetic/index.html"', index)
@@ -315,10 +316,9 @@ class ReportPageTest(unittest.TestCase):
             self.assertEqual(fh.read(), board_before)
 
         os.remove(os.path.join(site, "releases.json"))
-        report_page.build_site(site, "2026-07-20-synthetic", "2026-07-20",
-                               "Synthetic release", models, page)
-        with open(os.path.join(site, "releases.json"), encoding="utf-8") as fh:
-            self.assertEqual(json.load(fh)[0]["id"], "2026-07-20-synthetic")
+        with self.assertRaisesRegex(ValueError, "unlisted public release directory"):
+            report_page.build_site(site, "2026-07-20-synthetic", "2026-07-20",
+                                   "Synthetic release", models, page)
 
     def test_html_snapshot_smoke_contains_expected_arms_values_and_no_external_assets(self):
         rows = [

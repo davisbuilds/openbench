@@ -7842,105 +7842,8 @@
   },
   "generated_by": "obench site",
   "harness": {
-    "bundle_count": 6,
+    "bundle_count": 5,
     "bundles": [
-      {
-        "also_seen_as": [],
-        "arms": [
-          {
-            "cost_per_solve_usd": null,
-            "fresh_tokens_per_solve": 11438.75,
-            "harness": "codex",
-            "median_wall_s": 86.45349999999999,
-            "model": "gpt-5.6-sol",
-            "n": 4,
-            "solve_rate": 1.0,
-            "solved": 4,
-            "token_telemetry_bases": [
-              "proxy_measured"
-            ],
-            "token_telemetry_coverage": {
-              "covered_rows": 4,
-              "native_covered_rows": 4,
-              "proxy_covered_rows": 4,
-              "ratio": 1.0,
-              "total_rows": 4
-            },
-            "token_telemetry_source": "proxy",
-            "tokens_cache_read_per_solve": 48704.0,
-            "tokens_cache_write_per_solve": null,
-            "tokens_input_uncached_per_solve": 11020.5,
-            "tokens_output_per_solve": 418.25,
-            "wilson95": [
-              0.5100999795960008,
-              1.0
-            ]
-          },
-          {
-            "cost_per_solve_usd": null,
-            "fresh_tokens_per_solve": 6359.75,
-            "harness": "pi",
-            "median_wall_s": 40.837,
-            "model": "gpt-5.6-sol",
-            "n": 4,
-            "solve_rate": 1.0,
-            "solved": 4,
-            "token_telemetry_bases": [
-              "proxy_measured"
-            ],
-            "token_telemetry_coverage": {
-              "covered_rows": 4,
-              "native_covered_rows": 4,
-              "proxy_covered_rows": 4,
-              "ratio": 1.0,
-              "total_rows": 4
-            },
-            "token_telemetry_source": "proxy",
-            "tokens_cache_read_per_solve": 768.0,
-            "tokens_cache_write_per_solve": null,
-            "tokens_input_uncached_per_solve": 6102.0,
-            "tokens_output_per_solve": 257.75,
-            "wilson95": [
-              0.5100999795960008,
-              1.0
-            ]
-          }
-        ],
-        "caveats": [
-          "Harbor OAuth execution smoke: 2 core tasks, 2 harnesses, and 2 attempts per task-harness arm (8 accepted trials total). This is execution-path proof, not a broad harness ranking.",
-          "Harbor recorded 2 infrastructure retries after the Mac Mini ran out of host disk space. All 8 accepted trials completed without exceptions and the retry count remains in every published row.",
-          "Codex and Pi both used the canonical gpt-5.6-sol model identity at medium reasoning effort. Exact Harbor model identities remain bound in the per-run evidence.",
-          "Token usage is proxy-measured and reconciles exactly with ATIF agent usage for every row. Private ledgers, OAuth material, and raw trajectories are not published."
-        ],
-        "claim": null,
-        "countable_rows": 8,
-        "date": "2026-08-03",
-        "excluded_counts": {},
-        "family": "harness",
-        "has_caveats": true,
-        "id": "2026-08-03-gpt56-harbor-oauth-smoke",
-        "kind": "release",
-        "link": null,
-        "matched": {
-          "duplicate_cells_excluded": 0,
-          "duplicate_rows_excluded": 0,
-          "groups_compared": 2,
-          "matched_cells_per_group": 4,
-          "matched_rows": 8,
-          "unmatched_countable_rows": 0
-        },
-        "models": [
-          "gpt-5.6-sol"
-        ],
-        "path": "releases/2026-08-03-gpt56-harbor-oauth-smoke/index.html",
-        "raw_rows": 8,
-        "results_path": "releases/2026-08-03-gpt56-harbor-oauth-smoke/results.jsonl",
-        "results_sha256": "1cb6b123bae0dc4859b8ee71130cb6ab267716582f2909edaf369a96041267cb",
-        "submitter": null,
-        "table": "matched",
-        "task_set_digest": "05c1f676f1b1603a99148841476221eeca40cbf68f5e38bce3735834ef1ee4b4",
-        "title": "OpenBench: Harbor OAuth harness execution smoke"
-      },
       {
         "also_seen_as": [],
         "arms": [
@@ -8874,6 +8777,7 @@
         "gpt-5.5-medium"
       ],
       "path": "releases/2026-07-02-m3/index.html",
+      "status": "final",
       "title": "OpenBench M3 — Harness Comparison"
     },
     {
@@ -8883,6 +8787,7 @@
         "glm-5.2"
       ],
       "path": "releases/2026-07-09-glm52/index.html",
+      "status": "final",
       "title": "OpenBench: GLM 5.2 quarantine-safe archive"
     },
     {
@@ -8892,6 +8797,7 @@
         "grok-4.5"
       ],
       "path": "releases/2026-07-20-grok45/index.html",
+      "status": "final",
       "title": "OpenBench: grok-4.5 across 4 harnesses"
     },
     {
@@ -8901,6 +8807,7 @@
         "kimi-k3"
       ],
       "path": "releases/2026-07-20-kimi-k3/index.html",
+      "status": "final",
       "title": "OpenBench: kimi-k3 across 3 harnesses"
     },
     {
@@ -8910,6 +8817,7 @@
         "deepseek-v4-flash"
       ],
       "path": "releases/2026-07-20-deepseek/index.html",
+      "status": "final",
       "title": "OpenBench: deepseek across 5 harnesses"
     },
     {
@@ -8919,16 +8827,8 @@
         "gpt-5.6-sol"
       ],
       "path": "releases/2026-07-21-gpt56/index.html",
+      "status": "final",
       "title": "OpenBench: gpt-5.6 across 7 harnesses"
-    },
-    {
-      "date": "2026-08-03",
-      "id": "2026-08-03-gpt56-harbor-oauth-smoke",
-      "models": [
-        "gpt-5.6-sol"
-      ],
-      "path": "releases/2026-08-03-gpt56-harbor-oauth-smoke/index.html",
-      "title": "OpenBench: Harbor OAuth harness execution smoke"
     }
   ],
   "schema_version": 5,

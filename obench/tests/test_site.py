@@ -89,6 +89,7 @@ class _SiteFixture(unittest.TestCase):
             os.path.join(self.site_dir, "releases.json"),
             json.dumps([{
                 "id": "b1", "title": "Two harnesses", "date": "2026-07-24",
+                "status": "final",
                 "models": ["model-x"], "path": "releases/b1/index.html",
             }]),
         )
@@ -116,11 +117,12 @@ class HarnessFamilyTests(_SiteFixture):
             self.assertIsNotNone(arm["median_wall_s"])
             self.assertEqual(arm["n"], 4)
 
-    def test_unverified_release_is_skipped_not_ranked(self):
+    def test_unlisted_release_directory_fails_closed(self):
         _write(os.path.join(self.site_dir, "releases", "html-only", "index.html"), "<p>x</p>")
-        doc = site.build_board(self.site_dir, community_dir=None)
-        self.assertEqual(doc["harness"]["bundle_count"], 1)
-        self.assertIn("html-only", [s["id"] for s in doc["harness"]["skipped"]])
+        with self.assertRaisesRegex(
+            ValueError, "unlisted public release directory.*html-only"
+        ):
+            site.build_board(self.site_dir, community_dir=None)
 
 
 class GatewayFamilyTests(_SiteFixture):

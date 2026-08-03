@@ -988,7 +988,7 @@ def build_board(
     gateway_probe = build_gateway_probe_family(
         site_dir, gateway_probe_dirs=gateway_probe_dirs
     )
-    releases = leaderboard._load_manifest_list(os.path.join(site_dir, "releases.json"))
+    releases = leaderboard.load_final_releases(site_dir)
     community = leaderboard._load_manifest_list(os.path.join(site_dir, "community.json"))
     packs = leaderboard._load_manifest_list(os.path.join(site_dir, "packs.json"))
     site_metadata = {}

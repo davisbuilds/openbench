@@ -586,16 +586,11 @@ def _build_site_locked(site_dir, release_id, release_date, title, models, page):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", release_id):
         raise ValueError("release id must be a path-safe slug")
     release_date = _validated_date(release_date)
+    from .leaderboard import load_final_releases
     manifest_path = os.path.join(site_dir, "releases.json")
-    if os.path.exists(manifest_path):
-        with open(manifest_path, encoding="utf-8") as fh:
-            releases = json.load(fh)
-        if not isinstance(releases, list):
-            raise ValueError("releases.json must contain a JSON list")
-    else:
-        releases = []
+    releases = load_final_releases(site_dir)
     release_path = f"releases/{release_id}/index.html"
-    release = {"id": release_id, "title": title, "date": release_date,
+    release = {"id": release_id, "status": "final", "title": title, "date": release_date,
                "models": sorted(m["model"] for m in models), "path": release_path}
     existing = next((entry for entry in releases if entry.get("id") == release_id), None)
     if existing is not None and existing != release:
@@ -604,6 +599,7 @@ def _build_site_locked(site_dir, release_id, release_date, title, models, page):
         releases.append(release)
     releases_dir = os.path.join(site_dir, "releases")
     release_dir = os.path.join(releases_dir, release_id)
+    release_dir_existed = os.path.isdir(release_dir)
     _owned_directory(releases_dir)
     _owned_directory(release_dir)
     destination = os.path.join(release_dir, "index.html")
@@ -649,6 +645,11 @@ def _build_site_locked(site_dir, release_id, release_date, title, models, page):
                     handle.write(original)
                 os.chmod(handle.name, 0o644)
                 os.replace(handle.name, final)
+        if not release_dir_existed:
+            try:
+                os.rmdir(release_dir)
+            except OSError:
+                pass
         raise
     finally:
         for temporary, _ in pending:
