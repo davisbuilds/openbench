@@ -10,10 +10,10 @@ prove a claim, share the bundle, let others re-verify digests locally.
 ```bash
 # 1. Admit the candidate (schema dry-run first; --live spends tokens).
 obench gate path/to/my-cli.toml --model deepseek-v4-flash
-# Archive the printed JSON somewhere durable, e.g.:
-#   mkdir -p data && obench gate ... > data/my-cli-gate.json
 # Live checks (when you are ready to spend):
-obench gate path/to/my-cli.toml --model deepseek-v4-flash --live
+mkdir -p data
+obench gate path/to/my-cli.toml \
+  --model deepseek-v4-flash --live > data/my-cli-gate.json
 
 # 2. Run a matrix: candidate + stock arms, same tasks / model / trials.
 obench run --harness null,pi \
@@ -43,7 +43,7 @@ Readers open `index.html` and, if they have the same tasks checked out, run
 |------|------|
 | `index.html` | Self-contained HTML comparison card (candidate row(s) highlighted; Wilson CIs; mean score / wall; tokens/solve; token-basis badges: `unmetered` / `self-reported` / `proxy-measured`) |
 | `results.jsonl` | Filtered rows for the claim — transcript fields stripped |
-| `provenance.json` | `obench` version, `digest_scheme`, per-arm identity digests (`candidate_provenance`), per-task content digests, models, trial counts, SHA-256 of `results.jsonl` |
+| `provenance.json` | `obench` version, `digest_scheme`, per-arm identity digests (`candidate_provenance`), per-task content digests, models, trial counts, SHA-256 of `results.jsonl`, and a per-run `harbor_import_evidence` manifest when Harbor-imported rows are present |
 | `README.md` | How to re-verify and what verify does / does not prove |
 
 Default output directory: `./openbench-publish/<timestamp>/` (override with
@@ -59,9 +59,21 @@ Default output directory: `./openbench-publish/<timestamp>/` (override with
   username, hostname). Digests intentionally look like hex blobs and are not
   treated as PII here. Hits refuse the publish; `--allow-pii-override` continues
   with a loud warning and is documented as dangerous.
-- **Comparability warnings** (terminal + HTML) when arms disagree on task sets,
-  models, or trial counts, and when a candidate has no archived gate PASS
-  record under `data/`, `.openbench/gate/`, or `results/gate/`.
+- **Completeness is fail-closed.** Publish refuses when arms disagree on task
+  sets, models, or trial cells, or when a candidate has no exact live PASS gate
+  record under `data/`, `.openbench/gate/`, or `results/gate/`. Use
+  `--allow-incomplete` only for an intentionally caveated artifact; the
+  resulting warnings remain in terminal output, provenance, and HTML.
+- **Harbor imports have a strict publication schema.** A row marked as Harbor
+  execution must contain the complete normalized importer provenance and agree
+  with its workspace and usage fields. Publish retains the Harbor build, job
+  and trial identifiers, lock/result/reward/ATIF/verifier/artifact/workspace
+  digests, task hashes, mapping semantics, and Harbor usage source. It drops
+  every non-allowlisted row field, including raw trajectory, session,
+  transcript, and workspace paths or credential material. Missing, partial,
+  contradictory, or extended Harbor provenance refuses publication before the
+  output directory is created; `--allow-incomplete` and
+  `--allow-pii-override` do not bypass this validation.
 
 ## What `obench verify` proves
 
@@ -71,6 +83,17 @@ obench verify openbench-publish/my-claim
 ```
 
 - The bundled `results.jsonl` still matches `provenance.json`'s `results_sha256`.
+- For Harbor-imported rows, the per-run `harbor_import_evidence` manifest
+  exactly matches the safe normalized evidence in `results.jsonl`. This binds
+  the ATIF, verifier, artifact, final-workspace, lock/result/reward, task, and
+  usage-provenance claims without publishing the underlying private artifacts.
+- For each Harbor task, the structured executed digest is scheme 2 and equals
+  the task digest recorded by publication. `obench publish` also requires it
+  to match the local task tree before writing the bundle.
+- Using the evidence-bound exporter parameters, publish and verify reproduce
+  the Harbor 0.20.0 package content hash from a canonical re-export and require
+  it to equal the locked Harbor task digest. A modified post-export task cannot
+  retain the original OpenBench task claim.
 - When local task trees are available (`--tasks-dir` or CWD discovery), each
   recorded task content digest still matches under the bundle's
   `digest_scheme`:

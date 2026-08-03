@@ -1,0 +1,45 @@
+# Re-run laguna-s-2.1 under the CORRECTED model limits (commit 4a3a7e6).
+#
+# Its previous results were produced with invented limits: the provider config
+# fell back to 128000/8192 (deepseek) or free-tier numbers (laguna) instead of
+# the real values now pinned in data/model_limits.json. That is not cosmetic --
+# pi clamps every request to min(maxTokens, max(1, contextWindow - prompt -
+# 4096)), so laguna had a reply cut off at its cap on ~57% of cells and
+# deepseek's budget collapsed to 1 token on 19 long-horizon cells.
+#
+# Deliberately NOT seeded from prior results: the old rows were measured under
+# different limits, so they are not comparable and must not be reused.
+#
+# Two task groups because TB-7 spans both lanes: the synthetic tasks run local,
+# the terminal-bench tasks run in docker.
+results_path = "../../results/rerun-laguna/rerun.jsonl"
+ledger_dir = "../../results/rerun-laguna/ledger"
+timeout = 2400
+exec_mode = "docker"
+trials = 3
+proxy = true
+
+[retry]
+infra = 3
+stalled = 1
+rate_limited = 6
+rate_limited_backoff_start = 180
+
+[[arm]]
+harness = "pi"
+model = "laguna-s-2.1"
+
+[[task_group]]
+tasks_dir = "../../data/packs/openbench-tb-mid"
+exec_mode = "docker"
+tasks = ["adaptive-rejection-sampler","merge-diff-arc-agi-task","overfull-hbox","query-optimize","sanitize-git-repo","winning-avg-corewars"]
+
+[[task_group]]
+tasks_dir = "../../tasks"
+exec_mode = "local"
+tasks = ["add-feature","build-a-cli","fix-failing-test","make-ci-green","make-it-run","misleading-error","taskflow","webcore"]
+
+[[task_group]]
+tasks_dir = "../../tasks-imported"
+exec_mode = "docker"
+tasks = ["terminal-bench/db-wal-recovery","terminal-bench/extract-elf","terminal-bench/feal-differential-cryptanalysis","terminal-bench/gcode-to-text","terminal-bench/llm-inference-batching-scheduler","terminal-bench/raman-fitting","terminal-bench/schemelike-metacircular-eval"]

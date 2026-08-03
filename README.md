@@ -14,8 +14,12 @@ first local cell, Docker, imported tasks, and open-model keys. Evaluating
 harnesses on a **private codebase**? Start with
 [`docs/private-evals.md`](docs/private-evals.md) (`obench init`, author a task
 from a small code slice, validate polarity, run, report — transcripts stay
-local). To run OpenBench tasks on Harbor cloud sandboxes, see
+local). To run OpenBench tasks with Harbor, see
 [`docs/harbor-export.md`](docs/harbor-export.md) (`obench export harbor`).
+The optional one-trial Codex OAuth runner and strict result importer are
+documented in [`docs/harbor-oauth.md`](docs/harbor-oauth.md) (`obench harbor
+oauth-run`) and [`docs/harbor-results.md`](docs/harbor-results.md) (`obench
+import harbor-results`).
 To pull Harbor-format tasks into OpenBench, see
 [`docs/harbor-import.md`](docs/harbor-import.md) (`obench import harbor`).
 Versioned packs (`org/name@version`, tasks or harness manifests) are covered in
@@ -183,9 +187,10 @@ pip install "git+https://github.com/minghinmatthewlam/openbench.git"
 ```
 
 Then use the umbrella CLI: `obench init`, `obench run`, `obench report`,
-`obench doctor`, `obench validate`, `obench gate`, `obench compare`,
+`obench doctor`, `obench validate`, `obench admit`, `obench gate`, `obench compare`,
 `obench publish`, `obench verify`, `obench pack`, `obench export`,
-`obench import`, and `obench gateway validate|doctor|run|report|publish|verify`. Legacy
+`obench import`, `obench import harbor-results`, `obench harbor oauth-run`, and
+`obench gateway validate|doctor|run|report|publish|verify`. Legacy
 `python3 bench/run.py` (and friends) still forward with a deprecation note.
 Versioned packs (`org/name@version`) are documented in
 [`docs/task-packs.md`](docs/task-packs.md).
@@ -440,6 +445,11 @@ at 0/n and n/n, which the naive formula does not.
   auth bind-mounted read-only at runtime (never baked into the image). Docker is
   fail-closed by default; pass `--docker-fallback` to opt into whole-run local
   homogenization when the daemon/image is unavailable (mixed lanes still abort).
+- **Trust boundary.** Task setup and `checker.sh` run on the host in both modes,
+  and `--exec local` also runs the harness on the host. Treat task packs,
+  candidate adapters, and checkers as executable code: inspect them before use
+  and do not run untrusted packs on a machine containing unrelated secrets.
+  Docker isolates the harness cell; it is not a sandbox for the task oracle.
 - **Docker image is partial.** `codex`, `pi`, and open-model `claude` are installed
   and version-checked in the default image; `opencode`, `cursor`, and `devin` are
   behind `--build-arg INSTALL_UNVERIFIED=true` and their Linux installs are not

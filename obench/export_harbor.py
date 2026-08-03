@@ -7,8 +7,8 @@ This module maps OpenBench's files-plus-checker contract onto Harbor's
 optional ``solution/solve.sh`` layout so companies can run OpenBench suites
 on Harbor while keeping OpenBench as the comparison/stats layer.
 
-Format verified against Harbor docs (schema_version 1.3, Jul 2026):
-https://www.harborframework.com/docs/tasks
+Format pinned to Harbor 0.20.0 source at commit
+72bc40b1e58b47a9cc6e0f14c29aced3a9e53767 (schema_version 1.4).
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ import sys
 import tempfile
 
 from .paths import TasksDirError, resolve_tasks_dir
+from .publish import DIGEST_SCHEME_CURRENT, PublishError, task_content_digest
 from .validate_tasks import discover_tasks, effective_score, parse_score
 from .workspace import (
     WorkspaceError,
@@ -30,13 +31,16 @@ from .workspace import (
     resolve_workspace_mode,
 )
 
-# Harbor task config default as of Jul 2026 docs / TB challenges.
-HARBOR_SCHEMA_VERSION = "1.3"
+# Harbor 0.20.0 task contract pinned at commit 72bc40b1e58b.
+HARBOR_SCHEMA_VERSION = "1.4"
+HARBOR_TASK_VERSION = "1.0.0"
 HARBOR_WORKDIR = "/app"
 DEFAULT_BASE_IMAGE = "python:3.11-slim"
 
 # Reward log dir: Harbor uses /logs/verifier; local round-trips use a fallback.
 REWARD_FILENAME = "reward.txt"
+VERIFIER_EVIDENCE_FILENAME = "openbench-verifier-evidence.json"
+VERIFIER_EVIDENCE_SCHEMA_VERSION = "openbench-verifier-evidence-v2"
 
 
 class ExportError(ValueError):
@@ -80,20 +84,31 @@ def render_task_toml(
     task_name: str,
     description: str,
     workspace_provenance: dict | None,
+    openbench_task_content_digest: str,
     tags: list[str] | None = None,
+    base_image: str = DEFAULT_BASE_IMAGE,
     network_mode: str = "no-network",
     agent_timeout_sec: float = 600.0,
     verifier_timeout_sec: float = 120.0,
 ) -> str:
-    """Render Harbor ``task.toml`` (schema_version 1.3)."""
+    """Render Harbor ``task.toml`` (schema_version 1.4)."""
+    if re.fullmatch(r"[0-9a-f]{64}", openbench_task_content_digest) is None:
+        raise ExportError(
+            "OpenBench task content digest must be 64 lowercase hex characters"
+        )
     tags = list(tags) if tags else ["openbench"]
     keywords = ["openbench"]
     harbor_name = f"openbench/{task_name}"
     lines = [
         f"schema_version = {_toml_str(HARBOR_SCHEMA_VERSION)}",
+        "artifacts = [",
+        f"    {{ source = {_toml_str(HARBOR_WORKDIR)}, "
+        f"destination = {_toml_str('workspace')} }},",
+        "]",
         "",
         "[task]",
         f"name = {_toml_str(harbor_name)}",
+        f"version = {_toml_str(HARBOR_TASK_VERSION)}",
         f"description = {_toml_str(description)}",
         "authors = []",
         f"keywords = {_toml_str_list(keywords)}",
@@ -133,6 +148,15 @@ def render_task_toml(
 
     lines += [
         "",
+        "[metadata.openbench_task_content_digest]",
+        f"scheme = {DIGEST_SCHEME_CURRENT}",
+        f"sha256 = {_toml_str(openbench_task_content_digest)}",
+        "",
+        "[metadata.openbench_harbor_export]",
+        "schema_version = 1",
+        f"base_image = {_toml_str(base_image)}",
+        f"network_mode = {_toml_str(network_mode)}",
+        "",
         "[verifier]",
         f"timeout_sec = {float(verifier_timeout_sec)}",
         "",
@@ -163,15 +187,24 @@ def render_dockerfile(*, base_image: str = DEFAULT_BASE_IMAGE) -> str:
     )
 
 
-def render_test_sh() -> str:
+def render_test_sh(
+    openbench_task_content_digest: str,
+    *,
+    base_image: str = DEFAULT_BASE_IMAGE,
+    network_mode: str = "no-network",
+) -> str:
     """Harbor verifier wrapper around OpenBench ``checker.sh``.
 
-    Writes ``reward.txt`` under Harbor's ``/logs/verifier`` when that directory
-    exists (or is creatable). For local round-trip tests without Harbor's
+    Writes scalar ``reward.txt`` plus machine-readable verifier evidence under
+    Harbor's ``/logs/verifier``. For local round-trip tests without Harbor's
     filesystem layout, honors ``VERIFIER_LOGS_DIR`` and otherwise falls back to
     ``./logs-verifier`` relative to the agent workspace cwd.
     """
-    return r"""#!/usr/bin/env bash
+    if re.fullmatch(r"[0-9a-f]{64}", openbench_task_content_digest) is None:
+        raise ExportError(
+            "OpenBench task content digest must be 64 lowercase hex characters"
+        )
+    script = r"""#!/usr/bin/env bash
 # OpenBench → Harbor verifier: run checker.sh, map exit/SCORE → reward.txt.
 set -uo pipefail
 
@@ -189,6 +222,7 @@ else
 fi
 mkdir -p "$REWARD_DIR"
 
+START_EPOCH="$(date +%s 2>/dev/null || true)"
 OUT_FILE="$(mktemp)"
 set +e
 bash "$TESTS_DIR/checker.sh" >"$OUT_FILE" 2>&1
@@ -196,30 +230,82 @@ RC=$?
 set -e
 cat "$OUT_FILE"
 
+PARSED_SCORE="$(
+  awk '
+    /^[[:space:]]*SCORE:[[:space:]]*/ {
+      line=$0
+      sub(/^[[:space:]]*SCORE:[[:space:]]*/, "", line)
+      split(line, a, /[[:space:]]+/)
+      candidate=a[1]
+      if (candidate ~ /^[-+]?(([0-9]+([.][0-9]*)?)|([.][0-9]+))([eE][-+]?[0-9]+)?$/) {
+        value=candidate + 0
+        if (value < 0) value=0
+        if (value > 1) value=1
+        last=sprintf("%.17g", value)
+      }
+    }
+    END { if (last != "") print last }
+  ' "$OUT_FILE"
+)"
+
 if [ "$RC" -eq 0 ]; then
   REWARD="1.0"
+elif [ -n "$PARSED_SCORE" ]; then
+  REWARD="$PARSED_SCORE"
 else
-  REWARD="$(
-    awk '
-      /^[[:space:]]*SCORE:[[:space:]]*/ {
-        line=$0
-        sub(/^[[:space:]]*SCORE:[[:space:]]*/, "", line)
-        split(line, a, /[[:space:]]+/)
-        if (a[1] != "") last=a[1]
-      }
-      END { if (last != "") print last; else print "0.0" }
-    ' "$OUT_FILE"
-  )"
-  # Reject non-numeric SCORE payloads.
-  case "$REWARD" in
-    ''|*[!0-9.+-]* ) REWARD="0.0" ;;
-  esac
+  REWARD="0.0"
 fi
 
 printf '%s\n' "$REWARD" >"$REWARD_DIR/reward.txt"
+END_EPOCH="$(date +%s 2>/dev/null || true)"
+case "$START_EPOCH:$END_EPOCH" in
+  :*|*:|*[!0-9:]*) DURATION_JSON="null" ;;
+  *)
+    if [ "$END_EPOCH" -ge "$START_EPOCH" ]; then
+      DURATION_JSON="$((END_EPOCH - START_EPOCH))"
+    else
+      DURATION_JSON="null"
+    fi
+    ;;
+esac
+if [ -n "$PARSED_SCORE" ]; then
+  PARSED_SCORE_JSON="$PARSED_SCORE"
+else
+  PARSED_SCORE_JSON="null"
+fi
+cat >"$REWARD_DIR/openbench-verifier-evidence.json" <<EOF
+{
+  "schema_version": "openbench-verifier-evidence-v2",
+  "openbench_task_content_digest": {
+    "scheme": 2,
+    "sha256": "__OPENBENCH_TASK_CONTENT_DIGEST__"
+  },
+  "openbench_harbor_export": {
+    "schema_version": 1,
+    "base_image": "__OPENBENCH_BASE_IMAGE__",
+    "network_mode": "__OPENBENCH_NETWORK_MODE__"
+  },
+  "checker_exit": $RC,
+  "parsed_score": $PARSED_SCORE_JSON,
+  "reward": $REWARD,
+  "verifier_duration_seconds": $DURATION_JSON
+}
+EOF
 rm -f "$OUT_FILE"
 exit 0
 """
+    replacements = {
+        "__OPENBENCH_TASK_CONTENT_DIGEST__": openbench_task_content_digest,
+        "__OPENBENCH_BASE_IMAGE__": base_image,
+        "__OPENBENCH_NETWORK_MODE__": network_mode,
+    }
+    for placeholder, value in replacements.items():
+        if any(char in value for char in '"\\\n\r'):
+            raise ExportError(
+                f"Harbor export evidence value is not JSON-safe: {value!r}"
+            )
+        script = script.replace(placeholder, value)
+    return script
 
 
 def render_solve_sh() -> str:
@@ -231,11 +317,11 @@ set -euo pipefail
 SOLUTION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Harbor copies solution/ to /solution and runs solve.sh from the workdir.
-# Overlay every file except this script (and other *.sh helpers if any).
+# Overlay every solution file except this generated runner itself.
 while IFS= read -r -d '' src; do
   rel="${src#"$SOLUTION_DIR"/}"
   case "$rel" in
-    solve.sh|*.sh) continue ;;
+    solve.sh) continue ;;
   esac
   dest="./$rel"
   mkdir -p "$(dirname "$dest")"
@@ -297,6 +383,13 @@ def export_task(
         raise ExportError(f"missing instruction.md: {task_dir}")
 
     name = task_name or os.path.basename(task_dir.rstrip(os.sep))
+    try:
+        content_digest = task_content_digest(
+            task_dir,
+            scheme=DIGEST_SCHEME_CURRENT,
+        )
+    except PublishError as exc:
+        raise ExportError(f"cannot fingerprint OpenBench task {name}: {exc}") from exc
     if os.path.exists(out_dir):
         if not os.path.isdir(out_dir):
             raise ExportError(f"export path exists and is not a directory: {out_dir}")
@@ -334,6 +427,8 @@ def export_task(
             task_name=name,
             description=description,
             workspace_provenance=provenance,
+            openbench_task_content_digest=content_digest,
+            base_image=base_image,
             network_mode=network_mode,
         ),
     )
@@ -346,7 +441,15 @@ def export_task(
     checker_data = os.path.join(task_dir, "checker_data")
     if os.path.isdir(checker_data):
         _copy_tree_contents(checker_data, os.path.join(tests_dir, "checker_data"))
-    _write_text(os.path.join(tests_dir, "test.sh"), render_test_sh(), mode=0o755)
+    _write_text(
+        os.path.join(tests_dir, "test.sh"),
+        render_test_sh(
+            content_digest,
+            base_image=base_image,
+            network_mode=network_mode,
+        ),
+        mode=0o755,
+    )
 
     # Oracle when OpenBench ships a solution/.
     solution_src = os.path.join(task_dir, "solution")
@@ -368,17 +471,29 @@ def export_task(
                     os.path.join(root, fname),
                     os.path.join(target_root, fname),
                 )
-        _write_text(
-            os.path.join(solution_dest, "solve.sh"),
-            render_solve_sh(),
-            mode=0o755,
-        )
+        solve_dest = os.path.join(solution_dest, "solve.sh")
+        if os.path.isfile(solve_dest):
+            # Procedural task oracles are already Harbor-compatible: Harbor
+            # invokes solution/solve.sh from the agent workspace. Preserve the
+            # task author's procedure instead of replacing it with an overlay.
+            os.chmod(solve_dest, os.stat(solve_dest).st_mode | 0o100)
+        else:
+            _write_text(solve_dest, render_solve_sh(), mode=0o755)
 
     return {
         "task_name": name,
         "out_dir": out_dir,
         "workspace_mode": mode,
         "workspace_provenance": provenance,
+        "openbench_task_content_digest": {
+            "scheme": DIGEST_SCHEME_CURRENT,
+            "sha256": content_digest,
+        },
+        "openbench_harbor_export": {
+            "schema_version": 1,
+            "base_image": base_image,
+            "network_mode": network_mode,
+        },
         "has_solution": has_solution,
     }
 

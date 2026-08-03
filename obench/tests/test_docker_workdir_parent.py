@@ -20,8 +20,9 @@ import ast
 import os
 import tempfile
 import unittest
+from unittest import mock
 
-from obench import paths
+from obench import paths, validate_tasks
 
 
 class DockerWorkdirParentTests(unittest.TestCase):
@@ -67,6 +68,30 @@ class DockerWorkdirParentTests(unittest.TestCase):
                     f"{module}.py:{node.lineno}: mkdtemp() with no dir= lands "
                     "in /var/folders, which colima hides from containers; "
                     "pass dir=docker_workdir_parent()")
+
+    def test_validation_checker_exports_shared_tmpdir(self):
+        with tempfile.TemporaryDirectory() as task:
+            os.makedirs(os.path.join(task, "workspace"))
+            with open(os.path.join(task, "checker.sh"), "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\nexit 1\n")
+
+            captured = {}
+
+            def fake_run(*_args, **kwargs):
+                captured.update(kwargs["env"])
+                return mock.Mock(returncode=1, stdout="")
+
+            shared = os.path.join(task, "shared")
+            os.makedirs(shared)
+            with (
+                mock.patch.object(
+                    validate_tasks, "docker_workdir_parent",
+                    return_value=shared,
+                ),
+                mock.patch.object(validate_tasks.subprocess, "run", fake_run),
+            ):
+                validate_tasks.run_checker(task, False)
+            self.assertEqual(captured["TMPDIR"], shared)
 
 
 if __name__ == "__main__":

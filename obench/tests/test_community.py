@@ -140,7 +140,8 @@ class DiscoverVerifySyncTests(unittest.TestCase):
         site = os.path.join(self.tmp.name, "site")
         os.makedirs(site)
         _write(os.path.join(site, "releases.json"), "[]\n")
-        info = community.sync_community_to_site(self.community, site)
+        info = community.sync_community_to_site(
+            self.community, site, tasks_dirs=[self.tasks])
         self.assertEqual(info["count"], 1)
         self.assertTrue(os.path.isfile(os.path.join(site, "community.json")))
         card = os.path.join(site, "community", "alice-alpha", "index.html")
@@ -166,6 +167,17 @@ class DiscoverVerifySyncTests(unittest.TestCase):
             self.community, tasks_dirs=[self.tasks]
         )
         self.assertNotEqual(code, 0)
+
+    def test_sync_refuses_tampered_bundle_before_site_mutation(self):
+        bundle = _bundle_with_submission(
+            self.community, "alice-tamper-sync", self.tasks)
+        with open(os.path.join(bundle, "results.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write("{}\n")
+        site = os.path.join(self.tmp.name, "site")
+        with self.assertRaises(community.CommunityError):
+            community.sync_community_to_site(
+                self.community, site, tasks_dirs=[self.tasks])
+        self.assertFalse(os.path.exists(site))
 
     def test_site_index_includes_community_section(self):
         from obench import site

@@ -13,6 +13,7 @@ from unittest import mock
 ADAPTERS = os.path.join(BENCH, "adapters")
 
 import sys
+from obench import auth_persist
 from obench import candidates
 from obench import run as bench_run
 
@@ -70,6 +71,106 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(variant.base_adapter, "codex")
         self.assertEqual(variant.env["OPENBENCH_CODEX_MULTI_AGENT"], "enabled")
         self.assertEqual(variant.env["CODEX_HOME"], "{config_dir}")
+
+    def test_codex_config_variant_owns_auth_lease_and_rejects_stale_cas(self):
+        with tempfile.TemporaryDirectory() as td:
+            config_dir = os.path.join(td, "config")
+            os.makedirs(config_dir)
+            with open(
+                os.path.join(config_dir, "config.toml"),
+                "w",
+                encoding="utf-8",
+            ) as fh:
+                fh.write('model_reasoning_effort = "medium"\n')
+            spec_path = os.path.join(td, "candidate.toml")
+            with open(spec_path, "w", encoding="utf-8") as fh:
+                fh.write(
+                    'kind="config-variant"\n'
+                    'name="codex-auth-owner"\n'
+                    'base_adapter="codex"\n'
+                    'config_dir="config"\n'
+                    'config_files=["config.toml"]\n'
+                    'persist_auth=true\n'
+                    '[env]\n'
+                    'CODEX_HOME="{config_dir}"\n'
+                    '[[auth_files]]\n'
+                    'source="~/.codex/auth.json"\n'
+                    'destination="auth.json"\n'
+                )
+            master = os.path.join(td, "master-auth.json")
+            old = b'{"account_id":"owner","refresh_token":"old"}'
+            rotated = b'{"account_id":"owner","refresh_token":"rotated"}'
+            newer = b'{"account_id":"owner","refresh_token":"newer"}'
+            with open(master, "wb") as fh:
+                fh.write(old)
+            variant = candidates.load_candidate(spec_path, ADAPTERS)
+
+            def run_with_rotation(
+                cmd, cwd, capture_output, text, timeout, stdin, env
+            ):
+                del cmd, cwd, capture_output, text, timeout, stdin
+                with self.assertRaises(
+                    auth_persist.CredentialLeaseUnavailableError
+                ):
+                    with auth_persist.auth_file_lease(
+                        master, blocking=False
+                    ):
+                        self.fail("candidate master lease was not held")
+                with open(
+                    os.path.join(env["CODEX_HOME"], "auth.json"), "wb"
+                ) as fh:
+                    fh.write(rotated)
+                return Proc()
+
+            with mock.patch.object(
+                candidates, "_auth_source", return_value=master
+            ), mock.patch.object(
+                variant.module,
+                "auth_file_lease",
+                side_effect=AssertionError("Codex attempted a double lease"),
+            ), mock.patch.object(
+                variant.module.subprocess,
+                "run",
+                side_effect=run_with_rotation,
+            ):
+                result = variant.run(
+                    "prompt", td, "gpt-5.5-medium", 9
+                )
+            self.assertTrue(result["completed"])
+            with open(master, "rb") as fh:
+                self.assertEqual(fh.read(), rotated)
+
+            def run_with_stale_rotation(
+                cmd, cwd, capture_output, text, timeout, stdin, env
+            ):
+                del cmd, cwd, capture_output, text, timeout, stdin
+                with open(
+                    os.path.join(env["CODEX_HOME"], "auth.json"), "wb"
+                ) as fh:
+                    fh.write(old)
+                with open(master, "wb") as fh:
+                    fh.write(newer)
+                return Proc()
+
+            with mock.patch.object(
+                candidates, "_auth_source", return_value=master
+            ), mock.patch.object(
+                variant.module,
+                "auth_file_lease",
+                side_effect=AssertionError("Codex attempted a double lease"),
+            ), mock.patch.object(
+                variant.module.subprocess,
+                "run",
+                side_effect=run_with_stale_rotation,
+            ), mock.patch.object(auth_persist.sys, "stderr"):
+                result = variant.run(
+                    "prompt", td, "gpt-5.5-medium", 9
+                )
+            self.assertTrue(result["completed"])
+            with open(master, "rb") as fh:
+                self.assertEqual(fh.read(), newer)
+            with auth_persist.auth_file_lease(master, blocking=False):
+                pass
 
     def test_v2_variant_matches_ad_hoc_command_and_environment(self):
         helper = load("_codex_ablation")
@@ -420,6 +521,13 @@ class CandidateTests(unittest.TestCase):
 
                 def run_mutate(cmd, **kw):
                     copy = os.path.join(kw["env"]["HOME"], ".mycli", "auth.json")
+                    with self.assertRaises(
+                        auth_persist.CredentialLeaseUnavailableError
+                    ):
+                        with auth_persist.auth_file_lease(
+                            master, blocking=False
+                        ):
+                            self.fail("manifest master lease was not held")
                     with open(copy, "wb") as fh:
                         fh.write(b'{"provider":"x","refresh_token":"rotated"}')
                     return Proc()
@@ -434,10 +542,11 @@ class CandidateTests(unittest.TestCase):
                 with open(master, "rb") as fh:
                     self.assertEqual(fh.read(), b'{"provider":"x","refresh_token":"rotated"}')
             finally:
-                try:
-                    os.unlink(master)
-                except FileNotFoundError:
-                    pass
+                for path in (master, master + ".lock"):
+                    try:
+                        os.unlink(path)
+                    except FileNotFoundError:
+                        pass
 
     def test_manifest_rejects_auth_destination_escape(self):
         with tempfile.TemporaryDirectory() as td:

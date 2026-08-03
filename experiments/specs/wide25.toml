@@ -1,0 +1,70 @@
+# Wide benchmark: every validated task, no difficulty band.
+#
+# Deliberately NOT band-filtered. tb-mid's 6 tasks were selected for scoring
+# 40-70%, and if the scores that set that band came from these same models then
+# ranking them on those tasks is circular. Using every task that passes the
+# polarity gate removes the question; discrimination comes from having enough
+# tasks rather than from pre-filtering them.
+#
+# 25 tasks x 2 trials. Trials cut 3 -> 2 to fund more tasks: task-to-task
+# variance dominates trial-to-trial. At n=50 gpt-5.6 separates from the field;
+# deepseek vs laguna needs ~90 and WILL still overlap -- stated up front.
+#
+# Excluded, each with a recorded reason:
+#   openssl-selfsigned-cert   git cannot store the 0600 file mode its checker
+#                             asserts, so the golden solution fails polarity off
+#                             the authoring machine (dropped 2026-07-13)
+#   cancel-async-tasks        its own reference solution never creates run.py
+#   extract-elf (tb-1 copy)   NAME COLLISION with the tb-2 task of the same name
+#                             -- different instruction and checker (md5
+#                             a440c5ee vs 7cae3dec). Task identity is the bare
+#                             directory name, so both would map to one run_id
+#                             and one would silently vanish. Kept the tb-2 copy
+#                             for consistency with its 11 siblings.
+#
+# Runs on the mini: pi 0.80.10 matches the Dockerfile pin. The laptop carries
+# 0.82.0, and splitting arms across the two would compare harness versions while
+# calling it a model difference.
+results_path = "../../results/wide25/wide25.jsonl"
+ledger_dir = "../../results/wide25/ledger"
+timeout = 2400
+exec_mode = "docker"
+trials = 2
+proxy = true
+
+[retry]
+infra = 3
+stalled = 1
+rate_limited = 6
+rate_limited_backoff_start = 180
+
+[[arm]]
+harness = "pi"
+model = "gpt-5.6-sol"
+
+[[arm]]
+harness = "pi"
+model = "laguna-s-2.1"
+
+[[arm]]
+harness = "pi"
+model = "deepseek-v4-flash"
+
+[[arm]]
+harness = "pi"
+model = "inkling"
+
+[[task_group]]
+tasks_dir = "../../data/packs/openbench-tb-mid"
+exec_mode = "docker"
+tasks = ["adaptive-rejection-sampler", "merge-diff-arc-agi-task", "overfull-hbox", "query-optimize", "sanitize-git-repo", "winning-avg-corewars"]
+
+[[task_group]]
+tasks_dir = "../../tasks-imported/terminal-bench-2"
+exec_mode = "docker"
+tasks = ["cobol-modernization", "constraints-scheduling", "dna-assembly", "extract-elf", "log-summary-date-ranges", "path-tracing", "polyglot-c-py", "prove-plus-comm", "regex-log", "sparql-university", "sqlite-db-truncate", "vulnerable-secret"]
+
+[[task_group]]
+tasks_dir = "../../tasks-imported/terminal-bench"
+exec_mode = "docker"
+tasks = ["count-call-stack", "db-wal-recovery", "feal-differential-cryptanalysis", "gcode-to-text", "llm-inference-batching-scheduler", "raman-fitting", "schemelike-metacircular-eval"]

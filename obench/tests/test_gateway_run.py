@@ -19,7 +19,15 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
 
-from obench import cli, proxy, results, gateway_metrics, gateway_report, gateway_run
+from obench import (
+    cli,
+    gateway_metrics,
+    gateway_probe_publish,
+    gateway_report,
+    gateway_run,
+    proxy,
+    results,
+)
 
 
 SECRET = "gateway-bench-secret-that-must-not-persist"
@@ -255,8 +263,15 @@ direct_control_arm_id = "direct"
         class PlainHTTPSConnection(http.client.HTTPConnection):
             pass
 
+        class FrozenDateTime(gateway_run.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                fixed = cls.fromisoformat("2026-07-15T00:00:00+00:00")
+                return fixed if tz is None else fixed.astimezone(tz)
+
         with (
             mock.patch.object(proxy.http.client, "HTTPSConnection", PlainHTTPSConnection),
+            mock.patch.object(gateway_run, "datetime", FrozenDateTime),
             mock.patch.object(gateway_run.pi, "version", return_value="fake-pi 1.0"),
             mock.patch.dict(os.environ, self.env, clear=False),
         ):
@@ -1391,6 +1406,36 @@ direct_control_arm_id = "direct"
                     environ={**os.environ, **self.env},
                     adapters_dir=self.adapters,
                 )
+
+
+class GatewayVerifierCommitTests(unittest.TestCase):
+    def test_historical_verification_can_skip_only_tree_equality(self):
+        commit = "a" * 40
+        with (
+            mock.patch.object(
+                gateway_probe_publish,
+                "_detect_verifier_commit",
+                return_value=commit,
+            ),
+            mock.patch.object(
+                gateway_probe_publish,
+                "_assert_verifier_tree_matches",
+            ) as assert_tree,
+        ):
+            self.assertEqual(
+                gateway_probe_publish._verified_with_commit(None),
+                commit,
+            )
+            assert_tree.assert_called_once_with(commit)
+            assert_tree.reset_mock()
+            self.assertEqual(
+                gateway_probe_publish._verified_with_commit(
+                    None,
+                    require_tree_match=False,
+                ),
+                commit,
+            )
+            assert_tree.assert_not_called()
 
 
 if __name__ == "__main__":

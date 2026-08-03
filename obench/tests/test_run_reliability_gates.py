@@ -47,7 +47,11 @@ class RunnerReliabilityGateTests(unittest.TestCase):
                 mock.patch.object(run, "probe_version", return_value="mock-1"), \
                 mock.patch.object(run, "load_existing_run_ids", return_value=set()), \
                 mock.patch.object(run, "run_cell", side_effect=rows) as run_cell, \
-                mock.patch.object(run, "append_row", side_effect=lambda path, row: emitted.append((path, row))), \
+                mock.patch.object(
+                    run, "append_row",
+                    side_effect=lambda path, row, **_kwargs:
+                        (emitted.append((path, row)) or True),
+                ), \
                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             code = run.main(argv)
         return code, run_cell, emitted, stdout.getvalue(), stderr.getvalue()

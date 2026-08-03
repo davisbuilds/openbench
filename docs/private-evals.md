@@ -133,6 +133,12 @@ Docker (`--exec docker`) stages on the **host** before the container starts
 (same as snapshot mode) and bind-mounts the staged tree — git mode works
 there without in-container git.
 
+> **Trust boundary:** setup and `checker.sh` execute on the host, even when the
+> harness uses `--exec docker`. Local execution also runs the harness on the
+> host. Only run task packs, candidate adapters, setup commands, and checkers
+> that you trust and have reviewed; Docker currently isolates the harness cell,
+> not the task oracle.
+
 ## 4. Polarity validation
 
 Prove the checker fails on the untouched workspace and passes with `solution/`
@@ -145,6 +151,12 @@ obench validate
 ```
 
 Fix checkers until every task shows PASS.
+
+Before sharing or installing a task publicly, run the stricter admission gate:
+
+```bash
+obench admit .openbench/tasks/my-task
+```
 
 ## 5. Doctor preflight (no token spend)
 
@@ -196,10 +208,11 @@ python3 -m obench.scrub .openbench/results/transcripts/ --out scrubbed/
 python3 -m obench.scrub scrubbed/ --check
 ```
 
-## Optional: run the same tasks on Harbor
+## Optional: run the same tasks with Harbor
 
-If you want Harbor’s cloud sandboxes for execution while keeping OpenBench for
-comparison/stats, export your private tasks:
+OpenBench tasks remain the source of truth. Export them deterministically when
+you want Harbor-compatible local or cloud sandbox execution while keeping
+OpenBench for task admission, comparison, reporting, and publication:
 
 ```bash
 obench export harbor --task all --tasks-dir .openbench/tasks --out ./harbor-out
@@ -207,7 +220,11 @@ obench export harbor --task all --tasks-dir .openbench/tasks --out ./harbor-out
 
 See [`harbor-export.md`](harbor-export.md) for the field mapping, reward-path
 fallback used by local polarity checks, and known gaps (network defaults,
-partial-credit mapping, checker visibility).
+partial-credit mapping, checker visibility). For a local one-trial Codex OAuth
+run, export with `--network-mode public`, then use `obench harbor oauth-run` as
+described in [`harbor-oauth.md`](harbor-oauth.md). Import completed pinned
+Harbor 0.20 artifacts with `obench import harbor-results`; the evidence contract
+is documented in [`harbor-results.md`](harbor-results.md).
 
 ## What this path deliberately skips
 

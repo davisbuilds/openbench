@@ -4368,7 +4368,7 @@
         "submitter": "OpenBench",
         "title": "Kimi K3 Gateway Bench, 100 requests per route",
         "track": "request_probe",
-        "verified_with_commit": "cc47ef5d6923c6be4144be361573a475c88ab88b"
+        "verified_with_commit": "c45441997c8181ddd7af865e2726f8548296790b"
       },
       {
         "arms": [

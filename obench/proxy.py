@@ -908,7 +908,10 @@ class CountingProxyServer(ThreadingHTTPServer):
             path = self._ledger_path(token)
             if path.exists():
                 raise FileExistsError(f"cell ledger already exists: {path}")
-            self._cell_ledgers[token] = _CellLedger(max_calls=max_calls)
+            self._cell_ledgers[token] = _CellLedger(
+                max_calls=max_calls,
+                last_activity_monotonic=time.monotonic(),
+            )
 
     def register_route(
             self, token: str, plan: RoutePlan, secrets_plan: SecretPlan) -> None:
@@ -989,11 +992,13 @@ class CountingProxyServer(ThreadingHTTPServer):
             return token in self._cell_ledgers
 
     def cell_last_activity(self, token: str) -> float | None:
-        """Return the monotonic ts of the most recent proxied request, or None."""
+        """Return recent request activity; in-flight work stays active."""
         with self._ledger_condition:
             ledger = self._cell_ledgers.get(token)
             if ledger is None:
                 return None
+            if ledger.in_flight:
+                return time.monotonic()
             ts = ledger.last_activity_monotonic
             return ts if ts > 0 else None
 
@@ -1034,6 +1039,7 @@ class CountingProxyServer(ThreadingHTTPServer):
                 raise RuntimeError(f"cell ledger is {ledger.state.lower()}: {token}")
             ledger.admitted_calls += 1
             ledger.in_flight += 1
+            ledger.last_activity_monotonic = time.monotonic()
             return True
 
     def complete_cell_request(self, token: str, record: dict[str, Any]) -> None:

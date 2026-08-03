@@ -26,9 +26,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import ntpath
 import os
 import re
 import shutil
+import stat
 import sys
 import tarfile
 import tempfile
@@ -395,8 +397,21 @@ def resolve_install_identity(spec: str, meta: dict) -> dict:
 
 
 def default_packs_root(start: str | None = None) -> str:
-    """``.openbench/packs`` under ``start`` (default: cwd)."""
-    base = os.path.abspath(start or os.getcwd())
+    """Project-scoped ``.openbench/packs`` discovered from any subdirectory."""
+    from .config import load_config
+    cfg = load_config(start)
+    base = cfg.project_root
+    if base is None:
+        base = os.path.abspath(start or os.getcwd())
+        probe = base
+        while True:
+            if os.path.isdir(os.path.join(probe, "tasks")):
+                base = probe
+                break
+            parent = os.path.dirname(probe)
+            if parent == probe:
+                break
+            probe = parent
     return os.path.join(base, DEFAULT_PACKS_DIRNAME)
 
 
@@ -670,21 +685,60 @@ def _materialize_https(source: str, dest: str) -> dict:
 
 
 def _extract_archive(archive_path: str, dest: str, url: str) -> None:
+    dest = os.path.abspath(dest)
+
+    def safe_destination(name: str) -> str:
+        normalized = name.replace("\\", "/")
+        drive, _tail = ntpath.splitdrive(normalized)
+        if (
+            not normalized
+            or "\x00" in normalized
+            or drive
+            or normalized.startswith("/")
+        ):
+            raise PackError(f"unsafe archive member path in {url}: {name!r}")
+        target = os.path.abspath(os.path.join(dest, normalized))
+        try:
+            contained = os.path.commonpath((dest, target)) == dest
+        except ValueError:
+            contained = False
+        if not contained:
+            raise PackError(f"unsafe archive member path in {url}: {name!r}")
+        return target
+
     lower = url.lower().split("?", 1)[0]
     if lower.endswith(".zip"):
         try:
             with zipfile.ZipFile(archive_path) as zf:
+                for member in zf.infolist():
+                    safe_destination(member.filename)
+                    mode = (member.external_attr >> 16) & 0o170000
+                    if mode == stat.S_IFLNK:
+                        raise PackError(
+                            f"archive links are not allowed in {url}: "
+                            f"{member.filename!r}"
+                        )
                 zf.extractall(dest)
         except zipfile.BadZipFile as exc:
             raise PackError(f"invalid zip archive: {url}") from exc
         return
     try:
         with tarfile.open(archive_path) as tf:
-            # filter="data" is 3.12+; fall back without it on older runtimes.
+            members = tf.getmembers()
+            for member in members:
+                safe_destination(member.name)
+                if not (member.isfile() or member.isdir()):
+                    raise PackError(
+                        f"only regular files and directories are allowed in "
+                        f"{url}: {member.name!r}"
+                    )
+            # Python 3.11.4+ provides the data filter. Earlier supported
+            # runtimes use the same prevalidated member list, never an
+            # unrestricted extraction fallback.
             try:
-                tf.extractall(dest, filter="data")
+                tf.extractall(dest, members=members, filter="data")
             except TypeError:
-                tf.extractall(dest)
+                tf.extractall(dest, members=members)
     except tarfile.TarError as exc:
         raise PackError(f"invalid tar archive: {url}") from exc
 
@@ -1050,17 +1104,32 @@ def list_installed_packs(packs_root: str | None = None) -> list[dict]:
 
 
 def verify_pack(pack_dir: str) -> list[dict]:
-    """Recompute digests and compare to ``pack_source.json`` if present."""
+    """Recompute digests and fail closed without recorded expectations."""
     pack_dir = os.path.abspath(pack_dir)
     meta = load_pack_toml(os.path.join(pack_dir, PACK_TOML))
     kind = meta.get("kind", PACK_KIND_TASKS)
     source = load_pack_source(pack_dir)
     results = []
     if kind == PACK_KIND_HARNESS:
-        manifests = discover_pack_manifests(pack_dir, meta)
         expected = (source or {}).get("manifest_digests") or (
             (source or {}).get("spec_sha256") or {}
         )
+        if meta.get("manifests") is not None:
+            declared = [
+                _normalize_manifest_filename(name)
+                for name in meta["manifests"]
+            ]
+            manifests = [
+                name for name in declared
+                if os.path.isfile(os.path.join(pack_dir, name))
+            ]
+        else:
+            manifests = [
+                name for name in sorted(os.listdir(pack_dir))
+                if name.endswith(".toml")
+                and name != PACK_TOML
+                and os.path.isfile(os.path.join(pack_dir, name))
+            ]
         for filename in manifests:
             actual = manifest_spec_sha256(os.path.join(pack_dir, filename))
             exp = expected.get(filename)
@@ -1068,13 +1137,36 @@ def verify_pack(pack_dir: str) -> list[dict]:
                 "manifest": filename,
                 "digest": actual,
                 "expected": exp,
-                "ok": exp is None or exp == actual,
+                "ok": exp is not None and exp == actual,
                 "missing_expected": exp is None,
+            })
+        for filename in sorted(set(expected) - set(manifests)):
+            results.append({
+                "manifest": filename,
+                "digest": "",
+                "expected": expected[filename],
+                "ok": False,
+                "missing_expected": False,
+                "missing_member": True,
             })
         return results
 
-    tasks = discover_pack_tasks(pack_dir, meta)
     expected = (source or {}).get("task_digests") or {}
+    if meta.get("tasks") is not None:
+        tasks = [
+            name for name in meta["tasks"]
+            if os.path.isdir(os.path.join(pack_dir, name))
+        ]
+    else:
+        tasks = [
+            name for name in sorted(os.listdir(pack_dir))
+            if not name.startswith(".")
+            and os.path.isdir(os.path.join(pack_dir, name))
+            and (
+                os.path.isfile(os.path.join(pack_dir, name, "instruction.md"))
+                or os.path.isfile(os.path.join(pack_dir, name, "checker.sh"))
+            )
+        ]
     scheme = int((source or {}).get("digest_scheme") or DIGEST_SCHEME_CURRENT)
     for task in tasks:
         task_dir = os.path.join(pack_dir, task)
@@ -1084,8 +1176,17 @@ def verify_pack(pack_dir: str) -> list[dict]:
             "task": task,
             "digest": actual,
             "expected": exp,
-            "ok": exp is None or exp == actual,
+            "ok": exp is not None and exp == actual,
             "missing_expected": exp is None,
+        })
+    for task in sorted(set(expected) - set(tasks)):
+        results.append({
+            "task": task,
+            "digest": "",
+            "expected": expected[task],
+            "ok": False,
+            "missing_expected": False,
+            "missing_member": True,
         })
     return results
 
@@ -1512,7 +1613,7 @@ def main(argv=None):
                 for row in results:
                     status = "ok" if row["ok"] else "MISMATCH"
                     if row["missing_expected"]:
-                        status = "ok (no recorded digest)"
+                        status = "MISSING EXPECTED DIGEST"
                     if not row["ok"]:
                         failed += 1
                     label = row.get("task") or row.get("manifest") or "?"

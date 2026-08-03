@@ -1,6 +1,7 @@
 """Safely persist rotating CLI credentials from disposable auth copies."""
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -31,15 +32,58 @@ AUTH_PERSIST = {
 }
 
 
+class CredentialLeaseUnavailableError(RuntimeError):
+    """Another cooperating consumer currently owns this auth master."""
+
+
+class StaleCredentialGenerationError(RuntimeError):
+    """The auth master no longer matches the generation staged by this lease."""
+
+
+class _AuthLeaseProof:
+    """Opaque proof that an active lease staged one exact disposable path."""
+
+    __slots__ = ("_lease", "_staged_path")
+
+    def __init__(self, lease, staged_path):
+        self._lease = lease
+        self._staged_path = staged_path
+
+    def _covers(self, path):
+        staged_path = os.path.realpath(path)
+        return (
+            self._lease.original is not None
+            and self._lease._lock_context is not None
+            and self._staged_path == staged_path
+            and staged_path in self._lease._staged_paths
+        )
+
+
+def auth_lease_proves_path(proofs, path):
+    """Return whether an active lease proof covers exactly *path*."""
+    return any(
+        isinstance(proof, _AuthLeaseProof) and proof._covers(path)
+        for proof in (proofs or ())
+    )
+
+
 @contextlib.contextmanager
-def _lock(path):
-    """Serialize updates for one auth file across concurrent runner processes."""
+def _lock(path, *, blocking=True):
+    """Acquire the shared per-master credential lock."""
     lock_path = path + ".lock"
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         os.chmod(lock_path, 0o600)
         if fcntl is not None:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            flags = fcntl.LOCK_EX
+            if not blocking:
+                flags |= fcntl.LOCK_NB
+            try:
+                fcntl.flock(fd, flags)
+            except BlockingIOError as exc:
+                raise CredentialLeaseUnavailableError(
+                    "credential lease is already held"
+                ) from exc
         yield
     finally:
         if fcntl is not None:
@@ -94,6 +138,121 @@ def _validated_auth_bytes(current_bytes, updated_bytes):
     _validate_rotation(current, updated)
 
 
+def _atomic_replace_bytes(path, content):
+    """Replace one credential file durably with private permissions."""
+    parent = os.path.dirname(os.path.abspath(path))
+    fd, temp_path = tempfile.mkstemp(prefix=".auth-persist-", dir=parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fd = -1
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temp_path, path)
+        temp_path = None
+        os.chmod(path, 0o600)
+        try:
+            dir_fd = os.open(parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if temp_path is not None:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+
+
+class AuthFileLease:
+    """Own one auth master from generation snapshot through persist-back."""
+
+    def __init__(self, master_path, *, blocking=True):
+        self.master_path = os.path.realpath(master_path)
+        self.blocking = blocking
+        self.original = None
+        self.generation = None
+        self._lock_context = None
+        self._staged_paths = set()
+
+    def __enter__(self):
+        if fcntl is None:
+            raise RuntimeError("credential leases require fcntl on a Unix host")
+        self._lock_context = _lock(self.master_path, blocking=self.blocking)
+        self._lock_context.__enter__()
+        try:
+            with open(self.master_path, "rb") as fh:
+                self.original = fh.read()
+        except BaseException:
+            self.__exit__(*sys.exc_info())
+            raise
+        self.generation = hashlib.sha256(self.original).hexdigest()
+        self._staged_paths.clear()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        if self._lock_context is not None:
+            lock_context = self._lock_context
+            self._lock_context = None
+            lock_context.__exit__(exc_type, exc, traceback)
+        self.original = None
+        self._staged_paths.clear()
+        return False
+
+    def stage(self, copy_path):
+        """Write this lease's generation to a private disposable copy."""
+        if self.original is None:
+            raise RuntimeError("credential lease is not active")
+        parent = os.path.dirname(os.path.abspath(copy_path))
+        os.makedirs(parent, exist_ok=True)
+        _atomic_replace_bytes(copy_path, self.original)
+        staged_path = os.path.realpath(copy_path)
+        self._staged_paths.add(staged_path)
+        return _AuthLeaseProof(self, staged_path)
+
+    def persist(self, copy_path):
+        """CAS-persist a valid rotation from the disposable copy."""
+        if self.original is None:
+            raise RuntimeError("credential lease is not active")
+        if not copy_path or not os.path.isfile(copy_path):
+            return False
+        with open(copy_path, "rb") as fh:
+            updated = fh.read()
+        with open(self.master_path, "rb") as fh:
+            current = fh.read()
+        if current != self.original:
+            raise StaleCredentialGenerationError(
+                "auth master changed after its credential was staged"
+            )
+        if current == updated:
+            return False
+        _validated_auth_bytes(current, updated)
+        _atomic_replace_bytes(self.master_path, updated)
+        self.original = updated
+        self.generation = hashlib.sha256(updated).hexdigest()
+        return True
+
+    def try_persist(self, copy_path):
+        """Best-effort persist-back that does not mask a consumer result."""
+        try:
+            return self.persist(copy_path)
+        except (OSError, ValueError, StaleCredentialGenerationError) as exc:
+            print(f"WARN auth persist-back failed ({type(exc).__name__})",
+                  file=sys.stderr)
+            return False
+
+
+def auth_file_lease(master_path, *, blocking=True):
+    """Return the shared lifecycle lease for one credential master."""
+    return AuthFileLease(master_path, blocking=blocking)
+
+
 def persist_auth_file(copy_path, master_path):
     """Atomically replace *master_path* when *copy_path* has different bytes.
 
@@ -122,7 +281,6 @@ def persist_auth_file(copy_path, master_path):
         return False
     _validated_auth_bytes(current, updated)
 
-    parent = os.path.dirname(os.path.abspath(master_path))
     with _lock(master_path):
         with open(master_path, "rb") as fh:
             current = fh.read()
@@ -130,33 +288,7 @@ def persist_auth_file(copy_path, master_path):
             return False
         _validated_auth_bytes(current, updated)
 
-        fd, temp_path = tempfile.mkstemp(prefix=".auth-persist-", dir=parent)
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "wb") as fh:
-                fd = -1
-                fh.write(updated)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(temp_path, master_path)
-            temp_path = None
-            os.chmod(master_path, 0o600)
-            try:
-                dir_fd = os.open(parent, os.O_RDONLY)
-                try:
-                    os.fsync(dir_fd)
-                finally:
-                    os.close(dir_fd)
-            except OSError:
-                pass
-        finally:
-            if fd >= 0:
-                os.close(fd)
-            if temp_path is not None:
-                try:
-                    os.unlink(temp_path)
-                except FileNotFoundError:
-                    pass
+        _atomic_replace_bytes(master_path, updated)
     return True
 
 

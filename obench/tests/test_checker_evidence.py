@@ -256,6 +256,25 @@ exit 1
         self.assertIn("root.txt", saved["checker_workspace_files"])
         self.assertIn("image_digest", saved)
 
+    def test_append_row_can_reject_duplicate_under_lock(self):
+        self._set_checker("#!/usr/bin/env bash\nexit 1\n")
+        row = self._row()
+        results = os.path.join(self.tmp, "dedupe.jsonl")
+        self.assertTrue(run.append_row(results, row, reject_duplicate=True))
+        self.assertFalse(run.append_row(results, row, reject_duplicate=True))
+        with open(results, encoding="utf-8") as fh:
+            self.assertEqual(len(fh.readlines()), 1)
+        self.assertEqual(os.stat(results + ".lock").st_mode & 0o777, 0o600)
+
+    def test_transcript_permissions_are_private(self):
+        self._set_checker("#!/usr/bin/env bash\nexit 1\n")
+        row = self._row()
+        path = os.path.join(self.tmp, "transcripts", "run", "cell.txt")
+        run.write_transcript(path, row, "secret\n")
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        self.assertEqual(
+            os.stat(os.path.dirname(path)).st_mode & 0o777, 0o700)
+
     def test_docker_image_digest_prefers_repo_digest_then_image_id(self):
         def fake_run(cmd, **kwargs):
             class Proc:

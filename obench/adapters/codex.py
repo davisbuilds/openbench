@@ -54,9 +54,9 @@ import subprocess
 import tempfile
 
 try:
-    from obench.auth_persist import try_persist_auth_file
+    from obench.auth_persist import auth_file_lease, auth_lease_proves_path
 except ImportError:  # file-path / Docker mount layout
-    from auth_persist import try_persist_auth_file
+    from auth_persist import auth_file_lease, auth_lease_proves_path
 
 NAME = "codex"
 _EXE = "codex"
@@ -387,7 +387,14 @@ def _parse_json(stdout):
     tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
     return tokens, turns, tail
 
-def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override=None) -> dict:
+def run(
+    instruction: str,
+    workdir: str,
+    model: str,
+    timeout_s: int,
+    env_override=None,
+    auth_lease_proofs=(),
+) -> dict:
     if os.environ.get("BENCH_IN_CONTAINER"):
         # codex's own sandbox (bwrap) needs user namespaces and cannot nest
         # inside the bench container; the disposable container IS the external
@@ -449,12 +456,34 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
     # adapters supply their own already-composed CODEX_HOME via env_override.
     isolated_home = None
     auth_src = None
-    if not (env_override and "CODEX_HOME" in env_override):
+    auth_copy = None
+    auth_lease = None
+    provided_codex_home = (
+        env_override.get("CODEX_HOME") if env_override else None
+    )
+    if provided_codex_home:
+        auth_src = os.path.join(
+            os.path.expanduser(provided_codex_home), "auth.json"
+        )
+        if (os.path.isfile(auth_src)
+                and not auth_lease_proves_path(
+                    auth_lease_proofs, auth_src
+                )):
+            auth_lease = auth_file_lease(auth_src).__enter__()
+    else:
         isolated_home = tempfile.mkdtemp(prefix="codex_home_")
         auth_root = os.path.expanduser(os.environ.get("CODEX_HOME") or "~/.codex")
         auth_src = os.path.join(auth_root, "auth.json")
         if os.path.isfile(auth_src):
-            shutil.copy2(auth_src, os.path.join(isolated_home, "auth.json"))
+            try:
+                auth_lease = auth_file_lease(auth_src).__enter__()
+                auth_copy = os.path.join(isolated_home, "auth.json")
+                auth_lease.stage(auth_copy)
+            except BaseException:
+                if auth_lease is not None:
+                    auth_lease.__exit__(None, None, None)
+                shutil.rmtree(isolated_home, ignore_errors=True)
+                raise
         child_env["CODEX_HOME"] = isolated_home
 
     try:
@@ -481,10 +510,14 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
                 **_empty_token_usage(),
             }
     finally:
-        if isolated_home and auth_src:
-            try_persist_auth_file(os.path.join(isolated_home, "auth.json"), auth_src)
-        if isolated_home:
-            shutil.rmtree(isolated_home, ignore_errors=True)
+        try:
+            if auth_copy and auth_lease:
+                auth_lease.try_persist(auth_copy)
+        finally:
+            if auth_lease:
+                auth_lease.__exit__(None, None, None)
+            if isolated_home:
+                shutil.rmtree(isolated_home, ignore_errors=True)
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     try:

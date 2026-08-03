@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import io
+import shutil
+import tarfile
 import subprocess
 import sys
 import tempfile
@@ -129,6 +132,16 @@ class PackTomlTests(unittest.TestCase):
 
 
 class InitInstallListTests(unittest.TestCase):
+    def test_default_root_discovers_project_from_subdirectory(self):
+        with tempfile.TemporaryDirectory() as td:
+            os.makedirs(os.path.join(td, "tasks"))
+            nested = os.path.join(td, "src", "pkg")
+            os.makedirs(nested)
+            self.assertEqual(
+                packs.default_packs_root(nested),
+                os.path.join(td, ".openbench", "packs"),
+            )
+
     def test_init_scaffold(self):
         with tempfile.TemporaryDirectory() as td:
             path = packs.init_pack(td, org="org", name="pack", version="0.2.0")
@@ -228,6 +241,29 @@ class InitInstallListTests(unittest.TestCase):
             self.assertEqual(len(mismatched), 1)
             self.assertFalse(mismatched[0]["ok"])
 
+    def test_verify_fails_closed_without_recorded_digest(self):
+        with tempfile.TemporaryDirectory() as td:
+            _make_pack(td)
+            results = packs.verify_pack(td)
+            self.assertTrue(results)
+            self.assertTrue(all(r["missing_expected"] for r in results))
+            self.assertTrue(all(not r["ok"] for r in results))
+
+    def test_verify_detects_deleted_recorded_task(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "src")
+            _make_pack(src, explicit_tasks=True)
+            info = packs.install_pack(
+                "acme/smoke@1.0.0", src,
+                packs_root=os.path.join(td, "packs"),
+            )
+            shutil.rmtree(os.path.join(info["dest"], "alpha"))
+            results = packs.verify_pack(info["dest"])
+            missing = [r for r in results if r.get("task") == "alpha"]
+            self.assertEqual(len(missing), 1)
+            self.assertFalse(missing[0]["ok"])
+            self.assertTrue(missing[0]["missing_member"])
+
     def test_install_from_zip_url_via_local_https_source_classification(self):
         # Materialize https path using a file://-like flow is awkward; exercise
         # archive extract helper through a zip on disk via classify + zip roundtrip.
@@ -251,6 +287,32 @@ class InitInstallListTests(unittest.TestCase):
             root = packs._find_pack_root(extract)
             meta = packs.load_pack_toml(os.path.join(root, "pack.toml"))
             self.assertEqual(meta["version"], "2.0.0")
+
+    def test_extract_rejects_zip_path_escape(self):
+        with tempfile.TemporaryDirectory() as td:
+            archive = os.path.join(td, "bad.zip")
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("../escaped.txt", "no\n")
+            dest = os.path.join(td, "extract")
+            os.makedirs(dest)
+            with self.assertRaises(packs.PackError):
+                packs._extract_archive(
+                    archive, dest, "https://example.com/bad.zip")
+            self.assertFalse(os.path.exists(os.path.join(td, "escaped.txt")))
+
+    def test_extract_rejects_tar_links(self):
+        with tempfile.TemporaryDirectory() as td:
+            archive = os.path.join(td, "bad.tar")
+            with tarfile.open(archive, "w") as tf:
+                info = tarfile.TarInfo("linked")
+                info.type = tarfile.SYMTYPE
+                info.linkname = "../../outside"
+                tf.addfile(info, io.BytesIO())
+            dest = os.path.join(td, "extract")
+            os.makedirs(dest)
+            with self.assertRaises(packs.PackError):
+                packs._extract_archive(
+                    archive, dest, "https://example.com/bad.tar")
 
     def test_classify_source(self):
         with tempfile.TemporaryDirectory() as td:
@@ -415,6 +477,21 @@ class HarnessPackTests(unittest.TestCase):
             self.assertEqual(latest, resolved)
             results = packs.verify_pack(info["dest"])
             self.assertTrue(all(r["ok"] for r in results))
+
+    def test_verify_detects_deleted_recorded_manifest(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "src")
+            _make_harness_pack(src)
+            info = packs.install_pack(
+                "acme/cli@1.0.0", src,
+                packs_root=os.path.join(td, "packs"),
+            )
+            os.unlink(os.path.join(info["dest"], "demo.toml"))
+            results = packs.verify_pack(info["dest"])
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["manifest"], "demo.toml")
+            self.assertFalse(results[0]["ok"])
+            self.assertTrue(results[0]["missing_member"])
 
     def test_resolve_requires_manifest_when_multiple(self):
         with tempfile.TemporaryDirectory() as td:

@@ -100,11 +100,20 @@ the two must be declared together. Matches are contained within the disposable
 workspace. This supports CLIs that require editable files as positional argv
 instead of discovering them from their working directory. Auth files are copied to
 the disposable home; sources must use home-relative `~/...` paths and missing
-files return `SETUP-NEEDED`. Auth persist-back is **off by default** for
-candidates: set `persist_auth = true` only when the CLI rotates tokens in those
-declared `auth_files` and you want the host masters updated after the cell
-(same atomic schema-preserving path stock adapters use). Without the flag,
-disposable copies are discarded. `base_url_env` and
+files return `SETUP-NEEDED`. Local candidate execution holds one shared
+per-master credential lease from before staging until execution and any
+persist-back finish. Config variants pass an active, exact-staged-path lease
+proof to base adapters that support composed auth homes; an adapter bypasses
+its own lease only when that proof covers the auth file it will consume.
+
+Auth persist-back is **off by default** for candidates: set
+`persist_auth = true` only when the CLI rotates tokens in those declared
+`auth_files` and you want the host masters updated after the cell. Changed
+credentials use the same schema-preserving, mode-`0600`, atomic replacement as
+stock adapters, with staged-generation validation immediately before
+replacement. A stale rotation cannot overwrite a newer master. Without the
+flag, disposable copies are discarded after the lease is released.
+`base_url_env` and
 `proxy_route` opt the CLI into the counting proxy. `proxy_route` is the path
 after `/cell/<token>/` (for example `chat/zai/api/paas/v4`); the CLI must honor
 the declared base-URL environment variable. Generic output is retained as a

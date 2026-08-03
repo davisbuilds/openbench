@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Umbrella CLI for the OpenBench harness benchmarking framework.
 
-    obench run | report | doctor | validate | gateway | router | gate | compare | init |
-         publish | verify | community | leaderboard | site | pack | export | import
+    obench run | report | doctor | validate | admit | gateway | router | harbor | gate |
+         compare | init | publish | verify | community | leaderboard | site | pack |
+         export | import
          [args...]
 """
 
@@ -28,6 +29,7 @@ def main(argv=None):
     sub.add_parser("report", help="aggregate results.jsonl", add_help=False)
     sub.add_parser("doctor", help="preflight CLI/auth/model checks", add_help=False)
     sub.add_parser("validate", help="check task checker polarity", add_help=False)
+    sub.add_parser("admit", help="run the full task admission gate", add_help=False)
     sub.add_parser(
         "gateway",
         help="compare fixed model/provider routes through AI gateways",
@@ -36,6 +38,11 @@ def main(argv=None):
     sub.add_parser(
         "router",
         help="inspect and benchmark native model-router behavior",
+        add_help=False,
+    )
+    sub.add_parser(
+        "harbor",
+        help="run exported tasks through Harbor",
         add_help=False,
     )
     sub.add_parser("gate", help="BYO candidate admission gate", add_help=False)
@@ -83,7 +90,7 @@ def main(argv=None):
         return 0
 
     known = {
-        "run", "report", "doctor", "validate", "gateway", "router", "gate", "compare", "init",
+        "run", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
         "matrix", "results", "publish", "verify", "community", "leaderboard",
         "site", "pack", "export",
         "import",
@@ -91,7 +98,7 @@ def main(argv=None):
     if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, report, doctor, "
-            "validate, gateway, router, gate, compare, init, publish, verify, community, "
+            "validate, admit, gateway, router, harbor, gate, compare, init, publish, verify, community, "
             "leaderboard, results, site, pack, export, import"
         )
 
@@ -113,12 +120,18 @@ def main(argv=None):
     if command == "validate":
         from .validate_tasks import main as validate_main
         return validate_main(rest)
+    if command == "admit":
+        from .admission_gate import main as admission_main
+        return admission_main(rest)
     if command == "gateway":
         from .gateway_cli import main as gateway_main
         return gateway_main(rest)
     if command == "router":
         from .router_cli import main as router_main
         return router_main(rest)
+    if command == "harbor":
+        from .harbor_cli import main as harbor_main
+        return harbor_main(rest)
     if command == "gate":
         from .candidate_gate import main as gate_main
         return gate_main(rest)
@@ -150,6 +163,9 @@ def main(argv=None):
         from .export_harbor import main as export_main
         return export_main(rest)
     if command == "import":
+        if rest and rest[0] == "harbor-results":
+            from .harbor_results import main as harbor_results_main
+            return harbor_results_main(rest[1:])
         from .import_harbor import main as import_main
         return import_main(rest)
     return 1

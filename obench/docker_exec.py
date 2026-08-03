@@ -32,9 +32,10 @@ import subprocess
 import tempfile
 import time
 import uuid
+from contextlib import ExitStack
 from types import SimpleNamespace
 
-from .auth_persist import AUTH_PERSIST, try_persist_auth_file
+from .auth_persist import AUTH_PERSIST, auth_file_lease, try_persist_auth_file
 from .paths import PACKAGE_DIR, SOURCE_ROOT
 
 HERE = PACKAGE_DIR
@@ -424,9 +425,14 @@ def _candidate_auth_persist_targets(auth_files):
     return targets
 
 
-def _persist_returned_auth(return_dir, targets):
+def _persist_returned_auth(return_dir, targets, leases=None):
     for master, relative in targets:
-        try_persist_auth_file(os.path.join(return_dir, relative), master)
+        lease = (leases or {}).get(os.path.realpath(master))
+        copy_path = os.path.join(return_dir, relative)
+        if lease is None:
+            try_persist_auth_file(copy_path, master)
+        else:
+            lease.try_persist(copy_path)
 
 
 def _auth_mount_args(harness):
@@ -598,7 +604,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                      candidate_auth_files=None, candidate_pass_env=None,
                      candidate_config_dir=None, candidate_inherit_env=False,
                      candidate_spec_bytes=None, candidate_config_contents=None,
-                     candidate_persist_auth=False, container_workdir="/work"):
+                     candidate_persist_auth=False, container_workdir="/work",
+                     container_observer=None):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -612,6 +619,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     candidate_config_stage = None
     auth_return_dir = None
     auth_persist_targets = []
+    auth_leases = {}
+    auth_lease_stack = ExitStack()
     agent_started = False
     try:
         preflight(image)
@@ -651,6 +660,12 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                     auth_persist_targets.append((master, dest))
                     seen.add(dest)
         if auth_persist_targets:
+            for master in sorted({
+                os.path.realpath(master) for master, _ in auth_persist_targets
+            }):
+                auth_leases[master] = auth_lease_stack.enter_context(
+                    auth_file_lease(master)
+                )
             auth_return_dir = tempfile.mkdtemp(prefix="bench_auth_return_", dir=instr_dir)
             os.chmod(auth_return_dir, 0o700)
 
@@ -658,6 +673,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         # holds the stdout pipe open) can be force-killed on timeout. Killing
         # the `docker run` client alone does NOT stop the container.
         container_name = f"openbench_{harness}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+        if container_observer is not None:
+            container_observer(container_name)
         cmd = build_docker_cmd(
             harness, workdir, model, timeout_s, adapters_dir, image_for_run,
             instruction_path, container_name=container_name,
@@ -746,11 +763,16 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
             setattr(exc, "bench_agent_wall_time_s", 0.0)
         raise
     finally:
-        if auth_return_dir is not None:
-            try:
-                _persist_returned_auth(auth_return_dir, auth_persist_targets)
-            finally:
-                shutil.rmtree(auth_return_dir, ignore_errors=True)
+        try:
+            if auth_return_dir is not None:
+                try:
+                    _persist_returned_auth(
+                        auth_return_dir, auth_persist_targets, auth_leases
+                    )
+                finally:
+                    shutil.rmtree(auth_return_dir, ignore_errors=True)
+        finally:
+            auth_lease_stack.close()
         if instruction_path is not None:
             os.unlink(instruction_path)
         if candidate_spec_path is not None:

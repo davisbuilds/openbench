@@ -5,7 +5,11 @@
 # an env error that the queue classified as infra and retried rather than
 # failing loudly. Hence the explicit precondition check below.
 set -uo pipefail
-cd ~/dev/openbench
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)" || {
+  echo "ABORT: cannot determine repository root" >&2; exit 1;
+}
+[ -n "$REPO_ROOT" ] || { echo "ABORT: repository root is empty" >&2; exit 1; }
+cd "$REPO_ROOT" || { echo "ABORT: cannot enter repository root: $REPO_ROOT" >&2; exit 1; }
 set -a
 source ~/.openbench/keys.env
 set +a
@@ -15,4 +19,4 @@ if [ -z "${OPENROUTER_API_KEY:-}" ]; then
 fi
 echo "precondition OK: OPENROUTER_API_KEY present"
 rm -f results/tb-mid-refill/ledger/queue-state.json
-exec python3 -m obench.matrix_queue --spec tb-mid-refill.toml
+exec python3 -m obench.matrix_queue --spec experiments/specs/tb-mid-refill.toml

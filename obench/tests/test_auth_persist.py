@@ -1,6 +1,7 @@
 """Regression tests for rotating OAuth credential persist-back."""
 
 import importlib.util
+import hashlib
 import os
 
 BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -110,7 +111,168 @@ class TestAtomicPersist(unittest.TestCase):
             self.assertFalse(auth_persist.try_persist_auth_file("copy", "master"))
 
 
+class TestAuthFileLease(unittest.TestCase):
+    def test_lease_stages_generation_and_persists_rotation(self):
+        with tempfile.TemporaryDirectory() as td:
+            master = os.path.join(td, "auth.json")
+            copy = os.path.join(td, "isolated", "auth.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+
+            with auth_persist.auth_file_lease(master) as lease:
+                lease.stage(copy)
+                self.assertEqual(
+                    lease.generation,
+                    hashlib.sha256(
+                        b'{"account_id":"owner","refresh_token":"old"}'
+                    ).hexdigest(),
+                )
+                with open(copy, "wb") as fh:
+                    fh.write(b'{"account_id":"owner","refresh_token":"new"}')
+                self.assertTrue(lease.persist(copy))
+
+            with open(master, "rb") as fh:
+                self.assertEqual(
+                    fh.read(),
+                    b'{"account_id":"owner","refresh_token":"new"}',
+                )
+            self.assertEqual(stat.S_IMODE(os.stat(master).st_mode), 0o600)
+
+    def test_nonblocking_consumer_rejects_active_lease(self):
+        with tempfile.TemporaryDirectory() as td:
+            master = os.path.join(td, "auth.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"refresh_token":"old"}')
+
+            with auth_persist.auth_file_lease(master):
+                with self.assertRaises(
+                    auth_persist.CredentialLeaseUnavailableError
+                ):
+                    with auth_persist.auth_file_lease(master, blocking=False):
+                        self.fail("second lease unexpectedly acquired")
+
+    def test_stage_proof_is_path_specific_and_expires_with_lease(self):
+        with tempfile.TemporaryDirectory() as td:
+            master = os.path.join(td, "auth.json")
+            copy = os.path.join(td, "copy.json")
+            other = os.path.join(td, "other.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"refresh_token":"old"}')
+
+            with auth_persist.auth_file_lease(master) as lease:
+                proof = lease.stage(copy)
+                self.assertTrue(
+                    auth_persist.auth_lease_proves_path((proof,), copy)
+                )
+                self.assertFalse(
+                    auth_persist.auth_lease_proves_path((proof,), other)
+                )
+
+            self.assertFalse(
+                auth_persist.auth_lease_proves_path((proof,), copy)
+            )
+
+    def test_cas_rejects_noncooperating_master_replacement(self):
+        with tempfile.TemporaryDirectory() as td:
+            master = os.path.join(td, "auth.json")
+            copy = os.path.join(td, "copy.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+
+            with auth_persist.auth_file_lease(master) as lease:
+                lease.stage(copy)
+                with open(copy, "wb") as fh:
+                    fh.write(b'{"account_id":"owner","refresh_token":"rotated"}')
+                with open(master, "wb") as fh:
+                    fh.write(b'{"account_id":"owner","refresh_token":"newer"}')
+                with self.assertRaises(
+                    auth_persist.StaleCredentialGenerationError
+                ):
+                    lease.persist(copy)
+
+            with open(master, "rb") as fh:
+                self.assertEqual(
+                    fh.read(),
+                    b'{"account_id":"owner","refresh_token":"newer"}',
+                )
+
+
 class TestLocalAdapterPersist(unittest.TestCase):
+    def test_codex_leases_unproved_caller_owned_auth_home(self):
+        codex = _load_adapter("codex")
+        with tempfile.TemporaryDirectory() as td:
+            provided_home = os.path.join(td, "provided-home")
+            os.makedirs(provided_home)
+            auth = os.path.join(provided_home, "auth.json")
+            with open(auth, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+
+            def completed_run(cmd, cwd, capture_output, text, timeout, stdin, env):
+                del cmd, cwd, capture_output, text, timeout, stdin, env
+                with self.assertRaises(
+                    auth_persist.CredentialLeaseUnavailableError
+                ):
+                    with auth_persist.auth_file_lease(
+                        auth, blocking=False
+                    ):
+                        self.fail("Codex did not lease caller-owned auth")
+                return SimpleNamespace(
+                    returncode=0, stdout="", stderr=""
+                )
+
+            with mock.patch.object(
+                codex.subprocess, "run", side_effect=completed_run
+            ):
+                result = codex.run(
+                    "task",
+                    td,
+                    "gpt-5.5-medium",
+                    10,
+                    env_override={"CODEX_HOME": provided_home},
+                )
+
+            self.assertTrue(result["completed"])
+            with auth_persist.auth_file_lease(auth, blocking=False):
+                pass
+
+    def test_codex_holds_master_lease_from_stage_through_persist(self):
+        codex = _load_adapter("codex")
+        with tempfile.TemporaryDirectory() as td:
+            codex_home = os.path.join(td, "master-home")
+            os.makedirs(codex_home)
+            master = os.path.join(codex_home, "auth.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+
+            def completed_run(cmd, cwd, capture_output, text, timeout, stdin, env):
+                del cmd, cwd, capture_output, text, timeout, stdin
+                with self.assertRaises(
+                    auth_persist.CredentialLeaseUnavailableError
+                ):
+                    with auth_persist.auth_file_lease(master, blocking=False):
+                        self.fail("concurrent consumer acquired Codex lease")
+                isolated = os.path.join(env["CODEX_HOME"], "auth.json")
+                with open(isolated, "wb") as fh:
+                    fh.write(
+                        b'{"account_id":"owner","refresh_token":"rotated"}'
+                    )
+                return SimpleNamespace(
+                    returncode=0, stdout="", stderr=""
+                )
+
+            with mock.patch.dict(
+                os.environ, {"CODEX_HOME": codex_home}, clear=False
+            ), mock.patch.object(
+                codex.subprocess, "run", side_effect=completed_run
+            ):
+                result = codex.run(
+                    "task", td, "gpt-5.5-medium", 10
+                )
+
+            self.assertTrue(result["completed"])
+            with open(master, "rb") as fh:
+                self.assertIn(b'"rotated"', fh.read())
+
     def test_pi_persists_rotation_even_when_cli_fails(self):
         pi = _load_adapter("pi")
         with tempfile.TemporaryDirectory() as td:
@@ -133,6 +295,141 @@ class TestLocalAdapterPersist(unittest.TestCase):
 
 
 class TestDockerPersistPlumbing(unittest.TestCase):
+    def test_container_codex_holds_lease_through_return_persist(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = os.path.join(td, "home")
+            scratch = os.path.join(td, "scratch")
+            os.makedirs(os.path.join(home, ".codex"))
+            master = os.path.join(home, ".codex", "auth.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+            original_expanduser = os.path.expanduser
+
+            def fake_client(cmd, container_name, host_timeout_s):
+                del container_name, host_timeout_s
+                with self.assertRaises(
+                    auth_persist.CredentialLeaseUnavailableError
+                ):
+                    with auth_persist.auth_file_lease(master, blocking=False):
+                        self.fail("concurrent consumer acquired container lease")
+                return_mount = next(
+                    arg for arg in cmd
+                    if arg.endswith(f":{docker_exec.AUTH_RETURN}:rw")
+                )
+                return_dir = return_mount.split(":", 1)[0]
+                returned = os.path.join(
+                    return_dir, ".codex", "auth.json"
+                )
+                os.makedirs(os.path.dirname(returned), exist_ok=True)
+                with open(returned, "wb") as fh:
+                    fh.write(
+                        b'{"account_id":"owner","refresh_token":"rotated"}'
+                    )
+                return SimpleNamespace(
+                    timed_out=False,
+                    stdout=(
+                        docker_exec.RESULT_SENTINEL
+                        + ' {"completed": true}\n'
+                    ),
+                    stderr="",
+                    returncode=0,
+                    host_wall_time_s=0.01,
+                )
+
+            with mock.patch.dict(
+                os.environ, {"OPENBENCH_DOCKER_TMPDIR": scratch}, clear=False
+            ), mock.patch.object(
+                os.path,
+                "expanduser",
+                side_effect=lambda path: (
+                    home if path == "~" else original_expanduser(path)
+                ),
+            ), mock.patch.object(
+                docker_exec, "preflight"
+            ), mock.patch.object(
+                docker_exec, "image_digest", return_value=None
+            ), mock.patch.object(
+                docker_exec,
+                "_run_docker_client_with_deadline",
+                side_effect=fake_client,
+            ), mock.patch.object(
+                docker_exec, "_force_remove_container", return_value=True
+            ):
+                result = docker_exec.run_in_container(
+                    "codex",
+                    "task",
+                    td,
+                    "gpt-5.5-medium",
+                    10,
+                    ADAPTERS_DIR,
+                    image="synthetic",
+                )
+
+            self.assertTrue(result["completed"])
+            with open(master, "rb") as fh:
+                self.assertIn(b'"rotated"', fh.read())
+
+    def test_container_releases_lease_when_persist_raises_unexpectedly(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = os.path.join(td, "home")
+            scratch = os.path.join(td, "scratch")
+            os.makedirs(os.path.join(home, ".codex"))
+            master = os.path.join(home, ".codex", "auth.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+            original_expanduser = os.path.expanduser
+            proc = SimpleNamespace(
+                timed_out=False,
+                stdout=(
+                    docker_exec.RESULT_SENTINEL
+                    + ' {"completed": true}\n'
+                ),
+                stderr="",
+                returncode=0,
+                host_wall_time_s=0.01,
+            )
+
+            with mock.patch.dict(
+                os.environ, {"OPENBENCH_DOCKER_TMPDIR": scratch}, clear=False
+            ), mock.patch.object(
+                os.path,
+                "expanduser",
+                side_effect=lambda path: (
+                    home if path == "~" else original_expanduser(path)
+                ),
+            ), mock.patch.object(
+                docker_exec, "preflight"
+            ), mock.patch.object(
+                docker_exec, "image_digest", return_value=None
+            ), mock.patch.object(
+                docker_exec,
+                "_run_docker_client_with_deadline",
+                return_value=proc,
+            ), mock.patch.object(
+                docker_exec, "_force_remove_container", return_value=True
+            ), mock.patch.object(
+                docker_exec,
+                "_persist_returned_auth",
+                side_effect=RuntimeError("synthetic unexpected failure"),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "synthetic unexpected failure"
+                ):
+                    docker_exec.run_in_container(
+                        "codex",
+                        "task",
+                        td,
+                        "gpt-5.5-medium",
+                        10,
+                        ADAPTERS_DIR,
+                        image="synthetic",
+                    )
+
+            with auth_persist.auth_file_lease(
+                master, blocking=False
+            ):
+                pass
+
     def test_build_command_mounts_writable_return_directory(self):
         with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as returned:
             auth = os.path.join(home, ".pi", "agent", "auth.json")

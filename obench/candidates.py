@@ -1,5 +1,6 @@
 """Declarative candidate adapters for config variants and arbitrary CLIs."""
 
+from contextlib import ExitStack
 import glob
 import hashlib
 import importlib.util
@@ -10,6 +11,7 @@ import re
 import signal
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 
@@ -21,9 +23,9 @@ except ImportError:  # file-path / Docker mount layout: no package context
         return None
 
 try:
-    from .auth_persist import try_persist_auth_file
+    from .auth_persist import auth_file_lease
 except ImportError:  # file-path / Docker mount layout
-    from auth_persist import try_persist_auth_file
+    from auth_persist import auth_file_lease
 
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -173,15 +175,6 @@ def candidate_auth_persist_targets(candidate):
     return targets
 
 
-def _persist_candidate_auth(candidate, home, values):
-    if not candidate.persist_auth:
-        return
-    for auth in candidate.auth_files:
-        master = _auth_source(auth["source"])
-        copy_path = _safe_destination(home, _expand(auth["destination"], values))
-        try_persist_auth_file(copy_path, master)
-
-
 def _auth_source(path):
     """Resolve a declared auth file and reject symlink escapes from HOME."""
     home = os.path.realpath(os.path.expanduser("~"))
@@ -189,6 +182,78 @@ def _auth_source(path):
     if os.path.commonpath((home, source)) != home:
         raise ValueError(f"auth source escapes user home: {path!r}")
     return source
+
+
+def _candidate_auth_entries(candidate, home, values):
+    entries = []
+    for auth in candidate.auth_files:
+        master = _auth_source(auth["source"])
+        copy_path = _safe_destination(
+            home, _expand(auth["destination"], values)
+        )
+        entries.append((master, copy_path))
+    return entries
+
+
+class _CandidateAuthLifecycle:
+    """Own declared auth masters from candidate staging through persist-back."""
+
+    def __init__(self, entries, *, persist):
+        self.entries = entries
+        self.persist = persist
+        self.proofs = ()
+        self._stack = ExitStack()
+        self._leases = {}
+
+    def __enter__(self):
+        try:
+            for master in sorted({master for master, _ in self.entries}):
+                self._leases[master] = self._stack.enter_context(
+                    auth_file_lease(master)
+                )
+            self.proofs = tuple(
+                self._leases[master].stage(copy_path)
+                for master, copy_path in self.entries
+            )
+            return self
+        except BaseException:
+            self._stack.close()
+            raise
+
+    def _persist_rotations(self):
+        copies_by_master = {}
+        for master, copy_path in self.entries:
+            copies_by_master.setdefault(master, []).append(copy_path)
+        for master, copy_paths in copies_by_master.items():
+            lease = self._leases[master]
+            changed = []
+            for copy_path in copy_paths:
+                try:
+                    with open(copy_path, "rb") as fh:
+                        updated = fh.read()
+                except OSError:
+                    continue
+                if updated != lease.original:
+                    changed.append((copy_path, updated))
+            if not changed:
+                continue
+            if any(updated != changed[0][1] for _, updated in changed[1:]):
+                print(
+                    "WARN auth persist-back failed "
+                    "(conflicting candidate rotations)",
+                    file=sys.stderr,
+                )
+                continue
+            lease.try_persist(changed[0][0])
+
+    def __exit__(self, exc_type, exc, traceback):
+        try:
+            if self.persist:
+                self._persist_rotations()
+        finally:
+            self.proofs = ()
+            self._stack.close()
+        return False
 
 
 def _candidate_identity(provenance):
@@ -300,31 +365,54 @@ class ConfigVariant:
                             fh.write(content)
             else:
                 shutil.copytree(self.config_dir, staged, dirs_exist_ok=True)
-            for auth in self.auth_files:
-                src = _auth_source(auth["source"])
-                dst = _safe_destination(staged, _expand(auth["destination"], values))
-                if not os.path.isfile(src):
-                    return _base_result(False, f"SETUP-NEEDED: missing auth file {src}", "", None)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy2(src, dst)
-            env = {key: _expand(value, values) for key, value in self.env.items()}
-            if "env_override" in inspect.signature(self.module.run).parameters:
-                result = _tag_unmetered(self.module.run(
-                    instruction, workdir, model, timeout_s, env_override=env), self.unmetered)
-            else:
-                old = {key: os.environ.get(key) for key in env}
-                try:
-                    os.environ.update(env)
+            auth_entries = _candidate_auth_entries(self, staged, values)
+            for master, _ in auth_entries:
+                if not os.path.isfile(master):
+                    return _base_result(
+                        False,
+                        f"SETUP-NEEDED: missing auth file {master}",
+                        "",
+                        None,
+                    )
+            with _CandidateAuthLifecycle(
+                auth_entries, persist=self.persist_auth
+            ) as auth:
+                env = {
+                    key: _expand(value, values)
+                    for key, value in self.env.items()
+                }
+                parameters = inspect.signature(self.module.run).parameters
+                if "env_override" in parameters:
+                    kwargs = {"env_override": env}
+                    if "auth_lease_proofs" in parameters:
+                        kwargs["auth_lease_proofs"] = auth.proofs
                     result = _tag_unmetered(
-                        self.module.run(instruction, workdir, model, timeout_s), self.unmetered)
-                finally:
-                    for key, value in old.items():
-                        if value is None:
-                            os.environ.pop(key, None)
-                        else:
-                            os.environ[key] = value
-            _persist_candidate_auth(self, staged, values)
-            return result
+                        self.module.run(
+                            instruction,
+                            workdir,
+                            model,
+                            timeout_s,
+                            **kwargs,
+                        ),
+                        self.unmetered,
+                    )
+                else:
+                    old = {key: os.environ.get(key) for key in env}
+                    try:
+                        os.environ.update(env)
+                        result = _tag_unmetered(
+                            self.module.run(
+                                instruction, workdir, model, timeout_s
+                            ),
+                            self.unmetered,
+                        )
+                    finally:
+                        for key, value in old.items():
+                            if value is None:
+                                os.environ.pop(key, None)
+                            else:
+                                os.environ[key] = value
+                return result
 
 
 class ManifestHarness:
@@ -457,46 +545,75 @@ class ManifestHarness:
             for key in self.unset_env:
                 env.pop(key, None)
             env.update({key: _expand(value, values) for key, value in self.env.items()})
-            for auth in self.auth_files:
-                src = _auth_source(auth["source"])
-                dst = _safe_destination(home, _expand(auth["destination"], values))
-                if not os.path.isfile(src):
+            auth_entries = _candidate_auth_entries(self, home, values)
+            for master, _ in auth_entries:
+                if not os.path.isfile(master):
                     return _tag_unmetered(_base_result(
-                        False, f"SETUP-NEEDED: missing auth file {src}", "", None), self.unmetered)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy2(src, dst)
-            if self.base_url_env and self.proxy_route and env.get("OPENBENCH_PROXY"):
-                base, token = env.get("OPENBENCH_PROXY_BASE_URL"), env.get("OPENBENCH_PROXY_CELL_TOKEN")
-                if base and token:
-                    env[self.base_url_env] = "/".join(
-                        [base.rstrip("/"), "cell", token, self.proxy_route.strip("/")])
-            workspace_files = []
-            for pattern in self.workspace_file_globs:
-                for relative in glob.glob(pattern, root_dir=workdir, recursive=True):
-                    source = _contained_source(workdir, relative)
-                    if os.path.isfile(source):
-                        workspace_files.append(relative)
-            workspace_files = sorted(set(workspace_files))
-            cmd = []
-            for part in self.command:
-                if part == "{workspace_files}":
-                    cmd.extend(workspace_files)
-                else:
-                    cmd.append(_expand(part, values))
-            try:
-                proc = _run_process(cmd, cwd=workdir, timeout=timeout_s, env=env)
-            except subprocess.TimeoutExpired as exc:
-                out = ((exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or ""))
-                err = ((exc.stderr or b"").decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or ""))
-                _persist_candidate_auth(self, home, values)
-                return _tag_unmetered(
-                    _base_result(False, f"timeout after {timeout_s}s", out + err, cmd),
-                    self.unmetered)
-            output = (proc.stdout or "") + (proc.stderr or "")
-            _persist_candidate_auth(self, home, values)
-            return _tag_unmetered(_base_result(
-                proc.returncode == 0, None if proc.returncode == 0 else f"exit {proc.returncode}",
-                output, cmd), self.unmetered)
+                        False,
+                        f"SETUP-NEEDED: missing auth file {master}",
+                        "",
+                        None,
+                    ), self.unmetered)
+            with _CandidateAuthLifecycle(
+                auth_entries, persist=self.persist_auth
+            ):
+                if (self.base_url_env and self.proxy_route
+                        and env.get("OPENBENCH_PROXY")):
+                    base = env.get("OPENBENCH_PROXY_BASE_URL")
+                    token = env.get("OPENBENCH_PROXY_CELL_TOKEN")
+                    if base and token:
+                        env[self.base_url_env] = "/".join([
+                            base.rstrip("/"),
+                            "cell",
+                            token,
+                            self.proxy_route.strip("/"),
+                        ])
+                workspace_files = []
+                for pattern in self.workspace_file_globs:
+                    for relative in glob.glob(
+                        pattern, root_dir=workdir, recursive=True
+                    ):
+                        source = _contained_source(workdir, relative)
+                        if os.path.isfile(source):
+                            workspace_files.append(relative)
+                workspace_files = sorted(set(workspace_files))
+                cmd = []
+                for part in self.command:
+                    if part == "{workspace_files}":
+                        cmd.extend(workspace_files)
+                    else:
+                        cmd.append(_expand(part, values))
+                try:
+                    proc = _run_process(
+                        cmd, cwd=workdir, timeout=timeout_s, env=env
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    out = (
+                        (exc.stdout or b"").decode("utf-8", "replace")
+                        if isinstance(exc.stdout, bytes)
+                        else (exc.stdout or "")
+                    )
+                    err = (
+                        (exc.stderr or b"").decode("utf-8", "replace")
+                        if isinstance(exc.stderr, bytes)
+                        else (exc.stderr or "")
+                    )
+                    return _tag_unmetered(
+                        _base_result(
+                            False,
+                            f"timeout after {timeout_s}s",
+                            out + err,
+                            cmd,
+                        ),
+                        self.unmetered,
+                    )
+                output = (proc.stdout or "") + (proc.stderr or "")
+                return _tag_unmetered(_base_result(
+                    proc.returncode == 0,
+                    None if proc.returncode == 0 else f"exit {proc.returncode}",
+                    output,
+                    cmd,
+                ), self.unmetered)
         finally:
             if home_ctx:
                 home_ctx.cleanup()

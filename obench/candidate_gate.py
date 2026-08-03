@@ -329,7 +329,9 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
                            f"version={version!r}; smoke stamp={stamped!r}")
 
     failed = [item for item in checks if item["status"] == "FAIL"]
-    return {"candidate": candidate.name, "candidate_path": os.path.abspath(spec_path),
+    return {"candidate": candidate.name,
+            "candidate_digest": candidate.identity_digest,
+            "candidate_path": os.path.abspath(spec_path),
             "model": model, "mode": "live" if live else "dry-run", "pass": not failed,
             "status": "PASS" if not failed else "FAIL", "version": version,
             "smoke_row": smoke_row, "preview": preview, "checks": checks}
