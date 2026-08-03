@@ -211,6 +211,11 @@ def _validate_job_lock(job_lock: Any) -> tuple[dict[str, Any], Counter[str]]:
         )
     if not isinstance(harbor.get("is_editable"), bool):
         raise _fail("job lock.harbor.is_editable", "expected a boolean")
+    if harbor["is_editable"]:
+        raise _fail(
+            "job lock.harbor.is_editable",
+            "editable Harbor installations are not publication-grade",
+        )
 
     trials = _array(lock.get("trials"), "job lock.trials")
     if not trials:

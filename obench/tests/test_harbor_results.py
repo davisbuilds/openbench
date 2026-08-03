@@ -463,6 +463,19 @@ class HarborResultsTests(unittest.TestCase):
                 with self.assertRaises(HarborResultsError):
                     load_rows(fixture.root)
 
+    def test_rejects_editable_harbor_install(self):
+        fixture = GoldenHarborJob(self.root / "job-editable")
+        path = fixture.root / "lock.json"
+        lock = json.loads(path.read_text())
+        lock["harbor"]["is_editable"] = True
+        _write_json(path, lock)
+
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "editable Harbor installations are not publication-grade",
+        ):
+            load_rows(fixture.root)
+
     def test_rejects_missing_evidence_files(self):
         relative_paths = (
             "lock.json",
@@ -561,7 +574,7 @@ class HarborResultsTests(unittest.TestCase):
         _write_json(lock_path, trial_lock)
         job_lock_path = fixture.root / "lock.json"
         job_lock = json.loads(job_lock_path.read_text())
-        job_lock["harbor"]["is_editable"] = True
+        job_lock["harbor"]["is_editable"] = False
         job_lock["trials"] = [trial_lock]
         _write_json(job_lock_path, job_lock)
 
