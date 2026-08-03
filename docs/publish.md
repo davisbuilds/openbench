@@ -43,7 +43,7 @@ Readers open `index.html` and, if they have the same tasks checked out, run
 |------|------|
 | `index.html` | Self-contained HTML comparison card (candidate row(s) highlighted; Wilson CIs; mean score / wall; tokens/solve; token-basis badges: `unmetered` / `self-reported` / `proxy-measured`) |
 | `results.jsonl` | Filtered rows for the claim — transcript fields stripped |
-| `provenance.json` | `obench` version, `digest_scheme`, per-arm identity digests (`candidate_provenance`), per-task content digests, models, trial counts, SHA-256 of `results.jsonl` |
+| `provenance.json` | `obench` version, `digest_scheme`, per-arm identity digests (`candidate_provenance`), per-task content digests, models, trial counts, SHA-256 of `results.jsonl`, and a per-run `harbor_import_evidence` manifest when Harbor-imported rows are present |
 | `README.md` | How to re-verify and what verify does / does not prove |
 
 Default output directory: `./openbench-publish/<timestamp>/` (override with
@@ -64,6 +64,16 @@ Default output directory: `./openbench-publish/<timestamp>/` (override with
   record under `data/`, `.openbench/gate/`, or `results/gate/`. Use
   `--allow-incomplete` only for an intentionally caveated artifact; the
   resulting warnings remain in terminal output, provenance, and HTML.
+- **Harbor imports have a strict publication schema.** A row marked as Harbor
+  execution must contain the complete normalized importer provenance and agree
+  with its workspace and usage fields. Publish retains the Harbor build, job
+  and trial identifiers, lock/result/reward/ATIF/verifier/artifact/workspace
+  digests, task hashes, mapping semantics, and Harbor usage source. It drops
+  every non-allowlisted row field, including raw trajectory, session,
+  transcript, and workspace paths or credential material. Missing, partial,
+  contradictory, or extended Harbor provenance refuses publication before the
+  output directory is created; `--allow-incomplete` and
+  `--allow-pii-override` do not bypass this validation.
 
 ## What `obench verify` proves
 
@@ -73,6 +83,10 @@ obench verify openbench-publish/my-claim
 ```
 
 - The bundled `results.jsonl` still matches `provenance.json`'s `results_sha256`.
+- For Harbor-imported rows, the per-run `harbor_import_evidence` manifest
+  exactly matches the safe normalized evidence in `results.jsonl`. This binds
+  the ATIF, verifier, artifact, final-workspace, lock/result/reward, task, and
+  usage-provenance claims without publishing the underlying private artifacts.
 - When local task trees are available (`--tasks-dir` or CWD discovery), each
   recorded task content digest still matches under the bundle's
   `digest_scheme`:

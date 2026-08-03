@@ -58,6 +58,22 @@ it does not claim that trials are temporal matched blocks.
   digests, both Harbor task hashes, workspace tree digest, usage source, and mapping
   semantics.
 
+## Publishing imported rows
+
+`obench publish` treats `exec_mode = "harbor"` as a strict trust boundary. The
+complete normalized `candidate_provenance`, `workspace_source`, and usage
+contract must be present and internally consistent. Partial Harbor provenance,
+unknown provenance keys, invalid digests, workspace-digest disagreement, proxy
+claims, or usage-total disagreement fail before a bundle is written.
+
+Published Harbor rows use an allowlist. They retain the normalized result
+metrics, Harbor/ATIF/verifier/artifact/final-workspace digests, task hashes,
+mapping semantics, and Harbor-reported usage provenance needed to support the
+claim. Raw trajectory/session/transcript/workspace paths, unrecognized fields,
+and credential material are never copied. `provenance.json` records the same
+safe evidence per run under `harbor_import_evidence`; `obench verify`
+recomputes that manifest from `results.jsonl` and fails on disagreement.
+
 ## Append safety
 
 Before appending, the importer validates the entire job and scans every
