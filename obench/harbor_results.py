@@ -19,10 +19,11 @@ from .atif import validate_trajectory
 from .run import ROW_FIELDS, make_run_id
 
 HARBOR_VERSION = "0.20.0"
-HARBOR_GIT_COMMIT = "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc"
-JOB_LOCK_SCHEMA_VERSION = 2
-TRIAL_LOCK_SCHEMA_VERSION = 1
-FINAL_WORKSPACE_DESTINATION = "final-workspace"
+HARBOR_GIT_COMMIT = "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767"
+JOB_LOCK_SCHEMA_VERSION = 3
+TRIAL_LOCK_SCHEMA_VERSION = 2
+FINAL_WORKSPACE_DESTINATION = "workspace"
+VERIFIER_EVIDENCE_SCHEMA_VERSION = "openbench-verifier-evidence-v1"
 MAX_JSON_BYTES = 32 * 1024 * 1024
 
 
@@ -114,6 +115,18 @@ def _timestamp(value: Any, location: str) -> datetime:
 
 def _optional_timestamp(value: Any, location: str) -> datetime | None:
     return None if value is None else _timestamp(value, location)
+
+
+def _job_timestamp(value: Any, location: str) -> datetime:
+    text = _string(value, location)
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise _fail(location, "expected an ISO 8601 datetime") from exc
+
+
+def _optional_job_timestamp(value: Any, location: str) -> datetime | None:
+    return None if value is None else _job_timestamp(value, location)
 
 
 def _sha256_file(path: Path) -> str:
@@ -447,12 +460,21 @@ def _validate_lock_backed_config(
         config.get("verifier"), f"{location}.result.config.verifier"
     )
     lock_verifier = _object(trial_lock.get("verifier"), f"{location}.lock.verifier")
-    if _normalized_mapping(config_verifier, _VERIFIER_DEFAULTS) != _normalized_mapping(
-        lock_verifier, _VERIFIER_DEFAULTS
+    if _normalized_mapping(
+        config_verifier, _VERIFIER_DEFAULTS, exclude={"environment_mode"}
+    ) != _normalized_mapping(
+        lock_verifier, _VERIFIER_DEFAULTS, exclude={"environment_mode"}
     ):
         raise _fail(
             f"{location}.result.config.verifier",
             "does not match trial lock",
+        )
+    if result.get("verifier_environment_mode") != lock_verifier.get(
+        "environment_mode"
+    ):
+        raise _fail(
+            f"{location}.result.verifier_environment_mode",
+            "does not match resolved trial lock",
         )
 
     config_instructions = config.get("extra_instruction_paths", [])
@@ -487,9 +509,16 @@ def _validate_job_result(
 ) -> tuple[dict[str, Any], str, datetime, datetime]:
     result = _object(value, "job result")
     job_id = _string(result.get("id"), "job result.id")
-    started = _timestamp(result.get("started_at"), "job result.started_at")
-    finished = _timestamp(result.get("finished_at"), "job result.finished_at")
-    updated = _optional_timestamp(result.get("updated_at"), "job result.updated_at")
+    started = _job_timestamp(result.get("started_at"), "job result.started_at")
+    finished = _job_timestamp(result.get("finished_at"), "job result.finished_at")
+    updated = _optional_job_timestamp(
+        result.get("updated_at"), "job result.updated_at"
+    )
+    awareness = {value.tzinfo is not None for value in (started, finished)}
+    if updated is not None:
+        awareness.add(updated.tzinfo is not None)
+    if len(awareness) != 1:
+        raise _fail("job result", "job timestamps mix aware and naive datetimes")
     if finished < started:
         raise _fail("job result", "finished_at precedes started_at")
     if updated is not None and not (started <= updated <= finished):
@@ -517,31 +546,90 @@ def _validate_job_result(
             )
     _integer(stats.get("n_retries"), "job result.stats.n_retries")
 
-    aggregates = _array(result.get("trial_results"), "job result.trial_results")
-    if len(aggregates) != expected_trials:
-        raise _fail(
-            "job result.trial_results",
-            f"expected {expected_trials} entries, got {len(aggregates)}",
+    expected_reward_entries = sorted(
+        (
+            _string(item.get("trial_name"), "trial result.trial_name"),
+            _number(
+                _object(
+                    _object(
+                        item.get("verifier_result"),
+                        "trial result.verifier_result",
+                    ).get("rewards"),
+                    "trial result.verifier_result.rewards",
+                ).get("reward"),
+                "trial result.verifier_result.rewards.reward",
+                minimum=0.0,
+                maximum=1.0,
+            ),
         )
-    aggregate_by_id: dict[str, dict[str, Any]] = {}
-    for index, aggregate in enumerate(aggregates):
-        item = _object(aggregate, f"job result.trial_results[{index}]")
-        trial_id = _string(item.get("id"), f"job result.trial_results[{index}].id")
-        if trial_id in aggregate_by_id:
-            raise _fail("job result.trial_results", f"duplicate trial id {trial_id!r}")
-        aggregate_by_id[trial_id] = item
-    actual_by_id = {
-        _string(item.get("id"), "trial result.id"): item
         for item in actual_trial_results
-    }
-    if set(aggregate_by_id) != set(actual_by_id):
-        raise _fail("job result.trial_results", "does not match trial directories")
-    for trial_id, actual in actual_by_id.items():
-        if aggregate_by_id[trial_id] != actual:
+    )
+    actual_reward_entries: list[tuple[str, float]] = []
+    evals = _object(stats.get("evals"), "job result.stats.evals")
+    for eval_name, raw_eval in evals.items():
+        eval_stats = _object(raw_eval, f"job result.stats.evals.{eval_name}")
+        if eval_stats.get("n_errors") != 0:
             raise _fail(
-                "job result.trial_results",
-                f"aggregate for trial {trial_id!r} differs from its result.json",
+                f"job result.stats.evals.{eval_name}.n_errors",
+                "exception-free job must report zero",
             )
+        reward_stats = _object(
+            eval_stats.get("reward_stats"),
+            f"job result.stats.evals.{eval_name}.reward_stats",
+        )
+        reward_groups = _object(
+            reward_stats.get("reward"),
+            f"job result.stats.evals.{eval_name}.reward_stats.reward",
+        )
+        eval_trial_count = 0
+        for raw_score, raw_names in reward_groups.items():
+            try:
+                parsed_score = float(raw_score)
+            except (TypeError, ValueError) as exc:
+                raise _fail(
+                    f"job result.stats.evals.{eval_name}.reward_stats.reward",
+                    "reward key must be numeric",
+                ) from exc
+            score = _number(
+                parsed_score,
+                f"job result.stats.evals.{eval_name}.reward_stats.reward",
+                minimum=0.0,
+                maximum=1.0,
+            )
+            names = _array(
+                raw_names,
+                f"job result.stats.evals.{eval_name}.reward_stats.reward.{raw_score}",
+            )
+            for trial_name in names:
+                actual_reward_entries.append(
+                    (
+                        _string(
+                            trial_name,
+                            f"job result.stats.evals.{eval_name}.trial_name",
+                        ),
+                        score,
+                    )
+                )
+                eval_trial_count += 1
+        if eval_stats.get("n_trials") != eval_trial_count:
+            raise _fail(
+                f"job result.stats.evals.{eval_name}.n_trials",
+                f"expected {eval_trial_count!r}",
+            )
+        exception_stats = _object(
+            eval_stats.get("exception_stats"),
+            f"job result.stats.evals.{eval_name}.exception_stats",
+        )
+        if exception_stats:
+            raise _fail(
+                f"job result.stats.evals.{eval_name}.exception_stats",
+                "exception-free job must have no exception entries",
+            )
+    if sorted(actual_reward_entries) != expected_reward_entries:
+        raise _fail(
+            "job result.stats.evals",
+            "reward aggregates do not match enumerated trial directories",
+        )
     aggregate_fields = {
         "n_input_tokens": "n_input_tokens",
         "n_cache_tokens": "n_cache_tokens",
@@ -668,7 +756,7 @@ def _validate_timing(
 
 def _validate_reward(
     trial_dir: Path, result: dict[str, Any], location: str
-) -> tuple[float, Path]:
+) -> tuple[float, int, float | None, Path, Path]:
     reward_json = trial_dir / "verifier" / "reward.json"
     reward_text = trial_dir / "verifier" / "reward.txt"
     existing = [path for path in (reward_json, reward_text) if path.exists()]
@@ -699,7 +787,72 @@ def _validate_reward(
             f"{location}.result.verifier_result.rewards",
             "does not match verifier reward evidence",
         )
-    return score, reward_path
+    evidence_path = trial_dir / "verifier" / "openbench-verifier-evidence.json"
+    evidence = _object(
+        _read_json(evidence_path, f"{location}.verifier_evidence"),
+        f"{location}.verifier_evidence",
+    )
+    if set(evidence) != {
+        "schema_version",
+        "checker_exit",
+        "parsed_score",
+        "reward",
+        "verifier_duration_seconds",
+    }:
+        raise _fail(
+            f"{location}.verifier_evidence",
+            "unexpected or missing evidence fields",
+        )
+    if evidence.get("schema_version") != VERIFIER_EVIDENCE_SCHEMA_VERSION:
+        raise _fail(
+            f"{location}.verifier_evidence.schema_version",
+            f"expected {VERIFIER_EVIDENCE_SCHEMA_VERSION!r}",
+        )
+    checker_exit = evidence.get("checker_exit")
+    if not isinstance(checker_exit, int) or isinstance(checker_exit, bool):
+        raise _fail(
+            f"{location}.verifier_evidence.checker_exit",
+            "expected an integer",
+        )
+    parsed_score_value = evidence.get("parsed_score")
+    parsed_score = (
+        None
+        if parsed_score_value is None
+        else _number(
+            parsed_score_value,
+            f"{location}.verifier_evidence.parsed_score",
+            minimum=0.0,
+            maximum=1.0,
+        )
+    )
+    evidence_reward = _number(
+        evidence.get("reward"),
+        f"{location}.verifier_evidence.reward",
+        minimum=0.0,
+        maximum=1.0,
+    )
+    if evidence_reward != score:
+        raise _fail(
+            f"{location}.verifier_evidence.reward",
+            "does not match reward file and trial result",
+        )
+    duration = evidence.get("verifier_duration_seconds")
+    checker_duration = None
+    if duration is not None:
+        checker_duration = _number(
+            duration,
+            f"{location}.verifier_evidence.verifier_duration_seconds",
+            minimum=0.0,
+        )
+    expected_score = 1.0 if checker_exit == 0 else (
+        parsed_score if parsed_score is not None else 0.0
+    )
+    if score != expected_score:
+        raise _fail(
+            f"{location}.verifier_evidence",
+            "checker exit, parsed score, and Harbor reward are incoherent",
+        )
+    return score, checker_exit, checker_duration, reward_path, evidence_path
 
 
 def _validate_artifacts(
@@ -722,13 +875,13 @@ def _validate_artifacts(
     if len(requested) != 1:
         raise _fail(
             f"{location}.result.config.artifacts",
-            "must request exactly one final-workspace artifact",
+            "must request exactly one workspace artifact",
         )
     source, destination = requested[0]
     if not source.startswith("/") or source == "/":
         raise _fail(
             f"{location}.result.config.artifacts",
-            "final workspace source must be a non-root absolute path",
+            "workspace source must be a non-root absolute path",
         )
 
     manifest_path = trial_dir / "artifacts" / "manifest.json"
@@ -780,12 +933,12 @@ def _validate_artifacts(
     if final_entry is None:
         raise _fail(
             f"{location}.artifacts",
-            "manifest does not contain the requested final workspace",
+            "manifest does not contain the requested workspace",
         )
     if final_entry.get("type") != "directory" or final_entry.get("status") != "ok":
         raise _fail(
             f"{location}.artifacts",
-            "final workspace must have type='directory' and status='ok'",
+            "workspace must have type='directory' and status='ok'",
         )
     workspace_path = trial_dir / "artifacts" / destination
     return manifest_path, _tree_digest(workspace_path)
@@ -813,6 +966,11 @@ def _validate_atif(
             f"{location}.ATIF.agent",
             "does not match trial result agent identity",
         )
+    if agent.get("model_name") not in (None, model):
+        raise _fail(
+            f"{location}.ATIF.agent.model_name",
+            "does not match trial model identity",
+        )
     for index, step in enumerate(trajectory.get("steps", [])):
         if (
             isinstance(step, dict)
@@ -825,8 +983,11 @@ def _validate_atif(
             )
 
     agent_result = _object(result.get("agent_result"), f"{location}.result.agent_result")
-    final_metrics = _object(
-        trajectory.get("final_metrics"), f"{location}.ATIF.final_metrics"
+    final_metrics_value = trajectory.get("final_metrics")
+    final_metrics = (
+        {}
+        if final_metrics_value is None
+        else _object(final_metrics_value, f"{location}.ATIF.final_metrics")
     )
     metric_pairs = (
         ("n_input_tokens", "total_prompt_tokens"),
@@ -835,7 +996,14 @@ def _validate_atif(
         ("cost_usd", "total_cost_usd"),
     )
     for result_name, atif_name in metric_pairs:
-        if agent_result.get(result_name) != final_metrics.get(atif_name):
+        result_value = agent_result.get(result_name)
+        atif_value = final_metrics.get(atif_name)
+        if result_value is not None and final_metrics_value is None:
+            raise _fail(
+                f"{location}.ATIF.final_metrics",
+                "required when the agent result reports usage",
+            )
+        if result_value != atif_value:
             raise _fail(
                 f"{location}.ATIF.final_metrics.{atif_name}",
                 f"does not match result.agent_result.{result_name}",
@@ -935,12 +1103,35 @@ def _validate_trial(
 
     task = _object(trial_lock.get("task"), f"{location}.lock.task")
     task_name = _string(result.get("task_name"), f"{location}.result.task_name")
-    if task_name != task.get("name"):
+    if _normalized_task_name(task_name) != _normalized_task_name(
+        _string(task.get("name"), f"{location}.lock.task.name")
+    ):
         raise _fail(f"{location}.result.task_name", "does not match trial lock")
     task_digest = _validate_digest(task.get("digest"), f"{location}.lock.task.digest")
     checksum = _string(result.get("task_checksum"), f"{location}.result.task_checksum")
-    if checksum.removeprefix("sha256:") != task_digest.removeprefix("sha256:"):
-        raise _fail(f"{location}.result.task_checksum", "does not match locked task digest")
+    checksum_hex = checksum.removeprefix("sha256:")
+    if len(checksum_hex) != 64 or any(
+        char not in "0123456789abcdef" for char in checksum_hex
+    ):
+        raise _fail(
+            f"{location}.result.task_checksum",
+            "expected Harbor's 64-character lowercase dirhash checksum",
+        )
+    result_task_id = _object(result.get("task_id"), f"{location}.result.task_id")
+    config_task = _object(
+        _object(result.get("config"), f"{location}.result.config").get("task"),
+        f"{location}.result.config.task",
+    )
+    task_type = task.get("type")
+    identity_field = "path" if task_type == "local" else "name"
+    if (
+        result_task_id.get(identity_field) != config_task.get(identity_field)
+        or config_task.get(identity_field) != task.get(identity_field)
+    ):
+        raise _fail(
+            f"{location}.result.task_id",
+            "does not match result config and resolved task lock",
+        )
 
     agent_lock = _object(trial_lock.get("agent"), f"{location}.lock.agent")
     agent_info = _object(result.get("agent_info"), f"{location}.result.agent_info")
@@ -951,12 +1142,32 @@ def _validate_trial(
     model_info = _object(
         agent_info.get("model_info"), f"{location}.result.agent_info.model_info"
     )
-    model = _string(model_info.get("name"), f"{location}.result.agent_info.model_info.name")
-    if agent_name != agent_lock.get("name") or model != agent_lock.get("model_name"):
-        raise _fail(f"{location}.result.agent_info", "does not match trial lock identity")
+    model_name = _string(
+        model_info.get("name"), f"{location}.result.agent_info.model_info.name"
+    )
+    provider = model_info.get("provider")
+    if provider is not None and not isinstance(provider, str):
+        raise _fail(
+            f"{location}.result.agent_info.model_info.provider",
+            "expected a string or null",
+        )
+    model = f"{provider}/{model_name}" if provider else model_name
+    if model != agent_lock.get("model_name"):
+        raise _fail(
+            f"{location}.result.agent_info.model_info",
+            "does not match trial lock model identity",
+        )
 
-    started, finished, t_env, t_agent, t_checker = _validate_timing(result, location)
-    score, reward_path = _validate_reward(trial_dir, result, location)
+    started, finished, t_env, t_agent, harbor_verifier_time = _validate_timing(
+        result, location
+    )
+    (
+        score,
+        checker_exit,
+        t_checker,
+        reward_path,
+        verifier_evidence_path,
+    ) = _validate_reward(trial_dir, result, location)
     manifest_path, workspace_digest = _validate_artifacts(trial_dir, result, location)
     trajectory_path, agent_result, turns = _validate_atif(
         trial_dir, result, agent_name, agent_version, model, location
@@ -968,12 +1179,17 @@ def _validate_trial(
         "trial_lock_path": trial_lock_path,
         "result_path": result_path,
         "reward_path": reward_path,
+        "verifier_evidence_path": verifier_evidence_path,
         "manifest_path": manifest_path,
         "trajectory_path": trajectory_path,
         "trial_id": trial_id,
         "trial_name": trial_name,
         "task_name": task_name,
         "task_digest": task_digest,
+        "task_checksum": checksum,
+        "agent_config_name": _string(
+            agent_lock.get("name"), f"{location}.lock.agent.name"
+        ),
         "agent_name": agent_name,
         "agent_version": agent_version,
         "model": model,
@@ -982,7 +1198,9 @@ def _validate_trial(
         "t_env_setup_s": t_env,
         "t_agent_s": t_agent,
         "t_checker_s": t_checker,
+        "harbor_verifier_time_s": harbor_verifier_time,
         "score": score,
+        "checker_exit": checker_exit,
         "turns": turns,
         "usage": usage,
         "workspace_digest": workspace_digest,
@@ -1057,6 +1275,15 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
     ]
     if any(expected_locks.values()):
         raise _fail("job directory", "not every job-lock trial has completed evidence")
+    checksums_by_digest: dict[str, set[str]] = defaultdict(set)
+    for item in trials:
+        checksums_by_digest[item["task_digest"]].add(item["task_checksum"])
+    for task_digest, checksums in checksums_by_digest.items():
+        if len(checksums) != 1:
+            raise _fail(
+                "trial results.task_checksum",
+                f"inconsistent legacy checksums for locked task {task_digest}",
+            )
 
     _job_result, job_id, job_started, job_finished = _validate_job_result(
         job_result_value,
@@ -1064,7 +1291,15 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
         actual_trial_results=[item["result"] for item in trials],
     )
     for item in trials:
-        if not (job_started <= item["started"] <= item["finished"] <= job_finished):
+        if (
+            job_started.tzinfo is not None
+            and not (
+                job_started
+                <= item["started"]
+                <= item["finished"]
+                <= job_finished
+            )
+        ):
             raise _fail(
                 f"trial {item['trial_name']!r}",
                 "trial timing falls outside job timing",
@@ -1090,7 +1325,7 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
         )
         for trial_number, item in enumerate(group_trials, 1):
             score = item["score"]
-            success = score == 1.0
+            success = item["checker_exit"] == 0
             provenance = {
                 "kind": "harbor_job",
                 "harbor_version": HARBOR_VERSION,
@@ -1103,10 +1338,16 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "trial_lock_sha256": _sha256_file(item["trial_lock_path"]),
                 "trial_result_sha256": _sha256_file(item["result_path"]),
                 "reward_sha256": _sha256_file(item["reward_path"]),
+                "openbench_verifier_evidence_sha256": _sha256_file(
+                    item["verifier_evidence_path"]
+                ),
                 "atif_sha256": _sha256_file(item["trajectory_path"]),
                 "artifact_manifest_sha256": _sha256_file(item["manifest_path"]),
                 "final_workspace_sha256": item["workspace_digest"],
                 "task_digest": item["task_digest"],
+                "harbor_task_checksum": item["task_checksum"],
+                "harbor_agent_config_name": item["agent_config_name"],
+                "harbor_verifier_time_s": item["harbor_verifier_time_s"],
                 "usage_source": item["usage"]["token_basis"],
                 "proxy_measured": False,
                 "trial_mapping": "lexicographic_name_within_task_agent_model",
@@ -1133,6 +1374,7 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                     "turns": item["turns"],
                     "exec_mode": "harbor",
                     "score": score,
+                    "checker_exit": item["checker_exit"],
                     "harness_version": item["agent_version"],
                     "harness_version_source": "harbor_trial_result",
                     "failure_class": "solved" if success else "wrong_answer",

@@ -39,7 +39,7 @@ def _write_json(path: Path, value: object) -> None:
 
 def _trial_lock(task: str, model: str = "model-x") -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "task": {
             "name": f"openbench/{task}",
             "type": "local",
@@ -48,10 +48,27 @@ def _trial_lock(task: str, model: str = "model-x") -> dict:
         },
         "install_only": False,
         "timeout_multiplier": 1.0,
-        "agent": {"name": "codex", "model_name": model, "kwargs": {}},
+        "agent": {
+            "name": "codex",
+            "model_name": model,
+            "skills": [],
+            "resume_trajectory": False,
+            "extra_allowed_hosts": [],
+            "kwargs": {},
+            "mcp_servers": [],
+        },
         "skills": [],
-        "environment": {"type": "docker", "kwargs": {}},
-        "verifier": {"disable": False, "kwargs": {}},
+        "environment": {
+            "type": "docker",
+            "force_build": False,
+            "delete": True,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": [],
+        },
+        "verifier": {"disable": False, "environment_mode": "shared"},
     }
 
 
@@ -82,14 +99,14 @@ def _trial_result(
             "environment": {"type": "docker", "kwargs": {}},
             "verifier": {"disable": False, "kwargs": {}},
             "artifacts": [
-                {"source": "/app", "destination": "final-workspace"}
+                {"source": "/app", "destination": "workspace"}
             ],
             "extra_instruction_paths": [],
         },
         "agent_info": {
             "name": "codex",
             "version": "1.2.3",
-            "model_info": {"name": model, "provider": "openai"},
+            "model_info": {"name": model, "provider": None},
         },
         "agent_result": {
             "n_input_tokens": 100,
@@ -98,6 +115,7 @@ def _trial_result(
             "cost_usd": 0.5,
         },
         "verifier_result": {"rewards": {"reward": score}},
+        "verifier_environment_mode": "shared",
         "exception_info": None,
         "started_at": f"2026-07-20T10:{minute:02d}:00+00:00",
         "finished_at": f"2026-07-20T10:{minute + 4:02d}:00+00:00",
@@ -192,7 +210,7 @@ class GoldenHarborJob:
         _write_json(
             self.root / "lock.json",
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "created_at": "2026-07-20T09:59:00+00:00",
                 "harbor": {
                     "version": HARBOR_VERSION,
@@ -226,6 +244,18 @@ class GoldenHarborJob:
                 f"{spec['score']}\n"
             )
             _write_json(
+                trial_dir
+                / "verifier"
+                / "openbench-verifier-evidence.json",
+                {
+                    "schema_version": "openbench-verifier-evidence-v1",
+                    "checker_exit": 0 if spec["score"] == 1.0 else 1,
+                    "parsed_score": None if spec["score"] == 0.0 else spec["score"],
+                    "reward": spec["score"],
+                    "verifier_duration_seconds": 60,
+                },
+            )
+            _write_json(
                 trial_dir / "artifacts" / "manifest.json",
                 [
                     {
@@ -237,14 +267,14 @@ class GoldenHarborJob:
                     },
                     {
                         "source": "/app",
-                        "destination": "artifacts/final-workspace",
+                        "destination": "artifacts/workspace",
                         "type": "directory",
                         "status": "ok",
                         "service": None,
                     },
                 ],
             )
-            workspace = trial_dir / "artifacts" / "final-workspace"
+            workspace = trial_dir / "artifacts" / "workspace"
             workspace.mkdir(parents=True)
             (workspace / "answer.txt").write_text(f"{spec['name']}\n")
             results.append(result)
@@ -256,19 +286,7 @@ class GoldenHarborJob:
                 "updated_at": "2026-07-20T10:14:00+00:00",
                 "finished_at": "2026-07-20T10:15:00+00:00",
                 "n_total_trials": len(results),
-                "stats": {
-                    "n_completed_trials": len(results),
-                    "n_errored_trials": 0,
-                    "n_running_trials": 0,
-                    "n_pending_trials": 0,
-                    "n_cancelled_trials": 0,
-                    "n_retries": 0,
-                    "n_input_tokens": 100 * len(results),
-                    "n_cache_tokens": 25 * len(results),
-                    "n_output_tokens": 40 * len(results),
-                    "cost_usd": 0.5 * len(results),
-                },
-                "trial_results": results,
+                "stats": self._stats(results),
             },
         )
 
@@ -278,11 +296,41 @@ class GoldenHarborJob:
     def sync_aggregate(self) -> None:
         job_result_path = self.root / "result.json"
         job_result = json.loads(job_result_path.read_text())
-        job_result["trial_results"] = [
+        results = [
             json.loads((self.trial(index) / "result.json").read_text())
             for index in range(len(self.specs))
         ]
+        job_result["stats"] = self._stats(results)
         _write_json(job_result_path, job_result)
+
+    @staticmethod
+    def _stats(results: list[dict]) -> dict:
+        reward_stats: dict[str, list[str]] = {}
+        for result in results:
+            score = result["verifier_result"]["rewards"]["reward"]
+            reward_stats.setdefault(str(score), []).append(result["trial_name"])
+        return {
+            "n_completed_trials": len(results),
+            "n_errored_trials": 0,
+            "n_running_trials": 0,
+            "n_pending_trials": 0,
+            "n_cancelled_trials": 0,
+            "n_retries": 0,
+            "evals": {
+                "codex__model-x__openbench": {
+                    "n_trials": len(results),
+                    "n_errors": 0,
+                    "metrics": [],
+                    "pass_at_k": {},
+                    "reward_stats": {"reward": reward_stats},
+                    "exception_stats": {},
+                }
+            },
+            "n_input_tokens": 100 * len(results),
+            "n_cache_tokens": 25 * len(results),
+            "n_output_tokens": 40 * len(results),
+            "cost_usd": 0.5 * len(results),
+        }
 
 
 class HarborResultsTests(unittest.TestCase):
@@ -327,7 +375,7 @@ class HarborResultsTests(unittest.TestCase):
         self.assertEqual(rows[2]["failure_class"], "wrong_answer")
         for row in rows:
             self.assertEqual(set(row), set(ROW_FIELDS))
-            self.assertIsNone(row["checker_exit"])
+            self.assertIsInstance(row["checker_exit"], int)
             self.assertIsNone(row["checker_stdout"])
             self.assertIsNone(row["checker_stderr"])
 
@@ -421,6 +469,7 @@ class HarborResultsTests(unittest.TestCase):
             "result.json",
             "agent/trajectory.json",
             "verifier/reward.txt",
+            "verifier/openbench-verifier-evidence.json",
             "artifacts/manifest.json",
         )
         for index, relative in enumerate(relative_paths):
@@ -429,6 +478,180 @@ class HarborResultsTests(unittest.TestCase):
                 (fixture.trial() / relative).unlink()
                 with self.assertRaises(HarborResultsError):
                     load_rows(fixture.root)
+
+    def test_checker_exit_is_authoritative_even_when_partial_score_is_one(self):
+        fixture = GoldenHarborJob(
+            self.root / "job-nonzero-one",
+            specs=[
+                {
+                    "name": "alpha__one",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        evidence_path = (
+            fixture.trial()
+            / "verifier"
+            / "openbench-verifier-evidence.json"
+        )
+        evidence = json.loads(evidence_path.read_text())
+        evidence["checker_exit"] = 7
+        evidence["parsed_score"] = 1.0
+        _write_json(evidence_path, evidence)
+
+        row = load_rows(fixture.root)[0]
+        self.assertEqual(row["checker_exit"], 7)
+        self.assertEqual(row["score"], 1.0)
+        self.assertFalse(row["success"])
+        self.assertEqual(row["failure_class"], "wrong_answer")
+
+    def test_rejects_invalid_or_mismatched_verifier_evidence(self):
+        for index, mutation in enumerate(
+            (
+                {"checker_exit": "1"},
+                {"reward": 0.25},
+                {"checker_exit": 1, "parsed_score": None},
+            )
+        ):
+            with self.subTest(mutation=mutation):
+                fixture = GoldenHarborJob(
+                    self.root / f"job-evidence-{index}",
+                    specs=[
+                        {
+                            "name": "alpha__one",
+                            "task": "alpha",
+                            "id": "00000000-0000-0000-0000-000000000001",
+                            "score": 1.0,
+                            "offset": 0,
+                        }
+                    ],
+                )
+                evidence_path = (
+                    fixture.trial()
+                    / "verifier"
+                    / "openbench-verifier-evidence.json"
+                )
+                evidence = json.loads(evidence_path.read_text())
+                evidence.update(mutation)
+                _write_json(evidence_path, evidence)
+                with self.assertRaises(HarborResultsError):
+                    load_rows(fixture.root)
+
+    def test_real_0200_artifact_shape_regression_without_credentials(self):
+        fixture = GoldenHarborJob(
+            self.root / "vertical-slice-public",
+            specs=[
+                {
+                    "name": "make-it-run__qT2fWKm",
+                    "task": "make-it-run",
+                    "id": "1c7aae27-b206-449e-bb14-440c861da8f2",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        lock_path = fixture.trial() / "lock.json"
+        trial_lock = json.loads(lock_path.read_text())
+        trial_lock["task"]["name"] = "make-it-run"
+        trial_lock["agent"]["name"] = "spike_agent:OpenBenchSpikeAgent"
+        trial_lock["agent"]["model_name"] = "spike/no-llm"
+        _write_json(lock_path, trial_lock)
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["harbor"]["is_editable"] = True
+        job_lock["trials"] = [trial_lock]
+        _write_json(job_lock_path, job_lock)
+
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["source"] = None
+        result["task_checksum"] = "c" * 64
+        result["config"]["agent"] = {
+            "name": "spike_agent:OpenBenchSpikeAgent",
+            "model_name": "spike/no-llm",
+            "skills": [],
+            "resume_trajectory": False,
+            "extra_allowed_hosts": [],
+            "kwargs": {},
+            "mcp_servers": [],
+        }
+        result["agent_info"] = {
+            "name": "openbench-spike",
+            "version": "0.1.0",
+            "model_info": {"name": "no-llm", "provider": "spike"},
+        }
+        result["agent_result"] = {
+            "n_input_tokens": None,
+            "n_cache_tokens": None,
+            "n_output_tokens": None,
+            "cost_usd": None,
+            "rollout_details": None,
+            "metadata": {"spike": "custom-base-agent"},
+        }
+        _write_json(result_path, result)
+        _write_json(
+            fixture.trial() / "agent" / "trajectory.json",
+            {
+                "schema_version": "ATIF-v1.7",
+                "session_id": result["id"],
+                "agent": {
+                    "name": "openbench-spike",
+                    "version": "0.1.0",
+                    "model_name": "spike/no-llm",
+                },
+                "steps": [
+                    {"step_id": 1, "source": "user", "message": "Fix the task."},
+                    {
+                        "step_id": 2,
+                        "source": "agent",
+                        "message": "Repaired the task.",
+                        "llm_call_count": 0,
+                    },
+                ],
+            },
+        )
+        job_result_path = fixture.root / "result.json"
+        job_result = json.loads(job_result_path.read_text())
+        job_result["started_at"] = "2026-07-20T05:59:00"
+        job_result["updated_at"] = "2026-07-20T06:04:00"
+        job_result["finished_at"] = "2026-07-20T06:05:00"
+        job_result["stats"] = {
+            "n_completed_trials": 1,
+            "n_errored_trials": 0,
+            "n_running_trials": 0,
+            "n_pending_trials": 0,
+            "n_cancelled_trials": 0,
+            "n_retries": 0,
+            "evals": {
+                "openbench-spike__no-llm__adhoc": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "metrics": [{"mean": 1.0}],
+                    "pass_at_k": {},
+                    "reward_stats": {
+                        "reward": {"1.0": ["make-it-run__qT2fWKm"]}
+                    },
+                    "exception_stats": {},
+                }
+            },
+            "n_input_tokens": None,
+            "n_cache_tokens": None,
+            "n_output_tokens": None,
+            "cost_usd": None,
+        }
+        _write_json(job_result_path, job_result)
+
+        row = load_rows(fixture.root)[0]
+        self.assertEqual(row["harness"], "openbench-spike")
+        self.assertEqual(row["model"], "spike/no-llm")
+        self.assertEqual(row["token_basis"], "unmetered")
+        self.assertEqual(
+            row["candidate_provenance"]["harbor_git_commit_hash"],
+            "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        )
 
     def test_rejects_random_incomplete_and_duplicate_trials(self):
         fixture = GoldenHarborJob(self.root / "job-random")
