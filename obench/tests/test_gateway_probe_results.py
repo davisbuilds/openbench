@@ -275,6 +275,14 @@ class GatewayProbeResultsTests(unittest.TestCase):
             variants["multiple_successes"]["reuse_evidence"]["route"][
                 "attempts"
             ][0]["status"] = 200
+            variants["success_not_terminal"] = copy.deepcopy(row)
+            variants["success_not_terminal"]["reuse_evidence"]["route"][
+                "attempts"
+            ] = list(reversed(
+                variants["success_not_terminal"]["reuse_evidence"]["route"][
+                    "attempts"
+                ]
+            ))
             variants["extra_reason"] = copy.deepcopy(row)
             variants["extra_reason"]["reuse_evidence"]["route_integrity"][
                 "reasons"

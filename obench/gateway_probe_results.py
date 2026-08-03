@@ -600,8 +600,12 @@ def _recovered_primer_attempts_valid(value: Any) -> bool:
             attempt["status"],
         ))
     routes = {(provider, model) for provider, model, _status in normalized}
-    successes = sum(200 <= status < 300 for _, _, status in normalized)
-    return len(routes) == 1 and successes == 1
+    success_flags = [200 <= status < 300 for _, _, status in normalized]
+    return (
+        len(routes) == 1
+        and success_flags[-1] is True
+        and not any(success_flags[:-1])
+    )
 
 
 def _validate_money(value: Any, *, nullable: bool) -> bool:

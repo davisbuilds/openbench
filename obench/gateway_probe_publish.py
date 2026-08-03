@@ -774,14 +774,24 @@ def _project_result_row(row: Mapping[str, Any]) -> dict[str, Any]:
         name: copy.deepcopy(row[name])
         for name in _PUBLIC_RESULT_FIELDS
     }
-    projected["request_metrics"]["receipt_headers"] = {}
-    projected["reuse_evidence"]["receipt_headers"] = {}
-    route = projected["request_metrics"].get("route")
-    if isinstance(route, dict) and isinstance(route.get("gateway_metadata"), dict):
-        route["gateway_metadata"].pop("generationId", None)
+    _scrub_public_operational_evidence(projected)
     gateway_probe_results.validate_row_shape(projected)
     _assert_public_safe(projected)
     return projected
+
+
+def _scrub_public_operational_evidence(value: Any) -> None:
+    if isinstance(value, dict):
+        for key in list(value):
+            if key == "receipt_headers":
+                value[key] = {}
+            elif key == "generationId":
+                value.pop(key)
+            else:
+                _scrub_public_operational_evidence(value[key])
+    elif isinstance(value, list):
+        for item in value:
+            _scrub_public_operational_evidence(item)
 
 
 def _canonical_jsonl(rows: list[dict[str, Any]]) -> str:

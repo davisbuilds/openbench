@@ -993,6 +993,10 @@ class GatewayProbeHttpTests(unittest.TestCase):
                 {"provider": "openai", "model": "gpt-test", "status": 200},
                 attempts[1],
             ],
+            "success_not_terminal": [
+                attempts[1],
+                {"provider": "openai", "model": "gpt-test", "status": 504},
+            ],
             "malformed": [
                 {"provider": "openai", "model": "gpt-test"},
                 attempts[1],

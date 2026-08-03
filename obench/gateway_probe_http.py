@@ -536,8 +536,15 @@ def _primer_route_status(
             attempt["status"],
         ))
     routes = {(provider, model) for provider, model, _status in normalized}
-    successes = sum(200 <= attempt_status < 300 for _, _, attempt_status in normalized)
-    if len(routes) != 1 or successes != 1:
+    success_flags = [
+        200 <= attempt_status < 300
+        for _, _, attempt_status in normalized
+    ]
+    if (
+        len(routes) != 1
+        or success_flags[-1] is not True
+        or any(success_flags[:-1])
+    ):
         return status, reasons
     return "verified", reasons
 
