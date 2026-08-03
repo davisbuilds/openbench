@@ -32,9 +32,10 @@ import subprocess
 import tempfile
 import time
 import uuid
+from contextlib import ExitStack
 from types import SimpleNamespace
 
-from .auth_persist import AUTH_PERSIST, try_persist_auth_file
+from .auth_persist import AUTH_PERSIST, auth_file_lease, try_persist_auth_file
 from .paths import PACKAGE_DIR, SOURCE_ROOT
 
 HERE = PACKAGE_DIR
@@ -424,9 +425,14 @@ def _candidate_auth_persist_targets(auth_files):
     return targets
 
 
-def _persist_returned_auth(return_dir, targets):
+def _persist_returned_auth(return_dir, targets, leases=None):
     for master, relative in targets:
-        try_persist_auth_file(os.path.join(return_dir, relative), master)
+        lease = (leases or {}).get(os.path.realpath(master))
+        copy_path = os.path.join(return_dir, relative)
+        if lease is None:
+            try_persist_auth_file(copy_path, master)
+        else:
+            lease.try_persist(copy_path)
 
 
 def _auth_mount_args(harness):
@@ -613,6 +619,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     candidate_config_stage = None
     auth_return_dir = None
     auth_persist_targets = []
+    auth_leases = {}
+    auth_lease_stack = ExitStack()
     agent_started = False
     try:
         preflight(image)
@@ -652,6 +660,12 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                     auth_persist_targets.append((master, dest))
                     seen.add(dest)
         if auth_persist_targets:
+            for master in sorted({
+                os.path.realpath(master) for master, _ in auth_persist_targets
+            }):
+                auth_leases[master] = auth_lease_stack.enter_context(
+                    auth_file_lease(master)
+                )
             auth_return_dir = tempfile.mkdtemp(prefix="bench_auth_return_", dir=instr_dir)
             os.chmod(auth_return_dir, 0o700)
 
@@ -751,9 +765,12 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     finally:
         if auth_return_dir is not None:
             try:
-                _persist_returned_auth(auth_return_dir, auth_persist_targets)
+                _persist_returned_auth(
+                    auth_return_dir, auth_persist_targets, auth_leases
+                )
             finally:
                 shutil.rmtree(auth_return_dir, ignore_errors=True)
+        auth_lease_stack.close()
         if instruction_path is not None:
             os.unlink(instruction_path)
         if candidate_spec_path is not None:
