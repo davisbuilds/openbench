@@ -1,0 +1,52 @@
+{
+  "benchmark": "gateway_probe",
+  "bundle_kind": "gateway_probe_public",
+  "complete_blocks": {
+    "cold": 50,
+    "warm": 50
+  },
+  "experiment_digest": "34873bc948a088c2a5e23b3a356ed3425f71418e80f6f14afd400f6b73dcd8c4",
+  "experiment_id": "deepseek-v4-flash-five-way-chat-probe",
+  "files": {
+    "experiment.json": {
+      "sha256": "2c632dc6f0245be4f32e0dc1372719a38b3aaf849bc4ddf83755b98849a4d2fc"
+    },
+    "prices.json": {
+      "sha256": "3398985e5c13a3ad4fb4440d486669792f6f18da0854626b9022e895b72a5803"
+    },
+    "report.json": {
+      "sha256": "9295fb670bc0d9e86378ac4dee47c727ccb35165023081dc7bd6f2e1e129d93a"
+    },
+    "report.md": {
+      "sha256": "a6368e562ef125fd6c6867e4addc06315a92116c1c718c93f83bf4ab6fc2c881"
+    },
+    "results.jsonl": {
+      "sha256": "812fae4f1bdfa7bac47fa3e3b6521afac488d418a9242896c03d865d6adeca79"
+    },
+    "schedule.json": {
+      "sha256": "68a30a4d37342d63c016abb45a8d3aaa6274648f24cfb422712e9166dd0d3d4c"
+    }
+  },
+  "price_digest": "4fbc8bcc47b18dfe93015fe17a5c2d87dc1455d8a192ea8d68073d59e505e93a",
+  "report_schema_version": 4,
+  "result_count": 500,
+  "result_schema_version": 4,
+  "run_provenance": {
+    "completed_at": "unknown",
+    "source_commit": "unknown",
+    "started_at": "unknown"
+  },
+  "sanitization": {
+    "case_prompts": "sha256_only",
+    "experiment_private_fields": "omitted",
+    "operational_identifiers": "removed",
+    "paths_accounts_secrets": "rejected",
+    "receipt_values": "removed"
+  },
+  "schedule_digest": "95d76e5be01144a799299c29835dd8019985eb984841f87b588b2760e8a4972b",
+  "scheduled_blocks_per_condition": 50,
+  "schema_version": 3,
+  "verification": {
+    "verified_with_commit": "e0e5dd2978c718c481926b5d293e874baea70eb1"
+  }
+}

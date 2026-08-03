@@ -1,0 +1,178 @@
+{
+  "allow_private_endpoint": false,
+  "arms": [
+    {
+      "allowed_models": [
+        "deepseek-v4-flash"
+      ],
+      "allowed_providers": [
+        "deepseek"
+      ],
+      "arm_digest": "e24d37ca07e8ecd79b7fe1386619746e35ce224a659be71d560913082ffaf310",
+      "arm_id": "direct-deepseek",
+      "baseline": true,
+      "cache_enabled": false,
+      "canonical_model": "deepseek/deepseek-v4-flash",
+      "direct_control_arm_id": null,
+      "fallback_enabled": false,
+      "gateway": null,
+      "inference": {
+        "reasoning_effort": "high",
+        "thinking": "enabled"
+      },
+      "protocol": "openai_chat",
+      "requested_model": "deepseek-v4-flash",
+      "requested_provider": "deepseek",
+      "retry_count": 0,
+      "route_kind": "direct",
+      "sampling": {
+        "seed": 20260803,
+        "temperature": 1.0,
+        "top_p": 0.95
+      }
+    },
+    {
+      "allowed_models": [
+        "deepseek/deepseek-v4-flash-0731"
+      ],
+      "allowed_providers": [
+        "deepseek"
+      ],
+      "arm_digest": "5243650b32161cd2580dd1a287b6722c5ebc34456210b7cdac4cf3727febe9e0",
+      "arm_id": "openrouter-deepseek",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "deepseek/deepseek-v4-flash",
+      "direct_control_arm_id": "direct-deepseek",
+      "fallback_enabled": false,
+      "gateway": "openrouter",
+      "inference": {
+        "reasoning_effort": "high",
+        "thinking": "enabled"
+      },
+      "protocol": "openai_chat",
+      "requested_model": "deepseek/deepseek-v4-flash-0731",
+      "requested_provider": "deepseek",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {
+        "seed": 20260803,
+        "temperature": 1.0,
+        "top_p": 0.95
+      }
+    },
+    {
+      "allowed_models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "allowed_providers": [
+        "deepseek"
+      ],
+      "arm_digest": "ada7a43911052c4ab49078b1dc6d0410df931f0c7a0a58489ed5ecc75bea1f0c",
+      "arm_id": "vercel-deepseek",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "deepseek/deepseek-v4-flash",
+      "direct_control_arm_id": "direct-deepseek",
+      "fallback_enabled": false,
+      "gateway": "vercel",
+      "inference": {
+        "reasoning_effort": "high",
+        "thinking": "enabled"
+      },
+      "protocol": "openai_chat",
+      "requested_model": "deepseek/deepseek-v4-flash",
+      "requested_provider": "deepseek",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {
+        "seed": 20260803,
+        "temperature": 1.0,
+        "top_p": 0.95
+      }
+    },
+    {
+      "allowed_models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "allowed_providers": [
+        "deepseek"
+      ],
+      "arm_digest": "51d56ab8ac3d904382b7e94f58cd142ceb60068c192d376d69a00cac37f01b64",
+      "arm_id": "concentrate-deepseek",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "deepseek/deepseek-v4-flash",
+      "direct_control_arm_id": "direct-deepseek",
+      "fallback_enabled": false,
+      "gateway": "concentrate",
+      "inference": {
+        "reasoning_effort": "high",
+        "thinking": "enabled"
+      },
+      "protocol": "openai_chat",
+      "requested_model": "deepseek/deepseek-v4-flash",
+      "requested_provider": "deepseek",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {
+        "seed": 20260803,
+        "temperature": 1.0,
+        "top_p": 0.95
+      }
+    },
+    {
+      "allowed_models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "allowed_providers": [
+        "deepseek"
+      ],
+      "arm_digest": "a8b5bfcf9ca8f0d7c1719a24b6039d6779df0cb88a469fbdebd5b1021417c6d1",
+      "arm_id": "cloudflare-deepseek",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "deepseek/deepseek-v4-flash",
+      "direct_control_arm_id": "direct-deepseek",
+      "fallback_enabled": false,
+      "gateway": "cloudflare",
+      "inference": {
+        "reasoning_effort": "high",
+        "thinking": "enabled"
+      },
+      "protocol": "openai_chat",
+      "requested_model": "deepseek/deepseek-v4-flash",
+      "requested_provider": "deepseek",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {
+        "seed": 20260803,
+        "temperature": 1.0,
+        "top_p": 0.95
+      }
+    }
+  ],
+  "benchmark": "gateway_probe",
+  "budget": {
+    "max_input_tokens": 512,
+    "max_output_tokens": 4096,
+    "max_total_attempts": 3,
+    "retry_deadline_s": 360,
+    "timeout_s": 120,
+    "usd_cap": "5.0"
+  },
+  "cases": [
+    {
+      "case_id": "short-text",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970"
+    }
+  ],
+  "experiment_digest": "34873bc948a088c2a5e23b3a356ed3425f71418e80f6f14afd400f6b73dcd8c4",
+  "experiment_id": "deepseek-v4-flash-five-way-chat-probe",
+  "model_match": "rolling_alias",
+  "repetitions": 50,
+  "schedule_seed": 20260803,
+  "schema_version": 2,
+  "source_schema_version": 1,
+  "track": "request_probe"
+}

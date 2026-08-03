@@ -1,0 +1,1306 @@
+{
+  "benchmark": "gateway_probe",
+  "blocks": [
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 10
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 28
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 16
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 36
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 34
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 34
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 41
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 48
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 23
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 44
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 5
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 5
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 20
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 33
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 42
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 19
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 24
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 31
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 22
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 27
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 18
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 1
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 12
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 16
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 45
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 45
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 50
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 42
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 13
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 14
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 43
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 9
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 2
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 4
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 7
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 17
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 28
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 38
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 15
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 21
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 40
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 12
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 8
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 39
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 48
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 30
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 25
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 15
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 4
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 23
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 21
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 29
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 3
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 22
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 27
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 32
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 32
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 47
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 14
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 3
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 36
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 8
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 30
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 18
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 49
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 24
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 6
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 20
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 47
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 6
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 44
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 35
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 37
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 43
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 11
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 41
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 26
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 13
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 19
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 2
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 38
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 46
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 31
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 25
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 9
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 26
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 29
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 37
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 17
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 10
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 39
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 50
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 1
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 7
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "direct-deepseek",
+        "openrouter-deepseek",
+        "vercel-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 33
+    },
+    {
+      "arm_ids": [
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 11
+    },
+    {
+      "arm_ids": [
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 35
+    },
+    {
+      "arm_ids": [
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek",
+        "vercel-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 49
+    },
+    {
+      "arm_ids": [
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek",
+        "concentrate-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "cold",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 46
+    },
+    {
+      "arm_ids": [
+        "concentrate-deepseek",
+        "vercel-deepseek",
+        "openrouter-deepseek",
+        "direct-deepseek",
+        "cloudflare-deepseek"
+      ],
+      "case_id": "short-text",
+      "condition": "warm",
+      "prompt_digest": "840e9903230df2ef419f01be2d7e7ddf7b7338cd8c5231c369b6d926904ee970",
+      "repetition": 40
+    }
+  ],
+  "schema_version": 1
+}
