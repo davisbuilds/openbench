@@ -1180,7 +1180,11 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
         expected_harbor_evidence = []
         harbor_evidence_error = str(exc)
     declared_harbor_evidence = provenance.get("harbor_import_evidence")
-    if expected_harbor_evidence or declared_harbor_evidence is not None:
+    if (
+        harbor_evidence_error is not None
+        or expected_harbor_evidence
+        or declared_harbor_evidence is not None
+    ):
         harbor_evidence_ok = (
             harbor_evidence_error is None
             and isinstance(declared_harbor_evidence, list)

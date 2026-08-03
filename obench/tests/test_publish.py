@@ -294,6 +294,38 @@ class PublishBundleTests(unittest.TestCase):
         )
         self.assertEqual(harbor_check["status"], "FAIL", harbor_check)
 
+    def test_verify_rejects_rehashed_partial_harbor_row_without_manifest(self):
+        harbor_results = os.path.join(self.tmp.name, "harbor.jsonl")
+        _write_jsonl(harbor_results, [_harbor_row()])
+        publish.create_bundle(
+            harbor_results,
+            self.out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+        results_path = os.path.join(self.out, "results.jsonl")
+        with open(results_path, encoding="utf-8") as fh:
+            row = json.loads(fh.readline())
+        del row["candidate_provenance"]["atif_sha256"]
+        _write_jsonl(results_path, [row])
+        with open(results_path, "rb") as fh:
+            results_sha = hashlib.sha256(fh.read()).hexdigest()
+
+        provenance_path = os.path.join(self.out, "provenance.json")
+        with open(provenance_path, encoding="utf-8") as fh:
+            provenance = json.load(fh)
+        provenance["results_sha256"] = results_sha
+        del provenance["harbor_import_evidence"]
+        with open(provenance_path, "w", encoding="utf-8") as fh:
+            json.dump(provenance, fh)
+
+        checks = publish.verify_bundle(self.out, tasks_dirs=[self.tasks])
+        harbor_check = next(
+            item for item in checks if item["name"] == "harbor_import_evidence"
+        )
+        self.assertEqual(harbor_check["status"], "FAIL", harbor_check)
+        self.assertIn("malformed candidate_provenance", harbor_check["detail"])
+
     def test_non_harbor_publish_schema_remains_compatible(self):
         row = _row("null", "alpha", 1, False, safe_extension="kept")
         cleaned = publish.sanitize_row_for_publish(row)
