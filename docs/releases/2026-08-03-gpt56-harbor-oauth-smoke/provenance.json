@@ -1,0 +1,760 @@
+{
+  "arms": [
+    {
+      "candidate_provenance": {
+        "artifact_manifest_sha256": "ee918afcf3be1227e85049b12a647c0dcea231b2babd32d42a982701e1436fe6",
+        "atif_sha256": "fb3a4c1e84dac23694f4d33ac2d80cc41eca85520da6cc602000f5fddb90f13e",
+        "final_workspace_sha256": "03c0a57d40828383ea36342f4aecb3372e2dbabf4f9cab09fd166c3ce26f1b6e",
+        "harbor_agent_config_name": "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile",
+        "harbor_git_commit_hash": "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        "harbor_job_id": "39454708-69f1-4c2e-96a0-55d25f3a3612",
+        "harbor_job_max_retries": 1,
+        "harbor_job_retries": 2,
+        "harbor_metering": {
+          "auxiliary_request_count": 9,
+          "evidence_sha256": "a3f10c2bdd29d187088a9b55e7cd3bf0763fc988b561d12f677b5ec4e96e1a24",
+          "ledger_record_count": 14,
+          "ledger_root_hash": "0869ec946b8fcab872b6ad9d2220a4ea2d308069c5205c349652289d954eb8f0",
+          "ledger_sha256": "37b56816cc2e6338c9045c5860fdddea72eb132abf09e3269c26033422bc7366",
+          "model_call_count": 5,
+          "proxy_required": true,
+          "publication": {
+            "blocking_reasons": [],
+            "eligible": true,
+            "proxy_evidence_required": true
+          },
+          "reconciliation_status": "exact",
+          "schema_version": "openbench.harbor-metering.v2"
+        },
+        "harbor_model_name": "gpt-5.6-sol",
+        "harbor_task_checksum": "368945510fff7be46f5b623163528e2807f8b04f9ce826cf798c647944d2d46a",
+        "harbor_trial_id": "422340f2-f072-4fe9-93d6-48a07bd77a85",
+        "harbor_trial_name": "fix-failing-test__QqtAhjf",
+        "harbor_verifier_time_s": 0.202,
+        "harbor_version": "0.20.0",
+        "job_lock_sha256": "89aa3a18ee5ae4d62fb8ce61633645b7484e3852ccc3e0075f098001c5c5615e",
+        "job_result_sha256": "5c06cad589c3626a849b3682e8a5204889064f2e4883c5fc6bc79167617792fa",
+        "kind": "harbor_job",
+        "openbench_harbor_export": {
+          "base_image": "python:3.11-slim",
+          "network_mode": "public",
+          "schema_version": 1
+        },
+        "openbench_task_content_digest": {
+          "scheme": 2,
+          "sha256": "57cc75a6fb25ac9fe1a99b769000a96d1744a35d8d724d900f1fb37cf3da1e29"
+        },
+        "openbench_verifier_evidence_sha256": "1aed2600f5605a72eb27d01093a199bb6c7dc465ea07dd05e35282cc898014c0",
+        "proxy_measured": true,
+        "reward_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+        "task_digest": "sha256:9a918e61110731ef53d2887da0c27be294f6c7f4fe827475ba4c9a04980883fa",
+        "temporal_matched_block_claim": false,
+        "trial_lock_sha256": "00c49d363e31cb37c3d398f5db24d32e067e65ac7c6cf745908ab4fb9b09c92b",
+        "trial_mapping": "lexicographic_name_within_task_agent_model",
+        "trial_result_sha256": "4c4612ed93721af1c20671a78c6824f5488e629cb668861fdf477fe9b7c44f5a",
+        "usage_source": "harbor_agent_reported"
+      },
+      "harness": "codex",
+      "harness_version": "0.144.5",
+      "identity_digest": null,
+      "kind": "candidate",
+      "name": "codex"
+    },
+    {
+      "candidate_provenance": {
+        "artifact_manifest_sha256": "ee918afcf3be1227e85049b12a647c0dcea231b2babd32d42a982701e1436fe6",
+        "atif_sha256": "63dbd2c110a68551d96226080e659024885f2bcb1b5038ea4d8efe590187dac2",
+        "final_workspace_sha256": "3e12cb526f9bae9e70b892d805d5b2089ddf5d28ddeadc8cc641d527acc44af8",
+        "harbor_agent_config_name": "obench.harbor_agents.pi:OpenBenchPiOAuth",
+        "harbor_git_commit_hash": "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        "harbor_job_id": "39454708-69f1-4c2e-96a0-55d25f3a3612",
+        "harbor_job_max_retries": 1,
+        "harbor_job_retries": 2,
+        "harbor_metering": {
+          "auxiliary_request_count": 1,
+          "evidence_sha256": "08a1f6200d27c367f7b7f4bd41e8f0e7e8cb8d2a1432023a9ef2c39f6a94dcbe",
+          "ledger_record_count": 5,
+          "ledger_root_hash": "018f09e257c8467dfa6bfb3ae613858e697c8b5c7d44cf8e6caeb39d6f7ea317",
+          "ledger_sha256": "425fdb15e4727b0dc100780bb673826a2f48c3a92e5f27b6afc85662d32868bf",
+          "model_call_count": 4,
+          "proxy_required": true,
+          "publication": {
+            "blocking_reasons": [],
+            "eligible": true,
+            "proxy_evidence_required": true
+          },
+          "reconciliation_status": "exact",
+          "schema_version": "openbench.harbor-metering.v2"
+        },
+        "harbor_model_name": "openai-codex/gpt-5.6-sol",
+        "harbor_task_checksum": "368945510fff7be46f5b623163528e2807f8b04f9ce826cf798c647944d2d46a",
+        "harbor_trial_id": "73c45066-6742-40ad-8759-6f783bde0768",
+        "harbor_trial_name": "fix-failing-test__XZFdJhZ",
+        "harbor_verifier_time_s": 0.227,
+        "harbor_version": "0.20.0",
+        "job_lock_sha256": "89aa3a18ee5ae4d62fb8ce61633645b7484e3852ccc3e0075f098001c5c5615e",
+        "job_result_sha256": "5c06cad589c3626a849b3682e8a5204889064f2e4883c5fc6bc79167617792fa",
+        "kind": "harbor_job",
+        "openbench_harbor_export": {
+          "base_image": "python:3.11-slim",
+          "network_mode": "public",
+          "schema_version": 1
+        },
+        "openbench_task_content_digest": {
+          "scheme": 2,
+          "sha256": "57cc75a6fb25ac9fe1a99b769000a96d1744a35d8d724d900f1fb37cf3da1e29"
+        },
+        "openbench_verifier_evidence_sha256": "1aed2600f5605a72eb27d01093a199bb6c7dc465ea07dd05e35282cc898014c0",
+        "proxy_measured": true,
+        "reward_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+        "task_digest": "sha256:9a918e61110731ef53d2887da0c27be294f6c7f4fe827475ba4c9a04980883fa",
+        "temporal_matched_block_claim": false,
+        "trial_lock_sha256": "ce1e64fba66252135886ee37f608d173746fb9de21b4412e186f21585ac31247",
+        "trial_mapping": "lexicographic_name_within_task_agent_model",
+        "trial_result_sha256": "0ee1ead3ea22654b3a91ded9936912b5468dc616c8010cff82dab227744d7706",
+        "usage_source": "harbor_agent_reported"
+      },
+      "harness": "pi",
+      "harness_version": "0.80.10",
+      "identity_digest": null,
+      "kind": "candidate",
+      "name": "pi"
+    }
+  ],
+  "digest_scheme": 2,
+  "generated_at": "2026-08-03T13:32:23Z",
+  "harbor_import_evidence": [
+    {
+      "candidate_provenance": {
+        "artifact_manifest_sha256": "ee918afcf3be1227e85049b12a647c0dcea231b2babd32d42a982701e1436fe6",
+        "atif_sha256": "fb3a4c1e84dac23694f4d33ac2d80cc41eca85520da6cc602000f5fddb90f13e",
+        "final_workspace_sha256": "03c0a57d40828383ea36342f4aecb3372e2dbabf4f9cab09fd166c3ce26f1b6e",
+        "harbor_agent_config_name": "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile",
+        "harbor_git_commit_hash": "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        "harbor_job_id": "39454708-69f1-4c2e-96a0-55d25f3a3612",
+        "harbor_job_max_retries": 1,
+        "harbor_job_retries": 2,
+        "harbor_metering": {
+          "auxiliary_request_count": 9,
+          "evidence_sha256": "a3f10c2bdd29d187088a9b55e7cd3bf0763fc988b561d12f677b5ec4e96e1a24",
+          "ledger_record_count": 14,
+          "ledger_root_hash": "0869ec946b8fcab872b6ad9d2220a4ea2d308069c5205c349652289d954eb8f0",
+          "ledger_sha256": "37b56816cc2e6338c9045c5860fdddea72eb132abf09e3269c26033422bc7366",
+          "model_call_count": 5,
+          "proxy_required": true,
+          "publication": {
+            "blocking_reasons": [],
+            "eligible": true,
+            "proxy_evidence_required": true
+          },
+          "reconciliation_status": "exact",
+          "schema_version": "openbench.harbor-metering.v2"
+        },
+        "harbor_model_name": "gpt-5.6-sol",
+        "harbor_task_checksum": "368945510fff7be46f5b623163528e2807f8b04f9ce826cf798c647944d2d46a",
+        "harbor_trial_id": "422340f2-f072-4fe9-93d6-48a07bd77a85",
+        "harbor_trial_name": "fix-failing-test__QqtAhjf",
+        "harbor_verifier_time_s": 0.202,
+        "harbor_version": "0.20.0",
+        "job_lock_sha256": "89aa3a18ee5ae4d62fb8ce61633645b7484e3852ccc3e0075f098001c5c5615e",
+        "job_result_sha256": "5c06cad589c3626a849b3682e8a5204889064f2e4883c5fc6bc79167617792fa",
+        "kind": "harbor_job",
+        "openbench_harbor_export": {
+          "base_image": "python:3.11-slim",
+          "network_mode": "public",
+          "schema_version": 1
+        },
+        "openbench_task_content_digest": {
+          "scheme": 2,
+          "sha256": "57cc75a6fb25ac9fe1a99b769000a96d1744a35d8d724d900f1fb37cf3da1e29"
+        },
+        "openbench_verifier_evidence_sha256": "1aed2600f5605a72eb27d01093a199bb6c7dc465ea07dd05e35282cc898014c0",
+        "proxy_measured": true,
+        "reward_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+        "task_digest": "sha256:9a918e61110731ef53d2887da0c27be294f6c7f4fe827475ba4c9a04980883fa",
+        "temporal_matched_block_claim": false,
+        "trial_lock_sha256": "00c49d363e31cb37c3d398f5db24d32e067e65ac7c6cf745908ab4fb9b09c92b",
+        "trial_mapping": "lexicographic_name_within_task_agent_model",
+        "trial_result_sha256": "4c4612ed93721af1c20671a78c6824f5488e629cb668861fdf477fe9b7c44f5a",
+        "usage_source": "harbor_agent_reported"
+      },
+      "run_id": "codex:fix-failing-test:gpt-5.6-sol:trial1",
+      "usage": {
+        "token_basis": "harbor_agent_reported",
+        "usage_raw": {
+          "cost_usd": 0.09680599999999999,
+          "n_cache_tokens": 47872,
+          "n_input_tokens": 60046,
+          "n_output_tokens": 400,
+          "source": "harbor_agent_result"
+        }
+      },
+      "workspace_source": {
+        "kind": "harbor_artifact",
+        "sha256": "03c0a57d40828383ea36342f4aecb3372e2dbabf4f9cab09fd166c3ce26f1b6e"
+      }
+    },
+    {
+      "candidate_provenance": {
+        "artifact_manifest_sha256": "ee918afcf3be1227e85049b12a647c0dcea231b2babd32d42a982701e1436fe6",
+        "atif_sha256": "5e95ad52b5674f94f6d2ffbf8e1b5d35c54e9a5970865c72f6c405fb1e4c52d7",
+        "final_workspace_sha256": "e32b3dc55d98d28e9541bd2665a91d249b76a7ed815d98b69971b2c9d1ca0cd4",
+        "harbor_agent_config_name": "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile",
+        "harbor_git_commit_hash": "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        "harbor_job_id": "39454708-69f1-4c2e-96a0-55d25f3a3612",
+        "harbor_job_max_retries": 1,
+        "harbor_job_retries": 2,
+        "harbor_metering": {
+          "auxiliary_request_count": 9,
+          "evidence_sha256": "2822019def608cce48292b5b44b64de31c7eed2e967f46b77b453a1f325ef682",
+          "ledger_record_count": 14,
+          "ledger_root_hash": "b2f2c851940b12bc6e201a201dba5b2d37b9c72b625b107405739661335456d6",
+          "ledger_sha256": "d98b3d6bcce5a799e24d28efd36c9c4fe88d463f8fefbc075f07ea41617609a8",
+          "model_call_count": 5,
+          "proxy_required": true,
+          "publication": {
+            "blocking_reasons": [],
+            "eligible": true,
+            "proxy_evidence_required": true
+          },
+          "reconciliation_status": "exact",
+          "schema_version": "openbench.harbor-metering.v2"
+        },
+        "harbor_model_name": "gpt-5.6-sol",
+        "harbor_task_checksum": "368945510fff7be46f5b623163528e2807f8b04f9ce826cf798c647944d2d46a",
+        "harbor_trial_id": "e56652d0-568a-422f-83b7-5315a1603c02",
+        "harbor_trial_name": "fix-failing-test__yFaUva4",
+        "harbor_verifier_time_s": 0.232,
+        "harbor_version": "0.20.0",
+        "job_lock_sha256": "89aa3a18ee5ae4d62fb8ce61633645b7484e3852ccc3e0075f098001c5c5615e",
+        "job_result_sha256": "5c06cad589c3626a849b3682e8a5204889064f2e4883c5fc6bc79167617792fa",
+        "kind": "harbor_job",
+        "openbench_harbor_export": {
+          "base_image": "python:3.11-slim",
+          "network_mode": "public",
+          "schema_version": 1
+        },
+        "openbench_task_content_digest": {
+          "scheme": 2,
+          "sha256": "57cc75a6fb25ac9fe1a99b769000a96d1744a35d8d724d900f1fb37cf3da1e29"
+        },
+        "openbench_verifier_evidence_sha256": "1aed2600f5605a72eb27d01093a199bb6c7dc465ea07dd05e35282cc898014c0",
+        "proxy_measured": true,
+        "reward_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+        "task_digest": "sha256:9a918e61110731ef53d2887da0c27be294f6c7f4fe827475ba4c9a04980883fa",
+        "temporal_matched_block_claim": false,
+        "trial_lock_sha256": "00c49d363e31cb37c3d398f5db24d32e067e65ac7c6cf745908ab4fb9b09c92b",
+        "trial_mapping": "lexicographic_name_within_task_agent_model",
+        "trial_result_sha256": "02bfe9653b74f00d34253603f7c434911ee3373a2bbeca5988086ceb59c1f846",
+        "usage_source": "harbor_agent_reported"
+      },
+      "run_id": "codex:fix-failing-test:gpt-5.6-sol:trial2",
+      "usage": {
+        "token_basis": "harbor_agent_reported",
+        "usage_raw": {
+          "cost_usd": 0.136951,
+          "n_cache_tokens": 38912,
+          "n_input_tokens": 60071,
+          "n_output_tokens": 390,
+          "source": "harbor_agent_result"
+        }
+      },
+      "workspace_source": {
+        "kind": "harbor_artifact",
+        "sha256": "e32b3dc55d98d28e9541bd2665a91d249b76a7ed815d98b69971b2c9d1ca0cd4"
+      }
+    },
+    {
+      "candidate_provenance": {
+        "artifact_manifest_sha256": "ee918afcf3be1227e85049b12a647c0dcea231b2babd32d42a982701e1436fe6",
+        "atif_sha256": "45389973e29dde1d829ff66da24cb4264f41887dc910e996221153e3da3ad095",
+        "final_workspace_sha256": "86f8aeea81044bd12d473f66751c0a7bcd7a059b47bb3518c9a8adc39ea1607d",
+        "harbor_agent_config_name": "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile",
+        "harbor_git_commit_hash": "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        "harbor_job_id": "39454708-69f1-4c2e-96a0-55d25f3a3612",
+        "harbor_job_max_retries": 1,
+        "harbor_job_retries": 2,
+        "harbor_metering": {
+          "auxiliary_request_count": 9,
+          "evidence_sha256": "ae2c3240f1bf7f6b1e219af08567c9274b661f639dcefaac227992bd6f7ba1e5",
+          "ledger_record_count": 14,
+          "ledger_root_hash": "98244637fc5f46e2452d192ae20d7b29933b291538620ac124205d554d660a5f",
+          "ledger_sha256": "a5b45005640a1fc2befe5342c684d41ba4f8594bcf42627a1cab7a785d13ffb7",
+          "model_call_count": 5,
+          "proxy_required": true,
+          "publication": {
+            "blocking_reasons": [],
+            "eligible": true,
+            "proxy_evidence_required": true
+          },
+          "reconciliation_status": "exact",
+          "schema_version": "openbench.harbor-metering.v2"
+        },
+        "harbor_model_name": "gpt-5.6-sol",
+        "harbor_task_checksum": "1f52cb9c43e7816a9a6189adcc002c5bc09a066e0e9e9d76b07d9a1cb02be368",
+        "harbor_trial_id": "4c7fed4b-3172-44fd-aabc-6fadfd0c450d",
+        "harbor_trial_name": "make-it-run__hcat4fo",
+        "harbor_verifier_time_s": 0.223,
+        "harbor_version": "0.20.0",
+        "job_lock_sha256": "89aa3a18ee5ae4d62fb8ce61633645b7484e3852ccc3e0075f098001c5c5615e",
+        "job_result_sha256": "5c06cad589c3626a849b3682e8a5204889064f2e4883c5fc6bc79167617792fa",
+        "kind": "harbor_job",
+        "openbench_harbor_export": {
+          "base_image": "python:3.11-slim",
+          "network_mode": "public",
+          "schema_version": 1
+        },
+        "openbench_task_content_digest": {
+          "scheme": 2,
+          "sha256": "ae605369bf3da7ce9510ffd14c70f874c24e8da0158b0234051d8083355e3a3b"
+        },
+        "openbench_verifier_evidence_sha256": "aa9be8d05bf48ce0177850882082a8ac14555612999d2eb70eeb17b7906ef598",
+        "proxy_measured": true,
+        "reward_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+        "task_digest": "sha256:02bd13f9164fcf655248684f7d5bde6f0d5e29f8195e0972af7387e7ee7d14e1",
+        "temporal_matched_block_claim": false,
+        "trial_lock_sha256": "229c5eccfa021c56b5da1e98e6976167de3dbc3dad1833bfe8e182074cd8e8c2",
+        "trial_mapping": "lexicographic_name_within_task_agent_model",
+        "trial_result_sha256": "592276da22096869285fc631f2f642bbd69e0d414eb5fbbbc97bbb5c5a8c179e",
+        "usage_source": "harbor_agent_reported"
+      },
+      "run_id": "codex:make-it-run:gpt-5.6-sol:trial1",
+      "usage": {
+        "token_basis": "harbor_agent_reported",
+        "usage_raw": {
+          "cost_usd": 0.066358,
+          "n_cache_tokens": 54016,
+          "n_input_tokens": 59378,
+          "n_output_tokens": 418,
+          "source": "harbor_agent_result"
+        }
+      },
+      "workspace_source": {
+        "kind": "harbor_artifact",
+        "sha256": "86f8aeea81044bd12d473f66751c0a7bcd7a059b47bb3518c9a8adc39ea1607d"
+      }
+    },
+    {
+      "candidate_provenance": {
+        "artifact_manifest_sha256": "ee918afcf3be1227e85049b12a647c0dcea231b2babd32d42a982701e1436fe6",
+        "atif_sha256": "697d12046aaf8ba03c8ee3edada14cd8a1d3c93d1219fbd50aefd5d4122e0322",
+        "final_workspace_sha256": "806e6d9dc24deddf2145537f03323d4c75b4cfa6f96307f1658393c2dc23083c",
+        "harbor_agent_config_name": "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile",
+        "harbor_git_commit_hash": "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        "harbor_job_id": "39454708-69f1-4c2e-96a0-55d25f3a3612",
+        "harbor_job_max_retries": 1,
+        "harbor_job_retries": 2,
+        "harbor_metering": {
+          "auxiliary_request_count": 9,
+          "evidence_sha256": "ec372c35278df057e52fa39f67fdcd2819be6227078d033d2f8a9dde50649f80",
+          "ledger_record_count": 14,
+          "ledger_root_hash": "a2b7599f7cab5573d87b751cee78eefc0f61114aad68500b7925b0abf2ccc46c",
+          "ledger_sha256": "25315c8ed606d23ea8b7e6df37fc99fe5ee7148f5d0b98a17579eb9aa948f6b2",
+          "model_call_count": 5,
+          "proxy_required": true,
+          "publication": {
+            "blocking_reasons": [],
+            "eligible": true,
+            "proxy_evidence_required": true
+          },
+          "reconciliation_status": "exact",
+          "schema_version": "openbench.harbor-metering.v2"
+        },
+        "harbor_model_name": "gpt-5.6-sol",
+        "harbor_task_checksum": "1f52cb9c43e7816a9a6189adcc002c5bc09a066e0e9e9d76b07d9a1cb02be368",
+        "harbor_trial_id": "f01eeed4-8ffa-41d7-90d0-1304019fd019",
+        "harbor_trial_name": "make-it-run__qFdsuBA",
+        "harbor_verifier_time_s": 0.21,
+        "harbor_version": "0.20.0",
+        "job_lock_sha256": "89aa3a18ee5ae4d62fb8ce61633645b7484e3852ccc3e0075f098001c5c5615e",
+        "job_result_sha256": "5c06cad589c3626a849b3682e8a5204889064f2e4883c5fc6bc79167617792fa",
+        "kind": "harbor_job",
+        "openbench_harbor_export": {
+          "base_image": "python:3.11-slim",
+          "network_mode": "public",
+          "schema_version": 1
+        },
+        "openbench_task_content_digest": {
+          "scheme": 2,
+          "sha256": "ae605369bf3da7ce9510ffd14c70f874c24e8da0158b0234051d8083355e3a3b"
+        },
+        "openbench_verifier_evidence_sha256": "aa9be8d05bf48ce0177850882082a8ac14555612999d2eb70eeb17b7906ef598",
+        "proxy_measured": true,
+        "reward_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+        "task_digest": "sha256:02bd13f9164fcf655248684f7d5bde6f0d5e29f8195e0972af7387e7ee7d14e1",
+        "temporal_matched_block_claim": false,
+        "trial_lock_sha256": "229c5eccfa021c56b5da1e98e6976167de3dbc3dad1833bfe8e182074cd8e8c2",
+        "trial_mapping": "lexicographic_name_within_task_agent_model",
+        "trial_result_sha256": "e9a4c6be684be3872114bbbcd7aa96edaf3462bbd35f63928ee85986795b8512",
+        "usage_source": "harbor_agent_reported"
+      },
+      "run_id": "codex:make-it-run:gpt-5.6-sol:trial2",
+      "usage": {
+        "token_basis": "harbor_agent_reported",
+        "usage_raw": {
+          "cost_usd": 0.06789300000000001,
+          "n_cache_tokens": 54016,
+          "n_input_tokens": 59403,
+          "n_output_tokens": 465,
+          "source": "harbor_agent_result"
+        }
+      },
+      "workspace_source": {
+        "kind": "harbor_artifact",
+        "sha256": "806e6d9dc24deddf2145537f03323d4c75b4cfa6f96307f1658393c2dc23083c"
+      }
+    },
+    {
+      "candidate_provenance": {
+        "artifact_manifest_sha256": "ee918afcf3be1227e85049b12a647c0dcea231b2babd32d42a982701e1436fe6",
+        "atif_sha256": "63dbd2c110a68551d96226080e659024885f2bcb1b5038ea4d8efe590187dac2",
+        "final_workspace_sha256": "3e12cb526f9bae9e70b892d805d5b2089ddf5d28ddeadc8cc641d527acc44af8",
+        "harbor_agent_config_name": "obench.harbor_agents.pi:OpenBenchPiOAuth",
+        "harbor_git_commit_hash": "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        "harbor_job_id": "39454708-69f1-4c2e-96a0-55d25f3a3612",
+        "harbor_job_max_retries": 1,
+        "harbor_job_retries": 2,
+        "harbor_metering": {
+          "auxiliary_request_count": 1,
+          "evidence_sha256": "08a1f6200d27c367f7b7f4bd41e8f0e7e8cb8d2a1432023a9ef2c39f6a94dcbe",
+          "ledger_record_count": 5,
+          "ledger_root_hash": "018f09e257c8467dfa6bfb3ae613858e697c8b5c7d44cf8e6caeb39d6f7ea317",
+          "ledger_sha256": "425fdb15e4727b0dc100780bb673826a2f48c3a92e5f27b6afc85662d32868bf",
+          "model_call_count": 4,
+          "proxy_required": true,
+          "publication": {
+            "blocking_reasons": [],
+            "eligible": true,
+            "proxy_evidence_required": true
+          },
+          "reconciliation_status": "exact",
+          "schema_version": "openbench.harbor-metering.v2"
+        },
+        "harbor_model_name": "openai-codex/gpt-5.6-sol",
+        "harbor_task_checksum": "368945510fff7be46f5b623163528e2807f8b04f9ce826cf798c647944d2d46a",
+        "harbor_trial_id": "73c45066-6742-40ad-8759-6f783bde0768",
+        "harbor_trial_name": "fix-failing-test__XZFdJhZ",
+        "harbor_verifier_time_s": 0.227,
+        "harbor_version": "0.20.0",
+        "job_lock_sha256": "89aa3a18ee5ae4d62fb8ce61633645b7484e3852ccc3e0075f098001c5c5615e",
+        "job_result_sha256": "5c06cad589c3626a849b3682e8a5204889064f2e4883c5fc6bc79167617792fa",
+        "kind": "harbor_job",
+        "openbench_harbor_export": {
+          "base_image": "python:3.11-slim",
+          "network_mode": "public",
+          "schema_version": 1
+        },
+        "openbench_task_content_digest": {
+          "scheme": 2,
+          "sha256": "57cc75a6fb25ac9fe1a99b769000a96d1744a35d8d724d900f1fb37cf3da1e29"
+        },
+        "openbench_verifier_evidence_sha256": "1aed2600f5605a72eb27d01093a199bb6c7dc465ea07dd05e35282cc898014c0",
+        "proxy_measured": true,
+        "reward_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+        "task_digest": "sha256:9a918e61110731ef53d2887da0c27be294f6c7f4fe827475ba4c9a04980883fa",
+        "temporal_matched_block_claim": false,
+        "trial_lock_sha256": "ce1e64fba66252135886ee37f608d173746fb9de21b4412e186f21585ac31247",
+        "trial_mapping": "lexicographic_name_within_task_agent_model",
+        "trial_result_sha256": "0ee1ead3ea22654b3a91ded9936912b5468dc616c8010cff82dab227744d7706",
+        "usage_source": "harbor_agent_reported"
+      },
+      "run_id": "pi:fix-failing-test:gpt-5.6-sol:trial1",
+      "usage": {
+        "token_basis": "harbor_agent_reported",
+        "usage_raw": {
+          "cost_usd": 0.029453000000000003,
+          "n_cache_tokens": 1536,
+          "n_input_tokens": 6013,
+          "n_output_tokens": 210,
+          "source": "harbor_agent_result"
+        }
+      },
+      "workspace_source": {
+        "kind": "harbor_artifact",
+        "sha256": "3e12cb526f9bae9e70b892d805d5b2089ddf5d28ddeadc8cc641d527acc44af8"
+      }
+    },
+    {
+      "candidate_provenance": {
+        "artifact_manifest_sha256": "ee918afcf3be1227e85049b12a647c0dcea231b2babd32d42a982701e1436fe6",
+        "atif_sha256": "79ffd1325b7c37ebde9e618ae246acb308bd01a03f00d4a4e3606560f81ded4f",
+        "final_workspace_sha256": "44d0c2a67288cd11d7bc667870c996deb6900670d46817ff7ea7e5616a2987f5",
+        "harbor_agent_config_name": "obench.harbor_agents.pi:OpenBenchPiOAuth",
+        "harbor_git_commit_hash": "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        "harbor_job_id": "39454708-69f1-4c2e-96a0-55d25f3a3612",
+        "harbor_job_max_retries": 1,
+        "harbor_job_retries": 2,
+        "harbor_metering": {
+          "auxiliary_request_count": 1,
+          "evidence_sha256": "e05f1377320799da1f9198dba0760212210aa10acc0e8d2a86f65b5870c730cf",
+          "ledger_record_count": 5,
+          "ledger_root_hash": "22fca01509c0360fa3625ec641fbc2f88336c91fb1d10cad4d9137cfd36aa508",
+          "ledger_sha256": "48195750d3dea983d93e501a93f12a733dfeedc49d1a7283f75bdb42a8799480",
+          "model_call_count": 4,
+          "proxy_required": true,
+          "publication": {
+            "blocking_reasons": [],
+            "eligible": true,
+            "proxy_evidence_required": true
+          },
+          "reconciliation_status": "exact",
+          "schema_version": "openbench.harbor-metering.v2"
+        },
+        "harbor_model_name": "openai-codex/gpt-5.6-sol",
+        "harbor_task_checksum": "368945510fff7be46f5b623163528e2807f8b04f9ce826cf798c647944d2d46a",
+        "harbor_trial_id": "e4c6525d-98bf-417e-9e56-378bb9e24f8c",
+        "harbor_trial_name": "fix-failing-test__wNSVQME",
+        "harbor_verifier_time_s": 0.213,
+        "harbor_version": "0.20.0",
+        "job_lock_sha256": "89aa3a18ee5ae4d62fb8ce61633645b7484e3852ccc3e0075f098001c5c5615e",
+        "job_result_sha256": "5c06cad589c3626a849b3682e8a5204889064f2e4883c5fc6bc79167617792fa",
+        "kind": "harbor_job",
+        "openbench_harbor_export": {
+          "base_image": "python:3.11-slim",
+          "network_mode": "public",
+          "schema_version": 1
+        },
+        "openbench_task_content_digest": {
+          "scheme": 2,
+          "sha256": "57cc75a6fb25ac9fe1a99b769000a96d1744a35d8d724d900f1fb37cf3da1e29"
+        },
+        "openbench_verifier_evidence_sha256": "1aed2600f5605a72eb27d01093a199bb6c7dc465ea07dd05e35282cc898014c0",
+        "proxy_measured": true,
+        "reward_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+        "task_digest": "sha256:9a918e61110731ef53d2887da0c27be294f6c7f4fe827475ba4c9a04980883fa",
+        "temporal_matched_block_claim": false,
+        "trial_lock_sha256": "ce1e64fba66252135886ee37f608d173746fb9de21b4412e186f21585ac31247",
+        "trial_mapping": "lexicographic_name_within_task_agent_model",
+        "trial_result_sha256": "08ea5d3d1a614497c604f3fd5605b9acfb15a20751a75e14efb663ac61c20730",
+        "usage_source": "harbor_agent_reported"
+      },
+      "run_id": "pi:fix-failing-test:gpt-5.6-sol:trial2",
+      "usage": {
+        "token_basis": "harbor_agent_reported",
+        "usage_raw": {
+          "cost_usd": 0.029453000000000003,
+          "n_cache_tokens": 1536,
+          "n_input_tokens": 6013,
+          "n_output_tokens": 210,
+          "source": "harbor_agent_result"
+        }
+      },
+      "workspace_source": {
+        "kind": "harbor_artifact",
+        "sha256": "44d0c2a67288cd11d7bc667870c996deb6900670d46817ff7ea7e5616a2987f5"
+      }
+    },
+    {
+      "candidate_provenance": {
+        "artifact_manifest_sha256": "ee918afcf3be1227e85049b12a647c0dcea231b2babd32d42a982701e1436fe6",
+        "atif_sha256": "fdc842ae5db6a332844f3460da3baf8d05ad6b7903e36f780470c994970f9d8b",
+        "final_workspace_sha256": "8d0c187ad3569dd0f8b02cd0d23e14df091a0ddbd14cf4bdbb405e0a9e721c8d",
+        "harbor_agent_config_name": "obench.harbor_agents.pi:OpenBenchPiOAuth",
+        "harbor_git_commit_hash": "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        "harbor_job_id": "39454708-69f1-4c2e-96a0-55d25f3a3612",
+        "harbor_job_max_retries": 1,
+        "harbor_job_retries": 2,
+        "harbor_metering": {
+          "auxiliary_request_count": 1,
+          "evidence_sha256": "e51811e2a7860cb1efdfde09cbfa5b4dfe6a5317a949e7bc6d3d0bb01736b853",
+          "ledger_record_count": 6,
+          "ledger_root_hash": "9af3bf3690d70b55d7a4dde33b301518096b9dfd9fbf133fb2b6004bd9cd98e7",
+          "ledger_sha256": "f0694655f9bdd00f93281a1020a936d84c8b6eb7eccfc81aa6489180c6934e02",
+          "model_call_count": 5,
+          "proxy_required": true,
+          "publication": {
+            "blocking_reasons": [],
+            "eligible": true,
+            "proxy_evidence_required": true
+          },
+          "reconciliation_status": "exact",
+          "schema_version": "openbench.harbor-metering.v2"
+        },
+        "harbor_model_name": "openai-codex/gpt-5.6-sol",
+        "harbor_task_checksum": "1f52cb9c43e7816a9a6189adcc002c5bc09a066e0e9e9d76b07d9a1cb02be368",
+        "harbor_trial_id": "d3d5e1b4-819f-4f18-8b5c-456eb587805a",
+        "harbor_trial_name": "make-it-run__Fyp9YVd",
+        "harbor_verifier_time_s": 0.181,
+        "harbor_version": "0.20.0",
+        "job_lock_sha256": "89aa3a18ee5ae4d62fb8ce61633645b7484e3852ccc3e0075f098001c5c5615e",
+        "job_result_sha256": "5c06cad589c3626a849b3682e8a5204889064f2e4883c5fc6bc79167617792fa",
+        "kind": "harbor_job",
+        "openbench_harbor_export": {
+          "base_image": "python:3.11-slim",
+          "network_mode": "public",
+          "schema_version": 1
+        },
+        "openbench_task_content_digest": {
+          "scheme": 2,
+          "sha256": "ae605369bf3da7ce9510ffd14c70f874c24e8da0158b0234051d8083355e3a3b"
+        },
+        "openbench_verifier_evidence_sha256": "aa9be8d05bf48ce0177850882082a8ac14555612999d2eb70eeb17b7906ef598",
+        "proxy_measured": true,
+        "reward_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+        "task_digest": "sha256:02bd13f9164fcf655248684f7d5bde6f0d5e29f8195e0972af7387e7ee7d14e1",
+        "temporal_matched_block_claim": false,
+        "trial_lock_sha256": "9b8e4a2d80ab79d2e26e126d9e94a74152de60080f28dbb1e1b86164a33cd4cb",
+        "trial_mapping": "lexicographic_name_within_task_agent_model",
+        "trial_result_sha256": "b9e563b8228c0d324f381981c8f330fc1e52f90c1165d9ed1240aba82a807d15",
+        "usage_source": "harbor_agent_reported"
+      },
+      "run_id": "pi:make-it-run:gpt-5.6-sol:trial1",
+      "usage": {
+        "token_basis": "harbor_agent_reported",
+        "usage_raw": {
+          "cost_usd": 0.043725,
+          "n_cache_tokens": 0,
+          "n_input_tokens": 6981,
+          "n_output_tokens": 294,
+          "source": "harbor_agent_result"
+        }
+      },
+      "workspace_source": {
+        "kind": "harbor_artifact",
+        "sha256": "8d0c187ad3569dd0f8b02cd0d23e14df091a0ddbd14cf4bdbb405e0a9e721c8d"
+      }
+    },
+    {
+      "candidate_provenance": {
+        "artifact_manifest_sha256": "ee918afcf3be1227e85049b12a647c0dcea231b2babd32d42a982701e1436fe6",
+        "atif_sha256": "dd517732840bc62e0fe65ac857e5e03b2e5204eb5361a00ed92192f5008d4920",
+        "final_workspace_sha256": "cb000e5ddf50d68ccc0dbe4f554c99845e36cad9600b57e50bb0c00681ead4d8",
+        "harbor_agent_config_name": "obench.harbor_agents.pi:OpenBenchPiOAuth",
+        "harbor_git_commit_hash": "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
+        "harbor_job_id": "39454708-69f1-4c2e-96a0-55d25f3a3612",
+        "harbor_job_max_retries": 1,
+        "harbor_job_retries": 2,
+        "harbor_metering": {
+          "auxiliary_request_count": 1,
+          "evidence_sha256": "d751631bbb2049cbbffda525c7a23f17e871b23c693983ac1b9ab8de7b4b1267",
+          "ledger_record_count": 7,
+          "ledger_root_hash": "79b6f0b5af18ae2e755d1ed94318247348324c08e42d3f0ba1dc4ac019631855",
+          "ledger_sha256": "2b02f62591a2e3d2da3954a67ed5801e1f5c5cf73d49b7360c8a49cfcdea8efb",
+          "model_call_count": 6,
+          "proxy_required": true,
+          "publication": {
+            "blocking_reasons": [],
+            "eligible": true,
+            "proxy_evidence_required": true
+          },
+          "reconciliation_status": "exact",
+          "schema_version": "openbench.harbor-metering.v2"
+        },
+        "harbor_model_name": "openai-codex/gpt-5.6-sol",
+        "harbor_task_checksum": "1f52cb9c43e7816a9a6189adcc002c5bc09a066e0e9e9d76b07d9a1cb02be368",
+        "harbor_trial_id": "8e609c04-ebda-4af9-8cb7-d8c42d0238be",
+        "harbor_trial_name": "make-it-run__jNZcvV3",
+        "harbor_verifier_time_s": 0.221,
+        "harbor_version": "0.20.0",
+        "job_lock_sha256": "89aa3a18ee5ae4d62fb8ce61633645b7484e3852ccc3e0075f098001c5c5615e",
+        "job_result_sha256": "5c06cad589c3626a849b3682e8a5204889064f2e4883c5fc6bc79167617792fa",
+        "kind": "harbor_job",
+        "openbench_harbor_export": {
+          "base_image": "python:3.11-slim",
+          "network_mode": "public",
+          "schema_version": 1
+        },
+        "openbench_task_content_digest": {
+          "scheme": 2,
+          "sha256": "ae605369bf3da7ce9510ffd14c70f874c24e8da0158b0234051d8083355e3a3b"
+        },
+        "openbench_verifier_evidence_sha256": "aa9be8d05bf48ce0177850882082a8ac14555612999d2eb70eeb17b7906ef598",
+        "proxy_measured": true,
+        "reward_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+        "task_digest": "sha256:02bd13f9164fcf655248684f7d5bde6f0d5e29f8195e0972af7387e7ee7d14e1",
+        "temporal_matched_block_claim": false,
+        "trial_lock_sha256": "9b8e4a2d80ab79d2e26e126d9e94a74152de60080f28dbb1e1b86164a33cd4cb",
+        "trial_mapping": "lexicographic_name_within_task_agent_model",
+        "trial_result_sha256": "0ac4087d0152d8546312cee75e631fae3dbacbba3a755ca3d66a392b2f885b45",
+        "usage_source": "harbor_agent_reported"
+      },
+      "run_id": "pi:make-it-run:gpt-5.6-sol:trial2",
+      "usage": {
+        "token_basis": "harbor_agent_reported",
+        "usage_raw": {
+          "cost_usd": 0.051875000000000004,
+          "n_cache_tokens": 0,
+          "n_input_tokens": 8473,
+          "n_output_tokens": 317,
+          "source": "harbor_agent_result"
+        }
+      },
+      "workspace_source": {
+        "kind": "harbor_artifact",
+        "sha256": "cb000e5ddf50d68ccc0dbe4f554c99845e36cad9600b57e50bb0c00681ead4d8"
+      }
+    }
+  ],
+  "highlight_arms": [],
+  "models": [
+    "gpt-5.6-sol"
+  ],
+  "obench_version": "0.1.0",
+  "results_sha256": "1cb6b123bae0dc4859b8ee71130cb6ab267716582f2909edaf369a96041267cb",
+  "run_dates": [],
+  "tasks": [
+    {
+      "content_digest": "57cc75a6fb25ac9fe1a99b769000a96d1744a35d8d724d900f1fb37cf3da1e29",
+      "task": "fix-failing-test",
+      "workspace_source_samples": [
+        {
+          "kind": "harbor_artifact",
+          "sha256": "03c0a57d40828383ea36342f4aecb3372e2dbabf4f9cab09fd166c3ce26f1b6e"
+        },
+        {
+          "kind": "harbor_artifact",
+          "sha256": "e32b3dc55d98d28e9541bd2665a91d249b76a7ed815d98b69971b2c9d1ca0cd4"
+        },
+        {
+          "kind": "harbor_artifact",
+          "sha256": "3e12cb526f9bae9e70b892d805d5b2089ddf5d28ddeadc8cc641d527acc44af8"
+        },
+        {
+          "kind": "harbor_artifact",
+          "sha256": "44d0c2a67288cd11d7bc667870c996deb6900670d46817ff7ea7e5616a2987f5"
+        }
+      ]
+    },
+    {
+      "content_digest": "ae605369bf3da7ce9510ffd14c70f874c24e8da0158b0234051d8083355e3a3b",
+      "task": "make-it-run",
+      "workspace_source_samples": [
+        {
+          "kind": "harbor_artifact",
+          "sha256": "86f8aeea81044bd12d473f66751c0a7bcd7a059b47bb3518c9a8adc39ea1607d"
+        },
+        {
+          "kind": "harbor_artifact",
+          "sha256": "806e6d9dc24deddf2145537f03323d4c75b4cfa6f96307f1658393c2dc23083c"
+        },
+        {
+          "kind": "harbor_artifact",
+          "sha256": "8d0c187ad3569dd0f8b02cd0d23e14df091a0ddbd14cf4bdbb405e0a9e721c8d"
+        },
+        {
+          "kind": "harbor_artifact",
+          "sha256": "cb000e5ddf50d68ccc0dbe4f554c99845e36cad9600b57e50bb0c00681ead4d8"
+        }
+      ]
+    }
+  ],
+  "trial_counts": {
+    "codex/fix-failing-test/gpt-5.6-sol": [
+      1,
+      2
+    ],
+    "codex/make-it-run/gpt-5.6-sol": [
+      1,
+      2
+    ],
+    "pi/fix-failing-test/gpt-5.6-sol": [
+      1,
+      2
+    ],
+    "pi/make-it-run/gpt-5.6-sol": [
+      1,
+      2
+    ]
+  },
+  "warnings": []
+}
