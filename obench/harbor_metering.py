@@ -16,6 +16,7 @@ from obench.run import proxy_split_from_usage
 
 SCHEMA_VERSION = "openbench.harbor-metering.v1"
 HARBOR_BASE_URL_ENV = "OPENAI_BASE_URL"
+HARBOR_BASE_URL_SOURCE_ENV = "OPENBENCH_HARBOR_METERING_BASE_URL"
 STATUSES = {"exact", "mismatch", "incomplete"}
 COUNTER_FIELDS = ("calls", "input_tokens", "cache_tokens", "output_tokens")
 
@@ -263,10 +264,22 @@ class HarborMeteringSession:
 
     @property
     def agent_env(self) -> dict[str, str]:
-        """Harbor ``--ae`` value; keep it ephemeral because it carries the cell token."""
+        """Harbor ``--ae`` value; the persisted value is a non-secret template."""
         if self._closed:
             raise HarborMeteringError("metering session is closed")
-        return {HARBOR_BASE_URL_ENV: self._base_url}
+        return {
+            HARBOR_BASE_URL_ENV: f"${{{HARBOR_BASE_URL_SOURCE_ENV}}}",
+        }
+
+    def process_env(
+        self, base: Mapping[str, str] | None = None
+    ) -> dict[str, str]:
+        """Environment for the Harbor host process; contains the ephemeral route."""
+        if self._closed:
+            raise HarborMeteringError("metering session is closed")
+        environment = dict(os.environ if base is None else base)
+        environment[HARBOR_BASE_URL_SOURCE_ENV] = self._base_url
+        return environment
 
     @property
     def server(self):

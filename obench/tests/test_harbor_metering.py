@@ -83,7 +83,12 @@ class HarborMeteringSessionTests(unittest.TestCase):
 
     @staticmethod
     def _post_model_call(session):
-        endpoint = urlsplit(session.agent_env["OPENAI_BASE_URL"] + "/responses")
+        endpoint = urlsplit(
+            session.process_env({})[
+                harbor_metering.HARBOR_BASE_URL_SOURCE_ENV
+            ]
+            + "/responses"
+        )
         body = b'{"model":"gpt-test","input":"RAW-PROMPT-MUST-NOT-PERSIST"}'
         connection = http.client.HTTPConnection(
             endpoint.hostname, endpoint.port, timeout=5
@@ -108,7 +113,16 @@ class HarborMeteringSessionTests(unittest.TestCase):
     def test_secure_setup_normal_route_exact_seal_and_teardown(self):
         evidence_root = Path(self.temp.name) / "exact"
         with self._session("exact") as session:
-            endpoint = session.agent_env["OPENAI_BASE_URL"]
+            self.assertEqual(
+                session.agent_env,
+                {
+                    "OPENAI_BASE_URL":
+                        "${OPENBENCH_HARBOR_METERING_BASE_URL}"
+                },
+            )
+            endpoint = session.process_env({})[
+                harbor_metering.HARBOR_BASE_URL_SOURCE_ENV
+            ]
             self.assertIn("/codex/backend-api/codex", endpoint)
             self.assertEqual(self._post_model_call(session), 200)
             evidence = session.seal(
