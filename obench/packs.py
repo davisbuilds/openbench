@@ -1111,10 +1111,25 @@ def verify_pack(pack_dir: str) -> list[dict]:
     source = load_pack_source(pack_dir)
     results = []
     if kind == PACK_KIND_HARNESS:
-        manifests = discover_pack_manifests(pack_dir, meta)
         expected = (source or {}).get("manifest_digests") or (
             (source or {}).get("spec_sha256") or {}
         )
+        if meta.get("manifests") is not None:
+            declared = [
+                _normalize_manifest_filename(name)
+                for name in meta["manifests"]
+            ]
+            manifests = [
+                name for name in declared
+                if os.path.isfile(os.path.join(pack_dir, name))
+            ]
+        else:
+            manifests = [
+                name for name in sorted(os.listdir(pack_dir))
+                if name.endswith(".toml")
+                and name != PACK_TOML
+                and os.path.isfile(os.path.join(pack_dir, name))
+            ]
         for filename in manifests:
             actual = manifest_spec_sha256(os.path.join(pack_dir, filename))
             exp = expected.get(filename)
@@ -1125,10 +1140,33 @@ def verify_pack(pack_dir: str) -> list[dict]:
                 "ok": exp is not None and exp == actual,
                 "missing_expected": exp is None,
             })
+        for filename in sorted(set(expected) - set(manifests)):
+            results.append({
+                "manifest": filename,
+                "digest": "",
+                "expected": expected[filename],
+                "ok": False,
+                "missing_expected": False,
+                "missing_member": True,
+            })
         return results
 
-    tasks = discover_pack_tasks(pack_dir, meta)
     expected = (source or {}).get("task_digests") or {}
+    if meta.get("tasks") is not None:
+        tasks = [
+            name for name in meta["tasks"]
+            if os.path.isdir(os.path.join(pack_dir, name))
+        ]
+    else:
+        tasks = [
+            name for name in sorted(os.listdir(pack_dir))
+            if not name.startswith(".")
+            and os.path.isdir(os.path.join(pack_dir, name))
+            and (
+                os.path.isfile(os.path.join(pack_dir, name, "instruction.md"))
+                or os.path.isfile(os.path.join(pack_dir, name, "checker.sh"))
+            )
+        ]
     scheme = int((source or {}).get("digest_scheme") or DIGEST_SCHEME_CURRENT)
     for task in tasks:
         task_dir = os.path.join(pack_dir, task)
@@ -1140,6 +1178,15 @@ def verify_pack(pack_dir: str) -> list[dict]:
             "expected": exp,
             "ok": exp is not None and exp == actual,
             "missing_expected": exp is None,
+        })
+    for task in sorted(set(expected) - set(tasks)):
+        results.append({
+            "task": task,
+            "digest": "",
+            "expected": expected[task],
+            "ok": False,
+            "missing_expected": False,
+            "missing_member": True,
         })
     return results
 

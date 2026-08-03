@@ -57,6 +57,7 @@ class CandidateGateTests(unittest.TestCase):
         result = self.live_gate()
         self.assertEqual(result["status"], "PASS")
         self.assertTrue(all(item["pass"] for item in result["checks"]))
+        self.assertRegex(result["candidate_digest"], r"^[0-9a-f]{64}$")
 
     def test_metering_canary_timeout_and_honesty_failures_are_detected(self):
         result = self.live_gate(calls=0, canary=True, timeout_class="wrong_answer",
