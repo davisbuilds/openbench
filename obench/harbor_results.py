@@ -29,6 +29,8 @@ HARBOR_GIT_COMMIT = "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767"
 JOB_LOCK_SCHEMA_VERSION = 3
 TRIAL_LOCK_SCHEMA_VERSION = 2
 FINAL_WORKSPACE_DESTINATION = "workspace"
+FINAL_WORKSPACE_SOURCE = "/app"
+FINAL_WORKSPACE_MANIFEST_DESTINATION = "artifacts/workspace"
 VERIFIER_EVIDENCE_SCHEMA_VERSION = "openbench-verifier-evidence-v2"
 MAX_JSON_BYTES = 32 * 1024 * 1024
 HARBOR_AGENT_SEMANTIC_NAME_ALIASES = {
@@ -945,33 +947,86 @@ def _validate_reward(
     )
 
 
+def _validate_artifact_source(value: Any, location: str) -> str:
+    source = _string(value, location)
+    pure_source = PurePosixPath(source)
+    if (
+        "\0" in source
+        or source.startswith("//")
+        or not pure_source.is_absolute()
+        or source == "/"
+        or ".." in pure_source.parts
+        or source != pure_source.as_posix()
+    ):
+        raise _fail(location, "must be a canonical non-root absolute POSIX path")
+    return source
+
+
+def _validate_relative_artifact_path(value: Any, location: str) -> str:
+    destination = _string(value, location)
+    pure_destination = PurePosixPath(destination)
+    if (
+        "\0" in destination
+        or pure_destination.is_absolute()
+        or ".." in pure_destination.parts
+        or destination != pure_destination.as_posix()
+        or pure_destination.as_posix() == "."
+    ):
+        raise _fail(location, "must be a canonical relative POSIX path")
+    return destination
+
+
+def _validate_manifest_artifact_path(value: Any, location: str) -> str:
+    destination = _validate_relative_artifact_path(value, location)
+    parts = PurePosixPath(destination).parts
+    if len(parts) < 2 or parts[0] != "artifacts":
+        raise _fail(location, "must be a safe path below artifacts/")
+    return destination
+
+
+def _path_is_at_or_below(path: str, root: str) -> bool:
+    path_parts = PurePosixPath(path).parts
+    root_parts = PurePosixPath(root).parts
+    return path_parts[: len(root_parts)] == root_parts
+
+
 def _validate_artifacts(
     trial_dir: Path, result: dict[str, Any], location: str
 ) -> tuple[Path, str]:
     config = _object(result.get("config"), f"{location}.result.config")
     artifacts = _array(config.get("artifacts"), f"{location}.result.config.artifacts")
-    requested: list[tuple[str, str]] = []
+    configured_workspace_entries: list[tuple[str, str]] = []
     for index, artifact in enumerate(artifacts):
-        if isinstance(artifact, dict):
-            source = artifact.get("source")
-            destination = artifact.get("destination")
-            if destination == FINAL_WORKSPACE_DESTINATION:
-                requested.append(
-                    (
-                        _string(source, f"{location}.result.config.artifacts[{index}].source"),
-                        destination,
-                    )
-                )
-    if len(requested) != 1:
-        raise _fail(
-            f"{location}.result.config.artifacts",
-            "must request exactly one workspace artifact",
+        entry_location = f"{location}.result.config.artifacts[{index}]"
+        entry = _object(artifact, entry_location)
+        source = _validate_artifact_source(
+            entry.get("source"), f"{entry_location}.source"
         )
-    source, destination = requested[0]
-    if not source.startswith("/") or source == "/":
+        destination = _validate_relative_artifact_path(
+            entry.get("destination"), f"{entry_location}.destination"
+        )
+        if (
+            source == FINAL_WORKSPACE_SOURCE
+            or _path_is_at_or_below(destination, FINAL_WORKSPACE_DESTINATION)
+        ):
+            if set(entry) - {"source", "destination", "service"}:
+                raise _fail(
+                    entry_location,
+                    "workspace config contains unsupported semantic fields",
+                )
+            if entry.get("service") is not None:
+                raise _fail(
+                    f"{entry_location}.service",
+                    "workspace config service must be null or absent",
+                )
+            configured_workspace_entries.append((source, destination))
+    if artifacts and configured_workspace_entries != [
+        (FINAL_WORKSPACE_SOURCE, FINAL_WORKSPACE_DESTINATION)
+    ]:
         raise _fail(
             f"{location}.result.config.artifacts",
-            "workspace source must be a non-root absolute path",
+            "non-empty config must declare exactly one non-conflicting "
+            f"{FINAL_WORKSPACE_SOURCE} to {FINAL_WORKSPACE_DESTINATION} artifact",
         )
 
     manifest_path = trial_dir / "artifacts" / "manifest.json"
@@ -987,21 +1042,12 @@ def _validate_artifacts(
         entry = _object(raw_entry, entry_location)
         if set(entry) - {"source", "destination", "type", "status", "service"}:
             raise _fail(entry_location, "contains unknown manifest fields")
-        entry_source = _string(entry.get("source"), f"{entry_location}.source")
-        entry_destination = _string(
+        entry_source = _validate_artifact_source(
+            entry.get("source"), f"{entry_location}.source"
+        )
+        entry_destination = _validate_manifest_artifact_path(
             entry.get("destination"), f"{entry_location}.destination"
         )
-        pure_destination = PurePosixPath(entry_destination)
-        if (
-            pure_destination.is_absolute()
-            or ".." in pure_destination.parts
-            or not pure_destination.parts
-            or pure_destination.parts[0] != "artifacts"
-        ):
-            raise _fail(
-                f"{entry_location}.destination",
-                "must be a safe path below artifacts/",
-            )
         if entry.get("type") not in {"file", "directory"}:
             raise _fail(f"{entry_location}.type", "invalid artifact type")
         if entry.get("status") not in {"ok", "failed", "empty", "skipped"}:
@@ -1015,22 +1061,43 @@ def _validate_artifacts(
         seen_sources.add(source_key)
         seen_destinations.add(entry_destination)
         if (
-            entry_source == source
-            and entry_destination == f"artifacts/{destination}"
+            entry_source == FINAL_WORKSPACE_SOURCE
+            or _path_is_at_or_below(
+                entry_destination,
+                FINAL_WORKSPACE_MANIFEST_DESTINATION,
+            )
         ):
+            if final_entry is not None:
+                raise _fail(
+                    entry_location,
+                    "duplicate or contradictory workspace artifact entry",
+                )
             final_entry = entry
 
     if final_entry is None:
         raise _fail(
             f"{location}.artifacts",
-            "manifest does not contain the requested workspace",
+            "manifest does not contain the required workspace",
         )
-    if final_entry.get("type") != "directory" or final_entry.get("status") != "ok":
+    if (
+        final_entry.get("source") != FINAL_WORKSPACE_SOURCE
+        or final_entry.get("destination") != FINAL_WORKSPACE_MANIFEST_DESTINATION
+    ):
         raise _fail(
             f"{location}.artifacts",
-            "workspace must have type='directory' and status='ok'",
+            "workspace entry must map "
+            f"{FINAL_WORKSPACE_SOURCE} to {FINAL_WORKSPACE_MANIFEST_DESTINATION}",
         )
-    workspace_path = trial_dir / "artifacts" / destination
+    if (
+        final_entry.get("type") != "directory"
+        or final_entry.get("status") != "ok"
+        or final_entry.get("service") is not None
+    ):
+        raise _fail(
+            f"{location}.artifacts",
+            "workspace must have type='directory', status='ok', and service=null",
+        )
+    workspace_path = trial_dir / FINAL_WORKSPACE_MANIFEST_DESTINATION
     return manifest_path, _tree_digest(workspace_path)
 
 
@@ -1039,7 +1106,8 @@ def _validate_atif(
     result: dict[str, Any],
     agent_name: str,
     agent_version: str,
-    model: str,
+    lock_model: str,
+    reported_model_name: str,
     location: str,
 ) -> tuple[Path, dict[str, Any], int]:
     trajectory_path = trial_dir / "agent" / "trajectory.json"
@@ -1056,7 +1124,11 @@ def _validate_atif(
             f"{location}.ATIF.agent",
             "does not match trial result agent identity",
         )
-    if agent.get("model_name") not in (None, model):
+    if agent.get("model_name") not in (
+        None,
+        reported_model_name,
+        lock_model,
+    ):
         raise _fail(
             f"{location}.ATIF.agent.model_name",
             "does not match trial model identity",
@@ -1065,7 +1137,7 @@ def _validate_atif(
         if (
             isinstance(step, dict)
             and step.get("source") == "agent"
-            and step.get("model_name") not in (None, model)
+            and step.get("model_name") not in (None, lock_model)
         ):
             raise _fail(
                 f"{location}.ATIF.steps[{index}].model_name",
@@ -1272,7 +1344,13 @@ def _validate_trial(
     ) = _validate_reward(trial_dir, result, location)
     manifest_path, workspace_digest = _validate_artifacts(trial_dir, result, location)
     trajectory_path, agent_result, turns = _validate_atif(
-        trial_dir, result, agent_name, agent_version, model, location
+        trial_dir,
+        result,
+        agent_name,
+        agent_version,
+        model,
+        model_name,
+        location,
     )
     usage = _usage_fields(agent_result, location)
     return {

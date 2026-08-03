@@ -108,9 +108,7 @@ def _trial_result(
             "agent": {"name": "codex", "model_name": model, "kwargs": {}},
             "environment": {"type": "docker", "kwargs": {}},
             "verifier": {"disable": False, "kwargs": {}},
-            "artifacts": [
-                {"source": "/app", "destination": "workspace"}
-            ],
+            "artifacts": [],
             "extra_instruction_paths": [],
         },
         "agent_info": {
@@ -359,6 +357,51 @@ class HarborResultsTests(unittest.TestCase):
 
     def fixture(self) -> GoldenHarborJob:
         return GoldenHarborJob(self.root / "job")
+
+    def qualified_model_fixture(
+        self,
+        name: str,
+        *,
+        top_level_model: str,
+        step_model: str,
+    ) -> GoldenHarborJob:
+        fixture = GoldenHarborJob(
+            self.root / name,
+            specs=[
+                {
+                    "name": "alpha__qualified",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000009",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        lock_path = fixture.trial() / "lock.json"
+        trial_lock = json.loads(lock_path.read_text())
+        trial_lock["agent"]["model_name"] = "openai/gpt-5.6-sol"
+        _write_json(lock_path, trial_lock)
+
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"][0] = trial_lock
+        _write_json(job_lock_path, job_lock)
+
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["config"]["agent"]["model_name"] = "openai/gpt-5.6-sol"
+        result["agent_info"]["model_info"] = {
+            "name": "gpt-5.6-sol",
+            "provider": "openai",
+        }
+        _write_json(result_path, result)
+
+        trajectory_path = fixture.trial() / "agent" / "trajectory.json"
+        trajectory = json.loads(trajectory_path.read_text())
+        trajectory["agent"]["model_name"] = top_level_model
+        trajectory["steps"][1]["model_name"] = step_model
+        _write_json(trajectory_path, trajectory)
+        return fixture
 
     def test_golden_job_maps_groups_deterministically_without_temporal_claim(self):
         fixture = self.fixture()
@@ -779,6 +822,131 @@ class HarborResultsTests(unittest.TestCase):
         ):
             load_rows(fixture.root)
 
+    def test_accepts_populated_workspace_config_compatibility(self):
+        fixture = self.fixture()
+        for index in range(len(fixture.specs)):
+            result_path = fixture.trial(index) / "result.json"
+            result = json.loads(result_path.read_text())
+            result["config"]["artifacts"] = [
+                {"source": "/app", "destination": "workspace"}
+            ]
+            _write_json(result_path, result)
+        fixture.sync_aggregate()
+
+        self.assertEqual(len(load_rows(fixture.root)), len(fixture.specs))
+
+    def test_rejects_conflicting_or_unsafe_workspace_config(self):
+        cases = (
+            [{"source": "/app", "destination": "other"}],
+            [{"source": "/tmp", "destination": "workspace"}],
+            [
+                {"source": "/app", "destination": "workspace"},
+                {"source": "/app", "destination": "workspace"},
+            ],
+            [{"source": "/app/../tmp", "destination": "workspace"}],
+            [{"source": "/app", "destination": "../workspace"}],
+            [{"source": "/logs/artifacts", "destination": "logs"}],
+            [{"source": "/app", "destination": "workspace", "service": "db"}],
+            [{"source": "/app", "destination": "workspace", "type": "directory"}],
+            [
+                {"source": "/app", "destination": "workspace"},
+                {"source": "/tmp", "destination": "workspace/injected"},
+            ],
+        )
+        for index, artifacts in enumerate(cases):
+            with self.subTest(artifacts=artifacts):
+                fixture = GoldenHarborJob(self.root / f"config-artifacts-{index}")
+                result_path = fixture.trial() / "result.json"
+                result = json.loads(result_path.read_text())
+                result["config"]["artifacts"] = artifacts
+                _write_json(result_path, result)
+                with self.assertRaises(HarborResultsError):
+                    load_rows(fixture.root)
+
+    def test_rejects_tampered_manifest_workspace_evidence(self):
+        cases = (
+            lambda entry: entry.update(source="/tmp"),
+            lambda entry: entry.update(destination="artifacts/other"),
+            lambda entry: entry.update(status="failed"),
+            lambda entry: entry.update(type="file"),
+            lambda entry: entry.update(service="agent"),
+            lambda entry: entry.update(source="/app/../tmp"),
+            lambda entry: entry.update(destination="artifacts/../workspace"),
+        )
+        for index, mutate in enumerate(cases):
+            with self.subTest(index=index):
+                fixture = GoldenHarborJob(self.root / f"manifest-artifacts-{index}")
+                manifest_path = fixture.trial() / "artifacts" / "manifest.json"
+                manifest = json.loads(manifest_path.read_text())
+                mutate(manifest[1])
+                _write_json(manifest_path, manifest)
+                with self.assertRaises(HarborResultsError):
+                    load_rows(fixture.root)
+
+        fixture = GoldenHarborJob(self.root / "manifest-artifacts-duplicate")
+        manifest_path = fixture.trial() / "artifacts" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest.append(dict(manifest[1]))
+        _write_json(manifest_path, manifest)
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "duplicate artifact source or destination",
+        ):
+            load_rows(fixture.root)
+
+        fixture = GoldenHarborJob(self.root / "manifest-artifacts-nested")
+        manifest_path = fixture.trial() / "artifacts" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest.append(
+            {
+                "source": "/tmp/injected",
+                "destination": "artifacts/workspace/injected",
+                "type": "directory",
+                "status": "ok",
+                "service": None,
+            }
+        )
+        _write_json(manifest_path, manifest)
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "duplicate or contradictory workspace artifact entry",
+        ):
+            load_rows(fixture.root)
+
+    def test_accepts_qualified_atif_top_level_model_compatibility(self):
+        fixture = self.qualified_model_fixture(
+            "qualified-top-level-model",
+            top_level_model="openai/gpt-5.6-sol",
+            step_model="openai/gpt-5.6-sol",
+        )
+
+        self.assertEqual(
+            load_rows(fixture.root)[0]["model"],
+            "openai/gpt-5.6-sol",
+        )
+
+    def test_rejects_unrelated_or_misplaced_atif_model_identities(self):
+        cases = (
+            ("other-provider/gpt-5.6-sol", "openai/gpt-5.6-sol"),
+            ("gpt-5.6-sol", "gpt-5.6-sol"),
+            ("gpt-5.6-sol", "openai/gpt-5.6-terra"),
+        )
+        for index, (top_level_model, step_model) in enumerate(cases):
+            with self.subTest(
+                top_level_model=top_level_model,
+                step_model=step_model,
+            ):
+                fixture = self.qualified_model_fixture(
+                    f"tampered-model-{index}",
+                    top_level_model=top_level_model,
+                    step_model=step_model,
+                )
+                with self.assertRaisesRegex(
+                    HarborResultsError,
+                    "does not match trial model identity",
+                ):
+                    load_rows(fixture.root)
+
     def test_real_0200_artifact_shape_regression_without_credentials(self):
         fixture = GoldenHarborJob(
             self.root / "vertical-slice-public",
@@ -796,7 +964,7 @@ class HarborResultsTests(unittest.TestCase):
         trial_lock = json.loads(lock_path.read_text())
         trial_lock["task"]["name"] = "make-it-run"
         trial_lock["agent"]["name"] = "codex"
-        trial_lock["agent"]["model_name"] = "spike/no-llm"
+        trial_lock["agent"]["model_name"] = "openai/gpt-5.6-sol"
         _write_json(lock_path, trial_lock)
         job_lock_path = fixture.root / "lock.json"
         job_lock = json.loads(job_lock_path.read_text())
@@ -810,7 +978,7 @@ class HarborResultsTests(unittest.TestCase):
         result["task_checksum"] = "c" * 64
         result["config"]["agent"] = {
             "name": "codex",
-            "model_name": "spike/no-llm",
+            "model_name": "openai/gpt-5.6-sol",
             "skills": [],
             "resume_trajectory": False,
             "extra_allowed_hosts": [],
@@ -820,7 +988,7 @@ class HarborResultsTests(unittest.TestCase):
         result["agent_info"] = {
             "name": "codex",
             "version": "0.1.0",
-            "model_info": {"name": "no-llm", "provider": "spike"},
+            "model_info": {"name": "gpt-5.6-sol", "provider": "openai"},
         }
         result["agent_result"] = {
             "n_input_tokens": None,
@@ -839,7 +1007,7 @@ class HarborResultsTests(unittest.TestCase):
                 "agent": {
                     "name": "codex",
                     "version": "0.1.0",
-                    "model_name": "spike/no-llm",
+                    "model_name": "gpt-5.6-sol",
                 },
                 "steps": [
                     {"step_id": 1, "source": "user", "message": "Fix the task."},
@@ -848,6 +1016,7 @@ class HarborResultsTests(unittest.TestCase):
                         "source": "agent",
                         "message": "Repaired the task.",
                         "llm_call_count": 0,
+                        "model_name": "openai/gpt-5.6-sol",
                     },
                 ],
             },
@@ -865,7 +1034,7 @@ class HarborResultsTests(unittest.TestCase):
             "n_cancelled_trials": 0,
             "n_retries": 0,
             "evals": {
-                "codex__no-llm__adhoc": {
+                "codex__gpt-5.6-sol__adhoc": {
                     "n_trials": 1,
                     "n_errors": 0,
                     "metrics": [{"mean": 1.0}],
@@ -883,9 +1052,31 @@ class HarborResultsTests(unittest.TestCase):
         }
         _write_json(job_result_path, job_result)
 
+        self.assertEqual(result["config"]["artifacts"], [])
+        self.assertEqual(
+            json.loads(
+                (fixture.trial() / "artifacts" / "manifest.json").read_text()
+            ),
+            [
+                {
+                    "source": "/logs/artifacts",
+                    "destination": "artifacts/logs/artifacts",
+                    "type": "directory",
+                    "status": "empty",
+                    "service": None,
+                },
+                {
+                    "source": "/app",
+                    "destination": "artifacts/workspace",
+                    "type": "directory",
+                    "status": "ok",
+                    "service": None,
+                },
+            ],
+        )
         row = load_rows(fixture.root)[0]
         self.assertEqual(row["harness"], "codex")
-        self.assertEqual(row["model"], "spike/no-llm")
+        self.assertEqual(row["model"], "openai/gpt-5.6-sol")
         self.assertEqual(row["token_basis"], "unmetered")
         self.assertEqual(
             row["candidate_provenance"]["harbor_git_commit_hash"],
