@@ -33,6 +33,11 @@ The importer cross-checks the job/trial lock multiset, the lock task digest,
 Harbor's separate legacy task checksum, task/agent/model identity, phase timing,
 scalar reward in `[0, 1]`, OpenBench verifier evidence, ATIF identity and usage
 totals, job aggregates, artifact status, and duplicate identities.
+The result-reported `agent_info.name` and ATIF agent name must also resolve from
+the immutable trial-lock/config agent identity. Unlisted identities must match
+exactly. The pinned OpenBench OAuth custom agent is the only explicit alias:
+`obench.harbor_agents.codex:OpenBenchCodexOAuth` reports `codex`. Any other
+custom identity that reports a different semantic name is rejected.
 
 Any missing, partial, random, duplicate, unresolved, or contradictory evidence
 rejects the whole job before the output file is opened for append.
@@ -68,7 +73,8 @@ it does not claim that trials are temporal matched blocks.
 complete normalized `candidate_provenance`, `workspace_source`, and usage
 contract must be present and internally consistent. Partial Harbor provenance,
 unknown provenance keys, invalid digests, workspace-digest disagreement, proxy
-claims, or usage-total disagreement fail before a bundle is written.
+claims, semantic harness/config identity disagreement, or usage-total
+disagreement fail before a bundle is written.
 For every Harbor task, the imported scheme-2 execution digest must equal the
 digest recomputed from the local publication task tree. Missing local task
 trees, inconsistent imported digests, or any mismatch fail before the output

@@ -115,7 +115,7 @@ def _harbor_row(
                 "network_mode": "no-network",
             },
             "harbor_task_checksum": digest,
-            "harbor_agent_config_name": "codex__model-x__openbench",
+            "harbor_agent_config_name": "codex",
             "harbor_verifier_time_s": 1.25,
             "usage_source": "harbor_agent_reported",
             "proxy_measured": False,
@@ -293,6 +293,9 @@ class PublishBundleTests(unittest.TestCase):
         row = self._harbor_row()
         row["workspace_source"]["sha256"] = "c" * 64
         cases.append(("workspace-digest-mismatch", row))
+        row = self._harbor_row()
+        row["harness"] = "other-agent"
+        cases.append(("agent-identity-mismatch", row))
         row = self._harbor_row()
         row["exec_mode"] = "local"
         row["candidate_provenance"]["kind"] = "manifest"
@@ -484,6 +487,43 @@ class PublishBundleTests(unittest.TestCase):
         self.assertEqual(harbor_evidence["status"], "PASS", harbor_evidence)
         self.assertEqual(content_binding["status"], "PASS", content_binding)
         self.assertEqual(export_binding["status"], "FAIL", export_binding)
+
+    def test_verify_rejects_rehashed_harbor_agent_identity_tampering(self):
+        harbor_results = os.path.join(
+            self.tmp.name,
+            "harbor-agent-identity.jsonl",
+        )
+        _write_jsonl(harbor_results, [self._harbor_row()])
+        publish.create_bundle(
+            harbor_results,
+            self.out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+
+        results_path = os.path.join(self.out, "results.jsonl")
+        with open(results_path, encoding="utf-8") as fh:
+            row = json.loads(fh.readline())
+        row["harness"] = "other-agent"
+        _write_jsonl(results_path, [row])
+
+        provenance_path = os.path.join(self.out, "provenance.json")
+        with open(provenance_path, encoding="utf-8") as fh:
+            provenance = json.load(fh)
+        with open(results_path, "rb") as fh:
+            provenance["results_sha256"] = hashlib.sha256(fh.read()).hexdigest()
+        with open(provenance_path, "w", encoding="utf-8") as fh:
+            json.dump(provenance, fh)
+
+        checks = publish.verify_bundle(self.out, tasks_dirs=[self.tasks])
+        harbor_evidence = next(
+            item for item in checks if item["name"] == "harbor_import_evidence"
+        )
+        self.assertEqual(harbor_evidence["status"], "FAIL", harbor_evidence)
+        self.assertIn(
+            "harness does not match immutable Harbor agent config identity",
+            harbor_evidence["detail"],
+        )
 
     def test_verify_rejects_harbor_evidence_manifest_tampering(self):
         harbor_results = os.path.join(self.tmp.name, "harbor.jsonl")

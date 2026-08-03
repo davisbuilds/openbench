@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .atif import validate_trajectory
+from .harbor_oauth import AGENT_IMPORT_PATH
 from .run import ROW_FIELDS, make_run_id
 
 HARBOR_VERSION = "0.20.0"
@@ -26,6 +27,9 @@ TRIAL_LOCK_SCHEMA_VERSION = 2
 FINAL_WORKSPACE_DESTINATION = "workspace"
 VERIFIER_EVIDENCE_SCHEMA_VERSION = "openbench-verifier-evidence-v2"
 MAX_JSON_BYTES = 32 * 1024 * 1024
+HARBOR_AGENT_SEMANTIC_NAME_ALIASES = {
+    AGENT_IMPORT_PATH: "codex",
+}
 
 
 class HarborResultsError(ValueError):
@@ -34,6 +38,11 @@ class HarborResultsError(ValueError):
 
 def _fail(location: str, message: str) -> HarborResultsError:
     return HarborResultsError(f"{location}: {message}")
+
+
+def expected_harbor_agent_semantic_name(config_name: str) -> str:
+    """Resolve a pinned Harbor config identity to its reported agent name."""
+    return HARBOR_AGENT_SEMANTIC_NAME_ALIASES.get(config_name, config_name)
 
 
 def _require_regular_file(path: Path, location: str) -> None:
@@ -1211,8 +1220,18 @@ def _validate_trial(
         )
 
     agent_lock = _object(trial_lock.get("agent"), f"{location}.lock.agent")
+    agent_config_name = _string(
+        agent_lock.get("name"), f"{location}.lock.agent.name"
+    )
     agent_info = _object(result.get("agent_info"), f"{location}.result.agent_info")
     agent_name = _string(agent_info.get("name"), f"{location}.result.agent_info.name")
+    expected_agent_name = expected_harbor_agent_semantic_name(agent_config_name)
+    if agent_name != expected_agent_name:
+        raise _fail(
+            f"{location}.result.agent_info.name",
+            "does not match immutable trial-lock agent identity "
+            f"{agent_config_name!r} (expected {expected_agent_name!r})",
+        )
     agent_version = _string(
         agent_info.get("version"), f"{location}.result.agent_info.version"
     )
@@ -1268,9 +1287,7 @@ def _validate_trial(
         "openbench_task_content_digest": openbench_task_content_digest,
         "openbench_harbor_export": openbench_harbor_export,
         "task_checksum": checksum,
-        "agent_config_name": _string(
-            agent_lock.get("name"), f"{location}.lock.agent.name"
-        ),
+        "agent_config_name": agent_config_name,
         "agent_name": agent_name,
         "agent_version": agent_version,
         "model": model,

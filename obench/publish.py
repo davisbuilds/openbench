@@ -33,6 +33,7 @@ from . import compare
 from . import report_page
 from . import scrub
 from . import stats
+from .harbor_results import expected_harbor_agent_semantic_name
 from .paths import default_results_path, default_tasks_dir, resolve_tasks_dir
 
 TRANSCRIPT_FIELD_KEYS = (
@@ -484,6 +485,14 @@ def _validate_harbor_row(row):
             or value.startswith("~")
         ):
             raise PublishError(f"Harbor row {run_id!r}: invalid {key}")
+    expected_agent_name = expected_harbor_agent_semantic_name(
+        provenance["harbor_agent_config_name"]
+    )
+    if row.get("harness") != expected_agent_name:
+        raise PublishError(
+            f"Harbor row {run_id!r}: harness does not match immutable "
+            "Harbor agent config identity"
+        )
     if not _is_nonnegative_number(provenance["harbor_verifier_time_s"]):
         raise PublishError(f"Harbor row {run_id!r}: invalid harbor_verifier_time_s")
     if provenance["trial_mapping"] != "lexicographic_name_within_task_agent_model":

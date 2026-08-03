@@ -21,6 +21,7 @@ from obench.harbor_results import (
     import_results,
     load_rows,
 )
+from obench.harbor_oauth import AGENT_IMPORT_PATH
 from obench.run import ROW_FIELDS
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -625,7 +626,7 @@ class HarborResultsTests(unittest.TestCase):
         lock_path = fixture.trial() / "lock.json"
         trial_lock = json.loads(lock_path.read_text())
         trial_lock["task"]["name"] = "make-it-run"
-        trial_lock["agent"]["name"] = "spike_agent:OpenBenchSpikeAgent"
+        trial_lock["agent"]["name"] = "codex"
         trial_lock["agent"]["model_name"] = "spike/no-llm"
         _write_json(lock_path, trial_lock)
         job_lock_path = fixture.root / "lock.json"
@@ -639,7 +640,7 @@ class HarborResultsTests(unittest.TestCase):
         result["source"] = None
         result["task_checksum"] = "c" * 64
         result["config"]["agent"] = {
-            "name": "spike_agent:OpenBenchSpikeAgent",
+            "name": "codex",
             "model_name": "spike/no-llm",
             "skills": [],
             "resume_trajectory": False,
@@ -648,7 +649,7 @@ class HarborResultsTests(unittest.TestCase):
             "mcp_servers": [],
         }
         result["agent_info"] = {
-            "name": "openbench-spike",
+            "name": "codex",
             "version": "0.1.0",
             "model_info": {"name": "no-llm", "provider": "spike"},
         }
@@ -658,7 +659,7 @@ class HarborResultsTests(unittest.TestCase):
             "n_output_tokens": None,
             "cost_usd": None,
             "rollout_details": None,
-            "metadata": {"spike": "custom-base-agent"},
+            "metadata": {"artifact_shape": "no-token-usage"},
         }
         _write_json(result_path, result)
         _write_json(
@@ -667,7 +668,7 @@ class HarborResultsTests(unittest.TestCase):
                 "schema_version": "ATIF-v1.7",
                 "session_id": result["id"],
                 "agent": {
-                    "name": "openbench-spike",
+                    "name": "codex",
                     "version": "0.1.0",
                     "model_name": "spike/no-llm",
                 },
@@ -695,7 +696,7 @@ class HarborResultsTests(unittest.TestCase):
             "n_cancelled_trials": 0,
             "n_retries": 0,
             "evals": {
-                "openbench-spike__no-llm__adhoc": {
+                "codex__no-llm__adhoc": {
                     "n_trials": 1,
                     "n_errors": 0,
                     "metrics": [{"mean": 1.0}],
@@ -714,13 +715,66 @@ class HarborResultsTests(unittest.TestCase):
         _write_json(job_result_path, job_result)
 
         row = load_rows(fixture.root)[0]
-        self.assertEqual(row["harness"], "openbench-spike")
+        self.assertEqual(row["harness"], "codex")
         self.assertEqual(row["model"], "spike/no-llm")
         self.assertEqual(row["token_basis"], "unmetered")
         self.assertEqual(
             row["candidate_provenance"]["harbor_git_commit_hash"],
             "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767",
         )
+
+    def test_accepts_pinned_oauth_agent_semantic_alias(self):
+        fixture = GoldenHarborJob(
+            self.root / "job-oauth-alias",
+            specs=[
+                {
+                    "name": "alpha__oauth",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000004",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        lock_path = fixture.trial() / "lock.json"
+        trial_lock = json.loads(lock_path.read_text())
+        trial_lock["agent"]["name"] = AGENT_IMPORT_PATH
+        _write_json(lock_path, trial_lock)
+
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"] = [trial_lock]
+        _write_json(job_lock_path, job_lock)
+
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["config"]["agent"]["name"] = AGENT_IMPORT_PATH
+        _write_json(result_path, result)
+
+        row = load_rows(fixture.root)[0]
+        self.assertEqual(row["harness"], "codex")
+        self.assertEqual(
+            row["candidate_provenance"]["harbor_agent_config_name"],
+            AGENT_IMPORT_PATH,
+        )
+
+    def test_rejects_coherent_result_and_atif_agent_relabeling(self):
+        fixture = self.fixture()
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["agent_info"]["name"] = "other-agent"
+        _write_json(result_path, result)
+
+        trajectory_path = fixture.trial() / "agent" / "trajectory.json"
+        trajectory = json.loads(trajectory_path.read_text())
+        trajectory["agent"]["name"] = "other-agent"
+        _write_json(trajectory_path, trajectory)
+
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "does not match immutable trial-lock agent identity",
+        ):
+            load_rows(fixture.root)
 
     def test_rejects_random_incomplete_and_duplicate_trials(self):
         fixture = GoldenHarborJob(self.root / "job-random")
