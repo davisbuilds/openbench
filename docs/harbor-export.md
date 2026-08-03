@@ -118,7 +118,7 @@ metering, report), use [`obench import harbor`](harbor-import.md).
 | **Checker visibility** | Checker + `checker_data` live under `tests/`, which Harbor copies to `/tests` at verify time (not part of the agent’s starting workdir). Separate verifier images (`[verifier.environment]`) are **not** emitted by default — enable manually if you need a harder anti-cheat boundary. |
 | **Base image** | `python:3.11-slim` (bash + python3). Harbor’s hello-world example uses `ubuntu:24.04`; override with `--base-image` if you need apt-heavy tooling. |
 | **Schema contract** | Pinned Harbor `0.20.0` source defaults tasks and templates to `schema_version = "1.4"`. The exporter emits **1.4**, including `[task].version` and final `/app` artifact collection. OpenBench's importer continues accepting 1.3 tasks. |
-| **Auth / metering** | Not bridged. Harbor agents use Harbor’s auth story; OpenBench subscription/OAuth + counting-proxy metering stay on the OpenBench path. |
+| **Auth / metering** | Export itself is credential-free. The optional local Codex bridge runs one exported task with a shared OAuth credential lease (`obench harbor oauth-run`). Imported Harbor usage is explicitly labeled agent-reported; OpenBench counting-proxy metering is not yet bridged into Harbor execution. |
 | **Multi-step Harbor tasks** | Not generated. |
 
 ## Format verification sources (Aug 2026)

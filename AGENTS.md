@@ -69,7 +69,7 @@ run loop, tool set, and permission policy. Tasks are self-contained
 | Publish / verify digests | `obench/publish.py` |
 | Leaderboard site (harness + gateway) | `obench/site.py`, `obench/leaderboard.py`, `docs/site.md` |
 | Counting proxy | `obench/proxy.py` |
-| Harbor export | `obench/export_harbor.py` |
+| Harbor bridge | `obench/export_harbor.py`, `obench/harbor_run.py`, `obench/harbor_results.py` |
 | Versioned packs (tasks + harness) | `obench/packs.py`, `docs/task-packs.md`, `docs/packs.json` |
 | Stock adapters | `obench/adapters/` |
 | Unit tests | `obench/tests/` |
@@ -124,11 +124,15 @@ No live harness or model-API calls; stdlib-only.
   proxy metering for manifests is declaration-driven (`base_url_env` +
   `proxy_route`); candidate auth persist-back defaults off with
   `persist_auth = true` opt-in. Docker image's fixed CLI set remains a follow-up.
-- **P1 — Harbor bridge. [DONE Jul 2026]** One-way exporter
-  `obench export harbor` (`docs/harbor-export.md`): OpenBench task → Harbor
-  task (`checker.sh` + `SCORE:` → `tests/test.sh` writing `reward.txt`); lets
-  companies use Harbor's cloud sandboxes while OpenBench stays the
-  comparison/stats/auth layer.
+- **P1 — Harbor bridge. [DONE Aug 2026]** OpenBench tasks remain the canonical
+  lightweight authoring format, with deterministic conversion to Harbor 0.20
+  tasks (`obench export harbor`) and Harbor-format task import
+  (`obench import harbor`). The optional local Codex OAuth runner
+  (`obench harbor oauth-run`) executes one exported task at a time, and
+  `obench import harbor-results` fail-closed imports pinned Harbor artifacts,
+  ATIF trajectories, verifier evidence, final workspaces, and agent-reported
+  usage for OpenBench reporting/publication. OpenBench does not implement a
+  cloud scheduler; Harbor owns sandbox execution and parallel job orchestration.
 - **P2 — Versioned packs. [DONE Jul 2026]** Task and harness packs as
   versioned, installable-by-name artifacts (`org/pack@version`) via
   `obench pack` (`init` / `install` / `list` / `verify` / `publish-index`):

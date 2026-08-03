@@ -208,10 +208,11 @@ python3 -m obench.scrub .openbench/results/transcripts/ --out scrubbed/
 python3 -m obench.scrub scrubbed/ --check
 ```
 
-## Optional: run the same tasks on Harbor
+## Optional: run the same tasks with Harbor
 
-If you want Harbor’s cloud sandboxes for execution while keeping OpenBench for
-comparison/stats, export your private tasks:
+OpenBench tasks remain the source of truth. Export them deterministically when
+you want Harbor-compatible local or cloud sandbox execution while keeping
+OpenBench for task admission, comparison, reporting, and publication:
 
 ```bash
 obench export harbor --task all --tasks-dir .openbench/tasks --out ./harbor-out
@@ -219,7 +220,11 @@ obench export harbor --task all --tasks-dir .openbench/tasks --out ./harbor-out
 
 See [`harbor-export.md`](harbor-export.md) for the field mapping, reward-path
 fallback used by local polarity checks, and known gaps (network defaults,
-partial-credit mapping, checker visibility).
+partial-credit mapping, checker visibility). For a local one-trial Codex OAuth
+run, export with `--network-mode public`, then use `obench harbor oauth-run` as
+described in [`harbor-oauth.md`](harbor-oauth.md). Import completed pinned
+Harbor 0.20 artifacts with `obench import harbor-results`; the evidence contract
+is documented in [`harbor-results.md`](harbor-results.md).
 
 ## What this path deliberately skips
 
