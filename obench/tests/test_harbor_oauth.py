@@ -6,7 +6,7 @@ import asyncio
 import importlib
 import json
 import os
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import shutil
 import stat
 import sys
@@ -39,6 +39,7 @@ class FakeEnvironment:
         self.remote_files = {}
         self.commands = []
         self.uploads = []
+        self.uploaded_contents = []
         self.downloads = []
         self.logs = []
         self.artifacts = []
@@ -49,7 +50,9 @@ class FakeEnvironment:
         self.uploads.append((source, target_path))
         self.events.append(("upload", target_path))
         with open(source, "rb") as fh:
-            self.remote_files[target_path] = fh.read()
+            content = fh.read()
+            self.remote_files[target_path] = content
+            self.uploaded_contents.append(content)
 
     async def download_file(self, source_path, target_path):
         self.downloads.append((source_path, os.fspath(target_path)))
@@ -86,6 +89,18 @@ class FakeHarborCodex:
 
     def __init__(self, *, extra_env=None, **_kwargs):
         self._extra_env = dict(extra_env or {})
+        self.logs_dir = None
+        self.trajectory = SimpleNamespace(
+            steps=[
+                SimpleNamespace(source="agent", llm_call_count=2),
+                SimpleNamespace(source="agent", llm_call_count=1),
+            ],
+            final_metrics=SimpleNamespace(
+                total_prompt_tokens=30,
+                total_cached_tokens=5,
+                total_completion_tokens=7,
+            ),
+        )
 
     def _get_env(self, key):
         return self._extra_env.get(key)
@@ -119,6 +134,12 @@ class FakeHarborCodex:
                     # Mirrors Harbor's best-effort cleanup block.
                     pass
 
+    def _get_session_dir(self):
+        return Path(self.logs_dir) / "sessions"
+
+    def _convert_events_to_trajectory(self, _session_dir):
+        return self.trajectory
+
 
 class ChangedCleanupHarborCodex(FakeHarborCodex):
     emit_supported_cleanup = False
@@ -142,6 +163,36 @@ def _write(path, content):
 def _copy_input_to_return(config):
     shutil.copyfile(config.auth_json_path, config.auth_return_path)
     os.chmod(config.auth_return_path, 0o600)
+
+
+class FakeMeteringSession:
+    instances = []
+
+    def __init__(self, evidence_dir, trial_id):
+        self.evidence_dir = Path(evidence_dir)
+        self.evidence_path = self.evidence_dir / "harbor-metering.json"
+        self.trial_id = trial_id
+        self.runtime_base_url = "http://host.docker.internal/cell/redacted/codex"
+        self.sealed_usage = None
+        self.closed = False
+        self.__class__.instances.append(self)
+
+    def seal(self, usage, *, proxy_required):
+        self.sealed_usage = usage
+        self.evidence_dir.mkdir(parents=True, exist_ok=True)
+        self.evidence_path.write_text(
+            json.dumps(
+                {
+                    "trial_id": self.trial_id,
+                    "calls": usage.calls,
+                    "proxy_required": proxy_required,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def close(self):
+        self.closed = True
 
 
 class HostOAuthContextTests(unittest.TestCase):
@@ -243,6 +294,7 @@ class HarborAgentHookTests(unittest.IsolatedAsyncioTestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.master = os.path.join(self.tmp.name, "auth.json")
         _write(self.master, OLD_AUTH)
+        FakeMeteringSession.instances = []
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -253,7 +305,18 @@ class HarborAgentHookTests(unittest.IsolatedAsyncioTestCase):
             config = credential.config
             stage_dir = os.path.dirname(config.auth_json_path)
             agent = agent_class(**config.agent_kwargs())
-            result = await agent.run("instruction", environment, SimpleNamespace())
+            agent.logs_dir = Path(self.tmp.name) / "agent"
+            self.last_agent = agent
+            with mock.patch.object(
+                harbor_codex_agent,
+                "HarborMeteringSession",
+                FakeMeteringSession,
+            ):
+                result = await agent.run(
+                    "instruction",
+                    environment,
+                    SimpleNamespace(trial_name="trial-001"),
+                )
             return result, config, stage_dir
 
     async def test_setup_exec_before_run_does_not_enter_oauth_capture(self):
@@ -291,6 +354,12 @@ class HarborAgentHookTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(capture_index, cleanup_index)
         self.assertEqual(environment.remote_files, {})
         self.assertEqual(stat.S_IMODE(os.stat(self.master).st_mode), 0o600)
+        metering = FakeMeteringSession.instances[-1]
+        self.assertTrue(metering.evidence_path.is_file())
+        self.assertTrue(metering.closed)
+        self.assertEqual(metering.sealed_usage.calls, 3)
+        self.assertEqual(metering.sealed_usage.input_tokens, 30)
+        self.assertNotIn("OPENAI_BASE_URL", self.last_agent._extra_env)
 
         exposed = json.dumps({
             "config": config.agent_extra_env(),
@@ -310,6 +379,47 @@ class HarborAgentHookTests(unittest.IsolatedAsyncioTestCase):
         with open(self.master, "rb") as fh:
             self.assertEqual(fh.read(), ROTATED_AUTH)
         self.assertEqual(environment.remote_files, {})
+        metering = FakeMeteringSession.instances[-1]
+        self.assertTrue(metering.evidence_path.is_file())
+        self.assertTrue(metering.closed)
+        self.assertEqual(metering.sealed_usage.calls, 3)
+        self.assertNotIn("OPENAI_BASE_URL", self.last_agent._extra_env)
+
+    async def test_sequential_runs_refresh_staged_input_and_retain_final_return(self):
+        agent_class = harbor_codex_agent._build_agent_class(FakeHarborCodex)
+        with harbor_oauth.build_harbor_oauth_context(self.master) as credential:
+            agent = agent_class(**credential.config.agent_kwargs())
+            agent.logs_dir = Path(self.tmp.name) / "agent"
+            first = FakeEnvironment(rotated_auth=ROTATED_AUTH)
+            second = FakeEnvironment(rotated_auth=NEWER_AUTH)
+            with mock.patch.object(
+                harbor_codex_agent,
+                "HarborMeteringSession",
+                FakeMeteringSession,
+            ):
+                await agent.run(
+                    "first",
+                    first,
+                    SimpleNamespace(trial_name="trial-001"),
+                )
+                with open(credential.config.auth_json_path, "rb") as handle:
+                    self.assertEqual(handle.read(), ROTATED_AUTH)
+                with open(credential.config.auth_return_path, "rb") as handle:
+                    self.assertEqual(handle.read(), ROTATED_AUTH)
+
+                await agent.run(
+                    "second",
+                    second,
+                    SimpleNamespace(trial_name="trial-002"),
+                )
+                self.assertEqual(second.uploaded_contents[0], ROTATED_AUTH)
+                with open(credential.config.auth_json_path, "rb") as handle:
+                    self.assertEqual(handle.read(), NEWER_AUTH)
+                with open(credential.config.auth_return_path, "rb") as handle:
+                    self.assertEqual(handle.read(), NEWER_AUTH)
+
+        with open(self.master, "rb") as handle:
+            self.assertEqual(handle.read(), NEWER_AUTH)
 
     async def test_capture_failure_is_fail_closed_but_cleanup_still_runs(self):
         environment = FakeEnvironment(download_failure=True)

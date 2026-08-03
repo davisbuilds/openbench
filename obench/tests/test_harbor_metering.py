@@ -260,7 +260,7 @@ class HarborMeteringContractTests(unittest.TestCase):
         usage = harbor_metering.UsageCounters.from_openbench_row(row)
         self.assertEqual(
             usage,
-            harbor_metering.UsageCounters(2, 100, 20, 7),
+            harbor_metering.UsageCounters(None, 100, 20, 7),
         )
         evidence = {
             "schema_version": harbor_metering.SCHEMA_VERSION,
@@ -282,6 +282,37 @@ class HarborMeteringContractTests(unittest.TestCase):
         self.assertEqual(updated["token_basis_proxy"], "proxy_measured")
         gate = updated["candidate_provenance"]["harbor_metering"]["publication"]
         self.assertTrue(gate["eligible"])
+
+    def test_atif_usage_sums_llm_call_count_not_step_count(self):
+        trajectory = {
+            "steps": [
+                {"source": "user", "llm_call_count": None},
+                {"source": "agent", "llm_call_count": 2},
+                {"source": "agent", "llm_call_count": 0},
+                {"source": "agent", "llm_call_count": 1},
+            ],
+            "final_metrics": {
+                "total_prompt_tokens": 120,
+                "total_cached_tokens": 20,
+                "total_completion_tokens": 9,
+            },
+        }
+        self.assertEqual(
+            harbor_metering.UsageCounters.from_atif_trajectory(trajectory),
+            harbor_metering.UsageCounters(3, 120, 20, 9),
+        )
+
+    def test_atif_missing_llm_call_count_is_incomplete(self):
+        trajectory = {
+            "steps": [{"source": "agent", "llm_call_count": None}],
+            "final_metrics": {
+                "total_prompt_tokens": 1,
+                "total_cached_tokens": 0,
+                "total_completion_tokens": 1,
+            },
+        }
+        usage = harbor_metering.UsageCounters.from_atif_trajectory(trajectory)
+        self.assertIsNone(usage.calls)
 
     def test_loader_rejects_symlink_and_invalid_status(self):
         with tempfile.TemporaryDirectory() as temp:

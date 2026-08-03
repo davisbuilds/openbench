@@ -54,15 +54,46 @@ class UsageCounters:
 
     @classmethod
     def from_openbench_row(cls, row: Mapping[str, Any]) -> "UsageCounters":
-        """Map a normalized Harbor row to the pinned Codex accounting basis."""
+        """Map row token totals; call count must come from the ATIF trajectory."""
         uncached = _optional_int(row.get("tokens_input_uncached"))
         cache = _optional_int(row.get("tokens_cache_read"))
         total_input = None if uncached is None or cache is None else uncached + cache
         return cls(
-            calls=_optional_int(row.get("turns")),
+            calls=None,
             input_tokens=total_input,
             cache_tokens=cache,
             output_tokens=_optional_int(row.get("tokens_output")),
+        )
+
+    @classmethod
+    def from_atif_trajectory(cls, trajectory: Any) -> "UsageCounters":
+        """Use ATIF-v1.7 ``llm_call_count`` and final token metrics."""
+        if trajectory is None:
+            return cls(None, None, None, None)
+        steps = _member(trajectory, "steps")
+        if not isinstance(steps, (list, tuple)):
+            calls = None
+        else:
+            counts = []
+            calls_complete = True
+            for step in steps:
+                if _member(step, "source") != "agent":
+                    continue
+                count = _optional_int(_member(step, "llm_call_count"))
+                if count is None:
+                    calls_complete = False
+                    break
+                counts.append(count)
+            calls = sum(counts) if calls_complete else None
+
+        metrics = _member(trajectory, "final_metrics")
+        return cls(
+            calls=calls,
+            input_tokens=_optional_int(_member(metrics, "total_prompt_tokens")),
+            cache_tokens=_optional_int(_member(metrics, "total_cached_tokens")),
+            output_tokens=_optional_int(
+                _member(metrics, "total_completion_tokens")
+            ),
         )
 
 
@@ -282,6 +313,13 @@ class HarborMeteringSession:
         return environment
 
     @property
+    def runtime_base_url(self) -> str:
+        """Ephemeral endpoint for an in-process Harbor agent integration."""
+        if self._closed:
+            raise HarborMeteringError("metering session is closed")
+        return self._base_url
+
+    @property
     def server(self):
         """The owned CountingProxy server, exposed for lifecycle integration/tests."""
         return self._server
@@ -467,6 +505,12 @@ def _optional_int(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
     return value
+
+
+def _member(value: Any, name: str) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(name)
+    return getattr(value, name, None)
 
 
 def _mkdir_private(path: Path) -> None:
