@@ -271,7 +271,7 @@ def write_site_index(site_dir, releases=None, community=None, packs=None):
     return info["html_path"]
 
 
-def sync_community_to_site(community_dir, site_dir):
+def sync_community_to_site(community_dir, site_dir, tasks_dirs=None):
     """Copy accepted bundles to the Pages site and refresh manifests/index.
 
     Writes ``site_dir/community.json``, copies each bundle under
@@ -281,6 +281,18 @@ def sync_community_to_site(community_dir, site_dir):
     community_dir = os.path.abspath(community_dir)
     site_dir = os.path.abspath(site_dir)
     submissions = discover_submissions(community_dir)
+    failures = []
+    for submission in submissions:
+        checks, code = verify_submission(submission, tasks_dirs=tasks_dirs)
+        if code:
+            failed = ", ".join(
+                item["name"] for item in checks if item["status"] != "PASS"
+            )
+            failures.append(f"{submission['id']}: {failed}")
+    if failures:
+        raise CommunityError(
+            "refusing to sync unverified submission(s): " + "; ".join(failures)
+        )
     manifest = build_community_manifest(submissions)
 
     site_community = os.path.join(site_dir, "community")
@@ -361,6 +373,10 @@ def main(argv=None):
         "--site-dir", default=None,
         help="GitHub Pages site directory (default: ./docs)",
     )
+    p_sync.add_argument(
+        "--tasks-dir", action="append", default=None,
+        help="task root for content digests (repeatable)",
+    )
 
     p_list = sub.add_parser(
         "list",
@@ -381,8 +397,10 @@ def main(argv=None):
 
     if args.command == "sync":
         site_dir = args.site_dir or _default_site_dir()
+        tasks_dirs = _resolve_tasks_dirs(args.tasks_dir)
         try:
-            info = sync_community_to_site(community_dir, site_dir)
+            info = sync_community_to_site(
+                community_dir, site_dir, tasks_dirs=tasks_dirs)
         except CommunityError as exc:
             print(f"community: {exc}", file=sys.stderr)
             return 2

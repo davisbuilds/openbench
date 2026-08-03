@@ -25,7 +25,7 @@ import sys
 import tomllib
 from collections import defaultdict
 
-from . import stats
+from . import publish, stats
 from .paths import SOURCE_ROOT
 
 METHODOLOGY_NOTE = (
@@ -92,27 +92,37 @@ def _load_manifest_list(path):
 
 
 
-def _results_verification_error(bundle_dir):
-    """Return why a result bundle is not digest-verified, else ``None``."""
+def _default_tasks_dirs(site_dir):
+    """Resolve source-backed task roots for repository leaderboard builds."""
+    repo_root = os.path.dirname(os.path.abspath(site_dir))
+    candidates = [
+        os.path.join(repo_root, "tasks"),
+        os.path.join(repo_root, "tasks-imported", "terminal-bench"),
+        *stats.DEFAULT_TASK_DIRS,
+    ]
+    roots = []
+    seen = set()
+    for path in candidates:
+        normalized = os.path.realpath(path)
+        if os.path.isdir(normalized) and normalized not in seen:
+            roots.append(normalized)
+            seen.add(normalized)
+    return roots
+
+
+def _results_verification_error(bundle_dir, tasks_dirs):
+    """Return why a result bundle fails source-backed publish verification."""
     results_path = os.path.join(bundle_dir, "results.jsonl")
     provenance_path = os.path.join(bundle_dir, "provenance.json")
     if not os.path.isfile(results_path):
         return "no results.jsonl (HTML-only release page)"
     if not os.path.isfile(provenance_path):
         return "missing provenance.json (results are not verified)"
-    try:
-        provenance = _read_json(provenance_path)
-    except (OSError, json.JSONDecodeError):
-        return "invalid provenance.json (results are not verified)"
-    expected = provenance.get("results_sha256") if isinstance(provenance, dict) else None
-    if not isinstance(expected, str) or not expected:
-        return "missing results_sha256 in provenance.json"
-    digest = hashlib.sha256()
-    with open(results_path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    if digest.hexdigest() != expected:
-        return "results_sha256 mismatch"
+    checks = publish.verify_bundle(
+        bundle_dir, tasks_dirs=tasks_dirs, verify_task_trees=True)
+    failed = [item for item in checks if item["status"] != "PASS"]
+    if failed:
+        return "; ".join(f"{item['name']}: {item['detail']}" for item in failed)
     return None
 
 
@@ -373,10 +383,17 @@ def token_telemetry_per_solve(rows, solved=None):
     }
 
 
-def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
+def aggregate_bundle(
+    bundle_dir, *, kind, manifest_entry=None, site_dir=None, tasks_dirs=None,
+):
     """Aggregate one bundle. Returns None when results.jsonl is missing."""
     results_path = os.path.join(bundle_dir, "results.jsonl")
-    if _results_verification_error(bundle_dir) is not None:
+    if tasks_dirs is None:
+        inferred_site = site_dir or os.path.join(
+            os.path.dirname(bundle_dir), "docs"
+        )
+        tasks_dirs = _default_tasks_dirs(inferred_site)
+    if _results_verification_error(bundle_dir, tasks_dirs) is not None:
         return None
 
     meta = _bundle_meta(bundle_dir, kind, manifest_entry=manifest_entry)
@@ -464,9 +481,13 @@ def aggregate_bundle(bundle_dir, *, kind, manifest_entry=None, site_dir=None):
     }
 
 
-def build_leaderboard(site_dir, community_dir=None):
+def build_leaderboard(site_dir, community_dir=None, tasks_dirs=None):
     """Scan bundles and return the deterministic leaderboard document."""
     site_dir = os.path.abspath(site_dir)
+    if tasks_dirs is None:
+        tasks_dirs = _default_tasks_dirs(site_dir)
+    else:
+        tasks_dirs = stats.parse_tasks_dirs(tasks_dirs)
     bundles = []
     skipped = []
     by_sha = {}
@@ -476,7 +497,7 @@ def build_leaderboard(site_dir, community_dir=None):
         if not isinstance(entry, dict) or not entry.get("id"):
             continue
         bundle_dir = os.path.join(site_dir, "releases", entry["id"])
-        verification_error = _results_verification_error(bundle_dir)
+        verification_error = _results_verification_error(bundle_dir, tasks_dirs)
         if verification_error:
             skipped.append({
                 "id": entry["id"],
@@ -488,7 +509,7 @@ def build_leaderboard(site_dir, community_dir=None):
     for kind, bundle_dir, manifest_entry in discover_bundle_dirs(
         site_dir, community_dir=community_dir
     ):
-        verification_error = _results_verification_error(bundle_dir)
+        verification_error = _results_verification_error(bundle_dir, tasks_dirs)
         if verification_error:
             bundle_id = ((manifest_entry or {}).get("id")
                          or os.path.basename(bundle_dir))
@@ -502,6 +523,7 @@ def build_leaderboard(site_dir, community_dir=None):
             continue
         bundled = aggregate_bundle(
             bundle_dir, kind=kind, manifest_entry=manifest_entry, site_dir=site_dir,
+            tasks_dirs=tasks_dirs,
         )
         if bundled is None:
             continue

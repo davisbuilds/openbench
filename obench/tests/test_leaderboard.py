@@ -66,6 +66,7 @@ def _publish_bundle(out_dir, tasks_dir, rows, *, title="Test card"):
     _write_results(results, rows)
     return publish.create_bundle(
         results, out_dir, tasks_dirs=[tasks_dir], title=title,
+        allow_incomplete=True,
     )
 
 
@@ -390,6 +391,30 @@ class BuildLeaderboardTests(unittest.TestCase):
         page = site.render_board_html(site.build_board(self.site))
         self.assertIn("Not ranked", page)
         self.assertIn("missing provenance.json", page)
+
+    def test_recomputes_task_tree_before_ranking(self):
+        rows = [
+            _row("pi", "alpha", 1, True),
+            _row("null", "alpha", 1, False),
+        ]
+        rel = self._release_bundle("forged-task-tree", rows)
+        _write(
+            os.path.join(self.site, "releases.json"),
+            json.dumps([rel], indent=2) + "\n",
+        )
+        _write(os.path.join(self.site, "community.json"), "[]\n")
+        provenance_path = os.path.join(
+            self.site, "releases", rel["id"], "provenance.json"
+        )
+        with open(provenance_path, encoding="utf-8") as fh:
+            provenance = json.load(fh)
+        provenance["tasks"][0]["content_digest"] = "0" * 64
+        with open(provenance_path, "w", encoding="utf-8") as fh:
+            json.dump(provenance, fh)
+
+        doc = leaderboard.build_leaderboard(self.site)
+        self.assertEqual(doc["bundle_count"], 0)
+        self.assertIn("task_digest:alpha", doc["skipped"][0]["reason"])
 
     def test_write_leaderboard_and_index_link(self):
         rows = [
