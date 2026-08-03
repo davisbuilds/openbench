@@ -96,6 +96,13 @@ four gateways, use
 It schedules five repetitions and caps each generated response at 128 tokens.
 Replace its illustrative 32-hex Cloudflare account ID before running.
 
+For the publish-sized DeepSeek V4 Flash comparison, use
+[`gateway-probe-deepseek-v4-flash-five-way-chat.toml`](../obench/examples/gateway-probe-deepseek-v4-flash-five-way-chat.toml).
+It schedules 50 cold and 50 warm requests per route, locks every gateway to the
+DeepSeek provider, and seals thinking mode with `reasoning_effort = "high"` in
+the experiment and public evidence. Chat Completions is used because all five
+managed routes support that common protocol for this model.
+
 ```bash
 export OPENAI_API_KEY=...
 export OPENROUTER_API_KEY=...
@@ -112,6 +119,8 @@ export OPENBENCH_GATEWAY_FROZEN_PRICES_JSON='{
 ```
 
 The Kimi K3 example uses `MOONSHOT_API_KEY` instead of `OPENAI_API_KEY`.
+The DeepSeek V4 Flash example uses `DEEPSEEK_API_KEY` instead of
+`OPENAI_API_KEY`.
 
 The prices above illustrate the required shape; verify current prices before a
 real run.
