@@ -91,19 +91,20 @@ def main(argv: list[str] | None = None) -> int:
             harbor_binary=args.harbor_binary,
             run_process=process_runner,
         )
-    except HarborOAuthError as exc:
+    except (HarborRunError, HarborOAuthError, OSError, ValueError) as exc:
         if process_runner.harbor_returncode is not None:
             returncode = process_runner.harbor_returncode
             print(
                 f"ERROR: Harbor exited with code {returncode}, but OAuth "
-                f"credential finalization failed: {exc}",
+                f"credential finalization failed ({type(exc).__name__})",
                 file=sys.stderr,
             )
             return returncode if returncode != 0 else 2
-        print(f"ERROR: Harbor OAuth run could not start: {exc}", file=sys.stderr)
-        return 2
-    except (HarborRunError, OSError) as exc:
-        print(f"ERROR: Harbor OAuth run could not start: {exc}", file=sys.stderr)
+        if isinstance(exc, (HarborRunError, HarborOAuthError)):
+            detail = f": {exc}"
+        else:
+            detail = f" ({type(exc).__name__})"
+        print(f"ERROR: Harbor OAuth run could not start{detail}", file=sys.stderr)
         return 2
 
     message = (

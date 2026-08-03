@@ -184,7 +184,7 @@ class HarborCliTests(unittest.TestCase):
         self.assertEqual(
             stderr,
             "ERROR: Harbor exited with code 9, but OAuth credential "
-            "finalization failed: returned auth.json is missing\n",
+            "finalization failed (HarborOAuthError)\n",
         )
 
     def test_post_run_oauth_error_after_zero_exit_cannot_report_success(self):
@@ -212,6 +212,39 @@ class HarborCliTests(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn("Harbor exited with code 0", stderr)
         self.assertIn("credential finalization failed", stderr)
+
+    def test_generic_post_run_failures_report_status_without_exception_text(self):
+        argv = [
+            "oauth-run",
+            "--task=/tmp/exported-task",
+            "--model=openai/gpt-5",
+            "--master-auth-json=/secure/auth.json",
+            "--jobs-dir=/tmp/jobs",
+            "--job-name=finalization-error",
+        ]
+        secret = "credential-bytes-must-not-appear"
+
+        for error in (
+            ValueError(secret),
+            OSError(secret),
+        ):
+            with self.subTest(error=type(error).__name__):
+                def fail_after_harbor(**kwargs):
+                    kwargs["run_process"].harbor_returncode = 23
+                    raise error
+
+                with mock.patch.object(
+                    harbor_cli,
+                    "run_harbor_oauth",
+                    side_effect=fail_after_harbor,
+                ):
+                    code, stdout, stderr = self._invoke(argv)
+
+                self.assertEqual(code, 23)
+                self.assertEqual(stdout, "")
+                self.assertIn("Harbor exited with code 23", stderr)
+                self.assertIn(type(error).__name__, stderr)
+                self.assertNotIn(secret, stderr)
 
 
 if __name__ == "__main__":
