@@ -177,6 +177,44 @@ class TestAuthFileLease(unittest.TestCase):
 
 
 class TestLocalAdapterPersist(unittest.TestCase):
+    def test_codex_holds_master_lease_from_stage_through_persist(self):
+        codex = _load_adapter("codex")
+        with tempfile.TemporaryDirectory() as td:
+            codex_home = os.path.join(td, "master-home")
+            os.makedirs(codex_home)
+            master = os.path.join(codex_home, "auth.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+
+            def completed_run(cmd, cwd, capture_output, text, timeout, stdin, env):
+                del cmd, cwd, capture_output, text, timeout, stdin
+                with self.assertRaises(
+                    auth_persist.CredentialLeaseUnavailableError
+                ):
+                    with auth_persist.auth_file_lease(master, blocking=False):
+                        self.fail("concurrent consumer acquired Codex lease")
+                isolated = os.path.join(env["CODEX_HOME"], "auth.json")
+                with open(isolated, "wb") as fh:
+                    fh.write(
+                        b'{"account_id":"owner","refresh_token":"rotated"}'
+                    )
+                return SimpleNamespace(
+                    returncode=0, stdout="", stderr=""
+                )
+
+            with mock.patch.dict(
+                os.environ, {"CODEX_HOME": codex_home}, clear=False
+            ), mock.patch.object(
+                codex.subprocess, "run", side_effect=completed_run
+            ):
+                result = codex.run(
+                    "task", td, "gpt-5.5-medium", 10
+                )
+
+            self.assertTrue(result["completed"])
+            with open(master, "rb") as fh:
+                self.assertIn(b'"rotated"', fh.read())
+
     def test_pi_persists_rotation_even_when_cli_fails(self):
         pi = _load_adapter("pi")
         with tempfile.TemporaryDirectory() as td:

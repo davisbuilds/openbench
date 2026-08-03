@@ -18,9 +18,9 @@ import shutil
 import tempfile
 
 try:
-    from obench.auth_persist import try_persist_auth_file
+    from obench.auth_persist import auth_file_lease
 except ImportError:  # file-path / Docker mount layout
-    from auth_persist import try_persist_auth_file
+    from auth_persist import auth_file_lease
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
@@ -92,7 +92,14 @@ def _variant_paths(variant, ablation_root=None):
     return config_path, instructions_src, config_text
 
 
-def compose_codex_home(variant, codex_home, *, source_codex_home=None, ablation_root=None):
+def compose_codex_home(
+    variant,
+    codex_home,
+    *,
+    source_codex_home=None,
+    ablation_root=None,
+    credential_lease=None,
+):
     """Populate ``codex_home`` for an ablation run and return path metadata.
 
     ``auth.json`` is copied from ``source_codex_home`` (or runtime ``$CODEX_HOME``
@@ -117,7 +124,10 @@ def compose_codex_home(variant, codex_home, *, source_codex_home=None, ablation_
     if not os.path.isfile(auth_src):
         raise FileNotFoundError(f"missing Codex auth.json at {auth_src}")
     auth_dst = os.path.join(codex_home, "auth.json")
-    shutil.copy2(auth_src, auth_dst)
+    if credential_lease is None:
+        shutil.copy2(auth_src, auth_dst)
+    else:
+        credential_lease.stage(auth_dst)
 
     return {
         "codex_home": os.path.abspath(codex_home),
@@ -142,17 +152,25 @@ def _setup_needed(exc):
 
 def run_variant(name, variant, instruction, workdir, model, timeout_s):
     with tempfile.TemporaryDirectory(prefix=f"{name}_codex_home_") as codex_home:
-        try:
-            metadata = compose_codex_home(variant, codex_home)
-        except (OSError, ValueError) as exc:
-            return _setup_needed(exc)
-        try:
-            return _codex.run(
-                instruction,
-                workdir,
-                model,
-                timeout_s,
-                env_override={"CODEX_HOME": codex_home},
+        auth_src = os.path.join(_source_codex_home(), "auth.json")
+        if not os.path.isfile(auth_src):
+            return _setup_needed(
+                FileNotFoundError(f"missing Codex auth.json at {auth_src}")
             )
-        finally:
-            try_persist_auth_file(metadata["auth"], metadata["auth_source"])
+        with auth_file_lease(auth_src) as lease:
+            try:
+                metadata = compose_codex_home(
+                    variant, codex_home, credential_lease=lease
+                )
+            except (OSError, ValueError) as exc:
+                return _setup_needed(exc)
+            try:
+                return _codex.run(
+                    instruction,
+                    workdir,
+                    model,
+                    timeout_s,
+                    env_override={"CODEX_HOME": codex_home},
+                )
+            finally:
+                lease.try_persist(metadata["auth"])

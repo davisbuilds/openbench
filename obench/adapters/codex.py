@@ -54,9 +54,9 @@ import subprocess
 import tempfile
 
 try:
-    from obench.auth_persist import try_persist_auth_file
+    from obench.auth_persist import auth_file_lease
 except ImportError:  # file-path / Docker mount layout
-    from auth_persist import try_persist_auth_file
+    from auth_persist import auth_file_lease
 
 NAME = "codex"
 _EXE = "codex"
@@ -449,12 +449,20 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
     # adapters supply their own already-composed CODEX_HOME via env_override.
     isolated_home = None
     auth_src = None
+    auth_lease = None
     if not (env_override and "CODEX_HOME" in env_override):
         isolated_home = tempfile.mkdtemp(prefix="codex_home_")
         auth_root = os.path.expanduser(os.environ.get("CODEX_HOME") or "~/.codex")
         auth_src = os.path.join(auth_root, "auth.json")
         if os.path.isfile(auth_src):
-            shutil.copy2(auth_src, os.path.join(isolated_home, "auth.json"))
+            try:
+                auth_lease = auth_file_lease(auth_src).__enter__()
+                auth_lease.stage(os.path.join(isolated_home, "auth.json"))
+            except BaseException:
+                if auth_lease is not None:
+                    auth_lease.__exit__(None, None, None)
+                shutil.rmtree(isolated_home, ignore_errors=True)
+                raise
         child_env["CODEX_HOME"] = isolated_home
 
     try:
@@ -481,10 +489,14 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int, env_override
                 **_empty_token_usage(),
             }
     finally:
-        if isolated_home and auth_src:
-            try_persist_auth_file(os.path.join(isolated_home, "auth.json"), auth_src)
-        if isolated_home:
-            shutil.rmtree(isolated_home, ignore_errors=True)
+        try:
+            if isolated_home and auth_lease:
+                auth_lease.try_persist(os.path.join(isolated_home, "auth.json"))
+        finally:
+            if auth_lease:
+                auth_lease.__exit__(None, None, None)
+            if isolated_home:
+                shutil.rmtree(isolated_home, ignore_errors=True)
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     try:
