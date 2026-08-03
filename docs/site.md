@@ -132,11 +132,14 @@ uncached-input, output, cache-read, and cache-write traffic per solve; `$/solve`
 when the model has a configured price in `prices.json`; and exact telemetry
 source, basis, and row coverage.
 
-One complete telemetry lane is selected for each arm: complete counting-proxy
-splits are preferred, otherwise complete native harness splits are used. Sources
-are never mixed row by row. Incomplete lanes fail closed and display coverage
-instead of a potentially biased token figure. Per-solve token traffic sums every
-matched attempt, including failures, and divides by solved cells.
+One telemetry lane is selected for each arm: counting-proxy splits are
+preferred, otherwise native harness splits are used. A lane must report
+uncached input, output, and cache-read traffic for every row; sources are never
+mixed row by row. Cache-write traffic is displayed only when every selected row
+reports it, and its absence does not discard the other measured splits.
+Incomplete core lanes fail closed and display coverage instead of a potentially
+biased token figure. Per-solve token traffic sums every matched attempt,
+including failures, and divides by solved cells.
 
 **Gateway Bench.** Cold and warm request conditions render in separate tables.
 Each route row includes the provider logo, followed by TTFT, stream total,
@@ -229,6 +232,9 @@ directions — including flipping `color-scheme` back for native form controls.
 - **Caveats sit next to scores.** A bundle's disclosed caveats are shown on its
   board, not in a footnote, and boards with caveats can be filtered out.
 - **Unverifiable results are not ranked.** HTML-only release cards and bundles
-  failing digest verification appear in a "not ranked" list with the reason.
+  failing result, provenance, or execution-evidence verification appear in a
+  "not ranked" list with the reason. A current checkout that no longer contains
+  the archived task tree does not erase a result-sealed release; the board
+  discloses that drift and retains the run-time task digest.
 
 Regenerate after adding or updating any bundle so the Pages site stays in sync.

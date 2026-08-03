@@ -35,9 +35,15 @@ scalar reward in `[0, 1]`, OpenBench verifier evidence, ATIF identity and usage
 totals, job aggregates, artifact status, and duplicate identities.
 The result-reported `agent_info.name` and ATIF agent name must also resolve from
 the immutable trial-lock/config agent identity. Unlisted identities must match
-exactly. The pinned OpenBench OAuth custom agent is the only explicit alias:
-`obench.harbor_agents.codex:OpenBenchCodexOAuth` reports `codex`. Any other
-custom identity that reports a different semantic name is rejected.
+exactly. The pinned OpenBench OAuth profile imports are explicit aliases for
+`codex`, `pi`, and `opencode`. Any other custom identity that reports a
+different semantic name is rejected.
+
+Codex-profile and Pi-profile trials additionally require
+`agent/harbor-metering/`: one public evidence JSON plus one private durable
+ledger and seal. The importer recomputes the ledger chain, checks the trial and
+harness identity, and requires exact calls/input/cache/output reconciliation
+with ATIF.
 
 Any missing, partial, random, duplicate, unresolved, or contradictory evidence
 rejects the whole job before the output file is opened for append.
@@ -50,8 +56,8 @@ it does not claim that trials are temporal matched blocks.
 
 - `exec_mode` is `harbor`.
 - Harbor's `agent_result` usage is labeled `harbor_agent_reported`.
-- All proxy token fields remain null and provenance records
-  `proxy_measured: false`.
+- Required metered profiles also receive `proxy_measured` fields. Missing,
+  incomplete, or mismatched metering rejects the job.
 - `success` is strictly `checker_exit == 0`, matching `obench.run`; a nonzero
   exit remains unsuccessful even when its parsed and clamped score is `1.0`.
 - `score` and `checker_exit` come from the exporter's
@@ -65,7 +71,7 @@ it does not claim that trials are temporal matched blocks.
 - `candidate_provenance` records Harbor build, job/trial IDs, evidence SHA-256
   digests, both Harbor task hashes, the structured OpenBench scheme-2 task
   content digest, structured exporter parameters, workspace tree digest, usage
-  source, and mapping semantics.
+  source, job retry count/configured maximum, and mapping semantics.
 
 ## Publishing imported rows
 
@@ -75,6 +81,9 @@ contract must be present and internally consistent. Partial Harbor provenance,
 unknown provenance keys, invalid digests, workspace-digest disagreement, proxy
 claims, semantic harness/config identity disagreement, or usage-total
 disagreement fail before a bundle is written.
+For metered profiles, publication additionally requires an exact
+publication-eligible reconciliation and exact equality between proxy and agent
+input/cache/output totals.
 For every Harbor task, the imported scheme-2 execution digest must equal the
 digest recomputed from the local publication task tree. Missing local task
 trees, inconsistent imported digests, or any mismatch fail before the output

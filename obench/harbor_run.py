@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tomllib
+from contextlib import ExitStack
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,18 @@ from obench.harbor_oauth import (
     HarborOAuthConfig,
     HarborOAuthCredential,
 )
+from obench.harbor_job import (
+    AgentProfile,
+    ConcurrencyPolicy,
+    HarborJobArtifact,
+    HarborJobSpec,
+    LocalTaskSet,
+    RetryPolicy,
+    build_command_plan,
+    build_job_config,
+    write_job_config,
+)
+from obench.harbor_profiles import resolve_harbor_profile
 
 HARBOR_VERSION = "0.20.0"
 HARBOR_TASK_SCHEMA_VERSION = "1.4"
@@ -60,6 +73,15 @@ class HarborRunResult:
     @property
     def expected_job_path(self) -> Path:
         return self.plan.expected_job_path
+
+
+@dataclass(frozen=True)
+class HarborProfileJobResult:
+    returncode: int
+    artifact: HarborJobArtifact
+    config_path: Path
+    expected_job_path: Path
+    resumes_existing_job: bool
 
 
 def validate_task_root(task_dir: str | os.PathLike[str]) -> Path:
@@ -308,6 +330,136 @@ def run_harbor_oauth(
         completed = run_process(list(plan.argv), check=False)
 
     return HarborRunResult(returncode=int(completed.returncode), plan=plan)
+
+
+def run_harbor_profile_job(
+    *,
+    exported_tasks_dir: str | os.PathLike[str],
+    task_names: tuple[str, ...],
+    harnesses: tuple[str, ...],
+    model: str,
+    attempts: int,
+    n_concurrent_trials: int,
+    max_retries: int,
+    jobs_dir: str | os.PathLike[str],
+    job_name: str,
+    config_path: str | os.PathLike[str],
+    harbor_binary: str | os.PathLike[str] = "harbor",
+    run_process: ProcessRunner = subprocess.run,
+    which: Which = shutil.which,
+) -> HarborProfileJobResult:
+    """Run one native Harbor task x harness x attempt matrix with OAuth leases."""
+
+    if not harnesses or len(set(harnesses)) != len(harnesses):
+        raise HarborRunError("Harnesses must be a nonempty unique sequence")
+    if not task_names or len(set(task_names)) != len(task_names):
+        raise HarborRunError("Task names must be a nonempty unique sequence")
+    harbor = preflight_harbor_binary(
+        harbor_binary, run_process=run_process, which=which
+    )
+    process_env = dict(os.environ)
+    job_profiles: list[AgentProfile] = []
+    oauth_configs: list[HarborOAuthConfig] = []
+
+    with ExitStack() as stack:
+        for harness in harnesses:
+            profile = resolve_harbor_profile(harness, model)
+            master_path = _resolve_profile_auth_source(
+                harness, profile.auth.source_candidates
+            )
+            credential = stack.enter_context(HarborOAuthCredential(master_path))
+            oauth = credential.config
+            oauth_configs.append(oauth)
+            env_prefix = f"OPENBENCH_HARBOR_{harness.upper()}_AUTH"
+            input_source_env = f"{env_prefix}_INPUT"
+            return_source_env = f"{env_prefix}_RETURN"
+            process_env[input_source_env] = oauth.auth_json_path
+            process_env[return_source_env] = oauth.auth_return_path
+            job_profiles.append(
+                AgentProfile(
+                    profile_id=harness,
+                    model_name=profile.harbor_model_name,
+                    import_path=profile.agent_import_path,
+                    n_concurrent=profile.auth.max_concurrent_uses,
+                    concurrency_group=profile.auth.concurrency_group,
+                    kwargs=profile.agent_kwargs(),
+                    env={
+                        profile.auth.input_env: f"${{{input_source_env}}}",
+                        profile.auth.return_env: f"${{{return_source_env}}}",
+                    },
+                )
+            )
+
+        artifact = build_job_config(
+            HarborJobSpec(
+                job_name=job_name,
+                jobs_dir=jobs_dir,
+                source=LocalTaskSet(
+                    exported_tasks_dir,
+                    task_names=task_names,
+                ),
+                agent_profiles=tuple(job_profiles),
+                models=(),
+                attempts=attempts,
+                concurrency=ConcurrencyPolicy(
+                    n_concurrent_trials=n_concurrent_trials
+                ),
+                retry=RetryPolicy(max_retries=max_retries),
+            )
+        )
+        written_config = write_job_config(artifact, config_path)
+        plan = build_command_plan(
+            artifact,
+            written_config,
+            harbor_binary=harbor.path,
+        )
+        if plan.resumes_existing_job:
+            for oauth in oauth_configs:
+                _seed_resume_auth_return(oauth)
+        completed = run_process(
+            list(plan.argv),
+            check=False,
+            env=process_env,
+        )
+
+    return HarborProfileJobResult(
+        returncode=int(completed.returncode),
+        artifact=artifact,
+        config_path=written_config,
+        expected_job_path=plan.expected_job_path,
+        resumes_existing_job=plan.resumes_existing_job,
+    )
+
+
+def _resolve_profile_auth_source(
+    harness: str, candidates: tuple[str, ...]
+) -> Path:
+    for candidate in candidates:
+        path = Path(candidate).expanduser()
+        if path.is_file() and not path.is_symlink():
+            return path.resolve()
+    rendered = ", ".join(candidates)
+    raise HarborRunError(
+        f"{harness} OAuth credential is unavailable; checked: {rendered}"
+    )
+
+
+def _seed_resume_auth_return(oauth: HarborOAuthConfig) -> None:
+    """Allow a no-op resume to persist the unchanged staged generation."""
+
+    source = Path(oauth.auth_json_path)
+    destination = Path(oauth.auth_return_path)
+    if destination.exists() or destination.is_symlink():
+        raise HarborRunError(
+            f"OAuth resume return path already exists: {destination}"
+        )
+    try:
+        shutil.copyfile(source, destination)
+        destination.chmod(0o600)
+    except OSError as exc:
+        raise HarborRunError(
+            "Cannot seed OAuth return path for Harbor resume"
+        ) from exc
 
 
 def _validate_model(model: str) -> str:

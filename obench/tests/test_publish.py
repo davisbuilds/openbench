@@ -116,9 +116,13 @@ def _harbor_row(
             },
             "harbor_task_checksum": digest,
             "harbor_agent_config_name": "codex",
+            "harbor_model_name": "model-x",
             "harbor_verifier_time_s": 1.25,
+            "harbor_job_retries": 0,
+            "harbor_job_max_retries": 1,
             "usage_source": "harbor_agent_reported",
             "proxy_measured": False,
+            "harbor_metering": None,
             "trial_mapping": "lexicographic_name_within_task_agent_model",
             "temporal_matched_block_claim": False,
         },
@@ -277,12 +281,149 @@ class PublishBundleTests(unittest.TestCase):
         )
         self.assertEqual(harbor_check["status"], "PASS", harbor_check)
 
+    def test_harbor_publish_accepts_exact_proxy_reconciliation(self):
+        harbor_results = os.path.join(self.tmp.name, "harbor-metered.jsonl")
+        row = self._harbor_row(
+            tokens_proxy_calls=1,
+            tokens_proxy_input_uncached=75,
+            tokens_proxy_cache_read=25,
+            tokens_proxy_cache_write=None,
+            tokens_proxy_output=40,
+            tokens_proxy_reasoning=None,
+            token_basis_proxy="proxy_measured",
+            proxy_capture_truncated=None,
+        )
+        row["candidate_provenance"]["proxy_measured"] = True
+        row["candidate_provenance"]["harbor_metering"] = {
+            "schema_version": "openbench.harbor-metering.v2",
+            "reconciliation_status": "exact",
+            "ledger_root_hash": "1" * 64,
+            "ledger_record_count": 2,
+            "model_call_count": 1,
+            "auxiliary_request_count": 1,
+            "publication": {
+                "eligible": True,
+                "blocking_reasons": [],
+            },
+            "proxy_required": True,
+            "evidence_sha256": "2" * 64,
+            "ledger_sha256": "3" * 64,
+        }
+        _write_jsonl(harbor_results, [row])
+
+        provenance = publish.create_bundle(
+            harbor_results,
+            self.out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+
+        evidence = provenance["harbor_import_evidence"][0]
+        self.assertTrue(evidence["candidate_provenance"]["proxy_measured"])
+        self.assertEqual(
+            evidence["candidate_provenance"]["harbor_metering"][
+                "reconciliation_status"
+            ],
+            "exact",
+        )
+        self.assertTrue(
+            all(
+                item["status"] == "PASS"
+                for item in publish.verify_bundle(
+                    self.out,
+                    tasks_dirs=[self.tasks],
+                )
+            )
+        )
+
+    def test_harbor_publish_rejects_proxy_totals_that_disagree(self):
+        harbor_results = os.path.join(self.tmp.name, "harbor-metered-bad.jsonl")
+        row = self._harbor_row(
+            tokens_proxy_calls=1,
+            tokens_proxy_input_uncached=74,
+            tokens_proxy_cache_read=25,
+            tokens_proxy_cache_write=None,
+            tokens_proxy_output=40,
+            tokens_proxy_reasoning=None,
+            token_basis_proxy="proxy_measured",
+            proxy_capture_truncated=None,
+        )
+        row["candidate_provenance"]["proxy_measured"] = True
+        row["candidate_provenance"]["harbor_metering"] = {
+            "schema_version": "openbench.harbor-metering.v2",
+            "reconciliation_status": "exact",
+            "ledger_root_hash": "1" * 64,
+            "ledger_record_count": 2,
+            "model_call_count": 1,
+            "auxiliary_request_count": 1,
+            "publication": {
+                "eligible": True,
+                "blocking_reasons": [],
+            },
+            "proxy_required": True,
+            "evidence_sha256": "2" * 64,
+            "ledger_sha256": "3" * 64,
+        }
+        _write_jsonl(harbor_results, [row])
+
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "proxy totals disagree",
+        ):
+            publish.create_bundle(
+                harbor_results,
+                self.out,
+                tasks_dirs=[self.tasks],
+                scrub_ctx=self.scrub_ctx,
+            )
+
+    def test_harbor_publish_rejects_model_identity_drift(self):
+        harbor_results = os.path.join(self.tmp.name, "harbor-model-drift.jsonl")
+        row = self._harbor_row()
+        row["candidate_provenance"]["harbor_model_name"] = "other-model"
+        _write_jsonl(harbor_results, [row])
+
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "canonical model does not match",
+        ):
+            publish.create_bundle(
+                harbor_results,
+                self.out,
+                tasks_dirs=[self.tasks],
+                scrub_ctx=self.scrub_ctx,
+            )
+
+    def test_harbor_publish_rejects_unmetered_opencode_profile(self):
+        harbor_results = os.path.join(
+            self.tmp.name,
+            "harbor-opencode-unmetered.jsonl",
+        )
+        row = self._harbor_row()
+        row["harness"] = "opencode"
+        row["candidate_provenance"]["harbor_agent_config_name"] = (
+            "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth"
+        )
+        row["candidate_provenance"]["harbor_model_name"] = "openai/model-x"
+        _write_jsonl(harbor_results, [row])
+
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "execution-only",
+        ):
+            publish.create_bundle(
+                harbor_results,
+                self.out,
+                tasks_dirs=[self.tasks],
+                scrub_ctx=self.scrub_ctx,
+            )
+
     def test_harbor_publish_rejects_partial_or_inconsistent_provenance(self):
         cases = []
         for key in (
             "atif_sha256", "openbench_verifier_evidence_sha256",
             "final_workspace_sha256", "openbench_task_content_digest",
-            "openbench_harbor_export", "usage_source",
+            "openbench_harbor_export", "harbor_model_name", "usage_source",
         ):
             row = self._harbor_row()
             del row["candidate_provenance"][key]

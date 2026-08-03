@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import stat
 import subprocess
@@ -10,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from obench import harbor_oauth, harbor_run
+from obench import harbor_oauth, harbor_profiles, harbor_run
 
 
 OLD_AUTH = b'{"account_id":"owner","tokens":{"access_token":"old","refresh_token":"old-r"}}'
@@ -360,6 +361,155 @@ class HarborRunTests(unittest.TestCase):
         runner = PermissionRunner([ROTATED_AUTH])
         self._run(runner)
         self.assertEqual(runner.assertions, (0o700, 0o600))
+
+    def test_profile_job_runs_native_matrix_with_separate_oauth_leases(self):
+        exports = self.root / "exports"
+        for name in ("make-it-run", "fix-failing-test"):
+            task = exports / name
+            task.mkdir(parents=True)
+            (task / "task.toml").write_text(
+                (self.task / "task.toml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            (task / "instruction.md").write_text("Task.\n", encoding="utf-8")
+        codex_auth = self.root / "codex-auth.json"
+        pi_auth = self.root / "pi-auth.json"
+        _write_private(codex_auth, OLD_AUTH)
+        _write_private(pi_auth, b'{"openai-codex":{"type":"oauth"}}')
+        config = self.root / "profile-job.json"
+        stage_dirs: list[Path] = []
+
+        def profile(harness: str, model: str):
+            resolved = harbor_profiles.resolve_harbor_profile(harness, model)
+            source = codex_auth if harness == "codex" else pi_auth
+            return replace(
+                resolved,
+                auth=replace(
+                    resolved.auth,
+                    source_candidates=(str(source),),
+                ),
+            )
+
+        def runner(argv, **kwargs):
+            argv = list(argv)
+            if argv[-1] == "--version":
+                return subprocess.CompletedProcess(
+                    argv, 0, stdout="0.20.0\n", stderr=""
+                )
+            env = kwargs["env"]
+            for harness in ("CODEX", "PI"):
+                input_path = Path(
+                    env[f"OPENBENCH_HARBOR_{harness}_AUTH_INPUT"]
+                )
+                return_path = Path(
+                    env[f"OPENBENCH_HARBOR_{harness}_AUTH_RETURN"]
+                )
+                stage_dirs.append(input_path.parent)
+                _write_private(return_path, input_path.read_bytes())
+            return subprocess.CompletedProcess(argv, 0)
+
+        with mock.patch.object(
+            harbor_run,
+            "resolve_harbor_profile",
+            side_effect=profile,
+        ):
+            result = harbor_run.run_harbor_profile_job(
+                exported_tasks_dir=exports,
+                task_names=("make-it-run", "fix-failing-test"),
+                harnesses=("codex", "pi"),
+                model="gpt-5.6-sol",
+                attempts=2,
+                n_concurrent_trials=2,
+                max_retries=1,
+                jobs_dir=self.jobs,
+                job_name="profile-job",
+                config_path=config,
+                harbor_binary=self.harbor,
+                run_process=runner,
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.artifact.trial_count, 8)
+        self.assertEqual(
+            result.expected_job_path,
+            result.artifact.jobs_dir / "profile-job",
+        )
+        rendered = result.artifact.as_dict()
+        self.assertEqual(
+            [agent["model_name"] for agent in rendered["agents"]],
+            ["gpt-5.6-sol", "openai-codex/gpt-5.6-sol"],
+        )
+        self.assertEqual(
+            rendered["datasets"][0]["task_names"],
+            ["fix-failing-test", "make-it-run"],
+        )
+        serialized = result.artifact.json_bytes
+        self.assertNotIn(OLD_AUTH, serialized)
+        self.assertNotIn(pi_auth.read_bytes(), serialized)
+        self.assertEqual(codex_auth.read_bytes(), OLD_AUTH)
+        self.assertEqual(pi_auth.read_bytes(), b'{"openai-codex":{"type":"oauth"}}')
+        self.assertTrue(all(not path.exists() for path in stage_dirs))
+
+    def test_profile_job_noop_resume_persists_unchanged_credentials(self):
+        exports = self.root / "exports"
+        task = exports / "make-it-run"
+        task.mkdir(parents=True)
+        (task / "task.toml").write_text(
+            (self.task / "task.toml").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        (task / "instruction.md").write_text("Task.\n", encoding="utf-8")
+        codex_auth = self.root / "codex-auth.json"
+        _write_private(codex_auth, OLD_AUTH)
+        expected_job = self.jobs / "profile-resume"
+        expected_job.mkdir(parents=True)
+        (expected_job / "config.json").write_text("{}\n", encoding="utf-8")
+        observed_return: list[bytes] = []
+
+        def profile(harness: str, model: str):
+            resolved = harbor_profiles.resolve_harbor_profile(harness, model)
+            return replace(
+                resolved,
+                auth=replace(
+                    resolved.auth,
+                    source_candidates=(str(codex_auth),),
+                ),
+            )
+
+        def runner(argv, **kwargs):
+            argv = list(argv)
+            if argv[-1] == "--version":
+                return subprocess.CompletedProcess(
+                    argv, 0, stdout="0.20.0\n", stderr=""
+                )
+            env = kwargs["env"]
+            return_path = Path(env["OPENBENCH_HARBOR_CODEX_AUTH_RETURN"])
+            observed_return.append(return_path.read_bytes())
+            return subprocess.CompletedProcess(argv, 0)
+
+        with mock.patch.object(
+            harbor_run,
+            "resolve_harbor_profile",
+            side_effect=profile,
+        ):
+            result = harbor_run.run_harbor_profile_job(
+                exported_tasks_dir=exports,
+                task_names=("make-it-run",),
+                harnesses=("codex",),
+                model="gpt-5.6-sol",
+                attempts=1,
+                n_concurrent_trials=1,
+                max_retries=0,
+                jobs_dir=self.jobs,
+                job_name="profile-resume",
+                config_path=self.root / "profile-resume.json",
+                harbor_binary=self.harbor,
+                run_process=runner,
+            )
+
+        self.assertTrue(result.resumes_existing_job)
+        self.assertEqual(observed_return, [OLD_AUTH])
+        self.assertEqual(codex_auth.read_bytes(), OLD_AUTH)
 
 
 if __name__ == "__main__":

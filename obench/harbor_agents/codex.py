@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path, PurePosixPath
 import stat
+import tempfile
 
 from obench.harbor_oauth import (
     CODEX_AUTH_JSON_PATH,
@@ -12,6 +13,11 @@ from obench.harbor_oauth import (
     HarborOAuthCaptureError,
     HarborOAuthSetupError,
     HarborOAuthUnsupportedError,
+)
+from obench.harbor_metering import (
+    HARBOR_BASE_URL_ENV,
+    HarborMeteringSession,
+    UsageCounters,
 )
 
 
@@ -39,6 +45,65 @@ def _validate_host_return_path(path: str) -> None:
         raise HarborOAuthSetupError(
             "OAuth auth-return parent directory must have mode 0700"
         )
+
+
+def _refresh_staged_auth(return_path: str, input_path: str) -> None:
+    """Atomically advance the staged input while retaining the return copy."""
+    return_file = Path(return_path)
+    input_file = Path(input_path)
+    if return_file.parent.resolve() != input_file.parent.resolve():
+        raise HarborOAuthSetupError(
+            "OAuth input and return files must share one private staging directory"
+        )
+    try:
+        source_fd = os.open(
+            return_file,
+            os.O_RDONLY | (getattr(os, "O_NOFOLLOW", 0)),
+        )
+    except OSError as exc:
+        raise HarborOAuthSetupError("returned OAuth auth.json is unavailable") from exc
+    try:
+        source_info = os.fstat(source_fd)
+        if not stat.S_ISREG(source_info.st_mode):
+            raise HarborOAuthSetupError(
+                "returned OAuth auth.json must be a regular file"
+            )
+        chunks = []
+        while True:
+            chunk = os.read(source_fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        content = b"".join(chunks)
+    finally:
+        os.close(source_fd)
+
+    temp_fd, temp_name = tempfile.mkstemp(
+        prefix=".auth-next-",
+        dir=input_file.parent,
+    )
+    try:
+        os.fchmod(temp_fd, 0o600)
+        offset = 0
+        while offset < len(content):
+            offset += os.write(temp_fd, content[offset:])
+        os.fsync(temp_fd)
+        os.close(temp_fd)
+        temp_fd = -1
+        os.replace(temp_name, input_file)
+        os.chmod(input_file, 0o600)
+        directory_fd = os.open(input_file.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if temp_fd >= 0:
+            os.close(temp_fd)
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
 
 
 def _build_agent_class(harbor_codex):
@@ -81,6 +146,10 @@ def _build_agent_class(harbor_codex):
                 info = os.lstat(target)
                 if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
                     raise OSError("downloaded auth return is not a regular file")
+                staged_input = self._get_env(CODEX_AUTH_JSON_PATH)
+                if not staged_input:
+                    raise OSError("staged OAuth input path is unavailable")
+                _refresh_staged_auth(target, staged_input)
             except BaseException as exc:
                 self._oauth_capture_error = HarborOAuthCaptureError(
                     "failed to return Harbor Codex auth.json before cleanup"
@@ -139,6 +208,19 @@ def _build_agent_class(harbor_codex):
                 )
             _validate_host_return_path(return_path)
 
+            logs_dir = Path(self.logs_dir)
+            trial_id = str(
+                getattr(context, "trial_name", None)
+                or logs_dir.parent.name
+                or "harbor-trial"
+            )
+            metering = HarborMeteringSession(
+                logs_dir / "harbor-metering",
+                trial_id,
+            )
+            missing = object()
+            prior_base_url = self._extra_env.get(HARBOR_BASE_URL_ENV, missing)
+            self._extra_env[HARBOR_BASE_URL_ENV] = metering.runtime_base_url
             self._oauth_run_active = True
             self._oauth_return_path = return_path
             self._oauth_capture_attempted = False
@@ -163,8 +245,28 @@ def _build_agent_class(harbor_codex):
                     )
                 return result
             finally:
-                self._oauth_run_active = False
-                self._oauth_return_path = None
+                try:
+                    trajectory = None
+                    try:
+                        session_dir = self._get_session_dir()
+                        if session_dir is not None:
+                            trajectory = self._convert_events_to_trajectory(
+                                session_dir
+                            )
+                    except Exception:
+                        trajectory = None
+                    metering.seal(
+                        UsageCounters.from_atif_trajectory(trajectory),
+                        proxy_required=True,
+                    )
+                finally:
+                    metering.close()
+                    if prior_base_url is missing:
+                        self._extra_env.pop(HARBOR_BASE_URL_ENV, None)
+                    else:
+                        self._extra_env[HARBOR_BASE_URL_ENV] = prior_base_url
+                    self._oauth_run_active = False
+                    self._oauth_return_path = None
 
     OpenBenchCodexOAuth.__name__ = "OpenBenchCodexOAuth"
     OpenBenchCodexOAuth.__qualname__ = "OpenBenchCodexOAuth"

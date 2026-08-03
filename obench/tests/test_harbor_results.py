@@ -24,6 +24,7 @@ from obench.harbor_results import (
     load_rows,
 )
 from obench.harbor_oauth import AGENT_IMPORT_PATH
+from obench.harbor_profiles import OPENCODE_PROFILE_IMPORT
 from obench.run import ROW_FIELDS
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -428,6 +429,18 @@ class HarborResultsTests(unittest.TestCase):
         self.assertEqual(rows[0]["tokens_output"], 40)
         self.assertEqual(rows[0]["tokens"], 115)
         self.assertIsNone(rows[0]["token_basis_proxy"])
+        self.assertEqual(
+            rows[0]["candidate_provenance"]["harbor_job_retries"],
+            0,
+        )
+        self.assertEqual(
+            rows[0]["candidate_provenance"]["harbor_job_max_retries"],
+            0,
+        )
+        self.assertEqual(
+            rows[0]["candidate_provenance"]["harbor_model_name"],
+            "model-x",
+        )
         self.assertIsNone(rows[0]["tokens_proxy_calls"])
         self.assertFalse(rows[0]["candidate_provenance"]["proxy_measured"])
         self.assertEqual(
@@ -451,6 +464,55 @@ class HarborResultsTests(unittest.TestCase):
             self.assertIsInstance(row["checker_exit"], int)
             self.assertIsNone(row["checker_stdout"])
             self.assertIsNone(row["checker_stderr"])
+
+    def test_custom_agent_import_path_is_the_lock_identity(self):
+        fixture = self.fixture()
+        for index in range(len(fixture.specs)):
+            trial_dir = fixture.trial(index)
+            lock_path = trial_dir / "lock.json"
+            lock = json.loads(lock_path.read_text())
+            lock["agent"].pop("name")
+            lock["agent"]["import_path"] = AGENT_IMPORT_PATH
+            _write_json(lock_path, lock)
+
+            result_path = trial_dir / "result.json"
+            result = json.loads(result_path.read_text())
+            result["config"]["agent"]["name"] = None
+            result["config"]["agent"]["import_path"] = AGENT_IMPORT_PATH
+            _write_json(result_path, result)
+
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"] = [
+            json.loads((fixture.trial(index) / "lock.json").read_text())
+            for index in range(len(fixture.specs))
+        ]
+        _write_json(job_lock_path, job_lock)
+
+        rows = load_rows(fixture.root)
+
+        self.assertEqual(len(rows), len(fixture.specs))
+        self.assertTrue(all(row["harness"] == "codex" for row in rows))
+        self.assertTrue(
+            all(
+                row["candidate_provenance"]["harbor_agent_config_name"]
+                == AGENT_IMPORT_PATH
+                for row in rows
+            )
+        )
+
+    def test_agent_lock_requires_name_or_import_path(self):
+        fixture = self.fixture()
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"][0]["agent"].pop("name")
+        _write_json(job_lock_path, job_lock)
+
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            r"job lock\.trials\[0\]\.agent\.import_path",
+        ):
+            load_rows(fixture.root)
 
     def test_import_appends_row_fields_and_rejects_duplicate_without_mutation(self):
         fixture = self.fixture()
@@ -925,6 +987,43 @@ class HarborResultsTests(unittest.TestCase):
             "openai/gpt-5.6-sol",
         )
 
+    def test_profile_atif_steps_accept_only_the_canonical_model_identity(self):
+        fixture = self.qualified_model_fixture(
+            "profile-canonical-step-model",
+            top_level_model="openai/gpt-5.6-sol",
+            step_model="gpt-5.6-sol",
+        )
+        lock_path = fixture.trial() / "lock.json"
+        trial_lock = json.loads(lock_path.read_text())
+        trial_lock["agent"].pop("name")
+        trial_lock["agent"]["import_path"] = OPENCODE_PROFILE_IMPORT
+        _write_json(lock_path, trial_lock)
+
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"][0] = trial_lock
+        _write_json(job_lock_path, job_lock)
+
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["config"]["agent"]["name"] = None
+        result["config"]["agent"]["import_path"] = OPENCODE_PROFILE_IMPORT
+        result["agent_info"]["name"] = "opencode"
+        _write_json(result_path, result)
+
+        trajectory_path = fixture.trial() / "agent" / "trajectory.json"
+        trajectory = json.loads(trajectory_path.read_text())
+        trajectory["agent"]["name"] = "opencode"
+        _write_json(trajectory_path, trajectory)
+
+        row = load_rows(fixture.root)[0]
+
+        self.assertEqual(row["model"], "gpt-5.6-sol")
+        self.assertEqual(
+            row["candidate_provenance"]["harbor_model_name"],
+            "openai/gpt-5.6-sol",
+        )
+
     def test_rejects_unrelated_or_misplaced_atif_model_identities(self):
         cases = (
             ("other-provider/gpt-5.6-sol", "openai/gpt-5.6-sol"),
@@ -1117,6 +1216,44 @@ class HarborResultsTests(unittest.TestCase):
             row["candidate_provenance"]["harbor_agent_config_name"],
             AGENT_IMPORT_PATH,
         )
+
+    def test_profile_agent_requires_durable_proxy_evidence(self):
+        fixture = GoldenHarborJob(
+            self.root / "job-profile-metering-required",
+            specs=[
+                {
+                    "name": "alpha__profile",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000014",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        profile_import = (
+            "obench.harbor_agents.codex_profile:"
+            "OpenBenchCodexOAuthProfile"
+        )
+        lock_path = fixture.trial() / "lock.json"
+        trial_lock = json.loads(lock_path.read_text())
+        trial_lock["agent"]["name"] = profile_import
+        _write_json(lock_path, trial_lock)
+
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"] = [trial_lock]
+        _write_json(job_lock_path, job_lock)
+
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["config"]["agent"]["name"] = profile_import
+        _write_json(result_path, result)
+
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "metering",
+        ):
+            load_rows(fixture.root)
 
     def test_rejects_coherent_result_and_atif_agent_relabeling(self):
         fixture = self.fixture()

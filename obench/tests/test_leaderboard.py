@@ -186,6 +186,31 @@ class AggregateBundleTests(unittest.TestCase):
         self.assertEqual(telemetry["tokens_cache_read_per_solve"], 15.0)
         self.assertEqual(telemetry["tokens_cache_write_per_solve"], 1.5)
 
+    def test_missing_cache_write_keeps_complete_proxy_core_traffic(self):
+        rows = [
+            _row("pi", "alpha", 1, True, tokens=100),
+            _row("pi", "alpha", 2, True, tokens=300),
+        ]
+        for index, row in enumerate(rows, start=1):
+            row.update({
+                "tokens_proxy_input_uncached": 1000 * index,
+                "tokens_proxy_output": 100 * index,
+                "tokens_proxy_cache_read": 10 * index,
+                "tokens_proxy_cache_write": None,
+                "token_basis_proxy": "proxy_measured",
+            })
+
+        telemetry = leaderboard.token_telemetry_per_solve(rows)
+
+        self.assertEqual(telemetry["token_telemetry_source"], "proxy")
+        self.assertEqual(telemetry["fresh_tokens_per_solve"], 1650.0)
+        self.assertEqual(telemetry["tokens_cache_read_per_solve"], 15.0)
+        self.assertIsNone(telemetry["tokens_cache_write_per_solve"])
+        self.assertEqual(
+            telemetry["token_telemetry_coverage"]["proxy_covered_rows"],
+            2,
+        )
+
     def test_complete_native_lane_is_fallback_for_incomplete_proxy(self):
         rows = [
             _row("pi", "alpha", 1, True, tokens=100),
@@ -216,7 +241,7 @@ class AggregateBundleTests(unittest.TestCase):
             "tokens_proxy_cache_read": 10,
             "tokens_proxy_cache_write": 1,
             "token_basis_proxy": "proxy_measured",
-            "tokens_cache_write": None,
+            "tokens_output": None,
         })
         telemetry = leaderboard.token_telemetry_per_solve(rows)
         self.assertIsNone(telemetry["token_telemetry_source"])
@@ -392,7 +417,7 @@ class BuildLeaderboardTests(unittest.TestCase):
         self.assertIn("Not ranked", page)
         self.assertIn("missing provenance.json", page)
 
-    def test_recomputes_task_tree_before_ranking(self):
+    def test_current_tree_drift_is_disclosed_without_erasing_archive(self):
         rows = [
             _row("pi", "alpha", 1, True),
             _row("null", "alpha", 1, False),
@@ -403,18 +428,43 @@ class BuildLeaderboardTests(unittest.TestCase):
             json.dumps([rel], indent=2) + "\n",
         )
         _write(os.path.join(self.site, "community.json"), "[]\n")
-        provenance_path = os.path.join(
-            self.site, "releases", rel["id"], "provenance.json"
+        _write(
+            os.path.join(self.tasks, "alpha", "instruction.md"),
+            "changed after publication\n",
         )
-        with open(provenance_path, encoding="utf-8") as fh:
-            provenance = json.load(fh)
-        provenance["tasks"][0]["content_digest"] = "0" * 64
-        with open(provenance_path, "w", encoding="utf-8") as fh:
-            json.dump(provenance, fh)
 
         doc = leaderboard.build_leaderboard(self.site)
+        self.assertEqual(doc["bundle_count"], 1)
+        self.assertEqual(doc["skipped"], [])
+        self.assertTrue(doc["bundles"][0]["has_caveats"])
+        self.assertTrue(
+            any(
+                "current checkout for alpha" in caveat
+                for caveat in doc["bundles"][0]["caveats"]
+            )
+        )
+
+    def test_result_hash_tampering_is_still_not_ranked(self):
+        rows = [
+            _row("pi", "alpha", 1, True),
+            _row("null", "alpha", 1, False),
+        ]
+        rel = self._release_bundle("tampered-results", rows)
+        _write(
+            os.path.join(self.site, "releases.json"),
+            json.dumps([rel], indent=2) + "\n",
+        )
+        _write(os.path.join(self.site, "community.json"), "[]\n")
+        results_path = os.path.join(
+            self.site, "releases", rel["id"], "results.jsonl"
+        )
+        with open(results_path, "a", encoding="utf-8") as handle:
+            handle.write("{}\n")
+
+        doc = leaderboard.build_leaderboard(self.site)
+
         self.assertEqual(doc["bundle_count"], 0)
-        self.assertIn("task_digest:alpha", doc["skipped"][0]["reason"])
+        self.assertIn("results_sha256", doc["skipped"][0]["reason"])
 
     def test_write_leaderboard_and_index_link(self):
         rows = [

@@ -16,7 +16,20 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .atif import validate_trajectory
+from .harbor_metering import (
+    HarborMeteringError,
+    UsageCounters,
+    apply_to_imported_row,
+    verify_evidence_dir,
+)
 from .harbor_oauth import AGENT_IMPORT_PATH
+from .harbor_profiles import (
+    CODEX_PROFILE_IMPORT,
+    OPENCODE_PROFILE_IMPORT,
+    PI_PROFILE_IMPORT,
+    HarborProfileError,
+    canonical_openbench_model,
+)
 from .run import (
     ROW_FIELDS,
     ResultsLogError,
@@ -35,7 +48,14 @@ VERIFIER_EVIDENCE_SCHEMA_VERSION = "openbench-verifier-evidence-v2"
 MAX_JSON_BYTES = 32 * 1024 * 1024
 HARBOR_AGENT_SEMANTIC_NAME_ALIASES = {
     AGENT_IMPORT_PATH: "codex",
+    CODEX_PROFILE_IMPORT: "codex",
+    PI_PROFILE_IMPORT: "pi",
+    OPENCODE_PROFILE_IMPORT: "opencode",
 }
+HARBOR_PROXY_REQUIRED_AGENTS = frozenset({
+    CODEX_PROFILE_IMPORT,
+    PI_PROFILE_IMPORT,
+})
 
 
 class HarborResultsError(ValueError):
@@ -49,6 +69,18 @@ def _fail(location: str, message: str) -> HarborResultsError:
 def expected_harbor_agent_semantic_name(config_name: str) -> str:
     """Resolve a pinned Harbor config identity to its reported agent name."""
     return HARBOR_AGENT_SEMANTIC_NAME_ALIASES.get(config_name, config_name)
+
+
+def _agent_config_identity(agent: dict[str, Any], location: str) -> str:
+    """Return Harbor's immutable built-in name or custom-agent import path."""
+
+    name = agent.get("name")
+    import_path = agent.get("import_path")
+    if isinstance(name, str) and name:
+        return name
+    if name is not None:
+        raise _fail(f"{location}.name", "expected a non-empty string or null")
+    return _string(import_path, f"{location}.import_path")
 
 
 def _require_regular_file(path: Path, location: str) -> None:
@@ -303,7 +335,7 @@ def _validate_trial_lock(value: Any, location: str) -> dict[str, Any]:
         raise _fail(f"{location}.task.type", "expected local, git, or package")
     _validate_digest(task.get("digest"), f"{location}.task.digest")
     agent = _object(lock.get("agent"), f"{location}.agent")
-    _string(agent.get("name"), f"{location}.agent.name")
+    _agent_config_identity(agent, f"{location}.agent")
     _string(agent.get("model_name"), f"{location}.agent.model_name")
     _object(lock.get("environment"), f"{location}.environment")
     _object(lock.get("verifier"), f"{location}.verifier")
@@ -311,6 +343,7 @@ def _validate_trial_lock(value: Any, location: str) -> dict[str, Any]:
 
 
 _AGENT_DEFAULTS = {
+    "name": None,
     "import_path": None,
     "n_concurrent": None,
     "concurrency_group": None,
@@ -1107,9 +1140,10 @@ def _validate_atif(
     agent_name: str,
     agent_version: str,
     lock_model: str,
+    canonical_model: str,
     reported_model_name: str,
     location: str,
-) -> tuple[Path, dict[str, Any], int]:
+) -> tuple[Path, dict[str, Any], int, dict[str, Any]]:
     trajectory_path = trial_dir / "agent" / "trajectory.json"
     trajectory = _object(
         _read_json(trajectory_path, f"{location}.ATIF"),
@@ -1128,6 +1162,7 @@ def _validate_atif(
         None,
         reported_model_name,
         lock_model,
+        canonical_model,
     ):
         raise _fail(
             f"{location}.ATIF.agent.model_name",
@@ -1137,7 +1172,11 @@ def _validate_atif(
         if (
             isinstance(step, dict)
             and step.get("source") == "agent"
-            and step.get("model_name") not in (None, lock_model)
+            and step.get("model_name") not in (
+                None,
+                lock_model,
+                canonical_model,
+            )
         ):
             raise _fail(
                 f"{location}.ATIF.steps[{index}].model_name",
@@ -1175,7 +1214,7 @@ def _validate_atif(
         for step in trajectory.get("steps", [])
         if isinstance(step, dict) and step.get("source") == "agent"
     )
-    return trajectory_path, agent_result, turns
+    return trajectory_path, agent_result, turns, trajectory
 
 
 def _usage_fields(agent_result: dict[str, Any], location: str) -> dict[str, Any]:
@@ -1296,8 +1335,8 @@ def _validate_trial(
         )
 
     agent_lock = _object(trial_lock.get("agent"), f"{location}.lock.agent")
-    agent_config_name = _string(
-        agent_lock.get("name"), f"{location}.lock.agent.name"
+    agent_config_name = _agent_config_identity(
+        agent_lock, f"{location}.lock.agent"
     )
     agent_info = _object(result.get("agent_info"), f"{location}.result.agent_info")
     agent_name = _string(agent_info.get("name"), f"{location}.result.agent_info.name")
@@ -1329,6 +1368,10 @@ def _validate_trial(
             f"{location}.result.agent_info.model_info",
             "does not match trial lock model identity",
         )
+    try:
+        canonical_model = canonical_openbench_model(agent_config_name, model)
+    except HarborProfileError as exc:
+        raise _fail(f"{location}.lock.agent.model_name", str(exc)) from exc
 
     started, finished, t_env, t_agent, harbor_verifier_time = _validate_timing(
         result, location
@@ -1343,16 +1386,35 @@ def _validate_trial(
         openbench_harbor_export,
     ) = _validate_reward(trial_dir, result, location)
     manifest_path, workspace_digest = _validate_artifacts(trial_dir, result, location)
-    trajectory_path, agent_result, turns = _validate_atif(
+    trajectory_path, agent_result, turns, trajectory = _validate_atif(
         trial_dir,
         result,
         agent_name,
         agent_version,
         model,
+        canonical_model,
         model_name,
         location,
     )
     usage = _usage_fields(agent_result, location)
+    proxy_required = agent_config_name in HARBOR_PROXY_REQUIRED_AGENTS
+    metering_path = trial_dir / "agent" / "harbor-metering"
+    metering_evidence = None
+    metering_evidence_path = None
+    if proxy_required:
+        try:
+            metering_evidence = verify_evidence_dir(
+                metering_path,
+                expected_trial_id=trial_dir.name,
+                expected_harness=agent_name,
+                proxy_required=True,
+                expected_agent_usage=UsageCounters.from_atif_trajectory(
+                    trajectory
+                ),
+            )
+        except HarborMeteringError as exc:
+            raise _fail(f"{location}.metering", str(exc)) from exc
+        metering_evidence_path = metering_path / "harbor-metering.json"
     return {
         "trial_dir": trial_dir,
         "result": result,
@@ -1372,7 +1434,8 @@ def _validate_trial(
         "agent_config_name": agent_config_name,
         "agent_name": agent_name,
         "agent_version": agent_version,
-        "model": model,
+        "model": canonical_model,
+        "harbor_model_name": model,
         "started": started,
         "finished": finished,
         "t_env_setup_s": t_env,
@@ -1383,6 +1446,9 @@ def _validate_trial(
         "checker_exit": checker_exit,
         "turns": turns,
         "usage": usage,
+        "proxy_required": proxy_required,
+        "metering_evidence": metering_evidence,
+        "metering_evidence_path": metering_evidence_path,
         "workspace_digest": workspace_digest,
     }
 
@@ -1484,10 +1550,18 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 f"inconsistent OpenBench content digests for locked task {task_digest}",
             )
 
-    _job_result, job_id, job_started, job_finished = _validate_job_result(
+    job_result, job_id, job_started, job_finished = _validate_job_result(
         job_result_value,
         expected_trials=expected_count,
         actual_trial_results=[item["result"] for item in trials],
+    )
+    job_retry_count = _integer(
+        _object(job_result.get("stats"), "job result.stats").get("n_retries"),
+        "job result.stats.n_retries",
+    )
+    job_max_retries = _integer(
+        _object(job_lock.get("retry"), "job lock.retry").get("max_retries"),
+        "job lock.retry.max_retries",
     )
     for item in trials:
         if (
@@ -1552,9 +1626,13 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 ),
                 "harbor_task_checksum": item["task_checksum"],
                 "harbor_agent_config_name": item["agent_config_name"],
+                "harbor_model_name": item["harbor_model_name"],
                 "harbor_verifier_time_s": item["harbor_verifier_time_s"],
+                "harbor_job_retries": job_retry_count,
+                "harbor_job_max_retries": job_max_retries,
                 "usage_source": item["usage"]["token_basis"],
                 "proxy_measured": False,
+                "harbor_metering": None,
                 "trial_mapping": "lexicographic_name_within_task_agent_model",
                 "temporal_matched_block_claim": False,
             }
@@ -1592,6 +1670,24 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 }
             )
             row.update(item["usage"])
+            if item["metering_evidence"] is not None:
+                row = apply_to_imported_row(
+                    row,
+                    item["metering_evidence"],
+                    proxy_required=item["proxy_required"],
+                )
+                harbor_metering = row["candidate_provenance"]["harbor_metering"]
+                harbor_metering.update(
+                    {
+                        "proxy_required": item["proxy_required"],
+                        "evidence_sha256": _sha256_file(
+                            item["metering_evidence_path"]
+                        ),
+                        "ledger_sha256": item["metering_evidence"][
+                            "ledger_seal"
+                        ]["ledger_sha256"],
+                    }
+                )
             rows.append(row)
     run_ids = [row["run_id"] for row in rows]
     if len(run_ids) != len(set(run_ids)):
