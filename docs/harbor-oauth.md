@@ -23,11 +23,13 @@ print(result.returncode)
 print(result.expected_job_path)
 ```
 
-All inputs are explicit. `task_dir` must be one exported task root with a
-direct `task.toml` and `instruction.md`; a dataset root containing nested tasks
-is rejected. `job_name` is required so the expected output is always
-`jobs_dir/job_name`. An existing expected job path is rejected rather than
-implicitly resumed.
+All inputs are explicit. `task_dir` must be one task from the OpenBench Harbor
+1.4 exporter: its direct `task.toml` must declare `schema_version = "1.4"`,
+`[metadata].origin = "openbench"`, and exactly one artifact from `/app` to
+`workspace`. Legacy, foreign, altered, or dataset-style task roots are rejected.
+`job_name` is required so the expected output is always `jobs_dir/job_name`.
+Existing job paths and symlinked jobs directories are rejected rather than
+implicitly resumed or redirected.
 
 ## Fixed Harbor Contract
 
@@ -57,6 +59,10 @@ persist-back. A nonzero Harbor exit can therefore still preserve a valid
 rotation. Missing return, changed upstream cleanup behavior, account identity
 changes, concurrent use, and stale copy-and-swap generations all fail closed.
 Staging cleanup runs on success and failure.
+
+The version preflight proves the Harbor package version, not its source commit.
+Post-run evidence must remain unaccepted until the Harbor-results import gate
+confirms commit `72bc40b1e58b47a9cc6e0f14c29aced3a9e53767`.
 
 ## Why One Trial
 

@@ -21,6 +21,12 @@ from obench.harbor_oauth import (
 )
 
 HARBOR_VERSION = "0.20.0"
+HARBOR_TASK_SCHEMA_VERSION = "1.4"
+OPENBENCH_TASK_ORIGIN = "openbench"
+OPENBENCH_WORKSPACE_ARTIFACT = {
+    "source": "/app",
+    "destination": "workspace",
+}
 _JOB_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 
 ProcessRunner = Callable[..., Any]
@@ -93,10 +99,26 @@ def validate_task_root(task_dir: str | os.PathLike[str]) -> Path:
 
     try:
         with task_toml.open("rb") as handle:
-            metadata = tomllib.load(handle)
+            config = tomllib.load(handle)
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise HarborRunError(f"Cannot read Harbor task.toml: {task_toml}") from exc
-    task = metadata.get("task")
+    if config.get("schema_version") != HARBOR_TASK_SCHEMA_VERSION:
+        raise HarborRunError(
+            f"Harbor task.toml must use schema_version "
+            f"{HARBOR_TASK_SCHEMA_VERSION}: {task_toml}"
+        )
+    metadata = config.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("origin") != OPENBENCH_TASK_ORIGIN:
+        raise HarborRunError(
+            f"Harbor task.toml must define [metadata].origin = "
+            f"{OPENBENCH_TASK_ORIGIN!r}: {task_toml}"
+        )
+    if config.get("artifacts") != [OPENBENCH_WORKSPACE_ARTIFACT]:
+        raise HarborRunError(
+            "Harbor task.toml must configure exactly one /app to workspace "
+            f"artifact: {task_toml}"
+        )
+    task = config.get("task")
     if not isinstance(task, dict) or not isinstance(task.get("name"), str):
         raise HarborRunError(f"Harbor task.toml must define [task].name: {task_toml}")
     if not task["name"].strip():
@@ -222,8 +244,13 @@ def run_harbor_oauth(
     task_path = validate_task_root(task_dir)
     model = _validate_model(model)
     job_name = _validate_job_name(job_name)
-    jobs_path = Path(jobs_dir).expanduser().resolve()
-    if jobs_path.exists() and (not jobs_path.is_dir() or jobs_path.is_symlink()):
+    requested_jobs_path = Path(jobs_dir).expanduser()
+    if requested_jobs_path.is_symlink():
+        raise HarborRunError(
+            f"Jobs path must not be a symlink: {requested_jobs_path}"
+        )
+    jobs_path = requested_jobs_path.resolve()
+    if jobs_path.exists() and not jobs_path.is_dir():
         raise HarborRunError(f"Jobs path must be a real directory: {jobs_path}")
     expected_job_path = jobs_path / job_name
     if expected_job_path.exists():

@@ -74,7 +74,10 @@ class HarborRunTests(unittest.TestCase):
         self.task = self.root / "task"
         self.task.mkdir()
         (self.task / "task.toml").write_text(
-            'schema_version = "1.3"\n\n[task]\nname = "openbench/example"\n',
+            'schema_version = "1.4"\n'
+            '\n[task]\nname = "openbench/example"\n'
+            '\n[metadata]\norigin = "openbench"\n'
+            '\n[[artifacts]]\nsource = "/app"\ndestination = "workspace"\n',
             encoding="utf-8",
         )
         (self.task / "instruction.md").write_text("Do the task.\n", encoding="utf-8")
@@ -225,6 +228,70 @@ class HarborRunTests(unittest.TestCase):
 
         with self.assertRaisesRegex(harbor_run.HarborRunError, "nested task.toml"):
             harbor_run.validate_task_root(dataset)
+
+    def test_rejects_symlinked_jobs_dir_before_preflight_or_staging(self):
+        real_jobs = self.root / "real-jobs"
+        real_jobs.mkdir()
+        self.jobs.symlink_to(real_jobs, target_is_directory=True)
+        runner = FakeProcessRunner([])
+
+        with mock.patch.object(
+            harbor_run.HarborOAuthCredential,
+            "__enter__",
+            side_effect=AssertionError("credential was staged"),
+        ) as enter:
+            with self.assertRaisesRegex(harbor_run.HarborRunError, "symlink"):
+                self._run(runner)
+
+        enter.assert_not_called()
+        self.assertEqual(runner.calls, [])
+
+    def test_rejects_non_exporter_task_contracts(self):
+        invalid_contracts = {
+            "legacy schema": (
+                'schema_version = "1.3"\n'
+                '[task]\nname = "openbench/example"\n'
+                '[metadata]\norigin = "openbench"\n'
+                '[[artifacts]]\nsource = "/app"\ndestination = "workspace"\n'
+            ),
+            "foreign origin": (
+                'schema_version = "1.4"\n'
+                '[task]\nname = "openbench/example"\n'
+                '[metadata]\norigin = "other"\n'
+                '[[artifacts]]\nsource = "/app"\ndestination = "workspace"\n'
+            ),
+            "missing artifact": (
+                'schema_version = "1.4"\n'
+                '[task]\nname = "openbench/example"\n'
+                '[metadata]\norigin = "openbench"\n'
+            ),
+            "wrong artifact": (
+                'schema_version = "1.4"\n'
+                '[task]\nname = "openbench/example"\n'
+                '[metadata]\norigin = "openbench"\n'
+                '[[artifacts]]\nsource = "/tmp"\ndestination = "workspace"\n'
+            ),
+            "multiple artifacts": (
+                'schema_version = "1.4"\n'
+                '[task]\nname = "openbench/example"\n'
+                '[metadata]\norigin = "openbench"\n'
+                '[[artifacts]]\nsource = "/app"\ndestination = "workspace"\n'
+                '[[artifacts]]\nsource = "/logs"\ndestination = "logs"\n'
+            ),
+            "artifact extra field": (
+                'schema_version = "1.4"\n'
+                '[task]\nname = "openbench/example"\n'
+                '[metadata]\norigin = "openbench"\n'
+                '[[artifacts]]\nsource = "/app"\ndestination = "workspace"\n'
+                'required = true\n'
+            ),
+        }
+
+        for name, task_toml in invalid_contracts.items():
+            with self.subTest(name=name):
+                (self.task / "task.toml").write_text(task_toml, encoding="utf-8")
+                with self.assertRaises(harbor_run.HarborRunError):
+                    harbor_run.validate_task_root(self.task)
 
     def test_staged_paths_are_private(self):
         class PermissionRunner(FakeProcessRunner):
