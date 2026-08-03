@@ -1,0 +1,50 @@
+# Re-run laguna-s-2.1 AND deepseek-v4-flash under the CORRECTED model limits (commit 4a3a7e6).
+#
+# Its previous results were produced with invented limits: the provider config
+# fell back to 128000/8192 (deepseek) or free-tier numbers (laguna) instead of
+# the real values now pinned in data/model_limits.json. That is not cosmetic --
+# pi clamps every request to min(maxTokens, max(1, contextWindow - prompt -
+# 4096)), so laguna had a reply cut off at its cap on ~57% of cells and
+# deepseek's budget collapsed to 1 token on 19 long-horizon cells.
+#
+# Deliberately NOT seeded from prior results: the old rows were measured under
+# different limits, so they are not comparable and must not be reused.
+#
+# Both arms run in ONE queue on ONE host (the mini): it is the pin-compliant
+# machine (pi 0.80.10, matching obench/docker/Dockerfile), holds all six pinned
+# tb-mid image digests, and has both API keys. Splitting these arms across two
+# machines would have compared deepseek-on-pi-0.82.0 against laguna-on-pi-0.80.10
+# and called the difference a model difference.
+#
+# SCOPED TO tb-mid ONLY. The full 3-group spec runs every laguna cell before
+# deepseek starts, so the actual laguna-vs-deepseek comparison was ~a day out.
+# tb-mid is the tier where the models separate, so run both arms over it first
+# and decide about TB-7 with a measured pace rather than an extrapolation.
+#
+# Points at the SAME results file as the wider run: the 16 laguna tb-mid cells
+# already finished are skipped, not repeated.
+results_path = "../../results/rerun-corrected/rerun.jsonl"
+ledger_dir = "../../results/rerun-corrected/ledger"
+timeout = 2400
+exec_mode = "docker"
+trials = 3
+proxy = true
+
+[retry]
+infra = 3
+stall = 1
+rate_limited = 6
+rate_limited_backoff_start = 180
+
+[[arm]]
+harness = "pi"
+model = "laguna-s-2.1"
+
+[[arm]]
+harness = "pi"
+model = "deepseek-v4-flash"
+
+[[task_group]]
+tasks_dir = "../../data/packs/openbench-tb-mid"
+exec_mode = "docker"
+tasks = ["adaptive-rejection-sampler","merge-diff-arc-agi-task","overfull-hbox","query-optimize","sanitize-git-repo","winning-avg-corewars"]

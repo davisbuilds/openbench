@@ -1,0 +1,41 @@
+# Refill tb-mid to 18/18 judged cells per pi arm.
+#
+# 20 cells are missing across the four pi arms, and they are NOT random: the
+# gaps concentrate on query-optimize (9 of 20) and overfull-hbox (5 of 20),
+# which are the slowest tasks in the pack. That is exactly the bias that makes
+# a solve rate computed at 61-94% coverage read HIGH -- the excluded cells are
+# the hard ones. Closing them is the gate on publishing any tb-mid rate.
+#
+# Pool's 4 remaining cells are not here: the queue only understands core
+# `harness` arms, not BYO `candidate` arms. They run separately.
+results_path = "../../results/tb-mid-refill/tb-mid-refill.jsonl"
+ledger_dir = "../../results/tb-mid-refill/ledger"
+timeout = 2400
+exec_mode = "docker"
+trials = 3
+proxy = true
+
+[retry]
+infra = 3
+stall = 1
+rate_limited = 6
+rate_limited_backoff_start = 180
+
+[[arm]]
+harness = "pi"
+model = "laguna-s-2.1"
+
+[[arm]]
+harness = "pi"
+model = "inkling"
+
+[[task_group]]
+tasks_dir = "../../data/packs/openbench-tb-mid"
+tasks = [
+  "adaptive-rejection-sampler",
+  "merge-diff-arc-agi-task",
+  "overfull-hbox",
+  "query-optimize",
+  "sanitize-git-repo",
+  "winning-avg-corewars",
+]
