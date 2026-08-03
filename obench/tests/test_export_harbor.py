@@ -26,6 +26,7 @@ CORE_TASKS = (
     "taskflow",
     "webcore",
 )
+TASK_CONTENT_DIGEST = "d" * 64
 
 
 def _write(path: str, content: str) -> None:
@@ -61,6 +62,7 @@ class TaskTomlTests(unittest.TestCase):
             task_name="make-it-run",
             description="Get the script running.",
             workspace_provenance=None,
+            openbench_task_content_digest=TASK_CONTENT_DIGEST,
         )
         config = tomllib.loads(text)
         self.assertEqual(config["schema_version"], "1.4")
@@ -73,6 +75,10 @@ class TaskTomlTests(unittest.TestCase):
         self.assertIn('origin = "openbench"', text)
         self.assertIn('difficulty = "unknown"', text)
         self.assertIn('openbench_workspace_kind = "snapshot"', text)
+        self.assertEqual(
+            config["metadata"]["openbench_task_content_digest"],
+            {"scheme": 2, "sha256": TASK_CONTENT_DIGEST},
+        )
         self.assertIn('network_mode = "no-network"', text)
         self.assertIn("[environment]", text)
         self.assertIn("[verifier]", text)
@@ -88,6 +94,7 @@ class TaskTomlTests(unittest.TestCase):
                 "resolved_sha": "a" * 40,
                 "subdir": "services/billing",
             },
+            openbench_task_content_digest=TASK_CONTENT_DIGEST,
         )
         self.assertIn('openbench_workspace_kind = "git"', text)
         self.assertIn('openbench_workspace_resolved_sha = "' + ("a" * 40) + '"', text)
@@ -105,7 +112,10 @@ class TestShScoreMappingTests(unittest.TestCase):
             "#!/usr/bin/env bash\necho 'SCORE: 0.4'\nexit 7\n",
         )
         os.chmod(os.path.join(tests, "checker.sh"), 0o755)
-        _write(os.path.join(tests, "test.sh"), eh.render_test_sh())
+        _write(
+            os.path.join(tests, "test.sh"),
+            eh.render_test_sh(TASK_CONTENT_DIGEST),
+        )
         os.chmod(os.path.join(tests, "test.sh"), 0o755)
         work = os.path.join(tmp, "work")
         os.makedirs(work)
@@ -129,7 +139,11 @@ class TestShScoreMappingTests(unittest.TestCase):
         ) as fh:
             evidence = json.load(fh)
         self.assertEqual(
-            evidence["schema_version"], "openbench-verifier-evidence-v1"
+            evidence["schema_version"], "openbench-verifier-evidence-v2"
+        )
+        self.assertEqual(
+            evidence["openbench_task_content_digest"],
+            {"scheme": 2, "sha256": TASK_CONTENT_DIGEST},
         )
         self.assertEqual(evidence["checker_exit"], 7)
         self.assertEqual(evidence["parsed_score"], 0.4)
@@ -147,7 +161,10 @@ class TestShScoreMappingTests(unittest.TestCase):
             "#!/usr/bin/env bash\necho 'SCORE: 0.2'\nexit 0\n",
         )
         os.chmod(os.path.join(tests, "checker.sh"), 0o755)
-        _write(os.path.join(tests, "test.sh"), eh.render_test_sh())
+        _write(
+            os.path.join(tests, "test.sh"),
+            eh.render_test_sh(TASK_CONTENT_DIGEST),
+        )
         os.chmod(os.path.join(tests, "test.sh"), 0o755)
         work = os.path.join(tmp, "work")
         os.makedirs(work)
@@ -187,7 +204,10 @@ class TestShScoreMappingTests(unittest.TestCase):
             "exit 9\n",
         )
         os.chmod(os.path.join(tests, "checker.sh"), 0o755)
-        _write(os.path.join(tests, "test.sh"), eh.render_test_sh())
+        _write(
+            os.path.join(tests, "test.sh"),
+            eh.render_test_sh(TASK_CONTENT_DIGEST),
+        )
         os.chmod(os.path.join(tests, "test.sh"), 0o755)
         reward_dir = os.path.join(tmp, "reward")
         env = dict(os.environ)
@@ -222,7 +242,10 @@ class TestShScoreMappingTests(unittest.TestCase):
             "#!/usr/bin/env bash\necho 'no score available'\nexit 3\n",
         )
         os.chmod(os.path.join(tests, "checker.sh"), 0o755)
-        _write(os.path.join(tests, "test.sh"), eh.render_test_sh())
+        _write(
+            os.path.join(tests, "test.sh"),
+            eh.render_test_sh(TASK_CONTENT_DIGEST),
+        )
         os.chmod(os.path.join(tests, "test.sh"), 0o755)
         reward_dir = os.path.join(tmp, "reward")
         env = dict(os.environ)
@@ -323,8 +346,16 @@ class ExportTaskTests(unittest.TestCase):
     def test_export_layout(self):
         out = os.path.join(self.tmp, "harbor", "demo")
         summary = eh.export_task(self.task, out)
+        expected_digest = eh.task_content_digest(
+            self.task,
+            scheme=eh.DIGEST_SCHEME_CURRENT,
+        )
         self.assertEqual(summary["workspace_mode"], "snapshot")
         self.assertTrue(summary["has_solution"])
+        self.assertEqual(
+            summary["openbench_task_content_digest"],
+            {"scheme": 2, "sha256": expected_digest},
+        )
         self.assertTrue(os.path.isfile(os.path.join(out, "instruction.md")))
         self.assertTrue(os.path.isfile(os.path.join(out, "task.toml")))
         self.assertTrue(os.path.isfile(os.path.join(out, "environment", "Dockerfile")))
@@ -340,6 +371,14 @@ class ExportTaskTests(unittest.TestCase):
         self.assertTrue(
             os.path.isfile(os.path.join(out, "solution", "greeting.txt"))
         )
+        with open(os.path.join(out, "task.toml"), "rb") as fh:
+            task_config = tomllib.load(fh)
+        self.assertEqual(
+            task_config["metadata"]["openbench_task_content_digest"],
+            {"scheme": 2, "sha256": expected_digest},
+        )
+        with open(os.path.join(out, "tests", "test.sh"), encoding="utf-8") as fh:
+            self.assertIn(expected_digest, fh.read())
         with open(os.path.join(out, "environment", "Dockerfile"), encoding="utf-8") as fh:
             docker = fh.read()
         self.assertIn("FROM python:3.11-slim", docker)

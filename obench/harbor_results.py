@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -23,7 +24,7 @@ HARBOR_GIT_COMMIT = "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767"
 JOB_LOCK_SCHEMA_VERSION = 3
 TRIAL_LOCK_SCHEMA_VERSION = 2
 FINAL_WORKSPACE_DESTINATION = "workspace"
-VERIFIER_EVIDENCE_SCHEMA_VERSION = "openbench-verifier-evidence-v1"
+VERIFIER_EVIDENCE_SCHEMA_VERSION = "openbench-verifier-evidence-v2"
 MAX_JSON_BYTES = 32 * 1024 * 1024
 
 
@@ -185,6 +186,26 @@ def _validate_digest(value: Any, location: str) -> str:
     ):
         raise _fail(location, "expected sha256:<64 lowercase hex characters>")
     return digest
+
+
+def _validate_openbench_task_content_digest(
+    value: Any, location: str
+) -> dict[str, Any]:
+    digest = _object(value, location)
+    if set(digest) != {"scheme", "sha256"}:
+        raise _fail(location, "expected exactly 'scheme' and 'sha256'")
+    if digest.get("scheme") != 2 or isinstance(digest.get("scheme"), bool):
+        raise _fail(f"{location}.scheme", "expected OpenBench digest scheme 2")
+    sha256 = digest.get("sha256")
+    if (
+        not isinstance(sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", sha256) is None
+    ):
+        raise _fail(
+            f"{location}.sha256",
+            "expected 64 lowercase hex characters",
+        )
+    return {"scheme": 2, "sha256": sha256}
 
 
 def _validate_job_lock(job_lock: Any) -> tuple[dict[str, Any], Counter[str]]:
@@ -761,7 +782,7 @@ def _validate_timing(
 
 def _validate_reward(
     trial_dir: Path, result: dict[str, Any], location: str
-) -> tuple[float, int, float | None, Path, Path]:
+) -> tuple[float, int, float | None, Path, Path, dict[str, Any]]:
     reward_json = trial_dir / "verifier" / "reward.json"
     reward_text = trial_dir / "verifier" / "reward.txt"
     existing = [path for path in (reward_json, reward_text) if path.exists()]
@@ -799,6 +820,7 @@ def _validate_reward(
     )
     if set(evidence) != {
         "schema_version",
+        "openbench_task_content_digest",
         "checker_exit",
         "parsed_score",
         "reward",
@@ -813,6 +835,10 @@ def _validate_reward(
             f"{location}.verifier_evidence.schema_version",
             f"expected {VERIFIER_EVIDENCE_SCHEMA_VERSION!r}",
         )
+    openbench_task_content_digest = _validate_openbench_task_content_digest(
+        evidence.get("openbench_task_content_digest"),
+        f"{location}.verifier_evidence.openbench_task_content_digest",
+    )
     checker_exit = evidence.get("checker_exit")
     if not isinstance(checker_exit, int) or isinstance(checker_exit, bool):
         raise _fail(
@@ -857,7 +883,14 @@ def _validate_reward(
             f"{location}.verifier_evidence",
             "checker exit, parsed score, and Harbor reward are incoherent",
         )
-    return score, checker_exit, checker_duration, reward_path, evidence_path
+    return (
+        score,
+        checker_exit,
+        checker_duration,
+        reward_path,
+        evidence_path,
+        openbench_task_content_digest,
+    )
 
 
 def _validate_artifacts(
@@ -1172,6 +1205,7 @@ def _validate_trial(
         t_checker,
         reward_path,
         verifier_evidence_path,
+        openbench_task_content_digest,
     ) = _validate_reward(trial_dir, result, location)
     manifest_path, workspace_digest = _validate_artifacts(trial_dir, result, location)
     trajectory_path, agent_result, turns = _validate_atif(
@@ -1191,6 +1225,7 @@ def _validate_trial(
         "trial_name": trial_name,
         "task_name": task_name,
         "task_digest": task_digest,
+        "openbench_task_content_digest": openbench_task_content_digest,
         "task_checksum": checksum,
         "agent_config_name": _string(
             agent_lock.get("name"), f"{location}.lock.agent.name"
@@ -1281,13 +1316,32 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
     if any(expected_locks.values()):
         raise _fail("job directory", "not every job-lock trial has completed evidence")
     checksums_by_digest: dict[str, set[str]] = defaultdict(set)
+    content_digests_by_task: dict[str, set[str]] = defaultdict(set)
+    content_digests_by_harbor_digest: dict[str, set[str]] = defaultdict(set)
     for item in trials:
         checksums_by_digest[item["task_digest"]].add(item["task_checksum"])
+        content_sha256 = item["openbench_task_content_digest"]["sha256"]
+        content_digests_by_task[
+            _normalized_task_name(item["task_name"])
+        ].add(content_sha256)
+        content_digests_by_harbor_digest[item["task_digest"]].add(content_sha256)
     for task_digest, checksums in checksums_by_digest.items():
         if len(checksums) != 1:
             raise _fail(
                 "trial results.task_checksum",
                 f"inconsistent legacy checksums for locked task {task_digest}",
+            )
+    for task_name, content_digests in content_digests_by_task.items():
+        if len(content_digests) != 1:
+            raise _fail(
+                "trial results.openbench_task_content_digest",
+                f"inconsistent OpenBench content digests for task {task_name!r}",
+            )
+    for task_digest, content_digests in content_digests_by_harbor_digest.items():
+        if len(content_digests) != 1:
+            raise _fail(
+                "trial results.openbench_task_content_digest",
+                f"inconsistent OpenBench content digests for locked task {task_digest}",
             )
 
     _job_result, job_id, job_started, job_finished = _validate_job_result(
@@ -1350,6 +1404,9 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "artifact_manifest_sha256": _sha256_file(item["manifest_path"]),
                 "final_workspace_sha256": item["workspace_digest"],
                 "task_digest": item["task_digest"],
+                "openbench_task_content_digest": dict(
+                    item["openbench_task_content_digest"]
+                ),
                 "harbor_task_checksum": item["task_checksum"],
                 "harbor_agent_config_name": item["agent_config_name"],
                 "harbor_verifier_time_s": item["harbor_verifier_time_s"],

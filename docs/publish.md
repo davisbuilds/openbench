@@ -87,6 +87,9 @@ obench verify openbench-publish/my-claim
   exactly matches the safe normalized evidence in `results.jsonl`. This binds
   the ATIF, verifier, artifact, final-workspace, lock/result/reward, task, and
   usage-provenance claims without publishing the underlying private artifacts.
+- For each Harbor task, the structured executed digest is scheme 2 and equals
+  the task digest recorded by publication. `obench publish` also requires it
+  to match the local task tree before writing the bundle.
 - When local task trees are available (`--tasks-dir` or CWD discovery), each
   recorded task content digest still matches under the bundle's
   `digest_scheme`:

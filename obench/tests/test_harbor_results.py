@@ -37,6 +37,13 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
+def _openbench_task_content_digest(task: str) -> dict:
+    return {
+        "scheme": 2,
+        "sha256": ("1" if task == "alpha" else "2") * 64,
+    }
+
+
 def _trial_lock(task: str, model: str = "model-x") -> dict:
     return {
         "schema_version": 2,
@@ -248,7 +255,10 @@ class GoldenHarborJob:
                 / "verifier"
                 / "openbench-verifier-evidence.json",
                 {
-                    "schema_version": "openbench-verifier-evidence-v1",
+                    "schema_version": "openbench-verifier-evidence-v2",
+                    "openbench_task_content_digest": (
+                        _openbench_task_content_digest(spec["task"])
+                    ),
                     "checker_exit": 0 if spec["score"] == 1.0 else 1,
                     "parsed_score": None if spec["score"] == 0.0 else spec["score"],
                     "reward": spec["score"],
@@ -369,6 +379,10 @@ class HarborResultsTests(unittest.TestCase):
         self.assertIsNone(rows[0]["token_basis_proxy"])
         self.assertIsNone(rows[0]["tokens_proxy_calls"])
         self.assertFalse(rows[0]["candidate_provenance"]["proxy_measured"])
+        self.assertEqual(
+            rows[0]["candidate_provenance"]["openbench_task_content_digest"],
+            _openbench_task_content_digest("alpha"),
+        )
         self.assertEqual(rows[0]["failure_class"], "solved")
         self.assertEqual(rows[1]["failure_class"], "wrong_answer")
         self.assertEqual(rows[2]["score"], 0.5)
@@ -527,6 +541,18 @@ class HarborResultsTests(unittest.TestCase):
                 {"checker_exit": "1"},
                 {"reward": 0.25},
                 {"checker_exit": 1, "parsed_score": None},
+                {
+                    "openbench_task_content_digest": {
+                        "scheme": 1,
+                        "sha256": "1" * 64,
+                    }
+                },
+                {
+                    "openbench_task_content_digest": {
+                        "scheme": 2,
+                        "sha256": "A" * 64,
+                    }
+                },
             )
         ):
             with self.subTest(mutation=mutation):
@@ -552,6 +578,23 @@ class HarborResultsTests(unittest.TestCase):
                 _write_json(evidence_path, evidence)
                 with self.assertRaises(HarborResultsError):
                     load_rows(fixture.root)
+
+    def test_rejects_inconsistent_content_digest_for_same_task(self):
+        fixture = self.fixture()
+        evidence_path = (
+            fixture.trial(1)
+            / "verifier"
+            / "openbench-verifier-evidence.json"
+        )
+        evidence = json.loads(evidence_path.read_text())
+        evidence["openbench_task_content_digest"]["sha256"] = "3" * 64
+        _write_json(evidence_path, evidence)
+
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "inconsistent OpenBench content digests for task 'alpha'",
+        ):
+            load_rows(fixture.root)
 
     def test_real_0200_artifact_shape_regression_without_credentials(self):
         fixture = GoldenHarborJob(

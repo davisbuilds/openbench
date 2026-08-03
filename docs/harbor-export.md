@@ -52,6 +52,7 @@ Exports never include transcripts, results logs, or auth material.
 | `workspace/` or staged `workspace.toml` | `environment/app/` + `COPY app/ /app/` |
 | final `/app` state | task artifact collected under `artifacts/workspace/` |
 | git `resolved_sha` | `[metadata].openbench_workspace_resolved_sha` |
+| scheme-2 task content digest | `[metadata.openbench_task_content_digest]` and verifier evidence |
 | `checker.sh` + exit 0 | `tests/test.sh` writes `1.0` to reward file |
 | `SCORE: <float>` on nonzero exit | same float written to reward file |
 | nonzero exit, no SCORE | reward `0.0` |
@@ -61,11 +62,13 @@ Exports never include transcripts, results logs, or auth material.
 ## Verifier reward path
 
 Harbor expects `/logs/verifier/reward.txt` (or `reward.json`). The exporter
-retains the scalar `reward.txt` contract and also writes
-`openbench-verifier-evidence.json` beside it with the original checker exit,
-the last parseable clamped `SCORE` (or `null`), final reward, and whole-second
-verifier-wrapper duration. Generated `tests/test.sh` resolves the log directory
-as:
+retains the scalar `reward.txt` contract and also writes the structured
+`openbench-verifier-evidence-v2` record in
+`openbench-verifier-evidence.json`. It contains the original checker exit, the
+last parseable clamped `SCORE` (or `null`), final reward, whole-second
+verifier-wrapper duration, and the same `{scheme = 2, sha256 = ...}` task
+content digest recorded in `task.toml`. Generated `tests/test.sh` resolves the
+log directory as:
 
 1. `$VERIFIER_LOGS_DIR` if set (local round-trip / tests)
 2. else `/logs/verifier` when that directory already exists (Harbor runtime)

@@ -50,13 +50,16 @@ it does not claim that trials are temporal matched blocks.
 - `success` is strictly `checker_exit == 0`, matching `obench.run`; a nonzero
   exit remains unsuccessful even when its parsed and clamped score is `1.0`.
 - `score` and `checker_exit` come from the exporter's
-  `openbench-verifier-evidence-v1` record after matching it to Harbor's reward
+  `openbench-verifier-evidence-v2` record after matching it to Harbor's reward
   file and trial result. `t_checker_s` uses that record's checker duration;
   Harbor's broader verifier phase duration remains separate in provenance.
   Checker stdout/stderr remain null.
+- Harbor must report the pinned `0.20.0` commit as a non-editable install.
+  Editable installs are rejected because their source cannot be immutably
+  identified by the package version and commit fields alone.
 - `candidate_provenance` records Harbor build, job/trial IDs, evidence SHA-256
-  digests, both Harbor task hashes, workspace tree digest, usage source, and mapping
-  semantics.
+  digests, both Harbor task hashes, the structured OpenBench scheme-2 task
+  content digest, workspace tree digest, usage source, and mapping semantics.
 
 ## Publishing imported rows
 
@@ -65,6 +68,10 @@ complete normalized `candidate_provenance`, `workspace_source`, and usage
 contract must be present and internally consistent. Partial Harbor provenance,
 unknown provenance keys, invalid digests, workspace-digest disagreement, proxy
 claims, or usage-total disagreement fail before a bundle is written.
+For every Harbor task, the imported scheme-2 execution digest must equal the
+digest recomputed from the local publication task tree. Missing local task
+trees, inconsistent imported digests, or any mismatch fail before the output
+directory is created.
 
 Published Harbor rows use an allowlist. They retain the normalized result
 metrics, Harbor/ATIF/verifier/artifact/final-workspace digests, task hashes,
@@ -72,7 +79,9 @@ mapping semantics, and Harbor-reported usage provenance needed to support the
 claim. Raw trajectory/session/transcript/workspace paths, unrecognized fields,
 and credential material are never copied. `provenance.json` records the same
 safe evidence per run under `harbor_import_evidence`; `obench verify`
-recomputes that manifest from `results.jsonl` and fails on disagreement.
+recomputes that manifest from `results.jsonl`, checks the executed scheme-2
+digest against the per-task publication digest, and then recomputes the digest
+from the supplied local task tree.
 
 ## Append safety
 

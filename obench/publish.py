@@ -68,6 +68,7 @@ HARBOR_PROVENANCE_KEYS = frozenset({
     "artifact_manifest_sha256",
     "final_workspace_sha256",
     "task_digest",
+    "openbench_task_content_digest",
     "harbor_task_checksum",
     "harbor_agent_config_name",
     "harbor_verifier_time_s",
@@ -94,6 +95,7 @@ HARBOR_MARKER_KEYS = HARBOR_DIGEST_KEYS | frozenset({
     "harbor_job_id",
     "harbor_trial_id",
     "harbor_trial_name",
+    "openbench_task_content_digest",
     "harbor_agent_config_name",
     "harbor_verifier_time_s",
 })
@@ -436,6 +438,18 @@ def _validate_harbor_row(row):
     if not isinstance(provenance["task_digest"], str) or re.fullmatch(
             r"sha256:[0-9a-f]{64}", provenance["task_digest"]) is None:
         raise PublishError(f"Harbor row {run_id!r}: invalid task_digest")
+    content_digest = provenance["openbench_task_content_digest"]
+    if (
+        not isinstance(content_digest, dict)
+        or set(content_digest) != {"scheme", "sha256"}
+        or content_digest.get("scheme") != DIGEST_SCHEME_CURRENT
+        or isinstance(content_digest.get("scheme"), bool)
+        or not isinstance(content_digest.get("sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", content_digest["sha256"]) is None
+    ):
+        raise PublishError(
+            f"Harbor row {run_id!r}: invalid openbench_task_content_digest"
+        )
     if not isinstance(provenance["harbor_git_commit_hash"], str) or re.fullmatch(
             r"[0-9a-f]{40}", provenance["harbor_git_commit_hash"]) is None:
         raise PublishError(f"Harbor row {run_id!r}: invalid harbor_git_commit_hash")
@@ -496,6 +510,47 @@ def _harbor_import_evidence(rows):
             "workspace_source": dict(row["workspace_source"]),
         })
     return sorted(evidence, key=lambda item: item["run_id"])
+
+
+def _harbor_task_content_digests(rows):
+    """Return one imported scheme-2 digest per Harbor task, rejecting conflicts."""
+    digests = {}
+    for row in rows:
+        if not _is_harbor_row(row):
+            continue
+        _validate_harbor_row(row)
+        task = row.get("task")
+        digest = row["candidate_provenance"]["openbench_task_content_digest"][
+            "sha256"
+        ]
+        previous = digests.setdefault(task, digest)
+        if previous != digest:
+            raise PublishError(
+                f"Harbor task {task!r}: imported rows disagree on "
+                "openbench_task_content_digest"
+            )
+    return digests
+
+
+def _validate_harbor_task_bindings(rows, tasks_dirs):
+    """Require imported execution digests to match publication task trees."""
+    roots = stats.parse_tasks_dirs(tasks_dirs)
+    for task, executed_digest in _harbor_task_content_digests(rows).items():
+        task_dir = resolve_task_dir(task, roots)
+        if task_dir is None:
+            raise PublishError(
+                f"Harbor task {task!r}: local publication task tree not found"
+            )
+        local_digest = task_content_digest(
+            task_dir,
+            scheme=DIGEST_SCHEME_CURRENT,
+        )
+        if local_digest != executed_digest:
+            raise PublishError(
+                f"Harbor task {task!r}: executed scheme-2 digest "
+                f"{executed_digest} does not match local publication task "
+                f"{local_digest}"
+            )
 
 
 def sanitize_row_for_publish(row):
@@ -1019,6 +1074,8 @@ def create_bundle(results_path, out_dir, *, candidate_specs=None, tasks_dirs=Non
         discovered = default_tasks_dir()
         tasks_dirs = [discovered] if discovered else []
 
+    _validate_harbor_task_bindings(publish_rows, tasks_dirs)
+
     os.makedirs(out_dir, exist_ok=True)
     # Refuse if caller somehow pointed --out at transcripts.
     if os.path.basename(os.path.abspath(out_dir)) == "transcripts":
@@ -1249,6 +1306,41 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
             "detail": str(exc),
         })
         return checks
+
+    try:
+        harbor_task_digests = _harbor_task_content_digests(rows)
+        harbor_binding_error = None
+    except PublishError as exc:
+        harbor_task_digests = {}
+        harbor_binding_error = str(exc)
+    if harbor_binding_error is not None:
+        checks.append({
+            "name": "harbor_task_binding",
+            "status": "FAIL",
+            "detail": harbor_binding_error,
+        })
+    for task, executed_digest in sorted(harbor_task_digests.items()):
+        matching_entries = [
+            item for item in task_entries
+            if isinstance(item, dict) and item.get("task") == task
+        ]
+        recorded_digest = (
+            matching_entries[0].get("content_digest")
+            if len(matching_entries) == 1
+            else None
+        )
+        binding_ok = (
+            digest_scheme == DIGEST_SCHEME_CURRENT
+            and recorded_digest == executed_digest
+        )
+        checks.append({
+            "name": f"harbor_task_binding:{task}",
+            "status": "PASS" if binding_ok else "FAIL",
+            "detail": (
+                f"scheme={digest_scheme} executed={executed_digest} "
+                f"published={recorded_digest}"
+            ),
+        })
 
     if tasks_dirs is None:
         discovered = default_tasks_dir()

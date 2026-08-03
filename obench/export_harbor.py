@@ -22,6 +22,7 @@ import sys
 import tempfile
 
 from .paths import TasksDirError, resolve_tasks_dir
+from .publish import DIGEST_SCHEME_CURRENT, PublishError, task_content_digest
 from .validate_tasks import discover_tasks, effective_score, parse_score
 from .workspace import (
     WorkspaceError,
@@ -39,6 +40,7 @@ DEFAULT_BASE_IMAGE = "python:3.11-slim"
 # Reward log dir: Harbor uses /logs/verifier; local round-trips use a fallback.
 REWARD_FILENAME = "reward.txt"
 VERIFIER_EVIDENCE_FILENAME = "openbench-verifier-evidence.json"
+VERIFIER_EVIDENCE_SCHEMA_VERSION = "openbench-verifier-evidence-v2"
 
 
 class ExportError(ValueError):
@@ -82,12 +84,17 @@ def render_task_toml(
     task_name: str,
     description: str,
     workspace_provenance: dict | None,
+    openbench_task_content_digest: str,
     tags: list[str] | None = None,
     network_mode: str = "no-network",
     agent_timeout_sec: float = 600.0,
     verifier_timeout_sec: float = 120.0,
 ) -> str:
     """Render Harbor ``task.toml`` (schema_version 1.4)."""
+    if re.fullmatch(r"[0-9a-f]{64}", openbench_task_content_digest) is None:
+        raise ExportError(
+            "OpenBench task content digest must be 64 lowercase hex characters"
+        )
     tags = list(tags) if tags else ["openbench"]
     keywords = ["openbench"]
     harbor_name = f"openbench/{task_name}"
@@ -140,6 +147,10 @@ def render_task_toml(
 
     lines += [
         "",
+        "[metadata.openbench_task_content_digest]",
+        f"scheme = {DIGEST_SCHEME_CURRENT}",
+        f"sha256 = {_toml_str(openbench_task_content_digest)}",
+        "",
         "[verifier]",
         f"timeout_sec = {float(verifier_timeout_sec)}",
         "",
@@ -170,7 +181,7 @@ def render_dockerfile(*, base_image: str = DEFAULT_BASE_IMAGE) -> str:
     )
 
 
-def render_test_sh() -> str:
+def render_test_sh(openbench_task_content_digest: str) -> str:
     """Harbor verifier wrapper around OpenBench ``checker.sh``.
 
     Writes scalar ``reward.txt`` plus machine-readable verifier evidence under
@@ -178,7 +189,11 @@ def render_test_sh() -> str:
     filesystem layout, honors ``VERIFIER_LOGS_DIR`` and otherwise falls back to
     ``./logs-verifier`` relative to the agent workspace cwd.
     """
-    return r"""#!/usr/bin/env bash
+    if re.fullmatch(r"[0-9a-f]{64}", openbench_task_content_digest) is None:
+        raise ExportError(
+            "OpenBench task content digest must be 64 lowercase hex characters"
+        )
+    script = r"""#!/usr/bin/env bash
 # OpenBench → Harbor verifier: run checker.sh, map exit/SCORE → reward.txt.
 set -uo pipefail
 
@@ -249,7 +264,11 @@ else
 fi
 cat >"$REWARD_DIR/openbench-verifier-evidence.json" <<EOF
 {
-  "schema_version": "openbench-verifier-evidence-v1",
+  "schema_version": "openbench-verifier-evidence-v2",
+  "openbench_task_content_digest": {
+    "scheme": 2,
+    "sha256": "__OPENBENCH_TASK_CONTENT_DIGEST__"
+  },
   "checker_exit": $RC,
   "parsed_score": $PARSED_SCORE_JSON,
   "reward": $REWARD,
@@ -259,6 +278,10 @@ EOF
 rm -f "$OUT_FILE"
 exit 0
 """
+    return script.replace(
+        "__OPENBENCH_TASK_CONTENT_DIGEST__",
+        openbench_task_content_digest,
+    )
 
 
 def render_solve_sh() -> str:
@@ -336,6 +359,13 @@ def export_task(
         raise ExportError(f"missing instruction.md: {task_dir}")
 
     name = task_name or os.path.basename(task_dir.rstrip(os.sep))
+    try:
+        content_digest = task_content_digest(
+            task_dir,
+            scheme=DIGEST_SCHEME_CURRENT,
+        )
+    except PublishError as exc:
+        raise ExportError(f"cannot fingerprint OpenBench task {name}: {exc}") from exc
     if os.path.exists(out_dir):
         if not os.path.isdir(out_dir):
             raise ExportError(f"export path exists and is not a directory: {out_dir}")
@@ -373,6 +403,7 @@ def export_task(
             task_name=name,
             description=description,
             workspace_provenance=provenance,
+            openbench_task_content_digest=content_digest,
             network_mode=network_mode,
         ),
     )
@@ -385,7 +416,11 @@ def export_task(
     checker_data = os.path.join(task_dir, "checker_data")
     if os.path.isdir(checker_data):
         _copy_tree_contents(checker_data, os.path.join(tests_dir, "checker_data"))
-    _write_text(os.path.join(tests_dir, "test.sh"), render_test_sh(), mode=0o755)
+    _write_text(
+        os.path.join(tests_dir, "test.sh"),
+        render_test_sh(content_digest),
+        mode=0o755,
+    )
 
     # Oracle when OpenBench ships a solution/.
     solution_src = os.path.join(task_dir, "solution")
@@ -421,6 +456,10 @@ def export_task(
         "out_dir": out_dir,
         "workspace_mode": mode,
         "workspace_provenance": provenance,
+        "openbench_task_content_digest": {
+            "scheme": DIGEST_SCHEME_CURRENT,
+            "sha256": content_digest,
+        },
         "has_solution": has_solution,
     }
 
