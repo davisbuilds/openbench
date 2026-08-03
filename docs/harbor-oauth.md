@@ -5,8 +5,27 @@ rotated `auth.json` on the host. The bridge is optional: importing
 `obench.harbor_run` does not import Harbor, and the custom agent reports a clear
 setup error if Harbor is not installed.
 
-The shared `obench` CLI does not expose this runner yet. Until that wiring is
-added, call the stdlib API:
+Run one exported task with explicit inputs:
+
+```bash
+obench harbor oauth-run \
+  --task /absolute/path/to/exported-task \
+  --model openai/gpt-5 \
+  --master-auth-json /absolute/path/to/auth.json \
+  --jobs-dir /absolute/path/to/harbor-jobs \
+  --job-name oauth-smoke-001
+```
+
+Use `--harbor-binary /absolute/path/to/harbor` when the required Harbor binary
+is not available as `harbor` on `PATH`.
+
+On completion, the command reports Harbor's exit code and the expected
+`jobs_dir/job_name` output path. It returns Harbor's exit code unchanged,
+including nonzero codes. Argument, preflight, and OAuth preparation errors
+return `2` with a concise `ERROR:` message. The CLI never prints credential
+contents, the staged credential paths, or the constructed Harbor command.
+
+The same runner remains available as a stdlib API:
 
 ```python
 from obench.harbor_run import run_harbor_oauth
