@@ -53,6 +53,15 @@ def _build_agent_class(harbor_codex):
     class OpenBenchCodexOAuth(harbor_codex):
         """Harbor Codex with an opt-in pre-cleanup auth.json return hook."""
 
+        def __init__(self, *args, **kwargs):
+            # Harbor calls exec_as_agent during setup, before run() owns the
+            # OAuth return lifecycle.
+            self._oauth_run_active = False
+            self._oauth_return_path = None
+            self._oauth_capture_attempted = False
+            self._oauth_capture_error = None
+            super().__init__(*args, **kwargs)
+
         def _is_oauth_cleanup(self, command: str) -> bool:
             secrets_dir = PurePosixPath(self._REMOTE_CODEX_SECRETS_DIR).as_posix()
             return (

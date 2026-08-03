@@ -256,6 +256,21 @@ class HarborAgentHookTests(unittest.IsolatedAsyncioTestCase):
             result = await agent.run("instruction", environment, SimpleNamespace())
             return result, config, stage_dir
 
+    async def test_setup_exec_before_run_does_not_enter_oauth_capture(self):
+        environment = FakeEnvironment()
+        agent_class = harbor_codex_agent._build_agent_class(FakeHarborCodex)
+        agent = agent_class(extra_env={})
+
+        result = await agent.exec_as_agent(
+            environment,
+            "apt-get update && apt-get install -y nodejs",
+        )
+
+        self.assertEqual(result.return_code, 0)
+        self.assertFalse(agent._oauth_run_active)
+        self.assertFalse(agent._oauth_capture_attempted)
+        self.assertEqual(environment.downloads, [])
+
     async def test_success_returns_rotation_before_cleanup_and_persists_it(self):
         environment = FakeEnvironment()
         _result, config, stage_dir = await self._run(environment)
