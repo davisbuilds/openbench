@@ -598,7 +598,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
                      candidate_auth_files=None, candidate_pass_env=None,
                      candidate_config_dir=None, candidate_inherit_env=False,
                      candidate_spec_bytes=None, candidate_config_contents=None,
-                     candidate_persist_auth=False, container_workdir="/work"):
+                     candidate_persist_auth=False, container_workdir="/work",
+                     container_observer=None):
     """Run one cell in a container and return the adapter result dict.
 
     Raises ``DockerUnavailable`` (caller falls back to local) when the daemon or
@@ -658,6 +659,8 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
         # holds the stdout pipe open) can be force-killed on timeout. Killing
         # the `docker run` client alone does NOT stop the container.
         container_name = f"openbench_{harness}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+        if container_observer is not None:
+            container_observer(container_name)
         cmd = build_docker_cmd(
             harness, workdir, model, timeout_s, adapters_dir, image_for_run,
             instruction_path, container_name=container_name,

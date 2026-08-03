@@ -107,9 +107,9 @@ ROW_FIELDS = (
 )
 
 
-# Stall-kill watchdog state (set before cell invocation, cleared after).
-_STALLED_EVENT: threading.Event | None = None
-_ACTIVE_CELL_CONTEXT: dict | None = None
+# Bounded local process-group termination policy.
+LOCAL_TERMINATION_ATTEMPTS = 4
+LOCAL_TERMINATION_WAIT_S = 0.25
 
 
 class VersionDriftError(RuntimeError):
@@ -729,10 +729,150 @@ def hydrate_image_workdir(image, container_workdir, workdir):
             pass
 
 
+def _local_adapter_worker_main(spec_path, result_path):
+    """Execute one local adapter in an owned worker process."""
+    try:
+        with open(spec_path, encoding="utf-8") as fh:
+            spec = json.load(fh)
+        candidate = None
+        candidate_path = spec.get("candidate_path")
+        if candidate_path:
+            from .candidates import load_candidate
+            candidate = load_candidate(candidate_path, spec["adapters_dir"])
+            if candidate.identity_digest != spec.get("candidate_digest"):
+                raise RuntimeError(
+                    "candidate identity changed after runner preflight"
+                )
+        harness = spec["harness"]
+        if harness == "null":
+            result = null_run(
+                spec["instruction"],
+                spec["workdir"],
+                spec["model"],
+                spec["timeout_s"],
+            )
+        else:
+            adapter = candidate or load_adapter(spec["adapters_dir"], harness)
+            result = adapter.run(
+                spec["instruction"],
+                spec["workdir"],
+                spec["model"],
+                spec["timeout_s"],
+            )
+        payload = {"ok": True, "result": result}
+    except BaseException as exc:  # child must always leave parent-readable evidence
+        payload = {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "traceback": traceback.format_exc(limit=8),
+        }
+    fd = os.open(result_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+    return 0 if payload["ok"] else 1
+
+
+def _owned_process_group_exists(pgid):
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _terminate_owned_process_group(
+        proc, attempts=LOCAL_TERMINATION_ATTEMPTS,
+        wait_s=LOCAL_TERMINATION_WAIT_S):
+    """Boundedly terminate and verify one process group created by this runner."""
+    pgid = proc.pid
+    for attempt in range(attempts):
+        if not _owned_process_group_exists(pgid):
+            try:
+                proc.wait(timeout=0)
+            except (subprocess.TimeoutExpired, ChildProcessError):
+                pass
+            return True
+        sig = signal.SIGTERM if attempt == 0 else signal.SIGKILL
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return True
+        try:
+            proc.wait(timeout=wait_s)
+        except subprocess.TimeoutExpired:
+            pass
+        if not _owned_process_group_exists(pgid):
+            return True
+    return not _owned_process_group_exists(pgid)
+
+
+def _run_local_adapter_supervised(
+        harness, instruction, workdir, model, timeout_s, adapters_dir,
+        candidate, proxy_env, execution_context):
+    """Run a local adapter in a dedicated process group owned by this cell."""
+    with tempfile.TemporaryDirectory(prefix="obench_local_adapter_") as tmp:
+        spec_path = os.path.join(tmp, "spec.json")
+        result_path = os.path.join(tmp, "result.json")
+        spec = {
+            "harness": harness,
+            "instruction": instruction,
+            "workdir": workdir,
+            "model": model,
+            "timeout_s": timeout_s,
+            "adapters_dir": adapters_dir,
+            "candidate_path": (
+                candidate.path if candidate is not None else None
+            ),
+            "candidate_digest": (
+                candidate.identity_digest if candidate is not None else None
+            ),
+        }
+        fd = os.open(spec_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(spec, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        env = dict(os.environ)
+        env.update(proxy_env)
+        execution_context["activate"]()
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "obench.run",
+                "--local-adapter-worker",
+                spec_path,
+                result_path,
+            ],
+            env=env,
+            start_new_session=True,
+        )
+        execution_context["local_process"] = proc
+        returncode = proc.wait()
+        if not os.path.isfile(result_path):
+            raise RuntimeError(
+                f"local adapter worker exited {returncode} without a result"
+            )
+        with open(result_path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if not payload.get("ok"):
+            raise RuntimeError(
+                "local adapter worker failed: "
+                + str(payload.get("error") or payload.get("traceback"))
+            )
+        return payload["result"]
+
+
 def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                    adapters_dir, docker_image, docker_fallback,
                    proxy_ctx=None, cell_token=None, candidate=None,
-                   container_workdir="/work"):
+                   container_workdir="/work", execution_context=None):
     """Run the harness for one cell, honoring the execution mode.
 
     Returns ``(result_dict, exec_used)`` where ``exec_used`` is ``"local"`` or
@@ -767,6 +907,10 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
                 candidate_persist_auth=bool(
                     candidate is not None and getattr(candidate, "persist_auth", False)),
                 container_workdir=container_workdir,
+                container_observer=(
+                    execution_context["container_observer"]
+                    if execution_context is not None else None
+                ),
             )
             return result, "docker"
         except docker_exec.DockerUnavailable as exc:
@@ -789,12 +933,26 @@ def invoke_adapter(exec_mode, harness, instruction, workdir, model, timeout_s,
 
     local_start = time.monotonic()
     try:
-        with _temporary_environ(_proxy_env(proxy_ctx, cell_token, for_docker=False)):
-            if harness == "null":
-                result = null_run(instruction, workdir, model, timeout_s)
-            else:
-                adapter = candidate or load_adapter(adapters_dir, harness)
-                result = adapter.run(instruction, workdir, model, timeout_s)
+        proxy_env = _proxy_env(proxy_ctx, cell_token, for_docker=False)
+        if execution_context is not None:
+            result = _run_local_adapter_supervised(
+                harness,
+                instruction,
+                workdir,
+                model,
+                timeout_s,
+                adapters_dir,
+                candidate,
+                proxy_env,
+                execution_context,
+            )
+        else:
+            with _temporary_environ(proxy_env):
+                if harness == "null":
+                    result = null_run(instruction, workdir, model, timeout_s)
+                else:
+                    adapter = candidate or load_adapter(adapters_dir, harness)
+                    result = adapter.run(instruction, workdir, model, timeout_s)
         if fallback_env_setup_s is not None:
             result = _with_phase_timings(
                 result,
@@ -1549,13 +1707,50 @@ def _populate_proxy_row(row, proxy_ctx, cell_token, wait_s=0.0):
         row, read_proxy_ledger(proxy_ctx.get("ledger_dir"), cell_token, wait_s=wait_s))
 
 
-def _stall_watchdog_loop(proxy_server, cell_token, stall_timeout, kill_callback, poll_interval=10.0):
+def _finalize_proxy_cell(row, proxy_ctx, cell_token):
+    """Seal one managed cell and populate only complete proxy accounting."""
+    if not proxy_ctx or not cell_token:
+        return row
+    server = proxy_ctx.get("_proxy_server")
+    if server is None:
+        row["proxy_capture_truncated"] = True
+        row["token_basis_proxy"] = None
+        return row
+    try:
+        if not server.cell_is_registered(cell_token):
+            server.register_cell(cell_token)
+        server.seal_cell(cell_token, timeout_s=5.0)
+        ledger_rows = read_proxy_ledger(
+            proxy_ctx.get("ledger_dir"), cell_token, wait_s=0.0)
+        if not ledger_rows or ledger_rows[-1].get("record_type") != "ledger_seal":
+            raise ResultsLogError("managed proxy ledger is missing its durable seal")
+        seal = ledger_rows[-1]
+        requests = [
+            record for record in ledger_rows
+            if record.get("record_type") == "request"
+        ]
+        if seal.get("record_count") != len(requests):
+            raise ResultsLogError(
+                "managed proxy ledger record count does not match seal")
+        apply_proxy_ledger(row, requests)
+    except Exception as exc:  # preserve checker verdict, invalidate accounting
+        row["proxy_capture_truncated"] = True
+        row["token_basis_proxy"] = None
+        if row.get("error") is None:
+            row["error"] = f"proxy ledger finalization failed: {exc}"
+    return row
+
+
+def _stall_watchdog_loop(
+        proxy_server, cell_token, stall_timeout, kill_callback,
+        stalled_event, poll_interval=10.0, stop_event=None,
+        termination_outcome=None):
     """Daemon watchdog: monitor proxy liveness and kill on stall.
 
     Polls the proxy's cell_last_activity_age(cell_token) every
     poll_interval seconds.  If age >= stall_timeout (meaning no proxied
     model call arrived within the window), invokes kill_callback() and
-    sets the global _STALLED_EVENT so the caller can reclassify the row.
+    marks ``stalled_event`` only after bounded termination finishes.
 
     Liveness is defined as model-call ARRIVAL, not completion.  Every
     proxied HTTP request bumps last_activity_monotonic on the cell's
@@ -1563,20 +1758,27 @@ def _stall_watchdog_loop(proxy_server, cell_token, stall_timeout, kill_callback,
     NOT trigger the watchdog.
     """
     while True:
-        time.sleep(poll_interval)
-        event = _STALLED_EVENT
-        if event is None or event.is_set():
+        if stop_event is not None and stop_event.wait(poll_interval):
+            return
+        if stop_event is None:
+            time.sleep(poll_interval)
+        if stalled_event.is_set():
             return
         try:
             age = proxy_server.cell_last_activity_age(cell_token)
         except Exception:
             continue
         if age is not None and age >= stall_timeout:
-            event.set()
+            confirmed = False
+            if termination_outcome is not None:
+                termination_outcome["started"].set()
             try:
-                kill_callback()
+                confirmed = bool(kill_callback())
             except Exception:
                 pass
+            if termination_outcome is not None:
+                termination_outcome["confirmed"] = confirmed
+            stalled_event.set()
             return
 
 
@@ -1587,13 +1789,6 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              transcripts_dir=None, results_stem="", proxy_ctx=None,
              candidate=None, version_drift=False, workspace_observer=None,
              stall_timeout=None):
-    global _STALLED_EVENT, _ACTIVE_CELL_CONTEXT
-    # A prior cell's event (or a leftover daemon watchdog setting it) must
-    # never leak into this cell: the post-adapter is_set() check runs
-    # unconditionally, so a stale set event would mark a healthy cell stalled
-    # and skip its checker.
-    _STALLED_EVENT = None
-    _ACTIVE_CELL_CONTEXT = None
     """Execute one (task, harness, trial) cell and return its results row.
 
     Materializes the task workspace into a temp dir (snapshot ``workspace/``
@@ -1629,9 +1824,13 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     else:
         proxy_capable = proxy_supported_for_cell(proxy_harness, model)
     active_proxy_ctx = proxy_ctx if proxy_capable else None
+    proxy_server = None
     if active_proxy_ctx:
         from . import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
         cell_token = counting_proxy.new_cell_token()
+        proxy_server = active_proxy_ctx.get("_proxy_server")
+        if proxy_server is None:
+            raise RuntimeError("proxy context is missing its server")
         _write_proxy_cell_metadata(active_proxy_ctx, cell_token, proxy_harness, model)
     # Absolute so the checker (run with cwd=temp workdir) and TASK_DIR resolve
     # correctly regardless of the caller's cwd or a relative --tasks-dir.
@@ -1755,40 +1954,87 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         # Stall-kill watchdog: only active when proxy provides a liveness signal.
         # Liveness is model-call ARRIVAL, so a legitimately long streaming turn
         # does NOT trigger the kill.
-        stalled = False
-        if stall_timeout and active_proxy_ctx and cell_token and proxy_ctx:
-            proxy_server = proxy_ctx.get('_proxy_server')
-            if proxy_server is not None:
-                cell_ctx = {}
-                _ACTIVE_CELL_CONTEXT = cell_ctx
-                stall_event = threading.Event()
-                _STALLED_EVENT = stall_event
+        stalled_event = threading.Event()
+        watchdog_stop = None
+        watchdog_thread = None
+        cell_ctx = None
+        if stall_timeout and proxy_server is not None and cell_token:
+            activation_lock = threading.Lock()
+            termination_outcome = {
+                "confirmed": None,
+                "started": threading.Event(),
+            }
 
-                def _docker_kill():
-                    cname = cell_ctx.get('container_name')
+            def _activate_proxy_cell():
+                with activation_lock:
+                    if not proxy_server.cell_is_registered(cell_token):
+                        proxy_server.register_cell(cell_token)
+
+            def _observe_container(name):
+                _activate_proxy_cell()
+                cell_ctx["container_name"] = name
+
+            cell_ctx = {
+                "activate": _activate_proxy_cell,
+                "container_observer": _observe_container,
+            }
+
+            def _kill_owned_execution():
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline:
+                    proc = cell_ctx.get("local_process")
+                    if proc is not None:
+                        return _terminate_owned_process_group(proc)
+                    cname = cell_ctx.get("container_name")
                     if cname:
                         from .docker_exec import force_remove_container
-                        force_remove_container(cname)
+                        return force_remove_container(cname)
+                    time.sleep(0.02)
+                return False
 
-                kill_fn = _docker_kill if exec_mode == 'docker' else (lambda: None)
-                watchdog_thread = threading.Thread(
-                    target=_stall_watchdog_loop,
-                    args=(proxy_server, cell_token, stall_timeout, kill_fn, 10.0),
-                    daemon=True,
-                )
-                watchdog_thread.start()
+            watchdog_stop = threading.Event()
+            watchdog_thread = threading.Thread(
+                target=_stall_watchdog_loop,
+                args=(
+                    proxy_server,
+                    cell_token,
+                    stall_timeout,
+                    _kill_owned_execution,
+                    stalled_event,
+                    min(10.0, max(stall_timeout / 4.0, 0.05)),
+                    watchdog_stop,
+                    termination_outcome,
+                ),
+                daemon=True,
+            )
+            # Registration is performed by the execution observer so host or
+            # Docker setup time cannot consume the no-first-call stall budget.
+            watchdog_thread.start()
+        elif proxy_server is not None and cell_token:
+            proxy_server.register_cell(cell_token)
+        adapter_exc = None
         try:
             result, exec_used = invoke_adapter(
                 exec_mode, harness, instruction, workdir, model, timeout_s,
                 adapters_dir, docker_image, docker_fallback,
                 proxy_ctx=active_proxy_ctx, cell_token=cell_token,
                 candidate=candidate, container_workdir=task_workdir,
+                execution_context=cell_ctx,
             )
-            if _STALLED_EVENT is not None and _STALLED_EVENT.is_set():
-                stalled = True
         except Exception as exc:  # noqa: BLE001 - never crash the loop on an adapter
+            adapter_exc = exc
+        finally:
+            if watchdog_stop is not None:
+                watchdog_stop.set()
+            if watchdog_thread is not None:
+                if termination_outcome["started"].is_set():
+                    watchdog_thread.join()
+                else:
+                    watchdog_thread.join(timeout=1.0)
+        if adapter_exc is not None:
+            exc = adapter_exc
             exec_used = getattr(exc, "bench_exec_used", exec_mode)
-            row["error"] = traceback.format_exc(limit=4).strip()
+            row["error"] = "".join(traceback.format_exception(exc)).strip()
             env_extra = getattr(exc, "bench_env_setup_s", None)
             if isinstance(env_extra, (int, float)) and env_extra >= 0:
                 row["t_env_setup_s"] = round((row.get("t_env_setup_s") or 0.0) + env_extra, 3)
@@ -1803,7 +2049,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                 version_harness, exec_used, harness_version, docker_image, None,
                 container_versions_reader,
             )
-            if stalled and proxy_ctx:
+            if stalled_event.is_set() and proxy_ctx:
                 row["last_activity_age_s"] = round(
                     proxy_ctx.get("_proxy_server", proxy_ctx).cell_last_activity_age(cell_token) or 0, 1
                 ) if hasattr(proxy_ctx.get("_proxy_server", proxy_ctx), "cell_last_activity_age") else None
@@ -1857,11 +2103,19 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         _populate_proxy_row(row, active_proxy_ctx, cell_token, wait_s=2.0)
 
         # Stall detection: if the watchdog fired, reclassify and skip checker.
-        if stalled and proxy_ctx:
+        if stalled_event.is_set() and proxy_ctx:
             ps = proxy_ctx.get("_proxy_server", proxy_ctx)
             if hasattr(ps, "cell_last_activity_age"):
                 row["last_activity_age_s"] = round(ps.cell_last_activity_age(cell_token) or 0, 1)
             row["failure_class"] = STALLED
+            if (
+                cell_ctx is not None
+                and termination_outcome.get("confirmed") is False
+                and row.get("error") is None
+            ):
+                row["error"] = (
+                    "stall watchdog exhausted bounded termination attempts"
+                )
             return _populate_proxy_row(row, active_proxy_ctx, cell_token)
 
         # Persist the full agent transcript LOCAL-ONLY (prefer the untruncated
@@ -1910,6 +2164,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         row["failure_reason"] = classify_failure_reason(row, classifier_output)
         return _populate_proxy_row(row, active_proxy_ctx, cell_token)
     finally:
+        _finalize_proxy_cell(row, active_proxy_ctx, cell_token)
         if workspace_observer is not None:
             try:
                 workspace_observer(workdir)
@@ -1919,6 +2174,15 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "--local-adapter-worker":
+        if len(argv) != 3:
+            print(
+                "local adapter worker requires SPEC_PATH RESULT_PATH",
+                file=sys.stderr,
+            )
+            return 2
+        return _local_adapter_worker_main(argv[1], argv[2])
     parser = argparse.ArgumentParser(description="Agent-harness comparison runner.")
     parser.add_argument("--task", required=True,
                         help="comma-separated task name(s)")

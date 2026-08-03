@@ -9,6 +9,11 @@ Covers:
   - Stall-kill is disabled when proxy is off (no liveness signal)
 """
 
+import json
+import os
+import pathlib
+import subprocess
+import tempfile
 import threading
 import time
 import unittest
@@ -42,10 +47,10 @@ class ProxyLivenessTrackingTests(unittest.TestCase):
         self.server.server_close()
         self.server_thread.join(timeout=5)
 
-    def test_fresh_cell_has_no_activity(self):
-        """A newly registered cell with no requests reports no activity."""
+    def test_fresh_cell_starts_no_first_call_clock(self):
         age = self.server.cell_last_activity_age("test-cell-1")
-        self.assertIsNone(age)
+        self.assertIsNotNone(age)
+        self.assertLess(age, 0.5)
 
     def test_after_request_age_is_small(self):
         """After a completed request, last_activity_age is near zero."""
@@ -53,6 +58,15 @@ class ProxyLivenessTrackingTests(unittest.TestCase):
         with self.server._ledger_condition:
             ledger = self.server._cell_ledgers.get("test-cell-1")
             ledger.last_activity_monotonic = time.monotonic()
+        age = self.server.cell_last_activity_age("test-cell-1")
+        self.assertIsNotNone(age)
+        self.assertLess(age, 0.5)
+
+    def test_in_flight_request_remains_active(self):
+        with self.server._ledger_condition:
+            ledger = self.server._cell_ledgers["test-cell-1"]
+            ledger.in_flight = 1
+            ledger.last_activity_monotonic = time.monotonic() - 60
         age = self.server.cell_last_activity_age("test-cell-1")
         self.assertIsNotNone(age)
         self.assertLess(age, 0.5)
@@ -173,43 +187,182 @@ class FailureClassStalledTests(unittest.TestCase):
         self.assertFalse(fc_mod.is_excluded_from_solve_rate(row))
 
 
-class ProxyOffDisablesStallTests(unittest.TestCase):
-    """Verify stall-kill is disabled when --proxy is off."""
-
-    def test_watchdog_loop_exits_immediately_without_an_event(self):
-        """With no armed event (proxy off => watchdog never armed), the loop is a no-op.
-
-        ``_STALLED_EVENT`` is None outside a cell by design -- run_cell sets it
-        before invocation and clears it after -- so asserting it is non-None at
-        rest tests the opposite of the contract. What matters is that the loop
-        cannot kill anything when it was never armed.
-        """
-        self.assertIsNone(bench_run._STALLED_EVENT,
-                          "no cell running => no armed stall event")
-        killed = []
+class StallTerminationTests(unittest.TestCase):
+    def test_watchdog_sets_event_only_after_bounded_termination(self):
         proxy_server = mock.Mock()
-        # Age far beyond any timeout: the loop must STILL not kill, because the
-        # absence of an armed event means stall-kill is disabled for this cell.
         proxy_server.cell_last_activity_age.return_value = 10_000.0
+        stalled = threading.Event()
+        observed = []
+        outcome = {"confirmed": None, "started": threading.Event()}
+
+        def terminate():
+            observed.append(stalled.is_set())
+            return False
+
         bench_run._stall_watchdog_loop(
-            proxy_server, "cell", stall_timeout=1.0,
-            kill_callback=lambda: killed.append(True), poll_interval=0.01)
-        self.assertEqual(killed, [], "unarmed watchdog must never kill a cell")
+            proxy_server,
+            "cell",
+            stall_timeout=1.0,
+            kill_callback=terminate,
+            stalled_event=stalled,
+            poll_interval=0.01,
+            termination_outcome=outcome,
+        )
+        self.assertEqual(observed, [False])
+        self.assertTrue(outcome["started"].is_set())
+        self.assertFalse(outcome["confirmed"])
+        self.assertTrue(stalled.is_set())
 
-    def test_armed_watchdog_does_kill_on_stale_activity(self):
-        """Positive control: the same loop DOES kill once an event is armed."""
-        killed = []
-        proxy_server = mock.Mock()
-        proxy_server.cell_last_activity_age.return_value = 10_000.0
-        bench_run._STALLED_EVENT = threading.Event()
-        try:
-            bench_run._stall_watchdog_loop(
-                proxy_server, "cell", stall_timeout=1.0,
-                kill_callback=lambda: killed.append(True), poll_interval=0.01)
-            self.assertEqual(killed, [True])
-            self.assertTrue(bench_run._STALLED_EVENT.is_set())
-        finally:
-            bench_run._STALLED_EVENT = None
+    def test_owned_group_termination_exhausts_exact_bound(self):
+        proc = mock.Mock(pid=424242)
+        proc.wait.side_effect = subprocess.TimeoutExpired(["worker"], 0.01)
+        with (
+            mock.patch.object(
+                bench_run, "_owned_process_group_exists", return_value=True),
+            mock.patch.object(bench_run.os, "killpg") as killpg,
+        ):
+            confirmed = bench_run._terminate_owned_process_group(
+                proc, attempts=3, wait_s=0.01)
+        self.assertFalse(confirmed)
+        self.assertEqual(killpg.call_count, 3)
+        self.assertEqual(killpg.call_args_list[0].args[1], bench_run.signal.SIGTERM)
+        self.assertEqual(killpg.call_args_list[1].args[1], bench_run.signal.SIGKILL)
+
+    def test_local_stall_kills_only_owned_process_group_and_seals_ledger(self):
+        with tempfile.TemporaryDirectory(prefix="stall_e2e_") as root_value:
+            root = pathlib.Path(root_value)
+            task = root / "tasks" / "fake"
+            (task / "workspace").mkdir(parents=True)
+            (task / "instruction.md").write_text(
+                "wait forever\n", encoding="utf-8")
+            checker = task / "checker.sh"
+            checker.write_text(
+                "#!/usr/bin/env bash\n"
+                "echo checker-must-not-run >&2\n"
+                "exit 99\n",
+                encoding="utf-8",
+            )
+            checker.chmod(0o755)
+
+            adapters = root / "adapters"
+            adapters.mkdir()
+            (adapters / "pi.py").write_text(
+                "import pathlib, subprocess\n"
+                "def run(_instruction, workdir, _model, _timeout):\n"
+                "    proc = subprocess.Popen(['sleep', '30'])\n"
+                "    pathlib.Path(workdir, 'owned.pid').write_text(str(proc.pid))\n"
+                "    proc.wait()\n"
+                "    return {'completed': True, 'error': None, 'tokens': None, "
+                "'turns': None, 'cmd': ['sleep', '30'], 'output_tail': ''}\n",
+                encoding="utf-8",
+            )
+
+            ledger_dir = root / "ledgers"
+            server, thread = counting_proxy.start_in_thread(
+                "127.0.0.1", 0, ledger_dir)
+            port = server.server_address[1]
+            proxy_ctx = {
+                "ledger_dir": str(ledger_dir),
+                "local_base_url": f"http://127.0.0.1:{port}",
+                "docker_base_url": f"http://host.docker.internal:{port}",
+                "_proxy_server": server,
+            }
+            owned_pids = []
+            unrelated = subprocess.Popen(
+                ["sleep", "30"], start_new_session=True)
+            started = time.monotonic()
+            try:
+                row = bench_run.run_cell(
+                    "pi",
+                    "fake",
+                    "deepseek-v4-flash",
+                    1,
+                    30,
+                    str(root / "tasks"),
+                    str(adapters),
+                    5,
+                    proxy_ctx=proxy_ctx,
+                    stall_timeout=0.2,
+                    workspace_observer=lambda workdir: owned_pids.append(
+                        int(pathlib.Path(workdir, "owned.pid").read_text())
+                    ),
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                unrelated_alive = unrelated.poll() is None
+                unrelated.terminate()
+                unrelated.wait(timeout=5)
+
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertTrue(unrelated_alive)
+            self.assertEqual(row["failure_class"], "stalled")
+            self.assertIsNone(row["checker_exit"])
+            self.assertEqual(len(owned_pids), 1)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(owned_pids[0], 0)
+            records = [
+                json.loads(line)
+                for line in next(ledger_dir.glob("*.jsonl")).read_text(
+                    encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(records[-1]["record_type"], "ledger_seal")
+            self.assertEqual(records[-1]["record_count"], 0)
+
+    def test_workspace_setup_does_not_consume_stall_budget(self):
+        with tempfile.TemporaryDirectory(prefix="stall_setup_") as root_value:
+            root = pathlib.Path(root_value)
+            task = root / "tasks" / "fake"
+            (task / "workspace").mkdir(parents=True)
+            (task / "instruction.md").write_text("finish\n", encoding="utf-8")
+            checker = task / "checker.sh"
+            checker.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            checker.chmod(0o755)
+            adapters = root / "adapters"
+            adapters.mkdir()
+            (adapters / "pi.py").write_text(
+                "def run(*_args):\n"
+                "    return {'completed': True, 'error': None, 'tokens': None, "
+                "'turns': None, 'cmd': [], 'output_tail': ''}\n",
+                encoding="utf-8",
+            )
+            ledger_dir = root / "ledgers"
+            server, thread = counting_proxy.start_in_thread(
+                "127.0.0.1", 0, ledger_dir)
+            proxy_ctx = {
+                "ledger_dir": str(ledger_dir),
+                "local_base_url": (
+                    f"http://127.0.0.1:{server.server_address[1]}"),
+                "_proxy_server": server,
+            }
+            materialize = bench_run.materialize_workspace
+
+            def slow_materialize(*args, **kwargs):
+                time.sleep(0.7)
+                return materialize(*args, **kwargs)
+
+            try:
+                with mock.patch.object(
+                        bench_run, "materialize_workspace",
+                        side_effect=slow_materialize):
+                    row = bench_run.run_cell(
+                        "pi",
+                        "fake",
+                        "deepseek-v4-flash",
+                        1,
+                        5,
+                        str(root / "tasks"),
+                        str(adapters),
+                        5,
+                        proxy_ctx=proxy_ctx,
+                        stall_timeout=0.5,
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+            self.assertNotEqual(row["failure_class"], "stalled")
 
 
 class LastActivityAgeInRowFields(unittest.TestCase):

@@ -628,6 +628,28 @@ class TestContainerCleanup(unittest.TestCase):
         self.assertIn("host_wall_time_s", result)
         self.assertEqual(len(self._rm_calls(calls)), 1)
 
+    def test_container_observer_receives_killable_name_before_launch(self):
+        sentinel = docker_exec.RESULT_SENTINEL + ' {"completed": true}\n'
+        calls = self._patch(
+            lambda cmd, **kwargs: self.FakePopen(
+                cmd, stdout_text=sentinel, **kwargs))
+        observed = []
+        result = docker_exec.run_in_container(
+            "pi",
+            "do it",
+            "/tmp/wd",
+            "deepseek-v4-flash",
+            900,
+            "/repo/obench/adapters",
+            container_observer=observed.append,
+        )
+        self.assertTrue(result["completed"])
+        self.assertEqual(len(observed), 1)
+        docker_run = next(call for call in calls if call[:2] == ["docker", "run"])
+        self.assertIn(observed[0], docker_run)
+        self.assertTrue(
+            any(call[-1] == observed[0] for call in self._rm_calls(calls)))
+
     def test_force_remove_retries_until_gone(self):
         # First rm leaves the container visible in `docker ps` (wedged CLI on a
         # busy daemon); the retry succeeds.
