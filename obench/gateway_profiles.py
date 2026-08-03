@@ -54,7 +54,9 @@ _SCHEMA_KEYS = frozenset({
     "parameters",
     "schema",
 })
-_DATED_REVISION_RE = re.compile(r"-(?:\d{4}-\d{2}-\d{2}|\d{8})$")
+_DATED_REVISION_RE = re.compile(
+    r"-(?:\d{4}-\d{2}-\d{2}|\d{8}|(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))$"
+)
 
 
 class GatewayProfileError(ValueError):
@@ -84,8 +86,25 @@ def model_evidence_consistent(first: str, second: str, mode: str) -> bool:
     second_id = _model_id(second)
     if first_id == second_id:
         return True
-    if _DATED_REVISION_RE.search(first_id) and _DATED_REVISION_RE.search(second_id):
-        return False
+    first_revision = _dated_revision(first_id)
+    second_revision = _dated_revision(second_id)
+    if first_revision and second_revision:
+        first_base, first_date = first_revision
+        second_base, second_date = second_revision
+        return (
+            first_base == second_base
+            and (
+                first_date == second_date
+                or (
+                    len(first_date) == 4
+                    and second_date.endswith(first_date)
+                )
+                or (
+                    len(second_date) == 4
+                    and first_date.endswith(second_date)
+                )
+            )
+        )
     return _model_alias(first_id) == _model_alias(second_id)
 
 
@@ -134,6 +153,13 @@ def concrete_model_revision(value: str) -> str | None:
     """Return a normalized dated model ID, or None for a rolling alias."""
     model_id = _model_id(value)
     return model_id if _DATED_REVISION_RE.search(model_id) else None
+
+
+def _dated_revision(value: str) -> tuple[str, str] | None:
+    match = _DATED_REVISION_RE.search(value)
+    if match is None:
+        return None
+    return value[:match.start()], match.group(0)[1:].replace("-", "")
 
 
 def _model_alias(value: str) -> str:
@@ -479,9 +505,14 @@ class GatewayEvidence:
             return
         revision = concrete_model_revision(value)
         if revision is not None:
-            self._dated_model_ids.add(revision)
-            if len(self._dated_model_ids) > 1:
+            if any(
+                not model_evidence_consistent(
+                    existing, revision, self.model_match
+                )
+                for existing in self._dated_model_ids
+            ):
                 self.profile_reasons.append("served_model_conflict")
+            self._dated_model_ids.add(revision)
 
     def _observe_openrouter(self, obj: Mapping[str, Any]) -> bool:
         usage = obj.get("usage")

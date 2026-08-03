@@ -484,9 +484,14 @@ class OpenAIChatSSEParser:
                 if self._route_kind == "direct" and self._model_match == "rolling_alias":
                     revision = gateway_profiles.concrete_model_revision(model)
                     if revision is not None:
-                        self._direct_dated_model_ids.add(revision)
-                        if len(self._direct_dated_model_ids) > 1:
+                        if any(
+                            not gateway_profiles.model_evidence_consistent(
+                                existing, revision, self._model_match
+                            )
+                            for existing in self._direct_dated_model_ids
+                        ):
                             self._direct_model_conflict = True
+                        self._direct_dated_model_ids.add(revision)
                     if (
                         self._requested_provider
                         and not gateway_profiles.model_provider_matches(

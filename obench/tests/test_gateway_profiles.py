@@ -85,6 +85,21 @@ class GatewayRequestProfileTests(unittest.TestCase):
                     "allow_fallbacks": False,
                 })
 
+    def test_rolling_alias_accepts_matching_month_day_and_full_date(self):
+        shorthand = "deepseek/deepseek-v4-flash-0731"
+        canonical = "deepseek/deepseek-v4-flash-20260731"
+
+        self.assertTrue(
+            gateway_profiles.models_match(shorthand, canonical, "rolling_alias")
+        )
+        self.assertFalse(
+            gateway_profiles.models_match(
+                shorthand,
+                "deepseek/deepseek-v4-flash-20260801",
+                "rolling_alias",
+            )
+        )
+
     def test_vercel_sends_only_provider_filter_and_no_routing_or_cache_options(self):
         body = self.base_body()
         body["providerOptions"] = {
@@ -859,6 +874,36 @@ class GatewayEvidenceTests(unittest.TestCase):
         self.assertIn(
             "provider_conflict", contradictory["route_evidence"]["reasons"]
         )
+
+    def test_openrouter_accepts_equivalent_deepseek_revision_spellings(self):
+        requested = "deepseek/deepseek-v4-flash-0731"
+        canonical = "deepseek/deepseek-v4-flash-20260731"
+        result = self.parse(
+            sse(
+                {
+                    "model": requested,
+                    "provider": "DeepSeek",
+                    "choices": [{"delta": {"content": "x"}}],
+                    "openrouter_metadata": {
+                        "requested": requested,
+                        "endpoints": {"available": [{
+                            "provider": "DeepSeek",
+                            "model": canonical,
+                            "selected": True,
+                        }]},
+                    },
+                },
+                "[DONE]",
+            ),
+            gateway="openrouter",
+            requested_model=requested,
+            requested_provider="deepseek",
+            allowed_models=(requested,),
+            allowed_providers=("deepseek",),
+            model_match="rolling_alias",
+        )
+
+        self.assertTrue(result["route_evidence"]["pass"], result)
 
     def test_openrouter_rejects_selected_endpoint_from_other_model_family(self):
         requested = "openai/gpt-4o-mini"
