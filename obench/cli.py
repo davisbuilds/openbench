@@ -154,6 +154,9 @@ def main(argv=None):
         from .export_harbor import main as export_main
         return export_main(rest)
     if command == "import":
+        if rest and rest[0] == "harbor-results":
+            from .harbor_results import main as harbor_results_main
+            return harbor_results_main(rest[1:])
         from .import_harbor import main as import_main
         return import_main(rest)
     return 1
