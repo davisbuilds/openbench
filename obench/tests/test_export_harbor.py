@@ -79,6 +79,14 @@ class TaskTomlTests(unittest.TestCase):
             config["metadata"]["openbench_task_content_digest"],
             {"scheme": 2, "sha256": TASK_CONTENT_DIGEST},
         )
+        self.assertEqual(
+            config["metadata"]["openbench_harbor_export"],
+            {
+                "schema_version": 1,
+                "base_image": eh.DEFAULT_BASE_IMAGE,
+                "network_mode": "no-network",
+            },
+        )
         self.assertIn('network_mode = "no-network"', text)
         self.assertIn("[environment]", text)
         self.assertIn("[verifier]", text)
@@ -144,6 +152,14 @@ class TestShScoreMappingTests(unittest.TestCase):
         self.assertEqual(
             evidence["openbench_task_content_digest"],
             {"scheme": 2, "sha256": TASK_CONTENT_DIGEST},
+        )
+        self.assertEqual(
+            evidence["openbench_harbor_export"],
+            {
+                "schema_version": 1,
+                "base_image": eh.DEFAULT_BASE_IMAGE,
+                "network_mode": "no-network",
+            },
         )
         self.assertEqual(evidence["checker_exit"], 7)
         self.assertEqual(evidence["parsed_score"], 0.4)
@@ -355,6 +371,14 @@ class ExportTaskTests(unittest.TestCase):
         self.assertEqual(
             summary["openbench_task_content_digest"],
             {"scheme": 2, "sha256": expected_digest},
+        )
+        self.assertEqual(
+            summary["openbench_harbor_export"],
+            {
+                "schema_version": 1,
+                "base_image": eh.DEFAULT_BASE_IMAGE,
+                "network_mode": "no-network",
+            },
         )
         self.assertTrue(os.path.isfile(os.path.join(out, "instruction.md")))
         self.assertTrue(os.path.isfile(os.path.join(out, "task.toml")))

@@ -208,6 +208,31 @@ def _validate_openbench_task_content_digest(
     return {"scheme": 2, "sha256": sha256}
 
 
+def _validate_openbench_harbor_export(
+    value: Any, location: str
+) -> dict[str, Any]:
+    config = _object(value, location)
+    if set(config) != {"schema_version", "base_image", "network_mode"}:
+        raise _fail(
+            location,
+            "expected exactly 'schema_version', 'base_image', and 'network_mode'",
+        )
+    if config.get("schema_version") != 1 or isinstance(
+        config.get("schema_version"), bool
+    ):
+        raise _fail(f"{location}.schema_version", "expected 1")
+    base_image = _string(config.get("base_image"), f"{location}.base_image")
+    network_mode = _string(
+        config.get("network_mode"),
+        f"{location}.network_mode",
+    )
+    return {
+        "schema_version": 1,
+        "base_image": base_image,
+        "network_mode": network_mode,
+    }
+
+
 def _validate_job_lock(job_lock: Any) -> tuple[dict[str, Any], Counter[str]]:
     lock = _object(job_lock, "job lock")
     if lock.get("schema_version") != JOB_LOCK_SCHEMA_VERSION:
@@ -782,7 +807,15 @@ def _validate_timing(
 
 def _validate_reward(
     trial_dir: Path, result: dict[str, Any], location: str
-) -> tuple[float, int, float | None, Path, Path, dict[str, Any]]:
+) -> tuple[
+    float,
+    int,
+    float | None,
+    Path,
+    Path,
+    dict[str, Any],
+    dict[str, Any],
+]:
     reward_json = trial_dir / "verifier" / "reward.json"
     reward_text = trial_dir / "verifier" / "reward.txt"
     existing = [path for path in (reward_json, reward_text) if path.exists()]
@@ -821,6 +854,7 @@ def _validate_reward(
     if set(evidence) != {
         "schema_version",
         "openbench_task_content_digest",
+        "openbench_harbor_export",
         "checker_exit",
         "parsed_score",
         "reward",
@@ -838,6 +872,10 @@ def _validate_reward(
     openbench_task_content_digest = _validate_openbench_task_content_digest(
         evidence.get("openbench_task_content_digest"),
         f"{location}.verifier_evidence.openbench_task_content_digest",
+    )
+    openbench_harbor_export = _validate_openbench_harbor_export(
+        evidence.get("openbench_harbor_export"),
+        f"{location}.verifier_evidence.openbench_harbor_export",
     )
     checker_exit = evidence.get("checker_exit")
     if not isinstance(checker_exit, int) or isinstance(checker_exit, bool):
@@ -890,6 +928,7 @@ def _validate_reward(
         reward_path,
         evidence_path,
         openbench_task_content_digest,
+        openbench_harbor_export,
     )
 
 
@@ -1206,6 +1245,7 @@ def _validate_trial(
         reward_path,
         verifier_evidence_path,
         openbench_task_content_digest,
+        openbench_harbor_export,
     ) = _validate_reward(trial_dir, result, location)
     manifest_path, workspace_digest = _validate_artifacts(trial_dir, result, location)
     trajectory_path, agent_result, turns = _validate_atif(
@@ -1226,6 +1266,7 @@ def _validate_trial(
         "task_name": task_name,
         "task_digest": task_digest,
         "openbench_task_content_digest": openbench_task_content_digest,
+        "openbench_harbor_export": openbench_harbor_export,
         "task_checksum": checksum,
         "agent_config_name": _string(
             agent_lock.get("name"), f"{location}.lock.agent.name"
@@ -1406,6 +1447,9 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "task_digest": item["task_digest"],
                 "openbench_task_content_digest": dict(
                     item["openbench_task_content_digest"]
+                ),
+                "openbench_harbor_export": dict(
+                    item["openbench_harbor_export"]
                 ),
                 "harbor_task_checksum": item["task_checksum"],
                 "harbor_agent_config_name": item["agent_config_name"],

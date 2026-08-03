@@ -59,7 +59,8 @@ it does not claim that trials are temporal matched blocks.
   identified by the package version and commit fields alone.
 - `candidate_provenance` records Harbor build, job/trial IDs, evidence SHA-256
   digests, both Harbor task hashes, the structured OpenBench scheme-2 task
-  content digest, workspace tree digest, usage source, and mapping semantics.
+  content digest, structured exporter parameters, workspace tree digest, usage
+  source, and mapping semantics.
 
 ## Publishing imported rows
 
@@ -72,6 +73,10 @@ For every Harbor task, the imported scheme-2 execution digest must equal the
 digest recomputed from the local publication task tree. Missing local task
 trees, inconsistent imported digests, or any mismatch fail before the output
 directory is created.
+Publication also deterministically re-exports that local task with the
+evidence-bound `base_image` and `network_mode`, reproduces Harbor 0.20.0's
+package content hash, and requires equality with `TrialLock.task.digest`. This
+rejects exports changed after the OpenBench digest was embedded.
 
 Published Harbor rows use an allowlist. They retain the normalized result
 metrics, Harbor/ATIF/verifier/artifact/final-workspace digests, task hashes,
@@ -80,8 +85,8 @@ claim. Raw trajectory/session/transcript/workspace paths, unrecognized fields,
 and credential material are never copied. `provenance.json` records the same
 safe evidence per run under `harbor_import_evidence`; `obench verify`
 recomputes that manifest from `results.jsonl`, checks the executed scheme-2
-digest against the per-task publication digest, and then recomputes the digest
-from the supplied local task tree.
+digest against the per-task publication digest, reproduces the locked Harbor
+task digest, and then recomputes the digest from the supplied local task tree.
 
 ## Append safety
 

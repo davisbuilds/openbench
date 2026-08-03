@@ -86,6 +86,7 @@ def render_task_toml(
     workspace_provenance: dict | None,
     openbench_task_content_digest: str,
     tags: list[str] | None = None,
+    base_image: str = DEFAULT_BASE_IMAGE,
     network_mode: str = "no-network",
     agent_timeout_sec: float = 600.0,
     verifier_timeout_sec: float = 120.0,
@@ -151,6 +152,11 @@ def render_task_toml(
         f"scheme = {DIGEST_SCHEME_CURRENT}",
         f"sha256 = {_toml_str(openbench_task_content_digest)}",
         "",
+        "[metadata.openbench_harbor_export]",
+        "schema_version = 1",
+        f"base_image = {_toml_str(base_image)}",
+        f"network_mode = {_toml_str(network_mode)}",
+        "",
         "[verifier]",
         f"timeout_sec = {float(verifier_timeout_sec)}",
         "",
@@ -181,7 +187,12 @@ def render_dockerfile(*, base_image: str = DEFAULT_BASE_IMAGE) -> str:
     )
 
 
-def render_test_sh(openbench_task_content_digest: str) -> str:
+def render_test_sh(
+    openbench_task_content_digest: str,
+    *,
+    base_image: str = DEFAULT_BASE_IMAGE,
+    network_mode: str = "no-network",
+) -> str:
     """Harbor verifier wrapper around OpenBench ``checker.sh``.
 
     Writes scalar ``reward.txt`` plus machine-readable verifier evidence under
@@ -269,6 +280,11 @@ cat >"$REWARD_DIR/openbench-verifier-evidence.json" <<EOF
     "scheme": 2,
     "sha256": "__OPENBENCH_TASK_CONTENT_DIGEST__"
   },
+  "openbench_harbor_export": {
+    "schema_version": 1,
+    "base_image": "__OPENBENCH_BASE_IMAGE__",
+    "network_mode": "__OPENBENCH_NETWORK_MODE__"
+  },
   "checker_exit": $RC,
   "parsed_score": $PARSED_SCORE_JSON,
   "reward": $REWARD,
@@ -278,10 +294,18 @@ EOF
 rm -f "$OUT_FILE"
 exit 0
 """
-    return script.replace(
-        "__OPENBENCH_TASK_CONTENT_DIGEST__",
-        openbench_task_content_digest,
-    )
+    replacements = {
+        "__OPENBENCH_TASK_CONTENT_DIGEST__": openbench_task_content_digest,
+        "__OPENBENCH_BASE_IMAGE__": base_image,
+        "__OPENBENCH_NETWORK_MODE__": network_mode,
+    }
+    for placeholder, value in replacements.items():
+        if any(char in value for char in '"\\\n\r'):
+            raise ExportError(
+                f"Harbor export evidence value is not JSON-safe: {value!r}"
+            )
+        script = script.replace(placeholder, value)
+    return script
 
 
 def render_solve_sh() -> str:
@@ -404,6 +428,7 @@ def export_task(
             description=description,
             workspace_provenance=provenance,
             openbench_task_content_digest=content_digest,
+            base_image=base_image,
             network_mode=network_mode,
         ),
     )
@@ -418,7 +443,11 @@ def export_task(
         _copy_tree_contents(checker_data, os.path.join(tests_dir, "checker_data"))
     _write_text(
         os.path.join(tests_dir, "test.sh"),
-        render_test_sh(content_digest),
+        render_test_sh(
+            content_digest,
+            base_image=base_image,
+            network_mode=network_mode,
+        ),
         mode=0o755,
     )
 
@@ -459,6 +488,11 @@ def export_task(
         "openbench_task_content_digest": {
             "scheme": DIGEST_SCHEME_CURRENT,
             "sha256": content_digest,
+        },
+        "openbench_harbor_export": {
+            "schema_version": 1,
+            "base_image": base_image,
+            "network_mode": network_mode,
         },
         "has_solution": has_solution,
     }

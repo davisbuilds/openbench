@@ -259,6 +259,11 @@ class GoldenHarborJob:
                     "openbench_task_content_digest": (
                         _openbench_task_content_digest(spec["task"])
                     ),
+                    "openbench_harbor_export": {
+                        "schema_version": 1,
+                        "base_image": "python:3.11-slim",
+                        "network_mode": "no-network",
+                    },
                     "checker_exit": 0 if spec["score"] == 1.0 else 1,
                     "parsed_score": None if spec["score"] == 0.0 else spec["score"],
                     "reward": spec["score"],
@@ -382,6 +387,14 @@ class HarborResultsTests(unittest.TestCase):
         self.assertEqual(
             rows[0]["candidate_provenance"]["openbench_task_content_digest"],
             _openbench_task_content_digest("alpha"),
+        )
+        self.assertEqual(
+            rows[0]["candidate_provenance"]["openbench_harbor_export"],
+            {
+                "schema_version": 1,
+                "base_image": "python:3.11-slim",
+                "network_mode": "no-network",
+            },
         )
         self.assertEqual(rows[0]["failure_class"], "solved")
         self.assertEqual(rows[1]["failure_class"], "wrong_answer")

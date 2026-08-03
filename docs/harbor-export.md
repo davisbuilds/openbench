@@ -76,8 +76,9 @@ retains the scalar `reward.txt` contract and also writes the structured
 `openbench-verifier-evidence.json`. It contains the original checker exit, the
 last parseable clamped `SCORE` (or `null`), final reward, whole-second
 verifier-wrapper duration, and the same `{scheme = 2, sha256 = ...}` task
-content digest recorded in `task.toml`. Generated `tests/test.sh` resolves the
-log directory as:
+content digest recorded in `task.toml`. It also records the structured exporter
+parameters needed to reproduce the exact Harbor package (`base_image` and
+`network_mode`). Generated `tests/test.sh` resolves the log directory as:
 
 1. `$VERIFIER_LOGS_DIR` if set (local round-trip / tests)
 2. else `/logs/verifier` when that directory already exists (Harbor runtime)
