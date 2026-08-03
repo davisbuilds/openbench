@@ -3,8 +3,11 @@
 # Preconditions checked up front: a launch missing a key burns every cell's
 # retry budget in seconds on SETUP-NEEDED, which the queue records as infra.
 set -uo pipefail
-REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
-cd "$REPO_ROOT"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)" || {
+  echo "ABORT: cannot determine repository root" >&2; exit 1;
+}
+[ -n "$REPO_ROOT" ] || { echo "ABORT: repository root is empty" >&2; exit 1; }
+cd "$REPO_ROOT" || { echo "ABORT: cannot enter repository root: $REPO_ROOT" >&2; exit 1; }
 set -a; source ~/.openbench/keys.env 2>/dev/null; source ~/.config/secrets/secrets.env 2>/dev/null; set +a
 for v in OPENROUTER_API_KEY DEEPSEEK_API_KEY; do
   eval "val=\${$v:-}"

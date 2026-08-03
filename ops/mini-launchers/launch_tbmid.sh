@@ -5,8 +5,11 @@
 # an env error that the queue classified as infra and retried rather than
 # failing loudly. Hence the explicit precondition check below.
 set -uo pipefail
-REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
-cd "$REPO_ROOT"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)" || {
+  echo "ABORT: cannot determine repository root" >&2; exit 1;
+}
+[ -n "$REPO_ROOT" ] || { echo "ABORT: repository root is empty" >&2; exit 1; }
+cd "$REPO_ROOT" || { echo "ABORT: cannot enter repository root: $REPO_ROOT" >&2; exit 1; }
 set -a
 source ~/.openbench/keys.env
 set +a

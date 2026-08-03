@@ -32,7 +32,7 @@ proxy = true
 
 [retry]
 infra = 3
-stall = 1
+stalled = 1
 rate_limited = 6
 rate_limited_backoff_start = 180
 
