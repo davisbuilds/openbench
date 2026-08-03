@@ -8,6 +8,7 @@
 *.log
 .env
 .env.*
+/agents.env
 
 # Common dependency/build outputs
 node_modules/

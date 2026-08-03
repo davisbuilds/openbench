@@ -4,6 +4,18 @@ Read this first. It captures what this project is trying to become, so any agent
 or contributor picks up the strategic context, not just the mechanics in
 `README.md` / `WRITEUP.md`.
 
+## Local execution context
+
+Before changing benchmark execution or starting a run, read `agents.env` when
+it exists. It is a gitignored, machine-local source of truth for where code is
+developed and where benchmarks are executed. Never commit it or put credentials
+in it.
+
+For this installation, code changes belong in the laptop checkout. Benchmark
+runs normally execute on the Mac Mini from an exact pushed commit. Do not edit
+source on the Mini, do not launch from a dirty or stale checkout, and check for
+active benchmark processes before starting another run.
+
 ## What OpenBench is
 
 A benchmark framework for comparing coding-agent **harnesses** (codex, pi,
