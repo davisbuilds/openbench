@@ -255,8 +255,15 @@ direct_control_arm_id = "direct"
         class PlainHTTPSConnection(http.client.HTTPConnection):
             pass
 
+        class FrozenDateTime(gateway_run.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                fixed = cls.fromisoformat("2026-07-15T00:00:00+00:00")
+                return fixed if tz is None else fixed.astimezone(tz)
+
         with (
             mock.patch.object(proxy.http.client, "HTTPSConnection", PlainHTTPSConnection),
+            mock.patch.object(gateway_run, "datetime", FrozenDateTime),
             mock.patch.object(gateway_run.pi, "version", return_value="fake-pi 1.0"),
             mock.patch.dict(os.environ, self.env, clear=False),
         ):
