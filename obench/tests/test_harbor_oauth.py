@@ -200,6 +200,16 @@ class HostOAuthContextTests(unittest.TestCase):
         with open(self.master, "rb") as fh:
             self.assertEqual(fh.read(), OLD_AUTH)
 
+    def test_second_context_stages_rotation_returned_by_first_context(self):
+        with harbor_oauth.build_harbor_oauth_context(self.master) as first:
+            _write(first.config.auth_return_path, ROTATED_AUTH)
+        with harbor_oauth.build_harbor_oauth_context(self.master) as second:
+            with open(second.config.auth_json_path, "rb") as fh:
+                self.assertEqual(fh.read(), ROTATED_AUTH)
+            _write(second.config.auth_return_path, NEWER_AUTH)
+        with open(self.master, "rb") as fh:
+            self.assertEqual(fh.read(), NEWER_AUTH)
+
     def test_missing_return_fails_closed_and_cleans_staging(self):
         credential = harbor_oauth.build_harbor_oauth_context(self.master)
         with self.assertRaises(harbor_oauth.MissingAuthReturnError):
