@@ -14,12 +14,15 @@ first local cell, Docker, imported tasks, and open-model keys. Evaluating
 harnesses on a **private codebase**? Start with
 [`docs/private-evals.md`](docs/private-evals.md) (`obench init`, author a task
 from a small code slice, validate polarity, run, report — transcripts stay
-local). To run OpenBench tasks with Harbor, see
-[`docs/harbor-export.md`](docs/harbor-export.md) (`obench export harbor`).
-The optional one-trial Codex OAuth runner and strict result importer are
-documented in [`docs/harbor-oauth.md`](docs/harbor-oauth.md) (`obench harbor
-oauth-run`) and [`docs/harbor-results.md`](docs/harbor-results.md) (`obench
-import harbor-results`).
+local). To run OpenBench tasks as a native Harbor task x harness x attempt job,
+see [`docs/harbor-jobs.md`](docs/harbor-jobs.md) (`obench harbor job-run`).
+The exporter, exact OAuth harness profiles, sealed proxy metering, and strict
+result importer are documented in
+[`docs/harbor-export.md`](docs/harbor-export.md),
+[`docs/harbor-profiles.md`](docs/harbor-profiles.md),
+[`docs/harbor-metering.md`](docs/harbor-metering.md), and
+[`docs/harbor-results.md`](docs/harbor-results.md). The older one-trial
+Codex-only bridge remains available as `obench harbor oauth-run`.
 To pull Harbor-format tasks into OpenBench, see
 [`docs/harbor-import.md`](docs/harbor-import.md) (`obench import harbor`).
 Versioned packs (`org/name@version`, tasks or harness manifests) are covered in
@@ -189,7 +192,7 @@ pip install "git+https://github.com/minghinmatthewlam/openbench.git"
 Then use the umbrella CLI: `obench init`, `obench run`, `obench report`,
 `obench doctor`, `obench validate`, `obench admit`, `obench gate`, `obench compare`,
 `obench publish`, `obench verify`, `obench pack`, `obench export`,
-`obench import`, `obench import harbor-results`, `obench harbor oauth-run`, and
+`obench import`, `obench import harbor-results`, `obench harbor job-run`, and
 `obench gateway validate|doctor|run|report|publish|verify`. Legacy
 `python3 bench/run.py` (and friends) still forward with a deprecation note.
 Versioned packs (`org/name@version`) are documented in

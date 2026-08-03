@@ -183,6 +183,24 @@ class HarborMeteringSessionTests(unittest.TestCase):
             (evidence_root / "private").iterdir()
         ):
             self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+        verified = harbor_metering.verify_evidence_dir(
+            evidence_root,
+            expected_trial_id="exact",
+            expected_harness="codex",
+        )
+        self.assertEqual(verified["reconciliation"]["status"], "exact")
+
+    def test_durable_ledger_tampering_is_rejected(self):
+        with self._session("tampered") as session:
+            self._post_model_call(session)
+            session.seal(harbor_metering.UsageCounters(1, 12, 3, 4))
+        root = Path(self.temp.name) / "tampered"
+        ledger = next((root / "private").glob("*.jsonl"))
+        ledger.write_bytes(ledger.read_bytes() + b"{}\n")
+        with self.assertRaisesRegex(
+            harbor_metering.HarborMeteringError, "ledger"
+        ):
+            harbor_metering.verify_evidence_dir(root)
 
     def test_mismatch_is_machine_visible_and_required_evidence_blocks(self):
         with self._session("mismatch") as session:

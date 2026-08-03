@@ -19,6 +19,7 @@ from obench.harbor_oauth import (
     HarborOAuthSetupError,
     HarborOAuthUnsupportedError,
 )
+from obench.harbor_metering import HarborMeteringSession, UsageCounters
 from obench.tools.atif_convert import convert_pi
 
 
@@ -67,7 +68,6 @@ def _build_agent_class(harbor_pi):
             super().__init__(*args, **kwargs)
 
         async def run(self, instruction, environment, context):
-            del context
             if self._oauth_run_active:
                 raise HarborOAuthSetupError(
                     "one OpenBenchPiOAuth instance cannot run concurrently"
@@ -87,6 +87,16 @@ def _build_agent_class(harbor_pi):
                     "OpenBenchPiOAuth supports only the openai-codex provider"
                 )
 
+            logs_dir = Path(self.logs_dir)
+            metering = HarborMeteringSession(
+                logs_dir / "harbor-metering",
+                logs_dir.parent.name or "harbor-trial",
+                harness="pi",
+                base_route="backend-api",
+            )
+            missing = object()
+            prior_base_url = self._extra_env.get(PI_BASE_URL, missing)
+            self._extra_env[PI_BASE_URL] = metering.runtime_base_url
             instruction = self.render_instruction(instruction)
             self._openbench_instruction = instruction
             remote_home = _REMOTE_HOME.as_posix()
@@ -189,6 +199,24 @@ def _build_agent_class(harbor_pi):
                 except BaseException:
                     pass
                 self._oauth_run_active = False
+                try:
+                    self.populate_context_post_run(context)
+                    trajectory_path = logs_dir / "trajectory.json"
+                    trajectory = (
+                        json.loads(trajectory_path.read_text(encoding="utf-8"))
+                        if trajectory_path.is_file()
+                        else None
+                    )
+                    metering.seal(
+                        UsageCounters.from_atif_trajectory(trajectory),
+                        proxy_required=True,
+                    )
+                finally:
+                    metering.close()
+                    if prior_base_url is missing:
+                        self._extra_env.pop(PI_BASE_URL, None)
+                    else:
+                        self._extra_env[PI_BASE_URL] = prior_base_url
 
             if capture_error is not None:
                 raise capture_error from run_error

@@ -428,6 +428,14 @@ class HarborResultsTests(unittest.TestCase):
         self.assertEqual(rows[0]["tokens_output"], 40)
         self.assertEqual(rows[0]["tokens"], 115)
         self.assertIsNone(rows[0]["token_basis_proxy"])
+        self.assertEqual(
+            rows[0]["candidate_provenance"]["harbor_job_retries"],
+            0,
+        )
+        self.assertEqual(
+            rows[0]["candidate_provenance"]["harbor_job_max_retries"],
+            0,
+        )
         self.assertIsNone(rows[0]["tokens_proxy_calls"])
         self.assertFalse(rows[0]["candidate_provenance"]["proxy_measured"])
         self.assertEqual(
@@ -1117,6 +1125,44 @@ class HarborResultsTests(unittest.TestCase):
             row["candidate_provenance"]["harbor_agent_config_name"],
             AGENT_IMPORT_PATH,
         )
+
+    def test_profile_agent_requires_durable_proxy_evidence(self):
+        fixture = GoldenHarborJob(
+            self.root / "job-profile-metering-required",
+            specs=[
+                {
+                    "name": "alpha__profile",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000014",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        profile_import = (
+            "obench.harbor_agents.codex_profile:"
+            "OpenBenchCodexOAuthProfile"
+        )
+        lock_path = fixture.trial() / "lock.json"
+        trial_lock = json.loads(lock_path.read_text())
+        trial_lock["agent"]["name"] = profile_import
+        _write_json(lock_path, trial_lock)
+
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"] = [trial_lock]
+        _write_json(job_lock_path, job_lock)
+
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["config"]["agent"]["name"] = profile_import
+        _write_json(result_path, result)
+
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "metering",
+        ):
+            load_rows(fixture.root)
 
     def test_rejects_coherent_result_and_atif_agent_relabeling(self):
         fixture = self.fixture()

@@ -95,6 +95,13 @@ isolated paths after each single-step OpenBench task.
 Passing a proxy URL to the OpenCode profile fails closed. Profiles accept only
 absolute HTTP(S) proxy URLs and never construct cell tokens themselves.
 
+`obench harbor job-run` creates a separate per-trial metering session inside
+the Codex and Pi agents. The strict Harbor importer requires a sealed,
+hash-chain-verified ledger whose call and token totals exactly reconcile with
+ATIF before either profile can be published. OpenCode remains runnable for
+execution/trajectory experiments, but it is not a publication-grade metered
+arm.
+
 ## Pinned Harbor API evidence
 
 Compatibility is grounded in Harbor package `0.20.0`, commit
@@ -111,18 +118,14 @@ Compatibility is grounded in Harbor package `0.20.0`, commit
   OAuth auth-file staging.
 
 The focused offline proof instantiates every resolved profile through the pinned
-`AgentFactory`. No Docker, model, API, SSH, Mini, benchmark, or publish action is
-part of this proof.
+`AgentFactory`. The release proof additionally runs Codex and Pi through native
+Harbor Docker jobs on the benchmark host and imports their sealed evidence.
 
-## Integration blockers
+## Current boundary
 
-- `obench.harbor_results.HARBOR_AGENT_SEMANTIC_NAME_ALIASES` currently knows
-  only the older Codex OAuth import path. Before importing results from these
-  profiles, the Harbor-results owner must map all three profile import paths to
-  `codex`, `pi`, and `opencode` respectively. This file is outside the profile
-  owner's allowed write scope.
+- `obench.harbor_results` maps all three profile import identities back to
+  stable `codex`, `pi`, and `opencode` harness names.
+- Codex and Pi result import requires exact sealed proxy evidence. Missing,
+  incomplete, or mismatched ledgers fail closed.
 - OpenCode OAuth counting-proxy routing remains unsupported until its exact
   subscription endpoint/base-URL behavior is source-proven and tested.
-- Live OAuth rotation and CLI behavior remain operator-run integration proof;
-  this implementation was intentionally verified without credentials or model
-  calls.

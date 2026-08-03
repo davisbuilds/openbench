@@ -16,6 +16,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .atif import validate_trajectory
+from .harbor_metering import (
+    HarborMeteringError,
+    apply_to_imported_row,
+    verify_evidence_dir,
+)
 from .harbor_oauth import AGENT_IMPORT_PATH
 from .run import (
     ROW_FIELDS,
@@ -35,7 +40,14 @@ VERIFIER_EVIDENCE_SCHEMA_VERSION = "openbench-verifier-evidence-v2"
 MAX_JSON_BYTES = 32 * 1024 * 1024
 HARBOR_AGENT_SEMANTIC_NAME_ALIASES = {
     AGENT_IMPORT_PATH: "codex",
+    "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile": "codex",
+    "obench.harbor_agents.pi:OpenBenchPiOAuth": "pi",
+    "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth": "opencode",
 }
+HARBOR_PROXY_REQUIRED_AGENTS = frozenset({
+    "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile",
+    "obench.harbor_agents.pi:OpenBenchPiOAuth",
+})
 
 
 class HarborResultsError(ValueError):
@@ -1353,6 +1365,21 @@ def _validate_trial(
         location,
     )
     usage = _usage_fields(agent_result, location)
+    proxy_required = agent_config_name in HARBOR_PROXY_REQUIRED_AGENTS
+    metering_path = trial_dir / "agent" / "harbor-metering"
+    metering_evidence = None
+    metering_evidence_path = None
+    if proxy_required:
+        try:
+            metering_evidence = verify_evidence_dir(
+                metering_path,
+                expected_trial_id=trial_dir.name,
+                expected_harness=agent_name,
+                proxy_required=True,
+            )
+        except HarborMeteringError as exc:
+            raise _fail(f"{location}.metering", str(exc)) from exc
+        metering_evidence_path = metering_path / "harbor-metering.json"
     return {
         "trial_dir": trial_dir,
         "result": result,
@@ -1383,6 +1410,9 @@ def _validate_trial(
         "checker_exit": checker_exit,
         "turns": turns,
         "usage": usage,
+        "proxy_required": proxy_required,
+        "metering_evidence": metering_evidence,
+        "metering_evidence_path": metering_evidence_path,
         "workspace_digest": workspace_digest,
     }
 
@@ -1484,10 +1514,18 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 f"inconsistent OpenBench content digests for locked task {task_digest}",
             )
 
-    _job_result, job_id, job_started, job_finished = _validate_job_result(
+    job_result, job_id, job_started, job_finished = _validate_job_result(
         job_result_value,
         expected_trials=expected_count,
         actual_trial_results=[item["result"] for item in trials],
+    )
+    job_retry_count = _integer(
+        _object(job_result.get("stats"), "job result.stats").get("n_retries"),
+        "job result.stats.n_retries",
+    )
+    job_max_retries = _integer(
+        _object(job_lock.get("retry"), "job lock.retry").get("max_retries"),
+        "job lock.retry.max_retries",
     )
     for item in trials:
         if (
@@ -1553,8 +1591,11 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "harbor_task_checksum": item["task_checksum"],
                 "harbor_agent_config_name": item["agent_config_name"],
                 "harbor_verifier_time_s": item["harbor_verifier_time_s"],
+                "harbor_job_retries": job_retry_count,
+                "harbor_job_max_retries": job_max_retries,
                 "usage_source": item["usage"]["token_basis"],
                 "proxy_measured": False,
+                "harbor_metering": None,
                 "trial_mapping": "lexicographic_name_within_task_agent_model",
                 "temporal_matched_block_claim": False,
             }
@@ -1592,6 +1633,24 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 }
             )
             row.update(item["usage"])
+            if item["metering_evidence"] is not None:
+                row = apply_to_imported_row(
+                    row,
+                    item["metering_evidence"],
+                    proxy_required=item["proxy_required"],
+                )
+                harbor_metering = row["candidate_provenance"]["harbor_metering"]
+                harbor_metering.update(
+                    {
+                        "proxy_required": item["proxy_required"],
+                        "evidence_sha256": _sha256_file(
+                            item["metering_evidence_path"]
+                        ),
+                        "ledger_sha256": item["metering_evidence"][
+                            "ledger_seal"
+                        ]["ledger_sha256"],
+                    }
+                )
             rows.append(row)
     run_ids = [row["run_id"] for row in rows]
     if len(run_ids) != len(set(run_ids)):

@@ -29,7 +29,6 @@ DEFAULT_RETRY_EXCLUSIONS = (
     "AgentAuthenticationError",
     "AgentSafetyRefusalError",
     "AgentTimeoutError",
-    "ApiUsageLimitError",
     "ModelNotFoundError",
     "RewardFileEmptyError",
     "RewardFileNotFoundError",
@@ -70,13 +69,14 @@ class Dataset:
 
 @dataclass(frozen=True)
 class AgentProfile:
-    """One harness profile that will be crossed with every requested model.
+    """One harness profile, optionally bound to an exact model identity.
 
     ``env`` values must be Harbor host-environment templates such as
     ``${OPENAI_API_KEY}``. Literal runtime values are intentionally rejected.
     """
 
     profile_id: str
+    model_name: str | None = None
     name: str | None = None
     import_path: str | None = None
     n_concurrent: int | None = None
@@ -152,16 +152,28 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
     if spec.attempts < 1:
         raise HarborJobError("attempts must be at least 1")
 
-    models = _validate_unique_strings(spec.models, "models")
+    models = (
+        _validate_unique_strings(spec.models, "models")
+        if spec.models
+        else ()
+    )
     profiles = _validate_profiles(spec.agent_profiles, spec.concurrency)
     retry = _render_retry(spec.retry)
     source, source_task_count = _render_source(spec.source)
 
-    agents = [
-        _render_agent(profile, model)
-        for profile in profiles
-        for model in models
-    ]
+    agents = []
+    for profile in profiles:
+        profile_models = (
+            (profile.model_name,)
+            if profile.model_name is not None
+            else models
+        )
+        if not profile_models:
+            raise HarborJobError(
+                f"profile {profile.profile_id} requires model_name when "
+                "the job has no shared models"
+            )
+        agents.extend(_render_agent(profile, model) for model in profile_models)
     config = {
         "job_name": job_name,
         "jobs_dir": str(jobs_dir),
@@ -420,6 +432,10 @@ def _validate_profiles(
                 raise HarborJobError(
                     f"profile {profile_id} import_path must use module:Class form"
                 )
+        if profile.model_name is not None:
+            _validate_nonempty(
+                profile.model_name, f"profile {profile_id} model_name"
+            )
         if profile.n_concurrent is not None:
             if not isinstance(profile.n_concurrent, int) or isinstance(
                 profile.n_concurrent, bool

@@ -236,6 +236,8 @@ class HarborMeteringSession:
         evidence_dir: str | os.PathLike[str],
         trial_id: str,
         *,
+        harness: str = "codex",
+        base_route: str = "backend-api/codex",
         listen_host: str = "0.0.0.0",
         advertised_host: str = "host.docker.internal",
         port: int = 0,
@@ -244,8 +246,18 @@ class HarborMeteringSession:
             raise ValueError("trial_id must be a nonempty string without NUL bytes")
         if not advertised_host or "/" in advertised_host:
             raise ValueError("advertised_host must be a hostname or address")
+        if (
+            not isinstance(harness, str)
+            or not harness
+            or not isinstance(base_route, str)
+            or not base_route.strip("/")
+            or ".." in base_route.split("/")
+        ):
+            raise ValueError("harness and base_route must be nonempty safe strings")
 
         self.trial_id = trial_id
+        self.harness = harness
+        self.base_route = base_route.strip("/")
         self.evidence_dir = Path(evidence_dir).expanduser().resolve()
         self.private_dir = self.evidence_dir / "private"
         self.evidence_path = self.evidence_dir / "harbor-metering.json"
@@ -269,7 +281,7 @@ class HarborMeteringSession:
                 self.private_dir / f"{self._token}.meta.json",
                 {
                     "source": "harbor_metering",
-                    "harness": "codex",
+                    "harness": self.harness,
                     "trial_id_sha256": hashlib.sha256(
                         trial_id.encode("utf-8")
                     ).hexdigest(),
@@ -290,7 +302,7 @@ class HarborMeteringSession:
         host = f"[{advertised_host}]" if ":" in advertised_host else advertised_host
         self._base_url = (
             f"http://{host}:{actual_port}/cell/{self._token}/"
-            "codex/backend-api/codex"
+            f"codex/{self.base_route}"
         )
 
     @property
@@ -369,12 +381,13 @@ class HarborMeteringSession:
         evidence: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "trial_id": self.trial_id,
+            "harness": self.harness,
             "transport": {
                 "client_to_proxy": "http",
                 "proxy_to_upstream": "https",
                 "tls_interception": False,
                 "upstream_origin": "https://chatgpt.com",
-                "route": "codex/backend-api/codex",
+                "route": f"codex/{self.base_route}",
             },
             "agent_reported": asdict(agent_reported),
             "proxy_measured": asdict(proxy_usage),
@@ -451,6 +464,74 @@ def _verified_ledger(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     ):
         raise HarborMeteringError("proxy ledger seal does not match its records")
     return requests, seal
+
+
+def verify_evidence_dir(
+    evidence_dir: str | os.PathLike[str],
+    *,
+    expected_trial_id: str | None = None,
+    expected_harness: str | None = None,
+    proxy_required: bool = True,
+) -> dict[str, Any]:
+    """Recompute a trial's durable ledger and reconciliation before import."""
+
+    root = Path(evidence_dir)
+    if root.is_symlink() or not root.is_dir():
+        raise HarborMeteringError(f"metering directory is unavailable: {root}")
+    evidence = load_evidence(root / "harbor-metering.json")
+    if expected_trial_id is not None and evidence.get("trial_id") != expected_trial_id:
+        raise HarborMeteringError("metering trial identity does not match Harbor")
+    if expected_harness is not None and evidence.get("harness") != expected_harness:
+        raise HarborMeteringError("metering harness identity does not match Harbor")
+
+    private_dir = root / "private"
+    if private_dir.is_symlink() or not private_dir.is_dir():
+        raise HarborMeteringError("metering private ledger directory is missing")
+    ledgers = [
+        path
+        for path in private_dir.iterdir()
+        if path.is_file() and not path.is_symlink() and path.suffix == ".jsonl"
+    ]
+    if len(ledgers) != 1:
+        raise HarborMeteringError("expected exactly one durable proxy ledger")
+    ledger_path = ledgers[0]
+    records, durable_seal = _verified_ledger(ledger_path)
+    declared_seal = evidence.get("ledger_seal")
+    if not isinstance(declared_seal, Mapping):
+        raise HarborMeteringError("metering evidence lacks a ledger seal")
+    expected_seal = {
+        "record_count": durable_seal.get("record_count"),
+        "last_sequence": durable_seal.get("last_sequence"),
+        "root_hash": durable_seal.get("root_hash"),
+        "ledger_sha256": _sha256_file(ledger_path),
+    }
+    if dict(declared_seal) != expected_seal:
+        raise HarborMeteringError("metering evidence does not bind the durable ledger")
+
+    measured, errors = _proxy_totals(records)
+    if errors or asdict(measured) != evidence.get("proxy_measured"):
+        raise HarborMeteringError("metering proxy totals do not recompute exactly")
+    reported_value = evidence.get("agent_reported")
+    if not isinstance(reported_value, Mapping) or set(reported_value) != set(
+        COUNTER_FIELDS
+    ):
+        raise HarborMeteringError("metering agent-reported totals are malformed")
+    try:
+        reported = UsageCounters(**dict(reported_value))
+    except (TypeError, ValueError) as exc:
+        raise HarborMeteringError(
+            "metering agent-reported totals are invalid"
+        ) from exc
+    recomputed = reconcile_usage(reported, measured, proxy_complete=True)
+    declared_reconciliation = evidence.get("reconciliation")
+    expected_reconciliation = {
+        "status": recomputed.status,
+        "fields": recomputed.fields,
+    }
+    if declared_reconciliation != expected_reconciliation:
+        raise HarborMeteringError("metering reconciliation does not recompute")
+    require_publication_eligible(evidence, proxy_required=proxy_required)
+    return evidence
 
 
 def _proxy_totals(

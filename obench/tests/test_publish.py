@@ -117,8 +117,11 @@ def _harbor_row(
             "harbor_task_checksum": digest,
             "harbor_agent_config_name": "codex",
             "harbor_verifier_time_s": 1.25,
+            "harbor_job_retries": 0,
+            "harbor_job_max_retries": 1,
             "usage_source": "harbor_agent_reported",
             "proxy_measured": False,
+            "harbor_metering": None,
             "trial_mapping": "lexicographic_name_within_task_agent_model",
             "temporal_matched_block_claim": False,
         },
@@ -276,6 +279,96 @@ class PublishBundleTests(unittest.TestCase):
             item for item in checks if item["name"] == "harbor_import_evidence"
         )
         self.assertEqual(harbor_check["status"], "PASS", harbor_check)
+
+    def test_harbor_publish_accepts_exact_proxy_reconciliation(self):
+        harbor_results = os.path.join(self.tmp.name, "harbor-metered.jsonl")
+        row = self._harbor_row(
+            tokens_proxy_calls=1,
+            tokens_proxy_input_uncached=75,
+            tokens_proxy_cache_read=25,
+            tokens_proxy_cache_write=None,
+            tokens_proxy_output=40,
+            tokens_proxy_reasoning=None,
+            token_basis_proxy="proxy_measured",
+            proxy_capture_truncated=None,
+        )
+        row["candidate_provenance"]["proxy_measured"] = True
+        row["candidate_provenance"]["harbor_metering"] = {
+            "schema_version": "openbench.harbor-metering.v1",
+            "reconciliation_status": "exact",
+            "ledger_root_hash": "1" * 64,
+            "publication": {
+                "eligible": True,
+                "blocking_reasons": [],
+            },
+            "proxy_required": True,
+            "evidence_sha256": "2" * 64,
+            "ledger_sha256": "3" * 64,
+        }
+        _write_jsonl(harbor_results, [row])
+
+        provenance = publish.create_bundle(
+            harbor_results,
+            self.out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+
+        evidence = provenance["harbor_import_evidence"][0]
+        self.assertTrue(evidence["candidate_provenance"]["proxy_measured"])
+        self.assertEqual(
+            evidence["candidate_provenance"]["harbor_metering"][
+                "reconciliation_status"
+            ],
+            "exact",
+        )
+        self.assertTrue(
+            all(
+                item["status"] == "PASS"
+                for item in publish.verify_bundle(
+                    self.out,
+                    tasks_dirs=[self.tasks],
+                )
+            )
+        )
+
+    def test_harbor_publish_rejects_proxy_totals_that_disagree(self):
+        harbor_results = os.path.join(self.tmp.name, "harbor-metered-bad.jsonl")
+        row = self._harbor_row(
+            tokens_proxy_calls=1,
+            tokens_proxy_input_uncached=74,
+            tokens_proxy_cache_read=25,
+            tokens_proxy_cache_write=None,
+            tokens_proxy_output=40,
+            tokens_proxy_reasoning=None,
+            token_basis_proxy="proxy_measured",
+            proxy_capture_truncated=None,
+        )
+        row["candidate_provenance"]["proxy_measured"] = True
+        row["candidate_provenance"]["harbor_metering"] = {
+            "schema_version": "openbench.harbor-metering.v1",
+            "reconciliation_status": "exact",
+            "ledger_root_hash": "1" * 64,
+            "publication": {
+                "eligible": True,
+                "blocking_reasons": [],
+            },
+            "proxy_required": True,
+            "evidence_sha256": "2" * 64,
+            "ledger_sha256": "3" * 64,
+        }
+        _write_jsonl(harbor_results, [row])
+
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "proxy totals disagree",
+        ):
+            publish.create_bundle(
+                harbor_results,
+                self.out,
+                tasks_dirs=[self.tasks],
+                scrub_ctx=self.scrub_ctx,
+            )
 
     def test_harbor_publish_rejects_partial_or_inconsistent_provenance(self):
         cases = []

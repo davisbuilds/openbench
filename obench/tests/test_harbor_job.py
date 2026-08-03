@@ -190,6 +190,48 @@ class HarborJobTest(unittest.TestCase):
             )
         ).json_bytes)
 
+    def test_profiles_can_bind_distinct_exact_model_names(self):
+        profiles = (
+            hj.AgentProfile(
+                profile_id="codex",
+                import_path="obench.harbor_agents.codex:OpenBenchCodexOAuth",
+                model_name="gpt-5.6-sol",
+            ),
+            hj.AgentProfile(
+                profile_id="pi",
+                import_path="obench.harbor_agents.pi:OpenBenchPiOAuth",
+                model_name="openai-codex/gpt-5.6-sol",
+            ),
+        )
+        artifact = hj.build_job_config(
+            self._local_spec(
+                agent_profiles=profiles,
+                models=(),
+                attempts=2,
+            )
+        )
+        self.assertEqual(
+            [
+                (agent["import_path"], agent["model_name"])
+                for agent in artifact.as_dict()["agents"]
+            ],
+            [
+                (
+                    "obench.harbor_agents.codex:OpenBenchCodexOAuth",
+                    "gpt-5.6-sol",
+                ),
+                (
+                    "obench.harbor_agents.pi:OpenBenchPiOAuth",
+                    "openai-codex/gpt-5.6-sol",
+                ),
+            ],
+        )
+        self.assertEqual(artifact.trial_count, 8)
+
+    def test_profile_without_model_and_no_shared_models_is_rejected(self):
+        with self.assertRaisesRegex(hj.HarborJobError, "requires model_name"):
+            hj.build_job_config(self._local_spec(models=()))
+
     def test_local_task_selection_is_sorted_and_exact(self):
         artifact = hj.build_job_config(
             self._local_spec(

@@ -28,6 +28,41 @@ release-tag lookup, is the source of truth for this module. At that commit:
 - [`harbor run -c`](https://github.com/harbor-framework/harbor/blob/72bc40b1e58b47a9cc6e0f14c29aced3a9e53767/src/harbor/cli/jobs.py#L321-L335)
   accepts JSON or YAML implementing `JobConfig`.
 
+## Run an OpenBench harness matrix
+
+`obench harbor job-run` is the end-to-end local/Mini path. It exports the
+selected tasks with public agent networking, resolves exact OAuth harness/model
+profiles, holds one credential lease per harness, writes canonical job JSON,
+and invokes one native `harbor run -c` command:
+
+```bash
+obench harbor job-run \
+  --tasks-dir tasks \
+  --task make-it-run,fix-failing-test \
+  --export-dir /absolute/run/exports \
+  --harness codex \
+  --harness pi \
+  --model gpt-5.6-sol \
+  --attempts 2 \
+  --concurrency 2 \
+  --max-retries 1 \
+  --jobs-dir /absolute/run/jobs \
+  --job-name openbench-harness-smoke \
+  --config /absolute/run/openbench-harness-smoke.json
+```
+
+This example resolves to 2 tasks x 2 harnesses x 2 attempts = 8 trials.
+Codex and Pi each have an independent OAuth lane, but each credential is used
+by at most one trial at a time. A rerun with the identical config resumes the
+same Harbor job. OpenBench does not replay completed trials itself.
+
+Harbor's retry count and configured maximum are imported into every normalized
+row as job-level provenance. `ApiUsageLimitError` is retryable when
+`--max-retries` is nonzero; authentication, model identity, safety refusal,
+timeout, and verifier-contract failures remain excluded from retry. Retried
+attempts are Harbor infrastructure evidence and are not folded into a
+successful trial's agent latency or token totals.
+
 ## Author a job
 
 Local exports must point to the parent containing multiple Harbor task
@@ -112,9 +147,10 @@ and
 ## Integration contract
 
 - The integrator installs and preflights the exact Harbor `0.20.0` binary.
-- The integrator runs `plan.argv`; this module never starts Harbor.
-- OAuth, auth-file mounts, token rotation, and counting-proxy lifecycle stay
-  outside this module.
+- `obench.harbor_job` only authors the plan. `obench harbor job-run` is the
+  integration layer that executes it.
+- OAuth, auth-file mounts, token rotation, and counting-proxy lifecycle remain
+  outside the job authoring module and inside the profile runner/agents.
 - Runtime values enter only through `AgentProfile.env` Harbor templates of the
   form `${HOST_ENV}`. Literal values are rejected so configs remain safe to
   publish. The integrator populates those host variables before execution.

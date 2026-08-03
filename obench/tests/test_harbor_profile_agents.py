@@ -206,7 +206,8 @@ class AgentLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             any(
                 '"openai-codex": {"baseUrl": '
-                '"http://proxy/cell/token/codex/backend-api"}' in command
+                '"http://host.docker.internal:' in command
+                and "/codex/backend-api" in command
                 for command in first_env.commands
             )
         )

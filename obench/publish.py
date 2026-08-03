@@ -75,8 +75,11 @@ HARBOR_PROVENANCE_KEYS = frozenset({
     "harbor_task_checksum",
     "harbor_agent_config_name",
     "harbor_verifier_time_s",
+    "harbor_job_retries",
+    "harbor_job_max_retries",
     "usage_source",
     "proxy_measured",
+    "harbor_metering",
     "trial_mapping",
     "temporal_matched_block_claim",
 })
@@ -102,6 +105,8 @@ HARBOR_MARKER_KEYS = HARBOR_DIGEST_KEYS | frozenset({
     "openbench_harbor_export",
     "harbor_agent_config_name",
     "harbor_verifier_time_s",
+    "harbor_job_retries",
+    "harbor_job_max_retries",
 })
 HARBOR_PUBLISH_ROW_KEYS = (
     "run_id", "ts_iso", "harness", "model", "task", "trial",
@@ -112,6 +117,10 @@ HARBOR_PUBLISH_ROW_KEYS = (
     "checker_exit", "exec_mode", "score", "harness_version",
     "harness_version_source", "failure_class", "candidate_provenance",
     "version_drift", "workspace_source",
+    "tokens_proxy_input_uncached", "tokens_proxy_cache_read",
+    "tokens_proxy_cache_write", "tokens_proxy_output",
+    "tokens_proxy_reasoning", "tokens_proxy_calls", "token_basis_proxy",
+    "proxy_capture_truncated",
 )
 HARBOR_PROXY_ROW_KEYS = (
     "tokens_proxy_input_uncached", "tokens_proxy_cache_read",
@@ -342,15 +351,74 @@ def _validate_harbor_usage(row, provenance):
             f"Harbor row {row.get('run_id', '?')!r}: usage_source does not "
             "match token_basis"
         )
-    if provenance["proxy_measured"] is not False:
-        raise PublishError(
-            f"Harbor row {row.get('run_id', '?')!r}: proxy_measured must be false"
-        )
     nonempty_proxy = [key for key in HARBOR_PROXY_ROW_KEYS if row.get(key) is not None]
-    if nonempty_proxy:
+    metering = provenance["harbor_metering"]
+    if provenance["proxy_measured"] is False:
+        if metering is not None or nonempty_proxy:
+            raise PublishError(
+                f"Harbor row {row.get('run_id', '?')!r}: unmetered proxy "
+                "evidence must be null"
+            )
+    elif provenance["proxy_measured"] is True:
+        expected_metering_keys = {
+            "schema_version",
+            "reconciliation_status",
+            "ledger_root_hash",
+            "publication",
+            "proxy_required",
+            "evidence_sha256",
+            "ledger_sha256",
+        }
+        if not isinstance(metering, dict) or set(metering) != expected_metering_keys:
+            raise PublishError(
+                f"Harbor row {row.get('run_id', '?')!r}: malformed metering evidence"
+            )
+        if (
+            metering["schema_version"] != "openbench.harbor-metering.v1"
+            or metering["reconciliation_status"] != "exact"
+            or metering["proxy_required"] is not True
+            or not isinstance(metering["publication"], dict)
+            or metering["publication"].get("eligible") is not True
+            or metering["publication"].get("blocking_reasons") != []
+        ):
+            raise PublishError(
+                f"Harbor row {row.get('run_id', '?')!r}: proxy metering is "
+                "not publication-eligible"
+            )
+        for key in ("ledger_root_hash", "evidence_sha256", "ledger_sha256"):
+            if not isinstance(metering[key], str) or re.fullmatch(
+                r"[0-9a-f]{64}", metering[key]
+            ) is None:
+                raise PublishError(
+                    f"Harbor row {row.get('run_id', '?')!r}: invalid metering {key}"
+                )
+        proxy_int_fields = (
+            "tokens_proxy_calls",
+            "tokens_proxy_input_uncached",
+            "tokens_proxy_cache_read",
+            "tokens_proxy_output",
+        )
+        if any(
+            not isinstance(row.get(key), int)
+            or isinstance(row.get(key), bool)
+            or row.get(key) < 0
+            for key in proxy_int_fields
+        ):
+            raise PublishError(
+                f"Harbor row {row.get('run_id', '?')!r}: incomplete proxy totals"
+            )
+        if (
+            row.get("token_basis_proxy") != "proxy_measured"
+            or row.get("tokens_proxy_cache_write") is not None
+            or row.get("tokens_proxy_reasoning") is not None
+            or row.get("proxy_capture_truncated") not in (None, False)
+        ):
+            raise PublishError(
+                f"Harbor row {row.get('run_id', '?')!r}: unsupported proxy fields"
+            )
+    else:
         raise PublishError(
-            f"Harbor row {row.get('run_id', '?')!r}: proxy fields must be null: "
-            + ", ".join(sorted(nonempty_proxy))
+            f"Harbor row {row.get('run_id', '?')!r}: proxy_measured must be boolean"
         )
 
     usage = row.get("usage_raw")
@@ -415,6 +483,17 @@ def _validate_harbor_usage(row, provenance):
             f"Harbor row {row.get('run_id', '?')!r}: unsupported usage fields "
             "must be null"
         )
+    if provenance["proxy_measured"] is True:
+        expected_proxy = {
+            "tokens_proxy_input_uncached": row.get("tokens_input_uncached"),
+            "tokens_proxy_cache_read": row.get("tokens_cache_read"),
+            "tokens_proxy_output": row.get("tokens_output"),
+        }
+        if any(row.get(key) != value for key, value in expected_proxy.items()):
+            raise PublishError(
+                f"Harbor row {row.get('run_id', '?')!r}: proxy totals disagree "
+                "with exact agent reconciliation"
+            )
 
 
 def _validate_harbor_row(row):
@@ -435,6 +514,10 @@ def _validate_harbor_row(row):
         raise PublishError(
             f"Harbor row {run_id!r}: candidate_provenance.kind must be 'harbor_job'"
         )
+    for key in ("harbor_job_retries", "harbor_job_max_retries"):
+        value = provenance[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise PublishError(f"Harbor row {run_id!r}: invalid {key}")
     for key in HARBOR_DIGEST_KEYS:
         if not isinstance(provenance[key], str) or re.fullmatch(
                 r"[0-9a-f]{64}", provenance[key]) is None:

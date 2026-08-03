@@ -53,6 +53,96 @@ class HarborCliTests(unittest.TestCase):
             self.assertIn(option, command.stdout)
         self.assertIn("never command arguments or environment", command.stdout)
 
+        job_command = subprocess.run(
+            [sys.executable, "-m", "obench", "harbor", "job-run", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(job_command.returncode, 0, job_command.stderr)
+        for option in (
+            "--tasks-dir",
+            "--task",
+            "--export-dir",
+            "--harness",
+            "--model",
+            "--attempts",
+            "--concurrency",
+            "--max-retries",
+            "--jobs-dir",
+            "--job-name",
+            "--config",
+        ):
+            self.assertIn(option, job_command.stdout)
+        self.assertIn("Harbor owns scheduling", job_command.stdout)
+
+    def test_job_run_exports_tasks_and_calls_native_profile_matrix(self):
+        expected_job = Path("/tmp/jobs/harness-smoke")
+        artifact = mock.Mock(trial_count=8, sha256="a" * 64)
+        result = harbor_run.HarborProfileJobResult(
+            returncode=0,
+            artifact=artifact,
+            config_path=Path("/tmp/job.json"),
+            expected_job_path=expected_job,
+            resumes_existing_job=False,
+        )
+        argv = [
+            "job-run",
+            "--tasks-dir=/repo/tasks",
+            "--task=make-it-run,fix-failing-test",
+            "--export-dir=/tmp/exports",
+            "--harness=codex",
+            "--harness=pi",
+            "--model=gpt-5.6-sol",
+            "--attempts=2",
+            "--concurrency=2",
+            "--max-retries=1",
+            "--jobs-dir=/tmp/jobs",
+            "--job-name=harness-smoke",
+            "--config=/tmp/job.json",
+            "--harbor-binary=/opt/harbor",
+        ]
+        exports = [
+            {"out_dir": "/tmp/exports/make-it-run"},
+            {"out_dir": "/tmp/exports/fix-failing-test"},
+        ]
+
+        with (
+            mock.patch.object(harbor_cli, "export_tasks", return_value=exports) as export,
+            mock.patch.object(
+                harbor_cli,
+                "run_harbor_profile_job",
+                return_value=result,
+            ) as run,
+        ):
+            code, stdout, stderr = self._invoke(argv)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        export.assert_called_once_with(
+            "/repo/tasks",
+            "/tmp/exports",
+            "make-it-run,fix-failing-test",
+            network_mode="public",
+        )
+        run.assert_called_once_with(
+            exported_tasks_dir="/tmp/exports",
+            task_names=("make-it-run", "fix-failing-test"),
+            harnesses=("codex", "pi"),
+            model="gpt-5.6-sol",
+            attempts=2,
+            n_concurrent_trials=2,
+            max_retries=1,
+            jobs_dir="/tmp/jobs",
+            job_name="harness-smoke",
+            config_path="/tmp/job.json",
+            harbor_binary="/opt/harbor",
+            run_process=mock.ANY,
+        )
+        self.assertIn("Harbor job started; exited with code 0", stdout)
+        self.assertIn("trials: 8", stdout)
+        self.assertIn("config sha256: " + "a" * 64, stdout)
+
     def test_oauth_run_constructs_exact_library_call_without_credential_bytes(self):
         expected_job = Path("/tmp/jobs/oauth-smoke-001")
         result = harbor_run.HarborRunResult(

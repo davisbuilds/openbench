@@ -1,8 +1,8 @@
 # Harbor CountingProxy metering
 
-OpenBench's Harbor Codex OAuth agent automatically routes each local Docker
-trial through `CountingProxy` and seals independent usage evidence under the
-trial's agent logs:
+OpenBench's Harbor Codex and Pi OAuth agents automatically route each local
+Docker trial through `CountingProxy` and seal independent usage evidence under
+the trial's agent logs:
 
 ```text
 agent/
@@ -18,14 +18,15 @@ mode `0700`; its files are mode `0600` and remain local forensic inputs.
 
 ## Lifecycle
 
-`obench.harbor_agents.codex:OpenBenchCodexOAuth` owns one
-`HarborMeteringSession` per `run()`:
+Each supported profile owns one `HarborMeteringSession` per `run()`:
 
 1. Bind `CountingProxy` on the Docker host with registered-cell enforcement.
-2. Set the Codex runtime `OPENAI_BASE_URL` to
-   `http://host.docker.internal:<port>/cell/<token>/codex/backend-api/codex`.
-3. Run Codex and preserve the OAuth rotation through the existing cleanup hook.
-4. In `finally`, derive agent totals from the Codex ATIF trajectory, drain the
+2. Set the runtime endpoint to a tokenized local route. Codex uses
+   `/codex/backend-api/codex`; Pi writes `/codex/backend-api` into its isolated
+   `openai-codex.baseUrl`.
+3. Run the harness and preserve its OAuth rotation through the profile cleanup
+   hook.
+4. In `finally`, derive agent totals from the ATIF trajectory, drain the
    proxy, verify its hash chain and terminal seal, write the evidence artifact,
    and stop the listener.
 
@@ -103,35 +104,36 @@ The evidence status is:
 
 ## Import and publication hook
 
-An importer should load the artifact, attach it to the normalized row, then
-apply the publication gate:
+`obench import harbor-results` verifies the private ledger, checks its seal and
+hash chain, reconciles it with ATIF, digests the public and private evidence,
+and attaches the publication gate to the normalized row:
 
 ```python
 from obench.harbor_metering import (
     apply_to_imported_row,
-    load_evidence,
     require_publication_eligible,
+    verify_evidence_dir,
 )
 
-evidence = load_evidence(
-    trial_agent_logs / "harbor-metering" / "harbor-metering.json"
+evidence = verify_evidence_dir(
+    trial_agent_logs / "harbor-metering",
+    expected_trial_id=trial_id,
+    expected_harness=harness,
 )
 row = apply_to_imported_row(row, evidence, proxy_required=True)
 require_publication_eligible(evidence, proxy_required=True)
 ```
 
 When `proxy_required=True`, only `exact` is eligible. Unknown schemas, invalid
-statuses, `mismatch`, and `incomplete` fail closed. The importer should digest
-`harbor-metering.json` into trial provenance before publication; wiring that
-digest into `obench.harbor_results` and `obench.publish` remains outside this
-module's allowed scope.
+statuses, `mismatch`, and `incomplete` fail closed. `obench publish` then
+requires the same exact reconciliation and rejects proxy totals that disagree
+with agent totals.
 
 ## Scope and limitations
 
-- Local Harbor Docker only. Job scheduling and generic Harbor profiles are not
-  part of this bridge.
+- Local Harbor Docker only. Harbor owns job scheduling.
 - No model protocol translation and no TLS interception.
 - Docker must resolve `host.docker.internal` to the host. This is native on
   Docker Desktop; Linux engines may need equivalent host-gateway setup.
-- Live Docker/OAuth/model verification is intentionally not performed by the
-  offline test lane.
+- Offline CI never uses Docker, OAuth, or a model. Release evidence is produced
+  by an explicit benchmark-host run from an exact pushed commit.
