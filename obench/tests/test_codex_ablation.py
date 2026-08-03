@@ -8,6 +8,8 @@ BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 ADAPTERS_DIR = os.path.join(BENCH_DIR, "adapters")
 
@@ -88,6 +90,58 @@ class TestCodexAblationCompose(unittest.TestCase):
                     source_codex_home=os.path.join(tmp, "missing"),
                     ablation_root=ablation_root,
                 )
+
+    def test_run_variant_hands_active_auth_proof_to_codex(self):
+        helper = load_adapter("_codex_ablation")
+        with tempfile.TemporaryDirectory() as tmp:
+            ablation_root = os.path.join(tmp, "ablation")
+            variant_dir = os.path.join(ablation_root, "codex-home-v1")
+            source_home = os.path.join(tmp, "real-codex")
+            os.makedirs(variant_dir)
+            os.makedirs(source_home)
+            with open(
+                os.path.join(variant_dir, "instructions.md"),
+                "w",
+                encoding="utf-8",
+            ) as fh:
+                fh.write("tiny instructions\n")
+            with open(
+                os.path.join(variant_dir, "config.toml"),
+                "w",
+                encoding="utf-8",
+            ) as fh:
+                fh.write(
+                    'model_instructions_file = "instructions.md"\n'
+                )
+            with open(
+                os.path.join(source_home, "auth.json"), "wb"
+            ) as fh:
+                fh.write(
+                    b'{"account_id":"owner","refresh_token":"old"}'
+                )
+            proc = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with mock.patch.object(
+                helper, "_source_codex_home", return_value=source_home
+            ), mock.patch.object(
+                helper, "_ablation_root", return_value=ablation_root
+            ), mock.patch.object(
+                helper._codex,
+                "auth_file_lease",
+                side_effect=AssertionError("Codex attempted a double lease"),
+            ), mock.patch.object(
+                helper._codex.subprocess, "run", return_value=proc
+            ):
+                result = helper.run_variant(
+                    "codex-v1",
+                    "v1",
+                    "prompt",
+                    tmp,
+                    "gpt-5.5-medium",
+                    9,
+                )
+
+            self.assertTrue(result["completed"])
 
 
 class TestCodexAblationRegistry(unittest.TestCase):

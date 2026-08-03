@@ -198,6 +198,43 @@ class TestAuthFileLease(unittest.TestCase):
 
 
 class TestLocalAdapterPersist(unittest.TestCase):
+    def test_codex_leases_unproved_caller_owned_auth_home(self):
+        codex = _load_adapter("codex")
+        with tempfile.TemporaryDirectory() as td:
+            provided_home = os.path.join(td, "provided-home")
+            os.makedirs(provided_home)
+            auth = os.path.join(provided_home, "auth.json")
+            with open(auth, "wb") as fh:
+                fh.write(b'{"account_id":"owner","refresh_token":"old"}')
+
+            def completed_run(cmd, cwd, capture_output, text, timeout, stdin, env):
+                del cmd, cwd, capture_output, text, timeout, stdin, env
+                with self.assertRaises(
+                    auth_persist.CredentialLeaseUnavailableError
+                ):
+                    with auth_persist.auth_file_lease(
+                        auth, blocking=False
+                    ):
+                        self.fail("Codex did not lease caller-owned auth")
+                return SimpleNamespace(
+                    returncode=0, stdout="", stderr=""
+                )
+
+            with mock.patch.object(
+                codex.subprocess, "run", side_effect=completed_run
+            ):
+                result = codex.run(
+                    "task",
+                    td,
+                    "gpt-5.5-medium",
+                    10,
+                    env_override={"CODEX_HOME": provided_home},
+                )
+
+            self.assertTrue(result["completed"])
+            with auth_persist.auth_file_lease(auth, blocking=False):
+                pass
+
     def test_codex_holds_master_lease_from_stage_through_persist(self):
         codex = _load_adapter("codex")
         with tempfile.TemporaryDirectory() as td:

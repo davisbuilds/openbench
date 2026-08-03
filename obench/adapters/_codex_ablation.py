@@ -124,10 +124,11 @@ def compose_codex_home(
     if not os.path.isfile(auth_src):
         raise FileNotFoundError(f"missing Codex auth.json at {auth_src}")
     auth_dst = os.path.join(codex_home, "auth.json")
+    auth_lease_proof = None
     if credential_lease is None:
         shutil.copy2(auth_src, auth_dst)
     else:
-        credential_lease.stage(auth_dst)
+        auth_lease_proof = credential_lease.stage(auth_dst)
 
     return {
         "codex_home": os.path.abspath(codex_home),
@@ -135,6 +136,7 @@ def compose_codex_home(
         "instructions": instructions_dst,
         "auth": auth_dst,
         "auth_source": auth_src,
+        "auth_lease_proof": auth_lease_proof,
     }
 
 
@@ -171,6 +173,7 @@ def run_variant(name, variant, instruction, workdir, model, timeout_s):
                     model,
                     timeout_s,
                     env_override={"CODEX_HOME": codex_home},
+                    auth_lease_proofs=(metadata["auth_lease_proof"],),
                 )
             finally:
                 lease.try_persist(metadata["auth"])
