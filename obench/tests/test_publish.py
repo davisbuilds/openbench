@@ -247,6 +247,11 @@ class PublishBundleTests(unittest.TestCase):
         row = _harbor_row()
         row["workspace_source"]["sha256"] = "c" * 64
         cases.append(("workspace-digest-mismatch", row))
+        row = _harbor_row()
+        row["exec_mode"] = "local"
+        row["candidate_provenance"]["kind"] = "manifest"
+        row["workspace_source"]["kind"] = "snapshot"
+        cases.append(("removed-primary-markers", row))
         cases.append(("missing-harbor-provenance", _row(
             "codex", "alpha", 1, True, exec_mode="harbor"
         )))

@@ -88,6 +88,15 @@ HARBOR_DIGEST_KEYS = frozenset({
     "final_workspace_sha256",
     "harbor_task_checksum",
 })
+HARBOR_MARKER_KEYS = HARBOR_DIGEST_KEYS | frozenset({
+    "harbor_version",
+    "harbor_git_commit_hash",
+    "harbor_job_id",
+    "harbor_trial_id",
+    "harbor_trial_name",
+    "harbor_agent_config_name",
+    "harbor_verifier_time_s",
+})
 HARBOR_PUBLISH_ROW_KEYS = (
     "run_id", "ts_iso", "harness", "model", "task", "trial",
     "success", "completed", "error", "wall_time_s", "t_env_setup_s",
@@ -298,9 +307,11 @@ def _redact_local_path(value):
 def _is_harbor_row(row):
     provenance = row.get("candidate_provenance")
     workspace = row.get("workspace_source")
+    provenance_keys = set(provenance) if isinstance(provenance, dict) else set()
     return (
         row.get("exec_mode") == "harbor"
         or (isinstance(provenance, dict) and provenance.get("kind") == "harbor_job")
+        or bool(provenance_keys & HARBOR_MARKER_KEYS)
         or (isinstance(workspace, dict) and workspace.get("kind") == "harbor_artifact")
     )
 
