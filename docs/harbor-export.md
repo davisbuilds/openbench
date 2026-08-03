@@ -10,6 +10,15 @@ obench export harbor --task all --out /tmp/harbor-tasks
 obench export harbor --task make-it-run,fix-failing-test --out /tmp/harbor-tasks
 ```
 
+Codex OAuth tasks require public egress. Export those tasks explicitly:
+
+```bash
+obench export harbor \
+  --task make-it-run \
+  --out /tmp/harbor-oauth-tasks \
+  --network-mode public
+```
+
 Requires no Harbor install to export or to run the local round-trip polarity
 harness. Harbor itself is optional for `harbor run` smoke checks.
 

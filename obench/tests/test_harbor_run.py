@@ -77,6 +77,7 @@ class HarborRunTests(unittest.TestCase):
             'schema_version = "1.4"\n'
             '\n[task]\nname = "openbench/example"\n'
             '\n[metadata]\norigin = "openbench"\n'
+            '\n[environment]\nnetwork_mode = "public"\n'
             '\n[[artifacts]]\nsource = "/app"\ndestination = "workspace"\n',
             encoding="utf-8",
         )
@@ -200,6 +201,56 @@ class HarborRunTests(unittest.TestCase):
         enter.assert_not_called()
         self.assertEqual(len(runner.calls), 1)
         self.assertFalse(self.jobs.exists())
+
+    def test_no_network_fails_before_binary_or_credential_preflight(self):
+        task_toml = self.task / "task.toml"
+        task_toml.write_text(
+            task_toml.read_text(encoding="utf-8").replace(
+                'network_mode = "public"',
+                'network_mode = "no-network"',
+            ),
+            encoding="utf-8",
+        )
+        runner = FakeProcessRunner([])
+        with mock.patch.object(
+            harbor_run.HarborOAuthCredential,
+            "__enter__",
+            side_effect=AssertionError("credential was staged"),
+        ) as enter:
+            with self.assertRaisesRegex(
+                harbor_run.HarborRunError,
+                "requires public agent networking",
+            ):
+                self._run(runner)
+        enter.assert_not_called()
+        self.assertEqual(runner.calls, [])
+        self.assertFalse(self.jobs.exists())
+
+    def test_agent_network_override_is_effective(self):
+        task_toml = self.task / "task.toml"
+        public_task = task_toml.read_text(encoding="utf-8")
+        task_toml.write_text(
+            public_task + '\n[agent]\nnetwork_mode = "no-network"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            harbor_run.HarborRunError,
+            "requires public agent networking",
+        ):
+            harbor_run.validate_task_root(self.task)
+
+        task_toml.write_text(
+            public_task.replace(
+                'network_mode = "public"',
+                'network_mode = "no-network"',
+            )
+            + '\n[agent]\nnetwork_mode = "public"\n',
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            harbor_run.validate_task_root(self.task),
+            self.task.resolve(),
+        )
 
     def test_two_sequential_runs_stage_the_first_rotation(self):
         runner = FakeProcessRunner([ROTATED_AUTH, NEWER_AUTH])

@@ -5,11 +5,17 @@ rotated `auth.json` on the host. The bridge is optional: importing
 `obench.harbor_run` does not import Harbor, and the custom agent reports a clear
 setup error if Harbor is not installed.
 
-Run one exported task with explicit inputs:
+Export the OAuth task with explicit public networking, then run it with
+explicit inputs:
 
 ```bash
+obench export harbor \
+  --task make-it-run \
+  --out /absolute/path/to/harbor-tasks \
+  --network-mode public
+
 obench harbor oauth-run \
-  --task /absolute/path/to/exported-task \
+  --task /absolute/path/to/harbor-tasks/make-it-run \
   --model openai/gpt-5 \
   --master-auth-json /absolute/path/to/auth.json \
   --jobs-dir /absolute/path/to/harbor-jobs \
@@ -50,6 +56,10 @@ All inputs are explicit. `task_dir` must be one task from the OpenBench Harbor
 1.4 exporter: its direct `task.toml` must declare `schema_version = "1.4"`,
 `[metadata].origin = "openbench"`, and exactly one artifact from `/app` to
 `workspace`. Legacy, foreign, altered, or dataset-style task roots are rejected.
+The effective agent network policy must not be `no-network`: an
+`[agent].network_mode` override takes precedence over
+`[environment].network_mode`. Codex OAuth needs public egress, so the supported
+export command explicitly uses `--network-mode public`.
 `job_name` is required so the expected output is always `jobs_dir/job_name`.
 Existing job paths and symlinked jobs directories are rejected rather than
 implicitly resumed or redirected.

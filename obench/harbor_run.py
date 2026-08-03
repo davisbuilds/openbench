@@ -27,6 +27,7 @@ OPENBENCH_WORKSPACE_ARTIFACT = {
     "source": "/app",
     "destination": "workspace",
 }
+HARBOR_DEFAULT_NETWORK_MODE = "public"
 _JOB_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 
 ProcessRunner = Callable[..., Any]
@@ -123,6 +124,34 @@ def validate_task_root(task_dir: str | os.PathLike[str]) -> Path:
         raise HarborRunError(f"Harbor task.toml must define [task].name: {task_toml}")
     if not task["name"].strip():
         raise HarborRunError(f"Harbor [task].name must not be empty: {task_toml}")
+    environment = config.get("environment")
+    agent = config.get("agent")
+    environment_network_mode = (
+        environment.get("network_mode")
+        if isinstance(environment, dict)
+        else None
+    )
+    agent_network_mode = (
+        agent.get("network_mode")
+        if isinstance(agent, dict)
+        else None
+    )
+    effective_network_mode = (
+        agent_network_mode
+        if agent_network_mode is not None
+        else environment_network_mode
+    )
+    if effective_network_mode is None:
+        effective_network_mode = HARBOR_DEFAULT_NETWORK_MODE
+    if not isinstance(effective_network_mode, str):
+        raise HarborRunError(
+            f"Harbor effective agent network_mode must be a string: {task_toml}"
+        )
+    if effective_network_mode == "no-network":
+        raise HarborRunError(
+            "Codex OAuth requires public agent networking; export the task "
+            f"with --network-mode public: {task_toml}"
+        )
     return root
 
 
