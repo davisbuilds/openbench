@@ -869,6 +869,7 @@ def aggregate_gateway_probe_bundle(
         "title": _public_gateway_title(entry.get("title") or bundle_id),
         "model": entry.get("model") or entry.get("title") or bundle_id,
         "date": entry.get("date") or "",
+        "default": entry.get("default") is True,
         "result_schema_version": manifest.get("result_schema_version"),
         "path": entry.get("path"),
         "link": entry.get("link"),
@@ -958,6 +959,7 @@ def build_gateway_probe_family(site_dir, gateway_probe_dirs=None):
 
     bundles.sort(
         key=lambda bundle: (
+            not bundle.get("default"),
             -leaderboard._date_key(bundle.get("date")),
             bundle.get("id") or "",
         )
@@ -2542,6 +2544,7 @@ def _gateway_route_key(arm_id):
         if arm_id.startswith(provider + "-"):
             return provider + "-openai"
     for key in (
+        "direct-deepseek",
         "direct-openai",
         "direct-moonshot",
     ):
@@ -2554,6 +2557,7 @@ def _gateway_probe_route_name(arm_id):
     return {
         "cloudflare-openai": "Cloudflare",
         "concentrate-openai": "Concentrate",
+        "direct-deepseek": "Direct DeepSeek",
         "direct-openai": "Direct OpenAI",
         "direct-moonshot": "Direct Moonshot",
         "openrouter-openai": "OpenRouter",

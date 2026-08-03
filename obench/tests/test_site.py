@@ -193,26 +193,38 @@ class GatewayFamilyTests(_SiteFixture):
 
 
 class GatewayProbeFamilyTests(_SiteFixture):
-    def test_checked_in_models_publish_kimi_first_and_gpt4o_as_v3(self):
+    def test_checked_in_models_publish_kimi_first_with_deepseek_and_gpt4o(self):
         repo_docs = str(Path(__file__).resolve().parents[2] / "docs")
 
         doc = site.build_board(repo_docs)
         bundles = doc["gateway"]["bundles"]
 
         self.assertEqual(
-            [bundle["model"] for bundle in bundles[:2]],
-            ["Kimi K3", "GPT-4o mini"],
+            [bundle["model"] for bundle in bundles[:3]],
+            ["Kimi K3", "DeepSeek V4 Flash", "GPT-4o mini"],
         )
-        self.assertEqual(bundles[0]["result_schema_version"], 4)
-        self.assertEqual(bundles[1]["result_schema_version"], 3)
-        self.assertIsNone(bundles[1]["retry_summary"])
-        self.assertIsNone(bundles[1]["completion_integrity"])
-        self.assertIsNone(bundles[1]["output_token_limit_equalities"])
+        by_model = {bundle["model"]: bundle for bundle in bundles}
+        self.assertEqual(by_model["Kimi K3"]["result_schema_version"], 4)
+        self.assertEqual(
+            by_model["DeepSeek V4 Flash"]["result_schema_version"], 4
+        )
+        self.assertEqual(by_model["GPT-4o mini"]["result_schema_version"], 3)
+        self.assertIsNone(by_model["GPT-4o mini"]["retry_summary"])
+        self.assertIsNone(by_model["GPT-4o mini"]["completion_integrity"])
+        self.assertIsNone(
+            by_model["GPT-4o mini"]["output_token_limit_equalities"]
+        )
         page = site.render_board_html(doc)
         self.assertIn(
             'id="gateway-model-tab-2026-07-28-kimi-k3-managed-100" '
             'aria-controls="gateway-model-panel-2026-07-28-kimi-k3-managed-100" '
             'aria-selected="true"',
+            page,
+        )
+        self.assertIn(
+            'id="gateway-model-tab-2026-08-03-deepseek-v4-flash-100" '
+            'aria-controls="gateway-model-panel-2026-08-03-deepseek-v4-flash-100" '
+            'aria-selected="false"',
             page,
         )
         self.assertIn(
@@ -843,6 +855,7 @@ class GatewayProbeFamilyTests(_SiteFixture):
         labels = {
             "cloudflare-openai": "Cloudflare",
             "concentrate-openai": "Concentrate",
+            "direct-deepseek": "Direct DeepSeek",
             "direct-openai": "Direct OpenAI",
             "direct-moonshot": "Direct Moonshot",
             "cloudflare-moonshot": "Cloudflare",
