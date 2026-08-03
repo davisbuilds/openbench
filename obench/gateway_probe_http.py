@@ -231,6 +231,10 @@ def request_body(
     if plan.inference is not None:
         payload["thinking"] = {"type": plan.inference.thinking}
         payload["reasoning_effort"] = plan.inference.reasoning_effort
+    gateway_profiles.shape_provider_body(
+        payload,
+        requested_provider=plan.requested_provider,
+    )
     gateway_profiles.strip_cache_controls(payload)
     if plan.route_kind == "gateway":
         if plan.gateway is None:

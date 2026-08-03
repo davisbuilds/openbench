@@ -278,6 +278,20 @@ def strip_cache_controls(payload: dict[str, Any]) -> None:
     _strip_cache_controls(payload)
 
 
+def shape_provider_body(
+    payload: dict[str, Any],
+    *,
+    requested_provider: str,
+) -> None:
+    """Apply provider-native request fields shared by direct and gateway arms."""
+    if requested_provider.casefold() != "deepseek":
+        return
+    max_output_tokens = payload.pop("max_completion_tokens", None)
+    if max_output_tokens is not None:
+        payload["max_tokens"] = max_output_tokens
+    payload.pop("seed", None)
+
+
 def shape_body(
     payload: dict[str, Any],
     *,

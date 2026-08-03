@@ -370,6 +370,10 @@ class GatewayProbeResultsTests(unittest.TestCase):
                 "route": None,
                 "stream": None,
             }
+            variants["primer_without_evidence"] = copy.deepcopy(base)
+            variants["primer_without_evidence"]["retry_evidence"]["attempts"][
+                0
+            ]["phase"] = "primer"
             variants["timing_schema"] = copy.deepcopy(base)
             variants["timing_schema"]["request_metrics"]["timing"]["ttfb_s"] = 1.0
             variants["timing_order"] = copy.deepcopy(base)

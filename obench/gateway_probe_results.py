@@ -791,6 +791,10 @@ def _validate_retry_evidence(value: Any, *, condition: str) -> None:
                 attempt.get("receipt_headers"),
                 "retry attempt receipts",
             )
+        if attempt.get("phase") == "primer" and "primer_evidence" not in attempt:
+            raise GatewayProbeRunError(
+                "primer retry attempt lacks primer evidence"
+            )
         if "primer_evidence" in attempt:
             if attempt.get("phase") != "primer":
                 raise GatewayProbeRunError(

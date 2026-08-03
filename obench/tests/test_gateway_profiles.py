@@ -31,6 +31,17 @@ class GatewayRequestProfileTests(unittest.TestCase):
             "prompt_cache_key": "attacker-key",
         }
 
+    def test_deepseek_provider_uses_native_output_limit_without_seed(self):
+        body = {
+            "max_completion_tokens": 4096,
+            "seed": 20260803,
+        }
+        gateway_profiles.shape_provider_body(
+            body,
+            requested_provider="deepseek",
+        )
+        self.assertEqual(body, {"max_tokens": 4096})
+
     def test_openrouter_fixed_profile_replaces_routing_and_session_controls(self):
         body = self.base_body()
         body.update({

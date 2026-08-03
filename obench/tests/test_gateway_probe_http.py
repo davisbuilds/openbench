@@ -832,9 +832,13 @@ class GatewayProbeHttpTests(unittest.TestCase):
                 for body in deepseek_bodies.values())
         )
         self.assertTrue(
-            all(body["max_completion_tokens"] == 4096
+            all(body["max_tokens"] == 4096
                 for body in deepseek_bodies.values())
         )
+        self.assertTrue(all(
+            "max_completion_tokens" not in body and "seed" not in body
+            for body in deepseek_bodies.values()
+        ))
 
         gateway_bench = gateway_spec.load_experiment(
             examples / "gateway-bench-kimi-k3-five-way-chat.toml"
