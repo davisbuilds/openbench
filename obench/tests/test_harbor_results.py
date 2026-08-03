@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 import subprocess
@@ -13,6 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from obench import harbor_results, run
 from obench.harbor_results import (
     HARBOR_GIT_COMMIT,
     HARBOR_VERSION,
@@ -454,6 +456,173 @@ class HarborResultsTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("already exists", failures[0])
         self.assertEqual(len(output.read_text().splitlines()), 3)
+
+    def test_harbor_import_waits_for_normal_append_then_detects_collision(self):
+        fixture = self.fixture()
+        output = self.root / "normal-first.jsonl"
+        colliding_row = load_rows(fixture.root)[0]
+        normal_at_fsync = threading.Event()
+        release_normal = threading.Event()
+        harbor_lock_attempted = threading.Event()
+        harbor_lock_acquired = threading.Event()
+        real_fsync = os.fsync
+        real_results_file_lock = harbor_results.results_file_lock
+        outcomes = {}
+
+        def controlled_fsync(descriptor):
+            if threading.current_thread().name == "normal-append":
+                normal_at_fsync.set()
+                if not release_normal.wait(timeout=5):
+                    raise AssertionError("normal append was not released")
+            return real_fsync(descriptor)
+
+        @contextmanager
+        def observed_harbor_lock(path):
+            harbor_lock_attempted.set()
+            with real_results_file_lock(path):
+                harbor_lock_acquired.set()
+                yield
+
+        def append_normal():
+            try:
+                outcomes["normal"] = run.append_row(
+                    output, colliding_row, reject_duplicate=True
+                )
+            except BaseException as exc:
+                outcomes["normal_error"] = exc
+
+        def import_harbor():
+            try:
+                outcomes["harbor"] = import_results(fixture.root, output)
+            except BaseException as exc:
+                outcomes["harbor_error"] = exc
+
+        normal_thread = threading.Thread(
+            target=append_normal, name="normal-append"
+        )
+        harbor_thread = threading.Thread(
+            target=import_harbor, name="harbor-import"
+        )
+        with (
+            mock.patch.object(run.os, "fsync", side_effect=controlled_fsync),
+            mock.patch.object(
+                harbor_results,
+                "results_file_lock",
+                observed_harbor_lock,
+            ),
+        ):
+            normal_thread.start()
+            try:
+                self.assertTrue(normal_at_fsync.wait(timeout=5))
+                harbor_thread.start()
+                self.assertTrue(harbor_lock_attempted.wait(timeout=5))
+                self.assertFalse(harbor_lock_acquired.wait(timeout=0.2))
+            finally:
+                release_normal.set()
+                normal_thread.join(timeout=5)
+                if harbor_thread.ident is not None:
+                    harbor_thread.join(timeout=5)
+
+        self.assertFalse(normal_thread.is_alive())
+        self.assertFalse(harbor_thread.is_alive())
+        self.assertNotIn("normal_error", outcomes)
+        self.assertTrue(outcomes["normal"])
+        self.assertIsInstance(outcomes.get("harbor_error"), HarborResultsError)
+        self.assertIn("already exists", str(outcomes["harbor_error"]))
+        written = [json.loads(line) for line in output.read_text().splitlines()]
+        self.assertEqual([row["run_id"] for row in written], [colliding_row["run_id"]])
+
+    def test_harbor_rollback_finishes_before_waiting_normal_append(self):
+        fixture = self.fixture()
+        output = self.root / "cross-writer-rollback.jsonl"
+        seed = {field: None for field in ROW_FIELDS}
+        seed["run_id"] = "seed:task:model:trial1"
+        self.assertTrue(run.append_row(output, seed))
+        normal_row = dict(seed)
+        normal_row["run_id"] = "normal:task:model:trial1"
+
+        harbor_at_fsync = threading.Event()
+        release_harbor = threading.Event()
+        normal_lock_attempted = threading.Event()
+        normal_lock_acquired = threading.Event()
+        real_fsync = os.fsync
+        real_results_file_lock = run.results_file_lock
+        harbor_fsync_calls = 0
+        outcomes = {}
+
+        def controlled_fsync(descriptor):
+            nonlocal harbor_fsync_calls
+            if threading.current_thread().name == "harbor-import":
+                harbor_fsync_calls += 1
+                if harbor_fsync_calls == 1:
+                    harbor_at_fsync.set()
+                    if not release_harbor.wait(timeout=5):
+                        raise AssertionError("Harbor import was not released")
+                    raise OSError("injected disk failure")
+            return real_fsync(descriptor)
+
+        @contextmanager
+        def observed_normal_lock(path):
+            normal_lock_attempted.set()
+            with real_results_file_lock(path):
+                normal_lock_acquired.set()
+                yield
+
+        def import_harbor():
+            try:
+                outcomes["harbor"] = import_results(fixture.root, output)
+            except BaseException as exc:
+                outcomes["harbor_error"] = exc
+
+        def append_normal():
+            try:
+                outcomes["normal"] = run.append_row(
+                    output, normal_row, reject_duplicate=True
+                )
+            except BaseException as exc:
+                outcomes["normal_error"] = exc
+
+        harbor_thread = threading.Thread(
+            target=import_harbor, name="harbor-import"
+        )
+        normal_thread = threading.Thread(
+            target=append_normal, name="normal-append"
+        )
+        with (
+            mock.patch.object(
+                harbor_results.os,
+                "fsync",
+                side_effect=controlled_fsync,
+            ),
+            mock.patch.object(
+                run,
+                "results_file_lock",
+                observed_normal_lock,
+            ),
+        ):
+            harbor_thread.start()
+            try:
+                self.assertTrue(harbor_at_fsync.wait(timeout=5))
+                normal_thread.start()
+                self.assertTrue(normal_lock_attempted.wait(timeout=5))
+                self.assertFalse(normal_lock_acquired.wait(timeout=0.2))
+            finally:
+                release_harbor.set()
+                harbor_thread.join(timeout=5)
+                if normal_thread.ident is not None:
+                    normal_thread.join(timeout=5)
+
+        self.assertFalse(harbor_thread.is_alive())
+        self.assertFalse(normal_thread.is_alive())
+        self.assertIsInstance(outcomes.get("harbor_error"), HarborResultsError)
+        self.assertIn("rolled back", str(outcomes["harbor_error"]))
+        self.assertNotIn("normal_error", outcomes)
+        self.assertTrue(outcomes["normal"])
+        written = [json.loads(line) for line in output.read_text().splitlines()]
+        self.assertEqual(
+            [row["run_id"] for row in written],
+            [seed["run_id"], normal_row["run_id"]],
+        )
 
     def test_append_io_failure_rolls_back_whole_batch(self):
         fixture = self.fixture()

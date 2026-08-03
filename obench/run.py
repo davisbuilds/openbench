@@ -1312,6 +1312,34 @@ class ResultsLogError(RuntimeError):
     """Raised when a results JSONL cannot be safely resumed."""
 
 
+@contextmanager
+def results_file_lock(results_path):
+    """Lease the canonical sidecar lock for a results-writer transaction."""
+    absolute_results_path = os.path.abspath(results_path)
+    lock_path = absolute_results_path + ".lock"
+    try:
+        os.makedirs(os.path.dirname(absolute_results_path), exist_ok=True)
+        lock_fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise ResultsLogError(
+            f"cannot open results lock {lock_path}: {exc}"
+        ) from exc
+    try:
+        try:
+            os.fchmod(lock_fd, 0o600)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        except OSError as exc:
+            raise ResultsLogError(
+                f"cannot acquire results lock {lock_path}: {exc}"
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    finally:
+        os.close(lock_fd)
+
+
 def load_existing_run_ids(results_path):
     """Return the set of ``run_id`` values already present in the results log.
 
@@ -1355,13 +1383,8 @@ def append_row(results_path, row, *, reject_duplicate=False):
     lock as the append. This closes the race where two resumed invocations both
     observe a missing cell and append it after running concurrently.
     """
-    os.makedirs(os.path.dirname(os.path.abspath(results_path)), exist_ok=True)
     ordered = {key: row.get(key) for key in ROW_FIELDS}
-    lock_path = os.path.abspath(results_path) + ".lock"
-    lock_fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
-    try:
-        os.fchmod(lock_fd, 0o600)
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    with results_file_lock(results_path):
         if reject_duplicate and ordered.get("run_id") in load_existing_run_ids(
                 results_path):
             return False
@@ -1370,9 +1393,6 @@ def append_row(results_path, row, *, reject_duplicate=False):
             fh.flush()
             os.fsync(fh.fileno())
         return True
-    finally:
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        os.close(lock_fd)
 
 
 def preflight_results_path(results_path):

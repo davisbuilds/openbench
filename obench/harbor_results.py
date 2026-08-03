@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import math
@@ -18,7 +17,12 @@ from typing import Any
 
 from .atif import validate_trajectory
 from .harbor_oauth import AGENT_IMPORT_PATH
-from .run import ROW_FIELDS, make_run_id
+from .run import (
+    ROW_FIELDS,
+    ResultsLogError,
+    make_run_id,
+    results_file_lock,
+)
 
 HARBOR_VERSION = "0.20.0"
 HARBOR_GIT_COMMIT = "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767"
@@ -1535,35 +1539,46 @@ def import_results(
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     try:
-        descriptor = os.open(output, flags, 0o666)
-    except OSError as exc:
-        raise _fail("output", f"cannot open {output}: {exc}") from exc
-    with os.fdopen(descriptor, "r+b", buffering=0) as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        handle.seek(0)
-        existing_bytes = handle.read()
-        existing = _run_ids_from_jsonl(existing_bytes)
-        collisions = sorted(existing.intersection(row["run_id"] for row in rows))
-        if collisions:
-            raise _fail("output", f"run_id already exists: {collisions[0]!r}")
-        original_size = len(existing_bytes)
-        try:
-            handle.seek(0, os.SEEK_END)
-            written = 0
-            while written < len(payload):
-                count = handle.write(payload[written:])
-                if not count:
-                    raise OSError("short write while appending Harbor result batch")
-                written += count
-            os.fsync(handle.fileno())
-        except OSError as exc:
-            os.ftruncate(handle.fileno(), original_size)
-            os.fsync(handle.fileno())
-            raise _fail("output", f"append failed and was rolled back: {exc}") from exc
-        except BaseException:
-            os.ftruncate(handle.fileno(), original_size)
-            os.fsync(handle.fileno())
-            raise
+        with results_file_lock(output):
+            try:
+                descriptor = os.open(output, flags, 0o666)
+            except OSError as exc:
+                raise _fail("output", f"cannot open {output}: {exc}") from exc
+            with os.fdopen(descriptor, "r+b", buffering=0) as handle:
+                handle.seek(0)
+                existing_bytes = handle.read()
+                existing = _run_ids_from_jsonl(existing_bytes)
+                collisions = sorted(
+                    existing.intersection(row["run_id"] for row in rows)
+                )
+                if collisions:
+                    raise _fail(
+                        "output", f"run_id already exists: {collisions[0]!r}"
+                    )
+                original_size = len(existing_bytes)
+                try:
+                    handle.seek(0, os.SEEK_END)
+                    written = 0
+                    while written < len(payload):
+                        count = handle.write(payload[written:])
+                        if not count:
+                            raise OSError(
+                                "short write while appending Harbor result batch"
+                            )
+                        written += count
+                    os.fsync(handle.fileno())
+                except OSError as exc:
+                    os.ftruncate(handle.fileno(), original_size)
+                    os.fsync(handle.fileno())
+                    raise _fail(
+                        "output", f"append failed and was rolled back: {exc}"
+                    ) from exc
+                except BaseException:
+                    os.ftruncate(handle.fileno(), original_size)
+                    os.fsync(handle.fileno())
+                    raise
+    except ResultsLogError as exc:
+        raise _fail("output", str(exc)) from exc
     return rows
 
 
