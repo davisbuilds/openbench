@@ -110,20 +110,55 @@ def _default_tasks_dirs(site_dir):
     return roots
 
 
-def _results_verification_error(bundle_dir, tasks_dirs):
-    """Return why a result bundle fails source-backed publish verification."""
+def _bundle_verification(bundle_dir, tasks_dirs):
+    """Return a hard integrity error and current-tree archive drift checks."""
+
     results_path = os.path.join(bundle_dir, "results.jsonl")
     provenance_path = os.path.join(bundle_dir, "provenance.json")
     if not os.path.isfile(results_path):
-        return "no results.jsonl (HTML-only release page)"
+        return "no results.jsonl (HTML-only release page)", []
     if not os.path.isfile(provenance_path):
-        return "missing provenance.json (results are not verified)"
+        return "missing provenance.json (results are not verified)", []
     checks = publish.verify_bundle(
         bundle_dir, tasks_dirs=tasks_dirs, verify_task_trees=True)
     failed = [item for item in checks if item["status"] != "PASS"]
-    if failed:
-        return "; ".join(f"{item['name']}: {item['detail']}" for item in failed)
-    return None
+    archive_drift = [
+        item for item in failed
+        if item["name"].startswith(("task_digest:", "harbor_export_binding:"))
+    ]
+    hard_failures = [item for item in failed if item not in archive_drift]
+    if hard_failures:
+        return (
+            "; ".join(
+                f"{item['name']}: {item['detail']}"
+                for item in hard_failures
+            ),
+            archive_drift,
+        )
+    return None, archive_drift
+
+
+def _results_verification_error(bundle_dir, tasks_dirs):
+    """Return why a result bundle fails its immutable evidence checks."""
+
+    error, _archive_drift = _bundle_verification(bundle_dir, tasks_dirs)
+    return error
+
+
+def _archive_drift_caveat(checks):
+    tasks = sorted({
+        item["name"].split(":", 1)[1]
+        for item in checks
+        if ":" in item["name"]
+    })
+    if not tasks:
+        return None
+    return (
+        "Archived task definitions differ from or are unavailable in the "
+        f"current checkout for {', '.join(tasks)}. The result seal and bundled "
+        "evidence still verify; recorded task digests remain the run-time "
+        "fingerprints."
+    )
 
 
 def task_set_digest(provenance):
@@ -302,6 +337,11 @@ TOKEN_SPLITS = (
     "cache_read",
     "cache_write",
 )
+TOKEN_CORE_SPLITS = (
+    "input_uncached",
+    "output",
+    "cache_read",
+)
 
 
 def _token_lane(rows, source):
@@ -317,7 +357,8 @@ def _token_lane(rows, source):
             else True
         )
         if measured and all(
-            stats.is_nonnegative_number(value) for value in values.values()
+            stats.is_nonnegative_number(values[split])
+            for split in TOKEN_CORE_SPLITS
         ):
             complete.append(values)
             raw_basis = (
@@ -365,15 +406,28 @@ def token_telemetry_per_solve(rows, solved=None):
     if source is not None and solved:
         sums = {
             split: sum(float(values[split]) for values in lane)
-            for split in TOKEN_SPLITS
+            for split in TOKEN_CORE_SPLITS
         }
+        cache_write_values = [values["cache_write"] for values in lane]
+        cache_write_sum = (
+            sum(float(value) for value in cache_write_values)
+            if all(
+                stats.is_nonnegative_number(value)
+                for value in cache_write_values
+            )
+            else None
+        )
         metrics.update({
             "fresh_tokens_per_solve":
                 (sums["input_uncached"] + sums["output"]) / solved,
             "tokens_input_uncached_per_solve": sums["input_uncached"] / solved,
             "tokens_output_per_solve": sums["output"] / solved,
             "tokens_cache_read_per_solve": sums["cache_read"] / solved,
-            "tokens_cache_write_per_solve": sums["cache_write"] / solved,
+            "tokens_cache_write_per_solve": (
+                cache_write_sum / solved
+                if cache_write_sum is not None
+                else None
+            ),
         })
     return {
         **metrics,
@@ -393,7 +447,10 @@ def aggregate_bundle(
             os.path.dirname(bundle_dir), "docs"
         )
         tasks_dirs = _default_tasks_dirs(inferred_site)
-    if _results_verification_error(bundle_dir, tasks_dirs) is not None:
+    verification_error, archive_drift = _bundle_verification(
+        bundle_dir, tasks_dirs
+    )
+    if verification_error is not None:
         return None
 
     meta = _bundle_meta(bundle_dir, kind, manifest_entry=manifest_entry)
@@ -447,6 +504,9 @@ def aggregate_bundle(
     )
 
     caveats = load_bundle_caveats(bundle_dir)
+    drift_caveat = _archive_drift_caveat(archive_drift)
+    if drift_caveat and drift_caveat not in caveats:
+        caveats.append(drift_caveat)
     results_sha = provenance["results_sha256"]
 
     page_path = meta["page_path"]
