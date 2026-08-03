@@ -436,6 +436,10 @@ class HarborResultsTests(unittest.TestCase):
             rows[0]["candidate_provenance"]["harbor_job_max_retries"],
             0,
         )
+        self.assertEqual(
+            rows[0]["candidate_provenance"]["harbor_model_name"],
+            "model-x",
+        )
         self.assertIsNone(rows[0]["tokens_proxy_calls"])
         self.assertFalse(rows[0]["candidate_provenance"]["proxy_measured"])
         self.assertEqual(

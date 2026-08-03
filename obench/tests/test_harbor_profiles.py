@@ -6,8 +6,13 @@ import json
 import unittest
 
 from obench.harbor_profiles import (
+    CODEX_PROFILE_IMPORT,
     HARBOR_VERSION,
+    OPENCODE_PROFILE_IMPORT,
+    PI_PROFILE_IMPORT,
     HarborProfileError,
+    canonical_openbench_model,
+    expected_harbor_model_name,
     resolve_harbor_profile,
     supported_harbor_matrix,
 )
@@ -72,6 +77,34 @@ class HarborProfileTests(unittest.TestCase):
                     )
                 else:
                     self.assertIsNone(config)
+
+    def test_canonical_model_identity_preserves_exact_profile_lock(self):
+        expected = (
+            (CODEX_PROFILE_IMPORT, "gpt-5.6-sol"),
+            (PI_PROFILE_IMPORT, "openai-codex/gpt-5.6-sol"),
+            (OPENCODE_PROFILE_IMPORT, "openai/gpt-5.6-sol"),
+        )
+        for import_path, harbor_model in expected:
+            with self.subTest(import_path=import_path):
+                canonical = canonical_openbench_model(
+                    import_path,
+                    harbor_model,
+                )
+                self.assertEqual(canonical, "gpt-5.6-sol")
+                self.assertEqual(
+                    expected_harbor_model_name(import_path, canonical),
+                    harbor_model,
+                )
+
+        self.assertEqual(
+            canonical_openbench_model("codex", "openai/gpt-5.6-sol"),
+            "openai/gpt-5.6-sol",
+        )
+        with self.assertRaisesRegex(HarborProfileError, "profile prefix"):
+            canonical_openbench_model(
+                PI_PROFILE_IMPORT,
+                "openai/gpt-5.6-sol",
+            )
 
     def test_codex_55_does_not_invent_service_tier_override(self):
         kwargs = resolve_harbor_profile(

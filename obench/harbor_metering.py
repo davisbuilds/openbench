@@ -54,7 +54,7 @@ class UsageCounters:
 
     @classmethod
     def from_openbench_row(cls, row: Mapping[str, Any]) -> "UsageCounters":
-        """Map row token totals; call count must come from the ATIF trajectory."""
+        """Map row token totals; calls remain independent proxy evidence."""
         uncached = _optional_int(row.get("tokens_input_uncached"))
         cache = _optional_int(row.get("tokens_cache_read"))
         total_input = None if uncached is None or cache is None else uncached + cache
@@ -67,7 +67,7 @@ class UsageCounters:
 
     @classmethod
     def from_atif_trajectory(cls, trajectory: Any) -> "UsageCounters":
-        """Use ATIF-v1.7 ``llm_call_count`` and final token metrics."""
+        """Use final token metrics and an optional ``llm_call_count`` extension."""
         if trajectory is None:
             return cls(None, None, None, None)
         steps = _member(trajectory, "steps")
@@ -109,14 +109,26 @@ def reconcile_usage(
     *,
     proxy_complete: bool,
 ) -> Reconciliation:
-    """Classify complete equal totals, complete unequal totals, or missing evidence."""
+    """Reconcile ATIF token totals with the sealed proxy request ledger.
+
+    ATIF v1.7 has no standard aggregate call-count field. When it is absent,
+    the proxy ledger remains the authoritative call-count source while token
+    totals must still reconcile exactly.
+    """
     fields: dict[str, dict[str, Any]] = {}
     any_incomplete = not proxy_complete
     any_mismatch = False
     for name in COUNTER_FIELDS:
         agent_value = getattr(agent_reported, name)
         proxy_value = getattr(proxy_measured, name)
-        if not proxy_complete or agent_value is None or proxy_value is None:
+        if (
+            name == "calls"
+            and proxy_complete
+            and agent_value is None
+            and proxy_value is not None
+        ):
+            state = "proxy_only"
+        elif not proxy_complete or agent_value is None or proxy_value is None:
             state = "incomplete"
             any_incomplete = True
         elif agent_value != proxy_value:
@@ -472,6 +484,7 @@ def verify_evidence_dir(
     expected_trial_id: str | None = None,
     expected_harness: str | None = None,
     proxy_required: bool = True,
+    expected_agent_usage: UsageCounters | None = None,
 ) -> dict[str, Any]:
     """Recompute a trial's durable ledger and reconciliation before import."""
 
@@ -522,6 +535,10 @@ def verify_evidence_dir(
         raise HarborMeteringError(
             "metering agent-reported totals are invalid"
         ) from exc
+    if expected_agent_usage is not None and reported != expected_agent_usage:
+        raise HarborMeteringError(
+            "metering agent counters do not match the validated ATIF trajectory"
+        )
     recomputed = reconcile_usage(reported, measured, proxy_complete=True)
     declared_reconciliation = evidence.get("reconciliation")
     expected_reconciliation = {

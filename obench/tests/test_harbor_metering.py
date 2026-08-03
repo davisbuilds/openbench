@@ -187,8 +187,43 @@ class HarborMeteringSessionTests(unittest.TestCase):
             evidence_root,
             expected_trial_id="exact",
             expected_harness="codex",
+            expected_agent_usage=harbor_metering.UsageCounters(1, 12, 3, 4),
         )
         self.assertEqual(verified["reconciliation"]["status"], "exact")
+
+    def test_durable_evidence_must_match_the_validated_atif_counters(self):
+        with self._session("atif-mismatch") as session:
+            self._post_model_call(session)
+            session.seal(harbor_metering.UsageCounters(1, 12, 3, 4))
+
+        with self.assertRaisesRegex(
+            harbor_metering.HarborMeteringError,
+            "validated ATIF trajectory",
+        ):
+            harbor_metering.verify_evidence_dir(
+                Path(self.temp.name) / "atif-mismatch",
+                expected_agent_usage=harbor_metering.UsageCounters(
+                    2, 12, 3, 4
+                ),
+            )
+
+    def test_atif_without_call_count_uses_verified_proxy_count(self):
+        expected = harbor_metering.UsageCounters(None, 12, 3, 4)
+        with self._session("atif-proxy-calls") as session:
+            self._post_model_call(session)
+            evidence = session.seal(expected)
+
+        self.assertEqual(evidence["reconciliation"]["status"], "exact")
+        self.assertEqual(
+            evidence["reconciliation"]["fields"]["calls"]["status"],
+            "proxy_only",
+        )
+        self.assertTrue(evidence["publication"]["eligible"])
+        verified = harbor_metering.verify_evidence_dir(
+            Path(self.temp.name) / "atif-proxy-calls",
+            expected_agent_usage=expected,
+        )
+        self.assertEqual(verified["proxy_measured"]["calls"], 1)
 
     def test_durable_ledger_tampering_is_rejected(self):
         with self._session("tampered") as session:
@@ -258,14 +293,26 @@ class HarborMeteringSessionTests(unittest.TestCase):
 
 
 class HarborMeteringContractTests(unittest.TestCase):
-    def test_reconciliation_missing_agent_counter_is_incomplete(self):
+    def test_reconciliation_uses_proxy_as_call_count_source_for_atif(self):
         result = harbor_metering.reconcile_usage(
             harbor_metering.UsageCounters(None, 10, 2, 3),
             harbor_metering.UsageCounters(1, 10, 2, 3),
             proxy_complete=True,
         )
+        self.assertEqual(result.status, "exact")
+        self.assertEqual(result.fields["calls"]["status"], "proxy_only")
+
+    def test_reconciliation_missing_atif_token_counter_is_incomplete(self):
+        result = harbor_metering.reconcile_usage(
+            harbor_metering.UsageCounters(None, None, 2, 3),
+            harbor_metering.UsageCounters(1, 10, 2, 3),
+            proxy_complete=True,
+        )
         self.assertEqual(result.status, "incomplete")
-        self.assertEqual(result.fields["calls"]["status"], "incomplete")
+        self.assertEqual(
+            result.fields["input_tokens"]["status"],
+            "incomplete",
+        )
 
     def test_usage_from_imported_harbor_row_and_integrator_hook(self):
         row = {

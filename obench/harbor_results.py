@@ -18,10 +18,18 @@ from typing import Any
 from .atif import validate_trajectory
 from .harbor_metering import (
     HarborMeteringError,
+    UsageCounters,
     apply_to_imported_row,
     verify_evidence_dir,
 )
 from .harbor_oauth import AGENT_IMPORT_PATH
+from .harbor_profiles import (
+    CODEX_PROFILE_IMPORT,
+    OPENCODE_PROFILE_IMPORT,
+    PI_PROFILE_IMPORT,
+    HarborProfileError,
+    canonical_openbench_model,
+)
 from .run import (
     ROW_FIELDS,
     ResultsLogError,
@@ -40,13 +48,13 @@ VERIFIER_EVIDENCE_SCHEMA_VERSION = "openbench-verifier-evidence-v2"
 MAX_JSON_BYTES = 32 * 1024 * 1024
 HARBOR_AGENT_SEMANTIC_NAME_ALIASES = {
     AGENT_IMPORT_PATH: "codex",
-    "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile": "codex",
-    "obench.harbor_agents.pi:OpenBenchPiOAuth": "pi",
-    "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth": "opencode",
+    CODEX_PROFILE_IMPORT: "codex",
+    PI_PROFILE_IMPORT: "pi",
+    OPENCODE_PROFILE_IMPORT: "opencode",
 }
 HARBOR_PROXY_REQUIRED_AGENTS = frozenset({
-    "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile",
-    "obench.harbor_agents.pi:OpenBenchPiOAuth",
+    CODEX_PROFILE_IMPORT,
+    PI_PROFILE_IMPORT,
 })
 
 
@@ -1121,7 +1129,7 @@ def _validate_atif(
     lock_model: str,
     reported_model_name: str,
     location: str,
-) -> tuple[Path, dict[str, Any], int]:
+) -> tuple[Path, dict[str, Any], int, dict[str, Any]]:
     trajectory_path = trial_dir / "agent" / "trajectory.json"
     trajectory = _object(
         _read_json(trajectory_path, f"{location}.ATIF"),
@@ -1187,7 +1195,7 @@ def _validate_atif(
         for step in trajectory.get("steps", [])
         if isinstance(step, dict) and step.get("source") == "agent"
     )
-    return trajectory_path, agent_result, turns
+    return trajectory_path, agent_result, turns, trajectory
 
 
 def _usage_fields(agent_result: dict[str, Any], location: str) -> dict[str, Any]:
@@ -1341,6 +1349,10 @@ def _validate_trial(
             f"{location}.result.agent_info.model_info",
             "does not match trial lock model identity",
         )
+    try:
+        canonical_model = canonical_openbench_model(agent_config_name, model)
+    except HarborProfileError as exc:
+        raise _fail(f"{location}.lock.agent.model_name", str(exc)) from exc
 
     started, finished, t_env, t_agent, harbor_verifier_time = _validate_timing(
         result, location
@@ -1355,7 +1367,7 @@ def _validate_trial(
         openbench_harbor_export,
     ) = _validate_reward(trial_dir, result, location)
     manifest_path, workspace_digest = _validate_artifacts(trial_dir, result, location)
-    trajectory_path, agent_result, turns = _validate_atif(
+    trajectory_path, agent_result, turns, trajectory = _validate_atif(
         trial_dir,
         result,
         agent_name,
@@ -1376,6 +1388,9 @@ def _validate_trial(
                 expected_trial_id=trial_dir.name,
                 expected_harness=agent_name,
                 proxy_required=True,
+                expected_agent_usage=UsageCounters.from_atif_trajectory(
+                    trajectory
+                ),
             )
         except HarborMeteringError as exc:
             raise _fail(f"{location}.metering", str(exc)) from exc
@@ -1399,7 +1414,8 @@ def _validate_trial(
         "agent_config_name": agent_config_name,
         "agent_name": agent_name,
         "agent_version": agent_version,
-        "model": model,
+        "model": canonical_model,
+        "harbor_model_name": model,
         "started": started,
         "finished": finished,
         "t_env_setup_s": t_env,
@@ -1590,6 +1606,7 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 ),
                 "harbor_task_checksum": item["task_checksum"],
                 "harbor_agent_config_name": item["agent_config_name"],
+                "harbor_model_name": item["harbor_model_name"],
                 "harbor_verifier_time_s": item["harbor_verifier_time_s"],
                 "harbor_job_retries": job_retry_count,
                 "harbor_job_max_retries": job_max_retries,

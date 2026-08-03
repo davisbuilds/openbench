@@ -34,6 +34,10 @@ from . import report_page
 from . import scrub
 from . import stats
 from .harbor_results import expected_harbor_agent_semantic_name
+from .harbor_profiles import (
+    OPENCODE_PROFILE_IMPORT,
+    expected_harbor_model_name,
+)
 from .paths import default_results_path, default_tasks_dir, resolve_tasks_dir
 
 TRANSCRIPT_FIELD_KEYS = (
@@ -74,6 +78,7 @@ HARBOR_PROVENANCE_KEYS = frozenset({
     "openbench_harbor_export",
     "harbor_task_checksum",
     "harbor_agent_config_name",
+    "harbor_model_name",
     "harbor_verifier_time_s",
     "harbor_job_retries",
     "harbor_job_max_retries",
@@ -104,6 +109,7 @@ HARBOR_MARKER_KEYS = HARBOR_DIGEST_KEYS | frozenset({
     "openbench_task_content_digest",
     "openbench_harbor_export",
     "harbor_agent_config_name",
+    "harbor_model_name",
     "harbor_verifier_time_s",
     "harbor_job_retries",
     "harbor_job_max_retries",
@@ -575,6 +581,27 @@ def _validate_harbor_row(row):
         raise PublishError(
             f"Harbor row {run_id!r}: harness does not match immutable "
             "Harbor agent config identity"
+        )
+    harbor_model_name = provenance["harbor_model_name"]
+    if (
+        not isinstance(harbor_model_name, str)
+        or not harbor_model_name
+        or "\\" in harbor_model_name
+        or harbor_model_name.startswith("~")
+    ):
+        raise PublishError(f"Harbor row {run_id!r}: invalid harbor_model_name")
+    if harbor_model_name != expected_harbor_model_name(
+        provenance["harbor_agent_config_name"],
+        row.get("model"),
+    ):
+        raise PublishError(
+            f"Harbor row {run_id!r}: canonical model does not match immutable "
+            "Harbor model identity"
+        )
+    if provenance["harbor_agent_config_name"] == OPENCODE_PROFILE_IMPORT:
+        raise PublishError(
+            f"Harbor row {run_id!r}: the OpenCode OAuth profile is "
+            "execution-only until sealed proxy metering is supported"
         )
     if not _is_nonnegative_number(provenance["harbor_verifier_time_s"]):
         raise PublishError(f"Harbor row {run_id!r}: invalid harbor_verifier_time_s")

@@ -78,23 +78,24 @@ transparent proxy forwards them unchanged.
 
 ## Reconciliation
 
-Both sides use the same four counters:
+Token totals are reconciled across both surfaces; calls come from the sealed
+proxy ledger because ATIF-v1.7 does not define a standard aggregate call count:
 
 | Counter | Agent evidence | Proxy evidence |
 |---|---|---|
-| Calls | Sum of ATIF-v1.7 `step.llm_call_count` | Sealed request-record count |
+| Calls | Optional `step.llm_call_count` extension | Sealed request-record count |
 | Input | `total_prompt_tokens`, including cached input | Uncached + cache read + cache write |
 | Cache | `total_cached_tokens` | Cache-read tokens |
 | Output | `total_completion_tokens` | Output tokens |
 
-Normalized row `turns` is not used as a call count. Pinned Harbor groups Codex
-events by API call and assigns `llm_call_count = 1` to each resulting agent
-step ([source](https://github.com/harbor-framework/harbor/blob/72bc40b1e58b47a9cc6e0f14c29aced3a9e53767/src/harbor/agents/installed/codex.py#L225-L293)).
+Normalized row `turns` is not used as a call count. When ATIF omits the optional
+extension, the reconciliation field is `proxy_only`; the sealed, hash-chained
+ledger remains the independently recomputed call-count source.
 
 The evidence status is:
 
-- `exact`: the ledger is complete, all four counters are present, and all
-  values match.
+- `exact`: the ledger is complete and all ATIF token totals match. A missing
+  optional ATIF call count does not weaken the ledger-derived call count.
 - `mismatch`: the ledger and reported counters are complete, but at least one
   value differs.
 - `incomplete`: the seal/hash chain, any request usage, or any reported

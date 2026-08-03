@@ -15,11 +15,17 @@ from typing import Any
 HARBOR_VERSION = "0.20.0"
 AUTH_STRATEGY_OAUTH = "oauth"
 
-_CODEX_IMPORT = (
+CODEX_PROFILE_IMPORT = (
     "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile"
 )
-_PI_IMPORT = "obench.harbor_agents.pi:OpenBenchPiOAuth"
-_OPENCODE_IMPORT = "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth"
+PI_PROFILE_IMPORT = "obench.harbor_agents.pi:OpenBenchPiOAuth"
+OPENCODE_PROFILE_IMPORT = "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth"
+
+_MODEL_PREFIX_BY_PROFILE = {
+    CODEX_PROFILE_IMPORT: "",
+    PI_PROFILE_IMPORT: "openai-codex/",
+    OPENCODE_PROFILE_IMPORT: "openai/",
+}
 
 _MODEL_IDS = {
     "gpt-5.5-medium": "gpt-5.5",
@@ -173,10 +179,40 @@ _VERSIONS = {
 }
 
 _IMPORTS = {
-    "codex": _CODEX_IMPORT,
-    "pi": _PI_IMPORT,
-    "opencode": _OPENCODE_IMPORT,
+    "codex": CODEX_PROFILE_IMPORT,
+    "pi": PI_PROFILE_IMPORT,
+    "opencode": OPENCODE_PROFILE_IMPORT,
 }
+
+
+def canonical_openbench_model(
+    agent_import_path: str,
+    harbor_model_name: str,
+) -> str:
+    """Return the shared comparison identity for a pinned Harbor profile."""
+
+    prefix = _MODEL_PREFIX_BY_PROFILE.get(agent_import_path)
+    if prefix is None:
+        return harbor_model_name
+    if prefix and not harbor_model_name.startswith(prefix):
+        raise HarborProfileError(
+            f"Harbor model {harbor_model_name!r} does not match the "
+            f"{agent_import_path!r} profile prefix {prefix!r}"
+        )
+    canonical = harbor_model_name[len(prefix):]
+    if not canonical:
+        raise HarborProfileError("Harbor model identity has no canonical model")
+    return canonical
+
+
+def expected_harbor_model_name(
+    agent_import_path: str,
+    canonical_model: str,
+) -> str:
+    """Reconstruct the exact Harbor lock identity for a comparison row."""
+
+    prefix = _MODEL_PREFIX_BY_PROFILE.get(agent_import_path)
+    return canonical_model if prefix is None else f"{prefix}{canonical_model}"
 
 
 def _codex_config(model: str) -> str:
