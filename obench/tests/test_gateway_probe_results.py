@@ -199,6 +199,97 @@ def bound_row(experiment, block, schedule_digest, price_digest):
 
 
 class GatewayProbeResultsTests(unittest.TestCase):
+    def test_schema_v5_and_recovered_primer_attempts_are_fail_closed(self):
+        env = {
+            gateway_run.FROZEN_PRICES_ENV: json.dumps({
+                "openai/gpt-4o-mini": {
+                    "input_per_million": "1",
+                    "output_per_million": "2",
+                    "effective_at": "2026-07-25T00:00:00Z",
+                }
+            }),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path = Path(tmp, "probe.toml")
+            spec_path.write_text(manifest(), encoding="utf-8")
+            experiment = gateway_probe_spec.load_experiment(spec_path)
+            schedule = gateway_probe_run.build_schedule(experiment)
+            schedule_digest = gateway_spec.canonical_digest(
+                [dataclasses.asdict(block) for block in schedule]
+            )
+            _prices, price_snapshot = gateway_run.load_frozen_prices(env)
+            price_digest = gateway_spec.canonical_digest(price_snapshot)
+            block = next(
+                item for item in schedule if item.condition == "warm"
+            )
+            row = bound_row(
+                experiment, block, schedule_digest, price_digest
+            )
+            row["reuse_evidence"]["route_integrity"] = {
+                "status": "verified",
+                "pass": True,
+                "reasons": [
+                    "multiple_attempts",
+                    "unsuccessful_attempt",
+                ],
+            }
+            row["reuse_evidence"]["route"] = {
+                "requested_model": "openai/gpt-4o-mini",
+                "served_model": "openai/gpt-4o-mini",
+                "provider": "openai",
+                "attempts": [
+                    {
+                        "provider": "openai",
+                        "model": "openai/gpt-4o-mini",
+                        "status": 504,
+                    },
+                    {
+                        "provider": "openai",
+                        "model": "openai/gpt-4o-mini",
+                        "status": 200,
+                    },
+                ],
+            }
+            gateway_probe_results.validate_resume_rows(
+                [row],
+                experiment=experiment,
+                schedule=schedule,
+                schedule_digest=schedule_digest,
+                price_digest=price_digest,
+            )
+            self.assertEqual(gateway_probe_results.RESULT_SCHEMA_VERSION, 5)
+            self.assertTrue(row["cell_id"].startswith("gateway-probe-cell-v5-"))
+
+            variants = {}
+            variants["missing_route"] = copy.deepcopy(row)
+            variants["missing_route"]["reuse_evidence"].pop("route")
+            variants["fallback"] = copy.deepcopy(row)
+            variants["fallback"]["reuse_evidence"]["route"]["attempts"][0][
+                "provider"
+            ] = "other"
+            variants["malformed"] = copy.deepcopy(row)
+            variants["malformed"]["reuse_evidence"]["route"]["attempts"][0].pop(
+                "status"
+            )
+            variants["multiple_successes"] = copy.deepcopy(row)
+            variants["multiple_successes"]["reuse_evidence"]["route"][
+                "attempts"
+            ][0]["status"] = 200
+            variants["extra_reason"] = copy.deepcopy(row)
+            variants["extra_reason"]["reuse_evidence"]["route_integrity"][
+                "reasons"
+            ].append("fallback_attempt")
+            for name, candidate in variants.items():
+                with self.subTest(name=name):
+                    with self.assertRaises(GatewayProbeRunError):
+                        gateway_probe_results.validate_resume_rows(
+                            [candidate],
+                            experiment=experiment,
+                            schedule=schedule,
+                            schedule_digest=schedule_digest,
+                            price_digest=price_digest,
+                        )
+
     def test_resume_rows_are_fully_bound(self):
         env = {
             gateway_run.FROZEN_PRICES_ENV: json.dumps({
@@ -259,6 +350,10 @@ class GatewayProbeResultsTests(unittest.TestCase):
             variants["unsafe_receipt"]["request_metrics"]["receipt_headers"] = {
                 "authorization": "secret"
             }
+            variants["unsafe_retry_receipt"] = copy.deepcopy(base)
+            variants["unsafe_retry_receipt"]["retry_evidence"]["attempts"][0][
+                "receipt_headers"
+            ] = {"authorization": "secret"}
             variants["timing_schema"] = copy.deepcopy(base)
             variants["timing_schema"]["request_metrics"]["timing"]["ttfb_s"] = 1.0
             variants["timing_order"] = copy.deepcopy(base)
