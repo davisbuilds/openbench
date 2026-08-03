@@ -17,7 +17,9 @@ from .gateway_probe_models import GatewayProbeRunError, ProbeBlock
 
 
 BENCHMARK = "gateway_probe"
-RESULT_SCHEMA_VERSION = 5
+# V4 admits additive primer route and retry receipt evidence so checked-in
+# published bundles remain independently verifiable.
+RESULT_SCHEMA_VERSION = 4
 RECEIPT_HEADER_ALLOWLIST = frozenset({
     "x-request-id",
     "request-id",
@@ -89,7 +91,7 @@ def make_identity(
 
 
 def cell_id(identity: Mapping[str, Any]) -> str:
-    return "gateway-probe-cell-v5-" + gateway_spec.canonical_digest(identity)
+    return "gateway-probe-cell-v4-" + gateway_spec.canonical_digest(identity)
 
 
 def read_rows(path: Path) -> list[dict[str, Any]]:

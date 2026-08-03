@@ -199,7 +199,7 @@ def bound_row(experiment, block, schedule_digest, price_digest):
 
 
 class GatewayProbeResultsTests(unittest.TestCase):
-    def test_schema_v5_and_recovered_primer_attempts_are_fail_closed(self):
+    def test_schema_v4_additions_and_recovered_primer_attempts_are_fail_closed(self):
         env = {
             gateway_run.FROZEN_PRICES_ENV: json.dumps({
                 "openai/gpt-4o-mini": {
@@ -257,8 +257,8 @@ class GatewayProbeResultsTests(unittest.TestCase):
                 schedule_digest=schedule_digest,
                 price_digest=price_digest,
             )
-            self.assertEqual(gateway_probe_results.RESULT_SCHEMA_VERSION, 5)
-            self.assertTrue(row["cell_id"].startswith("gateway-probe-cell-v5-"))
+            self.assertEqual(gateway_probe_results.RESULT_SCHEMA_VERSION, 4)
+            self.assertTrue(row["cell_id"].startswith("gateway-probe-cell-v4-"))
 
             variants = {}
             variants["missing_route"] = copy.deepcopy(row)
