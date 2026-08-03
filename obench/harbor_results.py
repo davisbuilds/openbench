@@ -71,6 +71,18 @@ def expected_harbor_agent_semantic_name(config_name: str) -> str:
     return HARBOR_AGENT_SEMANTIC_NAME_ALIASES.get(config_name, config_name)
 
 
+def _agent_config_identity(agent: dict[str, Any], location: str) -> str:
+    """Return Harbor's immutable built-in name or custom-agent import path."""
+
+    name = agent.get("name")
+    import_path = agent.get("import_path")
+    if isinstance(name, str) and name:
+        return name
+    if name is not None:
+        raise _fail(f"{location}.name", "expected a non-empty string or null")
+    return _string(import_path, f"{location}.import_path")
+
+
 def _require_regular_file(path: Path, location: str) -> None:
     if path.is_symlink() or not path.is_file():
         raise _fail(location, f"required regular file is missing: {path}")
@@ -323,7 +335,7 @@ def _validate_trial_lock(value: Any, location: str) -> dict[str, Any]:
         raise _fail(f"{location}.task.type", "expected local, git, or package")
     _validate_digest(task.get("digest"), f"{location}.task.digest")
     agent = _object(lock.get("agent"), f"{location}.agent")
-    _string(agent.get("name"), f"{location}.agent.name")
+    _agent_config_identity(agent, f"{location}.agent")
     _string(agent.get("model_name"), f"{location}.agent.model_name")
     _object(lock.get("environment"), f"{location}.environment")
     _object(lock.get("verifier"), f"{location}.verifier")
@@ -331,6 +343,7 @@ def _validate_trial_lock(value: Any, location: str) -> dict[str, Any]:
 
 
 _AGENT_DEFAULTS = {
+    "name": None,
     "import_path": None,
     "n_concurrent": None,
     "concurrency_group": None,
@@ -1316,8 +1329,8 @@ def _validate_trial(
         )
 
     agent_lock = _object(trial_lock.get("agent"), f"{location}.lock.agent")
-    agent_config_name = _string(
-        agent_lock.get("name"), f"{location}.lock.agent.name"
+    agent_config_name = _agent_config_identity(
+        agent_lock, f"{location}.lock.agent"
     )
     agent_info = _object(result.get("agent_info"), f"{location}.result.agent_info")
     agent_name = _string(agent_info.get("name"), f"{location}.result.agent_info.name")

@@ -464,6 +464,55 @@ class HarborResultsTests(unittest.TestCase):
             self.assertIsNone(row["checker_stdout"])
             self.assertIsNone(row["checker_stderr"])
 
+    def test_custom_agent_import_path_is_the_lock_identity(self):
+        fixture = self.fixture()
+        for index in range(len(fixture.specs)):
+            trial_dir = fixture.trial(index)
+            lock_path = trial_dir / "lock.json"
+            lock = json.loads(lock_path.read_text())
+            lock["agent"].pop("name")
+            lock["agent"]["import_path"] = AGENT_IMPORT_PATH
+            _write_json(lock_path, lock)
+
+            result_path = trial_dir / "result.json"
+            result = json.loads(result_path.read_text())
+            result["config"]["agent"]["name"] = None
+            result["config"]["agent"]["import_path"] = AGENT_IMPORT_PATH
+            _write_json(result_path, result)
+
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"] = [
+            json.loads((fixture.trial(index) / "lock.json").read_text())
+            for index in range(len(fixture.specs))
+        ]
+        _write_json(job_lock_path, job_lock)
+
+        rows = load_rows(fixture.root)
+
+        self.assertEqual(len(rows), len(fixture.specs))
+        self.assertTrue(all(row["harness"] == "codex" for row in rows))
+        self.assertTrue(
+            all(
+                row["candidate_provenance"]["harbor_agent_config_name"]
+                == AGENT_IMPORT_PATH
+                for row in rows
+            )
+        )
+
+    def test_agent_lock_requires_name_or_import_path(self):
+        fixture = self.fixture()
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"][0]["agent"].pop("name")
+        _write_json(job_lock_path, job_lock)
+
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            r"job lock\.trials\[0\]\.agent\.import_path",
+        ):
+            load_rows(fixture.root)
+
     def test_import_appends_row_fields_and_rejects_duplicate_without_mutation(self):
         fixture = self.fixture()
         output = self.root / "results.jsonl"
