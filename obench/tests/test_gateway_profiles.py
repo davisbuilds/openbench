@@ -96,12 +96,19 @@ class GatewayRequestProfileTests(unittest.TestCase):
                     "allow_fallbacks": False,
                 })
 
-    def test_rolling_alias_accepts_matching_month_day_and_full_date(self):
+    def test_rolling_alias_accepts_only_known_deepseek_release_alias(self):
         shorthand = "deepseek/deepseek-v4-flash-0731"
         canonical = "deepseek/deepseek-v4-flash-20260731"
 
         self.assertTrue(
             gateway_profiles.models_match(shorthand, canonical, "rolling_alias")
+        )
+        self.assertFalse(
+            gateway_profiles.models_match(
+                shorthand,
+                "deepseek/deepseek-v4-flash-20250731",
+                "rolling_alias",
+            )
         )
         self.assertFalse(
             gateway_profiles.models_match(

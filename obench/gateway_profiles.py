@@ -32,6 +32,9 @@ _OPENROUTER_PROVIDER_SLUGS = {
 _PROVIDER_IDENTITY_ALIASES = {
     "moonshot ai": "moonshotai",
 }
+_MODEL_ID_ALIASES = {
+    "deepseek-v4-flash-0731": "deepseek-v4-flash-20260731",
+}
 _CLOUDFLARE_REST_ENDPOINT_RE = re.compile(
     r"https://api\.cloudflare\.com/client/v4/accounts/"
     r"(?P<account_id>[0-9a-fA-F]{32})/ai/v1/"
@@ -55,7 +58,7 @@ _SCHEMA_KEYS = frozenset({
     "schema",
 })
 _DATED_REVISION_RE = re.compile(
-    r"-(?:\d{4}-\d{2}-\d{2}|\d{8}|(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))$"
+    r"-(?:\d{4}-\d{2}-\d{2}|\d{8})$"
 )
 
 
@@ -93,23 +96,14 @@ def model_evidence_consistent(first: str, second: str, mode: str) -> bool:
         second_base, second_date = second_revision
         return (
             first_base == second_base
-            and (
-                first_date == second_date
-                or (
-                    len(first_date) == 4
-                    and second_date.endswith(first_date)
-                )
-                or (
-                    len(second_date) == 4
-                    and first_date.endswith(second_date)
-                )
-            )
+            and first_date == second_date
         )
     return _model_alias(first_id) == _model_alias(second_id)
 
 
 def _model_id(value: str) -> str:
-    return value.casefold().rsplit("/", 1)[-1]
+    model_id = value.casefold().rsplit("/", 1)[-1]
+    return _MODEL_ID_ALIASES.get(model_id, model_id)
 
 
 def _model_provider(value: str) -> str | None:
