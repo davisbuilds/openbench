@@ -8,13 +8,16 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from obench.harbor_results import (
     HARBOR_GIT_COMMIT,
     HARBOR_VERSION,
     HarborResultsError,
+    _tree_digest,
     import_results,
     load_rows,
 )
@@ -41,6 +44,7 @@ def _trial_lock(task: str, model: str = "model-x") -> dict:
             "name": f"openbench/{task}",
             "type": "local",
             "digest": "sha256:" + ("a" if task == "alpha" else "b") * 64,
+            "path": f"/tmp/tasks/{task}",
         },
         "install_only": False,
         "timeout_multiplier": 1.0,
@@ -73,6 +77,7 @@ def _trial_result(
             "task": {"path": f"/tmp/tasks/{task}"},
             "trial_name": name,
             "trials_dir": "/tmp/job",
+            "job_id": "10000000-0000-0000-0000-000000000000",
             "agent": {"name": "codex", "model_name": model, "kwargs": {}},
             "environment": {"type": "docker", "kwargs": {}},
             "verifier": {"disable": False, "kwargs": {}},
@@ -258,6 +263,10 @@ class GoldenHarborJob:
                     "n_pending_trials": 0,
                     "n_cancelled_trials": 0,
                     "n_retries": 0,
+                    "n_input_tokens": 100 * len(results),
+                    "n_cache_tokens": 25 * len(results),
+                    "n_output_tokens": 40 * len(results),
+                    "cost_usd": 0.5 * len(results),
                 },
                 "trial_results": results,
             },
@@ -308,7 +317,7 @@ class HarborResultsTests(unittest.TestCase):
         self.assertEqual(rows[0]["tokens_input_uncached"], 75)
         self.assertEqual(rows[0]["tokens_cache_read"], 25)
         self.assertEqual(rows[0]["tokens_output"], 40)
-        self.assertEqual(rows[0]["tokens"], 140)
+        self.assertEqual(rows[0]["tokens"], 115)
         self.assertIsNone(rows[0]["token_basis_proxy"])
         self.assertIsNone(rows[0]["tokens_proxy_calls"])
         self.assertFalse(rows[0]["candidate_provenance"]["proxy_measured"])
@@ -346,6 +355,49 @@ class HarborResultsTests(unittest.TestCase):
         with self.assertRaisesRegex(HarborResultsError, "corrupt JSONL"):
             import_results(fixture.root, output)
         self.assertEqual(output.read_bytes(), before)
+
+    def test_concurrent_imports_cannot_append_duplicate_batches(self):
+        fixture = self.fixture()
+        output = self.root / "concurrent.jsonl"
+        successes = []
+        failures = []
+
+        def run_import():
+            try:
+                successes.append(import_results(fixture.root, output))
+            except HarborResultsError as exc:
+                failures.append(str(exc))
+
+        threads = [threading.Thread(target=run_import) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("already exists", failures[0])
+        self.assertEqual(len(output.read_text().splitlines()), 3)
+
+    def test_append_io_failure_rolls_back_whole_batch(self):
+        fixture = self.fixture()
+        output = self.root / "rollback.jsonl"
+        output.write_text('{"run_id":"seed"}\n')
+        before = output.read_bytes()
+        with mock.patch("obench.harbor_results.os.fsync", side_effect=[OSError("disk"), None]):
+            with self.assertRaisesRegex(HarborResultsError, "rolled back"):
+                import_results(fixture.root, output)
+        self.assertEqual(output.read_bytes(), before)
+
+    def test_workspace_digest_is_unambiguous_across_file_boundaries(self):
+        first = self.root / "tree-one"
+        second = self.root / "tree-two"
+        first.mkdir()
+        second.mkdir()
+        (first / "a").write_bytes(b"Xf\0b\0Y")
+        (second / "a").write_bytes(b"X")
+        (second / "b").write_bytes(b"Y")
+        self.assertNotEqual(_tree_digest(first), _tree_digest(second))
 
     def test_rejects_unresolved_or_wrong_harbor_build(self):
         for field, value in (
@@ -427,6 +479,15 @@ class HarborResultsTests(unittest.TestCase):
 
         cases.append(("agent", agent_tamper))
 
+        def environment_tamper(fixture: GoldenHarborJob):
+            path = fixture.trial() / "result.json"
+            result = json.loads(path.read_text())
+            result["config"]["environment"]["force_build"] = True
+            _write_json(path, result)
+            fixture.sync_aggregate()
+
+        cases.append(("environment", environment_tamper))
+
         def reward_tamper(fixture: GoldenHarborJob):
             (fixture.trial() / "verifier" / "reward.txt").write_text("0.25\n")
 
@@ -461,6 +522,26 @@ class HarborResultsTests(unittest.TestCase):
             with self.subTest(name=name):
                 fixture = GoldenHarborJob(self.root / f"job-tamper-{index}")
                 mutate(fixture)
+                with self.assertRaises(HarborResultsError):
+                    load_rows(fixture.root)
+
+    def test_rejects_contradictory_job_statistics(self):
+        for index, (field, value) in enumerate(
+            (
+                ("n_errored_trials", 1),
+                ("n_cancelled_trials", 1),
+                ("n_input_tokens", 299),
+                ("n_cache_tokens", 74),
+                ("n_output_tokens", 119),
+                ("cost_usd", 1.4),
+            )
+        ):
+            with self.subTest(field=field):
+                fixture = GoldenHarborJob(self.root / f"job-stats-{index}")
+                path = fixture.root / "result.json"
+                result = json.loads(path.read_text())
+                result["stats"][field] = value
+                _write_json(path, result)
                 with self.assertRaises(HarborResultsError):
                     load_rows(fixture.root)
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import math
@@ -15,7 +16,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .atif import validate_trajectory
-from .run import ROW_FIELDS, append_row, make_run_id
+from .run import ROW_FIELDS, make_run_id
 
 HARBOR_VERSION = "0.20.0"
 HARBOR_GIT_COMMIT = "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc"
@@ -144,10 +145,15 @@ def _tree_digest(root: Path) -> str:
         if path.is_dir():
             digest.update(f"d\0{relative}\0".encode())
         elif path.is_file():
-            digest.update(f"f\0{relative}\0".encode())
+            file_digest = hashlib.sha256()
+            size = 0
             with path.open("rb") as handle:
                 for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
+                    size += len(chunk)
+                    file_digest.update(chunk)
+            digest.update(
+                f"f\0{relative}\0{size}\0{file_digest.hexdigest()}\0".encode()
+            )
         else:
             raise _fail("final workspace", f"unsupported filesystem entry: {path}")
     return digest.hexdigest()
@@ -225,6 +231,254 @@ def _validate_trial_lock(value: Any, location: str) -> dict[str, Any]:
     return lock
 
 
+_AGENT_DEFAULTS = {
+    "import_path": None,
+    "n_concurrent": None,
+    "concurrency_group": None,
+    "override_timeout_sec": None,
+    "override_setup_timeout_sec": None,
+    "max_timeout_sec": None,
+    "resume_trajectory": False,
+    "load_trajectory": None,
+    "extra_allowed_hosts": [],
+    "include_logs": [],
+    "exclude_logs": [],
+    "kwargs": {},
+    "env": {},
+    "mcp_servers": [],
+}
+_ENVIRONMENT_DEFAULTS = {
+    "import_path": None,
+    "force_build": False,
+    "delete": True,
+    "cpu_enforcement_policy": "auto",
+    "memory_enforcement_policy": "auto",
+    "override_cpus": None,
+    "override_memory_mb": None,
+    "override_storage_mb": None,
+    "override_gpus": None,
+    "override_tpu": None,
+    "mounts": None,
+    "env": {},
+    "kwargs": {},
+    "extra_allowed_hosts": [],
+}
+_VERIFIER_DEFAULTS = {
+    "override_timeout_sec": None,
+    "max_timeout_sec": None,
+    "include_logs": [],
+    "exclude_logs": [],
+    "env": {},
+    "import_path": None,
+    "kwargs": {},
+    "disable": False,
+}
+
+
+def _normalized_mapping(
+    value: dict[str, Any],
+    defaults: dict[str, Any],
+    *,
+    exclude: set[str] | None = None,
+) -> dict[str, Any]:
+    normalized = {
+        key: json.loads(json.dumps(default))
+        for key, default in defaults.items()
+    }
+    normalized.update(value)
+    for key in exclude or set():
+        normalized.pop(key, None)
+    return normalized
+
+
+def _validate_lock_backed_config(
+    result: dict[str, Any],
+    trial_lock: dict[str, Any],
+    *,
+    expected_job_id: str,
+    location: str,
+) -> None:
+    config = _object(result.get("config"), f"{location}.result.config")
+    scalar_defaults = {
+        "install_only": False,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": None,
+        "verifier_timeout_multiplier": None,
+        "agent_setup_timeout_multiplier": None,
+        "environment_build_timeout_multiplier": None,
+    }
+    for field, default in scalar_defaults.items():
+        if config.get(field, default) != trial_lock.get(field, default):
+            raise _fail(
+                f"{location}.result.config.{field}",
+                "does not match trial lock",
+            )
+    config_job_id = config.get("job_id")
+    if config_job_id is not None and config_job_id != expected_job_id:
+        raise _fail(
+            f"{location}.result.config.job_id",
+            "does not match top-level job id",
+        )
+
+    config_task = _object(config.get("task"), f"{location}.result.config.task")
+    lock_task = _object(trial_lock.get("task"), f"{location}.lock.task")
+    task_type = lock_task.get("type")
+    if config_task.get("source") != lock_task.get("source"):
+        raise _fail(
+            f"{location}.result.config.task.source",
+            "does not match trial lock",
+        )
+    if task_type == "local":
+        if config_task.get("path") != lock_task.get("path"):
+            raise _fail(
+                f"{location}.result.config.task.path",
+                "does not match local trial lock",
+            )
+        if any(
+            config_task.get(field) is not None
+            for field in ("name", "ref", "git_url", "git_commit_id")
+        ):
+            raise _fail(f"{location}.result.config.task", "contradicts local task lock")
+    elif task_type == "git":
+        for field in ("path", "git_url"):
+            if config_task.get(field) != lock_task.get(field):
+                raise _fail(
+                    f"{location}.result.config.task.{field}",
+                    "does not match git trial lock",
+                )
+        configured_commit = config_task.get("git_commit_id")
+        if (
+            isinstance(configured_commit, str)
+            and len(configured_commit) == 40
+            and configured_commit != lock_task.get("git_commit_id")
+        ):
+            raise _fail(
+                f"{location}.result.config.task.git_commit_id",
+                "contradicts resolved git trial lock",
+            )
+        if config_task.get("name") is not None or config_task.get("ref") is not None:
+            raise _fail(f"{location}.result.config.task", "contradicts git task lock")
+    elif task_type == "package":
+        if config_task.get("name") != lock_task.get("name"):
+            raise _fail(
+                f"{location}.result.config.task.name",
+                "does not match package trial lock",
+            )
+        ref = config_task.get("ref")
+        if isinstance(ref, str) and ref.startswith("sha256:") and ref != lock_task.get("digest"):
+            raise _fail(
+                f"{location}.result.config.task.ref",
+                "contradicts resolved package digest",
+            )
+        if any(
+            config_task.get(field) is not None
+            for field in ("path", "git_url", "git_commit_id")
+        ):
+            raise _fail(
+                f"{location}.result.config.task",
+                "contradicts package task lock",
+            )
+
+    config_agent = _object(config.get("agent"), f"{location}.result.config.agent")
+    lock_agent = _object(trial_lock.get("agent"), f"{location}.lock.agent")
+    if _normalized_mapping(
+        config_agent, _AGENT_DEFAULTS, exclude={"skills"}
+    ) != _normalized_mapping(lock_agent, _AGENT_DEFAULTS, exclude={"skills"}):
+        raise _fail(f"{location}.result.config.agent", "does not match trial lock")
+    config_skills = config_agent.get("skills", [])
+    if not isinstance(config_skills, list):
+        raise _fail(f"{location}.result.config.agent.skills", "expected an array")
+    lock_skills = _array(trial_lock.get("skills", []), f"{location}.lock.skills")
+    for index, skill in enumerate(lock_skills):
+        skill_obj = _object(skill, f"{location}.lock.skills[{index}]")
+        _validate_digest(skill_obj.get("digest"), f"{location}.lock.skills[{index}].digest")
+    if [str(item) for item in config_skills] != [
+        _string(item.get("source"), f"{location}.lock.skills.source")
+        for item in lock_skills
+    ]:
+        raise _fail(
+            f"{location}.result.config.agent.skills",
+            "does not match resolved trial-lock skills",
+        )
+
+    config_environment = _object(
+        config.get("environment"), f"{location}.result.config.environment"
+    )
+    lock_environment = _object(
+        trial_lock.get("environment"), f"{location}.lock.environment"
+    )
+    if _normalized_mapping(
+        config_environment,
+        _ENVIRONMENT_DEFAULTS,
+        exclude={"extra_docker_compose"},
+    ) != _normalized_mapping(
+        lock_environment,
+        _ENVIRONMENT_DEFAULTS,
+        exclude={"extra_docker_compose"},
+    ):
+        raise _fail(
+            f"{location}.result.config.environment",
+            "does not match trial lock",
+        )
+    config_compose = config_environment.get("extra_docker_compose", [])
+    if not isinstance(config_compose, list):
+        raise _fail(
+            f"{location}.result.config.environment.extra_docker_compose",
+            "expected an array",
+        )
+    lock_compose = trial_lock.get("extra_docker_compose") or []
+    lock_compose = _array(lock_compose, f"{location}.lock.extra_docker_compose")
+    for index, item in enumerate(lock_compose):
+        item_obj = _object(item, f"{location}.lock.extra_docker_compose[{index}]")
+        _validate_digest(
+            item_obj.get("digest"),
+            f"{location}.lock.extra_docker_compose[{index}].digest",
+        )
+    if [str(item) for item in config_compose] != [
+        _string(item.get("path"), f"{location}.lock.extra_docker_compose.path")
+        for item in lock_compose
+    ]:
+        raise _fail(
+            f"{location}.result.config.environment.extra_docker_compose",
+            "does not match resolved trial lock",
+        )
+
+    config_verifier = _object(
+        config.get("verifier"), f"{location}.result.config.verifier"
+    )
+    lock_verifier = _object(trial_lock.get("verifier"), f"{location}.lock.verifier")
+    if _normalized_mapping(config_verifier, _VERIFIER_DEFAULTS) != _normalized_mapping(
+        lock_verifier, _VERIFIER_DEFAULTS
+    ):
+        raise _fail(
+            f"{location}.result.config.verifier",
+            "does not match trial lock",
+        )
+
+    config_instructions = config.get("extra_instruction_paths", [])
+    if not isinstance(config_instructions, list):
+        raise _fail(
+            f"{location}.result.config.extra_instruction_paths",
+            "expected an array",
+        )
+    lock_instructions = trial_lock.get("extra_instructions") or []
+    lock_instructions = _array(lock_instructions, f"{location}.lock.extra_instructions")
+    for index, item in enumerate(lock_instructions):
+        item_obj = _object(item, f"{location}.lock.extra_instructions[{index}]")
+        _validate_digest(
+            item_obj.get("digest"),
+            f"{location}.lock.extra_instructions[{index}].digest",
+        )
+    if [str(item) for item in config_instructions] != [
+        _string(item.get("path"), f"{location}.lock.extra_instructions.path")
+        for item in lock_instructions
+    ]:
+        raise _fail(
+            f"{location}.result.config.extra_instruction_paths",
+            "does not match resolved trial lock",
+        )
+
+
 def _validate_job_result(
     value: Any,
     *,
@@ -255,6 +509,13 @@ def _validate_job_result(
     for field in ("n_running_trials", "n_pending_trials"):
         if stats.get(field) != 0:
             raise _fail(f"job result.stats.{field}", "completed job must report zero")
+    for field in ("n_errored_trials", "n_cancelled_trials"):
+        if stats.get(field) != 0:
+            raise _fail(
+                f"job result.stats.{field}",
+                "exception-free completed job must report zero",
+            )
+    _integer(stats.get("n_retries"), "job result.stats.n_retries")
 
     aggregates = _array(result.get("trial_results"), "job result.trial_results")
     if len(aggregates) != expected_trials:
@@ -280,6 +541,50 @@ def _validate_job_result(
             raise _fail(
                 "job result.trial_results",
                 f"aggregate for trial {trial_id!r} differs from its result.json",
+            )
+    aggregate_fields = {
+        "n_input_tokens": "n_input_tokens",
+        "n_cache_tokens": "n_cache_tokens",
+        "n_output_tokens": "n_output_tokens",
+        "cost_usd": "cost_usd",
+    }
+    for stats_field, result_field in aggregate_fields.items():
+        values = []
+        for trial_result in actual_trial_results:
+            agent_result = _object(
+                trial_result.get("agent_result"),
+                f"trial result.agent_result for aggregate {stats_field}",
+            )
+            value = agent_result.get(result_field)
+            if value is not None:
+                values.append(
+                    _number(
+                        value,
+                        f"trial result.agent_result.{result_field}",
+                        minimum=0.0,
+                    )
+                )
+        expected: float | int | None
+        if not values:
+            expected = None
+        else:
+            total = sum(values)
+            expected = total if stats_field == "cost_usd" else int(total)
+        actual = stats.get(stats_field)
+        if stats_field == "cost_usd" and actual is not None and expected is not None:
+            if (
+                not isinstance(actual, (int, float))
+                or isinstance(actual, bool)
+                or not math.isclose(float(actual), float(expected), abs_tol=1e-9)
+            ):
+                raise _fail(
+                    f"job result.stats.{stats_field}",
+                    f"expected aggregate {expected!r}, got {actual!r}",
+                )
+        elif actual != expected:
+            raise _fail(
+                f"job result.stats.{stats_field}",
+                f"expected aggregate {expected!r}, got {actual!r}",
             )
     return result, job_id, started, finished
 
@@ -570,7 +875,7 @@ def _usage_fields(agent_result: dict[str, Any], location: str) -> dict[str, Any]
         )
     uncached = input_tokens - cache_tokens
     return {
-        "tokens": input_tokens + output_tokens,
+        "tokens": uncached + output_tokens,
         "tokens_input_uncached": uncached,
         "tokens_cache_read": cache_tokens,
         "tokens_cache_write": None,
@@ -593,6 +898,7 @@ def _validate_trial(
     expected_locks: Counter[str],
     seen_ids: set[str],
     seen_names: set[str],
+    expected_job_id: str,
 ) -> dict[str, Any]:
     location = f"trial {trial_dir.name!r}"
     trial_lock_path = trial_dir / "lock.json"
@@ -620,6 +926,12 @@ def _validate_trial(
         raise _fail(f"{location}.result.exception_info", "exception-bearing trials are rejected")
     if result.get("step_results") is not None:
         raise _fail(f"{location}.result.step_results", "multi-step trials are not supported")
+    _validate_lock_backed_config(
+        result,
+        trial_lock,
+        expected_job_id=expected_job_id,
+        location=location,
+    )
 
     task = _object(trial_lock.get("task"), f"{location}.lock.task")
     task_name = _string(result.get("task_name"), f"{location}.result.task_name")
@@ -631,14 +943,6 @@ def _validate_trial(
         raise _fail(f"{location}.result.task_checksum", "does not match locked task digest")
 
     agent_lock = _object(trial_lock.get("agent"), f"{location}.lock.agent")
-    result_config = _object(result.get("config"), f"{location}.result.config")
-    config_agent = _object(result_config.get("agent"), f"{location}.result.config.agent")
-    for field in ("name", "model_name"):
-        if config_agent.get(field) != agent_lock.get(field):
-            raise _fail(
-                f"{location}.result.config.agent.{field}",
-                "does not match trial lock",
-            )
     agent_info = _object(result.get("agent_info"), f"{location}.result.agent_info")
     agent_name = _string(agent_info.get("name"), f"{location}.result.agent_info.name")
     agent_version = _string(
@@ -660,6 +964,7 @@ def _validate_trial(
     usage = _usage_fields(agent_result, location)
     return {
         "trial_dir": trial_dir,
+        "result": result,
         "trial_lock_path": trial_lock_path,
         "result_path": result_path,
         "reward_path": reward_path,
@@ -684,16 +989,12 @@ def _validate_trial(
     }
 
 
-def _existing_run_ids(results_path: Path) -> set[str]:
-    if not results_path.exists():
-        return set()
-    if results_path.is_symlink() or not results_path.is_file():
-        raise _fail("output", f"expected a regular file: {results_path}")
+def _run_ids_from_jsonl(contents: bytes) -> set[str]:
     run_ids: set[str] = set()
     try:
-        lines = results_path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError) as exc:
-        raise _fail("output", f"cannot read existing JSONL: {exc}") from exc
+        lines = contents.decode("utf-8").splitlines()
+    except UnicodeError as exc:
+        raise _fail("output", f"existing JSONL is not UTF-8: {exc}") from exc
     for line_number, line in enumerate(lines, 1):
         if not line.strip():
             continue
@@ -718,13 +1019,21 @@ def _normalized_task_name(task_name: str) -> str:
 
 def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
     """Validate a complete Harbor 0.20.0 job and return normalized rows."""
-    root = Path(job_dir).expanduser().resolve()
-    if root.is_symlink() or not root.is_dir():
+    requested_root = Path(job_dir).expanduser()
+    if requested_root.is_symlink():
+        raise _fail("job directory", f"symlink is not accepted: {requested_root}")
+    root = requested_root.resolve()
+    if not root.is_dir():
         raise _fail("job directory", f"not a directory: {root}")
     job_lock_path = root / "lock.json"
     job_result_path = root / "result.json"
     job_lock, expected_locks = _validate_job_lock(
         _read_json(job_lock_path, "job lock")
+    )
+    job_result_value = _read_json(job_result_path, "job result")
+    expected_job_id = _string(
+        _object(job_result_value, "job result").get("id"),
+        "job result.id",
     )
     trial_dirs = _trial_directories(root)
     expected_count = sum(expected_locks.values())
@@ -737,20 +1046,22 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
     seen_ids: set[str] = set()
     seen_names: set[str] = set()
     trials = [
-        _validate_trial(path, expected_locks, seen_ids, seen_names)
+        _validate_trial(
+            path,
+            expected_locks,
+            seen_ids,
+            seen_names,
+            expected_job_id,
+        )
         for path in trial_dirs
     ]
     if any(expected_locks.values()):
         raise _fail("job directory", "not every job-lock trial has completed evidence")
 
-    job_result_value = _read_json(job_result_path, "job result")
     _job_result, job_id, job_started, job_finished = _validate_job_result(
         job_result_value,
         expected_trials=expected_count,
-        actual_trial_results=[
-            _object(_read_json(item["result_path"], "trial result"), "trial result")
-            for item in trials
-        ],
+        actual_trial_results=[item["result"] for item in trials],
     )
     for item in trials:
         if not (job_started <= item["started"] <= item["finished"] <= job_finished):
@@ -844,16 +1155,50 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
 def import_results(
     job_dir: str | os.PathLike[str], results_path: str | os.PathLike[str]
 ) -> list[dict[str, Any]]:
-    """Validate fully, reject collisions, then append fsync'd ROW_FIELDS rows."""
+    """Validate, lock, collision-check, and append one rollback-safe batch."""
     rows = load_rows(job_dir)
-    output = Path(results_path).expanduser().resolve()
-    existing = _existing_run_ids(output)
-    collisions = sorted(existing.intersection(row["run_id"] for row in rows))
-    if collisions:
-        raise _fail("output", f"run_id already exists: {collisions[0]!r}")
+    requested_output = Path(results_path).expanduser()
+    if requested_output.is_symlink():
+        raise _fail("output", f"symlink is not accepted: {requested_output}")
+    output = requested_output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    for row in rows:
-        append_row(str(output), row)
+    payload = "".join(
+        json.dumps({key: row.get(key) for key in ROW_FIELDS}) + "\n"
+        for row in rows
+    ).encode("utf-8")
+    flags = os.O_RDWR | os.O_CREAT | os.O_APPEND
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(output, flags, 0o666)
+    except OSError as exc:
+        raise _fail("output", f"cannot open {output}: {exc}") from exc
+    with os.fdopen(descriptor, "r+b", buffering=0) as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        handle.seek(0)
+        existing_bytes = handle.read()
+        existing = _run_ids_from_jsonl(existing_bytes)
+        collisions = sorted(existing.intersection(row["run_id"] for row in rows))
+        if collisions:
+            raise _fail("output", f"run_id already exists: {collisions[0]!r}")
+        original_size = len(existing_bytes)
+        try:
+            handle.seek(0, os.SEEK_END)
+            written = 0
+            while written < len(payload):
+                count = handle.write(payload[written:])
+                if not count:
+                    raise OSError("short write while appending Harbor result batch")
+                written += count
+            os.fsync(handle.fileno())
+        except OSError as exc:
+            os.ftruncate(handle.fileno(), original_size)
+            os.fsync(handle.fileno())
+            raise _fail("output", f"append failed and was rolled back: {exc}") from exc
+        except BaseException:
+            os.ftruncate(handle.fileno(), original_size)
+            os.fsync(handle.fileno())
+            raise
     return rows
 
 

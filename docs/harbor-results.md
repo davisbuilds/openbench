@@ -59,8 +59,9 @@ it does not claim that trials are temporal matched blocks.
 Before appending, the importer validates the entire job and scans every
 existing non-empty JSONL line. Corrupt JSONL, duplicate existing IDs, or a
 collision with an imported `run_id` rejects the operation without mutation.
-Accepted rows use the runner's ordered append helper, including flush and
-`fsync` after each row.
+Accepted rows use `ROW_FIELDS` order. The collision scan and full-batch append
+run under one exclusive file lock; the batch is flushed and `fsync`ed once, and
+the output is truncated back to its prior length if append fails.
 
 Multi-step and exception-bearing Harbor trials are rejected rather than
 partially interpreted. Supporting them requires a separate contract for
