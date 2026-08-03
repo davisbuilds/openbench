@@ -354,6 +354,14 @@ class GatewayProbeResultsTests(unittest.TestCase):
             variants["unsafe_retry_receipt"]["retry_evidence"]["attempts"][0][
                 "receipt_headers"
             ] = {"authorization": "secret"}
+            variants["measured_with_primer_evidence"] = copy.deepcopy(base)
+            variants["measured_with_primer_evidence"]["retry_evidence"][
+                "attempts"
+            ][0]["primer_evidence"] = {
+                "route_integrity": None,
+                "route": None,
+                "stream": None,
+            }
             variants["timing_schema"] = copy.deepcopy(base)
             variants["timing_schema"]["request_metrics"]["timing"]["ttfb_s"] = 1.0
             variants["timing_order"] = copy.deepcopy(base)
