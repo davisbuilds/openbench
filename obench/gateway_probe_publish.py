@@ -294,6 +294,11 @@ def _project_experiment(
                 "sampling": arm.sampling.to_dict(),
                 "direct_control_arm_id": arm.direct_control_arm_id,
                 "gateway": arm.gateway,
+                **(
+                    {"inference": arm.inference.to_dict()}
+                    if arm.inference is not None
+                    else {}
+                ),
             }
             for arm in experiment.arms
         ],
@@ -440,9 +445,13 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
     baselines = 0
     for arm in arms:
         sampling = arm.get("sampling") if isinstance(arm, dict) else None
+        expected_arm_fields = arm_fields | (
+            {"inference"} if isinstance(arm, dict) and "inference" in arm else set()
+        )
+        inference = arm.get("inference") if isinstance(arm, dict) else None
         if (
             not isinstance(arm, dict)
-            or set(arm) != arm_fields
+            or set(arm) != expected_arm_fields
             or not isinstance(arm.get("arm_id"), str)
             or not arm["arm_id"]
             or arm["arm_id"] in arm_ids
@@ -470,6 +479,16 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
                 for name in ("temperature", "top_p")
             )
             or not _is_integer(sampling.get("seed"))
+            or (
+                inference is not None
+                and (
+                    not isinstance(inference, dict)
+                    or set(inference) != {"thinking", "reasoning_effort"}
+                    or inference.get("thinking") != "enabled"
+                    or inference.get("reasoning_effort") not in {"low", "high", "max"}
+                    or arm.get("protocol") != "openai_chat"
+                )
+            )
             or (
                 arm.get("direct_control_arm_id") is not None
                 and (

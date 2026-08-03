@@ -224,6 +224,9 @@ def request_body(
         "temperature": plan.sampling.temperature,
         "top_p": plan.sampling.top_p,
     })
+    if plan.inference is not None:
+        payload["thinking"] = {"type": plan.inference.thinking}
+        payload["reasoning_effort"] = plan.inference.reasoning_effort
     gateway_profiles.strip_cache_controls(payload)
     if plan.route_kind == "gateway":
         if plan.gateway is None:

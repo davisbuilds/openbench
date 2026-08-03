@@ -134,6 +134,46 @@ class GatewayProbeSpecTests(unittest.TestCase):
                         )
                     )
 
+    def test_chat_inference_controls_are_sealed_and_comparable(self):
+        configured = manifest().replace(
+            "auth_env = \"OPENAI_API_KEY\"\n[arms.sampling]",
+            "auth_env = \"OPENAI_API_KEY\"\n"
+            "[arms.inference]\n"
+            "thinking = \"enabled\"\n"
+            "reasoning_effort = \"high\"\n"
+            "[arms.sampling]",
+        ).replace(
+            "auth_env = \"OPENROUTER_API_KEY\"\n[arms.sampling]",
+            "auth_env = \"OPENROUTER_API_KEY\"\n"
+            "[arms.inference]\n"
+            "thinking = \"enabled\"\n"
+            "reasoning_effort = \"high\"\n"
+            "[arms.sampling]",
+        ).replace("openai_responses", "openai_chat").replace(
+            "/responses", "/chat/completions"
+        )
+        experiment = gateway_probe_spec.parse_experiment_toml(configured)
+        self.assertEqual(
+            {arm.inference.reasoning_effort for arm in experiment.arms},
+            {"high"},
+        )
+        self.assertEqual(
+            experiment.arms[0].to_dict()["inference"],
+            {"thinking": "enabled", "reasoning_effort": "high"},
+        )
+
+        with self.assertRaisesRegex(
+            gateway_probe_spec.GatewayProbeSpecError,
+            "inference",
+        ):
+            gateway_probe_spec.parse_experiment_toml(
+                configured.replace(
+                    'reasoning_effort = "high"',
+                    'reasoning_effort = "low"',
+                    1,
+                )
+            )
+
     def test_rejects_agent_fields_and_route_policy_drift(self):
         with self.assertRaisesRegex(
             gateway_probe_spec.GatewayProbeSpecError, "unknown field: harness"

@@ -1,0 +1,144 @@
+schema_version = 1
+experiment_id = "deepseek-v4-flash-five-way-chat-probe"
+track = "request_probe"
+model_match = "rolling_alias"
+repetitions = 50
+schedule_seed = 20260803
+allow_private_endpoint = false
+
+[budget]
+timeout_s = 120
+max_output_tokens = 4096
+usd_cap = 5.00
+max_total_attempts = 3
+max_input_tokens = 512
+retry_deadline_s = 360
+
+[[cases]]
+case_id = "short-text"
+prompt = "Reply with one short sentence describing a blue circle."
+
+[[arms]]
+arm_id = "direct-deepseek"
+route_kind = "direct"
+endpoint = "https://api.deepseek.com/chat/completions"
+protocol = "openai_chat"
+baseline = true
+canonical_model = "deepseek/deepseek-v4-flash"
+requested_model = "deepseek-v4-flash"
+requested_provider = "deepseek"
+allowed_models = ["deepseek-v4-flash"]
+allowed_providers = ["deepseek"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "DEEPSEEK_API_KEY"
+[arms.inference]
+thinking = "enabled"
+reasoning_effort = "high"
+[arms.sampling]
+temperature = 1.0
+top_p = 0.95
+seed = 20260803
+
+[[arms]]
+arm_id = "openrouter-deepseek"
+route_kind = "gateway"
+gateway = "openrouter"
+direct_control_arm_id = "direct-deepseek"
+endpoint = "https://openrouter.ai/api/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "deepseek/deepseek-v4-flash"
+requested_model = "deepseek/deepseek-v4-flash-0731"
+requested_provider = "deepseek"
+allowed_models = ["deepseek/deepseek-v4-flash-0731"]
+allowed_providers = ["deepseek"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "OPENROUTER_API_KEY"
+[arms.inference]
+thinking = "enabled"
+reasoning_effort = "high"
+[arms.sampling]
+temperature = 1.0
+top_p = 0.95
+seed = 20260803
+
+[[arms]]
+arm_id = "vercel-deepseek"
+route_kind = "gateway"
+gateway = "vercel"
+direct_control_arm_id = "direct-deepseek"
+endpoint = "https://ai-gateway.vercel.sh/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "deepseek/deepseek-v4-flash"
+requested_model = "deepseek/deepseek-v4-flash-0731"
+requested_provider = "deepseek"
+allowed_models = ["deepseek/deepseek-v4-flash-0731"]
+allowed_providers = ["deepseek"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "VERCEL_API_KEY"
+[arms.inference]
+thinking = "enabled"
+reasoning_effort = "high"
+[arms.sampling]
+temperature = 1.0
+top_p = 0.95
+seed = 20260803
+
+[[arms]]
+arm_id = "concentrate-deepseek"
+route_kind = "gateway"
+gateway = "concentrate"
+direct_control_arm_id = "direct-deepseek"
+endpoint = "https://api.concentrate.ai/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "deepseek/deepseek-v4-flash"
+requested_model = "deepseek/deepseek-v4-flash"
+requested_provider = "deepseek"
+allowed_models = ["deepseek/deepseek-v4-flash"]
+allowed_providers = ["deepseek"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "CONCENTRATE_API_KEY"
+[arms.inference]
+thinking = "enabled"
+reasoning_effort = "high"
+[arms.sampling]
+temperature = 1.0
+top_p = 0.95
+seed = 20260803
+
+[[arms]]
+arm_id = "cloudflare-deepseek"
+route_kind = "gateway"
+gateway = "cloudflare"
+gateway_id = "openbench-router-bench"
+direct_control_arm_id = "direct-deepseek"
+# Replace this illustrative 32-hex Cloudflare account ID before running.
+endpoint = "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1/chat/completions"
+protocol = "openai_chat"
+baseline = false
+canonical_model = "deepseek/deepseek-v4-flash"
+requested_model = "deepseek/deepseek-v4-flash"
+requested_provider = "deepseek"
+allowed_models = ["deepseek/deepseek-v4-flash"]
+allowed_providers = ["deepseek"]
+fallback_enabled = false
+retry_count = 0
+cache_enabled = false
+auth_env = "CLOUDFLARE_API_TOKEN"
+[arms.inference]
+thinking = "enabled"
+reasoning_effort = "high"
+[arms.sampling]
+temperature = 1.0
+top_p = 0.95
+seed = 20260803

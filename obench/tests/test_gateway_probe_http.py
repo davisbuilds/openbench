@@ -799,6 +799,43 @@ class GatewayProbeHttpTests(unittest.TestCase):
         )
         self.assertTrue(all(body["top_p"] == 0.95 for body in bodies.values()))
 
+        deepseek_probe = gateway_probe_spec.load_experiment(
+            examples / "gateway-probe-deepseek-v4-flash-five-way-chat.toml"
+        )
+        deepseek_plans, _ = gateway_probe_spec.compile_route_plans(
+            deepseek_probe,
+            environ={
+                arm.auth_env: "secret"
+                for arm in deepseek_probe.arms
+            },
+            admitted_auth_envs={
+                arm.auth_env
+                for arm in deepseek_probe.arms
+            },
+        )
+        deepseek_bodies = {
+            plan.arm_id: json.loads(
+                gateway_probe_http.request_body(
+                    "probe", "nonce", plan, deepseek_probe.budget.max_output_tokens
+                )
+            )
+            for plan in deepseek_plans
+        }
+        self.assertEqual(deepseek_probe.repetitions, 50)
+        self.assertEqual(len(deepseek_probe.arms), 5)
+        self.assertTrue(
+            all(body["thinking"] == {"type": "enabled"}
+                for body in deepseek_bodies.values())
+        )
+        self.assertTrue(
+            all(body["reasoning_effort"] == "high"
+                for body in deepseek_bodies.values())
+        )
+        self.assertTrue(
+            all(body["max_completion_tokens"] == 4096
+                for body in deepseek_bodies.values())
+        )
+
         gateway_bench = gateway_spec.load_experiment(
             examples / "gateway-bench-kimi-k3-five-way-chat.toml"
         )
