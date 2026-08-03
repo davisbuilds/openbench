@@ -839,6 +839,14 @@ class GatewayProbeHttpTests(unittest.TestCase):
             "max_completion_tokens" not in body and "seed" not in body
             for body in deepseek_bodies.values()
         ))
+        self.assertEqual(
+            deepseek_bodies["openrouter-deepseek"]["model"],
+            "deepseek/deepseek-v4-flash-0731",
+        )
+        self.assertEqual(
+            deepseek_bodies["vercel-deepseek"]["model"],
+            "deepseek/deepseek-v4-flash",
+        )
 
         gateway_bench = gateway_spec.load_experiment(
             examples / "gateway-bench-kimi-k3-five-way-chat.toml"
