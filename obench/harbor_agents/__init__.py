@@ -15,4 +15,3 @@ def __getattr__(name):
     agent_class = load_agent_class()
     globals()[name] = agent_class
     return agent_class
-

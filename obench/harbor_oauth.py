@@ -263,4 +263,3 @@ def build_harbor_oauth_context(
 ) -> HarborOAuthCredential:
     """Build the single-trial OAuth context without importing Harbor."""
     return HarborOAuthCredential(master_path)
-
