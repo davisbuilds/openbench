@@ -3,10 +3,25 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
+from typing import Any
 
 from .harbor_oauth import HarborOAuthError
 from .harbor_run import HarborRunError, run_harbor_oauth
+
+
+class _ExitRecordingProcessRunner:
+    """Run subprocesses while retaining only the Harbor trial's exit code."""
+
+    def __init__(self) -> None:
+        self.harbor_returncode: int | None = None
+
+    def __call__(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        completed = subprocess.run(argv, **kwargs)
+        if not argv or argv[-1] != "--version":
+            self.harbor_returncode = int(completed.returncode)
+        return completed
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -65,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command != "oauth-run":
         return 2
 
+    process_runner = _ExitRecordingProcessRunner()
     try:
         result = run_harbor_oauth(
             task_dir=args.task,
@@ -73,8 +89,20 @@ def main(argv: list[str] | None = None) -> int:
             jobs_dir=args.jobs_dir,
             job_name=args.job_name,
             harbor_binary=args.harbor_binary,
+            run_process=process_runner,
         )
-    except (HarborRunError, HarborOAuthError) as exc:
+    except HarborOAuthError as exc:
+        if process_runner.harbor_returncode is not None:
+            returncode = process_runner.harbor_returncode
+            print(
+                f"ERROR: Harbor exited with code {returncode}, but OAuth "
+                f"credential finalization failed: {exc}",
+                file=sys.stderr,
+            )
+            return returncode if returncode != 0 else 2
+        print(f"ERROR: Harbor OAuth run could not start: {exc}", file=sys.stderr)
+        return 2
+    except (HarborRunError, OSError) as exc:
         print(f"ERROR: Harbor OAuth run could not start: {exc}", file=sys.stderr)
         return 2
 

@@ -21,9 +21,13 @@ is not available as `harbor` on `PATH`.
 
 On completion, the command reports Harbor's exit code and the expected
 `jobs_dir/job_name` output path. It returns Harbor's exit code unchanged,
-including nonzero codes. Argument, preflight, and OAuth preparation errors
-return `2` with a concise `ERROR:` message. The CLI never prints credential
-contents, the staged credential paths, or the constructed Harbor command.
+including nonzero codes. If credential finalization fails after Harbor exits,
+the command still reports the exact Harbor code and propagates it when nonzero;
+a Harbor `0` with failed credential finalization returns `2` so the overall
+operation cannot appear successful. Argument, preflight, and OAuth preparation
+errors also return `2` with a concise `ERROR:` message. The CLI never prints
+credential contents, the staged credential paths, or the constructed Harbor
+command.
 
 The same runner remains available as a stdlib API:
 

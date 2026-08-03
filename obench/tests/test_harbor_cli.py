@@ -92,7 +92,11 @@ class HarborCliTests(unittest.TestCase):
             jobs_dir="/tmp/jobs",
             job_name="oauth-smoke-001",
             harbor_binary="/opt/harbor",
+            run_process=mock.ANY,
         )
+        process_runner = run.call_args.kwargs["run_process"]
+        self.assertIsInstance(process_runner, harbor_cli._ExitRecordingProcessRunner)
+        self.assertIsNone(process_runner.harbor_returncode)
         self.assertEqual(
             stdout,
             "Harbor exited with code 0; "
@@ -153,6 +157,61 @@ class HarborCliTests(unittest.TestCase):
             "ERROR: Harbor OAuth run could not start: task contract rejected\n",
         )
         self.assertNotIn("Traceback", stderr)
+
+    def test_post_run_oauth_error_reports_and_preserves_nonzero_harbor_code(self):
+        argv = [
+            "oauth-run",
+            "--task=/tmp/exported-task",
+            "--model=openai/gpt-5",
+            "--master-auth-json=/secure/auth.json",
+            "--jobs-dir=/tmp/jobs",
+            "--job-name=missing-return",
+        ]
+
+        def fail_after_harbor(**kwargs):
+            kwargs["run_process"].harbor_returncode = 9
+            raise harbor_cli.HarborOAuthError("returned auth.json is missing")
+
+        with mock.patch.object(
+            harbor_cli,
+            "run_harbor_oauth",
+            side_effect=fail_after_harbor,
+        ):
+            code, stdout, stderr = self._invoke(argv)
+
+        self.assertEqual(code, 9)
+        self.assertEqual(stdout, "")
+        self.assertEqual(
+            stderr,
+            "ERROR: Harbor exited with code 9, but OAuth credential "
+            "finalization failed: returned auth.json is missing\n",
+        )
+
+    def test_post_run_oauth_error_after_zero_exit_cannot_report_success(self):
+        argv = [
+            "oauth-run",
+            "--task=/tmp/exported-task",
+            "--model=openai/gpt-5",
+            "--master-auth-json=/secure/auth.json",
+            "--jobs-dir=/tmp/jobs",
+            "--job-name=stale-auth",
+        ]
+
+        def fail_after_harbor(**kwargs):
+            kwargs["run_process"].harbor_returncode = 0
+            raise harbor_cli.HarborOAuthError("master auth.json changed")
+
+        with mock.patch.object(
+            harbor_cli,
+            "run_harbor_oauth",
+            side_effect=fail_after_harbor,
+        ):
+            code, stdout, stderr = self._invoke(argv)
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertIn("Harbor exited with code 0", stderr)
+        self.assertIn("credential finalization failed", stderr)
 
 
 if __name__ == "__main__":
