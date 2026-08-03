@@ -151,6 +151,27 @@ class TestAuthFileLease(unittest.TestCase):
                     with auth_persist.auth_file_lease(master, blocking=False):
                         self.fail("second lease unexpectedly acquired")
 
+    def test_stage_proof_is_path_specific_and_expires_with_lease(self):
+        with tempfile.TemporaryDirectory() as td:
+            master = os.path.join(td, "auth.json")
+            copy = os.path.join(td, "copy.json")
+            other = os.path.join(td, "other.json")
+            with open(master, "wb") as fh:
+                fh.write(b'{"refresh_token":"old"}')
+
+            with auth_persist.auth_file_lease(master) as lease:
+                proof = lease.stage(copy)
+                self.assertTrue(
+                    auth_persist.auth_lease_proves_path((proof,), copy)
+                )
+                self.assertFalse(
+                    auth_persist.auth_lease_proves_path((proof,), other)
+                )
+
+            self.assertFalse(
+                auth_persist.auth_lease_proves_path((proof,), copy)
+            )
+
     def test_cas_rejects_noncooperating_master_replacement(self):
         with tempfile.TemporaryDirectory() as td:
             master = os.path.join(td, "auth.json")

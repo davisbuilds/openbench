@@ -40,6 +40,33 @@ class StaleCredentialGenerationError(RuntimeError):
     """The auth master no longer matches the generation staged by this lease."""
 
 
+class _AuthLeaseProof:
+    """Opaque proof that an active lease staged one exact disposable path."""
+
+    __slots__ = ("_lease", "_staged_path")
+
+    def __init__(self, lease, staged_path):
+        self._lease = lease
+        self._staged_path = staged_path
+
+    def _covers(self, path):
+        staged_path = os.path.realpath(path)
+        return (
+            self._lease.original is not None
+            and self._lease._lock_context is not None
+            and self._staged_path == staged_path
+            and staged_path in self._lease._staged_paths
+        )
+
+
+def auth_lease_proves_path(proofs, path):
+    """Return whether an active lease proof covers exactly *path*."""
+    return any(
+        isinstance(proof, _AuthLeaseProof) and proof._covers(path)
+        for proof in (proofs or ())
+    )
+
+
 @contextlib.contextmanager
 def _lock(path, *, blocking=True):
     """Acquire the shared per-master credential lock."""
@@ -152,6 +179,7 @@ class AuthFileLease:
         self.original = None
         self.generation = None
         self._lock_context = None
+        self._staged_paths = set()
 
     def __enter__(self):
         if fcntl is None:
@@ -165,6 +193,7 @@ class AuthFileLease:
             self.__exit__(*sys.exc_info())
             raise
         self.generation = hashlib.sha256(self.original).hexdigest()
+        self._staged_paths.clear()
         return self
 
     def __exit__(self, exc_type, exc, traceback):
@@ -173,6 +202,7 @@ class AuthFileLease:
             self._lock_context = None
             lock_context.__exit__(exc_type, exc, traceback)
         self.original = None
+        self._staged_paths.clear()
         return False
 
     def stage(self, copy_path):
@@ -182,6 +212,9 @@ class AuthFileLease:
         parent = os.path.dirname(os.path.abspath(copy_path))
         os.makedirs(parent, exist_ok=True)
         _atomic_replace_bytes(copy_path, self.original)
+        staged_path = os.path.realpath(copy_path)
+        self._staged_paths.add(staged_path)
+        return _AuthLeaseProof(self, staged_path)
 
     def persist(self, copy_path):
         """CAS-persist a valid rotation from the disposable copy."""
