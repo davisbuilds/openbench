@@ -97,10 +97,10 @@ absolute HTTP(S) proxy URLs and never construct cell tokens themselves.
 
 `obench harbor job-run` creates a separate per-trial metering session inside
 the Codex and Pi agents. The strict Harbor importer requires a sealed,
-hash-chain-verified ledger whose call and token totals exactly reconcile with
-ATIF before either profile can be published. OpenCode remains runnable for
-execution/trajectory experiments, but it is not a publication-grade metered
-arm.
+hash-chain-verified ledger. Exact call and token reconciliation with ATIF earns
+the `proxy-verified` label. A structurally valid mismatch preserves both values
+but is excluded from usage rankings. OpenCode publishes its available ATIF
+usage as `Harbor-reported`; it cannot claim proxy verification.
 
 ## Pinned Harbor API evidence
 
@@ -125,7 +125,10 @@ Harbor Docker jobs on the benchmark host and imports their sealed evidence.
 
 - `obench.harbor_results` maps all three profile import identities back to
   stable `codex`, `pi`, and `opencode` harness names.
-- Codex and Pi result import requires exact sealed proxy evidence. Missing,
-  incomplete, or mismatched ledgers fail closed.
+- Codex and Pi result import requires sealed proxy evidence. Exact
+  reconciliation is proxy-verified; valid mismatches remain publishable but
+  usage-ranking-ineligible. Missing, incomplete, malformed, unsealed, or
+  tampered evidence fails closed.
 - OpenCode OAuth counting-proxy routing remains unsupported until its exact
-  subscription endpoint/base-URL behavior is source-proven and tested.
+  subscription endpoint/base-URL behavior is source-proven and tested; its ATIF
+  usage remains publishable as Harbor-reported.

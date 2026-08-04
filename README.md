@@ -390,7 +390,9 @@ otherwise the counting-proxy fresh total (`tokens_proxy_input_uncached +
 tokens_proxy_output`) when `token_basis_proxy` is `proxy_measured`. Cache-read
 is not mixed into that number. Proxy-derived figures are marked `*`; mixed-basis
 tables print a warning. HTML publish/report cards use the same rule and badge
-arms as `unmetered` / `self-reported` / `proxy-measured`.
+arms by their usage evidence, including `Harbor-reported`,
+`Harbor-reported + proxy-verified`, and visibly excluded Harbor/proxy
+mismatches.
 
 ### Transcripts are LOCAL-ONLY
 

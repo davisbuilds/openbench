@@ -339,6 +339,13 @@ class HarborMeteringSessionTests(unittest.TestCase):
             evidence["publication"]["blocking_reasons"],
             ["proxy_evidence_incomplete"],
         )
+        with self.assertRaisesRegex(
+            harbor_metering.HarborMeteringPublicationError,
+            "proxy_evidence_incomplete",
+        ):
+            harbor_metering.require_publication_eligible(
+                evidence, proxy_required=True
+            )
 
     def test_context_teardown_runs_on_exception(self):
         session = self._session("exception")

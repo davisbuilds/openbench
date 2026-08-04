@@ -107,7 +107,10 @@ The evidence status is:
 - `incomplete`: the seal/hash chain, any request usage, or any reported
   counter is missing or invalid.
 
-`mismatch` and `incomplete` are evidence, not soft warnings.
+`mismatch` is retained evidence, not a soft warning: both Harbor and proxy
+values remain on the normalized row, but the row is excluded from token, cost,
+and efficiency rankings. `incomplete` remains a hard integrity failure for a
+proxy-required profile.
 
 ## Import and publication hook
 
@@ -131,10 +134,12 @@ row = apply_to_imported_row(row, evidence, proxy_required=True)
 require_publication_eligible(evidence, proxy_required=True)
 ```
 
-When `proxy_required=True`, only `exact` is eligible. Unknown schemas, invalid
-statuses, `mismatch`, and `incomplete` fail closed. `obench publish` then
-requires the same exact reconciliation and rejects proxy totals that disagree
-with agent totals.
+When `proxy_required=True`, `exact` is publication- and ranking-eligible and is
+labeled `Harbor-reported + proxy-verified`. A structurally valid `mismatch` is
+publication-eligible but ranking-ineligible; publication preserves both values
+and displays a prominent warning. Unknown schemas, invalid statuses,
+`incomplete`, malformed records, broken seals, and ledger tampering fail closed.
+Non-proxy profiles publish available ATIF totals as `Harbor-reported`.
 
 ## Scope and limitations
 

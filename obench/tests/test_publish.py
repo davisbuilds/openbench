@@ -333,6 +333,10 @@ class PublishBundleTests(unittest.TestCase):
             ],
             "exact",
         )
+        with open(
+            os.path.join(self.out, "index.html"), encoding="utf-8"
+        ) as fh:
+            self.assertIn("Harbor-reported + proxy-verified", fh.read())
         self.assertTrue(
             all(
                 item["status"] == "PASS"
@@ -428,6 +432,10 @@ class PublishBundleTests(unittest.TestCase):
         self.assertEqual(
             evidence["usage"]["token_basis"], "harbor_agent_reported"
         )
+        with open(
+            os.path.join(self.out, "index.html"), encoding="utf-8"
+        ) as fh:
+            self.assertIn("Harbor-reported", fh.read())
 
     def test_harbor_publish_accepts_mismatch_and_preserves_both_lanes(self):
         harbor_results = os.path.join(self.tmp.name, "harbor-mismatch.jsonl")
@@ -492,6 +500,15 @@ class PublishBundleTests(unittest.TestCase):
         self.assertEqual(published_row["tokens_input_uncached"], 75)
         self.assertEqual(published_row["tokens_proxy_input_uncached"], 76)
         self.assertFalse(published_row["usage_ranking_eligible"])
+        with open(
+            os.path.join(
+                self.tmp.name, "bundle-mismatch", "index.html"
+            ),
+            encoding="utf-8",
+        ) as fh:
+            page = fh.read()
+        self.assertIn("Usage evidence warning", page)
+        self.assertIn("Harbor/proxy mismatch", page)
 
     def test_harbor_publish_rejects_partial_or_inconsistent_provenance(self):
         cases = []

@@ -42,8 +42,7 @@ different semantic name is rejected.
 Codex-profile and Pi-profile trials additionally require
 `agent/harbor-metering/`: one public evidence JSON plus one private durable
 ledger and seal. The importer recomputes the ledger chain, checks the trial and
-harness identity, and requires exact calls/input/cache/output reconciliation
-with ATIF.
+harness identity, and reconciles calls/input/cache/output with ATIF.
 
 Any missing, partial, random, duplicate, unresolved, or contradictory evidence
 rejects the whole job before the output file is opened for append.
@@ -56,8 +55,11 @@ it does not claim that trials are temporal matched blocks.
 
 - `exec_mode` is `harbor`.
 - Harbor's `agent_result` usage is labeled `harbor_agent_reported`.
-- Required metered profiles also receive `proxy_measured` fields. Missing,
-  incomplete, or mismatched metering rejects the job.
+- Required metered profiles also receive `proxy_measured` fields. Exact
+  reconciliation is labeled `Harbor-reported + proxy-verified`. A structurally
+  valid mismatch preserves both lanes and is excluded from usage rankings.
+  Missing, incomplete, malformed, unsealed, or tampered metering rejects the
+  job.
 - `success` is strictly `checker_exit == 0`, matching `obench.run`; a nonzero
   exit remains unsuccessful even when its parsed and clamped score is `1.0`.
 - `score` and `checker_exit` come from the exporter's
@@ -81,9 +83,11 @@ contract must be present and internally consistent. Partial Harbor provenance,
 unknown provenance keys, invalid digests, workspace-digest disagreement, proxy
 claims, semantic harness/config identity disagreement, or usage-total
 disagreement fail before a bundle is written.
-For metered profiles, publication additionally requires an exact
-publication-eligible reconciliation and exact equality between proxy and agent
-input/cache/output totals.
+For metered profiles, exact equality supports the `proxy-verified` label.
+Structurally valid mismatches remain publishable with both values and a visible
+warning, but cannot contribute to token, cost, or efficiency rankings.
+Correctness and latency remain independently publishable. Non-proxy profiles
+publish available ATIF usage as `Harbor-reported`.
 For every Harbor task, the imported scheme-2 execution digest must equal the
 digest recomputed from the local publication task tree. Missing local task
 trees, inconsistent imported digests, or any mismatch fail before the output

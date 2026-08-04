@@ -41,7 +41,7 @@ Readers open `index.html` and, if they have the same tasks checked out, run
 
 | Path | Role |
 |------|------|
-| `index.html` | Self-contained HTML comparison card (candidate row(s) highlighted; Wilson CIs; mean score / wall; tokens/solve; token-basis badges: `unmetered` / `self-reported` / `proxy-measured`) |
+| `index.html` | Self-contained HTML comparison card (candidate row(s) highlighted; Wilson CIs; mean score / wall; tokens/solve; evidence badges including `Harbor-reported`, `Harbor-reported + proxy-verified`, and visibly flagged Harbor/proxy mismatches) |
 | `results.jsonl` | Filtered rows for the claim — transcript fields stripped |
 | `provenance.json` | `obench` version, `digest_scheme`, per-arm identity digests (`candidate_provenance`), per-task content digests, models, trial counts, SHA-256 of `results.jsonl`, and a per-run `harbor_import_evidence` manifest when Harbor-imported rows are present |
 | `README.md` | How to re-verify and what verify does / does not prove |
@@ -74,6 +74,12 @@ Default output directory: `./openbench-publish/<timestamp>/` (override with
   contradictory, or extended Harbor provenance refuses publication before the
   output directory is created; `--allow-incomplete` and
   `--allow-pii-override` do not bypass this validation.
+- **Usage evidence is graded independently.** Non-proxy profiles publish ATIF
+  usage as `Harbor-reported`. Exact proxy reconciliation adds
+  `proxy-verified`. A structurally valid mismatch preserves both values and may
+  publish correctness and latency, but token, cost, and efficiency metrics are
+  excluded. Incomplete, malformed, unsealed, or tampered required evidence
+  still refuses publication.
 
 ## What `obench verify` proves
 
