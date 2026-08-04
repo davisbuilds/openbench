@@ -917,6 +917,7 @@ def _validate_harbor_row(row):
             row.get("model"),
             row.get("trial"),
             candidate_digest=agent_config_sha256,
+            full_candidate_digest=True,
         )
         if run_id != expected_run_id:
             raise PublishError(

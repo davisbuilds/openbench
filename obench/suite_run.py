@@ -603,14 +603,24 @@ def _require_usage_evidence(
         valid = (
             metering_valid
             and (
-                (status == "exact" and grade == GRADE_PROXY_VERIFIED)
-                or (status == "mismatch" and grade == GRADE_PROXY_MISMATCH)
+                (
+                    status == "exact"
+                    and grade == GRADE_PROXY_VERIFIED
+                    and row.get("usage_ranking_eligible") is True
+                )
+                or (
+                    status == "mismatch"
+                    and grade == GRADE_PROXY_MISMATCH
+                    and row.get("usage_ranking_eligible") is False
+                )
             )
         )
     else:
         valid = (
             row.get("token_basis") == "harbor_agent_reported"
+            and isinstance(row.get("usage_raw"), dict)
             and grade == GRADE_HARBOR_REPORTED
+            and row.get("usage_ranking_eligible") is True
         )
     if not valid:
         raise SuiteRunError(

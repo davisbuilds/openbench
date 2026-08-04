@@ -617,9 +617,19 @@ def validate_suite_rows(rows, *, for_publication=False):
     if not isinstance(evidence, dict):
         raise ValueError("suite manifest has invalid evidence policy")
     for row in suite_rows:
+        provenance = row["candidate_provenance"]
+        if evidence.get("harbor_lock") and any(
+            not _sha256_hex(provenance.get(key))
+            for key in (
+                "job_lock_sha256",
+                "job_result_sha256",
+                "trial_lock_sha256",
+                "trial_result_sha256",
+            )
+        ):
+            raise ValueError("suite row lacks required Harbor lock/result evidence")
         if row.get("completed") is not True:
             continue
-        provenance = row["candidate_provenance"]
         if evidence.get("trajectory") and not _sha256_hex(
             provenance.get("atif_sha256")
         ):
@@ -628,12 +638,6 @@ def validate_suite_rows(rows, *, for_publication=False):
             provenance.get("openbench_verifier_evidence_sha256")
         ):
             raise ValueError("suite row lacks required verifier evidence")
-        if evidence.get("usage") and row.get("usage_evidence_grade") not in {
-            usage_evidence.GRADE_HARBOR_REPORTED,
-            usage_evidence.GRADE_PROXY_VERIFIED,
-            usage_evidence.GRADE_PROXY_MISMATCH,
-        }:
-            raise ValueError("suite row lacks required usage evidence")
         if evidence.get("usage"):
             from .harbor_results import HARBOR_PROXY_REQUIRED_AGENTS
 
@@ -641,14 +645,33 @@ def validate_suite_rows(rows, *, for_publication=False):
                 "harbor_agent_config_name"
             ) in HARBOR_PROXY_REQUIRED_AGENTS
             metering = provenance.get("harbor_metering")
-            if proxy_required and (
-                not isinstance(metering, dict)
-                or metering.get("proxy_required") is not True
-                or metering.get("reconciliation_status")
-                not in {"exact", "mismatch"}
-            ):
+            grade = row.get("usage_evidence_grade")
+            if proxy_required:
+                status = (
+                    metering.get("reconciliation_status")
+                    if isinstance(metering, dict)
+                    and metering.get("proxy_required") is True
+                    else None
+                )
+                valid_usage = (
+                    status == "exact"
+                    and grade == usage_evidence.GRADE_PROXY_VERIFIED
+                    and row.get("usage_ranking_eligible") is True
+                ) or (
+                    status == "mismatch"
+                    and grade == usage_evidence.GRADE_PROXY_MISMATCH
+                    and row.get("usage_ranking_eligible") is False
+                )
+            else:
+                valid_usage = (
+                    row.get("token_basis") == "harbor_agent_reported"
+                    and isinstance(row.get("usage_raw"), dict)
+                    and grade == usage_evidence.GRADE_HARBOR_REPORTED
+                    and row.get("usage_ranking_eligible") is True
+                )
+            if not valid_usage:
                 raise ValueError(
-                    "suite row lacks required proxy usage reconciliation"
+                    "suite row lacks required usage evidence"
                 )
     if for_publication:
         if publication["scope"] != "public":

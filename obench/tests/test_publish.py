@@ -285,6 +285,7 @@ def _suite_harbor_row(row, *, scope):
         "model-x",
         1,
         candidate_digest=agent_digest,
+        full_candidate_digest=True,
     )
     return row
 
@@ -563,6 +564,7 @@ class PublishBundleTests(unittest.TestCase):
                 row["model"],
                 row["trial"],
                 candidate_digest=agent_digest,
+                full_candidate_digest=True,
             )
         exact_path = os.path.join(
             self.tmp.name,

@@ -33,6 +33,22 @@ class SuiteRunTests(unittest.TestCase):
         init.init_scaffold(root)
         return root
 
+    def test_repository_default_is_local_only_openbench_lite_suite(self):
+        root = Path(__file__).resolve().parents[2]
+
+        compiled = suite_run.compile_suite(start=root)
+
+        self.assertEqual(compiled.suite.id, "openbench-lite-local")
+        self.assertEqual(compiled.suite.publication.scope, "local_only")
+        self.assertEqual(
+            compiled.manifest["task_sets"][0]["path"],
+            "harbor-tasks/openbench-lite",
+        )
+        self.assertEqual(
+            [arm["id"] for arm in compiled.manifest["arms"]],
+            ["codex-sol", "pi-sol"],
+        )
+
     def _suite_path(self, root: Path) -> Path:
         return root / ".openbench" / "suites" / "default.toml"
 
@@ -207,6 +223,13 @@ model = "gpt-5.6-terra"
                         "exec_mode": "harbor",
                         "score": 1.0,
                         "token_basis": "harbor_agent_reported",
+                        "usage_raw": {
+                            "source": "harbor_agent_result",
+                            "n_input_tokens": 10,
+                            "n_cache_tokens": 0,
+                            "n_output_tokens": 5,
+                            "cost_usd": None,
+                        },
                         "usage_evidence_grade": (
                             "harbor_reported_proxy_verified"
                             if proxy_required
@@ -215,6 +238,10 @@ model = "gpt-5.6-terra"
                         "usage_ranking_eligible": True,
                         "candidate_provenance": {
                             "kind": "harbor_job",
+                            "job_lock_sha256": "c" * 64,
+                            "job_result_sha256": "d" * 64,
+                            "trial_lock_sha256": "e" * 64,
+                            "trial_result_sha256": "f" * 64,
                             "comparison_plan_schema_version": plan["schema_version"],
                             "comparison_plan_sha256": plan_sha256,
                             "comparison_plan": plan,
