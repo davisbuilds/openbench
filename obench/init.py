@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 import re
+import stat
 import sys
 
 from . import add_task
@@ -146,7 +148,9 @@ set -euo pipefail
 
 reward_dir="${VERIFIER_LOGS_DIR:-/logs/verifier}"
 mkdir -p "$reward_dir"
-if [ -f greeting.txt ] && [ "$(cat greeting.txt)" = "hello" ]; then
+if [ -f greeting.txt ] && python3 -c \
+  'from pathlib import Path; raise SystemExit(Path("greeting.txt").read_bytes() != b"hello\\n")'
+then
   printf '%s\n' '{"reward": 1.0}' >"$reward_dir/reward.json"
 else
   printf '%s\n' '{"reward": 0.0}' >"$reward_dir/reward.json"
@@ -164,6 +168,88 @@ def _openbench_root(start: str | None = None) -> str:
     return os.path.join(os.path.abspath(start or os.getcwd()), CONFIG_DIRNAME)
 
 
+def _scaffold_location(path: str) -> tuple[str, tuple[str, ...]]:
+    absolute = Path(os.path.abspath(path))
+    indices = [
+        index
+        for index, part in enumerate(absolute.parts)
+        if part == CONFIG_DIRNAME
+    ]
+    if not indices:
+        raise OSError(f"scaffold path is outside {CONFIG_DIRNAME}: {path}")
+    root_index = indices[-1]
+    root = Path(*absolute.parts[:root_index + 1])
+    return os.fspath(root), tuple(absolute.parts[root_index + 1:])
+
+
+def _directory_flags() -> int:
+    return (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+
+
+def _open_scaffold_directory(path: str, *, create: bool) -> int:
+    """Open a scaffold directory without following links below ``.openbench``."""
+
+    root, parts = _scaffold_location(path)
+    if os.path.lexists(root):
+        if os.path.islink(root):
+            raise OSError(f"refusing symlinked scaffold path: {root}")
+        if not os.path.isdir(root):
+            raise NotADirectoryError(f"scaffold root is not a directory: {root}")
+    elif create:
+        os.mkdir(root)
+    else:
+        raise FileNotFoundError(root)
+
+    try:
+        directory_fd = os.open(root, _directory_flags())
+    except OSError as exc:
+        raise OSError(
+            f"refusing symlinked or invalid scaffold path: {root}"
+        ) from exc
+
+    current = root
+    try:
+        for part in parts:
+            current = os.path.join(current, part)
+            try:
+                child_fd = os.open(
+                    part,
+                    _directory_flags(),
+                    dir_fd=directory_fd,
+                )
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(part, dir_fd=directory_fd)
+                except FileExistsError:
+                    pass
+                try:
+                    child_fd = os.open(
+                        part,
+                        _directory_flags(),
+                        dir_fd=directory_fd,
+                    )
+                except OSError as exc:
+                    raise OSError(
+                        f"refusing symlinked or invalid scaffold path: {current}"
+                    ) from exc
+            except OSError as exc:
+                raise OSError(
+                    f"refusing symlinked or invalid scaffold path: {current}"
+                ) from exc
+            os.close(directory_fd)
+            directory_fd = child_fd
+        return directory_fd
+    except BaseException:
+        os.close(directory_fd)
+        raise
+
+
 def _write_new(
     path: str,
     contents: str,
@@ -173,63 +259,122 @@ def _write_new(
 ) -> bool:
     """Create one file without changing an existing path."""
 
-    if os.path.exists(path):
-        notes.append(f"skip (exists): {path}")
-        return False
     parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(contents)
-    if executable:
-        os.chmod(path, 0o755)
+    parent_fd = _open_scaffold_directory(parent, create=True)
+    name = os.path.basename(path)
+    try:
+        try:
+            existing = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
+        if existing is not None:
+            if stat.S_ISLNK(existing.st_mode):
+                raise OSError(f"refusing symlinked scaffold path: {path}")
+            notes.append(f"skip (exists): {path}")
+            return False
+
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(
+            os, "O_NOFOLLOW", 0
+        )
+        try:
+            file_fd = os.open(name, flags, 0o666, dir_fd=parent_fd)
+        except FileExistsError:
+            existing = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if stat.S_ISLNK(existing.st_mode):
+                raise OSError(f"refusing symlinked scaffold path: {path}")
+            notes.append(f"skip (exists): {path}")
+            return False
+        with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
+            handle.write(contents)
+            handle.flush()
+            os.fsync(handle.fileno())
+            if executable:
+                os.fchmod(handle.fileno(), 0o755)
+    finally:
+        os.close(parent_fd)
     notes.append(f"created: {path}")
     return True
 
 
 def _ensure_dir(path: str, notes: list[str]) -> None:
-    if os.path.isdir(path):
-        notes.append(f"skip (exists): {path}/")
-        return
-    if os.path.exists(path):
-        notes.append(f"skip (exists, not a directory): {path}")
-        return
-    os.makedirs(path)
-    notes.append(f"created: {path}/")
+    existed = os.path.lexists(path)
+    directory_fd = _open_scaffold_directory(path, create=True)
+    os.close(directory_fd)
+    notes.append(
+        f"skip (exists): {path}/" if existed else f"created: {path}/"
+    )
 
 
 def _ensure_gitignore(path: str, notes: list[str]) -> None:
-    if not os.path.exists(path):
-        _write_new(path, GITIGNORE, notes)
-        return
-    if os.path.islink(path) or not os.path.isfile(path):
-        notes.append(f"skip (exists, not a regular file): {path}")
-        return
-    with open(path, "r+", encoding="utf-8") as handle:
-        contents = handle.read()
-        existing = set(contents.splitlines())
-        missing = [
-            entry for entry in ("jobs/", "results/", "trajectories/")
-            if entry not in existing
-        ]
-        if not missing:
-            notes.append(f"skip (exists): {path}")
+    parent_fd = _open_scaffold_directory(os.path.dirname(path), create=True)
+    name = os.path.basename(path)
+    try:
+        try:
+            existing = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
+        if existing is None:
+            os.close(parent_fd)
+            parent_fd = -1
+            _write_new(path, GITIGNORE, notes)
             return
-        if contents and not contents.endswith("\n"):
-            handle.write("\n")
-        handle.write(
-            "\n# Harbor/OpenBench private runtime artifacts.\n"
-            + "".join(f"{entry}\n" for entry in missing)
+        if stat.S_ISLNK(existing.st_mode):
+            raise OSError(f"refusing symlinked scaffold path: {path}")
+        if not stat.S_ISREG(existing.st_mode):
+            notes.append(f"skip (exists, not a regular file): {path}")
+            return
+
+        flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+        file_fd = os.open(name, flags, dir_fd=parent_fd)
+        with os.fdopen(file_fd, "r+", encoding="utf-8") as handle:
+            contents = handle.read()
+            existing_lines = set(contents.splitlines())
+            missing = [
+                entry for entry in ("jobs/", "results/", "trajectories/")
+                if entry not in existing_lines
+            ]
+            if not missing:
+                notes.append(f"skip (exists): {path}")
+                return
+            if contents and not contents.endswith("\n"):
+                handle.write("\n")
+            handle.write(
+                "\n# Harbor/OpenBench private runtime artifacts.\n"
+                + "".join(f"{entry}\n" for entry in missing)
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        notes.append(f"updated: {path} (added {', '.join(missing)})")
+    finally:
+        if parent_fd >= 0:
+            os.close(parent_fd)
+
+
+def _reject_existing_file_symlink(path: str) -> None:
+    try:
+        parent_fd = _open_scaffold_directory(
+            os.path.dirname(path),
+            create=False,
         )
-        handle.flush()
-        os.fsync(handle.fileno())
-    notes.append(f"updated: {path} (added {', '.join(missing)})")
+    except FileNotFoundError:
+        return
+    try:
+        try:
+            existing = os.stat(
+                os.path.basename(path),
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return
+        if stat.S_ISLNK(existing.st_mode):
+            raise OSError(f"refusing symlinked scaffold path: {path}")
+    finally:
+        os.close(parent_fd)
 
 
 def _requires_harbor_task_isolation(tasks_dir: str) -> bool:
-    if os.path.islink(tasks_dir) or (
-        os.path.exists(tasks_dir) and not os.path.isdir(tasks_dir)
-    ):
+    if os.path.exists(tasks_dir) and not os.path.isdir(tasks_dir):
         return True
     if not os.path.isdir(tasks_dir):
         return False
@@ -261,6 +406,8 @@ def _requires_harbor_task_isolation(tasks_dir: str) -> bool:
 
 def _select_harbor_tasks_dir(root: str, notes: list[str]) -> str:
     default = os.path.join(root, "tasks")
+    if os.path.islink(default):
+        raise OSError(f"refusing symlinked scaffold path: {default}")
     if not _requires_harbor_task_isolation(default):
         return default
     isolated = os.path.join(root, "harbor-tasks")
@@ -285,7 +432,30 @@ def scaffold_harbor_example_task(tasks_dir: str, notes: list[str]) -> None:
     """Create one small Harbor schema 1.4 coding task without running it."""
 
     example = os.path.join(tasks_dir, "example-greeting")
-    if os.path.exists(example):
+    if os.path.lexists(example):
+        directory_fd = _open_scaffold_directory(example, create=False)
+        os.close(directory_fd)
+        for directory in (
+            os.path.join(example, "environment"),
+            os.path.join(example, "environment", "app"),
+            os.path.join(example, "tests"),
+            os.path.join(example, "solution"),
+        ):
+            if os.path.lexists(directory):
+                directory_fd = _open_scaffold_directory(
+                    directory,
+                    create=False,
+                )
+                os.close(directory_fd)
+        for file_path in (
+            os.path.join(example, "instruction.md"),
+            os.path.join(example, "task.toml"),
+            os.path.join(example, "environment", "Dockerfile"),
+            os.path.join(example, "environment", "app", "README.md"),
+            os.path.join(example, "tests", "test.sh"),
+            os.path.join(example, "solution", "solve.sh"),
+        ):
+            _reject_existing_file_symlink(file_path)
         notes.append(f"skip (exists): {example}/")
         return
     _ensure_dir(example, notes)
@@ -372,8 +542,8 @@ def init_task(
         )
     root = _openbench_root(start)
     legacy_tasks_dir = os.path.join(root, "legacy-tasks")
-    os.makedirs(legacy_tasks_dir, exist_ok=True)
     init_scaffold(start)
+    _ensure_dir(legacy_tasks_dir, [])
     return add_task.scaffold(
         os.path.join(legacy_tasks_dir, name),
         from_dir=from_dir,

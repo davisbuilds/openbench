@@ -163,12 +163,78 @@ class InitTests(unittest.TestCase):
                 return json.load(handle)["reward"]
 
         self.assertEqual(verify(), 0.0)
+        greeting = workspace / "greeting.txt"
+        for near_miss in (b"hello", b"hello\n\n", b"hello\n\n\n"):
+            with self.subTest(near_miss=near_miss):
+                greeting.write_bytes(near_miss)
+                self.assertEqual(verify(), 0.0)
         subprocess.run(
             ["bash", str(task / "solution" / "solve.sh")],
             cwd=workspace,
             check=True,
         )
+        self.assertEqual(greeting.read_bytes(), b"hello\n")
         self.assertEqual(verify(), 1.0)
+
+    def test_init_rejects_symlinked_openbench_root_without_escape(self):
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        (self.tmp / ".openbench").symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaisesRegex(OSError, "symlink"):
+            init.init_scaffold()
+
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_init_rejects_symlinked_generated_directory_without_escape(self):
+        root = self.tmp / ".openbench"
+        outside = self.tmp / "outside"
+        root.mkdir()
+        outside.mkdir()
+        (root / "suites").symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaisesRegex(OSError, "symlink"):
+            init.init_scaffold()
+
+        self.assertFalse((outside / "default.toml").exists())
+
+    def test_init_rejects_symlinked_tasks_directory_without_escape(self):
+        root = self.tmp / ".openbench"
+        outside = self.tmp / "outside"
+        root.mkdir()
+        outside.mkdir()
+        (root / "tasks").symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaisesRegex(OSError, "symlink"):
+            init.init_scaffold()
+
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_init_rejects_symlinked_generated_file_without_escape(self):
+        root = self.tmp / ".openbench"
+        outside = self.tmp / "outside"
+        root.mkdir()
+        outside.mkdir()
+        (root / "openbench.toml").symlink_to(outside / "escaped.toml")
+
+        with self.assertRaisesRegex(OSError, "symlink"):
+            init.init_scaffold()
+
+        self.assertFalse((outside / "escaped.toml").exists())
+
+    def test_init_rejects_nested_symlink_in_existing_example(self):
+        init.init_scaffold()
+        root = self.tmp / ".openbench"
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        test_script = root / "tasks" / "example-greeting" / "tests" / "test.sh"
+        test_script.unlink()
+        test_script.symlink_to(outside / "escaped.sh")
+
+        with self.assertRaisesRegex(OSError, "symlink"):
+            init.init_scaffold()
+
+        self.assertFalse((outside / "escaped.sh").exists())
 
     def test_cli_prints_validation_command_and_no_run_command(self):
         output = io.StringIO()
