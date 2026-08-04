@@ -88,6 +88,9 @@ def _harbor_row(
             "cost_usd": 0.5,
         },
         "token_basis": "harbor_agent_reported",
+        "usage_evidence_grade": "harbor_reported",
+        "usage_ranking_eligible": True,
+        "usage_ranking_exclusion_reason": None,
         "candidate_provenance": {
             "kind": "harbor_job",
             "harbor_version": "0.20.0",
@@ -294,6 +297,7 @@ class PublishBundleTests(unittest.TestCase):
             proxy_capture_truncated=None,
         )
         row["candidate_provenance"]["proxy_measured"] = True
+        row["usage_evidence_grade"] = "harbor_reported_proxy_verified"
         row["candidate_provenance"]["harbor_metering"] = {
             "schema_version": "openbench.harbor-metering.v2",
             "reconciliation_status": "exact",
@@ -302,8 +306,11 @@ class PublishBundleTests(unittest.TestCase):
             "model_call_count": 1,
             "auxiliary_request_count": 1,
             "publication": {
+                "proxy_evidence_required": True,
                 "eligible": True,
                 "blocking_reasons": [],
+                "usage_ranking_eligible": True,
+                "usage_ranking_exclusion_reasons": [],
             },
             "proxy_required": True,
             "evidence_sha256": "2" * 64,
@@ -349,6 +356,7 @@ class PublishBundleTests(unittest.TestCase):
             proxy_capture_truncated=None,
         )
         row["candidate_provenance"]["proxy_measured"] = True
+        row["usage_evidence_grade"] = "harbor_reported_proxy_verified"
         row["candidate_provenance"]["harbor_metering"] = {
             "schema_version": "openbench.harbor-metering.v2",
             "reconciliation_status": "exact",
@@ -357,8 +365,11 @@ class PublishBundleTests(unittest.TestCase):
             "model_call_count": 1,
             "auxiliary_request_count": 1,
             "publication": {
+                "proxy_evidence_required": True,
                 "eligible": True,
                 "blocking_reasons": [],
+                "usage_ranking_eligible": True,
+                "usage_ranking_exclusion_reasons": [],
             },
             "proxy_required": True,
             "evidence_sha256": "2" * 64,
@@ -394,7 +405,7 @@ class PublishBundleTests(unittest.TestCase):
                 scrub_ctx=self.scrub_ctx,
             )
 
-    def test_harbor_publish_rejects_unmetered_opencode_profile(self):
+    def test_harbor_publish_accepts_harbor_reported_opencode_profile(self):
         harbor_results = os.path.join(
             self.tmp.name,
             "harbor-opencode-unmetered.jsonl",
@@ -407,16 +418,80 @@ class PublishBundleTests(unittest.TestCase):
         row["candidate_provenance"]["harbor_model_name"] = "openai/model-x"
         _write_jsonl(harbor_results, [row])
 
-        with self.assertRaisesRegex(
-            publish.PublishError,
-            "execution-only",
-        ):
-            publish.create_bundle(
-                harbor_results,
-                self.out,
-                tasks_dirs=[self.tasks],
-                scrub_ctx=self.scrub_ctx,
-            )
+        provenance = publish.create_bundle(
+            harbor_results,
+            self.out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+        evidence = provenance["harbor_import_evidence"][0]
+        self.assertEqual(
+            evidence["usage"]["token_basis"], "harbor_agent_reported"
+        )
+
+    def test_harbor_publish_accepts_mismatch_and_preserves_both_lanes(self):
+        harbor_results = os.path.join(self.tmp.name, "harbor-mismatch.jsonl")
+        row = self._harbor_row(
+            tokens_proxy_calls=1,
+            tokens_proxy_input_uncached=76,
+            tokens_proxy_cache_read=25,
+            tokens_proxy_cache_write=None,
+            tokens_proxy_output=40,
+            tokens_proxy_reasoning=None,
+            token_basis_proxy="proxy_measured",
+            proxy_capture_truncated=None,
+            usage_evidence_grade="harbor_reported_proxy_mismatch",
+            usage_ranking_eligible=False,
+            usage_ranking_exclusion_reason="proxy_mismatch",
+        )
+        row["candidate_provenance"]["proxy_measured"] = True
+        row["candidate_provenance"]["harbor_metering"] = {
+            "schema_version": "openbench.harbor-metering.v2",
+            "reconciliation_status": "mismatch",
+            "ledger_root_hash": "1" * 64,
+            "ledger_record_count": 1,
+            "model_call_count": 1,
+            "auxiliary_request_count": 0,
+            "publication": {
+                "proxy_evidence_required": True,
+                "eligible": True,
+                "blocking_reasons": [],
+                "usage_ranking_eligible": False,
+                "usage_ranking_exclusion_reasons": [
+                    "proxy_evidence_mismatch"
+                ],
+            },
+            "proxy_required": True,
+            "evidence_sha256": "2" * 64,
+            "ledger_sha256": "3" * 64,
+        }
+        _write_jsonl(harbor_results, [row])
+
+        provenance = publish.create_bundle(
+            harbor_results,
+            os.path.join(self.tmp.name, "bundle-mismatch"),
+            tasks_dirs=[self.tasks],
+            allow_incomplete=True,
+            scrub_ctx=self.scrub_ctx,
+        )
+
+        evidence = provenance["harbor_import_evidence"][0]
+        self.assertEqual(
+            evidence["candidate_provenance"]["harbor_metering"][
+                "reconciliation_status"
+            ],
+            "mismatch",
+        )
+        with open(
+            os.path.join(
+                self.tmp.name, "bundle-mismatch", "results.jsonl"
+            ),
+            encoding="utf-8",
+        ) as fh:
+            published_row = json.loads(fh.read())
+        self.assertEqual(published_row["tokens_input_uncached"], 75)
+        self.assertEqual(published_row["tokens_proxy_input_uncached"], 76)
+        self.assertFalse(published_row["usage_ranking_eligible"])
 
     def test_harbor_publish_rejects_partial_or_inconsistent_provenance(self):
         cases = []

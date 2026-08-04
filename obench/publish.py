@@ -35,10 +35,11 @@ from . import scrub
 from . import stats
 from .harbor_results import expected_harbor_agent_semantic_name
 from .harbor_profiles import (
-    OPENCODE_PROFILE_IMPORT,
     expected_harbor_model_name,
 )
+from .harbor_metering import publication_decision
 from .paths import default_results_path, default_tasks_dir, resolve_tasks_dir
+from .usage_evidence import harbor_usage_policy
 
 TRANSCRIPT_FIELD_KEYS = (
     "transcript_path",
@@ -127,6 +128,8 @@ HARBOR_PUBLISH_ROW_KEYS = (
     "tokens_proxy_cache_write", "tokens_proxy_output",
     "tokens_proxy_reasoning", "tokens_proxy_calls", "token_basis_proxy",
     "proxy_capture_truncated",
+    "usage_evidence_grade", "usage_ranking_eligible",
+    "usage_ranking_exclusion_reason",
 )
 HARBOR_PROXY_ROW_KEYS = (
     "tokens_proxy_input_uncached", "tokens_proxy_cache_read",
@@ -359,6 +362,8 @@ def _validate_harbor_usage(row, provenance):
         )
     nonempty_proxy = [key for key in HARBOR_PROXY_ROW_KEYS if row.get(key) is not None]
     metering = provenance["harbor_metering"]
+    reconciliation_status = None
+    proxy_required = False
     if provenance["proxy_measured"] is False:
         if metering is not None or nonempty_proxy:
             raise PublishError(
@@ -382,13 +387,17 @@ def _validate_harbor_usage(row, provenance):
             raise PublishError(
                 f"Harbor row {row.get('run_id', '?')!r}: malformed metering evidence"
             )
+        reconciliation_status = metering.get("reconciliation_status")
+        proxy_required = metering.get("proxy_required") is True
+        expected_publication = publication_decision(
+            {"reconciliation": {"status": reconciliation_status}},
+            proxy_required=proxy_required,
+        )
         if (
             metering["schema_version"] != "openbench.harbor-metering.v2"
-            or metering["reconciliation_status"] != "exact"
-            or metering["proxy_required"] is not True
-            or not isinstance(metering["publication"], dict)
-            or metering["publication"].get("eligible") is not True
-            or metering["publication"].get("blocking_reasons") != []
+            or reconciliation_status not in ("exact", "mismatch")
+            or not proxy_required
+            or metering["publication"] != expected_publication
         ):
             raise PublishError(
                 f"Harbor row {row.get('run_id', '?')!r}: proxy metering is "
@@ -454,6 +463,22 @@ def _validate_harbor_usage(row, provenance):
             f"Harbor row {row.get('run_id', '?')!r}: proxy_measured must be boolean"
         )
 
+    expected_policy = harbor_usage_policy(
+        basis,
+        proxy_required=proxy_required,
+        reconciliation_status=reconciliation_status,
+    )
+    actual_policy = (
+        row.get("usage_evidence_grade"),
+        row.get("usage_ranking_eligible"),
+        row.get("usage_ranking_exclusion_reason"),
+    )
+    if actual_policy != expected_policy:
+        raise PublishError(
+            f"Harbor row {row.get('run_id', '?')!r}: usage evidence policy "
+            "fields disagree"
+        )
+
     usage = row.get("usage_raw")
     usage_fields = (
         "tokens", "tokens_input_uncached", "tokens_cache_read",
@@ -516,7 +541,7 @@ def _validate_harbor_usage(row, provenance):
             f"Harbor row {row.get('run_id', '?')!r}: unsupported usage fields "
             "must be null"
         )
-    if provenance["proxy_measured"] is True:
+    if provenance["proxy_measured"] is True and reconciliation_status == "exact":
         expected_proxy = {
             "tokens_proxy_input_uncached": row.get("tokens_input_uncached"),
             "tokens_proxy_cache_read": row.get("tokens_cache_read"),
@@ -624,11 +649,6 @@ def _validate_harbor_row(row):
         raise PublishError(
             f"Harbor row {run_id!r}: canonical model does not match immutable "
             "Harbor model identity"
-        )
-    if provenance["harbor_agent_config_name"] == OPENCODE_PROFILE_IMPORT:
-        raise PublishError(
-            f"Harbor row {run_id!r}: the OpenCode OAuth profile is "
-            "execution-only until sealed proxy metering is supported"
         )
     if not _is_nonnegative_number(provenance["harbor_verifier_time_s"]):
         raise PublishError(f"Harbor row {run_id!r}: invalid harbor_verifier_time_s")
