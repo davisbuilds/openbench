@@ -105,6 +105,14 @@ HARBOR_PROVENANCE_KEYS = frozenset({
     "trial_mapping",
     "temporal_matched_block_claim",
 })
+HARBOR_SUITE_PROVENANCE_KEYS = frozenset({
+    "suite_manifest_schema_version",
+    "suite_manifest_sha256",
+    "suite_manifest",
+    "suite_task_set_id",
+    "suite_publication_scope",
+    "suite_completeness",
+})
 HARBOR_CORE_DIGEST_KEYS = frozenset({
     "job_lock_sha256",
     "job_result_sha256",
@@ -612,9 +620,12 @@ def _validate_harbor_row(row):
     if row.get("exec_mode") != "harbor":
         raise PublishError(f"Harbor row {run_id!r}: exec_mode must be 'harbor'")
     provenance_keys = set(provenance) if isinstance(provenance, dict) else set()
-    if provenance_keys != HARBOR_PROVENANCE_KEYS:
-        missing = sorted(HARBOR_PROVENANCE_KEYS - provenance_keys)
-        extra = sorted(provenance_keys - HARBOR_PROVENANCE_KEYS)
+    expected_provenance_keys = HARBOR_PROVENANCE_KEYS
+    if provenance_keys & HARBOR_SUITE_PROVENANCE_KEYS:
+        expected_provenance_keys |= HARBOR_SUITE_PROVENANCE_KEYS
+    if provenance_keys != expected_provenance_keys:
+        missing = sorted(expected_provenance_keys - provenance_keys)
+        extra = sorted(provenance_keys - expected_provenance_keys)
         raise PublishError(
             f"Harbor row {run_id!r}: malformed candidate_provenance "
             f"(missing={missing}, extra={extra})"
@@ -1640,6 +1651,10 @@ def create_bundle(results_path, out_dir, *, candidate_specs=None, tasks_dirs=Non
         raise PublishError(
             f"{results_path}: {invalid} invalid result row(s); refusing to publish"
         )
+    try:
+        stats.validate_suite_rows(rows, for_publication=True)
+    except ValueError as exc:
+        raise PublishError(str(exc)) from exc
 
     transcript_problems = rows_reference_transcripts(rows)
     if transcript_problems:
@@ -1837,6 +1852,25 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
         "status": "FAIL" if row_error or not rows else "PASS",
         "detail": row_error or f"{len(rows)} valid result row(s)",
     })
+    if rows:
+        try:
+            stats.validate_suite_rows(rows, for_publication=True)
+            suite_policy_error = None
+        except ValueError as exc:
+            suite_policy_error = str(exc)
+        if any(
+            isinstance(row.get("candidate_provenance"), dict)
+            and any(
+                key.startswith("suite_")
+                for key in row["candidate_provenance"]
+            )
+            for row in rows
+        ):
+            checks.append({
+                "name": "suite_publication_policy",
+                "status": "FAIL" if suite_policy_error else "PASS",
+                "detail": suite_policy_error or "public complete suite",
+            })
 
     try:
         expected_harbor_evidence = _harbor_import_evidence(rows)

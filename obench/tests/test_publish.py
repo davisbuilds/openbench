@@ -16,6 +16,7 @@ from unittest import mock
 from obench import publish
 from obench import scrub
 from obench.harbor_job import canonical_agent_config_sha256
+from obench.run import make_run_id
 
 # The e2e tests run `python -m obench.cli` from a temp cwd; the repo root must
 # be importable regardless of where the suite is invoked from.
@@ -152,6 +153,140 @@ def _write_jsonl(path, rows):
     with open(path, "w", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row) + "\n")
+
+
+def _suite_harbor_row(row, *, scope):
+    rendered_agent = {"model_name": "model-x", "name": "codex"}
+    agent_digest = canonical_agent_config_sha256(rendered_agent)
+    plan = {
+        "schema_version": "openbench-harbor-comparison-plan-v2",
+        "harbor_version": "0.20.0",
+        "harbor_git_commit_hash": "b" * 40,
+        "job_name": "suite-core-job",
+        "job_config_sha256": "d" * 64,
+        "attempts": 1,
+        "dataset": None,
+        "tasks": ["alpha"],
+        "arms": [{
+            "arm_id": "codex-arm",
+            "agent_config_name": "codex",
+            "harbor_model_name": "model-x",
+            "agent_config_sha256": agent_digest,
+            "canonical_harness": "codex",
+            "canonical_model": "model-x",
+        }],
+    }
+    plan_sha256 = hashlib.sha256(
+        publish.canonical_comparison_plan_bytes(plan)
+    ).hexdigest()
+    manifest = {
+        "schema_version": 1,
+        "suite": {"id": "public-suite", "title": "Public suite"},
+        "harbor": {"version": "0.20.0", "commit": "b" * 40},
+        "task_sets": [{
+            "id": "core",
+            "kind": "local",
+            "path": "harbor-tasks",
+            "content_sha256": "e" * 64,
+            "tasks": [{"directory": "alpha", "logical_name": "alpha"}],
+        }],
+        "arms": [{
+            "id": "codex-arm",
+            "harness": "codex",
+            "profile": {
+                "id": "codex",
+                "kind": "stock",
+                "harness": "codex",
+            },
+            "canonical_model": "model-x",
+            "agent_config_sha256": agent_digest,
+            "agent": {"execution_id": "codex-arm", **rendered_agent},
+        }],
+        "run": {
+            "attempts": 1,
+            "concurrency": 1,
+            "max_retries": 0,
+            "timeout_seconds": 60.0,
+            "scheduler": "harbor",
+        },
+        "evidence": {
+            "harbor_lock": True,
+            "verifier": True,
+            "trajectory": True,
+            "usage": True,
+        },
+        "publication": {"scope": scope, "completeness": "complete"},
+        "jobs": [{
+            "task_set_id": "core",
+            "arm_ids": ["codex-arm"],
+            "attempts": 1,
+            "concurrency": 1,
+            "max_retries": 0,
+            "timeout_seconds": 60.0,
+            "semantic_sha256": "",
+        }],
+    }
+    semantic_job = {
+        key: manifest["jobs"][0][key]
+        for key in (
+            "task_set_id",
+            "arm_ids",
+            "attempts",
+            "concurrency",
+            "max_retries",
+            "timeout_seconds",
+        )
+    }
+    manifest["jobs"][0]["semantic_sha256"] = hashlib.sha256(
+        (
+            json.dumps(
+                semantic_job,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            )
+            + "\n"
+        ).encode()
+    ).hexdigest()
+    manifest_bytes = (
+        json.dumps(
+            manifest,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        + "\n"
+    ).encode()
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    plan["job_name"] = f"public-suite-core-{manifest_sha256[:12]}"
+    plan_sha256 = hashlib.sha256(
+        publish.canonical_comparison_plan_bytes(plan)
+    ).hexdigest()
+    provenance = row["candidate_provenance"]
+    provenance.update({
+        "comparison_plan_schema_version": plan["schema_version"],
+        "comparison_plan_sha256": plan_sha256,
+        "comparison_plan": plan,
+        "comparison_arm_id": "codex-arm",
+        "agent_config_sha256": agent_digest,
+        "comparison_resolved_tasks": ["alpha"],
+        "comparison_block": {"task": "alpha", "index": 1},
+        "trial_mapping": "openbench_comparison_plan_v2",
+        "suite_manifest_schema_version": 1,
+        "suite_manifest_sha256": manifest_sha256,
+        "suite_manifest": manifest,
+        "suite_task_set_id": "core",
+        "suite_publication_scope": scope,
+        "suite_completeness": "complete",
+    })
+    row["run_id"] = make_run_id(
+        "codex",
+        "alpha",
+        "model-x",
+        1,
+        candidate_digest=agent_digest,
+    )
+    return row
 
 
 def _make_task(root, name):
@@ -293,6 +428,42 @@ class PublishBundleTests(unittest.TestCase):
             item for item in checks if item["name"] == "harbor_import_evidence"
         )
         self.assertEqual(harbor_check["status"], "PASS", harbor_check)
+
+    def test_suite_publication_rejects_local_only_and_accepts_public_complete(self):
+        local_results = os.path.join(self.tmp.name, "suite-local.jsonl")
+        _write_jsonl(
+            local_results,
+            [_suite_harbor_row(self._harbor_row(), scope="local_only")],
+        )
+        with self.assertRaisesRegex(
+            publish.PublishError, "local_only suite results cannot be published"
+        ):
+            publish.create_bundle(
+                local_results,
+                self.out,
+                tasks_dirs=[self.tasks],
+                scrub_ctx=self.scrub_ctx,
+            )
+
+        public_results = os.path.join(self.tmp.name, "suite-public.jsonl")
+        _write_jsonl(
+            public_results,
+            [_suite_harbor_row(self._harbor_row(), scope="public")],
+        )
+        provenance = publish.create_bundle(
+            public_results,
+            self.out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+        self.assertEqual(len(provenance["harbor_import_evidence"]), 1)
+        checks = publish.verify_bundle(self.out, tasks_dirs=[self.tasks])
+        suite_check = next(
+            item
+            for item in checks
+            if item["name"] == "suite_publication_policy"
+        )
+        self.assertEqual(suite_check["status"], "PASS", checks)
 
     def test_harbor_publish_validates_comparison_plan_identity(self):
         codex = self._harbor_row()

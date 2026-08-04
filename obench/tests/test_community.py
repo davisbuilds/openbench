@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -14,6 +15,7 @@ import unittest
 from obench import community
 from obench import publish
 from obench import report_page
+from obench.tests.test_publish import _harbor_row, _suite_harbor_row
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _SUBPROC_ENV = {
@@ -178,6 +180,59 @@ class DiscoverVerifySyncTests(unittest.TestCase):
             community.sync_community_to_site(
                 self.community, site, tasks_dirs=[self.tasks])
         self.assertFalse(os.path.exists(site))
+
+    def test_local_only_suite_is_rejected_by_community_and_site_ingestion(self):
+        bundle = os.path.join(self.community, "alice-local-suite")
+        os.makedirs(bundle)
+        row = _suite_harbor_row(_harbor_row(), scope="local_only")
+        results_path = os.path.join(bundle, "results.jsonl")
+        raw = (json.dumps(row) + "\n").encode()
+        with open(results_path, "wb") as fh:
+            fh.write(raw)
+        _write(
+            os.path.join(bundle, "provenance.json"),
+            json.dumps({
+                "results_sha256": hashlib.sha256(raw).hexdigest(),
+                "tasks": [],
+            }),
+        )
+        _write(os.path.join(bundle, "index.html"), "<!doctype html>\n")
+        _write(os.path.join(bundle, "README.md"), "# local\n")
+        _write(
+            os.path.join(bundle, "submission.toml"),
+            'submitter = "alice"\n'
+            'date = "2026-08-04"\n'
+            'claim = "must remain local"\n',
+        )
+
+        submission = community.load_submission(bundle)
+        checks, code = community.verify_submission(
+            submission, tasks_dirs=[self.tasks]
+        )
+        suite_check = next(
+            item
+            for item in checks
+            if item["name"] == "suite_publication_policy"
+        )
+        self.assertEqual(suite_check["status"], "FAIL")
+        self.assertNotEqual(code, 0)
+
+        site_dir = os.path.join(self.tmp.name, "site-local")
+        with self.assertRaises(community.CommunityError):
+            community.sync_community_to_site(
+                self.community, site_dir, tasks_dirs=[self.tasks]
+            )
+        self.assertFalse(os.path.exists(site_dir))
+
+        from obench import leaderboard
+
+        self.assertIsNone(
+            leaderboard.aggregate_bundle(
+                bundle,
+                kind="community",
+                tasks_dirs=[self.tasks],
+            )
+        )
 
     def test_site_index_includes_community_section(self):
         from obench import site
