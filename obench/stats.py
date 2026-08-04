@@ -573,6 +573,9 @@ def validate_suite_rows(rows, *, for_publication=False):
             raise ValueError("suite row plan does not match suite manifest job")
         plan_sha256 = provenance["comparison_plan_sha256"]
         task_set_plans[task_set_id].add(plan_sha256)
+        cell_key = comparison_cell_key(row)
+        if cell_key[:3] != (digest, task_set_id, plan_sha256):
+            raise ValueError("suite row has inconsistent matched-cell identity")
         block = provenance.get("comparison_block")
         coordinate = (
             task_set_id,
@@ -599,20 +602,45 @@ def validate_suite_rows(rows, *, for_publication=False):
     if any(len(digests) != 1 for digests in task_set_plans.values()):
         raise ValueError("each suite task set must bind exactly one comparison plan")
 
-    arm_count = len(manifest["arms"])
     attempts = manifest["run"]["attempts"]
+    arm_ids = {arm["id"] for arm in manifest["arms"]}
     for task_set_id, selected in rows_by_task_set.items():
-        tasks = {row["task"] for row in selected}
-        expected = len(tasks) * arm_count * attempts
-        if len(selected) != expected:
+        plan_sha256 = next(iter(task_set_plans[task_set_id]))
+        resolved_task_sets = {
+            tuple(row["candidate_provenance"].get("comparison_resolved_tasks", ()))
+            for row in selected
+        }
+        if (
+            len(resolved_task_sets) != 1
+            or not next(iter(resolved_task_sets))
+        ):
+            raise ValueError(
+                f"suite task set {task_set_id!r} has inconsistent resolved tasks"
+            )
+        resolved_tasks = next(iter(resolved_task_sets))
+        plan_tasks = selected[0]["candidate_provenance"]["comparison_plan"]["tasks"]
+        if plan_tasks is not None and tuple(plan_tasks) != resolved_tasks:
+            raise ValueError(
+                f"suite task set {task_set_id!r} plan does not bind resolved tasks"
+            )
+        expected_coordinates = {
+            (task_set_id, plan_sha256, arm_id, task, attempt)
+            for arm_id in arm_ids
+            for task in resolved_tasks
+            for attempt in range(1, attempts + 1)
+        }
+        actual_coordinates = {
+            coordinate
+            for coordinate in coordinates
+            if coordinate[0] == task_set_id
+        }
+        if actual_coordinates != expected_coordinates:
             raise ValueError(
                 f"suite task set {task_set_id!r} has an incomplete denominator"
             )
 
     publication = manifest["publication"]
     complete = publication["completeness"] == "complete"
-    if complete and any(row.get("completed") is not True for row in suite_rows):
-        raise ValueError("complete suite contains terminal failure cells")
     evidence = manifest.get("evidence")
     if not isinstance(evidence, dict):
         raise ValueError("suite manifest has invalid evidence policy")
@@ -628,7 +656,7 @@ def validate_suite_rows(rows, *, for_publication=False):
             )
         ):
             raise ValueError("suite row lacks required Harbor lock/result evidence")
-        if row.get("completed") is not True:
+        if row.get("completed") is not True and not (for_publication and complete):
             continue
         if evidence.get("trajectory") and not _sha256_hex(
             provenance.get("atif_sha256")

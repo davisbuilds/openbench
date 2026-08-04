@@ -394,6 +394,25 @@ class HarborJobTest(unittest.TestCase):
             artifact.as_dict()["datasets"][0]["task_names"], ["alpha", "zeta"]
         )
 
+    def test_local_comparison_tasks_can_bind_logical_names(self):
+        artifact = hj.build_job_config(
+            self._local_spec(
+                source=hj.LocalTaskSet(
+                    self.task_set,
+                    task_names=("zeta", "alpha"),
+                    comparison_task_names=("private/zeta", "private/alpha"),
+                )
+            )
+        )
+
+        self.assertEqual(
+            artifact.as_dict()["datasets"][0]["task_names"], ["alpha", "zeta"]
+        )
+        self.assertEqual(
+            artifact.comparison_plan.as_dict()["tasks"],
+            ["private/alpha", "private/zeta"],
+        )
+
     def test_local_source_rejects_one_task_partial_and_unknown_selection(self):
         with self.assertRaisesRegex(hj.HarborJobError, "points to one task"):
             hj.build_job_config(self._local_spec(source=hj.LocalTaskSet(
@@ -408,6 +427,13 @@ class HarborJobTest(unittest.TestCase):
         with self.assertRaisesRegex(hj.HarborJobError, "selected tasks"):
             hj.build_job_config(self._local_spec(source=hj.LocalTaskSet(
                 self.task_set, task_names=("missing",)
+            )))
+        with self.assertRaisesRegex(
+            hj.HarborJobError, "identify every selected local task"
+        ):
+            hj.build_job_config(self._local_spec(source=hj.LocalTaskSet(
+                self.task_set,
+                comparison_task_names=("private/alpha",),
             )))
 
     def test_dataset_requires_immutable_unambiguous_reference(self):

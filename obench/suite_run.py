@@ -273,6 +273,7 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
             source = LocalTaskSet(
                 item.task_set.path,
                 task_names=item.task_names,
+                comparison_task_names=item.logical_names,
             )
         else:
             assert item.task_set.name is not None
@@ -497,7 +498,6 @@ def _validate_suite_rows(
 
     planned = {job.task_set_id: job for job in jobs}
     coordinates: set[tuple[str, str, str, int]] = set()
-    counts: dict[str, int] = {}
     for row in rows:
         provenance = row["candidate_provenance"]
         task_set_id = provenance["suite_task_set_id"]
@@ -523,7 +523,6 @@ def _validate_suite_rows(
         if coordinate in coordinates:
             raise SuiteRunError(f"duplicate suite cell: {coordinate!r}")
         coordinates.add(coordinate)
-        counts[task_set_id] = counts.get(task_set_id, 0) + 1
 
         complete = row.get("completed") is True
         if compiled.suite.evidence.trajectory and complete:
@@ -537,34 +536,6 @@ def _validate_suite_rows(
         if compiled.suite.evidence.usage and complete:
             _require_usage_evidence(row, coordinate)
 
-    if set(counts) != set(planned):
-        missing = sorted(set(planned) - set(counts))
-        raise SuiteRunError(f"suite imports are missing task sets: {missing}")
-    for task_set_id, job in planned.items():
-        plan = job.artifact.comparison_plan
-        assert plan is not None
-        task_names = {
-            row["task"]
-            for row in rows
-            if row["candidate_provenance"]["suite_task_set_id"] == task_set_id
-        }
-        expected = (
-            len(task_names)
-            * len(plan.as_dict()["arms"])
-            * compiled.suite.run.attempts
-        )
-        if counts[task_set_id] != expected:
-            raise SuiteRunError(
-                f"task set {task_set_id!r} is incomplete: expected {expected} "
-                f"cells, imported {counts[task_set_id]}"
-            )
-    if (
-        compiled.suite.publication.completeness == "complete"
-        and any(row.get("completed") is not True for row in rows)
-    ):
-        raise SuiteRunError(
-            "suite declares completeness=complete but has terminal failure cells"
-        )
 
 
 def _require_digest(value: Any, label: str, coordinate: tuple[Any, ...]) -> None:

@@ -57,6 +57,7 @@ class LocalTaskSet:
 
     path: str | os.PathLike[str]
     task_names: tuple[str, ...] | None = None
+    comparison_task_names: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,7 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
         source,
         source_task_count,
         source_task_names,
+        comparison_task_names,
         dataset_descriptor,
     ) = _render_source(spec.source)
 
@@ -265,7 +267,7 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
         job_name=job_name,
         job_config_sha256=config_sha256,
         dataset=dataset_descriptor,
-        tasks=source_task_names,
+        tasks=comparison_task_names,
         arms=comparison_arms,
         attempts=spec.attempts,
     )
@@ -485,19 +487,37 @@ def _render_source(
     dict[str, list[dict[str, Any]]],
     int | None,
     tuple[str, ...] | None,
+    tuple[str, ...] | None,
     dict[str, Any] | None,
 ]:
     if isinstance(source, LocalTaskSet):
         dataset, task_names = _render_local_task_set(source)
+        comparison_task_names = (
+            task_names
+            if source.comparison_task_names is None
+            else tuple(
+                sorted(
+                    _validate_unique_strings(
+                        source.comparison_task_names,
+                        "comparison_task_names",
+                    )
+                )
+            )
+        )
+        if len(comparison_task_names) != len(task_names):
+            raise HarborJobError(
+                "comparison_task_names must identify every selected local task"
+            )
         return (
             {"datasets": [dataset], "tasks": []},
             len(task_names),
             task_names,
+            comparison_task_names,
             None,
         )
     if isinstance(source, Dataset):
         dataset = _render_dataset(source)
-        return {"datasets": [dataset], "tasks": []}, None, None, dataset
+        return {"datasets": [dataset], "tasks": []}, None, None, None, dataset
     raise HarborJobError("source must be exactly one LocalTaskSet or Dataset")
 
 

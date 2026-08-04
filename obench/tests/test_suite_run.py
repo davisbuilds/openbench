@@ -311,11 +311,20 @@ model = "gpt-5.6-terra"
         nested.mkdir(parents=True)
 
         compiled = suite_run.compile_suite(start=nested)
+        planned = suite_run.plan_jobs(compiled)[0].artifact
 
         self.assertEqual(compiled.suite.id, "private-default")
         self.assertEqual(compiled.registry.get("local-codex").harness, "codex")
         self.assertEqual(compiled.suite.publication.scope, "local_only")
         self.assertEqual(len(compiled.task_sets), 1)
+        self.assertEqual(
+            planned.as_dict()["datasets"][0]["task_names"],
+            ["example-greeting"],
+        )
+        self.assertEqual(
+            planned.comparison_plan.as_dict()["tasks"],
+            ["private/example-greeting"],
+        )
 
     def test_explicit_suite_overrides_discovered_default(self):
         root = self._project()
@@ -776,6 +785,53 @@ model = "gpt-5.6-terra"
                 mutate(rows[0])
                 with self.assertRaises(ValueError):
                     stats.validate_suite_rows(rows)
+
+    def test_complete_denominator_uses_resolved_tasks_not_observed_rows(self):
+        root = self._project()
+        source = root / ".openbench" / "tasks" / "example-greeting"
+        second = root / ".openbench" / "tasks" / "second"
+        shutil.copytree(source, second)
+        task_toml = second / "task.toml"
+        task_toml.write_text(
+            task_toml.read_text(encoding="utf-8").replace(
+                "private/example-greeting",
+                "private/second",
+            ),
+            encoding="utf-8",
+        )
+        compiled = suite_run.compile_suite(start=root)
+        result = self._run_simulated(compiled)
+        rows = stats.load_rows([result.results_path])
+
+        partial = [row for row in rows if row["task"] != "private/second"]
+        with self.assertRaisesRegex(ValueError, "incomplete denominator"):
+            stats.validate_suite_rows(partial)
+
+    def test_terminal_cell_remains_measured_in_local_complete_suite(self):
+        root = self._project()
+        compiled = suite_run.compile_suite(start=root)
+
+        def importer(job_path, *, comparison_plan_path):
+            rows = self._simulated_rows(Path(comparison_plan_path))
+            row = rows[0]
+            row.update({
+                "completed": False,
+                "success": False,
+                "score": 0.0,
+                "usage_raw": None,
+                "usage_evidence_grade": "usage_unavailable",
+                "usage_ranking_eligible": False,
+            })
+            provenance = row["candidate_provenance"]
+            provenance["atif_sha256"] = None
+            provenance["openbench_verifier_evidence_sha256"] = None
+            return rows
+
+        result = self._run_simulated(compiled, importer=importer)
+        rows = stats.load_rows([result.results_path])
+
+        self.assertFalse(rows[0]["completed"])
+        self.assertIsNotNone(stats.validate_suite_rows(rows))
 
     def test_custom_distribution_executes_after_exact_ownership_verification(self):
         root = self._project()
