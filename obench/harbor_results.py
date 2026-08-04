@@ -24,6 +24,7 @@ from .harbor_metering import (
 )
 from .harbor_job import (
     COMPARISON_PLAN_SCHEMA_VERSION,
+    canonical_agent_config_sha256,
     canonical_comparison_plan_bytes,
 )
 from .harbor_oauth import AGENT_IMPORT_PATH
@@ -61,6 +62,16 @@ HARBOR_AGENT_SEMANTIC_NAME_ALIASES = {
     CURSOR_PROFILE_IMPORT: "cursor",
     DEVIN_PROFILE_IMPORT: "devin",
 }
+HARBOR_STOCK_AGENT_CONFIG_NAMES = frozenset(
+    {
+        "codex",
+        "pi",
+        "opencode",
+        "cursor",
+        "devin",
+        *HARBOR_AGENT_SEMANTIC_NAME_ALIASES,
+    }
+)
 HARBOR_PROXY_REQUIRED_AGENTS = frozenset({
     CODEX_PROFILE_IMPORT,
     PI_PROFILE_IMPORT,
@@ -113,6 +124,23 @@ def _agent_config_identity(agent: dict[str, Any], location: str) -> str:
     if name is not None:
         raise _fail(f"{location}.name", "expected a non-empty string or null")
     return _string(import_path, f"{location}.import_path")
+
+
+def _agent_config_match_key(agent: dict[str, Any]) -> str:
+    """Normalize Harbor's omitted AgentConfig defaults for exact matching."""
+
+    normalized = _normalized_mapping(
+        agent,
+        _AGENT_DEFAULTS,
+        exclude={"skills"},
+    )
+    return json.dumps(
+        normalized,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
 
 
 def _require_regular_file(path: Path, location: str) -> None:
@@ -1428,6 +1456,8 @@ def _validate_trial(
     seen_ids: set[str],
     seen_names: set[str],
     expected_job_id: str,
+    *,
+    comparison_plan_requested: bool,
 ) -> dict[str, Any]:
     location = f"trial {trial_dir.name!r}"
     trial_lock_path = trial_dir / "lock.json"
@@ -1496,10 +1526,22 @@ def _validate_trial(
     agent_config_name = _agent_config_identity(
         agent_lock, f"{location}.lock.agent"
     )
+    if (
+        not comparison_plan_requested
+        and agent_config_name not in HARBOR_STOCK_AGENT_CONFIG_NAMES
+    ):
+        raise _fail(
+            f"{location}.lock.agent",
+            "custom Harbor agents require an exact OpenBench comparison plan",
+        )
     agent_info = _object(result.get("agent_info"), f"{location}.result.agent_info")
     agent_name = _string(agent_info.get("name"), f"{location}.result.agent_info.name")
-    expected_agent_name = expected_harbor_agent_semantic_name(agent_config_name)
-    if agent_name != expected_agent_name:
+    expected_agent_name = HARBOR_AGENT_SEMANTIC_NAME_ALIASES.get(
+        agent_config_name
+    )
+    if expected_agent_name is None and agent_config_name in HARBOR_STOCK_AGENT_CONFIG_NAMES:
+        expected_agent_name = agent_config_name
+    if expected_agent_name is not None and agent_name != expected_agent_name:
         raise _fail(
             f"{location}.result.agent_info.name",
             "does not match immutable trial-lock agent identity "
@@ -1526,10 +1568,15 @@ def _validate_trial(
             f"{location}.result.agent_info.model_info",
             "does not match trial lock model identity",
         )
-    try:
-        canonical_model = canonical_openbench_model(agent_config_name, model)
-    except HarborProfileError as exc:
-        raise _fail(f"{location}.lock.agent.model_name", str(exc)) from exc
+    if agent_config_name in HARBOR_STOCK_AGENT_CONFIG_NAMES:
+        try:
+            canonical_model = canonical_openbench_model(agent_config_name, model)
+        except HarborProfileError as exc:
+            raise _fail(f"{location}.lock.agent.model_name", str(exc)) from exc
+    else:
+        # Planned custom labels are applied only after the exact config, lock,
+        # and result chain is verified. ATIF remains bound to this raw lock model.
+        canonical_model = model
 
     started, finished, t_env, t_agent, harbor_verifier_time = _validate_timing(
         result, location
@@ -1662,6 +1709,7 @@ def _validate_trial(
         "openbench_harbor_export": openbench_harbor_export,
         "task_checksum": checksum,
         "agent_config_name": agent_config_name,
+        "agent_config_match_key": _agent_config_match_key(agent_lock),
         "agent_name": agent_name,
         "agent_version": agent_version,
         "model": canonical_model,
@@ -1718,7 +1766,12 @@ def _validate_comparison_plan(
     job_root: Path,
     job_lock: dict[str, Any],
     trials: list[dict[str, Any]],
-) -> tuple[str, dict[str, Any], dict[str, dict[str, Any]]]:
+) -> tuple[
+    str,
+    dict[str, Any],
+    tuple[str, ...],
+    dict[str, dict[str, Any]],
+]:
     plan_path = Path(path).expanduser()
     plan = _object(
         _read_json(plan_path, "comparison plan"),
@@ -1731,6 +1784,7 @@ def _validate_comparison_plan(
         "job_name",
         "job_config_sha256",
         "attempts",
+        "dataset",
         "tasks",
         "arms",
     }
@@ -1800,46 +1854,76 @@ def _validate_comparison_plan(
             "does not match comparison plan",
         )
 
-    raw_tasks = _array(plan.get("tasks"), "comparison plan.tasks")
-    tasks = tuple(
-        _string(task, f"comparison plan.tasks[{index}]")
-        for index, task in enumerate(raw_tasks)
-    )
-    if not tasks or tuple(sorted(set(tasks))) != tasks:
+    datasets = _array(job_config.get("datasets"), "job config.datasets")
+    if len(datasets) != 1:
+        raise _fail(
+            "job config.datasets",
+            "comparison plan requires exactly one dataset",
+        )
+    dataset = _object(datasets[0], "job config.datasets[0]")
+    if job_config.get("tasks") != []:
+        raise _fail(
+            "job config.tasks",
+            "comparison plan requires one dataset and no standalone tasks",
+        )
+
+    plan_dataset = plan.get("dataset")
+    raw_tasks = plan.get("tasks")
+    if plan_dataset is None:
+        if "path" not in dataset or "name" in dataset:
+            raise _fail(
+                "comparison plan.dataset",
+                "null is valid only for a local task set",
+            )
+        task_values = _array(raw_tasks, "comparison plan.tasks")
+        tasks = tuple(
+            _string(task, f"comparison plan.tasks[{index}]")
+            for index, task in enumerate(task_values)
+        )
+        if dataset.get("task_names") != list(tasks):
+            raise _fail(
+                "job config.datasets[0].task_names",
+                "does not match comparison plan",
+            )
+    else:
+        descriptor = _object(plan_dataset, "comparison plan.dataset")
+        if descriptor != dataset:
+            raise _fail(
+                "comparison plan.dataset",
+                "does not match the immutable Harbor dataset descriptor",
+            )
+        if raw_tasks is not None:
+            raise _fail(
+                "comparison plan.tasks",
+                "must be null when Harbor resolves an immutable dataset",
+            )
+        tasks = ()
+    if tasks and tuple(sorted(set(tasks))) != tasks:
         raise _fail(
             "comparison plan.tasks",
-            "must be a nonempty sorted unique list",
+            "must be a sorted unique list",
         )
     if any(_normalized_task_name(task) != task for task in tasks):
         raise _fail(
             "comparison plan.tasks",
             "must contain normalized OpenBench task names",
         )
-    datasets = _array(job_config.get("datasets"), "job config.datasets")
-    if len(datasets) != 1:
-        raise _fail(
-            "job config.datasets",
-            "comparison plan requires one local task set",
-        )
-    dataset = _object(datasets[0], "job config.datasets[0]")
-    if dataset.get("task_names") != list(tasks):
-        raise _fail(
-            "job config.datasets[0].task_names",
-            "does not match comparison plan",
-        )
-    if job_config.get("tasks") != []:
-        raise _fail(
-            "job config.tasks",
-            "comparison plan requires local dataset expansion",
-        )
 
     raw_arms = _array(plan.get("arms"), "comparison plan.arms")
-    arms_by_key: dict[tuple[str, str], str] = {}
+    arms_by_digest: dict[str, dict[str, str]] = {}
     arm_ids: set[str] = set()
     for index, raw_arm in enumerate(raw_arms):
         location = f"comparison plan.arms[{index}]"
         arm = _object(raw_arm, location)
-        if set(arm) != {"arm_id", "agent_config_name", "model_name"}:
+        expected_arm_fields = {
+            "arm_id",
+            "agent_config_name",
+            "harbor_model_name",
+            "agent_config_sha256",
+            "canonical_harness",
+            "canonical_model",
+        }
+        if set(arm) != expected_arm_fields:
             raise _fail(location, "unexpected or missing fields")
         arm_id = _string(arm.get("arm_id"), f"{location}.arm_id")
         if "\\" in arm_id or "\x00" in arm_id:
@@ -1848,50 +1932,127 @@ def _validate_comparison_plan(
             arm.get("agent_config_name"),
             f"{location}.agent_config_name",
         )
-        model_name = _string(
-            arm.get("model_name"),
-            f"{location}.model_name",
+        harbor_model_name = _string(
+            arm.get("harbor_model_name"),
+            f"{location}.harbor_model_name",
         )
-        key = (agent_config_name, model_name)
+        agent_config_sha256 = _string(
+            arm.get("agent_config_sha256"),
+            f"{location}.agent_config_sha256",
+        )
+        if re.fullmatch(r"[0-9a-f]{64}", agent_config_sha256) is None:
+            raise _fail(
+                f"{location}.agent_config_sha256",
+                "expected a lowercase SHA-256",
+            )
+        canonical_harness = _string(
+            arm.get("canonical_harness"),
+            f"{location}.canonical_harness",
+        )
+        canonical_model = _string(
+            arm.get("canonical_model"),
+            f"{location}.canonical_model",
+        )
         if arm_id in arm_ids:
             raise _fail(f"{location}.arm_id", "duplicate comparison arm")
-        if key in arms_by_key:
+        if agent_config_sha256 in arms_by_digest:
             raise _fail(
                 location,
-                "duplicate immutable agent/model identity",
+                "duplicate rendered agent config digest",
             )
         arm_ids.add(arm_id)
-        arms_by_key[key] = arm_id
-    if not arms_by_key:
+        arms_by_digest[agent_config_sha256] = {
+            "arm_id": arm_id,
+            "agent_config_name": agent_config_name,
+            "harbor_model_name": harbor_model_name,
+            "agent_config_sha256": agent_config_sha256,
+            "canonical_harness": canonical_harness,
+            "canonical_model": canonical_model,
+        }
+    if not arms_by_digest:
         raise _fail("comparison plan.arms", "must not be empty")
 
-    config_arm_keys = []
+    config_agents_by_digest: dict[str, dict[str, Any]] = {}
+    config_digest_by_match_key: dict[str, str] = {}
     for index, raw_agent in enumerate(
         _array(job_config.get("agents"), "job config.agents")
     ):
-        agent = _object(raw_agent, f"job config.agents[{index}]")
-        config_arm_keys.append(
-            (
-                _agent_config_identity(
-                    agent,
-                    f"job config.agents[{index}]",
-                ),
-                _string(
-                    agent.get("model_name"),
-                    f"job config.agents[{index}].model_name",
-                ),
+        location = f"job config.agents[{index}]"
+        agent = _object(raw_agent, location)
+        agent_config_sha256 = canonical_agent_config_sha256(agent)
+        match_key = _agent_config_match_key(agent)
+        if (
+            agent_config_sha256 in config_agents_by_digest
+            or match_key in config_digest_by_match_key
+        ):
+            raise _fail(
+                "job config.agents",
+                "contains duplicate rendered agent configs",
             )
-        )
-    if Counter(config_arm_keys) != Counter(arms_by_key.keys()):
+        config_agents_by_digest[agent_config_sha256] = agent
+        config_digest_by_match_key[match_key] = agent_config_sha256
+    if set(config_agents_by_digest) != set(arms_by_digest):
         raise _fail(
             "job config.agents",
-            "does not match comparison plan arms",
+            "rendered config digests do not match comparison plan arms",
         )
+    for agent_config_sha256, agent in config_agents_by_digest.items():
+        arm = arms_by_digest[agent_config_sha256]
+        location = f"comparison arm {arm['arm_id']!r}"
+        if (
+            _agent_config_identity(agent, location)
+            != arm["agent_config_name"]
+            or _string(agent.get("model_name"), f"{location}.model_name")
+            != arm["harbor_model_name"]
+        ):
+            raise _fail(
+                location,
+                "identity does not match the rendered Harbor agent config",
+            )
 
+    task_digests_by_name: dict[str, set[str]] = defaultdict(set)
+    for index, raw_lock in enumerate(
+        _array(job_lock.get("trials"), "job lock.trials")
+    ):
+        task = _object(
+            _object(raw_lock, f"job lock.trials[{index}]").get("task"),
+            f"job lock.trials[{index}].task",
+        )
+        task_name = _normalized_task_name(
+            _string(task.get("name"), f"job lock.trials[{index}].task.name")
+        )
+        task_digests_by_name[task_name].add(
+            _validate_digest(
+                task.get("digest"),
+                f"job lock.trials[{index}].task.digest",
+            )
+        )
+    conflicting_task_digests = {
+        task_name: digests
+        for task_name, digests in task_digests_by_name.items()
+        if len(digests) != 1
+    }
+    if conflicting_task_digests:
+        raise _fail(
+            "job lock.trials",
+            "comparison arms resolved different immutable digests for the same task",
+        )
+    task_digest_by_name = {
+        task_name: next(iter(digests))
+        for task_name, digests in task_digests_by_name.items()
+    }
+    resolved_tasks = tuple(sorted(task_digest_by_name))
+    if not resolved_tasks:
+        raise _fail("job lock.trials", "resolved task set must not be empty")
+    if tasks and resolved_tasks != tasks:
+        raise _fail(
+            "comparison plan.tasks",
+            "does not match the resolved Harbor lock task set",
+        )
     expected_cells = Counter(
-        (task, agent_config_name, model_name)
-        for task in tasks
-        for agent_config_name, model_name in arms_by_key
+        (task, task_digest_by_name[task], agent_config_sha256)
+        for task in resolved_tasks
+        for agent_config_sha256 in arms_by_digest
         for _attempt in range(attempts)
     )
     actual_cells: Counter[tuple[str, str, str]] = Counter()
@@ -1901,22 +2062,27 @@ def _validate_comparison_plan(
         lock = _object(raw_lock, f"job lock.trials[{index}]")
         task = _object(lock.get("task"), f"job lock.trials[{index}].task")
         agent = _object(lock.get("agent"), f"job lock.trials[{index}].agent")
+        match_key = _agent_config_match_key(agent)
+        agent_config_sha256 = config_digest_by_match_key.get(match_key)
+        if agent_config_sha256 is None:
+            raise _fail(
+                f"job lock.trials[{index}].agent",
+                "does not match any exact rendered agent config",
+            )
+        task_name = _normalized_task_name(
+            _string(
+                task.get("name"),
+                f"job lock.trials[{index}].task.name",
+            )
+        )
         actual_cells[
             (
-                _normalized_task_name(
-                    _string(
-                        task.get("name"),
-                        f"job lock.trials[{index}].task.name",
-                    )
+                task_name,
+                _validate_digest(
+                    task.get("digest"),
+                    f"job lock.trials[{index}].task.digest",
                 ),
-                _agent_config_identity(
-                    agent,
-                    f"job lock.trials[{index}].agent",
-                ),
-                _string(
-                    agent.get("model_name"),
-                    f"job lock.trials[{index}].agent.model_name",
-                ),
+                agent_config_sha256,
             )
         ] += 1
     if actual_cells != expected_cells:
@@ -1925,19 +2091,28 @@ def _validate_comparison_plan(
             "task/arm/attempt matrix does not match immutable Harbor job lock",
         )
 
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for item in trials:
-        grouped[
-            (
-                _normalized_task_name(item["task_name"]),
-                item["agent_config_name"],
-                item["harbor_model_name"],
+        agent_config_sha256 = config_digest_by_match_key.get(
+            item["agent_config_match_key"]
+        )
+        if agent_config_sha256 is None:
+            raise _fail(
+                f"trial {item['trial_name']!r}.lock.agent",
+                "does not match any exact rendered agent config",
             )
-        ].append(item)
+        task_name = _normalized_task_name(item["task_name"])
+        if item["task_digest"] != task_digest_by_name.get(task_name):
+            raise _fail(
+                f"trial {item['trial_name']!r}.lock.task.digest",
+                "does not match the immutable task digest in the Harbor job lock",
+            )
+        grouped[(task_name, agent_config_sha256)].append(item)
     coordinates: dict[str, dict[str, Any]] = {}
     for key, group_trials in grouped.items():
-        task, agent_config_name, model_name = key
-        arm_id = arms_by_key[(agent_config_name, model_name)]
+        task, agent_config_sha256 = key
+        arm = arms_by_digest[agent_config_sha256]
+        arm_id = arm["arm_id"]
         ordered = sorted(
             group_trials,
             key=lambda item: (item["trial_name"], item["trial_id"]),
@@ -1952,13 +2127,16 @@ def _validate_comparison_plan(
                 "arm_id": arm_id,
                 "task": task,
                 "index": block_index,
+                "agent_config_sha256": agent_config_sha256,
+                "canonical_harness": arm["canonical_harness"],
+                "canonical_model": arm["canonical_model"],
             }
     if len(coordinates) != len(trials):
         raise _fail(
             "comparison plan",
             "did not assign every completed Harbor trial",
         )
-    return _sha256_file(plan_path), plan, coordinates
+    return _sha256_file(plan_path), plan, resolved_tasks, coordinates
 
 
 def load_rows(
@@ -2000,6 +2178,7 @@ def load_rows(
             seen_ids,
             seen_names,
             expected_job_id,
+            comparison_plan_requested=comparison_plan_path is not None,
         )
         for path in trial_dirs
     ]
@@ -2007,11 +2186,13 @@ def load_rows(
         raise _fail("job directory", "not every job-lock trial has completed evidence")
     comparison_plan_sha256 = None
     comparison_plan = None
+    comparison_resolved_tasks: tuple[str, ...] | None = None
     comparison_coordinates: dict[str, dict[str, Any]] = {}
     if comparison_plan_path is not None:
         (
             comparison_plan_sha256,
             comparison_plan,
+            comparison_resolved_tasks,
             comparison_coordinates,
         ) = _validate_comparison_plan(
             comparison_plan_path,
@@ -2078,20 +2259,30 @@ def load_rows(
                 "trial timing falls outside job timing",
             )
 
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for item in trials:
-        key = (
-            _normalized_task_name(item["task_name"]),
-            item["agent_name"],
-            item["model"],
-        )
+        comparison_coordinate = comparison_coordinates.get(item["trial_id"])
+        if comparison_coordinate is None:
+            key = (
+                _normalized_task_name(item["task_name"]),
+                item["agent_name"],
+                item["model"],
+                "",
+            )
+        else:
+            key = (
+                comparison_coordinate["task"],
+                comparison_coordinate["canonical_harness"],
+                comparison_coordinate["canonical_model"],
+                comparison_coordinate["agent_config_sha256"],
+            )
         grouped[key].append(item)
 
     job_lock_digest = _sha256_file(job_lock_path)
     job_result_digest = _sha256_file(job_result_path)
     rows: list[dict[str, Any]] = []
     for group in sorted(grouped):
-        task, harness, model = group
+        task, harness, model, _variant_digest = group
         group_trials = sorted(
             grouped[group],
             key=lambda item: (item["trial_name"], item["trial_id"]),
@@ -2144,6 +2335,11 @@ def load_rows(
                 "harbor_task_checksum": item["task_checksum"],
                 "harbor_agent_config_name": item["agent_config_name"],
                 "harbor_model_name": item["harbor_model_name"],
+                "agent_config_sha256": (
+                    comparison_coordinate["agent_config_sha256"]
+                    if comparison_coordinate is not None
+                    else None
+                ),
                 "harbor_verifier_time_s": item["harbor_verifier_time_s"],
                 "harbor_job_retries": job_retry_count,
                 "harbor_job_max_retries": job_max_retries,
@@ -2168,6 +2364,11 @@ def load_rows(
                     if comparison_coordinate is not None
                     else None
                 ),
+                "comparison_resolved_tasks": (
+                    list(comparison_resolved_tasks)
+                    if comparison_coordinate is not None
+                    else None
+                ),
                 "comparison_block": (
                     {
                         "task": comparison_coordinate["task"],
@@ -2180,7 +2381,7 @@ def load_rows(
                 "proxy_measured": False,
                 "harbor_metering": None,
                 "trial_mapping": (
-                    "openbench_comparison_plan_v1"
+                    "openbench_comparison_plan_v2"
                     if comparison_coordinate is not None
                     else "lexicographic_name_within_task_agent_model"
                 ),
@@ -2189,7 +2390,18 @@ def load_rows(
             row = {field: None for field in ROW_FIELDS}
             row.update(
                 {
-                    "run_id": make_run_id(harness, task, model, trial_number),
+                    "run_id": make_run_id(
+                        harness,
+                        task,
+                        model,
+                        trial_number,
+                        candidate_digest=(
+                            comparison_coordinate["agent_config_sha256"]
+                            if comparison_coordinate is not None
+                            else None
+                        ),
+                        full_candidate_digest=comparison_coordinate is not None,
+                    ),
                     "ts_iso": item["started"].isoformat(),
                     "harness": harness,
                     "model": model,

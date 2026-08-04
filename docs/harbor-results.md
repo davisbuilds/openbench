@@ -37,12 +37,14 @@ Harbor's separate legacy task checksum, task/agent/model identity, phase timing,
 scalar reward in `[0, 1]`, OpenBench verifier evidence, ATIF identity and usage
 totals, job reward/exception/usage aggregates, artifact status, and duplicate
 identities.
-The result-reported `agent_info.name` and ATIF agent name must also resolve from
-the immutable trial-lock/config agent identity. Unlisted identities must match
-exactly. The pinned OpenBench profile imports are explicit aliases for `codex`,
-`pi`, `opencode`, `cursor`, and `devin`. Cursor, Devin, and OpenCode use
-Harbor-reported usage without proxy claims. Any other custom identity that
-reports a different semantic name is rejected.
+The result-reported `agent_info.name` and ATIF agent name must agree. Without a
+comparison plan, the immutable trial-lock/config agent identity must be one of
+the pinned stock identities; their imports are explicit aliases for `codex`,
+`pi`, `opencode`, `cursor`, and `devin`. With a plan, a custom agent is accepted
+only after its raw Harbor model and runtime identity agree across lock, result,
+and ATIF and its full normalized lock/result config matches one exact rendered
+config digest in the canonical plan. Only then are the plan's canonical
+OpenBench harness/model labels assigned to the row.
 
 Codex-profile and Pi-profile trials additionally require
 `agent/harbor-metering/`: one public evidence JSON plus one private durable
@@ -55,11 +57,15 @@ rejects the whole job before the output file is opened for append.
 ## Row semantics
 
 With `--comparison-plan`, the importer verifies the canonical sidecar digest,
-the persisted Harbor `config.json` digest, and the exact task x agent/model x
-attempt multiset in Harbor's immutable job lock. Within each task/arm, completed
-trial names and IDs are sorted and assigned sidecar block indexes. Every arm
-therefore receives the same stable `(task, block)` coordinates. Harbor remains
-the scheduler and `temporal_matched_block_claim` stays false.
+the persisted Harbor `config.json` digest, every full rendered agent-config
+digest against job/trial locks and result configs, and the exact task x arm x
+attempt multiset in Harbor's immutable job lock. Registry/package plans bind
+their immutable dataset descriptor before execution and record the sorted
+lock-resolved task set separately after execution. Within each task/arm,
+completed trial names and IDs are sorted and assigned sidecar block indexes.
+Every arm therefore receives the same stable `(task, block)` coordinates. This
+proves intended plus Harbor-locked denominator identity; Harbor remains the
+scheduler and `temporal_matched_block_claim` stays false.
 
 Without the sidecar, trials retain the legacy deterministic
 `(task, agent, model)` name/ID numbering for inspection, but Harbor matched

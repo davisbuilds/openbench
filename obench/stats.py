@@ -20,6 +20,7 @@ stdlib implementation.
 """
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -68,7 +69,10 @@ Z_95 = 1.96
 
 from .failure_class import class_for_report
 from .failure_class import EXCLUDED_FROM_SOLVE_RATE as _EXCLUDED_FROM_SOLVE_RATE
-from .harbor_job import COMPARISON_PLAN_SCHEMA_VERSION
+from .harbor_job import (
+    COMPARISON_PLAN_SCHEMA_VERSION,
+    canonical_comparison_plan_bytes,
+)
 from . import usage_evidence
 
 EXCLUDED_FAILURE_CLASSES = set(_EXCLUDED_FROM_SOLVE_RATE)
@@ -355,13 +359,24 @@ def is_valid_result_row(row):
 
 
 def group_key(row, fields):
-    return tuple(str(row.get(field) or "-") for field in fields)
+    key = tuple(str(row.get(field) or "-") for field in fields)
+    provenance = row.get("candidate_provenance")
+    if (
+        isinstance(provenance, dict)
+        and provenance.get("kind") == "harbor_job"
+        and provenance.get("comparison_arm_id")
+    ):
+        key += (str(provenance["comparison_arm_id"]),)
+    return key
 
 
 def group_label(key, fields):
+    suffix = f",arm={key[-1]}" if len(key) > len(fields) else ""
     if len(fields) == 1:
-        return key[0]
-    return ",".join(f"{field}={value}" for field, value in zip(fields, key))
+        return key[0] + suffix
+    return ",".join(
+        f"{field}={value}" for field, value in zip(fields, key)
+    ) + suffix
 
 
 def is_harbor_result_row(row):
@@ -373,6 +388,89 @@ def is_harbor_result_row(row):
             and provenance.get("kind") == "harbor_job"
         )
     )
+
+
+def _comparison_plan_arm(row):
+    provenance = row.get("candidate_provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError(
+            "Harbor matched comparison requires exact OpenBench "
+            "comparison-plan identity"
+        )
+    plan = provenance.get("comparison_plan")
+    expected_plan_fields = {
+        "schema_version",
+        "harbor_version",
+        "harbor_git_commit_hash",
+        "job_name",
+        "job_config_sha256",
+        "attempts",
+        "dataset",
+        "tasks",
+        "arms",
+    }
+    if not isinstance(plan, dict) or set(plan) != expected_plan_fields:
+        raise ValueError(
+            "Harbor matched comparison requires a canonical embedded plan"
+        )
+    try:
+        plan_bytes = canonical_comparison_plan_bytes(plan)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Harbor matched comparison requires a canonical embedded plan"
+        ) from None
+    plan_sha256 = hashlib.sha256(plan_bytes).hexdigest()
+    if (
+        plan.get("schema_version") != COMPARISON_PLAN_SCHEMA_VERSION
+        or provenance.get("comparison_plan_schema_version")
+        != COMPARISON_PLAN_SCHEMA_VERSION
+        or provenance.get("comparison_plan_sha256") != plan_sha256
+    ):
+        raise ValueError(
+            "Harbor matched comparison embedded plan digest does not match"
+        )
+    arms = plan.get("arms")
+    if not isinstance(arms, list) or not arms:
+        raise ValueError("Harbor matched comparison plan has invalid arms")
+    expected_arm_fields = {
+        "arm_id",
+        "agent_config_name",
+        "harbor_model_name",
+        "agent_config_sha256",
+        "canonical_harness",
+        "canonical_model",
+    }
+    arms_by_id = {}
+    digests = set()
+    for arm in arms:
+        if not isinstance(arm, dict) or set(arm) != expected_arm_fields:
+            raise ValueError("Harbor matched comparison plan has invalid arms")
+        arm_id = arm.get("arm_id")
+        digest = arm.get("agent_config_sha256")
+        if (
+            not isinstance(arm_id, str)
+            or not arm_id
+            or arm_id in arms_by_id
+            or not isinstance(digest, str)
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+            or digest in digests
+        ):
+            raise ValueError("Harbor matched comparison plan has invalid arms")
+        arms_by_id[arm_id] = arm
+        digests.add(digest)
+    arm = arms_by_id.get(provenance.get("comparison_arm_id"))
+    if (
+        arm is None
+        or arm["agent_config_sha256"]
+        != provenance.get("agent_config_sha256")
+        or arm["canonical_harness"] != row.get("harness")
+        or arm["canonical_model"] != row.get("model")
+    ):
+        raise ValueError(
+            "Harbor matched comparison row does not match its declared plan arm"
+        )
+    return arm
 
 
 def comparison_cell_key(row, *, require_harbor_identity=True):
@@ -391,6 +489,8 @@ def comparison_cell_key(row, *, require_harbor_identity=True):
     schema = provenance.get("comparison_plan_schema_version")
     plan_sha256 = provenance.get("comparison_plan_sha256")
     arm_id = provenance.get("comparison_arm_id")
+    agent_config_sha256 = provenance.get("agent_config_sha256")
+    resolved_tasks = provenance.get("comparison_resolved_tasks")
     block = provenance.get("comparison_block")
     exact = (
         schema == COMPARISON_PLAN_SCHEMA_VERSION
@@ -399,15 +499,22 @@ def comparison_cell_key(row, *, require_harbor_identity=True):
         and all(char in "0123456789abcdef" for char in plan_sha256)
         and isinstance(arm_id, str)
         and bool(arm_id)
+        and isinstance(agent_config_sha256, str)
+        and len(agent_config_sha256) == 64
+        and all(char in "0123456789abcdef" for char in agent_config_sha256)
+        and isinstance(resolved_tasks, list)
+        and bool(resolved_tasks)
+        and resolved_tasks == sorted(set(resolved_tasks))
         and isinstance(block, dict)
         and set(block) == {"task", "index"}
         and block.get("task") == row.get("task")
+        and block.get("task") in resolved_tasks
         and block.get("index") == row.get("trial")
         and isinstance(block.get("index"), int)
         and not isinstance(block.get("index"), bool)
         and block["index"] >= 1
         and provenance.get("trial_mapping")
-        == "openbench_comparison_plan_v1"
+        == "openbench_comparison_plan_v2"
         and provenance.get("temporal_matched_block_claim") is False
     )
     if not exact:
@@ -417,6 +524,7 @@ def comparison_cell_key(row, *, require_harbor_identity=True):
                 "comparison-plan identity"
             )
         return (row.get("task"), row.get("trial"))
+    _comparison_plan_arm(row)
     return (plan_sha256, block["task"], block["index"])
 
 
@@ -438,6 +546,29 @@ def validate_matched_comparison_rows(rows):
         raise ValueError(
             "Harbor matched comparison requires one exact comparison-plan "
             "digest across every arm"
+        )
+    resolved_task_sets = {
+        tuple(row["candidate_provenance"]["comparison_resolved_tasks"])
+        for row in harbor_rows
+    }
+    if len(resolved_task_sets) != 1:
+        raise ValueError(
+            "Harbor matched comparison requires one lock-resolved task set "
+            "across every arm"
+        )
+    arm_bindings = defaultdict(set)
+    for row in harbor_rows:
+        _comparison_plan_arm(row)
+        provenance = row["candidate_provenance"]
+        arm_bindings[provenance["comparison_arm_id"]].add((
+            provenance["agent_config_sha256"],
+            row.get("harness"),
+            row.get("model"),
+        ))
+    if any(len(bindings) != 1 for bindings in arm_bindings.values()):
+        raise ValueError(
+            "Harbor matched comparison arm changed rendered config or "
+            "canonical labels"
         )
     return "harbor_comparison_plan"
 

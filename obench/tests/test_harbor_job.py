@@ -55,7 +55,7 @@ class HarborJobTest(unittest.TestCase):
             jobs_dir="/tmp/openbench-harbor-jobs",
             source=hj.Dataset(
                 name="openbench/core-smoke",
-                ref="sha256:0123456789abcdef",
+                ref="sha256:" + "0" * 64,
                 task_names=("make-it-run", "fix-tests"),
             ),
             agent_profiles=(
@@ -106,7 +106,7 @@ class HarborJobTest(unittest.TestCase):
   "datasets": [
     {
       "name": "openbench/core-smoke",
-      "ref": "sha256:0123456789abcdef",
+      "ref": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       "task_names": [
         "make-it-run",
         "fix-tests"
@@ -140,6 +140,15 @@ class HarborJobTest(unittest.TestCase):
         )
         self.assertEqual(artifact.as_dict(), json.loads(expected))
         self.assertIsNone(artifact.trial_count)
+        self.assertEqual(
+            artifact.comparison_plan.as_dict()["dataset"],
+            {
+                "name": "openbench/core-smoke",
+                "ref": "sha256:" + "0" * 64,
+                "task_names": ["make-it-run", "fix-tests"],
+            },
+        )
+        self.assertIsNone(artifact.comparison_plan.as_dict()["tasks"])
 
     def test_local_task_set_expands_profiles_models_and_attempts(self):
         profiles = (
@@ -193,27 +202,48 @@ class HarborJobTest(unittest.TestCase):
                 "job_name": "openbench-smoke",
                 "job_config_sha256": artifact.sha256,
                 "attempts": 3,
+                "dataset": None,
                 "tasks": ["alpha", "zeta"],
                 "arms": [
                     {
                         "arm_id": "codex@provider/model-b",
                         "agent_config_name": "codex",
-                        "model_name": "provider/model-b",
+                        "harbor_model_name": "provider/model-b",
+                        "agent_config_sha256": (
+                            hj.canonical_agent_config_sha256(config["agents"][0])
+                        ),
+                        "canonical_harness": "codex",
+                        "canonical_model": "provider/model-b",
                     },
                     {
                         "arm_id": "codex@provider/model-a",
                         "agent_config_name": "codex",
-                        "model_name": "provider/model-a",
+                        "harbor_model_name": "provider/model-a",
+                        "agent_config_sha256": (
+                            hj.canonical_agent_config_sha256(config["agents"][1])
+                        ),
+                        "canonical_harness": "codex",
+                        "canonical_model": "provider/model-a",
                     },
                     {
                         "arm_id": "custom@provider/model-b",
                         "agent_config_name": "acme.agent:Agent",
-                        "model_name": "provider/model-b",
+                        "harbor_model_name": "provider/model-b",
+                        "agent_config_sha256": (
+                            hj.canonical_agent_config_sha256(config["agents"][2])
+                        ),
+                        "canonical_harness": "custom",
+                        "canonical_model": "provider/model-b",
                     },
                     {
                         "arm_id": "custom@provider/model-a",
                         "agent_config_name": "acme.agent:Agent",
-                        "model_name": "provider/model-a",
+                        "harbor_model_name": "provider/model-a",
+                        "agent_config_sha256": (
+                            hj.canonical_agent_config_sha256(config["agents"][3])
+                        ),
+                        "canonical_harness": "custom",
+                        "canonical_model": "provider/model-a",
                     },
                 ],
             },
@@ -268,6 +298,88 @@ class HarborJobTest(unittest.TestCase):
         )
         self.assertEqual(artifact.trial_count, 8)
 
+    def test_same_agent_and_model_variants_bind_full_config_and_labels(self):
+        profiles = (
+            hj.AgentProfile(
+                profile_id="strict",
+                arm_id="strict-arm",
+                canonical_harness="acme-strict",
+                canonical_model="model-x",
+                import_path="acme.agent:Agent",
+                model_name="provider/model-x",
+                kwargs={"mode": "strict"},
+            ),
+            hj.AgentProfile(
+                profile_id="fast",
+                arm_id="fast-arm",
+                canonical_harness="acme-fast",
+                canonical_model="model-x",
+                import_path="acme.agent:Agent",
+                model_name="provider/model-x",
+                kwargs={"mode": "fast"},
+            ),
+        )
+
+        artifact = hj.build_job_config(
+            self._local_spec(agent_profiles=profiles, models=(), attempts=1)
+        )
+        arms = artifact.comparison_plan.as_dict()["arms"]
+
+        self.assertEqual([arm["arm_id"] for arm in arms], ["strict-arm", "fast-arm"])
+        self.assertEqual(
+            [arm["canonical_harness"] for arm in arms],
+            ["acme-strict", "acme-fast"],
+        )
+        self.assertEqual(
+            len({arm["agent_config_sha256"] for arm in arms}),
+            2,
+        )
+        self.assertEqual(
+            [
+                arm["agent_config_sha256"]
+                for arm in arms
+            ],
+            [
+                hj.canonical_agent_config_sha256(agent)
+                for agent in artifact.as_dict()["agents"]
+            ],
+        )
+
+    def test_registry_and_package_dataset_plans_bind_exact_descriptors(self):
+        cases = (
+            (
+                hj.Dataset(
+                    name="terminal-bench",
+                    version="2.0",
+                    task_names=("task-b", "task-a"),
+                ),
+                {
+                    "name": "terminal-bench",
+                    "version": "2.0",
+                    "task_names": ["task-b", "task-a"],
+                },
+            ),
+            (
+                hj.Dataset(
+                    name="openbench/core",
+                    ref="sha256:" + "1" * 64,
+                    task_names=("task-a",),
+                ),
+                {
+                    "name": "openbench/core",
+                    "ref": "sha256:" + "1" * 64,
+                    "task_names": ["task-a"],
+                },
+            ),
+        )
+        for source, descriptor in cases:
+            with self.subTest(source=source):
+                artifact = hj.build_job_config(self._local_spec(source=source))
+                plan = artifact.comparison_plan.as_dict()
+                self.assertEqual(plan["dataset"], descriptor)
+                self.assertIsNone(plan["tasks"])
+                self.assertEqual(artifact.as_dict()["datasets"], [descriptor])
+
     def test_profile_without_model_and_no_shared_models_is_rejected(self):
         with self.assertRaisesRegex(hj.HarborJobError, "requires model_name"):
             hj.build_job_config(self._local_spec(models=()))
@@ -303,6 +415,7 @@ class HarborJobTest(unittest.TestCase):
             hj.Dataset(name="terminal-bench"),
             hj.Dataset(name="terminal-bench", ref="main"),
             hj.Dataset(name="org/tasks"),
+            hj.Dataset(name="org/tasks", ref="latest"),
             hj.Dataset(name="org/tasks", version="2", ref="sha256:abc"),
         )
         for source in cases:
@@ -415,7 +528,7 @@ class HarborJobTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(
             hj.HarborJobError,
-            "unique immutable agent/model identities",
+            "distinct rendered agent configs",
         ):
             hj.build_job_config(
                 self._local_spec(agent_profiles=profiles)

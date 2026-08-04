@@ -479,6 +479,9 @@ def run_harbor_profile_job(
             job_profiles.append(
                 AgentProfile(
                     profile_id=harness,
+                    arm_id=harness,
+                    canonical_harness=harness,
+                    canonical_model=model,
                     model_name=profile.harbor_model_name,
                     import_path=profile.agent_import_path,
                     n_concurrent=profile.auth.max_concurrent_uses,

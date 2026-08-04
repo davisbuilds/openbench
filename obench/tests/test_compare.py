@@ -2,6 +2,7 @@
 """Unit and CLI tests for the matched comparison scorecard."""
 
 import json
+import hashlib
 import os
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import unittest
 
 
 from obench import compare  # noqa: E402
+from obench.harbor_job import canonical_comparison_plan_bytes  # noqa: E402
 
 
 class CompareTestCase(unittest.TestCase):
@@ -58,9 +60,44 @@ class CompareTestCase(unittest.TestCase):
         success,
         *,
         arm_id,
-        plan_sha256="a" * 64,
+        plan_variant="",
         **extra,
     ):
+        plan = {
+            "schema_version": "openbench-harbor-comparison-plan-v2",
+            "harbor_version": "0.20.0",
+            "harbor_git_commit_hash": "0" * 40,
+            "job_name": "compare-fixture" + plan_variant,
+            "job_config_sha256": "f" * 64,
+            "attempts": 1,
+            "dataset": None,
+            "tasks": [task],
+            "arms": [
+                {
+                    "arm_id": candidate_arm,
+                    "agent_config_name": "custom",
+                    "harbor_model_name": "raw-model",
+                    "agent_config_sha256": digest,
+                    "canonical_harness": canonical_harness,
+                    "canonical_model": canonical_model,
+                }
+                for (
+                    candidate_arm,
+                    digest,
+                    canonical_harness,
+                    canonical_model,
+                ) in (
+                    ("codex", "1" * 64, "codex", "m"),
+                    ("pi", "2" * 64, "pi", "m"),
+                    ("strict", "3" * 64, "acme", "model-x"),
+                    ("fast", "4" * 64, "acme", "model-x"),
+                )
+            ],
+        }
+        plan_sha256 = hashlib.sha256(
+            canonical_comparison_plan_bytes(plan)
+        ).hexdigest()
+        arm = next(item for item in plan["arms"] if item["arm_id"] == arm_id)
         return cls.row(
             harness,
             task,
@@ -70,15 +107,18 @@ class CompareTestCase(unittest.TestCase):
             candidate_provenance={
                 "kind": "harbor_job",
                 "comparison_plan_schema_version": (
-                    "openbench-harbor-comparison-plan-v1"
+                    "openbench-harbor-comparison-plan-v2"
                 ),
                 "comparison_plan_sha256": plan_sha256,
+                "comparison_plan": plan,
                 "comparison_arm_id": arm_id,
+                "agent_config_sha256": arm["agent_config_sha256"],
+                "comparison_resolved_tasks": [task],
                 "comparison_block": {
                     "task": task,
                     "index": trial,
                 },
-                "trial_mapping": "openbench_comparison_plan_v1",
+                "trial_mapping": "openbench_comparison_plan_v2",
                 "temporal_matched_block_claim": False,
             },
             **extra,
@@ -120,6 +160,30 @@ class TestMatchedComparison(CompareTestCase):
             compare.render_text(result),
         )
         self.assertNotIn("temporal", compare.render_text(result).lower())
+
+    def test_same_labels_remain_distinct_config_bound_arms(self):
+        strict = self.harbor_row(
+            "acme",
+            "t",
+            1,
+            True,
+            arm_id="strict",
+            model="model-x",
+        )
+        fast = self.harbor_row(
+            "acme",
+            "t",
+            1,
+            False,
+            arm_id="fast",
+            model="model-x",
+        )
+        path = self.write("variants.jsonl", [strict, fast])
+
+        result = compare.build_comparison([path], tasks_dirs=[self.tasks])
+
+        self.assertEqual(result["arms"], ["fast", "strict"])
+        self.assertEqual(result["matched_n"], 1)
 
     def test_harbor_matched_claims_reject_missing_mixed_or_cross_plan_identity(self):
         missing = self.write(
@@ -183,7 +247,7 @@ class TestMatchedComparison(CompareTestCase):
                     1,
                     True,
                     arm_id="pi",
-                    plan_sha256="b" * 64,
+                    plan_variant="-other",
                 )
             ],
         )

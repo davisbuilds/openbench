@@ -219,9 +219,24 @@ def version_drift_refusal(host_drift, image_drift=None,
     return "\n".join(lines)
 
 
-def make_run_id(harness, task, model, trial, candidate_digest=None):
+def make_run_id(
+    harness,
+    task,
+    model,
+    trial,
+    candidate_digest=None,
+    *,
+    full_candidate_digest=False,
+):
     """Deterministic identity for a cell, including declarative candidate content."""
-    group = f"{harness}@{candidate_digest[:12]}" if candidate_digest else harness
+    digest = (
+        candidate_digest
+        if full_candidate_digest
+        else candidate_digest[:12]
+        if candidate_digest
+        else None
+    )
+    group = f"{harness}@{digest}" if digest else harness
     return f"{group}:{task}:{model}:trial{trial}"
 
 

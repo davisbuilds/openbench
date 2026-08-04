@@ -46,6 +46,7 @@ from .harbor_job import (
     canonical_comparison_plan_bytes,
 )
 from .paths import default_results_path, default_tasks_dir, resolve_tasks_dir
+from .run import make_run_id
 from .usage_evidence import harbor_usage_policy
 
 TRANSCRIPT_FIELD_KEYS = (
@@ -87,6 +88,7 @@ HARBOR_PROVENANCE_KEYS = frozenset({
     "harbor_task_checksum",
     "harbor_agent_config_name",
     "harbor_model_name",
+    "agent_config_sha256",
     "harbor_verifier_time_s",
     "harbor_job_retries",
     "harbor_job_max_retries",
@@ -95,6 +97,7 @@ HARBOR_PROVENANCE_KEYS = frozenset({
     "comparison_plan_sha256",
     "comparison_plan",
     "comparison_arm_id",
+    "comparison_resolved_tasks",
     "comparison_block",
     "usage_source",
     "proxy_measured",
@@ -362,6 +365,38 @@ def _is_nonnegative_number(value):
         and not isinstance(value, bool)
         and math.isfinite(value)
         and value >= 0
+    )
+
+
+def _valid_comparison_dataset_descriptor(value):
+    if not isinstance(value, dict):
+        return False
+    name = value.get("name")
+    if not isinstance(name, str) or not name:
+        return False
+    identity_field = "ref" if "/" in name else "version"
+    expected_fields = {"name", identity_field}
+    if "task_names" in value:
+        expected_fields.add("task_names")
+    if set(value) != expected_fields:
+        return False
+    identity = value.get(identity_field)
+    if identity_field == "ref":
+        if (
+            not isinstance(identity, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", identity) is None
+        ):
+            return False
+    elif not isinstance(identity, str) or not identity:
+        return False
+    task_names = value.get("task_names")
+    if "task_names" not in value:
+        return True
+    return (
+        isinstance(task_names, list)
+        and bool(task_names)
+        and all(isinstance(task, str) and bool(task) for task in task_names)
+        and len(task_names) == len(set(task_names))
     )
 
 
@@ -668,14 +703,6 @@ def _validate_harbor_row(row):
             or value.startswith("~")
         ):
             raise PublishError(f"Harbor row {run_id!r}: invalid {key}")
-    expected_agent_name = expected_harbor_agent_semantic_name(
-        provenance["harbor_agent_config_name"]
-    )
-    if row.get("harness") != expected_agent_name:
-        raise PublishError(
-            f"Harbor row {run_id!r}: harness does not match immutable "
-            "Harbor agent config identity"
-        )
     harbor_model_name = provenance["harbor_model_name"]
     if (
         not isinstance(harbor_model_name, str)
@@ -684,14 +711,6 @@ def _validate_harbor_row(row):
         or harbor_model_name.startswith("~")
     ):
         raise PublishError(f"Harbor row {run_id!r}: invalid harbor_model_name")
-    if harbor_model_name != expected_harbor_model_name(
-        provenance["harbor_agent_config_name"],
-        row.get("model"),
-    ):
-        raise PublishError(
-            f"Harbor row {run_id!r}: canonical model does not match immutable "
-            "Harbor model identity"
-        )
     if (
         provenance["harbor_verifier_time_s"] is not None
         and not _is_nonnegative_number(provenance["harbor_verifier_time_s"])
@@ -704,6 +723,8 @@ def _validate_harbor_row(row):
         provenance["comparison_plan_sha256"],
         provenance["comparison_plan"],
         provenance["comparison_arm_id"],
+        provenance["agent_config_sha256"],
+        provenance["comparison_resolved_tasks"],
         provenance["comparison_block"],
     )
     has_comparison_plan = any(value is not None for value in comparison_values)
@@ -738,6 +759,7 @@ def _validate_harbor_row(row):
             "job_name",
             "job_config_sha256",
             "attempts",
+            "dataset",
             "tasks",
             "arms",
         }
@@ -770,6 +792,7 @@ def _validate_harbor_row(row):
         job_name = comparison_plan.get("job_name")
         config_sha256 = comparison_plan.get("job_config_sha256")
         attempts = comparison_plan.get("attempts")
+        dataset = comparison_plan.get("dataset")
         tasks = comparison_plan.get("tasks")
         arms = comparison_plan.get("arms")
         if (
@@ -782,10 +805,23 @@ def _validate_harbor_row(row):
             or not isinstance(attempts, int)
             or isinstance(attempts, bool)
             or attempts < 1
-            or not isinstance(tasks, list)
-            or not tasks
-            or tasks != sorted(set(tasks))
-            or any(not isinstance(task, str) or not task for task in tasks)
+            or (
+                tasks is not None
+                and (
+                    not isinstance(tasks, list)
+                    or not tasks
+                    or tasks != sorted(set(tasks))
+                    or any(
+                        not isinstance(task, str) or not task
+                        for task in tasks
+                    )
+                )
+            )
+            or (
+                dataset is not None
+                and not _valid_comparison_dataset_descriptor(dataset)
+            )
+            or (dataset is None) == (tasks is None)
             or not isinstance(arms, list)
             or not arms
         ):
@@ -793,6 +829,8 @@ def _validate_harbor_row(row):
                 f"Harbor row {run_id!r}: invalid comparison plan manifest"
             )
         arm_id = provenance["comparison_arm_id"]
+        agent_config_sha256 = provenance["agent_config_sha256"]
+        resolved_tasks = provenance["comparison_resolved_tasks"]
         if (
             not isinstance(arm_id, str)
             or not arm_id
@@ -802,17 +840,45 @@ def _validate_harbor_row(row):
             raise PublishError(
                 f"Harbor row {run_id!r}: invalid comparison arm identity"
             )
+        if (
+            not isinstance(agent_config_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", agent_config_sha256) is None
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: invalid rendered agent config digest"
+            )
+        if (
+            not isinstance(resolved_tasks, list)
+            or not resolved_tasks
+            or resolved_tasks != sorted(set(resolved_tasks))
+            or any(not isinstance(task, str) or not task for task in resolved_tasks)
+            or (tasks is not None and resolved_tasks != tasks)
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: invalid resolved comparison task set"
+            )
         matching_arms = [
             arm
             for arm in arms
             if (
                 isinstance(arm, dict)
                 and set(arm)
-                == {"arm_id", "agent_config_name", "model_name"}
+                == {
+                    "arm_id",
+                    "agent_config_name",
+                    "harbor_model_name",
+                    "agent_config_sha256",
+                    "canonical_harness",
+                    "canonical_model",
+                }
                 and arm.get("arm_id") == arm_id
                 and arm.get("agent_config_name")
                 == provenance["harbor_agent_config_name"]
-                and arm.get("model_name") == provenance["harbor_model_name"]
+                and arm.get("harbor_model_name")
+                == provenance["harbor_model_name"]
+                and arm.get("agent_config_sha256") == agent_config_sha256
+                and arm.get("canonical_harness") == row.get("harness")
+                and arm.get("canonical_model") == row.get("model")
             )
         ]
         if len(matching_arms) != 1:
@@ -825,7 +891,7 @@ def _validate_harbor_row(row):
             or set(block) != {"task", "index"}
             or block.get("task") != row.get("task")
             or block.get("index") != row.get("trial")
-            or block.get("task") not in tasks
+            or block.get("task") not in resolved_tasks
             or not isinstance(block.get("index"), int)
             or isinstance(block.get("index"), bool)
             or block["index"] < 1
@@ -834,7 +900,18 @@ def _validate_harbor_row(row):
             raise PublishError(
                 f"Harbor row {run_id!r}: invalid comparison block identity"
             )
-        if provenance["trial_mapping"] != "openbench_comparison_plan_v1":
+        expected_run_id = make_run_id(
+            row.get("harness"),
+            row.get("task"),
+            row.get("model"),
+            row.get("trial"),
+            candidate_digest=agent_config_sha256,
+        )
+        if run_id != expected_run_id:
+            raise PublishError(
+                f"Harbor row {run_id!r}: run_id does not bind rendered agent config"
+            )
+        if provenance["trial_mapping"] != "openbench_comparison_plan_v2":
             raise PublishError(
                 f"Harbor row {run_id!r}: invalid comparison trial mapping"
             )
@@ -848,6 +925,22 @@ def _validate_harbor_row(row):
             != "lexicographic_name_within_task_agent_model"
         ):
             raise PublishError(f"Harbor row {run_id!r}: invalid trial_mapping")
+        expected_agent_name = expected_harbor_agent_semantic_name(
+            provenance["harbor_agent_config_name"]
+        )
+        if row.get("harness") != expected_agent_name:
+            raise PublishError(
+                f"Harbor row {run_id!r}: harness does not match immutable "
+                "Harbor agent config identity"
+            )
+        if harbor_model_name != expected_harbor_model_name(
+            provenance["harbor_agent_config_name"],
+            row.get("model"),
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: canonical model does not match immutable "
+                "Harbor model identity"
+            )
     if provenance["temporal_matched_block_claim"] is not False:
         raise PublishError(
             f"Harbor row {run_id!r}: temporal_matched_block_claim must be false"

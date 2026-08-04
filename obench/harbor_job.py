@@ -24,7 +24,7 @@ HARBOR_JOB_CONFIG_SOURCE = (
     "https://github.com/harbor-framework/harbor/blob/"
     f"{HARBOR_GIT_COMMIT}/src/harbor/models/job/config.py"
 )
-COMPARISON_PLAN_SCHEMA_VERSION = "openbench-harbor-comparison-plan-v1"
+COMPARISON_PLAN_SCHEMA_VERSION = "openbench-harbor-comparison-plan-v2"
 COMPARISON_PLAN_SUFFIX = ".openbench-comparison-plan.json"
 
 DEFAULT_RETRY_EXCLUSIONS = (
@@ -78,6 +78,9 @@ class AgentProfile:
     """
 
     profile_id: str
+    arm_id: str | None = None
+    canonical_harness: str | None = None
+    canonical_model: str | None = None
     model_name: str | None = None
     name: str | None = None
     import_path: str | None = None
@@ -173,11 +176,16 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
     )
     profiles = _validate_profiles(spec.agent_profiles, spec.concurrency)
     retry = _render_retry(spec.retry)
-    source, source_task_count, source_task_names = _render_source(spec.source)
+    (
+        source,
+        source_task_count,
+        source_task_names,
+        dataset_descriptor,
+    ) = _render_source(spec.source)
 
     agents = []
     comparison_arms = []
-    comparison_arm_keys: set[tuple[str, str]] = set()
+    comparison_agent_config_digests: set[str] = set()
     comparison_arm_ids: set[str] = set()
     for profile in profiles:
         profile_models = (
@@ -190,20 +198,24 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
                 f"profile {profile.profile_id} requires model_name when "
                 "the job has no shared models"
             )
+        if profile.arm_id is not None and len(profile_models) != 1:
+            raise HarborJobError(
+                f"profile {profile.profile_id} arm_id requires exactly one model"
+            )
         for model in profile_models:
             rendered_agent = _render_agent(profile, model)
             agent_config_name = (
                 rendered_agent.get("name") or rendered_agent["import_path"]
             )
-            arm_key = (agent_config_name, model)
-            if arm_key in comparison_arm_keys:
+            agent_config_sha256 = canonical_agent_config_sha256(rendered_agent)
+            if agent_config_sha256 in comparison_agent_config_digests:
                 raise HarborJobError(
-                    "comparison arms must have unique immutable "
-                    f"agent/model identities: {agent_config_name} {model}"
+                    "comparison arms must have distinct rendered agent configs: "
+                    f"{profile.profile_id}"
                 )
-            comparison_arm_keys.add(arm_key)
+            comparison_agent_config_digests.add(agent_config_sha256)
             arm_id = (
-                profile.profile_id
+                profile.arm_id or profile.profile_id
                 if len(profile_models) == 1
                 else f"{profile.profile_id}@{model}"
             )
@@ -216,7 +228,12 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
             comparison_arms.append({
                 "arm_id": arm_id,
                 "agent_config_name": agent_config_name,
-                "model_name": model,
+                "harbor_model_name": model,
+                "agent_config_sha256": agent_config_sha256,
+                "canonical_harness": (
+                    profile.canonical_harness or profile.profile_id
+                ),
+                "canonical_model": profile.canonical_model or model,
             })
     config = {
         "job_name": job_name,
@@ -243,16 +260,13 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
         else None
     )
     config_sha256 = hashlib.sha256(json_bytes).hexdigest()
-    comparison_plan = (
-        _build_comparison_plan(
-            job_name=job_name,
-            job_config_sha256=config_sha256,
-            tasks=source_task_names,
-            arms=comparison_arms,
-            attempts=spec.attempts,
-        )
-        if source_task_names is not None
-        else None
+    comparison_plan = _build_comparison_plan(
+        job_name=job_name,
+        job_config_sha256=config_sha256,
+        dataset=dataset_descriptor,
+        tasks=source_task_names,
+        arms=comparison_arms,
+        attempts=spec.attempts,
     )
     return HarborJobArtifact(
         json_bytes=json_bytes,
@@ -269,7 +283,8 @@ def _build_comparison_plan(
     *,
     job_name: str,
     job_config_sha256: str,
-    tasks: tuple[str, ...],
+    dataset: dict[str, Any] | None,
+    tasks: tuple[str, ...] | None,
     arms: list[dict[str, str]],
     attempts: int,
 ) -> HarborComparisonPlanArtifact:
@@ -280,7 +295,8 @@ def _build_comparison_plan(
         "job_name": job_name,
         "job_config_sha256": job_config_sha256,
         "attempts": attempts,
-        "tasks": list(tasks),
+        "dataset": dataset,
+        "tasks": None if tasks is None else list(tasks),
         "arms": arms,
     }
     json_bytes = canonical_comparison_plan_bytes(value)
@@ -303,6 +319,19 @@ def canonical_comparison_plan_bytes(value: Mapping[str, Any]) -> bytes:
         )
         + "\n"
     ).encode("utf-8")
+
+
+def canonical_agent_config_sha256(value: Mapping[str, Any]) -> str:
+    """Hash one exact secret-free rendered Harbor AgentConfig mapping."""
+
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def comparison_plan_path_for_config(
@@ -455,13 +484,19 @@ def _render_source(
     dict[str, list[dict[str, Any]]],
     int | None,
     tuple[str, ...] | None,
+    dict[str, Any] | None,
 ]:
     if isinstance(source, LocalTaskSet):
         dataset, task_names = _render_local_task_set(source)
-        return {"datasets": [dataset], "tasks": []}, len(task_names), task_names
+        return (
+            {"datasets": [dataset], "tasks": []},
+            len(task_names),
+            task_names,
+            None,
+        )
     if isinstance(source, Dataset):
         dataset = _render_dataset(source)
-        return {"datasets": [dataset], "tasks": []}, None, None
+        return {"datasets": [dataset], "tasks": []}, None, None, dataset
     raise HarborJobError("source must be exactly one LocalTaskSet or Dataset")
 
 
@@ -534,7 +569,12 @@ def _render_dataset(source: Dataset) -> dict[str, Any]:
     if source.version is not None:
         rendered["version"] = _validate_nonempty(source.version, "dataset version")
     if source.ref is not None:
-        rendered["ref"] = _validate_nonempty(source.ref, "dataset ref")
+        ref = _validate_nonempty(source.ref, "dataset ref")
+        if package and re.fullmatch(r"sha256:[0-9a-f]{64}", ref) is None:
+            raise HarborJobError(
+                "package dataset ref must be an immutable sha256 digest"
+            )
+        rendered["ref"] = ref
     if source.task_names is not None:
         rendered["task_names"] = list(
             _validate_unique_strings(source.task_names, "task_names")
@@ -578,6 +618,18 @@ def _validate_profiles(
         if profile.model_name is not None:
             _validate_nonempty(
                 profile.model_name, f"profile {profile_id} model_name"
+            )
+        if profile.arm_id is not None:
+            _validate_identifier(profile.arm_id, f"profile {profile_id} arm_id")
+        if profile.canonical_harness is not None:
+            _validate_nonempty(
+                profile.canonical_harness,
+                f"profile {profile_id} canonical_harness",
+            )
+        if profile.canonical_model is not None:
+            _validate_nonempty(
+                profile.canonical_model,
+                f"profile {profile_id} canonical_model",
             )
         if profile.n_concurrent is not None:
             if not isinstance(profile.n_concurrent, int) or isinstance(

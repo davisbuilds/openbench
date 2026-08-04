@@ -15,6 +15,7 @@ from unittest import mock
 
 from obench import publish
 from obench import scrub
+from obench.harbor_job import canonical_agent_config_sha256
 
 # The e2e tests run `python -m obench.cli` from a temp cwd; the repo root must
 # be importable regardless of where the suite is invoked from.
@@ -121,6 +122,7 @@ def _harbor_row(
             "harbor_task_checksum": digest,
             "harbor_agent_config_name": "codex",
             "harbor_model_name": "model-x",
+            "agent_config_sha256": None,
             "harbor_verifier_time_s": 1.25,
             "harbor_job_retries": 0,
             "harbor_job_max_retries": 1,
@@ -129,6 +131,7 @@ def _harbor_row(
             "comparison_plan_sha256": None,
             "comparison_plan": None,
             "comparison_arm_id": None,
+            "comparison_resolved_tasks": None,
             "comparison_block": None,
             "usage_source": "harbor_agent_reported",
             "proxy_measured": False,
@@ -323,19 +326,32 @@ class PublishBundleTests(unittest.TestCase):
                 scrub_ctx=self.scrub_ctx,
             )
 
+        codex_agent = {"name": "codex", "model_name": "model-x"}
+        opencode_agent = {
+            "import_path": (
+                "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth"
+            ),
+            "model_name": "openai/model-x",
+        }
+        codex_agent_digest = canonical_agent_config_sha256(codex_agent)
+        opencode_agent_digest = canonical_agent_config_sha256(opencode_agent)
         comparison_plan = {
-            "schema_version": "openbench-harbor-comparison-plan-v1",
+            "schema_version": "openbench-harbor-comparison-plan-v2",
             "harbor_version": "0.20.0",
             "harbor_git_commit_hash": "b" * 40,
             "job_name": "job-1",
             "job_config_sha256": "8" * 64,
             "attempts": 1,
+            "dataset": None,
             "tasks": ["alpha"],
             "arms": [
                 {
                     "arm_id": "codex",
                     "agent_config_name": "codex",
-                    "model_name": "model-x",
+                    "harbor_model_name": "model-x",
+                    "agent_config_sha256": codex_agent_digest,
+                    "canonical_harness": "codex",
+                    "canonical_model": "model-x",
                 },
                 {
                     "arm_id": "opencode",
@@ -343,25 +359,40 @@ class PublishBundleTests(unittest.TestCase):
                         "obench.harbor_agents.opencode:"
                         "OpenBenchOpenCodeOAuth"
                     ),
-                    "model_name": "openai/model-x",
+                    "harbor_model_name": "openai/model-x",
+                    "agent_config_sha256": opencode_agent_digest,
+                    "canonical_harness": "opencode",
+                    "canonical_model": "model-x",
                 },
             ],
         }
         comparison_plan_sha256 = hashlib.sha256(
             publish.canonical_comparison_plan_bytes(comparison_plan)
         ).hexdigest()
-        for row, arm_id in ((codex, "codex"), (opencode, "opencode")):
+        for row, arm_id, agent_digest in (
+            (codex, "codex", codex_agent_digest),
+            (opencode, "opencode", opencode_agent_digest),
+        ):
             provenance = row["candidate_provenance"]
             provenance.update({
                 "comparison_plan_schema_version": (
-                    "openbench-harbor-comparison-plan-v1"
+                    "openbench-harbor-comparison-plan-v2"
                 ),
                 "comparison_plan_sha256": comparison_plan_sha256,
                 "comparison_plan": comparison_plan,
                 "comparison_arm_id": arm_id,
+                "agent_config_sha256": agent_digest,
+                "comparison_resolved_tasks": ["alpha"],
                 "comparison_block": {"task": "alpha", "index": 1},
-                "trial_mapping": "openbench_comparison_plan_v1",
+                "trial_mapping": "openbench_comparison_plan_v2",
             })
+            row["run_id"] = publish.make_run_id(
+                row["harness"],
+                row["task"],
+                row["model"],
+                row["trial"],
+                candidate_digest=agent_digest,
+            )
         exact_path = os.path.join(
             self.tmp.name,
             "harbor-exact-plan.jsonl",
@@ -390,6 +421,14 @@ class PublishBundleTests(unittest.TestCase):
             "partial comparison identity",
         ):
             publish.sanitize_row_for_publish(partial)
+
+        relabeled = copy.deepcopy(codex)
+        relabeled["harness"] = "tampered"
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "comparison arm does not match plan",
+        ):
+            publish.sanitize_row_for_publish(relabeled)
 
     def test_terminal_harbor_publish_preserves_only_available_evidence(self):
         row = self._harbor_row(
