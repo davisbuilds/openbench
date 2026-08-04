@@ -11,6 +11,7 @@ diagnostics and migration, but manual import is not the default suite workflow.
 ```bash
 obench import harbor-results /path/to/harbor-job \
   --comparison-plan /path/to/job.openbench-comparison-plan.json \
+  --job-config /path/to/job.json \
   --output results/harbor.jsonl
 ```
 
@@ -68,16 +69,20 @@ suite when required evidence is absent.
 
 ## Row semantics
 
-With `--comparison-plan`, the importer verifies the canonical sidecar digest,
-the persisted Harbor `config.json` digest, every full rendered agent-config
-digest against job/trial locks and result configs, and the exact task x arm x
-attempt multiset in Harbor's immutable job lock. Registry/package plans bind
-their immutable dataset descriptor before execution and record the sorted
-lock-resolved task set separately after execution. Within each task/arm,
-completed trial names and IDs are sorted and assigned sidecar block indexes.
-Every arm therefore receives the same stable `(task, block)` coordinates. This
-proves intended plus Harbor-locked denominator identity; Harbor remains the
-scheduler and `temporal_matched_block_claim` stays false.
+With `--comparison-plan`, `--job-config` is also required. The v3 sidecar binds
+both the exact submitted config bytes and a pinned semantic digest. The latter
+normalizes only Harbor 0.20.0's documented default elision and retry-set order,
+so Harbor's persisted `config.json` may serialize differently but cannot change
+run intent. The importer independently verifies both identities, every full
+rendered agent-config digest against job/trial locks and result configs, and
+the exact task x arm x attempt multiset in Harbor's immutable job lock.
+Registry/package plans bind their immutable dataset descriptor before execution
+and record the sorted lock-resolved task set separately after execution.
+Within each task/arm, completed trial names and IDs are sorted and assigned
+sidecar block indexes. Every arm therefore receives the same stable
+`(task, block)` coordinates. This proves intended plus Harbor-locked
+denominator identity; Harbor remains the scheduler and
+`temporal_matched_block_claim` stays false.
 
 Without the sidecar, trials retain the legacy deterministic
 `(task, agent, model)` name/ID numbering for inspection, but Harbor matched

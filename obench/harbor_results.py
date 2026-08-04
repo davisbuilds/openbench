@@ -26,6 +26,7 @@ from .harbor_job import (
     COMPARISON_PLAN_SCHEMA_VERSION,
     canonical_agent_config_sha256,
     canonical_comparison_plan_bytes,
+    canonical_harbor_job_config_sha256,
 )
 from .harbor_oauth import AGENT_IMPORT_PATH
 from .harbor_profiles import (
@@ -1763,6 +1764,7 @@ def _normalized_task_name(task_name: str) -> str:
 def _validate_comparison_plan(
     path: str | os.PathLike[str],
     *,
+    submitted_job_config_path: str | os.PathLike[str],
     job_root: Path,
     job_lock: dict[str, Any],
     trials: list[dict[str, Any]],
@@ -1782,7 +1784,8 @@ def _validate_comparison_plan(
         "harbor_version",
         "harbor_git_commit_hash",
         "job_name",
-        "job_config_sha256",
+        "submitted_job_config_sha256",
+        "effective_job_config_sha256",
         "attempts",
         "dataset",
         "tasks",
@@ -1819,25 +1822,69 @@ def _validate_comparison_plan(
             "comparison plan.job_name",
             "does not match Harbor job directory",
         )
-    config_digest = _string(
-        plan.get("job_config_sha256"),
-        "comparison plan.job_config_sha256",
+    submitted_config_digest = _string(
+        plan.get("submitted_job_config_sha256"),
+        "comparison plan.submitted_job_config_sha256",
     )
-    if re.fullmatch(r"[0-9a-f]{64}", config_digest) is None:
+    if re.fullmatch(r"[0-9a-f]{64}", submitted_config_digest) is None:
         raise _fail(
-            "comparison plan.job_config_sha256",
+            "comparison plan.submitted_job_config_sha256",
             "expected a lowercase SHA-256",
         )
-    job_config_path = job_root / "config.json"
-    if _sha256_file(job_config_path) != config_digest:
+    effective_config_digest = _string(
+        plan.get("effective_job_config_sha256"),
+        "comparison plan.effective_job_config_sha256",
+    )
+    if re.fullmatch(r"[0-9a-f]{64}", effective_config_digest) is None:
         raise _fail(
-            "comparison plan.job_config_sha256",
-            "does not match Harbor's persisted job config",
+            "comparison plan.effective_job_config_sha256",
+            "expected a lowercase SHA-256",
         )
+
+    submitted_config_path = Path(submitted_job_config_path).expanduser()
+    submitted_config = _object(
+        _read_json(submitted_config_path, "submitted job config"),
+        "submitted job config",
+    )
+    if _sha256_file(submitted_config_path) != submitted_config_digest:
+        raise _fail(
+            "comparison plan.submitted_job_config_sha256",
+            "does not match OpenBench's submitted job config",
+        )
+    try:
+        submitted_effective_digest = canonical_harbor_job_config_sha256(
+            submitted_config
+        )
+    except ValueError as exc:
+        raise _fail(
+            "submitted job config",
+            f"cannot derive pinned semantic identity: {exc}",
+        ) from exc
+    if submitted_effective_digest != effective_config_digest:
+        raise _fail(
+            "comparison plan.effective_job_config_sha256",
+            "does not match OpenBench's submitted semantic job config",
+        )
+
+    job_config_path = job_root / "config.json"
     job_config = _object(
         _read_json(job_config_path, "job config"),
         "job config",
     )
+    try:
+        persisted_effective_digest = canonical_harbor_job_config_sha256(
+            job_config
+        )
+    except ValueError as exc:
+        raise _fail(
+            "job config",
+            f"cannot derive pinned semantic identity: {exc}",
+        ) from exc
+    if persisted_effective_digest != effective_config_digest:
+        raise _fail(
+            "comparison plan.effective_job_config_sha256",
+            "does not match Harbor's persisted semantic job config",
+        )
     attempts = _integer(
         plan.get("attempts"),
         "comparison plan.attempts",
@@ -1848,7 +1895,7 @@ def _validate_comparison_plan(
             "job config.job_name",
             "does not match comparison plan",
         )
-    if job_config.get("n_attempts") != attempts:
+    if job_config.get("n_attempts", 1) != attempts:
         raise _fail(
             "job config.n_attempts",
             "does not match comparison plan",
@@ -1861,7 +1908,7 @@ def _validate_comparison_plan(
             "comparison plan requires exactly one dataset",
         )
     dataset = _object(datasets[0], "job config.datasets[0]")
-    if job_config.get("tasks") != []:
+    if job_config.get("tasks", []) != []:
         raise _fail(
             "job config.tasks",
             "comparison plan requires one dataset and no standalone tasks",
@@ -2143,8 +2190,14 @@ def load_rows(
     job_dir: str | os.PathLike[str],
     *,
     comparison_plan_path: str | os.PathLike[str] | None = None,
+    submitted_job_config_path: str | os.PathLike[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Validate a complete Harbor 0.20.0 job and return normalized rows."""
+    if (comparison_plan_path is None) != (submitted_job_config_path is None):
+        raise _fail(
+            "comparison identity",
+            "comparison plan and submitted job config must be provided together",
+        )
     requested_root = Path(job_dir).expanduser()
     if requested_root.is_symlink():
         raise _fail("job directory", f"symlink is not accepted: {requested_root}")
@@ -2196,6 +2249,7 @@ def load_rows(
             comparison_coordinates,
         ) = _validate_comparison_plan(
             comparison_plan_path,
+            submitted_job_config_path=submitted_job_config_path,
             job_root=root,
             job_lock=job_lock,
             trials=trials,
@@ -2381,7 +2435,7 @@ def load_rows(
                 "proxy_measured": False,
                 "harbor_metering": None,
                 "trial_mapping": (
-                    "openbench_comparison_plan_v2"
+                    "openbench_comparison_plan_v3"
                     if comparison_coordinate is not None
                     else "lexicographic_name_within_task_agent_model"
                 ),
@@ -2479,11 +2533,13 @@ def import_results(
     results_path: str | os.PathLike[str],
     *,
     comparison_plan_path: str | os.PathLike[str] | None = None,
+    submitted_job_config_path: str | os.PathLike[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Validate, lock, collision-check, and append one rollback-safe batch."""
     rows = load_rows(
         job_dir,
         comparison_plan_path=comparison_plan_path,
+        submitted_job_config_path=submitted_job_config_path,
     )
     requested_output = Path(results_path).expanduser()
     if requested_output.is_symlink():
@@ -2560,6 +2616,13 @@ def build_parser() -> argparse.ArgumentParser:
             "job config"
         ),
     )
+    parser.add_argument(
+        "--job-config",
+        help=(
+            "exact OpenBench-submitted Harbor job config; required with "
+            "--comparison-plan"
+        ),
+    )
     return parser
 
 
@@ -2570,6 +2633,7 @@ def main(argv: list[str] | None = None) -> int:
             args.job_dir,
             args.output,
             comparison_plan_path=args.comparison_plan,
+            submitted_job_config_path=args.job_config,
         )
     except HarborResultsError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

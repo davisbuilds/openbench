@@ -17,6 +17,7 @@ import unittest
 from unittest import mock
 
 from obench import compare, init, stats, suite_run
+from obench.harbor_job import canonical_harbor_job_config_sha256
 from obench.harbor_run import HarborBinary
 from obench.harbor_results import HARBOR_PROXY_REQUIRED_AGENTS
 from obench.suite_run import SuiteRunError
@@ -265,7 +266,7 @@ model = "gpt-5.6-terra"
                                 if proxy_required
                                 else None
                             ),
-                            "trial_mapping": "openbench_comparison_plan_v2",
+                            "trial_mapping": "openbench_comparison_plan_v3",
                             "temporal_matched_block_claim": False,
                         },
                     })
@@ -298,7 +299,8 @@ model = "gpt-5.6-terra"
                 run_process=process,
                 preflight=lambda *args, **kwargs: harbor,
                 import_job=importer or (
-                    lambda job_path, *, comparison_plan_path: (
+                    lambda job_path, *, comparison_plan_path,
+                    submitted_job_config_path: (
                         self._simulated_rows(Path(comparison_plan_path))
                     )
                 ),
@@ -380,10 +382,13 @@ model = "gpt-5.6-terra"
                 [900.0, 900.0],
             )
             plan = job.artifact.comparison_plan.as_dict()
-            self.assertEqual(plan["job_config_sha256"], job.artifact.sha256)
             self.assertEqual(
-                hashlib.sha256(job.artifact.json_bytes).hexdigest(),
-                plan["job_config_sha256"],
+                job.artifact.sha256,
+                plan["submitted_job_config_sha256"],
+            )
+            self.assertEqual(
+                canonical_harbor_job_config_sha256(job.artifact.as_dict()),
+                plan["effective_job_config_sha256"],
             )
             self.assertEqual(
                 [arm["arm_id"] for arm in plan["arms"]],
@@ -687,7 +692,12 @@ model = "gpt-5.6-terra"
                 else:
                     imports = 0
 
-                    def importer(job_path, *, comparison_plan_path):
+                    def importer(
+                        job_path,
+                        *,
+                        comparison_plan_path,
+                        submitted_job_config_path,
+                    ):
                         nonlocal imports
                         imports += 1
                         if imports == 2:
@@ -807,11 +817,55 @@ model = "gpt-5.6-terra"
         with self.assertRaisesRegex(ValueError, "incomplete denominator"):
             stats.validate_suite_rows(partial)
 
-    def test_terminal_cell_remains_measured_in_local_complete_suite(self):
+    def test_complete_suite_rejects_terminal_cell_without_required_evidence(self):
         root = self._project()
         compiled = suite_run.compile_suite(start=root)
 
-        def importer(job_path, *, comparison_plan_path):
+        def importer(
+            job_path,
+            *,
+            comparison_plan_path,
+            submitted_job_config_path,
+        ):
+            rows = self._simulated_rows(Path(comparison_plan_path))
+            row = rows[0]
+            row.update({
+                "completed": False,
+                "success": False,
+                "score": 0.0,
+                "usage_raw": None,
+                "usage_evidence_grade": "usage_unavailable",
+                "usage_ranking_eligible": False,
+            })
+            provenance = row["candidate_provenance"]
+            provenance["atif_sha256"] = None
+            provenance["openbench_verifier_evidence_sha256"] = None
+            return rows
+
+        with self.assertRaisesRegex(
+            SuiteRunError,
+            "lacks required ATIF evidence",
+        ):
+            self._run_simulated(compiled, importer=importer)
+
+    def test_local_incomplete_suite_retains_terminal_cell(self):
+        root = self._project()
+        suite_path = self._suite_path(root)
+        suite_path.write_text(
+            suite_path.read_text(encoding="utf-8").replace(
+                'completeness = "complete"',
+                'completeness = "allow_incomplete"',
+            ),
+            encoding="utf-8",
+        )
+        compiled = suite_run.compile_suite(start=root)
+
+        def importer(
+            job_path,
+            *,
+            comparison_plan_path,
+            submitted_job_config_path,
+        ):
             rows = self._simulated_rows(Path(comparison_plan_path))
             row = rows[0]
             row.update({

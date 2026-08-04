@@ -37,6 +37,7 @@ from .harbor_job import (
     build_job_config,
     canonical_agent_config_sha256,
     canonical_comparison_plan_bytes,
+    canonical_harbor_job_config_sha256,
     comparison_plan_path_for_config,
     write_comparison_plan,
     write_job_config,
@@ -446,6 +447,7 @@ def run_suite(
             imported = import_job(
                 artifact.harbor_job_path,
                 comparison_plan_path=artifact.comparison_plan_path,
+                submitted_job_config_path=artifact.config_path,
             )
         except Exception as exc:
             raise SuiteRunError(
@@ -525,15 +527,19 @@ def _validate_suite_rows(
         coordinates.add(coordinate)
 
         complete = row.get("completed") is True
-        if compiled.suite.evidence.trajectory and complete:
+        evidence_required = (
+            complete
+            or compiled.suite.publication.completeness == "complete"
+        )
+        if compiled.suite.evidence.trajectory and evidence_required:
             _require_digest(provenance.get("atif_sha256"), "ATIF", coordinate)
-        if compiled.suite.evidence.verifier and complete:
+        if compiled.suite.evidence.verifier and evidence_required:
             _require_digest(
                 provenance.get("openbench_verifier_evidence_sha256"),
                 "verifier",
                 coordinate,
             )
-        if compiled.suite.evidence.usage and complete:
+        if compiled.suite.evidence.usage and evidence_required:
             _require_usage_evidence(row, coordinate)
 
 
@@ -846,13 +852,25 @@ def verify_suite_run(
         config_bytes = config_path.read_bytes()
         plan_bytes = plan_path.read_bytes()
         plan_body = plan_binding["body"]
+        try:
+            config_body = json.loads(config_bytes)
+            effective_config_sha256 = canonical_harbor_job_config_sha256(
+                config_body
+            )
+        except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            raise SuiteRunError(
+                "suite run submitted Harbor config is invalid"
+            ) from exc
         if (
             hashlib.sha256(config_bytes).hexdigest() != config.get("sha256")
             or hashlib.sha256(plan_bytes).hexdigest()
             != plan_binding.get("sha256")
             or not isinstance(plan_body, dict)
             or plan_bytes != canonical_comparison_plan_bytes(plan_body)
-            or plan_body.get("job_config_sha256") != config.get("sha256")
+            or plan_body.get("submitted_job_config_sha256")
+            != config.get("sha256")
+            or plan_body.get("effective_job_config_sha256")
+            != effective_config_sha256
             or plan_body.get("job_name") != harbor_job.get("name")
         ):
             raise SuiteRunError("suite run config or comparison-plan binding differs")

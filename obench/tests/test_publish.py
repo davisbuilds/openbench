@@ -159,11 +159,12 @@ def _suite_harbor_row(row, *, scope):
     rendered_agent = {"model_name": "model-x", "name": "codex"}
     agent_digest = canonical_agent_config_sha256(rendered_agent)
     plan = {
-        "schema_version": "openbench-harbor-comparison-plan-v2",
+        "schema_version": "openbench-harbor-comparison-plan-v3",
         "harbor_version": "0.20.0",
         "harbor_git_commit_hash": "b" * 40,
         "job_name": "suite-core-job",
-        "job_config_sha256": "d" * 64,
+        "submitted_job_config_sha256": "c" * 64,
+        "effective_job_config_sha256": "d" * 64,
         "attempts": 1,
         "dataset": None,
         "tasks": ["alpha"],
@@ -271,7 +272,7 @@ def _suite_harbor_row(row, *, scope):
         "agent_config_sha256": agent_digest,
         "comparison_resolved_tasks": ["alpha"],
         "comparison_block": {"task": "alpha", "index": 1},
-        "trial_mapping": "openbench_comparison_plan_v2",
+        "trial_mapping": "openbench_comparison_plan_v3",
         "suite_manifest_schema_version": 1,
         "suite_manifest_sha256": manifest_sha256,
         "suite_manifest": manifest,
@@ -508,11 +509,12 @@ class PublishBundleTests(unittest.TestCase):
         codex_agent_digest = canonical_agent_config_sha256(codex_agent)
         opencode_agent_digest = canonical_agent_config_sha256(opencode_agent)
         comparison_plan = {
-            "schema_version": "openbench-harbor-comparison-plan-v2",
+            "schema_version": "openbench-harbor-comparison-plan-v3",
             "harbor_version": "0.20.0",
             "harbor_git_commit_hash": "b" * 40,
             "job_name": "job-1",
-            "job_config_sha256": "8" * 64,
+            "submitted_job_config_sha256": "7" * 64,
+            "effective_job_config_sha256": "8" * 64,
             "attempts": 1,
             "dataset": None,
             "tasks": ["alpha"],
@@ -548,7 +550,7 @@ class PublishBundleTests(unittest.TestCase):
             provenance = row["candidate_provenance"]
             provenance.update({
                 "comparison_plan_schema_version": (
-                    "openbench-harbor-comparison-plan-v2"
+                    "openbench-harbor-comparison-plan-v3"
                 ),
                 "comparison_plan_sha256": comparison_plan_sha256,
                 "comparison_plan": comparison_plan,
@@ -556,7 +558,7 @@ class PublishBundleTests(unittest.TestCase):
                 "agent_config_sha256": agent_digest,
                 "comparison_resolved_tasks": ["alpha"],
                 "comparison_block": {"task": "alpha", "index": 1},
-                "trial_mapping": "openbench_comparison_plan_v2",
+                "trial_mapping": "openbench_comparison_plan_v3",
             })
             row["run_id"] = publish.make_run_id(
                 row["harness"],

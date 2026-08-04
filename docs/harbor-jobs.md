@@ -55,14 +55,17 @@ obench harbor job-run \
 This example resolves to 2 tasks x 2 harnesses x 2 attempts = 8 trials.
 The sidecar is written beside the config as
 `openbench-harness-smoke.openbench-comparison-plan.json`. It binds the job
-config SHA-256, exact task source, full rendered agent-config SHA-256 values,
-canonical OpenBench harness/model labels, and attempt count. Local task names
-are fixed before execution. For immutable registry/package datasets, the
-sidecar fixes the exact name/version or package/ref descriptor and leaves
-`tasks` null; the importer later binds Harbor's lock-resolved task set without
-rewriting the canonical pre-run sidecar. Harbor still chooses execution order.
-The sidecar proves intended and lock-resolved denominator identity, not temporal
-matched scheduling, so `temporal_matched_block_claim` remains false.
+config's exact submitted SHA-256 and pinned semantic SHA-256, exact task source,
+full rendered agent-config SHA-256 values, canonical OpenBench harness/model
+labels, and attempt count. The semantic digest normalizes only Harbor 0.20.0's
+default elision and unordered retry exception sets; all other changes remain
+identity changes. Local task names are fixed before execution. For immutable
+registry/package datasets, the sidecar fixes the exact name/version or
+package/ref descriptor and leaves `tasks` null; the importer later binds
+Harbor's lock-resolved task set without rewriting the canonical pre-run
+sidecar. Harbor still chooses execution order. The sidecar proves intended and
+lock-resolved denominator identity, not temporal matched scheduling, so
+`temporal_matched_block_claim` remains false.
 Codex and Pi each have an independent OAuth lane, but each credential is used
 by at most one trial at a time. A rerun with the identical config resumes the
 same Harbor job. OpenBench does not replay completed trials itself.

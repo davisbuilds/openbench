@@ -200,7 +200,10 @@ class HarborJobTest(unittest.TestCase):
                 "harbor_version": hj.HARBOR_VERSION,
                 "harbor_git_commit_hash": hj.HARBOR_GIT_COMMIT,
                 "job_name": "openbench-smoke",
-                "job_config_sha256": artifact.sha256,
+                "submitted_job_config_sha256": artifact.sha256,
+                "effective_job_config_sha256": (
+                    hj.canonical_harbor_job_config_sha256(config)
+                ),
                 "attempts": 3,
                 "dataset": None,
                 "tasks": ["alpha", "zeta"],
@@ -259,6 +262,60 @@ class HarborJobTest(unittest.TestCase):
                 attempts=3,
             )
         ).json_bytes)
+
+    def test_semantic_config_digest_matches_harbor_default_elision_and_sets(self):
+        artifact = hj.build_job_config(
+            self._local_spec(
+                attempts=1,
+                retry=hj.RetryPolicy(max_retries=0),
+            )
+        )
+        submitted = artifact.as_dict()
+        persisted = json.loads(json.dumps(submitted))
+        persisted.pop("n_attempts")
+        submitted["n_concurrent_trials"] = 4
+        persisted["n_concurrent_trials"] = 4
+        persisted.pop("n_concurrent_trials")
+        persisted.pop("tasks")
+        retry = persisted["retry"]
+        retry.pop("include_exceptions")
+        retry.pop("max_retries")
+        retry.pop("wait_multiplier")
+        retry.pop("min_wait_sec")
+        retry.pop("max_wait_sec")
+        retry["exclude_exceptions"].reverse()
+
+        self.assertNotEqual(
+            json.dumps(submitted, sort_keys=True),
+            json.dumps(persisted, sort_keys=True),
+        )
+        self.assertEqual(
+            hj.canonical_harbor_job_config_sha256(submitted),
+            hj.canonical_harbor_job_config_sha256(persisted),
+        )
+        persisted["n_concurrent_trials"] = 5
+        self.assertNotEqual(
+            hj.canonical_harbor_job_config_sha256(submitted),
+            hj.canonical_harbor_job_config_sha256(persisted),
+        )
+        persisted = json.loads(json.dumps(submitted))
+        persisted["future_harbor_field"] = {"enabled": True}
+        self.assertNotEqual(
+            hj.canonical_harbor_job_config_sha256(submitted),
+            hj.canonical_harbor_job_config_sha256(persisted),
+        )
+
+    def test_semantic_config_digest_rejects_ambiguous_retry_sets(self):
+        artifact = hj.build_job_config(self._local_spec())
+        config = artifact.as_dict()
+        config["retry"]["exclude_exceptions"].append(
+            config["retry"]["exclude_exceptions"][0]
+        )
+        with self.assertRaisesRegex(
+            hj.HarborJobError,
+            "unique string array",
+        ):
+            hj.canonical_harbor_job_config_sha256(config)
 
     def test_profiles_can_bind_distinct_exact_model_names(self):
         profiles = (

@@ -768,7 +768,8 @@ def _validate_harbor_row(row):
             "harbor_version",
             "harbor_git_commit_hash",
             "job_name",
-            "job_config_sha256",
+            "submitted_job_config_sha256",
+            "effective_job_config_sha256",
             "attempts",
             "dataset",
             "tasks",
@@ -801,7 +802,12 @@ def _validate_harbor_row(row):
                 f"Harbor row {run_id!r}: comparison plan digest disagrees"
             )
         job_name = comparison_plan.get("job_name")
-        config_sha256 = comparison_plan.get("job_config_sha256")
+        submitted_config_sha256 = comparison_plan.get(
+            "submitted_job_config_sha256"
+        )
+        effective_config_sha256 = comparison_plan.get(
+            "effective_job_config_sha256"
+        )
         attempts = comparison_plan.get("attempts")
         dataset = comparison_plan.get("dataset")
         tasks = comparison_plan.get("tasks")
@@ -811,8 +817,10 @@ def _validate_harbor_row(row):
             or not job_name
             or "/" in job_name
             or "\\" in job_name
-            or not isinstance(config_sha256, str)
-            or re.fullmatch(r"[0-9a-f]{64}", config_sha256) is None
+            or not isinstance(submitted_config_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", submitted_config_sha256) is None
+            or not isinstance(effective_config_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", effective_config_sha256) is None
             or not isinstance(attempts, int)
             or isinstance(attempts, bool)
             or attempts < 1
@@ -923,7 +931,7 @@ def _validate_harbor_row(row):
             raise PublishError(
                 f"Harbor row {run_id!r}: run_id does not bind rendered agent config"
             )
-        if provenance["trial_mapping"] != "openbench_comparison_plan_v2":
+        if provenance["trial_mapping"] != "openbench_comparison_plan_v3":
             raise PublishError(
                 f"Harbor row {run_id!r}: invalid comparison trial mapping"
             )

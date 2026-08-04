@@ -20,6 +20,7 @@ from obench import harbor_results, run, stats
 from obench.harbor_job import (
     COMPARISON_PLAN_SCHEMA_VERSION,
     canonical_agent_config_sha256,
+    canonical_harbor_job_config_sha256,
 )
 from obench.harbor_results import (
     HARBOR_GIT_COMMIT,
@@ -215,6 +216,7 @@ class GoldenHarborJob:
 
     def __init__(self, root: Path, specs: list[dict] | None = None):
         self.root = root
+        self.submitted_config_path = root.parent / f"{root.name}-submitted.json"
         self.specs = specs or [
             {
                 "name": "alpha__zeta",
@@ -487,14 +489,18 @@ class GoldenHarborJob:
         }
         config_path = self.root / "config.json"
         _write_json(config_path, config)
+        _write_json(self.submitted_config_path, config)
         plan = {
             "schema_version": COMPARISON_PLAN_SCHEMA_VERSION,
             "harbor_version": HARBOR_VERSION,
             "harbor_git_commit_hash": HARBOR_GIT_COMMIT,
             "job_name": self.root.name,
-            "job_config_sha256": hashlib.sha256(
+            "submitted_job_config_sha256": hashlib.sha256(
                 config_path.read_bytes()
             ).hexdigest(),
+            "effective_job_config_sha256": (
+                canonical_harbor_job_config_sha256(config)
+            ),
             "attempts": attempts,
             "dataset": dataset_descriptor,
             "tasks": None if dataset_descriptor is not None else tasks,
@@ -726,6 +732,7 @@ class HarborResultsTests(unittest.TestCase):
         rows = load_rows(
             fixture.root,
             comparison_plan_path=plan_path,
+            submitted_job_config_path=fixture.submitted_config_path,
         )
 
         plan_sha256 = hashlib.sha256(plan_path.read_bytes()).hexdigest()
@@ -764,7 +771,7 @@ class HarborResultsTests(unittest.TestCase):
                 self.assertEqual(provenance["comparison_arm_id"], harness)
                 self.assertEqual(
                     provenance["trial_mapping"],
-                    "openbench_comparison_plan_v2",
+                    "openbench_comparison_plan_v3",
                 )
                 self.assertFalse(
                     provenance["temporal_matched_block_claim"]
@@ -810,11 +817,12 @@ class HarborResultsTests(unittest.TestCase):
         _write_json(config_path, config)
         with self.assertRaisesRegex(
             HarborResultsError,
-            "persisted job config",
+            "persisted semantic job config",
         ):
             load_rows(
                 fixture.root,
                 comparison_plan_path=plan_path,
+                submitted_job_config_path=fixture.submitted_config_path,
             )
         plan_path = fixture.write_comparison_plan(
             attempts=2,
@@ -827,6 +835,61 @@ class HarborResultsTests(unittest.TestCase):
             load_rows(
                 fixture.root,
                 comparison_plan_path=plan_path,
+                submitted_job_config_path=fixture.submitted_config_path,
+            )
+
+    def test_comparison_plan_rejects_v2_and_submitted_config_tampering(self):
+        fixture = GoldenHarborJob(
+            self.root / "comparison-identity",
+            specs=[
+                {
+                    "name": "alpha__one",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000022",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        arms = [
+            _comparison_arm(
+                "codex",
+                {"name": "codex", "model_name": "model-x"},
+            )
+        ]
+        plan_path = fixture.write_comparison_plan(attempts=1, arms=arms)
+
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "must be provided together",
+        ):
+            load_rows(fixture.root, comparison_plan_path=plan_path)
+
+        submitted = json.loads(fixture.submitted_config_path.read_text())
+        submitted["debug"] = True
+        _write_json(fixture.submitted_config_path, submitted)
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "submitted job config",
+        ):
+            load_rows(
+                fixture.root,
+                comparison_plan_path=plan_path,
+                submitted_job_config_path=fixture.submitted_config_path,
+            )
+
+        fixture.write_comparison_plan(attempts=1, arms=arms)
+        plan = json.loads(plan_path.read_text())
+        plan["schema_version"] = "openbench-harbor-comparison-plan-v2"
+        _write_json(plan_path, plan)
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "openbench-harbor-comparison-plan-v3",
+        ):
+            load_rows(
+                fixture.root,
+                comparison_plan_path=plan_path,
+                submitted_job_config_path=fixture.submitted_config_path,
             )
 
     def test_custom_variants_use_bound_labels_and_config_digest_run_ids(self):
@@ -888,7 +951,11 @@ class HarborResultsTests(unittest.TestCase):
             agents=agents,
         )
 
-        rows = load_rows(fixture.root, comparison_plan_path=plan_path)
+        rows = load_rows(
+            fixture.root,
+            comparison_plan_path=plan_path,
+            submitted_job_config_path=fixture.submitted_config_path,
+        )
 
         self.assertEqual({row["harness"] for row in rows}, {"acme"})
         self.assertEqual({row["model"] for row in rows}, {"model-x"})
@@ -942,7 +1009,11 @@ class HarborResultsTests(unittest.TestCase):
             HarborResultsError,
             "different immutable digests for the same task",
         ):
-            load_rows(fixture.root, comparison_plan_path=plan_path)
+            load_rows(
+                fixture.root,
+                comparison_plan_path=plan_path,
+                submitted_job_config_path=fixture.submitted_config_path,
+            )
         job_lock["trials"][1]["task"]["digest"] = original_digest
         trial_lock["task"]["digest"] = original_digest
         _write_json(job_lock_path, job_lock)
@@ -955,7 +1026,11 @@ class HarborResultsTests(unittest.TestCase):
             HarborResultsError,
             "rendered config digests",
         ):
-            load_rows(fixture.root, comparison_plan_path=plan_path)
+            load_rows(
+                fixture.root,
+                comparison_plan_path=plan_path,
+                submitted_job_config_path=fixture.submitted_config_path,
+            )
 
     def test_comparison_plan_rejects_agent_digest_and_dataset_drift(self):
         fixture = GoldenHarborJob(
@@ -983,7 +1058,11 @@ class HarborResultsTests(unittest.TestCase):
             agents=[agent],
             dataset_descriptor=descriptor,
         )
-        rows = load_rows(fixture.root, comparison_plan_path=plan_path)
+        rows = load_rows(
+            fixture.root,
+            comparison_plan_path=plan_path,
+            submitted_job_config_path=fixture.submitted_config_path,
+        )
         self.assertEqual(
             rows[0]["candidate_provenance"]["comparison_resolved_tasks"],
             ["alpha"],
@@ -996,7 +1075,11 @@ class HarborResultsTests(unittest.TestCase):
             HarborResultsError,
             "rendered config digests",
         ):
-            load_rows(fixture.root, comparison_plan_path=plan_path)
+            load_rows(
+                fixture.root,
+                comparison_plan_path=plan_path,
+                submitted_job_config_path=fixture.submitted_config_path,
+            )
 
         plan["arms"][0] = arm
         plan["dataset"]["version"] = "2.1"
@@ -1005,7 +1088,11 @@ class HarborResultsTests(unittest.TestCase):
             HarborResultsError,
             "immutable Harbor dataset descriptor",
         ):
-            load_rows(fixture.root, comparison_plan_path=plan_path)
+            load_rows(
+                fixture.root,
+                comparison_plan_path=plan_path,
+                submitted_job_config_path=fixture.submitted_config_path,
+            )
 
     def test_package_dataset_plan_binds_lock_resolved_tasks(self):
         fixture = GoldenHarborJob(
@@ -1032,7 +1119,11 @@ class HarborResultsTests(unittest.TestCase):
             dataset_descriptor=descriptor,
         )
 
-        row = load_rows(fixture.root, comparison_plan_path=plan_path)[0]
+        row = load_rows(
+            fixture.root,
+            comparison_plan_path=plan_path,
+            submitted_job_config_path=fixture.submitted_config_path,
+        )[0]
 
         self.assertEqual(
             row["candidate_provenance"]["comparison_plan"]["dataset"],

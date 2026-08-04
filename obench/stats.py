@@ -403,7 +403,8 @@ def _comparison_plan_arm(row):
         "harbor_version",
         "harbor_git_commit_hash",
         "job_name",
-        "job_config_sha256",
+        "submitted_job_config_sha256",
+        "effective_job_config_sha256",
         "attempts",
         "dataset",
         "tasks",
@@ -656,7 +657,7 @@ def validate_suite_rows(rows, *, for_publication=False):
             )
         ):
             raise ValueError("suite row lacks required Harbor lock/result evidence")
-        if row.get("completed") is not True and not (for_publication and complete):
+        if row.get("completed") is not True and not complete:
             continue
         if evidence.get("trajectory") and not _sha256_hex(
             provenance.get("atif_sha256")
@@ -882,7 +883,7 @@ def comparison_cell_key(row, *, require_harbor_identity=True):
         and not isinstance(block.get("index"), bool)
         and block["index"] >= 1
         and provenance.get("trial_mapping")
-        == "openbench_comparison_plan_v2"
+        == "openbench_comparison_plan_v3"
         and provenance.get("temporal_matched_block_claim") is False
     )
     if not exact:

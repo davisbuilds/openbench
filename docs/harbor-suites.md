@@ -177,9 +177,12 @@ run-manifest bytes are accepted on resume; divergence fails.
 
 Each row embeds the canonical secret-free suite semantic manifest and digest,
 task-set identity, publication scope/completeness, and its exact per-job
-comparison plan. Multi-task-set matched comparisons include suite, task-set,
-plan, task, and attempt identity. They never claim temporal scheduling;
-`temporal_matched_block_claim` remains false.
+comparison plan. The plan separately binds the exact submitted job-config bytes
+and Harbor 0.20.0's canonical semantic config identity, so default elision and
+unordered retry-set serialization do not create false drift. Multi-task-set
+matched comparisons include suite, task-set, plan, task, and attempt identity.
+They never claim temporal scheduling; `temporal_matched_block_claim` remains
+false.
 
 The sealed public run manifest binds the suite semantic body/digest, each
 task-set config path identity and SHA-256, comparison-plan body/digest, expected

@@ -24,7 +24,7 @@ HARBOR_JOB_CONFIG_SOURCE = (
     "https://github.com/harbor-framework/harbor/blob/"
     f"{HARBOR_GIT_COMMIT}/src/harbor/models/job/config.py"
 )
-COMPARISON_PLAN_SCHEMA_VERSION = "openbench-harbor-comparison-plan-v2"
+COMPARISON_PLAN_SCHEMA_VERSION = "openbench-harbor-comparison-plan-v3"
 COMPARISON_PLAN_SUFFIX = ".openbench-comparison-plan.json"
 
 DEFAULT_RETRY_EXCLUSIONS = (
@@ -37,6 +37,25 @@ DEFAULT_RETRY_EXCLUSIONS = (
     "VerifierOutputParseError",
     "VerifierTimeoutError",
 )
+_HARBOR_RETRY_DEFAULT_EXCLUSIONS = (
+    "AgentAuthenticationError",
+    "AgentSafetyRefusalError",
+    "AgentTimeoutError",
+    "ApiUsageLimitError",
+    "ModelNotFoundError",
+    "RewardFileEmptyError",
+    "RewardFileNotFoundError",
+    "VerifierOutputParseError",
+    "VerifierTimeoutError",
+)
+_HARBOR_RETRY_DEFAULTS = {
+    "max_retries": 0,
+    "include_exceptions": None,
+    "exclude_exceptions": list(_HARBOR_RETRY_DEFAULT_EXCLUSIONS),
+    "wait_multiplier": 1.0,
+    "min_wait_sec": 1.0,
+    "max_wait_sec": 60.0,
+}
 
 _IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
@@ -265,7 +284,8 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
     config_sha256 = hashlib.sha256(json_bytes).hexdigest()
     comparison_plan = _build_comparison_plan(
         job_name=job_name,
-        job_config_sha256=config_sha256,
+        submitted_job_config_sha256=config_sha256,
+        effective_job_config_sha256=canonical_harbor_job_config_sha256(config),
         dataset=dataset_descriptor,
         tasks=comparison_task_names,
         arms=comparison_arms,
@@ -285,7 +305,8 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
 def _build_comparison_plan(
     *,
     job_name: str,
-    job_config_sha256: str,
+    submitted_job_config_sha256: str,
+    effective_job_config_sha256: str,
     dataset: dict[str, Any] | None,
     tasks: tuple[str, ...] | None,
     arms: list[dict[str, str]],
@@ -296,7 +317,8 @@ def _build_comparison_plan(
         "harbor_version": HARBOR_VERSION,
         "harbor_git_commit_hash": HARBOR_GIT_COMMIT,
         "job_name": job_name,
-        "job_config_sha256": job_config_sha256,
+        "submitted_job_config_sha256": submitted_job_config_sha256,
+        "effective_job_config_sha256": effective_job_config_sha256,
         "attempts": attempts,
         "dataset": dataset,
         "tasks": None if tasks is None else list(tasks),
@@ -335,6 +357,71 @@ def canonical_agent_config_sha256(value: Mapping[str, Any]) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def canonical_harbor_job_config_bytes(value: Mapping[str, Any]) -> bytes:
+    """Return Harbor 0.20.0's stable semantic job-config identity.
+
+    Harbor persists ``JobConfig`` with ``exclude_defaults=True`` and represents
+    retry exception sets as JSON arrays. Raw persisted bytes therefore differ
+    when explicit defaults are omitted or a set is emitted in another order.
+    OpenBench normalizes only those pinned Harbor semantics; all other fields
+    remain exact.
+    """
+
+    if not isinstance(value, Mapping):
+        raise HarborJobError("Harbor job config must be a JSON object")
+    try:
+        normalized = json.loads(
+            json.dumps(
+                value,
+                ensure_ascii=True,
+                allow_nan=False,
+            )
+        )
+    except (TypeError, ValueError) as exc:
+        raise HarborJobError("Harbor job config must be finite JSON") from exc
+    if not isinstance(normalized, dict):
+        raise HarborJobError("Harbor job config must be a JSON object")
+
+    normalized.setdefault("n_attempts", 1)
+    normalized.setdefault("n_concurrent_trials", 4)
+    normalized.setdefault("tasks", [])
+    retry = normalized.setdefault("retry", {})
+    if not isinstance(retry, dict):
+        raise HarborJobError("Harbor job config retry must be an object")
+    for key, default in _HARBOR_RETRY_DEFAULTS.items():
+        retry.setdefault(key, json.loads(json.dumps(default)))
+    for key in ("include_exceptions", "exclude_exceptions"):
+        exceptions = retry.get(key)
+        if exceptions is None:
+            continue
+        if (
+            not isinstance(exceptions, list)
+            or any(not isinstance(item, str) or not item for item in exceptions)
+            or len(set(exceptions)) != len(exceptions)
+        ):
+            raise HarborJobError(
+                f"Harbor job config retry.{key} must be a unique string array or null"
+            )
+        retry[key] = sorted(exceptions)
+
+    return (
+        json.dumps(
+            normalized,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def canonical_harbor_job_config_sha256(value: Mapping[str, Any]) -> str:
+    """Hash the pinned semantic Harbor job configuration."""
+
+    return hashlib.sha256(canonical_harbor_job_config_bytes(value)).hexdigest()
 
 
 def comparison_plan_path_for_config(
