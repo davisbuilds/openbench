@@ -11,6 +11,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass, replace
 import hashlib
 from importlib import metadata
+from importlib.machinery import all_suffixes
 import json
 import os
 from pathlib import Path
@@ -318,6 +319,11 @@ def run_suite(
         / "suite-configs"
         / compiled.manifest_sha256
     )
+    _ensure_safe_artifact_directory(
+        compiled.suite.project_root,
+        configs_dir,
+        label="Harbor suite config directory",
+    )
 
     try:
         with ExitStack() as stack:
@@ -410,9 +416,16 @@ def _compile_task_set(task_set: TaskSet, root: Path) -> CompiledTaskSet:
             raise SuiteRunError(f"{task_toml}: invalid TOML: {exc}") from exc
         task = raw.get("task")
         logical = task.get("name") if isinstance(task, dict) else None
-        logical_names.append(
-            logical if isinstance(logical, str) and logical else child.name
-        )
+        if (
+            not isinstance(logical, str)
+            or not logical
+            or logical != logical.strip()
+            or "\x00" in logical
+        ):
+            raise SuiteRunError(
+                f"{task_toml}: task.name must be a non-empty safe string"
+            )
+        logical_names.append(logical)
     relative = task_set.path.relative_to(root).as_posix()
     return CompiledTaskSet(
         task_set=task_set,
@@ -448,12 +461,13 @@ def _reject_task_collisions(task_sets: tuple[CompiledTaskSet, ...]) -> None:
         if item.logical_names is None:
             continue
         for logical_name in item.logical_names:
-            previous = seen.setdefault(logical_name, item.task_set.id)
-            if previous != item.task_set.id:
+            previous = seen.get(logical_name)
+            if previous is not None:
                 raise SuiteRunError(
-                    f"logical task {logical_name!r} collides across task sets "
+                    f"logical task {logical_name!r} is duplicated by task sets "
                     f"{previous!r} and {item.task_set.id!r}"
                 )
+            seen[logical_name] = item.task_set.id
 
 
 def _semantic_manifest(
@@ -674,27 +688,53 @@ def _validate_custom_runtime(compiled: CompiledSuite) -> dict[str, str]:
 
 def _verify_custom_distribution(profile: CustomProfileSpec) -> None:
     try:
-        installed = metadata.version(profile.distribution)
+        distribution = metadata.distribution(profile.distribution)
     except metadata.PackageNotFoundError as exc:
         raise SuiteRunError(
             f"custom profile {profile.id!r} requires installed distribution "
             f"{profile.distribution}=={profile.version}"
         ) from exc
+    installed = distribution.version
     if installed != profile.version:
         raise SuiteRunError(
             f"custom profile {profile.id!r} requires "
             f"{profile.distribution}=={profile.version}, found {installed}"
         )
 
-    top_level_module = profile.import_path.split(":", 1)[0].split(".", 1)[0]
-    owners = metadata.packages_distributions().get(top_level_module, ())
-    expected = _canonical_distribution_name(profile.distribution)
-    if expected not in {
-        _canonical_distribution_name(owner) for owner in owners
-    }:
+    installed_name = distribution.metadata.get("Name")
+    if (
+        not isinstance(installed_name, str)
+        or _canonical_distribution_name(installed_name)
+        != _canonical_distribution_name(profile.distribution)
+    ):
+        raise SuiteRunError(
+            f"custom profile {profile.id!r} resolved a different distribution "
+            f"identity for {profile.distribution!r}"
+        )
+
+    module_path = profile.import_path.split(":", 1)[0].replace(".", "/")
+    candidates = {
+        f"{module_path}{suffix}" for suffix in all_suffixes()
+    } | {
+        f"{module_path}/__init__{suffix}" for suffix in all_suffixes()
+    }
+    files = distribution.files
+    matching = [
+        file
+        for file in (files or ())
+        if Path(str(file)).as_posix() in candidates
+    ]
+    if len(matching) != 1:
         raise SuiteRunError(
             f"custom profile {profile.id!r} import {profile.import_path!r} "
-            f"is not owned by installed distribution {profile.distribution!r}"
+            f"is not uniquely owned by installed distribution "
+            f"{profile.distribution!r}"
+        )
+    installed_module = Path(distribution.locate_file(matching[0]))
+    if installed_module.is_symlink() or not installed_module.is_file():
+        raise SuiteRunError(
+            f"custom profile {profile.id!r} installed module is not a "
+            f"regular file: {profile.import_path!r}"
         )
 
 
@@ -809,8 +849,61 @@ def _write_manifest(compiled: CompiledSuite) -> Path:
         / "suite-runs"
         / f"{compiled.manifest_sha256}.json"
     )
+    _ensure_safe_artifact_directory(
+        compiled.suite.project_root,
+        destination.parent,
+        label="suite manifest directory",
+    )
     _write_immutable(destination, compiled.manifest_bytes)
     return destination
+
+
+def _ensure_safe_artifact_directory(
+    project_root: Path,
+    directory: Path,
+    *,
+    label: str,
+) -> None:
+    """Create a project-local directory without following any symlink."""
+
+    root = Path(os.path.abspath(project_root))
+    target = Path(os.path.abspath(directory))
+    try:
+        relative = target.relative_to(root)
+    except ValueError as exc:
+        raise SuiteRunError(f"{label} escapes the project root: {target}") from exc
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        directory_fd = os.open(root, flags)
+    except OSError as exc:
+        raise SuiteRunError(f"{label} has an unsafe project root") from exc
+    current = root
+    try:
+        for part in relative.parts:
+            current = current / part
+            try:
+                child_fd = os.open(part, flags, dir_fd=directory_fd)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(part, dir_fd=directory_fd)
+                    child_fd = os.open(part, flags, dir_fd=directory_fd)
+                except OSError as exc:
+                    raise SuiteRunError(
+                        f"{label} has an unsafe component: {current}"
+                    ) from exc
+            except OSError as exc:
+                raise SuiteRunError(
+                    f"{label} has an unsafe component: {current}"
+                ) from exc
+            os.close(directory_fd)
+            directory_fd = child_fd
+    finally:
+        os.close(directory_fd)
 
 
 def _write_immutable(destination: Path, content: bytes) -> None:

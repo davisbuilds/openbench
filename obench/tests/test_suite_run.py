@@ -38,6 +38,23 @@ class SuiteRunTests(unittest.TestCase):
     def _write_suite(self, root: Path, text: str) -> None:
         self._suite_path(root).write_text(text, encoding="utf-8")
 
+    def _fake_distribution(
+        self,
+        root: Path,
+        *,
+        version: str,
+    ):
+        installed = root / "installed"
+        module = installed / "acme" / "harbor.py"
+        module.parent.mkdir(parents=True)
+        module.write_text("class Agent: pass\n", encoding="utf-8")
+        return SimpleNamespace(
+            version=version,
+            metadata={"Name": "acme-harbor-agent"},
+            files=(Path("acme/harbor.py"),),
+            locate_file=lambda path: installed / path,
+        )
+
     def _add_second_local_task_set(
         self,
         root: Path,
@@ -282,10 +299,11 @@ model = "gpt-5.6-terra"
         with mock.patch.dict(
             os.environ, {"ACME_API_KEY": "not-in-manifest"}, clear=True
         ), mock.patch(
-            "obench.suite_run.metadata.version", return_value="2.4.0"
+            "obench.suite_run.metadata.distribution",
+            return_value=self._fake_distribution(root, version="2.4.0"),
         ):
             with self.assertRaisesRegex(
-                SuiteRunError, "requires acme-harbor-agent==2.4.1"
+                SuiteRunError, "requires .*acme-harbor-agent==2.4.1"
             ):
                 suite_run.run_suite(compiled, preflight=preflight)
         preflight.assert_not_called()
@@ -297,7 +315,22 @@ model = "gpt-5.6-terra"
             root, logical_name="private/example-greeting"
         )
 
-        with self.assertRaisesRegex(SuiteRunError, "collides across task sets"):
+        with self.assertRaisesRegex(SuiteRunError, "duplicated by task sets"):
+            suite_run.compile_suite(start=root)
+
+    def test_missing_local_task_name_fails_during_compile(self):
+        root = self._project()
+        task_toml = (
+            root / ".openbench" / "tasks" / "example-greeting" / "task.toml"
+        )
+        task_toml.write_text(
+            task_toml.read_text(encoding="utf-8").replace(
+                'name = "private/example-greeting"', 'name = ""'
+            ),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(SuiteRunError, "task.name"):
             suite_run.compile_suite(start=root)
 
     def test_mocked_execution_runs_one_harbor_command_per_task_set_and_one_lease(self):
@@ -411,10 +444,8 @@ model = "gpt-5.6-sol"
         with mock.patch.dict(
             os.environ, {"ACME_API_KEY": "runtime-secret"}, clear=True
         ), mock.patch(
-            "obench.suite_run.metadata.version", return_value="2.4.1"
-        ), mock.patch(
-            "obench.suite_run.metadata.packages_distributions",
-            return_value={"acme": ["acme-harbor-agent"]},
+            "obench.suite_run.metadata.distribution",
+            return_value=self._fake_distribution(root, version="2.4.1"),
         ):
             result = suite_run.run_suite(
                 compiled,
@@ -509,6 +540,38 @@ model = "gpt-5.6-sol"
         self.assertEqual(result.returncode, 0)
         self.assertEqual(observed_return_before_harbor, [False])
         self.assertTrue((fake_auth_root / "return.json").is_file())
+
+    def test_generated_artifact_directories_reject_symlink_escape(self):
+        root = self._project()
+        compiled = suite_run.compile_suite(start=root)
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        suite_runs = root / ".openbench" / "results" / "suite-runs"
+        suite_runs.symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaisesRegex(SuiteRunError, "unsafe component"):
+            suite_run._write_manifest(compiled)
+        self.assertEqual(list(outside.iterdir()), [])
+
+        suite_runs.unlink()
+        suite_configs = root / ".openbench" / "jobs" / "suite-configs"
+        suite_configs.symlink_to(outside, target_is_directory=True)
+        credential = mock.Mock()
+        with mock.patch(
+            "obench.suite_run.HarborOAuthCredential", credential
+        ):
+            with self.assertRaisesRegex(SuiteRunError, "unsafe component"):
+                suite_run.run_suite(
+                    compiled,
+                    preflight=lambda *args, **kwargs: HarborBinary(
+                        path=Path("/fake/harbor"),
+                        version="0.20.0",
+                        git_commit=init.HARBOR_COMMIT,
+                        is_editable=False,
+                    ),
+                )
+        credential.assert_not_called()
+        self.assertEqual(list(outside.iterdir()), [])
 
     def test_nonzero_harbor_exit_is_returned_and_stops_later_jobs(self):
         root = self._project()
