@@ -70,6 +70,8 @@ def split_total_tokens_per_solve(rows, solved=None):
         solved = sum(bool(row.get("success")) for row in rows)
     if not solved:
         return None
+    if any(not stats.usage_evidence.ranking_eligible(row) for row in rows):
+        return None
     totals = []
     selected_source = None
     for row in rows:
@@ -155,17 +157,22 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
         arms = []
         prepared = {}
         arm_labels = _arm_labels(model_rows)
+        matched = matching_policy.get(model, False)
+        if matched:
+            stats.validate_matched_comparison_rows(model_rows)
         for identity, arm_label in arm_labels.items():
             eligible, excluded = compare._filter_arm(
                 [row for row in model_rows if _arm_identity(row) == identity], roots)
-            unique, duplicates = compare._unique_cells(eligible)
+            unique, duplicates = compare._unique_cells(
+                eligible,
+                require_harbor_identity=matched,
+            )
             if duplicates:
                 raise ValueError(
                     f"{model} × {arm_label}: {duplicates} duplicate (task, trial) cell(s)"
                 )
             prepared[arm_label] = (eligible, unique, excluded, duplicates)
         common_cells = set.intersection(*(set(values[1]) for values in prepared.values()))
-        matched = matching_policy.get(model, False)
         provenance_rows = []
         for harness, (eligible, unique, excluded, duplicates) in prepared.items():
             rows = ([unique[cell] for cell in sorted(common_cells)]
@@ -187,6 +194,11 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
             # Uniform total is derived from the three displayed split fields;
             # never trust the vendor aggregate, whose semantics vary by harness.
             total_tokens = split_total_tokens_per_solve(rows, solved)
+            usage_exclusions = sorted({
+                stats.usage_evidence.exclusion_reason(row)
+                for row in rows
+                if not stats.usage_evidence.ranking_eligible(row)
+            })
             arms.append({
                 "arm": harness,
                 "solved": solved,
@@ -206,6 +218,7 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
                 "total_tokens": total_tokens,
                 "cost_per_solve": _cost_per_solve(rows, solved, pricing),
                 "token_basis": _token_basis(rows),
+                "usage_exclusions": usage_exclusions,
                 "cli_basis": any(str(row.get("harness", "")).lower() in CLI_ARMS
                                  for row in rows),
                 "excluded": dict(excluded),
@@ -463,6 +476,20 @@ def render_page(models, methodology, title="OpenBench report", headline=None,
             else:
                 warning = ('<p class="warning"><strong>Non-comparable provenance:</strong> '
                            + html.escape(messages) + ". Inspect source rows before publishing.</p>")
+        usage_warnings = []
+        for arm in model["arms"]:
+            if not arm.get("usage_exclusions"):
+                continue
+            usage_warnings.append(
+                f"{arm['arm']}: {arm['token_basis']}; token, cost, and efficiency "
+                "metrics are excluded. Correctness and latency remain publishable."
+            )
+        if usage_warnings:
+            warning += (
+                '<p class="warning usage-warning"><strong>Usage evidence warning:</strong> '
+                + html.escape(" ".join(usage_warnings))
+                + "</p>"
+            )
         body = []
         for a in model["arms"]:
             values = [f"{a['arm']} × {model['model']}", f"{a['solved']}/{a['n']}"]

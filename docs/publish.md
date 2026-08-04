@@ -15,17 +15,12 @@ mkdir -p data
 obench gate path/to/my-cli.toml \
   --model deepseek-v4-flash --live > data/my-cli-gate.json
 
-# 2. Run a matrix: candidate + stock arms, same tasks / model / trials.
-obench run --harness null,pi \
-  --candidate path/to/my-cli.toml \
-  --task fix-failing-test,build-a-cli \
-  --model deepseek-v4-flash \
-  --trials 2 \
-  --results-path results/my-claim.jsonl
+# 2. Declare the stock/custom arms and tasks in a public, complete suite.
+obench run path/to/my-public-suite.toml
 
 # 3. Publish a shareable bundle (no transcripts ever leave the machine).
 obench publish \
-  --results-path results/my-claim.jsonl \
+  --results-path .openbench/results/suite-runs/<digest>.results.jsonl \
   --candidate my-cli \
   --out openbench-publish/my-claim
 
@@ -41,7 +36,7 @@ Readers open `index.html` and, if they have the same tasks checked out, run
 
 | Path | Role |
 |------|------|
-| `index.html` | Self-contained HTML comparison card (candidate row(s) highlighted; Wilson CIs; mean score / wall; tokens/solve; token-basis badges: `unmetered` / `self-reported` / `proxy-measured`) |
+| `index.html` | Self-contained HTML comparison card (candidate row(s) highlighted; Wilson CIs; mean score / wall; tokens/solve; evidence badges including `Harbor-reported`, `Harbor-reported + proxy-verified`, and visibly flagged Harbor/proxy mismatches) |
 | `results.jsonl` | Filtered rows for the claim — transcript fields stripped |
 | `provenance.json` | `obench` version, `digest_scheme`, per-arm identity digests (`candidate_provenance`), per-task content digests, models, trial counts, SHA-256 of `results.jsonl`, and a per-run `harbor_import_evidence` manifest when Harbor-imported rows are present |
 | `README.md` | How to re-verify and what verify does / does not prove |
@@ -64,6 +59,10 @@ Default output directory: `./openbench-publish/<timestamp>/` (override with
   record under `data/`, `.openbench/gate/`, or `results/gate/`. Use
   `--allow-incomplete` only for an intentionally caveated artifact; the
   resulting warnings remain in terminal output, provenance, and HTML.
+- **Suite scope is authoritative.** `local_only` suite rows are rejected by
+  publish, bundle verification, community acceptance/sync, and site ingestion,
+  even if files are copied. Public suite rows require `complete`, the full
+  declared denominator, and all declared evidence. Smoke suites never publish.
 - **Harbor imports have a strict publication schema.** A row marked as Harbor
   execution must contain the complete normalized importer provenance and agree
   with its workspace and usage fields. Publish retains the Harbor build, job
@@ -74,6 +73,12 @@ Default output directory: `./openbench-publish/<timestamp>/` (override with
   contradictory, or extended Harbor provenance refuses publication before the
   output directory is created; `--allow-incomplete` and
   `--allow-pii-override` do not bypass this validation.
+- **Usage evidence is graded independently.** Non-proxy profiles publish ATIF
+  usage as `Harbor-reported`. Exact proxy reconciliation adds
+  `proxy-verified`. A structurally valid mismatch preserves both values and may
+  publish correctness and latency, but token, cost, and efficiency metrics are
+  excluded. Incomplete, malformed, unsealed, or tampered required evidence
+  still refuses publication.
 
 ## What `obench verify` proves
 
@@ -89,7 +94,9 @@ obench verify openbench-publish/my-claim
   usage-provenance claims without publishing the underlying private artifacts.
 - For each Harbor task, the structured executed digest is scheme 2 and equals
   the task digest recorded by publication. `obench publish` also requires it
-  to match the local task tree before writing the bundle.
+  to match the local task tree before writing the bundle. For local comparison
+  plans, the row keeps the canonical task ID while the sealed `task_id_map`
+  selects the actual source directory used for this recomputation.
 - Using the evidence-bound exporter parameters, publish and verify reproduce
   the Harbor 0.20.0 package content hash from a canonical re-export and require
   it to equal the locked Harbor task digest. A modified post-export task cannot

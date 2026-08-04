@@ -25,7 +25,12 @@ def main(argv=None):
     )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("run", help="run benchmark cells", add_help=False)
+    sub.add_parser("run", help="run a Harbor-native benchmark suite", add_help=False)
+    sub.add_parser(
+        "legacy",
+        help="explicit compatibility commands for the old native runner",
+        add_help=False,
+    )
     sub.add_parser("report", help="aggregate results.jsonl", add_help=False)
     sub.add_parser("doctor", help="preflight CLI/auth/model checks", add_help=False)
     sub.add_parser("validate", help="check task checker polarity", add_help=False)
@@ -90,14 +95,14 @@ def main(argv=None):
         return 0
 
     known = {
-        "run", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
+        "run", "legacy", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
         "matrix", "results", "publish", "verify", "community", "leaderboard",
         "site", "pack", "export",
         "import",
     }
     if command not in known:
         parser.error(
-            f"unknown command {command!r}; choose from run, report, doctor, "
+            f"unknown command {command!r}; choose from run, legacy, report, doctor, "
             "validate, admit, gateway, router, harbor, gate, compare, init, publish, verify, community, "
             "leaderboard, results, site, pack, export, import"
         )
@@ -109,8 +114,13 @@ def main(argv=None):
         from .matrix_queue import main as matrix_main
         return matrix_main(rest)
     if command == "run":
-        from .run import main as run_main
+        from .suite_run import main as run_main
         return run_main(rest)
+    if command == "legacy":
+        if not rest or rest[0] != "run":
+            parser.error("legacy requires the explicit subcommand: obench legacy run")
+        from .run import main as legacy_run_main
+        return legacy_run_main(rest[1:])
     if command == "report":
         from .report import main as report_main
         return report_main(rest)

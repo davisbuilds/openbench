@@ -34,8 +34,12 @@ from .paths import default_results_path
 from .stats import (
     TOKEN_BASIS_PROXY,
     TOKEN_BASIS_SELF,
+    comparison_cell_key,
     effective_tokens,
+    is_harbor_result_row,
+    validate_matched_comparison_rows,
 )
+from . import usage_evidence
 
 DEFAULT_RESULTS_PATH = default_results_path()
 
@@ -125,6 +129,17 @@ def aggregate(rows):
     value, so an empty list means "no data" (rendered ``-``) rather than zero.
     Effective tokens prefer self-reported ``tokens``, else proxy fresh totals.
     """
+    comparable_rows = [
+        row
+        for row in rows
+        if _arm_key(row) is not None and row.get("task") is not None
+    ]
+    if (
+        len({_arm_key(row) for row in comparable_rows}) >= 2
+        and any(is_harbor_result_row(row) for row in comparable_rows)
+    ):
+        validate_matched_comparison_rows(comparable_rows)
+
     arms = []
     tasks = []
     stats = {}
@@ -137,7 +152,7 @@ def aggregate(rows):
         if key not in stats:
             stats[key] = {"per_task": {}, "succ": 0, "n": 0, "scores": [],
                           "wall_times": [], "token_vals": [], "token_bases": set(),
-                          "turn_vals": [],
+                          "turn_vals": [], "usage_exclusions": set(),
                           "cells_planned": set(), "cells_satisfied": set(),
                           "taxonomy": {fc: 0 for fc in FAILURE_CLASSES}}
             arms.append(key)
@@ -145,6 +160,10 @@ def aggregate(rows):
             tasks.append(task)
 
         st = stats[key]
+        if not usage_evidence.ranking_eligible(row):
+            st["usage_exclusions"].add(
+                usage_evidence.exclusion_reason(row) or "usage_unavailable"
+            )
         fc = class_for_report(row)
         st["taxonomy"][fc] = st["taxonomy"].get(fc, 0) + 1
         # Coverage: a (task, trial) cell is PLANNED as soon as any row exists for
@@ -152,7 +171,10 @@ def aggregate(rows):
         # still proves it was attempted) and SATISFIED only once some attempt
         # produced a countable verdict. Tracking distinct cells rather than row
         # counts keeps retries from inflating either side.
-        cell = (task, row.get("trial"))
+        cell = comparison_cell_key(
+            row,
+            require_harbor_identity=False,
+        )
         st["cells_planned"].add(cell)
         if is_excluded_from_solve_rate(row):
             continue
@@ -187,6 +209,10 @@ def aggregate(rows):
         turn = row.get("turns")
         if isinstance(turn, (int, float)) and not isinstance(turn, bool):
             st["turn_vals"].append(turn)
+    for st in stats.values():
+        if st["usage_exclusions"]:
+            st["token_vals"].clear()
+            st["token_bases"].clear()
     return arms, tasks, stats
 
 
@@ -224,7 +250,14 @@ def _one_row_per_cell(rows):
         # Every row in the current corpus carries a trial (3875/3875), so this
         # only guards older or hand-written data.
         trial = row.get("trial")
-        cell = (key, task, trial) if trial is not None else ("__no_trial__", index)
+        cell = (
+            (key, *comparison_cell_key(
+                row,
+                require_harbor_identity=False,
+            ))
+            if trial is not None
+            else ("__no_trial__", index)
+        )
         rank = (not is_excluded_from_solve_rate(row), row.get("ts_iso") or "")
         prev = chosen.get(cell)
         if prev is None or rank > prev[0]:
@@ -357,6 +390,22 @@ def _token_notes(stats, arms, used_proxy):
         notes.append(PROXY_FOOTNOTE)
     if table_has_mixed_token_bases(stats, arms):
         notes.append(MIXED_BASIS_WARNING)
+    excluded = []
+    for arm in arms:
+        reasons = sorted(stats[arm].get("usage_exclusions") or ())
+        if reasons:
+            excluded.append(
+                "%s: %s" % (
+                    " x ".join(str(value) for value in arm),
+                    ", ".join(reasons),
+                )
+            )
+    if excluded:
+        notes.append(
+            "USAGE EVIDENCE: token/cost/efficiency metrics excluded for "
+            + "; ".join(excluded)
+            + ". Correctness and latency remain reportable."
+        )
     notes.extend("COVERAGE: " + w for w in coverage_warnings(stats, arms))
     return notes
 

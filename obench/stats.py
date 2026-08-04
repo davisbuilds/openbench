@@ -20,10 +20,12 @@ stdlib implementation.
 """
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import sys
+import tomllib
 from collections import Counter, defaultdict
 
 from .paths import SOURCE_ROOT, default_imported_tasks_dir, default_tasks_dir, find_repo_root
@@ -68,6 +70,11 @@ Z_95 = 1.96
 
 from .failure_class import class_for_report
 from .failure_class import EXCLUDED_FROM_SOLVE_RATE as _EXCLUDED_FROM_SOLVE_RATE
+from .harbor_job import (
+    COMPARISON_PLAN_SCHEMA_VERSION,
+    canonical_comparison_plan_bytes,
+)
+from . import usage_evidence
 
 EXCLUDED_FAILURE_CLASSES = set(_EXCLUDED_FROM_SOLVE_RATE)
 
@@ -230,6 +237,8 @@ def effective_tokens(row):
     scalar contributes. Large ``tokens_proxy_cache_read`` never inflates the
     fresh total.
     """
+    if not usage_evidence.ranking_eligible(row):
+        return None, None
     if is_nonnegative_number(row.get("tokens")):
         return float(row["tokens"]), TOKEN_BASIS_SELF
     if row.get("token_basis_proxy") == "proxy_measured":
@@ -243,6 +252,9 @@ def effective_tokens(row):
 
 def display_token_basis(row):
     """Normalize a row's token accounting into a badge label, or None."""
+    evidence_label = usage_evidence.display_label(row)
+    if evidence_label is not None:
+        return evidence_label
     _value, basis = effective_tokens(row)
     if basis is not None:
         return basis
@@ -259,6 +271,8 @@ def display_token_basis(row):
 
 
 def total_tokens(row):
+    if not usage_evidence.ranking_eligible(row):
+        return None
     if is_nonnegative_number(row.get("tokens_total")):
         return row.get("tokens_total")
     value, _basis = effective_tokens(row)
@@ -266,6 +280,8 @@ def total_tokens(row):
 
 
 def input_tokens(row):
+    if not usage_evidence.ranking_eligible(row):
+        return None
     if is_nonnegative_number(row.get("tokens_input")):
         return row.get("tokens_input")
     if is_nonnegative_number(row.get("tokens_input_uncached")):
@@ -278,6 +294,8 @@ def input_tokens(row):
 
 
 def output_tokens(row):
+    if not usage_evidence.ranking_eligible(row):
+        return None
     if is_nonnegative_number(row.get("tokens_output")):
         return row.get("tokens_output")
     if row.get("token_basis_proxy") == "proxy_measured":
@@ -342,17 +360,884 @@ def is_valid_result_row(row):
 
 
 def group_key(row, fields):
-    return tuple(str(row.get(field) or "-") for field in fields)
+    key = tuple(str(row.get(field) or "-") for field in fields)
+    provenance = row.get("candidate_provenance")
+    if (
+        isinstance(provenance, dict)
+        and provenance.get("kind") == "harbor_job"
+        and provenance.get("comparison_arm_id")
+    ):
+        key += (str(provenance["comparison_arm_id"]),)
+    return key
 
 
 def group_label(key, fields):
+    suffix = f",arm={key[-1]}" if len(key) > len(fields) else ""
     if len(fields) == 1:
-        return key[0]
-    return ",".join(f"{field}={value}" for field, value in zip(fields, key))
+        return key[0] + suffix
+    return ",".join(
+        f"{field}={value}" for field, value in zip(fields, key)
+    ) + suffix
+
+
+def is_harbor_result_row(row):
+    provenance = row.get("candidate_provenance")
+    return (
+        row.get("exec_mode") == "harbor"
+        or (
+            isinstance(provenance, dict)
+            and provenance.get("kind") == "harbor_job"
+        )
+    )
+
+
+def _comparison_plan_arm(row):
+    provenance = row.get("candidate_provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError(
+            "Harbor matched comparison requires exact OpenBench "
+            "comparison-plan identity"
+        )
+    plan = provenance.get("comparison_plan")
+    expected_plan_fields = {
+        "schema_version",
+        "harbor_version",
+        "harbor_git_commit_hash",
+        "job_name",
+        "submitted_job_config_sha256",
+        "effective_job_config_sha256",
+        "attempts",
+        "dataset",
+        "tasks",
+        "task_id_map",
+        "arms",
+    }
+    if not isinstance(plan, dict) or set(plan) != expected_plan_fields:
+        raise ValueError(
+            "Harbor matched comparison requires a canonical embedded plan"
+        )
+    try:
+        plan_bytes = canonical_comparison_plan_bytes(plan)
+    except (TypeError, ValueError):
+        raise ValueError(
+            "Harbor matched comparison requires a canonical embedded plan"
+        ) from None
+    plan_sha256 = hashlib.sha256(plan_bytes).hexdigest()
+    if (
+        plan.get("schema_version") != COMPARISON_PLAN_SCHEMA_VERSION
+        or provenance.get("comparison_plan_schema_version")
+        != COMPARISON_PLAN_SCHEMA_VERSION
+        or provenance.get("comparison_plan_sha256") != plan_sha256
+    ):
+        raise ValueError(
+            "Harbor matched comparison embedded plan digest does not match"
+        )
+    arms = plan.get("arms")
+    if not isinstance(arms, list) or not arms:
+        raise ValueError("Harbor matched comparison plan has invalid arms")
+    expected_arm_fields = {
+        "arm_id",
+        "agent_config_name",
+        "harbor_model_name",
+        "agent_config_sha256",
+        "canonical_harness",
+        "canonical_model",
+    }
+    arms_by_id = {}
+    digests = set()
+    for arm in arms:
+        if not isinstance(arm, dict) or set(arm) != expected_arm_fields:
+            raise ValueError("Harbor matched comparison plan has invalid arms")
+        arm_id = arm.get("arm_id")
+        digest = arm.get("agent_config_sha256")
+        if (
+            not isinstance(arm_id, str)
+            or not arm_id
+            or arm_id in arms_by_id
+            or not isinstance(digest, str)
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+            or digest in digests
+        ):
+            raise ValueError("Harbor matched comparison plan has invalid arms")
+        arms_by_id[arm_id] = arm
+        digests.add(digest)
+    arm = arms_by_id.get(provenance.get("comparison_arm_id"))
+    if (
+        arm is None
+        or arm["agent_config_sha256"]
+        != provenance.get("agent_config_sha256")
+        or arm["canonical_harness"] != row.get("harness")
+        or arm["canonical_model"] != row.get("model")
+    ):
+        raise ValueError(
+            "Harbor matched comparison row does not match its declared plan arm"
+        )
+    return arm
+
+
+def harbor_task_source_binding(row):
+    """Return the sealed filesystem binding for one Harbor result task."""
+
+    task = row.get("task")
+    if not isinstance(task, str) or not task:
+        raise ValueError("Harbor result row has no canonical task identity")
+    provenance = row.get("candidate_provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError("Harbor result row has no provenance")
+
+    plan = provenance.get("comparison_plan")
+    selector = task
+    if isinstance(plan, dict) and plan.get("tasks") is not None:
+        _comparison_plan_arm(row)
+        task_id_map = plan.get("task_id_map")
+        matches = [
+            raw_selector
+            for raw_selector, canonical_id in task_id_map.items()
+            if canonical_id == task
+        ] if isinstance(task_id_map, dict) else []
+        if len(matches) != 1:
+            raise ValueError(
+                f"Harbor task {task!r}: canonical ID has no unique local selector"
+            )
+        selector = matches[0]
+
+    binding = {
+        "canonical_id": task,
+        "selector": selector,
+        "suite_manifest_sha256": None,
+        "suite_task_set_id": None,
+        "suite_task_set_path": None,
+    }
+    manifest = provenance.get("suite_manifest")
+    manifest_sha256 = provenance.get("suite_manifest_sha256")
+    task_set_id = provenance.get("suite_task_set_id")
+    if manifest is None and manifest_sha256 is None and task_set_id is None:
+        return binding
+    if (
+        not isinstance(manifest, dict)
+        or not _sha256_hex(manifest_sha256)
+        or hashlib.sha256(_canonical_suite_manifest_bytes(manifest)).hexdigest()
+        != manifest_sha256
+        or not isinstance(task_set_id, str)
+        or not task_set_id
+    ):
+        raise ValueError("Harbor suite task source has invalid manifest identity")
+    _validate_suite_manifest_shape(manifest, manifest_sha256)
+    matches = [
+        item
+        for item in manifest["task_sets"]
+        if isinstance(item, dict) and item.get("id") == task_set_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("Harbor suite task source has no unique task-set binding")
+    task_set = matches[0]
+    if task_set.get("kind") != "local":
+        return {
+            **binding,
+            "suite_manifest_sha256": manifest_sha256,
+            "suite_task_set_id": task_set_id,
+        }
+
+    task_set_path = task_set.get("path")
+    task_entries = task_set.get("tasks")
+    path_parts = (
+        task_set_path.split("/")
+        if isinstance(task_set_path, str)
+        else []
+    )
+    expected_task_map = (
+        {
+            item["directory"]: item["logical_name"]
+            for item in task_entries
+        }
+        if isinstance(task_entries, list)
+        and all(
+            isinstance(item, dict)
+            and set(item) == {"directory", "logical_name"}
+            and isinstance(item["directory"], str)
+            and item["directory"]
+            and isinstance(item["logical_name"], str)
+            and item["logical_name"]
+            for item in task_entries
+        )
+        else None
+    )
+    if (
+        not path_parts
+        or any(part in ("", ".", "..") for part in path_parts)
+        or os.path.isabs(task_set_path)
+        or expected_task_map is None
+        or expected_task_map.get(selector) != task
+    ):
+        raise ValueError("Harbor suite task source does not match its manifest")
+    return {
+        **binding,
+        "suite_manifest_sha256": manifest_sha256,
+        "suite_task_set_id": task_set_id,
+        "suite_task_set_path": task_set_path,
+    }
+
+
+def _path_is_under(path, root):
+    path_real = os.path.realpath(path)
+    root_real = os.path.realpath(root)
+    return os.path.commonpath([root_real, path_real]) == root_real
+
+
+def _unique_existing_task_dir(task, roots):
+    candidates = {
+        os.path.realpath(path)
+        for path in _candidate_task_dirs(task, roots)
+        if os.path.isdir(path)
+    }
+    if len(candidates) > 1:
+        raise ValueError(
+            f"task source {task!r} is ambiguous across configured task roots"
+        )
+    return next(iter(candidates), None)
+
+
+def resolve_task_source_binding(binding, roots, *, required=False):
+    """Resolve a sealed task binding to exactly one current source directory."""
+
+    roots = parse_tasks_dirs(roots)
+    selector = binding["selector"]
+    task_set_path = binding.get("suite_task_set_path")
+    if task_set_path is None:
+        return _unique_existing_task_dir(selector, roots)
+
+    project_roots = set()
+    for root in roots:
+        current = os.path.realpath(root)
+        while True:
+            project_roots.add(current)
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+
+    source_dirs = set()
+    found_suite_task = False
+    for project_root in sorted(project_roots):
+        task_set_root = _safe_join_under(project_root, task_set_path)
+        if (
+            task_set_root is None
+            or not os.path.isdir(task_set_root)
+            or os.path.islink(task_set_root)
+        ):
+            continue
+        task_dir = _safe_join_under(task_set_root, selector)
+        if (
+            task_dir is None
+            or os.path.dirname(task_dir) != os.path.realpath(task_set_root)
+            or not os.path.isdir(task_dir)
+            or os.path.islink(task_dir)
+        ):
+            continue
+        config_path = os.path.join(task_dir, "task.toml")
+        try:
+            with open(config_path, "rb") as handle:
+                config = tomllib.load(handle)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ValueError(
+                f"cannot read sealed Harbor task source {config_path}: {exc}"
+            ) from exc
+        task_config = config.get("task")
+        if (
+            not isinstance(task_config, dict)
+            or task_config.get("name") != binding["canonical_id"]
+        ):
+            continue
+        found_suite_task = True
+        metadata = config.get("metadata")
+        source_task = (
+            metadata.get("source_task")
+            if isinstance(metadata, dict)
+            else None
+        )
+        if source_task is None:
+            if any(_path_is_under(task_dir, root) for root in roots):
+                source_dirs.add(os.path.realpath(task_dir))
+            continue
+        source_parts = source_task.split("/") if isinstance(source_task, str) else []
+        if (
+            not source_parts
+            or os.path.isabs(source_task)
+            or any(part in ("", ".", "..") for part in source_parts)
+        ):
+            raise ValueError(
+                f"Harbor task {binding['canonical_id']!r} has unsafe source_task metadata"
+            )
+        source_dir = _safe_join_under(project_root, source_task)
+        if (
+            source_dir is not None
+            and os.path.isdir(source_dir)
+            and any(_path_is_under(source_dir, root) for root in roots)
+        ):
+            source_dirs.add(os.path.realpath(source_dir))
+
+    if len(source_dirs) > 1:
+        raise ValueError(
+            f"Harbor task {binding['canonical_id']!r} resolves to multiple source trees"
+        )
+    if source_dirs:
+        return next(iter(source_dirs))
+    if found_suite_task:
+        if required:
+            raise ValueError(
+                f"Harbor task {binding['canonical_id']!r} source tree is not among "
+                "the configured task roots"
+            )
+        return None
+    if required:
+        raise ValueError(
+            f"Harbor task {binding['canonical_id']!r} does not match the sealed "
+            f"suite task-set path {task_set_path!r}"
+        )
+    return None
+
+
+def resolve_row_task_dir(row, roots):
+    if not is_harbor_result_row(row):
+        return _unique_existing_task_dir(row.get("task"), roots)
+    return resolve_task_source_binding(harbor_task_source_binding(row), roots)
+
+
+def _canonical_suite_manifest_bytes(value):
+    return (
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def validate_suite_rows(rows, *, for_publication=False):
+    """Validate canonical suite bindings and the declared complete matrix."""
+
+    rows = list(rows)
+    suite_rows = [
+        row
+        for row in rows
+        if isinstance(row.get("candidate_provenance"), dict)
+        and any(
+            key.startswith("suite_")
+            for key in row["candidate_provenance"]
+        )
+    ]
+    if not suite_rows:
+        return None
+    if len(suite_rows) != len(rows):
+        raise ValueError("suite results cannot mix suite-bound and unbound rows")
+
+    manifests = {}
+    task_set_plans = defaultdict(set)
+    coordinates = set()
+    rows_by_task_set = defaultdict(list)
+    for row in suite_rows:
+        provenance = row["candidate_provenance"]
+        manifest = provenance.get("suite_manifest")
+        digest = provenance.get("suite_manifest_sha256")
+        if (
+            provenance.get("suite_manifest_schema_version") != 1
+            or not isinstance(manifest, dict)
+            or manifest.get("schema_version") != 1
+            or not isinstance(digest, str)
+            or hashlib.sha256(_canonical_suite_manifest_bytes(manifest)).hexdigest()
+            != digest
+        ):
+            raise ValueError("suite row has a non-canonical embedded manifest")
+        _validate_suite_manifest_shape(manifest, digest)
+        manifests[digest] = manifest
+        publication = manifest.get("publication")
+        if (
+            not isinstance(publication, dict)
+            or set(publication) != {"scope", "completeness"}
+            or provenance.get("suite_publication_scope")
+            != publication.get("scope")
+            or provenance.get("suite_completeness")
+            != publication.get("completeness")
+        ):
+            raise ValueError("suite row publication policy does not match manifest")
+        task_set_id = provenance.get("suite_task_set_id")
+        task_sets = manifest.get("task_sets")
+        if (
+            not isinstance(task_set_id, str)
+            or not isinstance(task_sets, list)
+            or sum(
+                isinstance(item, dict) and item.get("id") == task_set_id
+                for item in task_sets
+            )
+            != 1
+        ):
+            raise ValueError("suite row task-set binding does not match manifest")
+        arm = _comparison_plan_arm(row)
+        manifest_arms = manifest.get("arms")
+        matching_manifest_arms = [
+            item
+            for item in manifest_arms
+            if isinstance(item, dict)
+            and item.get("id") == arm["arm_id"]
+            and item.get("harness") == arm["canonical_harness"]
+            and item.get("canonical_model") == arm["canonical_model"]
+            and item.get("agent_config_sha256")
+            == arm["agent_config_sha256"]
+        ] if isinstance(manifest_arms, list) else []
+        if len(matching_manifest_arms) != 1:
+            raise ValueError("suite row plan arm does not match suite manifest")
+        run = manifest.get("run")
+        plan = provenance["comparison_plan"]
+        if (
+            not isinstance(run, dict)
+            or plan.get("attempts") != run.get("attempts")
+            or plan.get("job_name")
+            != (
+                f"{manifest['suite']['id']}-{task_set_id}-"
+                f"{digest[:12]}"
+            )
+        ):
+            raise ValueError("suite row plan does not match suite manifest job")
+        plan_sha256 = provenance["comparison_plan_sha256"]
+        task_set_plans[task_set_id].add(plan_sha256)
+        cell_key = comparison_cell_key(row)
+        if cell_key[:3] != (digest, task_set_id, plan_sha256):
+            raise ValueError("suite row has inconsistent matched-cell identity")
+        block = provenance.get("comparison_block")
+        coordinate = (
+            task_set_id,
+            plan_sha256,
+            arm["arm_id"],
+            block.get("task") if isinstance(block, dict) else None,
+            block.get("index") if isinstance(block, dict) else None,
+        )
+        if coordinate in coordinates:
+            raise ValueError("suite results contain a duplicate bound cell")
+        coordinates.add(coordinate)
+        rows_by_task_set[task_set_id].append(row)
+
+    if len(manifests) != 1:
+        raise ValueError(
+            "multi-plan suite comparison requires one canonical suite manifest"
+        )
+    manifest = next(iter(manifests.values()))
+    declared_task_sets = {
+        item["id"] for item in manifest["task_sets"] if isinstance(item, dict)
+    }
+    if set(rows_by_task_set) != declared_task_sets:
+        raise ValueError("suite results do not cover every declared task set")
+    if any(len(digests) != 1 for digests in task_set_plans.values()):
+        raise ValueError("each suite task set must bind exactly one comparison plan")
+
+    attempts = manifest["run"]["attempts"]
+    arm_ids = {arm["id"] for arm in manifest["arms"]}
+    for task_set_id, selected in rows_by_task_set.items():
+        plan_sha256 = next(iter(task_set_plans[task_set_id]))
+        resolved_task_sets = {
+            tuple(row["candidate_provenance"].get("comparison_resolved_tasks", ()))
+            for row in selected
+        }
+        if (
+            len(resolved_task_sets) != 1
+            or not next(iter(resolved_task_sets))
+        ):
+            raise ValueError(
+                f"suite task set {task_set_id!r} has inconsistent resolved tasks"
+            )
+        resolved_tasks = next(iter(resolved_task_sets))
+        plan = selected[0]["candidate_provenance"]["comparison_plan"]
+        plan_tasks = plan["tasks"]
+        task_id_map = plan["task_id_map"]
+        manifest_task_set = next(
+            item
+            for item in manifest["task_sets"]
+            if item["id"] == task_set_id
+        )
+        if manifest_task_set.get("kind") == "local":
+            manifest_tasks = manifest_task_set.get("tasks")
+            expected_task_id_map = (
+                {
+                    item["directory"]: item["logical_name"]
+                    for item in manifest_tasks
+                }
+                if isinstance(manifest_tasks, list)
+                and all(
+                    isinstance(item, dict)
+                    and set(item) == {"directory", "logical_name"}
+                    for item in manifest_tasks
+                )
+                else None
+            )
+            if (
+                expected_task_id_map is None
+                or plan_tasks != sorted(expected_task_id_map)
+                or task_id_map != expected_task_id_map
+            ):
+                raise ValueError(
+                    f"suite task set {task_set_id!r} plan task identities "
+                    "do not match the suite manifest"
+                )
+        elif plan_tasks is not None or task_id_map is not None:
+            raise ValueError(
+                f"suite task set {task_set_id!r} immutable Harbor dataset "
+                "must not declare local task identities"
+            )
+        expected_resolved_tasks = (
+            tuple(sorted(task_id_map.values()))
+            if plan_tasks is not None
+            else resolved_tasks
+        )
+        if expected_resolved_tasks != resolved_tasks:
+            raise ValueError(
+                f"suite task set {task_set_id!r} plan does not bind resolved tasks"
+            )
+        expected_coordinates = {
+            (task_set_id, plan_sha256, arm_id, task, attempt)
+            for arm_id in arm_ids
+            for task in resolved_tasks
+            for attempt in range(1, attempts + 1)
+        }
+        actual_coordinates = {
+            coordinate
+            for coordinate in coordinates
+            if coordinate[0] == task_set_id
+        }
+        if actual_coordinates != expected_coordinates:
+            raise ValueError(
+                f"suite task set {task_set_id!r} has an incomplete denominator"
+            )
+
+    publication = manifest["publication"]
+    complete = publication["completeness"] == "complete"
+    evidence = manifest.get("evidence")
+    if not isinstance(evidence, dict):
+        raise ValueError("suite manifest has invalid evidence policy")
+    for row in suite_rows:
+        provenance = row["candidate_provenance"]
+        if evidence.get("harbor_lock") and any(
+            not _sha256_hex(provenance.get(key))
+            for key in (
+                "job_lock_sha256",
+                "job_result_sha256",
+                "trial_lock_sha256",
+                "trial_result_sha256",
+            )
+        ):
+            raise ValueError("suite row lacks required Harbor lock/result evidence")
+        if row.get("completed") is not True and not complete:
+            continue
+        if evidence.get("trajectory") and not _sha256_hex(
+            provenance.get("atif_sha256")
+        ):
+            raise ValueError("suite row lacks required ATIF evidence")
+        if evidence.get("verifier") and not _sha256_hex(
+            provenance.get("openbench_verifier_evidence_sha256")
+        ):
+            raise ValueError("suite row lacks required verifier evidence")
+        if evidence.get("usage"):
+            from .harbor_results import HARBOR_PROXY_REQUIRED_AGENTS
+
+            proxy_required = provenance.get(
+                "harbor_agent_config_name"
+            ) in HARBOR_PROXY_REQUIRED_AGENTS
+            metering = provenance.get("harbor_metering")
+            grade = row.get("usage_evidence_grade")
+            if proxy_required:
+                status = (
+                    metering.get("reconciliation_status")
+                    if isinstance(metering, dict)
+                    and metering.get("proxy_required") is True
+                    else None
+                )
+                valid_usage = (
+                    status == "exact"
+                    and grade == usage_evidence.GRADE_PROXY_VERIFIED
+                    and row.get("usage_ranking_eligible") is True
+                ) or (
+                    status == "mismatch"
+                    and grade == usage_evidence.GRADE_PROXY_MISMATCH
+                    and row.get("usage_ranking_eligible") is False
+                )
+            else:
+                valid_usage = (
+                    row.get("token_basis") == "harbor_agent_reported"
+                    and isinstance(row.get("usage_raw"), dict)
+                    and grade == usage_evidence.GRADE_HARBOR_REPORTED
+                    and row.get("usage_ranking_eligible") is True
+                )
+            if not valid_usage:
+                raise ValueError(
+                    "suite row lacks required usage evidence"
+                )
+    if for_publication:
+        if publication["scope"] != "public":
+            raise ValueError("local_only suite results cannot be published")
+        if not complete:
+            raise ValueError("public suite results must be complete")
+        smoke_values = [
+            manifest["suite"]["id"],
+            manifest["suite"]["title"],
+            *(
+                str(item.get("id") or "")
+                for item in manifest["task_sets"]
+            ),
+            *(
+                str(item.get("name") or "")
+                for item in manifest["task_sets"]
+            ),
+        ]
+        if any("smoke" in value.lower() for value in smoke_values):
+            raise ValueError("smoke suite results cannot be published")
+    return manifest
+
+
+def _validate_suite_manifest_shape(manifest, digest):
+    expected_fields = {
+        "schema_version",
+        "suite",
+        "harbor",
+        "task_sets",
+        "arms",
+        "run",
+        "evidence",
+        "publication",
+        "jobs",
+    }
+    if set(manifest) != expected_fields:
+        raise ValueError("suite manifest has unexpected or missing fields")
+    if (
+        not isinstance(manifest.get("suite"), dict)
+        or set(manifest["suite"]) != {"id", "title"}
+        or not all(
+            isinstance(manifest["suite"].get(key), str)
+            and manifest["suite"][key]
+            for key in ("id", "title")
+        )
+        or not isinstance(manifest.get("task_sets"), list)
+        or not manifest["task_sets"]
+        or not isinstance(manifest.get("arms"), list)
+        or not manifest["arms"]
+        or not isinstance(manifest.get("jobs"), list)
+    ):
+        raise ValueError("suite manifest structure is invalid")
+    task_set_ids = [
+        item.get("id") for item in manifest["task_sets"]
+        if isinstance(item, dict)
+    ]
+    arm_ids = [
+        item.get("id") for item in manifest["arms"]
+        if isinstance(item, dict)
+    ]
+    if (
+        len(task_set_ids) != len(manifest["task_sets"])
+        or len(task_set_ids) != len(set(task_set_ids))
+        or any(not isinstance(value, str) or not value for value in task_set_ids)
+        or len(arm_ids) != len(manifest["arms"])
+        or len(arm_ids) != len(set(arm_ids))
+        or any(not isinstance(value, str) or not value for value in arm_ids)
+    ):
+        raise ValueError("suite manifest identities are invalid")
+    jobs_by_task_set = {}
+    for job in manifest["jobs"]:
+        if (
+            not isinstance(job, dict)
+            or set(job)
+            != {
+                "task_set_id",
+                "arm_ids",
+                "attempts",
+                "concurrency",
+                "max_retries",
+                "timeout_seconds",
+                "semantic_sha256",
+            }
+        ):
+            raise ValueError("suite manifest job is invalid")
+        semantic = {
+            key: job[key]
+            for key in (
+                "task_set_id",
+                "arm_ids",
+                "attempts",
+                "concurrency",
+                "max_retries",
+                "timeout_seconds",
+            )
+        }
+        semantic_sha256 = hashlib.sha256(
+            _canonical_suite_manifest_bytes(semantic)
+        ).hexdigest()
+        if (
+            job["task_set_id"] in jobs_by_task_set
+            or job["task_set_id"] not in task_set_ids
+            or job["arm_ids"] != arm_ids
+            or job["semantic_sha256"] != semantic_sha256
+        ):
+            raise ValueError("suite manifest job binding is invalid")
+        jobs_by_task_set[job["task_set_id"]] = job
+    if set(jobs_by_task_set) != set(task_set_ids):
+        raise ValueError("suite manifest jobs do not cover every task set")
+    _reject_public_manifest_paths(manifest)
+    if hashlib.sha256(_canonical_suite_manifest_bytes(manifest)).hexdigest() != digest:
+        raise ValueError("suite manifest digest does not match canonical body")
+
+
+def _reject_public_manifest_paths(value):
+    if isinstance(value, dict):
+        for child in value.values():
+            _reject_public_manifest_paths(child)
+    elif isinstance(value, list):
+        for child in value:
+            _reject_public_manifest_paths(child)
+    elif isinstance(value, str) and (
+        value.startswith(("/", "~/"))
+        or (
+            len(value) >= 3
+            and value[0].isalpha()
+            and value[1] == ":"
+            and value[2] in "\\/"
+        )
+    ):
+        raise ValueError("suite manifest contains a local absolute path")
+
+
+def _sha256_hex(value):
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def comparison_cell_key(row, *, require_harbor_identity=True):
+    """Return the supported matched-cell identity for one normalized row."""
+
+    if not is_harbor_result_row(row):
+        return (row.get("task"), row.get("trial"))
+    provenance = row.get("candidate_provenance")
+    if not isinstance(provenance, dict):
+        if require_harbor_identity:
+            raise ValueError(
+                "Harbor matched comparison requires exact OpenBench "
+                "comparison-plan identity"
+            )
+        return (row.get("task"), row.get("trial"))
+    schema = provenance.get("comparison_plan_schema_version")
+    plan_sha256 = provenance.get("comparison_plan_sha256")
+    arm_id = provenance.get("comparison_arm_id")
+    agent_config_sha256 = provenance.get("agent_config_sha256")
+    resolved_tasks = provenance.get("comparison_resolved_tasks")
+    block = provenance.get("comparison_block")
+    exact = (
+        schema == COMPARISON_PLAN_SCHEMA_VERSION
+        and isinstance(plan_sha256, str)
+        and len(plan_sha256) == 64
+        and all(char in "0123456789abcdef" for char in plan_sha256)
+        and isinstance(arm_id, str)
+        and bool(arm_id)
+        and isinstance(agent_config_sha256, str)
+        and len(agent_config_sha256) == 64
+        and all(char in "0123456789abcdef" for char in agent_config_sha256)
+        and isinstance(resolved_tasks, list)
+        and bool(resolved_tasks)
+        and resolved_tasks == sorted(set(resolved_tasks))
+        and isinstance(block, dict)
+        and set(block) == {"task", "index"}
+        and block.get("task") == row.get("task")
+        and block.get("task") in resolved_tasks
+        and block.get("index") == row.get("trial")
+        and isinstance(block.get("index"), int)
+        and not isinstance(block.get("index"), bool)
+        and block["index"] >= 1
+        and provenance.get("trial_mapping")
+        == "openbench_comparison_plan_v4"
+        and provenance.get("temporal_matched_block_claim") is False
+    )
+    if not exact:
+        if require_harbor_identity:
+            raise ValueError(
+                "Harbor matched comparison requires exact OpenBench "
+                "comparison-plan identity"
+            )
+        return (row.get("task"), row.get("trial"))
+    _comparison_plan_arm(row)
+    suite_manifest_sha256 = provenance.get("suite_manifest_sha256")
+    suite_task_set_id = provenance.get("suite_task_set_id")
+    if suite_manifest_sha256 is not None or suite_task_set_id is not None:
+        if not _sha256_hex(suite_manifest_sha256) or not isinstance(
+            suite_task_set_id, str
+        ) or not suite_task_set_id:
+            if require_harbor_identity:
+                raise ValueError("Harbor suite row has invalid suite identity")
+            return (row.get("task"), row.get("trial"))
+        return (
+            suite_manifest_sha256,
+            suite_task_set_id,
+            plan_sha256,
+            block["task"],
+            block["index"],
+        )
+    return (plan_sha256, block["task"], block["index"])
+
+
+def validate_matched_comparison_rows(rows):
+    """Return the matched identity mode or reject unsupported mixed evidence."""
+
+    rows = list(rows)
+    harbor_rows = [row for row in rows if is_harbor_result_row(row)]
+    if not harbor_rows:
+        return "legacy_task_trial"
+    if len(harbor_rows) != len(rows):
+        raise ValueError(
+            "matched comparison cannot mix Harbor comparison-plan identity "
+            "with legacy non-Harbor task/trial identity"
+        )
+    suite_manifest = validate_suite_rows(harbor_rows)
+    keys = [comparison_cell_key(row) for row in harbor_rows]
+    plan_sha256s = {key[0] for key in keys}
+    if suite_manifest is None and len(plan_sha256s) != 1:
+        raise ValueError(
+            "Harbor matched comparison requires one exact comparison-plan "
+            "digest across every arm"
+        )
+    resolved_task_sets = defaultdict(set)
+    for row in harbor_rows:
+        provenance = row["candidate_provenance"]
+        resolved_task_sets[provenance.get("suite_task_set_id")].add(
+            tuple(provenance["comparison_resolved_tasks"])
+        )
+    if any(len(values) != 1 for values in resolved_task_sets.values()):
+        raise ValueError(
+            "Harbor matched comparison requires one lock-resolved task set "
+            "across every arm"
+        )
+    arm_bindings = defaultdict(set)
+    for row in harbor_rows:
+        _comparison_plan_arm(row)
+        provenance = row["candidate_provenance"]
+        arm_bindings[provenance["comparison_arm_id"]].add((
+            provenance["agent_config_sha256"],
+            row.get("harness"),
+            row.get("model"),
+        ))
+    if any(len(bindings) != 1 for bindings in arm_bindings.values()):
+        raise ValueError(
+            "Harbor matched comparison arm changed rendered config or "
+            "canonical labels"
+        )
+    return (
+        "harbor_suite_manifest"
+        if suite_manifest is not None
+        else "harbor_comparison_plan"
+    )
 
 
 def matched_cell_key(row, fields):
-    parts = [str(row.get("task") or "-"), str(row.get("trial") if row.get("trial") is not None else "-")]
+    parts = [str(value) for value in comparison_cell_key(row)]
     for field in ("harness", "model"):
         if field not in fields:
             parts.append(str(row.get(field) or "-"))
@@ -674,7 +1559,27 @@ def filter_rows(rows, tasks_dirs):
             excluded_counts["invalid_row"] += 1
             continue
         task = row.get("task")
-        dropped_path = task_is_dropped(task, tasks_dirs, dropped_cache)
+        if is_harbor_result_row(row):
+            binding = harbor_task_source_binding(row)
+            cache_key = (
+                binding["canonical_id"],
+                binding["selector"],
+                binding["suite_manifest_sha256"],
+                binding["suite_task_set_id"],
+            )
+            if cache_key not in dropped_cache:
+                task_dir = resolve_task_source_binding(binding, tasks_dirs)
+                dropped = (
+                    os.path.join(task_dir, "DROPPED.md")
+                    if task_dir is not None
+                    else None
+                )
+                dropped_cache[cache_key] = (
+                    dropped if dropped and os.path.isfile(dropped) else None
+                )
+            dropped_path = dropped_cache[cache_key]
+        else:
+            dropped_path = task_is_dropped(task, tasks_dirs, dropped_cache)
         if dropped_path:
             excluded_counts["quarantined_dropped_task"] += 1
             quarantined_tasks[str(task)] += 1
@@ -693,13 +1598,19 @@ def filter_rows(rows, tasks_dirs):
 
 
 def matched_rows(countable_rows, fields):
-    by_group = defaultdict(lambda: defaultdict(list))
+    rows_by_group = defaultdict(list)
     for row in countable_rows:
         gkey = group_key(row, fields)
-        ckey = matched_cell_key(row, fields)
-        by_group[gkey][ckey].append(row)
-    if len(by_group) < 2:
+        rows_by_group[gkey].append(row)
+    if len(rows_by_group) < 2:
         return list(countable_rows), None
+
+    comparison_identity = validate_matched_comparison_rows(countable_rows)
+    by_group = defaultdict(lambda: defaultdict(list))
+    for gkey, rows in rows_by_group.items():
+        for row in rows:
+            ckey = matched_cell_key(row, fields)
+            by_group[gkey][ckey].append(row)
 
     duplicate_cells = 0
     duplicate_rows = 0
@@ -732,6 +1643,7 @@ def matched_rows(countable_rows, fields):
         "unmatched_countable_rows": len(countable_rows) - len(out),
         "duplicate_cells_excluded": duplicate_cells,
         "duplicate_rows_excluded": duplicate_rows,
+        "comparison_identity": comparison_identity,
     }
     return out, diagnostics
 

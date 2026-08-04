@@ -30,3 +30,12 @@ class CliEntrypointTests(unittest.TestCase):
         ) as admission_main:
             self.assertEqual(cli.main(["admit", "tasks/demo"]), 7)
         admission_main.assert_called_once_with(["tasks/demo"])
+
+    def test_run_and_legacy_run_route_to_distinct_owners(self):
+        with mock.patch("obench.suite_run.main", return_value=3) as suite_main:
+            self.assertEqual(cli.main(["run", "--plan"]), 3)
+        suite_main.assert_called_once_with(["--plan"])
+
+        with mock.patch("obench.run.main", return_value=4) as legacy_main:
+            self.assertEqual(cli.main(["legacy", "run", "--task", "demo"]), 4)
+        legacy_main.assert_called_once_with(["--task", "demo"])

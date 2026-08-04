@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import tomllib
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 CONFIG_DIRNAME = ".openbench"
@@ -28,6 +29,10 @@ class OpenBenchConfig:
     harnesses: list[str] = field(default_factory=list)
     model: str | None = None
     trials: int | None = None
+    default_suite: str | None = None
+    jobs_dir: str | None = None
+    results_dir: str | None = None
+    trajectories_dir: str | None = None
 
 
 def find_config_path(start: str | None = None) -> str | None:
@@ -91,4 +96,81 @@ def load_config(start: str | None = None) -> OpenBenchConfig:
     elif isinstance(trials, float) and trials >= 1 and trials == int(trials):
         cfg.trials = int(trials)
 
+    for field_name in (
+        "default_suite",
+        "jobs_dir",
+        "results_dir",
+        "trajectories_dir",
+    ):
+        value = raw.get(field_name)
+        if isinstance(value, str) and value.strip():
+            setattr(cfg, field_name, _resolve_rel(value.strip(), project_root))
+
     return cfg
+
+
+def require_suite_config(start: str | None = None) -> OpenBenchConfig:
+    """Load the nearest config and require the Harbor suite-runner fields."""
+
+    cfg = load_config(start)
+    if cfg.path is None or cfg.project_root is None:
+        raise ValueError(
+            "no .openbench/openbench.toml found in the current directory or ancestors"
+        )
+    missing = [
+        name
+        for name in (
+            "default_suite",
+            "jobs_dir",
+            "results_dir",
+            "trajectories_dir",
+        )
+        if getattr(cfg, name) is None
+    ]
+    if missing:
+        raise ValueError(
+            f"{cfg.path} is missing required suite settings: {', '.join(missing)}"
+        )
+    root = Path(cfg.project_root)
+    for name in ("default_suite", "jobs_dir", "results_dir", "trajectories_dir"):
+        path = Path(getattr(cfg, name))
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(
+                f"{name} must resolve inside the project root: {path}"
+            ) from exc
+        _reject_unsafe_path_components(
+            root,
+            path,
+            label=name,
+            final_may_be_file=name == "default_suite",
+        )
+    return cfg
+
+
+def _reject_unsafe_path_components(
+    root: Path,
+    path: Path,
+    *,
+    label: str,
+    final_may_be_file: bool,
+) -> None:
+    current = root
+    if current.is_symlink():
+        raise ValueError(f"{label} must not traverse a symlink: {current}")
+    relative = path.relative_to(root)
+    for index, part in enumerate(relative.parts):
+        current = current / part
+        final = index == len(relative.parts) - 1
+        if current.is_symlink():
+            raise ValueError(f"{label} must not traverse a symlink: {current}")
+        if not current.exists():
+            continue
+        if current.is_dir():
+            continue
+        if final and final_may_be_file and current.is_file():
+            continue
+        raise ValueError(
+            f"{label} has an existing non-directory component: {current}"
+        )

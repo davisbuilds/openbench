@@ -10,6 +10,7 @@ import math
 import os
 import re
 import sys
+import tomllib
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -22,9 +23,17 @@ from .harbor_metering import (
     apply_to_imported_row,
     verify_evidence_dir,
 )
+from .harbor_job import (
+    COMPARISON_PLAN_SCHEMA_VERSION,
+    canonical_agent_config_sha256,
+    canonical_comparison_plan_bytes,
+    canonical_harbor_job_config_sha256,
+)
 from .harbor_oauth import AGENT_IMPORT_PATH
 from .harbor_profiles import (
     CODEX_PROFILE_IMPORT,
+    CURSOR_PROFILE_IMPORT,
+    DEVIN_PROFILE_IMPORT,
     OPENCODE_PROFILE_IMPORT,
     PI_PROFILE_IMPORT,
     HarborProfileError,
@@ -36,6 +45,7 @@ from .run import (
     make_run_id,
     results_file_lock,
 )
+from .usage_evidence import harbor_usage_policy
 
 HARBOR_VERSION = "0.20.0"
 HARBOR_GIT_COMMIT = "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767"
@@ -51,11 +61,33 @@ HARBOR_AGENT_SEMANTIC_NAME_ALIASES = {
     CODEX_PROFILE_IMPORT: "codex",
     PI_PROFILE_IMPORT: "pi",
     OPENCODE_PROFILE_IMPORT: "opencode",
+    CURSOR_PROFILE_IMPORT: "cursor",
+    DEVIN_PROFILE_IMPORT: "devin",
 }
+HARBOR_STOCK_AGENT_CONFIG_NAMES = frozenset(
+    {
+        "codex",
+        "pi",
+        "opencode",
+        "cursor",
+        "devin",
+        *HARBOR_AGENT_SEMANTIC_NAME_ALIASES,
+    }
+)
 HARBOR_PROXY_REQUIRED_AGENTS = frozenset({
     CODEX_PROFILE_IMPORT,
     PI_PROFILE_IMPORT,
 })
+HARBOR_TIMEOUT_EXCEPTIONS = frozenset({
+    "AgentSetupTimeoutError",
+    "AgentTimeoutError",
+    "EnvironmentStartTimeoutError",
+    "TimeoutError",
+    "VerifierTimeoutError",
+})
+HARBOR_RATE_LIMIT_EXCEPTIONS = frozenset({"ApiUsageLimitError"})
+HARBOR_AUTH_EXCEPTIONS = frozenset({"AgentAuthenticationError"})
+HARBOR_SAFETY_EXCEPTIONS = frozenset({"AgentSafetyRefusalError"})
 
 
 class HarborResultsError(ValueError):
@@ -71,6 +103,19 @@ def expected_harbor_agent_semantic_name(config_name: str) -> str:
     return HARBOR_AGENT_SEMANTIC_NAME_ALIASES.get(config_name, config_name)
 
 
+def harbor_exception_semantics(exception_type: str) -> tuple[str, str]:
+    """Map a Harbor terminal exception to OpenBench class and stable reason."""
+    if exception_type in HARBOR_TIMEOUT_EXCEPTIONS:
+        return "timeout", f"harbor_timeout:{exception_type}"
+    if exception_type in HARBOR_RATE_LIMIT_EXCEPTIONS:
+        return "rate_limited", f"harbor_rate_limit:{exception_type}"
+    if exception_type in HARBOR_AUTH_EXCEPTIONS:
+        return "infra", f"harbor_auth:{exception_type}"
+    if exception_type in HARBOR_SAFETY_EXCEPTIONS:
+        return "infra", f"harbor_safety:{exception_type}"
+    return "infra", f"harbor_infrastructure:{exception_type}"
+
+
 def _agent_config_identity(agent: dict[str, Any], location: str) -> str:
     """Return Harbor's immutable built-in name or custom-agent import path."""
 
@@ -81,6 +126,23 @@ def _agent_config_identity(agent: dict[str, Any], location: str) -> str:
     if name is not None:
         raise _fail(f"{location}.name", "expected a non-empty string or null")
     return _string(import_path, f"{location}.import_path")
+
+
+def _agent_config_match_key(agent: dict[str, Any]) -> str:
+    """Normalize Harbor's omitted AgentConfig defaults for exact matching."""
+
+    normalized = _normalized_mapping(
+        agent,
+        _AGENT_DEFAULTS,
+        exclude={"skills"},
+    )
+    return json.dumps(
+        normalized,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
 
 
 def _require_regular_file(path: Path, location: str) -> None:
@@ -183,6 +245,10 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _optional_sha256_file(path: Path | None) -> str | None:
+    return None if path is None else _sha256_file(path)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -637,12 +703,34 @@ def _validate_job_result(
     for field in ("n_running_trials", "n_pending_trials"):
         if stats.get(field) != 0:
             raise _fail(f"job result.stats.{field}", "completed job must report zero")
-    for field in ("n_errored_trials", "n_cancelled_trials"):
-        if stats.get(field) != 0:
-            raise _fail(
-                f"job result.stats.{field}",
-                "exception-free completed job must report zero",
-            )
+    expected_exceptions = sorted(
+        (
+            _string(
+                _object(
+                    item.get("exception_info"),
+                    "trial result.exception_info",
+                ).get("exception_type"),
+                "trial result.exception_info.exception_type",
+            ),
+            _string(item.get("trial_name"), "trial result.trial_name"),
+        )
+        for item in actual_trial_results
+        if item.get("exception_info") is not None
+    )
+    expected_cancelled = sum(
+        exception_type == "CancelledError"
+        for exception_type, _trial_name in expected_exceptions
+    )
+    if stats.get("n_errored_trials") != len(expected_exceptions):
+        raise _fail(
+            "job result.stats.n_errored_trials",
+            f"expected {len(expected_exceptions)!r}",
+        )
+    if stats.get("n_cancelled_trials") != expected_cancelled:
+        raise _fail(
+            "job result.stats.n_cancelled_trials",
+            f"expected {expected_cancelled!r}",
+        )
     _integer(stats.get("n_retries"), "job result.stats.n_retries")
 
     expected_reward_entries = sorted(
@@ -662,16 +750,13 @@ def _validate_job_result(
             ),
         )
         for item in actual_trial_results
+        if item.get("verifier_result") is not None
     )
     actual_reward_entries: list[tuple[str, float]] = []
+    actual_exceptions: list[tuple[str, str]] = []
     evals = _object(stats.get("evals"), "job result.stats.evals")
     for eval_name, raw_eval in evals.items():
         eval_stats = _object(raw_eval, f"job result.stats.evals.{eval_name}")
-        if eval_stats.get("n_errors") != 0:
-            raise _fail(
-                f"job result.stats.evals.{eval_name}.n_errors",
-                "exception-free job must report zero",
-            )
         reward_stats = _object(
             eval_stats.get("reward_stats"),
             f"job result.stats.evals.{eval_name}.reward_stats",
@@ -719,15 +804,42 @@ def _validate_job_result(
             eval_stats.get("exception_stats"),
             f"job result.stats.evals.{eval_name}.exception_stats",
         )
-        if exception_stats:
-            raise _fail(
+        eval_error_count = 0
+        for exception_type, raw_names in exception_stats.items():
+            exception_type = _string(
+                exception_type,
                 f"job result.stats.evals.{eval_name}.exception_stats",
-                "exception-free job must have no exception entries",
+            )
+            names = _array(
+                raw_names,
+                f"job result.stats.evals.{eval_name}.exception_stats.{exception_type}",
+            )
+            for trial_name in names:
+                actual_exceptions.append(
+                    (
+                        exception_type,
+                        _string(
+                            trial_name,
+                            f"job result.stats.evals.{eval_name}.exception_stats."
+                            f"{exception_type}",
+                        ),
+                    )
+                )
+                eval_error_count += 1
+        if eval_stats.get("n_errors") != eval_error_count:
+            raise _fail(
+                f"job result.stats.evals.{eval_name}.n_errors",
+                f"expected {eval_error_count!r}",
             )
     if sorted(actual_reward_entries) != expected_reward_entries:
         raise _fail(
             "job result.stats.evals",
             "reward aggregates do not match enumerated trial directories",
+        )
+    if sorted(actual_exceptions) != expected_exceptions:
+        raise _fail(
+            "job result.stats.evals",
+            "exception aggregates do not match enumerated trial directories",
         )
     aggregate_fields = {
         "n_input_tokens": "n_input_tokens",
@@ -738,8 +850,11 @@ def _validate_job_result(
     for stats_field, result_field in aggregate_fields.items():
         values = []
         for trial_result in actual_trial_results:
+            raw_agent_result = trial_result.get("agent_result")
+            if raw_agent_result is None:
+                continue
             agent_result = _object(
-                trial_result.get("agent_result"),
+                raw_agent_result,
                 f"trial result.agent_result for aggregate {stats_field}",
             )
             value = agent_result.get(result_field)
@@ -851,6 +966,50 @@ def _validate_timing(
         durations["agent_execution"],
         durations["verifier"],
     )
+
+
+def _validate_exception_info(
+    value: Any,
+    *,
+    started: datetime,
+    finished: datetime,
+    location: str,
+) -> tuple[str, str, str] | None:
+    if value is None:
+        return None
+    exception = _object(value, f"{location}.result.exception_info")
+    expected_fields = {
+        "exception_type",
+        "exception_message",
+        "exception_traceback",
+        "occurred_at",
+    }
+    if set(exception) != expected_fields:
+        raise _fail(
+            f"{location}.result.exception_info",
+            "unexpected or missing exception fields",
+        )
+    exception_type = _string(
+        exception.get("exception_type"),
+        f"{location}.result.exception_info.exception_type",
+    )
+    for field in ("exception_message", "exception_traceback"):
+        if not isinstance(exception.get(field), str):
+            raise _fail(
+                f"{location}.result.exception_info.{field}",
+                "expected a string",
+            )
+    occurred_at = _timestamp(
+        exception.get("occurred_at"),
+        f"{location}.result.exception_info.occurred_at",
+    )
+    if not started <= occurred_at <= finished:
+        raise _fail(
+            f"{location}.result.exception_info.occurred_at",
+            "must fall within trial timing",
+        )
+    failure_class, failure_reason = harbor_exception_semantics(exception_type)
+    return exception_type, failure_class, failure_reason
 
 
 def _validate_reward(
@@ -1024,8 +1183,12 @@ def _path_is_at_or_below(path: str, root: str) -> bool:
 
 
 def _validate_artifacts(
-    trial_dir: Path, result: dict[str, Any], location: str
-) -> tuple[Path, str]:
+    trial_dir: Path,
+    result: dict[str, Any],
+    location: str,
+    *,
+    required: bool,
+) -> tuple[Path | None, str | None]:
     config = _object(result.get("config"), f"{location}.result.config")
     artifacts = _array(config.get("artifacts"), f"{location}.result.config.artifacts")
     configured_workspace_entries: list[tuple[str, str]] = []
@@ -1063,6 +1226,19 @@ def _validate_artifacts(
         )
 
     manifest_path = trial_dir / "artifacts" / "manifest.json"
+    workspace_path = trial_dir / FINAL_WORKSPACE_MANIFEST_DESTINATION
+    if not manifest_path.exists():
+        if required:
+            raise _fail(
+                f"{location}.artifacts",
+                "required artifact manifest is missing",
+            )
+        if workspace_path.exists() or workspace_path.is_symlink():
+            raise _fail(
+                f"{location}.artifacts",
+                "workspace exists without an artifact manifest",
+            )
+        return None, None
     manifest = _array(
         _read_json(manifest_path, f"{location}.artifacts"),
         f"{location}.artifacts",
@@ -1108,6 +1284,8 @@ def _validate_artifacts(
             final_entry = entry
 
     if final_entry is None:
+        if not required:
+            return manifest_path, None
         raise _fail(
             f"{location}.artifacts",
             "manifest does not contain the required workspace",
@@ -1121,16 +1299,28 @@ def _validate_artifacts(
             "workspace entry must map "
             f"{FINAL_WORKSPACE_SOURCE} to {FINAL_WORKSPACE_MANIFEST_DESTINATION}",
         )
-    if (
-        final_entry.get("type") != "directory"
-        or final_entry.get("status") != "ok"
-        or final_entry.get("service") is not None
-    ):
+    if final_entry.get("type") != "directory" or final_entry.get("service") is not None:
         raise _fail(
             f"{location}.artifacts",
-            "workspace must have type='directory', status='ok', and service=null",
+            "workspace must have type='directory' and service=null",
         )
-    workspace_path = trial_dir / FINAL_WORKSPACE_MANIFEST_DESTINATION
+    if final_entry.get("status") != "ok":
+        if required:
+            raise _fail(
+                f"{location}.artifacts",
+                "workspace must have status='ok'",
+            )
+        if workspace_path.is_symlink():
+            raise _fail(f"{location}.artifacts", "workspace must not be a symlink")
+        if workspace_path.exists():
+            if not workspace_path.is_dir():
+                raise _fail(f"{location}.artifacts", "workspace must be a directory")
+            if any(workspace_path.iterdir()):
+                raise _fail(
+                    f"{location}.artifacts",
+                    "non-ok workspace artifact must not contain files",
+                )
+        return manifest_path, None
     return manifest_path, _tree_digest(workspace_path)
 
 
@@ -1268,6 +1458,8 @@ def _validate_trial(
     seen_ids: set[str],
     seen_names: set[str],
     expected_job_id: str,
+    *,
+    comparison_plan_requested: bool,
 ) -> dict[str, Any]:
     location = f"trial {trial_dir.name!r}"
     trial_lock_path = trial_dir / "lock.json"
@@ -1291,8 +1483,6 @@ def _validate_trial(
         raise _fail(f"{location}.result.trial_name", "duplicate trial name")
     seen_ids.add(trial_id)
     seen_names.add(trial_name)
-    if result.get("exception_info") is not None:
-        raise _fail(f"{location}.result.exception_info", "exception-bearing trials are rejected")
     if result.get("step_results") is not None:
         raise _fail(f"{location}.result.step_results", "multi-step trials are not supported")
     _validate_lock_backed_config(
@@ -1338,10 +1528,22 @@ def _validate_trial(
     agent_config_name = _agent_config_identity(
         agent_lock, f"{location}.lock.agent"
     )
+    if (
+        not comparison_plan_requested
+        and agent_config_name not in HARBOR_STOCK_AGENT_CONFIG_NAMES
+    ):
+        raise _fail(
+            f"{location}.lock.agent",
+            "custom Harbor agents require an exact OpenBench comparison plan",
+        )
     agent_info = _object(result.get("agent_info"), f"{location}.result.agent_info")
     agent_name = _string(agent_info.get("name"), f"{location}.result.agent_info.name")
-    expected_agent_name = expected_harbor_agent_semantic_name(agent_config_name)
-    if agent_name != expected_agent_name:
+    expected_agent_name = HARBOR_AGENT_SEMANTIC_NAME_ALIASES.get(
+        agent_config_name
+    )
+    if expected_agent_name is None and agent_config_name in HARBOR_STOCK_AGENT_CONFIG_NAMES:
+        expected_agent_name = agent_config_name
+    if expected_agent_name is not None and agent_name != expected_agent_name:
         raise _fail(
             f"{location}.result.agent_info.name",
             "does not match immutable trial-lock agent identity "
@@ -1368,40 +1570,106 @@ def _validate_trial(
             f"{location}.result.agent_info.model_info",
             "does not match trial lock model identity",
         )
-    try:
-        canonical_model = canonical_openbench_model(agent_config_name, model)
-    except HarborProfileError as exc:
-        raise _fail(f"{location}.lock.agent.model_name", str(exc)) from exc
+    if agent_config_name in HARBOR_STOCK_AGENT_CONFIG_NAMES:
+        try:
+            canonical_model = canonical_openbench_model(agent_config_name, model)
+        except HarborProfileError as exc:
+            raise _fail(f"{location}.lock.agent.model_name", str(exc)) from exc
+    else:
+        # Planned custom labels are applied only after the exact config, lock,
+        # and result chain is verified. ATIF remains bound to this raw lock model.
+        canonical_model = model
 
     started, finished, t_env, t_agent, harbor_verifier_time = _validate_timing(
         result, location
     )
-    (
-        score,
-        checker_exit,
-        t_checker,
-        reward_path,
-        verifier_evidence_path,
-        openbench_task_content_digest,
-        openbench_harbor_export,
-    ) = _validate_reward(trial_dir, result, location)
-    manifest_path, workspace_digest = _validate_artifacts(trial_dir, result, location)
-    trajectory_path, agent_result, turns, trajectory = _validate_atif(
+    exception = _validate_exception_info(
+        result.get("exception_info"),
+        started=started,
+        finished=finished,
+        location=location,
+    )
+    terminal_failure = exception is not None
+
+    reward_files = (
+        trial_dir / "verifier" / "reward.json",
+        trial_dir / "verifier" / "reward.txt",
+        trial_dir / "verifier" / "openbench-verifier-evidence.json",
+    )
+    has_reward_evidence = (
+        result.get("verifier_result") is not None
+        or any(path.exists() or path.is_symlink() for path in reward_files)
+    )
+    score = None
+    checker_exit = None
+    t_checker = None
+    reward_path = None
+    verifier_evidence_path = None
+    openbench_task_content_digest = None
+    openbench_harbor_export = None
+    if not terminal_failure or has_reward_evidence:
+        (
+            score,
+            checker_exit,
+            t_checker,
+            reward_path,
+            verifier_evidence_path,
+            openbench_task_content_digest,
+            openbench_harbor_export,
+        ) = _validate_reward(trial_dir, result, location)
+
+    manifest_path, workspace_digest = _validate_artifacts(
         trial_dir,
         result,
-        agent_name,
-        agent_version,
-        model,
-        canonical_model,
-        model_name,
         location,
+        required=not terminal_failure,
     )
-    usage = _usage_fields(agent_result, location)
+
+    trajectory_candidate = trial_dir / "agent" / "trajectory.json"
+    has_trajectory = trajectory_candidate.exists() or trajectory_candidate.is_symlink()
+    raw_agent_result = result.get("agent_result")
+    has_agent_usage = (
+        isinstance(raw_agent_result, dict)
+        and any(
+            raw_agent_result.get(field) is not None
+            for field in (
+                "n_input_tokens",
+                "n_cache_tokens",
+                "n_output_tokens",
+                "cost_usd",
+            )
+        )
+    )
+    trajectory_path = None
+    trajectory = None
+    turns = None
+    usage = _usage_fields({}, location)
+    if not terminal_failure or has_trajectory:
+        trajectory_path, agent_result, turns, trajectory = _validate_atif(
+            trial_dir,
+            result,
+            agent_name,
+            agent_version,
+            model,
+            canonical_model,
+            model_name,
+            location,
+        )
+        usage = _usage_fields(agent_result, location)
+    elif has_agent_usage:
+        raise _fail(
+            f"{location}.result.agent_result",
+            "usage-bearing terminal result requires matching ATIF evidence",
+        )
+    elif raw_agent_result is not None:
+        _object(raw_agent_result, f"{location}.result.agent_result")
+
     proxy_required = agent_config_name in HARBOR_PROXY_REQUIRED_AGENTS
     metering_path = trial_dir / "agent" / "harbor-metering"
     metering_evidence = None
     metering_evidence_path = None
-    if proxy_required:
+    has_metering = metering_path.exists() or metering_path.is_symlink()
+    if proxy_required and trajectory is not None:
         try:
             metering_evidence = verify_evidence_dir(
                 metering_path,
@@ -1415,6 +1683,17 @@ def _validate_trial(
         except HarborMeteringError as exc:
             raise _fail(f"{location}.metering", str(exc)) from exc
         metering_evidence_path = metering_path / "harbor-metering.json"
+    elif proxy_required and has_metering:
+        try:
+            verify_evidence_dir(
+                metering_path,
+                expected_trial_id=trial_dir.name,
+                expected_harness=agent_name,
+                proxy_required=False,
+                expected_agent_usage=UsageCounters(None, None, None, None),
+            )
+        except HarborMeteringError as exc:
+            raise _fail(f"{location}.metering", str(exc)) from exc
     return {
         "trial_dir": trial_dir,
         "result": result,
@@ -1427,11 +1706,13 @@ def _validate_trial(
         "trial_id": trial_id,
         "trial_name": trial_name,
         "task_name": task_name,
+        "task_lock": task,
         "task_digest": task_digest,
         "openbench_task_content_digest": openbench_task_content_digest,
         "openbench_harbor_export": openbench_harbor_export,
         "task_checksum": checksum,
         "agent_config_name": agent_config_name,
+        "agent_config_match_key": _agent_config_match_key(agent_lock),
         "agent_name": agent_name,
         "agent_version": agent_version,
         "model": canonical_model,
@@ -1442,6 +1723,7 @@ def _validate_trial(
         "t_agent_s": t_agent,
         "t_checker_s": t_checker,
         "harbor_verifier_time_s": harbor_verifier_time,
+        "exception": exception,
         "score": score,
         "checker_exit": checker_exit,
         "turns": turns,
@@ -1481,8 +1763,573 @@ def _normalized_task_name(task_name: str) -> str:
     return task_name.removeprefix("openbench/")
 
 
-def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
+def _local_task_selector(
+    task: dict[str, Any],
+    *,
+    dataset_root: Path,
+    task_id_map: dict[str, str],
+    location: str,
+) -> str:
+    if task.get("type") != "local":
+        raise _fail(location, "local comparison plan resolved a non-local task")
+    raw_path = Path(_string(task.get("path"), f"{location}.path")).expanduser()
+    if raw_path.is_symlink():
+        raise _fail(f"{location}.path", "local task path must not be a symlink")
+    task_path = raw_path.resolve()
+    if task_path.parent != dataset_root:
+        raise _fail(
+            f"{location}.path",
+            "must be one direct child of the configured local task set",
+        )
+    selector = task_path.name
+    if selector not in task_id_map:
+        raise _fail(
+            f"{location}.path",
+            "does not identify a task selector in the comparison plan",
+        )
+    config_path = task_path / "task.toml"
+    if config_path.is_symlink() or not config_path.is_file():
+        raise _fail(
+            f"{location}.path",
+            "selected local task has no safe task.toml",
+        )
+    try:
+        with config_path.open("rb") as handle:
+            config = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise _fail(
+            f"{location}.path",
+            f"cannot read selected local task.toml: {exc}",
+        ) from exc
+    task_config = config.get("task")
+    canonical_id = (
+        task_config.get("name") if isinstance(task_config, dict) else None
+    )
+    if canonical_id != task_id_map[selector]:
+        raise _fail(
+            f"{location}.path",
+            "task.toml identity does not match comparison plan.task_id_map",
+        )
+    return selector
+
+
+def _validate_comparison_plan(
+    path: str | os.PathLike[str],
+    *,
+    submitted_job_config_path: str | os.PathLike[str],
+    job_root: Path,
+    job_lock: dict[str, Any],
+    trials: list[dict[str, Any]],
+) -> tuple[
+    str,
+    dict[str, Any],
+    tuple[str, ...],
+    dict[str, dict[str, Any]],
+]:
+    plan_path = Path(path).expanduser()
+    plan = _object(
+        _read_json(plan_path, "comparison plan"),
+        "comparison plan",
+    )
+    expected_fields = {
+        "schema_version",
+        "harbor_version",
+        "harbor_git_commit_hash",
+        "job_name",
+        "submitted_job_config_sha256",
+        "effective_job_config_sha256",
+        "attempts",
+        "dataset",
+        "tasks",
+        "task_id_map",
+        "arms",
+    }
+    if set(plan) != expected_fields:
+        raise _fail(
+            "comparison plan",
+            "unexpected or missing fields",
+        )
+    if plan_path.read_bytes() != canonical_comparison_plan_bytes(plan):
+        raise _fail(
+            "comparison plan",
+            "must use canonical OpenBench JSON encoding",
+        )
+    if plan.get("schema_version") != COMPARISON_PLAN_SCHEMA_VERSION:
+        raise _fail(
+            "comparison plan.schema_version",
+            f"expected {COMPARISON_PLAN_SCHEMA_VERSION!r}",
+        )
+    if plan.get("harbor_version") != HARBOR_VERSION:
+        raise _fail(
+            "comparison plan.harbor_version",
+            f"expected {HARBOR_VERSION!r}",
+        )
+    if plan.get("harbor_git_commit_hash") != HARBOR_GIT_COMMIT:
+        raise _fail(
+            "comparison plan.harbor_git_commit_hash",
+            f"expected {HARBOR_GIT_COMMIT}",
+        )
+    job_name = _string(plan.get("job_name"), "comparison plan.job_name")
+    if job_name != job_root.name:
+        raise _fail(
+            "comparison plan.job_name",
+            "does not match Harbor job directory",
+        )
+    submitted_config_digest = _string(
+        plan.get("submitted_job_config_sha256"),
+        "comparison plan.submitted_job_config_sha256",
+    )
+    if re.fullmatch(r"[0-9a-f]{64}", submitted_config_digest) is None:
+        raise _fail(
+            "comparison plan.submitted_job_config_sha256",
+            "expected a lowercase SHA-256",
+        )
+    effective_config_digest = _string(
+        plan.get("effective_job_config_sha256"),
+        "comparison plan.effective_job_config_sha256",
+    )
+    if re.fullmatch(r"[0-9a-f]{64}", effective_config_digest) is None:
+        raise _fail(
+            "comparison plan.effective_job_config_sha256",
+            "expected a lowercase SHA-256",
+        )
+
+    submitted_config_path = Path(submitted_job_config_path).expanduser()
+    submitted_config = _object(
+        _read_json(submitted_config_path, "submitted job config"),
+        "submitted job config",
+    )
+    if _sha256_file(submitted_config_path) != submitted_config_digest:
+        raise _fail(
+            "comparison plan.submitted_job_config_sha256",
+            "does not match OpenBench's submitted job config",
+        )
+    try:
+        submitted_effective_digest = canonical_harbor_job_config_sha256(
+            submitted_config
+        )
+    except ValueError as exc:
+        raise _fail(
+            "submitted job config",
+            f"cannot derive pinned semantic identity: {exc}",
+        ) from exc
+    if submitted_effective_digest != effective_config_digest:
+        raise _fail(
+            "comparison plan.effective_job_config_sha256",
+            "does not match OpenBench's submitted semantic job config",
+        )
+
+    job_config_path = job_root / "config.json"
+    job_config = _object(
+        _read_json(job_config_path, "job config"),
+        "job config",
+    )
+    try:
+        persisted_effective_digest = canonical_harbor_job_config_sha256(
+            job_config
+        )
+    except ValueError as exc:
+        raise _fail(
+            "job config",
+            f"cannot derive pinned semantic identity: {exc}",
+        ) from exc
+    if persisted_effective_digest != effective_config_digest:
+        raise _fail(
+            "comparison plan.effective_job_config_sha256",
+            "does not match Harbor's persisted semantic job config",
+        )
+    attempts = _integer(
+        plan.get("attempts"),
+        "comparison plan.attempts",
+        minimum=1,
+    )
+    if job_config.get("job_name") != job_name:
+        raise _fail(
+            "job config.job_name",
+            "does not match comparison plan",
+        )
+    if job_config.get("n_attempts", 1) != attempts:
+        raise _fail(
+            "job config.n_attempts",
+            "does not match comparison plan",
+        )
+
+    datasets = _array(job_config.get("datasets"), "job config.datasets")
+    if len(datasets) != 1:
+        raise _fail(
+            "job config.datasets",
+            "comparison plan requires exactly one dataset",
+        )
+    dataset = _object(datasets[0], "job config.datasets[0]")
+    if job_config.get("tasks", []) != []:
+        raise _fail(
+            "job config.tasks",
+            "comparison plan requires one dataset and no standalone tasks",
+        )
+
+    plan_dataset = plan.get("dataset")
+    raw_tasks = plan.get("tasks")
+    raw_task_id_map = plan.get("task_id_map")
+    if plan_dataset is None:
+        if "path" not in dataset or "name" in dataset:
+            raise _fail(
+                "comparison plan.dataset",
+                "null is valid only for a local task set",
+            )
+        task_values = _array(raw_tasks, "comparison plan.tasks")
+        tasks = tuple(
+            _string(task, f"comparison plan.tasks[{index}]")
+            for index, task in enumerate(task_values)
+        )
+        if dataset.get("task_names") != list(tasks):
+            raise _fail(
+                "job config.datasets[0].task_names",
+                "does not match comparison plan",
+            )
+        dataset_path = Path(
+            _string(dataset.get("path"), "job config.datasets[0].path")
+        ).expanduser()
+        if dataset_path.is_symlink():
+            raise _fail(
+                "job config.datasets[0].path",
+                "local task-set path must not be a symlink",
+            )
+        dataset_root = dataset_path.resolve()
+        if not dataset_root.is_dir():
+            raise _fail(
+                "job config.datasets[0].path",
+                "local task-set path is not a directory",
+            )
+        task_id_map = _object(
+            raw_task_id_map,
+            "comparison plan.task_id_map",
+        )
+        if set(task_id_map) != set(tasks):
+            raise _fail(
+                "comparison plan.task_id_map",
+                "keys must match every Harbor task selector exactly",
+            )
+        canonical_task_ids = tuple(
+            _string(
+                task_id_map[task],
+                f"comparison plan.task_id_map[{task!r}]",
+            )
+            for task in tasks
+        )
+        if any(
+            task_id != task_id.strip() or "\x00" in task_id
+            for task_id in canonical_task_ids
+        ):
+            raise _fail(
+                "comparison plan.task_id_map",
+                "canonical task IDs contain unsafe whitespace or NUL",
+            )
+        if len(set(canonical_task_ids)) != len(canonical_task_ids):
+            raise _fail(
+                "comparison plan.task_id_map",
+                "canonical task IDs must be unique",
+            )
+    else:
+        descriptor = _object(plan_dataset, "comparison plan.dataset")
+        if descriptor != dataset:
+            raise _fail(
+                "comparison plan.dataset",
+                "does not match the immutable Harbor dataset descriptor",
+            )
+        if raw_tasks is not None:
+            raise _fail(
+                "comparison plan.tasks",
+                "must be null when Harbor resolves an immutable dataset",
+            )
+        if raw_task_id_map is not None:
+            raise _fail(
+                "comparison plan.task_id_map",
+                "must be null when Harbor resolves an immutable dataset",
+            )
+        tasks = ()
+        task_id_map = {}
+        dataset_root = None
+    if tasks and tuple(sorted(set(tasks))) != tasks:
+        raise _fail(
+            "comparison plan.tasks",
+            "must be a sorted unique list",
+        )
+    raw_arms = _array(plan.get("arms"), "comparison plan.arms")
+    arms_by_digest: dict[str, dict[str, str]] = {}
+    arm_ids: set[str] = set()
+    for index, raw_arm in enumerate(raw_arms):
+        location = f"comparison plan.arms[{index}]"
+        arm = _object(raw_arm, location)
+        expected_arm_fields = {
+            "arm_id",
+            "agent_config_name",
+            "harbor_model_name",
+            "agent_config_sha256",
+            "canonical_harness",
+            "canonical_model",
+        }
+        if set(arm) != expected_arm_fields:
+            raise _fail(location, "unexpected or missing fields")
+        arm_id = _string(arm.get("arm_id"), f"{location}.arm_id")
+        if "\\" in arm_id or "\x00" in arm_id:
+            raise _fail(f"{location}.arm_id", "contains an unsafe character")
+        agent_config_name = _string(
+            arm.get("agent_config_name"),
+            f"{location}.agent_config_name",
+        )
+        harbor_model_name = _string(
+            arm.get("harbor_model_name"),
+            f"{location}.harbor_model_name",
+        )
+        agent_config_sha256 = _string(
+            arm.get("agent_config_sha256"),
+            f"{location}.agent_config_sha256",
+        )
+        if re.fullmatch(r"[0-9a-f]{64}", agent_config_sha256) is None:
+            raise _fail(
+                f"{location}.agent_config_sha256",
+                "expected a lowercase SHA-256",
+            )
+        canonical_harness = _string(
+            arm.get("canonical_harness"),
+            f"{location}.canonical_harness",
+        )
+        canonical_model = _string(
+            arm.get("canonical_model"),
+            f"{location}.canonical_model",
+        )
+        if arm_id in arm_ids:
+            raise _fail(f"{location}.arm_id", "duplicate comparison arm")
+        if agent_config_sha256 in arms_by_digest:
+            raise _fail(
+                location,
+                "duplicate rendered agent config digest",
+            )
+        arm_ids.add(arm_id)
+        arms_by_digest[agent_config_sha256] = {
+            "arm_id": arm_id,
+            "agent_config_name": agent_config_name,
+            "harbor_model_name": harbor_model_name,
+            "agent_config_sha256": agent_config_sha256,
+            "canonical_harness": canonical_harness,
+            "canonical_model": canonical_model,
+        }
+    if not arms_by_digest:
+        raise _fail("comparison plan.arms", "must not be empty")
+
+    config_agents_by_digest: dict[str, dict[str, Any]] = {}
+    config_digest_by_match_key: dict[str, str] = {}
+    for index, raw_agent in enumerate(
+        _array(job_config.get("agents"), "job config.agents")
+    ):
+        location = f"job config.agents[{index}]"
+        agent = _object(raw_agent, location)
+        agent_config_sha256 = canonical_agent_config_sha256(agent)
+        match_key = _agent_config_match_key(agent)
+        if (
+            agent_config_sha256 in config_agents_by_digest
+            or match_key in config_digest_by_match_key
+        ):
+            raise _fail(
+                "job config.agents",
+                "contains duplicate rendered agent configs",
+            )
+        config_agents_by_digest[agent_config_sha256] = agent
+        config_digest_by_match_key[match_key] = agent_config_sha256
+    if set(config_agents_by_digest) != set(arms_by_digest):
+        raise _fail(
+            "job config.agents",
+            "rendered config digests do not match comparison plan arms",
+        )
+    for agent_config_sha256, agent in config_agents_by_digest.items():
+        arm = arms_by_digest[agent_config_sha256]
+        location = f"comparison arm {arm['arm_id']!r}"
+        if (
+            _agent_config_identity(agent, location)
+            != arm["agent_config_name"]
+            or _string(agent.get("model_name"), f"{location}.model_name")
+            != arm["harbor_model_name"]
+        ):
+            raise _fail(
+                location,
+                "identity does not match the rendered Harbor agent config",
+            )
+
+    task_digests_by_name: dict[str, set[str]] = defaultdict(set)
+    for index, raw_lock in enumerate(
+        _array(job_lock.get("trials"), "job lock.trials")
+    ):
+        task = _object(
+            _object(raw_lock, f"job lock.trials[{index}]").get("task"),
+            f"job lock.trials[{index}].task",
+        )
+        task_name = (
+            _local_task_selector(
+                task,
+                dataset_root=dataset_root,
+                task_id_map=task_id_map,
+                location=f"job lock.trials[{index}].task",
+            )
+            if tasks
+            else _string(
+                task.get("name"),
+                f"job lock.trials[{index}].task.name",
+            )
+        )
+        task_digests_by_name[task_name].add(
+            _validate_digest(
+                task.get("digest"),
+                f"job lock.trials[{index}].task.digest",
+            )
+        )
+    conflicting_task_digests = {
+        task_name: digests
+        for task_name, digests in task_digests_by_name.items()
+        if len(digests) != 1
+    }
+    if conflicting_task_digests:
+        raise _fail(
+            "job lock.trials",
+            "comparison arms resolved different immutable digests for the same task",
+        )
+    task_digest_by_name = {
+        task_name: next(iter(digests))
+        for task_name, digests in task_digests_by_name.items()
+    }
+    resolved_harbor_tasks = tuple(sorted(task_digest_by_name))
+    if not resolved_harbor_tasks:
+        raise _fail("job lock.trials", "resolved task set must not be empty")
+    if tasks and resolved_harbor_tasks != tasks:
+        raise _fail(
+            "comparison plan.tasks",
+            "does not match the resolved Harbor lock task set",
+        )
+    resolved_tasks = (
+        tuple(sorted(task_id_map[task] for task in resolved_harbor_tasks))
+        if tasks
+        else resolved_harbor_tasks
+    )
+    expected_cells = Counter(
+        (task, task_digest_by_name[task], agent_config_sha256)
+        for task in resolved_harbor_tasks
+        for agent_config_sha256 in arms_by_digest
+        for _attempt in range(attempts)
+    )
+    actual_cells: Counter[tuple[str, str, str]] = Counter()
+    for index, raw_lock in enumerate(
+        _array(job_lock.get("trials"), "job lock.trials")
+    ):
+        lock = _object(raw_lock, f"job lock.trials[{index}]")
+        task = _object(lock.get("task"), f"job lock.trials[{index}].task")
+        agent = _object(lock.get("agent"), f"job lock.trials[{index}].agent")
+        match_key = _agent_config_match_key(agent)
+        agent_config_sha256 = config_digest_by_match_key.get(match_key)
+        if agent_config_sha256 is None:
+            raise _fail(
+                f"job lock.trials[{index}].agent",
+                "does not match any exact rendered agent config",
+            )
+        task_name = (
+            _local_task_selector(
+                task,
+                dataset_root=dataset_root,
+                task_id_map=task_id_map,
+                location=f"job lock.trials[{index}].task",
+            )
+            if tasks
+            else _string(
+                task.get("name"),
+                f"job lock.trials[{index}].task.name",
+            )
+        )
+        actual_cells[
+            (
+                task_name,
+                _validate_digest(
+                    task.get("digest"),
+                    f"job lock.trials[{index}].task.digest",
+                ),
+                agent_config_sha256,
+            )
+        ] += 1
+    if actual_cells != expected_cells:
+        raise _fail(
+            "comparison plan",
+            "task/arm/attempt matrix does not match immutable Harbor job lock",
+        )
+
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for item in trials:
+        agent_config_sha256 = config_digest_by_match_key.get(
+            item["agent_config_match_key"]
+        )
+        if agent_config_sha256 is None:
+            raise _fail(
+                f"trial {item['trial_name']!r}.lock.agent",
+                "does not match any exact rendered agent config",
+            )
+        task_name = (
+            _local_task_selector(
+                item["task_lock"],
+                dataset_root=dataset_root,
+                task_id_map=task_id_map,
+                location=f"trial {item['trial_name']!r}.lock.task",
+            )
+            if tasks
+            else _string(
+                item["task_lock"].get("name"),
+                f"trial {item['trial_name']!r}.lock.task.name",
+            )
+        )
+        if item["task_digest"] != task_digest_by_name.get(task_name):
+            raise _fail(
+                f"trial {item['trial_name']!r}.lock.task.digest",
+                "does not match the immutable task digest in the Harbor job lock",
+            )
+        grouped[(task_name, agent_config_sha256)].append(item)
+    coordinates: dict[str, dict[str, Any]] = {}
+    for key, group_trials in grouped.items():
+        harbor_task, agent_config_sha256 = key
+        arm = arms_by_digest[agent_config_sha256]
+        arm_id = arm["arm_id"]
+        ordered = sorted(
+            group_trials,
+            key=lambda item: (item["trial_name"], item["trial_id"]),
+        )
+        if len(ordered) != attempts:
+            raise _fail(
+                "comparison plan",
+                f"resolved cell count disagrees for {harbor_task!r} and {arm_id!r}",
+            )
+        for block_index, item in enumerate(ordered, 1):
+            coordinates[item["trial_id"]] = {
+                "arm_id": arm_id,
+                "task": task_id_map.get(harbor_task, harbor_task),
+                "index": block_index,
+                "agent_config_sha256": agent_config_sha256,
+                "canonical_harness": arm["canonical_harness"],
+                "canonical_model": arm["canonical_model"],
+            }
+    if len(coordinates) != len(trials):
+        raise _fail(
+            "comparison plan",
+            "did not assign every completed Harbor trial",
+        )
+    return _sha256_file(plan_path), plan, resolved_tasks, coordinates
+
+
+def load_rows(
+    job_dir: str | os.PathLike[str],
+    *,
+    comparison_plan_path: str | os.PathLike[str] | None = None,
+    submitted_job_config_path: str | os.PathLike[str] | None = None,
+) -> list[dict[str, Any]]:
     """Validate a complete Harbor 0.20.0 job and return normalized rows."""
+    if (comparison_plan_path is None) != (submitted_job_config_path is None):
+        raise _fail(
+            "comparison identity",
+            "comparison plan and submitted job config must be provided together",
+        )
     requested_root = Path(job_dir).expanduser()
     if requested_root.is_symlink():
         raise _fail("job directory", f"symlink is not accepted: {requested_root}")
@@ -1516,20 +2363,44 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
             seen_ids,
             seen_names,
             expected_job_id,
+            comparison_plan_requested=comparison_plan_path is not None,
         )
         for path in trial_dirs
     ]
     if any(expected_locks.values()):
         raise _fail("job directory", "not every job-lock trial has completed evidence")
+    comparison_plan_sha256 = None
+    comparison_plan = None
+    comparison_resolved_tasks: tuple[str, ...] | None = None
+    comparison_coordinates: dict[str, dict[str, Any]] = {}
+    if comparison_plan_path is not None:
+        (
+            comparison_plan_sha256,
+            comparison_plan,
+            comparison_resolved_tasks,
+            comparison_coordinates,
+        ) = _validate_comparison_plan(
+            comparison_plan_path,
+            submitted_job_config_path=submitted_job_config_path,
+            job_root=root,
+            job_lock=job_lock,
+            trials=trials,
+        )
     checksums_by_digest: dict[str, set[str]] = defaultdict(set)
     content_digests_by_task: dict[str, set[str]] = defaultdict(set)
     content_digests_by_harbor_digest: dict[str, set[str]] = defaultdict(set)
     for item in trials:
         checksums_by_digest[item["task_digest"]].add(item["task_checksum"])
+        if item["openbench_task_content_digest"] is None:
+            continue
         content_sha256 = item["openbench_task_content_digest"]["sha256"]
-        content_digests_by_task[
-            _normalized_task_name(item["task_name"])
-        ].add(content_sha256)
+        comparison_coordinate = comparison_coordinates.get(item["trial_id"])
+        content_task = (
+            comparison_coordinate["task"]
+            if comparison_coordinate is not None
+            else _normalized_task_name(item["task_name"])
+        )
+        content_digests_by_task[content_task].add(content_sha256)
         content_digests_by_harbor_digest[item["task_digest"]].add(content_sha256)
     for task_digest, checksums in checksums_by_digest.items():
         if len(checksums) != 1:
@@ -1578,27 +2449,48 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "trial timing falls outside job timing",
             )
 
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for item in trials:
-        key = (
-            _normalized_task_name(item["task_name"]),
-            item["agent_name"],
-            item["model"],
-        )
+        comparison_coordinate = comparison_coordinates.get(item["trial_id"])
+        if comparison_coordinate is None:
+            key = (
+                _normalized_task_name(item["task_name"]),
+                item["agent_name"],
+                item["model"],
+                "",
+            )
+        else:
+            key = (
+                comparison_coordinate["task"],
+                comparison_coordinate["canonical_harness"],
+                comparison_coordinate["canonical_model"],
+                comparison_coordinate["agent_config_sha256"],
+            )
         grouped[key].append(item)
 
     job_lock_digest = _sha256_file(job_lock_path)
     job_result_digest = _sha256_file(job_result_path)
     rows: list[dict[str, Any]] = []
     for group in sorted(grouped):
-        task, harness, model = group
+        task, harness, model, _variant_digest = group
         group_trials = sorted(
             grouped[group],
             key=lambda item: (item["trial_name"], item["trial_id"]),
         )
         for trial_number, item in enumerate(group_trials, 1):
+            comparison_coordinate = comparison_coordinates.get(item["trial_id"])
+            if comparison_coordinate is not None:
+                trial_number = comparison_coordinate["index"]
             score = item["score"]
-            success = item["checker_exit"] == 0
+            exception = item["exception"]
+            terminal_failure = exception is not None
+            success = not terminal_failure and item["checker_exit"] == 0
+            if terminal_failure:
+                exception_type, failure_class, failure_reason = exception
+            else:
+                exception_type = None
+                failure_class = "solved" if success else "wrong_answer"
+                failure_reason = None
             provenance = {
                 "kind": "harbor_job",
                 "harbor_version": HARBOR_VERSION,
@@ -1610,44 +2502,108 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "job_result_sha256": job_result_digest,
                 "trial_lock_sha256": _sha256_file(item["trial_lock_path"]),
                 "trial_result_sha256": _sha256_file(item["result_path"]),
-                "reward_sha256": _sha256_file(item["reward_path"]),
-                "openbench_verifier_evidence_sha256": _sha256_file(
+                "reward_sha256": _optional_sha256_file(item["reward_path"]),
+                "openbench_verifier_evidence_sha256": _optional_sha256_file(
                     item["verifier_evidence_path"]
                 ),
-                "atif_sha256": _sha256_file(item["trajectory_path"]),
-                "artifact_manifest_sha256": _sha256_file(item["manifest_path"]),
+                "atif_sha256": _optional_sha256_file(item["trajectory_path"]),
+                "artifact_manifest_sha256": _optional_sha256_file(
+                    item["manifest_path"]
+                ),
                 "final_workspace_sha256": item["workspace_digest"],
                 "task_digest": item["task_digest"],
-                "openbench_task_content_digest": dict(
-                    item["openbench_task_content_digest"]
+                "openbench_task_content_digest": (
+                    None
+                    if item["openbench_task_content_digest"] is None
+                    else dict(item["openbench_task_content_digest"])
                 ),
-                "openbench_harbor_export": dict(
-                    item["openbench_harbor_export"]
+                "openbench_harbor_export": (
+                    None
+                    if item["openbench_harbor_export"] is None
+                    else dict(item["openbench_harbor_export"])
                 ),
                 "harbor_task_checksum": item["task_checksum"],
                 "harbor_agent_config_name": item["agent_config_name"],
                 "harbor_model_name": item["harbor_model_name"],
+                "agent_config_sha256": (
+                    comparison_coordinate["agent_config_sha256"]
+                    if comparison_coordinate is not None
+                    else None
+                ),
                 "harbor_verifier_time_s": item["harbor_verifier_time_s"],
                 "harbor_job_retries": job_retry_count,
                 "harbor_job_max_retries": job_max_retries,
+                "harbor_exception_type": exception_type,
+                "comparison_plan_schema_version": (
+                    COMPARISON_PLAN_SCHEMA_VERSION
+                    if comparison_coordinate is not None
+                    else None
+                ),
+                "comparison_plan_sha256": (
+                    comparison_plan_sha256
+                    if comparison_coordinate is not None
+                    else None
+                ),
+                "comparison_plan": (
+                    dict(comparison_plan)
+                    if comparison_coordinate is not None
+                    else None
+                ),
+                "comparison_arm_id": (
+                    comparison_coordinate["arm_id"]
+                    if comparison_coordinate is not None
+                    else None
+                ),
+                "comparison_resolved_tasks": (
+                    list(comparison_resolved_tasks)
+                    if comparison_coordinate is not None
+                    else None
+                ),
+                "comparison_block": (
+                    {
+                        "task": comparison_coordinate["task"],
+                        "index": comparison_coordinate["index"],
+                    }
+                    if comparison_coordinate is not None
+                    else None
+                ),
                 "usage_source": item["usage"]["token_basis"],
                 "proxy_measured": False,
                 "harbor_metering": None,
-                "trial_mapping": "lexicographic_name_within_task_agent_model",
+                "trial_mapping": (
+                    "openbench_comparison_plan_v4"
+                    if comparison_coordinate is not None
+                    else "lexicographic_name_within_task_agent_model"
+                ),
                 "temporal_matched_block_claim": False,
             }
             row = {field: None for field in ROW_FIELDS}
             row.update(
                 {
-                    "run_id": make_run_id(harness, task, model, trial_number),
+                    "run_id": make_run_id(
+                        harness,
+                        task,
+                        model,
+                        trial_number,
+                        candidate_digest=(
+                            comparison_coordinate["agent_config_sha256"]
+                            if comparison_coordinate is not None
+                            else None
+                        ),
+                        full_candidate_digest=comparison_coordinate is not None,
+                    ),
                     "ts_iso": item["started"].isoformat(),
                     "harness": harness,
                     "model": model,
                     "task": task,
                     "trial": trial_number,
                     "success": success,
-                    "completed": True,
-                    "error": None,
+                    "completed": not terminal_failure,
+                    "error": (
+                        None
+                        if exception_type is None
+                        else f"Harbor terminal failure: {exception_type}"
+                    ),
                     "wall_time_s": round(
                         (item["finished"] - item["started"]).total_seconds(), 3
                     ),
@@ -1660,13 +2616,18 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                     "checker_exit": item["checker_exit"],
                     "harness_version": item["agent_version"],
                     "harness_version_source": "harbor_trial_result",
-                    "failure_class": "solved" if success else "wrong_answer",
+                    "failure_class": failure_class,
+                    "failure_reason": failure_reason,
                     "candidate_provenance": provenance,
                     "version_drift": False,
-                    "workspace_source": {
-                        "kind": "harbor_artifact",
-                        "sha256": item["workspace_digest"],
-                    },
+                    "workspace_source": (
+                        None
+                        if item["workspace_digest"] is None
+                        else {
+                            "kind": "harbor_artifact",
+                            "sha256": item["workspace_digest"],
+                        }
+                    ),
                 }
             )
             row.update(item["usage"])
@@ -1688,6 +2649,14 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                         ]["ledger_sha256"],
                     }
                 )
+            else:
+                grade, ranking_eligible, exclusion_reason = harbor_usage_policy(
+                    row.get("token_basis"),
+                    proxy_required=False,
+                )
+                row["usage_evidence_grade"] = grade
+                row["usage_ranking_eligible"] = ranking_eligible
+                row["usage_ranking_exclusion_reason"] = exclusion_reason
             rows.append(row)
     run_ids = [row["run_id"] for row in rows]
     if len(run_ids) != len(set(run_ids)):
@@ -1696,10 +2665,18 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
 
 
 def import_results(
-    job_dir: str | os.PathLike[str], results_path: str | os.PathLike[str]
+    job_dir: str | os.PathLike[str],
+    results_path: str | os.PathLike[str],
+    *,
+    comparison_plan_path: str | os.PathLike[str] | None = None,
+    submitted_job_config_path: str | os.PathLike[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Validate, lock, collision-check, and append one rollback-safe batch."""
-    rows = load_rows(job_dir)
+    rows = load_rows(
+        job_dir,
+        comparison_plan_path=comparison_plan_path,
+        submitted_job_config_path=submitted_job_config_path,
+    )
     requested_output = Path(results_path).expanduser()
     if requested_output.is_symlink():
         raise _fail("output", f"symlink is not accepted: {requested_output}")
@@ -1768,13 +2745,32 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="OpenBench results JSONL to append",
     )
+    parser.add_argument(
+        "--comparison-plan",
+        help=(
+            "OpenBench comparison-plan sidecar emitted beside the Harbor "
+            "job config"
+        ),
+    )
+    parser.add_argument(
+        "--job-config",
+        help=(
+            "exact OpenBench-submitted Harbor job config; required with "
+            "--comparison-plan"
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        rows = import_results(args.job_dir, args.output)
+        rows = import_results(
+            args.job_dir,
+            args.output,
+            comparison_plan_path=args.comparison_plan,
+            submitted_job_config_path=args.job_config,
+        )
     except HarborResultsError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

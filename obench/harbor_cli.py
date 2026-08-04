@@ -27,7 +27,7 @@ class _ExitRecordingProcessRunner:
 
     def __call__(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
         completed = subprocess.run(argv, **kwargs)
-        if not argv or argv[-1] != "--version":
+        if len(argv) > 1 and argv[1] == "run":
             self.harbor_returncode = int(completed.returncode)
         return completed
 
@@ -85,7 +85,7 @@ def _parser() -> argparse.ArgumentParser:
         help="run a native task x harness x attempt matrix",
         description=(
             "Export OpenBench tasks and run a native Harbor job with exact "
-            "OAuth harness profiles. Harbor owns scheduling, retries, locking, "
+            "stock auth profiles. Harbor owns scheduling, retries, locking, "
             "and resume."
         ),
     )
@@ -110,8 +110,8 @@ def _parser() -> argparse.ArgumentParser:
         "--harness",
         action="append",
         required=True,
-        choices=("codex", "pi", "opencode"),
-        help="OAuth harness profile; repeat for multiple harnesses",
+        choices=("codex", "pi", "opencode", "cursor", "devin"),
+        help="stock harness profile; repeat for multiple harnesses",
     )
     job_run.add_argument(
         "--model",
@@ -271,6 +271,7 @@ def _run_profile_job(
         f"Harbor job {action}; exited with code {result.returncode}; "
         f"trials: {result.artifact.trial_count}; "
         f"config sha256: {result.artifact.sha256}; "
+        f"comparison plan: {result.comparison_plan_path}; "
         f"job output: {result.expected_job_path}"
     )
     print(message, file=sys.stdout if result.returncode == 0 else sys.stderr)

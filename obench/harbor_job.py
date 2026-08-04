@@ -13,6 +13,7 @@ import math
 import os
 import re
 import tempfile
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -24,6 +25,8 @@ HARBOR_JOB_CONFIG_SOURCE = (
     "https://github.com/harbor-framework/harbor/blob/"
     f"{HARBOR_GIT_COMMIT}/src/harbor/models/job/config.py"
 )
+COMPARISON_PLAN_SCHEMA_VERSION = "openbench-harbor-comparison-plan-v4"
+COMPARISON_PLAN_SUFFIX = ".openbench-comparison-plan.json"
 
 DEFAULT_RETRY_EXCLUSIONS = (
     "AgentAuthenticationError",
@@ -35,6 +38,25 @@ DEFAULT_RETRY_EXCLUSIONS = (
     "VerifierOutputParseError",
     "VerifierTimeoutError",
 )
+_HARBOR_RETRY_DEFAULT_EXCLUSIONS = (
+    "AgentAuthenticationError",
+    "AgentSafetyRefusalError",
+    "AgentTimeoutError",
+    "ApiUsageLimitError",
+    "ModelNotFoundError",
+    "RewardFileEmptyError",
+    "RewardFileNotFoundError",
+    "VerifierOutputParseError",
+    "VerifierTimeoutError",
+)
+_HARBOR_RETRY_DEFAULTS = {
+    "max_retries": 0,
+    "include_exceptions": None,
+    "exclude_exceptions": list(_HARBOR_RETRY_DEFAULT_EXCLUSIONS),
+    "wait_multiplier": 1.0,
+    "min_wait_sec": 1.0,
+    "max_wait_sec": 60.0,
+}
 
 _IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
@@ -76,9 +98,13 @@ class AgentProfile:
     """
 
     profile_id: str
+    arm_id: str | None = None
+    canonical_harness: str | None = None
+    canonical_model: str | None = None
     model_name: str | None = None
     name: str | None = None
     import_path: str | None = None
+    override_timeout_sec: float | None = None
     n_concurrent: int | None = None
     concurrency_group: str | None = None
     kwargs: Mapping[str, Any] = field(default_factory=dict)
@@ -116,6 +142,17 @@ class HarborJobSpec:
 
 
 @dataclass(frozen=True)
+class HarborComparisonPlanArtifact:
+    """OpenBench comparison coordinates bound to one native Harbor job config."""
+
+    json_bytes: bytes
+    sha256: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return json.loads(self.json_bytes)
+
+
+@dataclass(frozen=True)
 class HarborJobArtifact:
     """Canonical publishable config bytes and their immutable identity."""
 
@@ -125,6 +162,7 @@ class HarborJobArtifact:
     jobs_dir: Path
     trial_count: int | None
     source_task_count: int | None
+    comparison_plan: HarborComparisonPlanArtifact | None
 
     def as_dict(self) -> dict[str, Any]:
         return json.loads(self.json_bytes)
@@ -159,9 +197,18 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
     )
     profiles = _validate_profiles(spec.agent_profiles, spec.concurrency)
     retry = _render_retry(spec.retry)
-    source, source_task_count = _render_source(spec.source)
+    (
+        source,
+        source_task_count,
+        source_task_names,
+        task_id_map,
+        dataset_descriptor,
+    ) = _render_source(spec.source)
 
     agents = []
+    comparison_arms = []
+    comparison_agent_config_digests: set[str] = set()
+    comparison_arm_ids: set[str] = set()
     for profile in profiles:
         profile_models = (
             (profile.model_name,)
@@ -173,7 +220,43 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
                 f"profile {profile.profile_id} requires model_name when "
                 "the job has no shared models"
             )
-        agents.extend(_render_agent(profile, model) for model in profile_models)
+        if profile.arm_id is not None and len(profile_models) != 1:
+            raise HarborJobError(
+                f"profile {profile.profile_id} arm_id requires exactly one model"
+            )
+        for model in profile_models:
+            rendered_agent = _render_agent(profile, model)
+            agent_config_name = (
+                rendered_agent.get("name") or rendered_agent["import_path"]
+            )
+            agent_config_sha256 = canonical_agent_config_sha256(rendered_agent)
+            if agent_config_sha256 in comparison_agent_config_digests:
+                raise HarborJobError(
+                    "comparison arms must have distinct rendered agent configs: "
+                    f"{profile.profile_id}"
+                )
+            comparison_agent_config_digests.add(agent_config_sha256)
+            arm_id = (
+                profile.arm_id or profile.profile_id
+                if len(profile_models) == 1
+                else f"{profile.profile_id}@{model}"
+            )
+            if arm_id in comparison_arm_ids:
+                raise HarborJobError(
+                    f"comparison arm identity is ambiguous: {arm_id}"
+                )
+            comparison_arm_ids.add(arm_id)
+            agents.append(rendered_agent)
+            comparison_arms.append({
+                "arm_id": arm_id,
+                "agent_config_name": agent_config_name,
+                "harbor_model_name": model,
+                "agent_config_sha256": agent_config_sha256,
+                "canonical_harness": (
+                    profile.canonical_harness or profile.profile_id
+                ),
+                "canonical_model": profile.canonical_model or model,
+            })
     config = {
         "job_name": job_name,
         "jobs_dir": str(jobs_dir),
@@ -198,13 +281,172 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
         if source_task_count is not None
         else None
     )
+    config_sha256 = hashlib.sha256(json_bytes).hexdigest()
+    comparison_plan = _build_comparison_plan(
+        job_name=job_name,
+        submitted_job_config_sha256=config_sha256,
+        effective_job_config_sha256=canonical_harbor_job_config_sha256(config),
+        dataset=dataset_descriptor,
+        tasks=source_task_names,
+        task_id_map=task_id_map,
+        arms=comparison_arms,
+        attempts=spec.attempts,
+    )
     return HarborJobArtifact(
         json_bytes=json_bytes,
-        sha256=hashlib.sha256(json_bytes).hexdigest(),
+        sha256=config_sha256,
         job_name=job_name,
         jobs_dir=jobs_dir,
         trial_count=trial_count,
         source_task_count=source_task_count,
+        comparison_plan=comparison_plan,
+    )
+
+
+def _build_comparison_plan(
+    *,
+    job_name: str,
+    submitted_job_config_sha256: str,
+    effective_job_config_sha256: str,
+    dataset: dict[str, Any] | None,
+    tasks: tuple[str, ...] | None,
+    task_id_map: dict[str, str] | None,
+    arms: list[dict[str, str]],
+    attempts: int,
+) -> HarborComparisonPlanArtifact:
+    value = {
+        "schema_version": COMPARISON_PLAN_SCHEMA_VERSION,
+        "harbor_version": HARBOR_VERSION,
+        "harbor_git_commit_hash": HARBOR_GIT_COMMIT,
+        "job_name": job_name,
+        "submitted_job_config_sha256": submitted_job_config_sha256,
+        "effective_job_config_sha256": effective_job_config_sha256,
+        "attempts": attempts,
+        "dataset": dataset,
+        "tasks": None if tasks is None else list(tasks),
+        "task_id_map": task_id_map,
+        "arms": arms,
+    }
+    json_bytes = canonical_comparison_plan_bytes(value)
+    return HarborComparisonPlanArtifact(
+        json_bytes=json_bytes,
+        sha256=hashlib.sha256(json_bytes).hexdigest(),
+    )
+
+
+def canonical_comparison_plan_bytes(value: Mapping[str, Any]) -> bytes:
+    """Serialize a comparison plan in its single supported canonical form."""
+
+    return (
+        json.dumps(
+            value,
+            sort_keys=True,
+            indent=2,
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def canonical_agent_config_sha256(value: Mapping[str, Any]) -> str:
+    """Hash one exact secret-free rendered Harbor AgentConfig mapping."""
+
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def canonical_harbor_job_config_bytes(value: Mapping[str, Any]) -> bytes:
+    """Return Harbor 0.20.0's stable semantic job-config identity.
+
+    Harbor persists ``JobConfig`` with ``exclude_defaults=True`` and represents
+    retry exception sets as JSON arrays. Raw persisted bytes therefore differ
+    when explicit defaults are omitted or a set is emitted in another order.
+    OpenBench normalizes only those pinned Harbor semantics; all other fields
+    remain exact.
+    """
+
+    if not isinstance(value, Mapping):
+        raise HarborJobError("Harbor job config must be a JSON object")
+    try:
+        normalized = json.loads(
+            json.dumps(
+                value,
+                ensure_ascii=True,
+                allow_nan=False,
+            )
+        )
+    except (TypeError, ValueError) as exc:
+        raise HarborJobError("Harbor job config must be finite JSON") from exc
+    if not isinstance(normalized, dict):
+        raise HarborJobError("Harbor job config must be a JSON object")
+
+    normalized.setdefault("n_attempts", 1)
+    normalized.setdefault("n_concurrent_trials", 4)
+    normalized.setdefault("tasks", [])
+    retry = normalized.setdefault("retry", {})
+    if not isinstance(retry, dict):
+        raise HarborJobError("Harbor job config retry must be an object")
+    for key, default in _HARBOR_RETRY_DEFAULTS.items():
+        retry.setdefault(key, json.loads(json.dumps(default)))
+    for key in ("include_exceptions", "exclude_exceptions"):
+        exceptions = retry.get(key)
+        if exceptions is None:
+            continue
+        if (
+            not isinstance(exceptions, list)
+            or any(not isinstance(item, str) or not item for item in exceptions)
+            or len(set(exceptions)) != len(exceptions)
+        ):
+            raise HarborJobError(
+                f"Harbor job config retry.{key} must be a unique string array or null"
+            )
+        retry[key] = sorted(exceptions)
+
+    return (
+        json.dumps(
+            normalized,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def canonical_harbor_job_config_sha256(value: Mapping[str, Any]) -> str:
+    """Hash the pinned semantic Harbor job configuration."""
+
+    return hashlib.sha256(canonical_harbor_job_config_bytes(value)).hexdigest()
+
+
+def comparison_plan_path_for_config(
+    config_path: str | os.PathLike[str],
+) -> Path:
+    """Return the deterministic OpenBench sidecar path for a Harbor config."""
+
+    path = Path(config_path).expanduser()
+    return path.with_name(path.stem + COMPARISON_PLAN_SUFFIX)
+
+
+def write_comparison_plan(
+    artifact: HarborComparisonPlanArtifact,
+    path: str | os.PathLike[str],
+) -> Path:
+    """Atomically create a sidecar, allowing only identical existing bytes."""
+
+    return _write_immutable_bytes(
+        artifact.json_bytes,
+        path,
+        path_label="comparison plan path",
+        artifact_label="Harbor comparison plan",
     )
 
 
@@ -213,19 +455,36 @@ def write_job_config(
 ) -> Path:
     """Atomically create a config, allowing only an identical existing file."""
 
+    return _write_immutable_bytes(
+        artifact.json_bytes,
+        path,
+        path_label="config path",
+        artifact_label="Harbor job config",
+    )
+
+
+def _write_immutable_bytes(
+    payload: bytes,
+    path: str | os.PathLike[str],
+    *,
+    path_label: str,
+    artifact_label: str,
+) -> Path:
     destination = Path(path).expanduser()
     if destination.suffix.lower() != ".json":
-        raise HarborJobError("Harbor job config path must end in .json")
+        raise HarborJobError(f"{artifact_label} path must end in .json")
     if destination.is_symlink():
-        raise HarborJobError(f"config path must not be a symlink: {destination}")
+        raise HarborJobError(f"{path_label} must not be a symlink: {destination}")
     destination = destination.resolve(strict=False)
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         if not destination.is_file():
-            raise HarborJobError(f"config path is not a regular file: {destination}")
-        if destination.read_bytes() != artifact.json_bytes:
             raise HarborJobError(
-                f"refusing to overwrite different Harbor job config: {destination}"
+                f"{path_label} is not a regular file: {destination}"
+            )
+        if destination.read_bytes() != payload:
+            raise HarborJobError(
+                f"refusing to overwrite different {artifact_label}: {destination}"
             )
         return destination
 
@@ -235,15 +494,15 @@ def write_job_config(
     temporary = Path(temporary_name)
     try:
         with os.fdopen(fd, "wb") as handle:
-            handle.write(artifact.json_bytes)
+            handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
         try:
             os.link(temporary, destination)
         except FileExistsError:
-            if destination.is_symlink() or destination.read_bytes() != artifact.json_bytes:
+            if destination.is_symlink() or destination.read_bytes() != payload:
                 raise HarborJobError(
-                    f"refusing to overwrite different Harbor job config: {destination}"
+                    f"refusing to overwrite different {artifact_label}: {destination}"
                 ) from None
         return destination
     finally:
@@ -314,17 +573,56 @@ def _normalize_output_dir(value: str | os.PathLike[str]) -> Path:
 
 def _render_source(
     source: LocalTaskSet | Dataset,
-) -> tuple[dict[str, list[dict[str, Any]]], int | None]:
+) -> tuple[
+    dict[str, list[dict[str, Any]]],
+    int | None,
+    tuple[str, ...] | None,
+    tuple[str, ...] | None,
+    dict[str, Any] | None,
+]:
     if isinstance(source, LocalTaskSet):
-        dataset, count = _render_local_task_set(source)
-        return {"datasets": [dataset], "tasks": []}, count
+        dataset, task_names = _render_local_task_set(source)
+        task_id_map = _local_task_id_map(Path(dataset["path"]), task_names)
+        return (
+            {"datasets": [dataset], "tasks": []},
+            len(task_names),
+            task_names,
+            task_id_map,
+            None,
+        )
     if isinstance(source, Dataset):
         dataset = _render_dataset(source)
-        return {"datasets": [dataset], "tasks": []}, None
+        return {"datasets": [dataset], "tasks": []}, None, None, None, dataset
     raise HarborJobError("source must be exactly one LocalTaskSet or Dataset")
 
 
-def _render_local_task_set(source: LocalTaskSet) -> tuple[dict[str, Any], int]:
+def _local_task_id_map(root: Path, task_names: tuple[str, ...]) -> dict[str, str]:
+    task_id_map: dict[str, str] = {}
+    for selector in task_names:
+        config_path = root / selector / "task.toml"
+        try:
+            with config_path.open("rb") as handle:
+                raw = tomllib.load(handle)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise HarborJobError(
+                f"cannot read selected Harbor task config {config_path}: {exc}"
+            ) from exc
+        task = raw.get("task")
+        canonical_id = task.get("name") if isinstance(task, dict) else None
+        task_id_map[selector] = _validate_nonempty(
+            canonical_id,
+            f"{config_path} [task].name",
+        )
+    if len(set(task_id_map.values())) != len(task_id_map):
+        raise HarborJobError(
+            "selected local Harbor tasks must have unique [task].name identities"
+        )
+    return task_id_map
+
+
+def _render_local_task_set(
+    source: LocalTaskSet,
+) -> tuple[dict[str, Any], tuple[str, ...]]:
     raw = Path(source.path).expanduser()
     if raw.is_symlink():
         raise HarborJobError(f"local task-set path must not be a symlink: {raw}")
@@ -369,7 +667,7 @@ def _render_local_task_set(source: LocalTaskSet) -> tuple[dict[str, Any], int]:
                 + ", ".join(unavailable)
             )
         selected = tuple(sorted(selected))
-    return {"path": str(root), "task_names": list(selected)}, len(selected)
+    return {"path": str(root), "task_names": list(selected)}, selected
 
 
 def _render_dataset(source: Dataset) -> dict[str, Any]:
@@ -391,7 +689,12 @@ def _render_dataset(source: Dataset) -> dict[str, Any]:
     if source.version is not None:
         rendered["version"] = _validate_nonempty(source.version, "dataset version")
     if source.ref is not None:
-        rendered["ref"] = _validate_nonempty(source.ref, "dataset ref")
+        ref = _validate_nonempty(source.ref, "dataset ref")
+        if package and re.fullmatch(r"sha256:[0-9a-f]{64}", ref) is None:
+            raise HarborJobError(
+                "package dataset ref must be an immutable sha256 digest"
+            )
+        rendered["ref"] = ref
     if source.task_names is not None:
         rendered["task_names"] = list(
             _validate_unique_strings(source.task_names, "task_names")
@@ -436,6 +739,23 @@ def _validate_profiles(
             _validate_nonempty(
                 profile.model_name, f"profile {profile_id} model_name"
             )
+        if profile.arm_id is not None:
+            _validate_identifier(profile.arm_id, f"profile {profile_id} arm_id")
+        if profile.canonical_harness is not None:
+            _validate_nonempty(
+                profile.canonical_harness,
+                f"profile {profile_id} canonical_harness",
+            )
+        if profile.canonical_model is not None:
+            _validate_nonempty(
+                profile.canonical_model,
+                f"profile {profile_id} canonical_model",
+            )
+        if profile.override_timeout_sec is not None:
+            _validate_positive_number(
+                profile.override_timeout_sec,
+                f"profile {profile_id} override_timeout_sec",
+            )
         if profile.n_concurrent is not None:
             if not isinstance(profile.n_concurrent, int) or isinstance(
                 profile.n_concurrent, bool
@@ -476,6 +796,8 @@ def _render_agent(profile: AgentProfile, model: str) -> dict[str, Any]:
         rendered["name"] = profile.name
     else:
         rendered["import_path"] = profile.import_path
+    if profile.override_timeout_sec is not None:
+        rendered["override_timeout_sec"] = profile.override_timeout_sec
     if profile.n_concurrent is not None:
         rendered["n_concurrent"] = profile.n_concurrent
     if profile.concurrency_group is not None:

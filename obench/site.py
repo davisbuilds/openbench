@@ -2123,9 +2123,15 @@ def _harness_board(bundle):
     def telemetry_basis(arm):
         source = arm.get("token_telemetry_source")
         bases = arm.get("token_telemetry_bases") or []
+        evidence = arm.get("usage_evidence_labels") or []
+        exclusions = arm.get("usage_ranking_exclusions") or []
         if source is None:
-            return _chip("unavailable", "warn")
-        return _chip(source) + "".join(_chip(basis) for basis in bases)
+            value = _chip("usage excluded" if exclusions else "unavailable", "warn")
+        else:
+            value = _chip(source) + "".join(_chip(basis) for basis in bases)
+        return value + "".join(
+            _chip(label, "warn" if exclusions else "") for label in evidence
+        )
 
     def telemetry_coverage(arm):
         coverage = arm.get("token_telemetry_coverage") or {}

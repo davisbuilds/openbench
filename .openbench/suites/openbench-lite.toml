@@ -1,0 +1,40 @@
+schema_version = 1
+id = "openbench-lite-local"
+title = "OpenBench Lite local comparison"
+
+[harbor]
+version = "0.20.0"
+commit = "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767"
+
+[[task_sets]]
+id = "openbench-lite"
+kind = "local"
+path = "harbor-tasks/openbench-lite"
+
+[[arms]]
+id = "codex-sol"
+harness = "codex"
+profile = "codex"
+model = "gpt-5.6-sol"
+
+[[arms]]
+id = "pi-sol"
+harness = "pi"
+profile = "pi"
+model = "gpt-5.6-sol"
+
+[run]
+attempts = 1
+concurrency = 2
+max_retries = 0
+timeout_seconds = 900
+
+[evidence]
+harbor_lock = true
+verifier = true
+trajectory = true
+usage = true
+
+[publication]
+scope = "local_only"
+completeness = "complete"

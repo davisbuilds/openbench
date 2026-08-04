@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -23,15 +24,22 @@ from obench.harbor_oauth import (
 from obench.harbor_job import (
     AgentProfile,
     ConcurrencyPolicy,
+    HARBOR_GIT_COMMIT,
     HarborJobArtifact,
     HarborJobSpec,
     LocalTaskSet,
     RetryPolicy,
     build_command_plan,
     build_job_config,
+    comparison_plan_path_for_config,
+    write_comparison_plan,
     write_job_config,
 )
-from obench.harbor_profiles import resolve_harbor_profile
+from obench.harbor_profiles import (
+    AUTH_STRATEGY_OAUTH,
+    resolve_harbor_profile,
+)
+from obench.harbor_agents._subscription import staged_subscription_auth
 
 HARBOR_VERSION = "0.20.0"
 HARBOR_TASK_SCHEMA_VERSION = "1.4"
@@ -55,6 +63,8 @@ class HarborRunError(RuntimeError):
 class HarborBinary:
     path: Path
     version: str
+    git_commit: str
+    is_editable: bool
 
 
 @dataclass(frozen=True)
@@ -80,6 +90,7 @@ class HarborProfileJobResult:
     returncode: int
     artifact: HarborJobArtifact
     config_path: Path
+    comparison_plan_path: Path
     expected_job_path: Path
     resumes_existing_job: bool
 
@@ -220,7 +231,74 @@ def preflight_harbor_binary(
         raise HarborRunError(
             f"Harbor {HARBOR_VERSION} is required; binary reported: {reported}"
         )
-    return HarborBinary(path=resolved, version=HARBOR_VERSION)
+
+    try:
+        with resolved.open("rb") as handle:
+            first_line = handle.readline(4096).decode(
+                "utf-8", "strict"
+            ).strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise HarborRunError(
+            f"Cannot inspect Harbor executable shebang: {resolved}"
+        ) from exc
+    if not first_line.startswith("#!"):
+        raise HarborRunError(
+            "Harbor executable must expose its package interpreter in a shebang"
+        )
+    interpreter = Path(first_line[2:].strip())
+    if not interpreter.is_absolute() or not interpreter.is_file():
+        raise HarborRunError(
+            "Harbor executable must use an absolute package interpreter"
+        )
+
+    metadata_script = (
+        "import json;"
+        "from harbor.models.job.lock import "
+        "_get_harbor_git_commit_hash,_get_harbor_is_editable_install,"
+        "_get_harbor_version;"
+        "print(json.dumps({'version':_get_harbor_version(),"
+        "'git_commit':_get_harbor_git_commit_hash(),"
+        "'is_editable':_get_harbor_is_editable_install()},sort_keys=True))"
+    )
+    try:
+        metadata_process = run_process(
+            [str(interpreter), "-c", metadata_script],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise HarborRunError(
+            "Cannot inspect installed Harbor package metadata"
+        ) from exc
+    if metadata_process.returncode != 0:
+        raise HarborRunError(
+            "Harbor package metadata preflight failed with exit code "
+            f"{metadata_process.returncode}"
+        )
+    try:
+        metadata = json.loads(metadata_process.stdout or "")
+    except json.JSONDecodeError as exc:
+        raise HarborRunError(
+            "Harbor package metadata preflight returned invalid JSON"
+        ) from exc
+    expected_metadata = {
+        "version": HARBOR_VERSION,
+        "git_commit": HARBOR_GIT_COMMIT,
+        "is_editable": False,
+    }
+    if metadata != expected_metadata:
+        raise HarborRunError(
+            "Harbor package provenance mismatch; required "
+            f"version={HARBOR_VERSION}, commit={HARBOR_GIT_COMMIT}, "
+            "editable=false"
+        )
+    return HarborBinary(
+        path=resolved,
+        version=HARBOR_VERSION,
+        git_commit=HARBOR_GIT_COMMIT,
+        is_editable=False,
+    )
 
 
 def build_harbor_oauth_command(
@@ -364,29 +442,52 @@ def run_harbor_profile_job(
     with ExitStack() as stack:
         for harness in harnesses:
             profile = resolve_harbor_profile(harness, model)
-            master_path = _resolve_profile_auth_source(
-                harness, profile.auth.source_candidates
-            )
-            credential = stack.enter_context(HarborOAuthCredential(master_path))
-            oauth = credential.config
-            oauth_configs.append(oauth)
             env_prefix = f"OPENBENCH_HARBOR_{harness.upper()}_AUTH"
             input_source_env = f"{env_prefix}_INPUT"
-            return_source_env = f"{env_prefix}_RETURN"
-            process_env[input_source_env] = oauth.auth_json_path
-            process_env[return_source_env] = oauth.auth_return_path
+            profile_env: dict[str, str]
+            if profile.auth.strategy == AUTH_STRATEGY_OAUTH:
+                master_path = _resolve_profile_auth_source(
+                    harness, profile.auth.source_candidates
+                )
+                credential = stack.enter_context(
+                    HarborOAuthCredential(master_path)
+                )
+                oauth = credential.config
+                oauth_configs.append(oauth)
+                return_source_env = f"{env_prefix}_RETURN"
+                process_env[input_source_env] = oauth.auth_json_path
+                process_env[return_source_env] = oauth.auth_return_path
+                if profile.auth.return_env is None:
+                    raise HarborRunError(
+                        f"{harness} OAuth profile lacks a return environment"
+                    )
+                profile_env = {
+                    profile.auth.input_env: f"${{{input_source_env}}}",
+                    profile.auth.return_env: f"${{{return_source_env}}}",
+                }
+            else:
+                archive = stack.enter_context(
+                    staged_subscription_auth(
+                        harness,
+                        profile.auth.source_candidates,
+                    )
+                )
+                process_env[input_source_env] = str(archive)
+                profile_env = {
+                    profile.auth.input_env: f"${{{input_source_env}}}",
+                }
             job_profiles.append(
                 AgentProfile(
                     profile_id=harness,
+                    arm_id=harness,
+                    canonical_harness=harness,
+                    canonical_model=model,
                     model_name=profile.harbor_model_name,
                     import_path=profile.agent_import_path,
                     n_concurrent=profile.auth.max_concurrent_uses,
                     concurrency_group=profile.auth.concurrency_group,
                     kwargs=profile.agent_kwargs(),
-                    env={
-                        profile.auth.input_env: f"${{{input_source_env}}}",
-                        profile.auth.return_env: f"${{{return_source_env}}}",
-                    },
+                    env=profile_env,
                 )
             )
 
@@ -408,6 +509,14 @@ def run_harbor_profile_job(
             )
         )
         written_config = write_job_config(artifact, config_path)
+        if artifact.comparison_plan is None:
+            raise HarborRunError(
+                "local Harbor profile jobs require a comparison plan"
+            )
+        written_comparison_plan = write_comparison_plan(
+            artifact.comparison_plan,
+            comparison_plan_path_for_config(written_config),
+        )
         plan = build_command_plan(
             artifact,
             written_config,
@@ -426,6 +535,7 @@ def run_harbor_profile_job(
         returncode=int(completed.returncode),
         artifact=artifact,
         config_path=written_config,
+        comparison_plan_path=written_comparison_plan,
         expected_job_path=plan.expected_job_path,
         resumes_existing_job=plan.resumes_existing_job,
     )

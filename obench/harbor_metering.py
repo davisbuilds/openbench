@@ -13,6 +13,7 @@ from typing import Any, Mapping
 
 from obench import proxy
 from obench.run import proxy_split_from_usage
+from obench.usage_evidence import harbor_usage_policy
 
 SCHEMA_VERSION = "openbench.harbor-metering.v2"
 HARBOR_BASE_URL_ENV = "OPENAI_BASE_URL"
@@ -148,19 +149,29 @@ def reconcile_usage(
 def publication_decision(
     evidence: Mapping[str, Any], *, proxy_required: bool
 ) -> dict[str, Any]:
-    """Return the fail-closed importer/publication decision for one trial."""
+    """Return publication and usage-ranking decisions for one trial."""
     status = evidence.get("reconciliation", {}).get("status")
     valid_status = status in STATUSES
-    eligible = not proxy_required or (valid_status and status == "exact")
+    eligible = not proxy_required or status in ("exact", "mismatch")
+    ranking_eligible = not proxy_required or status == "exact"
     reasons = []
     if proxy_required and not valid_status:
         reasons.append("invalid_metering_evidence")
-    elif proxy_required and status != "exact":
+    elif proxy_required and status == "incomplete":
         reasons.append(f"proxy_evidence_{status}")
+    ranking_reasons = []
+    if proxy_required and not ranking_eligible:
+        ranking_reasons.append(
+            "proxy_evidence_mismatch"
+            if status == "mismatch"
+            else "proxy_evidence_incomplete"
+        )
     return {
         "proxy_evidence_required": proxy_required,
         "eligible": bool(eligible),
         "blocking_reasons": reasons,
+        "usage_ranking_eligible": bool(ranking_eligible),
+        "usage_ranking_exclusion_reasons": ranking_reasons,
     }
 
 
@@ -182,7 +193,7 @@ def apply_to_imported_row(
     *,
     proxy_required: bool,
 ) -> dict[str, Any]:
-    """Integrator hook: attach measured totals and a machine publication gate."""
+    """Attach proxy totals plus the canonical usage evidence policy."""
     updated = dict(row)
     proxy_usage = evidence.get("proxy_measured")
     if not isinstance(proxy_usage, Mapping):
@@ -221,6 +232,14 @@ def apply_to_imported_row(
         ),
     }
     provenance["proxy_measured"] = evidence.get("proxy_complete") is True
+    grade, ranking_eligible, exclusion_reason = harbor_usage_policy(
+        updated.get("token_basis"),
+        proxy_required=proxy_required,
+        reconciliation_status=evidence.get("reconciliation", {}).get("status"),
+    )
+    updated["usage_evidence_grade"] = grade
+    updated["usage_ranking_eligible"] = ranking_eligible
+    updated["usage_ranking_exclusion_reason"] = exclusion_reason
     updated["candidate_provenance"] = provenance
     return updated
 
@@ -560,6 +579,8 @@ def verify_evidence_dir(
     }
     if declared_reconciliation != expected_reconciliation:
         raise HarborMeteringError("metering reconciliation does not recompute")
+    # A complete, recomputed mismatch is publishable evidence but cannot rank.
+    # Incomplete required evidence still fails closed here.
     require_publication_eligible(evidence, proxy_required=proxy_required)
     return evidence
 

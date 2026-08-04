@@ -1,0 +1,33 @@
+schema_version = "1.4"
+source = "tasks/make-it-run@802014700f6b3c62eddc1a406e3062a438ce572f"
+artifacts = [
+    { source = "/app", destination = "workspace" },
+]
+
+[task]
+name = "openbench/make-it-run"
+description = "Get the greeting program running"
+authors = [{ name = "Matthew Lam" }]
+keywords = ["openbench"]
+
+[metadata]
+origin = "openbench"
+source_task = "tasks/make-it-run"
+source_commit = "802014700f6b3c62eddc1a406e3062a438ce572f"
+
+[metadata.openbench_task_content_digest]
+scheme = 2
+sha256 = "ae605369bf3da7ce9510ffd14c70f874c24e8da0158b0234051d8083355e3a3b"
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 2400.0
+
+[environment]
+build_timeout_sec = 600.0
+network_mode = "public"
+os = "linux"
+cpus = 4
+gpus = 0

@@ -2,6 +2,7 @@
 """Unit and CLI tests for the matched comparison scorecard."""
 
 import json
+import hashlib
 import os
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import unittest
 
 
 from obench import compare  # noqa: E402
+from obench.harbor_job import canonical_comparison_plan_bytes  # noqa: E402
 
 
 class CompareTestCase(unittest.TestCase):
@@ -49,8 +51,217 @@ class CompareTestCase(unittest.TestCase):
         row.update(extra)
         return row
 
+    @classmethod
+    def harbor_row(
+        cls,
+        harness,
+        task,
+        trial,
+        success,
+        *,
+        arm_id,
+        plan_variant="",
+        **extra,
+    ):
+        plan = {
+            "schema_version": "openbench-harbor-comparison-plan-v4",
+            "harbor_version": "0.20.0",
+            "harbor_git_commit_hash": "0" * 40,
+            "job_name": "compare-fixture" + plan_variant,
+            "submitted_job_config_sha256": "e" * 64,
+            "effective_job_config_sha256": "f" * 64,
+            "attempts": 1,
+            "dataset": None,
+            "tasks": [task],
+            "task_id_map": {task: task},
+            "arms": [
+                {
+                    "arm_id": candidate_arm,
+                    "agent_config_name": "custom",
+                    "harbor_model_name": "raw-model",
+                    "agent_config_sha256": digest,
+                    "canonical_harness": canonical_harness,
+                    "canonical_model": canonical_model,
+                }
+                for (
+                    candidate_arm,
+                    digest,
+                    canonical_harness,
+                    canonical_model,
+                ) in (
+                    ("codex", "1" * 64, "codex", "m"),
+                    ("pi", "2" * 64, "pi", "m"),
+                    ("strict", "3" * 64, "acme", "model-x"),
+                    ("fast", "4" * 64, "acme", "model-x"),
+                )
+            ],
+        }
+        plan_sha256 = hashlib.sha256(
+            canonical_comparison_plan_bytes(plan)
+        ).hexdigest()
+        arm = next(item for item in plan["arms"] if item["arm_id"] == arm_id)
+        return cls.row(
+            harness,
+            task,
+            trial,
+            success,
+            exec_mode="harbor",
+            candidate_provenance={
+                "kind": "harbor_job",
+                "comparison_plan_schema_version": (
+                    "openbench-harbor-comparison-plan-v4"
+                ),
+                "comparison_plan_sha256": plan_sha256,
+                "comparison_plan": plan,
+                "comparison_arm_id": arm_id,
+                "agent_config_sha256": arm["agent_config_sha256"],
+                "comparison_resolved_tasks": [task],
+                "comparison_block": {
+                    "task": task,
+                    "index": trial,
+                },
+                "trial_mapping": "openbench_comparison_plan_v4",
+                "temporal_matched_block_claim": False,
+            },
+            **extra,
+        )
+
 
 class TestMatchedComparison(CompareTestCase):
+    def test_harbor_uses_exact_plan_blocks_without_temporal_claim(self):
+        path = self.write(
+            "harbor.jsonl",
+            [
+                self.harbor_row(
+                    "codex",
+                    "t",
+                    1,
+                    True,
+                    arm_id="codex",
+                ),
+                self.harbor_row(
+                    "pi",
+                    "t",
+                    1,
+                    False,
+                    arm_id="pi",
+                ),
+            ],
+        )
+
+        result = compare.build_comparison([path], tasks_dirs=[self.tasks])
+
+        self.assertEqual(result["arms"], ["codex", "pi"])
+        self.assertEqual(result["matched_n"], 1)
+        self.assertEqual(
+            result["comparison_identity"],
+            "harbor_comparison_plan",
+        )
+        self.assertIn(
+            "OpenBench Harbor comparison-plan blocks",
+            compare.render_text(result),
+        )
+        self.assertNotIn("temporal", compare.render_text(result).lower())
+
+    def test_same_labels_remain_distinct_config_bound_arms(self):
+        strict = self.harbor_row(
+            "acme",
+            "t",
+            1,
+            True,
+            arm_id="strict",
+            model="model-x",
+        )
+        fast = self.harbor_row(
+            "acme",
+            "t",
+            1,
+            False,
+            arm_id="fast",
+            model="model-x",
+        )
+        path = self.write("variants.jsonl", [strict, fast])
+
+        result = compare.build_comparison([path], tasks_dirs=[self.tasks])
+
+        self.assertEqual(result["arms"], ["fast", "strict"])
+        self.assertEqual(result["matched_n"], 1)
+
+    def test_harbor_matched_claims_reject_missing_mixed_or_cross_plan_identity(self):
+        missing = self.write(
+            "missing.jsonl",
+            [
+                self.row(
+                    "codex",
+                    "t",
+                    1,
+                    True,
+                    exec_mode="harbor",
+                    candidate_provenance={"kind": "harbor_job"},
+                ),
+                self.row(
+                    "pi",
+                    "t",
+                    1,
+                    True,
+                    exec_mode="harbor",
+                    candidate_provenance={"kind": "harbor_job"},
+                ),
+            ],
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "requires exact OpenBench comparison-plan identity",
+        ):
+            compare.build_comparison([missing], tasks_dirs=[self.tasks])
+
+        harbor = self.write(
+            "harbor-arm.jsonl",
+            [
+                self.harbor_row(
+                    "codex",
+                    "t",
+                    1,
+                    True,
+                    arm_id="codex",
+                )
+            ],
+        )
+        legacy = self.write(
+            "legacy-arm.jsonl",
+            [self.row("pi", "t", 1, True)],
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "cannot mix Harbor",
+        ):
+            compare.build_comparison(
+                [harbor, legacy],
+                tasks_dirs=[self.tasks],
+            )
+
+        other_plan = self.write(
+            "other-plan.jsonl",
+            [
+                self.harbor_row(
+                    "pi",
+                    "t",
+                    1,
+                    True,
+                    arm_id="pi",
+                    plan_variant="-other",
+                )
+            ],
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "one exact comparison-plan digest",
+        ):
+            compare.build_comparison(
+                [harbor, other_plan],
+                tasks_dirs=[self.tasks],
+            )
+
     def test_path_labels_cannot_collide_with_generated_suffixes(self):
         labels = compare._path_labels(["a.jsonl", "a.jsonl", "a-2.jsonl"])
         self.assertEqual(len(labels), len(set(labels)))
@@ -102,6 +313,42 @@ class TestMatchedComparison(CompareTestCase):
         self.assertEqual(rendered_rows["Cache-read tokens / solve"], ["22.0", "22.0"])
         self.assertEqual(rendered_rows["Cache-write tokens / solve"], ["3.0", "3.0"])
         self.assertEqual(rendered_rows["Output tokens / solve"], ["44.0", "44.0"])
+
+    def test_usage_mismatch_excludes_tokens_but_keeps_correctness_and_latency(self):
+        mismatch = {
+            "usage_evidence_grade": "harbor_reported_proxy_mismatch",
+            "usage_ranking_eligible": False,
+            "usage_ranking_exclusion_reason": "proxy_mismatch",
+        }
+        a = self.write("a.jsonl", [
+            self.row("pi", "t", 1, True, **mismatch),
+        ])
+        b = self.write("b.jsonl", [
+            self.row("opencode", "t", 1, True),
+        ])
+
+        report = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
+        summary = report["summaries"]["a"]
+        self.assertEqual(summary["solve_rate"], 1.0)
+        self.assertEqual(summary["wall_time_per_solve"], 10.0)
+        self.assertIsNone(summary["tokens_input_uncached_per_solve"])
+        self.assertIsNone(
+            summary["tokens_input_uncached_per_cell_mean"]
+        )
+        self.assertEqual(
+            summary["usage_exclusions"],
+            ["Harbor/proxy mismatch"],
+        )
+        rendered_rows = dict(compare.scorecard_rows(report))
+        self.assertEqual(
+            rendered_rows["Uncached input tokens / solve"],
+            ["-", "100.0"],
+        )
+        text = compare.render_text(report)
+        markdown = compare.render_markdown(report)
+        self.assertIn("USAGE EVIDENCE WARNING", text)
+        self.assertIn("Harbor/proxy mismatch", text)
+        self.assertIn("correctness and latency remain", markdown)
 
     def test_solved_intersection_uses_only_cells_every_arm_solved_for_efficiency(self):
         a = self.write("a.jsonl", [

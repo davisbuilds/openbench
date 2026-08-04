@@ -12,6 +12,8 @@ creation, trial scheduling, retries, environments, verification, and artifacts.
 | Codex | `obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile` | `0.144.5` | `<model-id>` | `reasoning_effort=medium`; apps, plugins, and multi-agent disabled; GPT-5.6 service tier `default` | `~/.codex/auth.json` |
 | Pi | `obench.harbor_agents.pi:OpenBenchPiOAuth` | `0.80.10` | `openai-codex/<model-id>` | `thinking=medium`; `--no-approve`; `--no-extensions`; isolated Pi home | `~/.pi/agent/auth.json` |
 | OpenCode | `obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth` | `1.18.3` | `openai/<model-id>` | `variant=medium`; permission bypass; isolated HOME/XDG config, data, state, and cache | first existing OpenCode auth candidate |
+| Cursor | `obench.harbor_agents.cursor:OpenBenchCursorSubscription` | `2026.07.09-a3815c0` | canonical OpenBench model | native Cursor model UID; `--force`; `--trust`; isolated HOME/XDG | first existing Cursor auth candidate |
+| Devin | `obench.harbor_agents.devin:OpenBenchDevinSubscription` | `3000.2.17` | canonical OpenBench model | native Devin model UID; `dangerous` permission mode; isolated HOME | all existing Devin auth directories |
 
 Supported canonical models:
 
@@ -20,8 +22,10 @@ Supported canonical models:
 - `gpt-5.6-terra`
 - `gpt-5.6-luna`
 
-All other harnesses, models, and auth strategies fail resolution. There is no
-model fallback or API-key fallback.
+Cursor supports all four models above. Devin supports `gpt-5.5-medium`
+(account-default legacy behavior, matching the native adapter) and
+`gpt-5.6-sol` (`gpt-5-6-sol-medium`) only. All other harnesses, models, and
+auth strategies fail resolution. There is no model or API-key fallback.
 
 ```python
 from obench.harbor_profiles import resolve_harbor_profile
@@ -70,6 +74,26 @@ The next sequential trial therefore uploads the latest rotation. A failed
 capture fails the agent phase and does not replace the previous valid return
 file. The host lease and final schema/identity validation remain authoritative.
 
+## Read-only subscription contract
+
+Cursor and Devin do not use the OAuth rotation path above. Their native
+adapters treat local subscription login as read-only, so `job-run` preserves
+that behavior:
+
+1. Preflight exact Harbor package provenance before reading auth state or
+   starting model traffic.
+2. Create a private mode-`0700` temporary directory and mode-`0600` archive.
+3. Cursor includes only Linux `auth.json`, or only `authInfo` from the macOS
+   `cli-config.json`. Adjacent preferences and permission settings are omitted.
+4. Devin includes only `.devin`, `.config/devin`, and
+   `.local/share/devin`. Symlinks and special files fail staging.
+5. Pass only the private archive path through Harbor's host env template.
+6. Extract into an isolated remote HOME, run the CLI, then delete remote and
+   host staging.
+
+There is no auth-return path, persist-back, API-key fallback, user
+`AGENTS.md`, `.agents`, skill, or global behavior import for either profile.
+
 ## ATIF
 
 Codex and OpenCode retain Harbor's built-in ATIF conversion.
@@ -84,6 +108,18 @@ OpenCode resume is explicitly disabled. Its OAuth credential state and session
 state share release-sensitive XDG surfaces, and the profile deletes those
 isolated paths after each single-step OpenBench task.
 
+Cursor runs with the documented `stream-json` output. The converter accepts
+only source user, assistant, tool-call, observation, usage, session, and
+successful terminal events. Missing JSON, a failed/missing terminal event, or
+no attributable agent action fails the profile instead of creating a
+trajectory.
+
+Devin writes its native `--export` JSON outside `/app`. OpenBench preserves its
+source steps, stamps the pinned harness identity, upgrades the schema marker to
+ATIF v1.7, and validates the complete trajectory. A missing, empty, or invalid
+export fails the profile. Neither profile derives ATIF from human-readable
+stdout.
+
 ## Counting proxy
 
 | Harness | OAuth proxy status | Configuration |
@@ -91,16 +127,18 @@ isolated paths after each single-step OpenBench task.
 | Codex | supported | full cell URL through Harbor Codex `OPENAI_BASE_URL` / `openai_base_url`; route `codex/backend-api/codex` |
 | Pi | supported | full cell URL written to isolated `models.json` as `openai-codex.baseUrl`; route `codex/backend-api` |
 | OpenCode | unsupported | the stock OpenBench OAuth adapter does not prove an equivalent base-URL override |
+| Cursor | unsupported | Cursor subscription inference uses its private service protocol |
+| Devin | unsupported | Devin subscription inference remains behind Cognition's service boundary |
 
-Passing a proxy URL to the OpenCode profile fails closed. Profiles accept only
-absolute HTTP(S) proxy URLs and never construct cell tokens themselves.
+Passing a proxy URL to OpenCode, Cursor, or Devin fails closed. Profiles accept
+only absolute HTTP(S) proxy URLs and never construct cell tokens themselves.
 
 `obench harbor job-run` creates a separate per-trial metering session inside
 the Codex and Pi agents. The strict Harbor importer requires a sealed,
-hash-chain-verified ledger whose call and token totals exactly reconcile with
-ATIF before either profile can be published. OpenCode remains runnable for
-execution/trajectory experiments, but it is not a publication-grade metered
-arm.
+hash-chain-verified ledger. Exact call and token reconciliation with ATIF earns
+the `proxy-verified` label. A structurally valid mismatch preserves both values
+but is excluded from usage rankings. OpenCode publishes its available ATIF
+usage as `Harbor-reported`; it cannot claim proxy verification.
 
 ## Pinned Harbor API evidence
 
@@ -117,15 +155,28 @@ Compatibility is grounded in Harbor package `0.20.0`, commit
 - Installed OpenCode accepts `variant`, supplies ATIF conversion, and lacks
   OAuth auth-file staging.
 
-The focused offline proof instantiates every resolved profile through the pinned
-`AgentFactory`. The release proof additionally runs Codex and Pi through native
-Harbor Docker jobs on the benchmark host and imports their sealed evidence.
+Before credential staging or model traffic, `job-run` checks both
+`harbor --version` and the package interpreter recorded in the executable
+shebang. Harbor's installed package metadata must report the exact commit
+above and `is_editable=false`. A wheel install without VCS provenance, an
+editable checkout, a different commit, or an ambiguous shebang fails closed.
+
+The focused offline proof resolves every profile and tests the custom
+source-log converters without importing Harbor. Release proof must additionally
+instantiate both custom profiles through the pinned `AgentFactory` and run
+native Harbor Docker jobs on the benchmark host.
 
 ## Current boundary
 
-- `obench.harbor_results` maps all three profile import identities back to
-  stable `codex`, `pi`, and `opencode` harness names.
-- Codex and Pi result import requires exact sealed proxy evidence. Missing,
-  incomplete, or mismatched ledgers fail closed.
+- `obench.harbor_results` maps the Codex, Pi, and OpenCode profile imports to
+  stable harness names. Cursor and Devin now provide execution and validated
+  ATIF; their strict result-import aliases are integrated separately.
+- Codex and Pi result import requires sealed proxy evidence. Exact
+  reconciliation is proxy-verified; valid mismatches remain publishable but
+  usage-ranking-ineligible. Missing, incomplete, malformed, unsealed, or
+  tampered evidence fails closed.
 - OpenCode OAuth counting-proxy routing remains unsupported until its exact
-  subscription endpoint/base-URL behavior is source-proven and tested.
+  subscription endpoint/base-URL behavior is source-proven and tested; its ATIF
+  usage remains publishable as Harbor-reported.
+- Cursor and Devin are non-proxy profiles. Their harness-reported usage must not
+  be presented as independently metered.

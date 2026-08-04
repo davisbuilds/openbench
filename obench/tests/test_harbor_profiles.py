@@ -22,13 +22,46 @@ class HarborProfileTests(unittest.TestCase):
     def test_compatibility_matrix_is_complete_and_deterministic(self):
         expected = tuple(
             (harness, model)
-            for harness in ("codex", "opencode", "pi")
-            for model in (
-                "gpt-5.5-medium",
-                "gpt-5.6-luna",
-                "gpt-5.6-sol",
-                "gpt-5.6-terra",
+            for harness, models in (
+                (
+                    "codex",
+                    (
+                        "gpt-5.5-medium",
+                        "gpt-5.6-luna",
+                        "gpt-5.6-sol",
+                        "gpt-5.6-terra",
+                    ),
+                ),
+                (
+                    "cursor",
+                    (
+                        "gpt-5.5-medium",
+                        "gpt-5.6-luna",
+                        "gpt-5.6-sol",
+                        "gpt-5.6-terra",
+                    ),
+                ),
+                ("devin", ("gpt-5.5-medium", "gpt-5.6-sol")),
+                (
+                    "opencode",
+                    (
+                        "gpt-5.5-medium",
+                        "gpt-5.6-luna",
+                        "gpt-5.6-sol",
+                        "gpt-5.6-terra",
+                    ),
+                ),
+                (
+                    "pi",
+                    (
+                        "gpt-5.5-medium",
+                        "gpt-5.6-luna",
+                        "gpt-5.6-sol",
+                        "gpt-5.6-terra",
+                    ),
+                ),
             )
+            for model in models
         )
         self.assertEqual(HARBOR_VERSION, "0.20.0")
         self.assertEqual(supported_harbor_matrix(), expected)
@@ -55,6 +88,18 @@ class HarborProfileTests(unittest.TestCase):
                 "1.18.3",
                 "openai/gpt-5.6-sol",
                 {"variant": "medium"},
+            ),
+            "cursor": (
+                "obench.harbor_agents.cursor:OpenBenchCursorSubscription",
+                "2026.07.09-a3815c0",
+                "gpt-5.6-sol",
+                {},
+            ),
+            "devin": (
+                "obench.harbor_agents.devin:OpenBenchDevinSubscription",
+                "3000.2.17",
+                "gpt-5.6-sol",
+                {},
             ),
         }
         for harness, values in expected.items():
@@ -176,6 +221,32 @@ class HarborProfileTests(unittest.TestCase):
                     profile.auth.concurrency_group,
                     f"openbench-oauth-{harness}",
                 )
+
+    def test_subscription_auth_is_read_only_and_model_mapping_is_exact(self):
+        cursor = resolve_harbor_profile("cursor", "gpt-5.6-terra")
+        self.assertEqual(cursor.auth.strategy, "subscription")
+        self.assertFalse(cursor.auth.persist_back)
+        self.assertFalse(cursor.auth.lease_required)
+        self.assertEqual(cursor.auth.return_env, None)
+        config = cursor.agent_config(auth_json_path="/private/cursor.tar.gz")
+        self.assertEqual(
+            config["env"],
+            {"OPENBENCH_CURSOR_AUTH_ARCHIVE": "/private/cursor.tar.gz"},
+        )
+        self.assertEqual(cursor.harbor_model_name, "gpt-5.6-terra")
+        self.assertEqual(cursor.agent_kwargs(), {"version": "2026.07.09-a3815c0"})
+
+        devin = resolve_harbor_profile("devin", "gpt-5.5-medium")
+        self.assertEqual(devin.auth.strategy, "subscription")
+        self.assertFalse(devin.auth.persist_back)
+        self.assertEqual(devin.harbor_model_name, "gpt-5.5-medium")
+        with self.assertRaisesRegex(HarborProfileError, "unsupported devin"):
+            resolve_harbor_profile("devin", "gpt-5.6-terra")
+        with self.assertRaisesRegex(HarborProfileError, "return path"):
+            devin.agent_config(
+                auth_json_path="/private/devin.tar.gz",
+                auth_return_path="/private/return.tar.gz",
+            )
 
     def test_proxy_contract_and_injection_are_explicit(self):
         codex = resolve_harbor_profile(

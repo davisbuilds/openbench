@@ -2,6 +2,7 @@
 """Unit tests for bench/stats.py canonical statistics."""
 
 import json
+import hashlib
 import os
 import sys
 import subprocess
@@ -10,6 +11,7 @@ import unittest
 
 
 from obench import stats  # noqa: E402
+from obench.harbor_job import canonical_comparison_plan_bytes  # noqa: E402
 
 
 class StatsTestCase(unittest.TestCase):
@@ -114,8 +116,171 @@ class TestExclusionsAndQuarantine(StatsTestCase):
         self.assertEqual(result["excluded_counts"], {"quarantined_dropped_task": 2})
         self.assertEqual(result["quarantined_tasks"], {"dropped": 1, dropped_abs: 1})
 
+    def test_harbor_dropped_lookup_uses_raw_selector_not_canonical_id(self):
+        self.make_task("t1", dropped=True)
+        row = TestMatchedDenominators._harbor_row("a")
+        provenance = row["candidate_provenance"]
+        plan = provenance["comparison_plan"]
+        plan["task_id_map"] = {"t1": "private/t1"}
+        provenance["comparison_plan_sha256"] = hashlib.sha256(
+            canonical_comparison_plan_bytes(plan)
+        ).hexdigest()
+        provenance["comparison_resolved_tasks"] = ["private/t1"]
+        provenance["comparison_block"]["task"] = "private/t1"
+        row["task"] = "private/t1"
+
+        result = self.build([row], group="model", min_n=1)
+
+        self.assertEqual(result["excluded_counts"], {
+            "quarantined_dropped_task": 1,
+        })
+        self.assertEqual(result["quarantined_tasks"], {"private/t1": 1})
+        self.assertEqual(result["tables"]["all_countable_non_comparable"], [])
+
 
 class TestMatchedDenominators(StatsTestCase):
+    @staticmethod
+    def _harbor_row(model, *, with_identity=True):
+        provenance = {"kind": "harbor_job"}
+        if with_identity:
+            plan = {
+                "schema_version": "openbench-harbor-comparison-plan-v4",
+                "harbor_version": "0.20.0",
+                "harbor_git_commit_hash": "0" * 40,
+                "job_name": "stats-fixture",
+                "submitted_job_config_sha256": "e" * 64,
+                "effective_job_config_sha256": "f" * 64,
+                "attempts": 1,
+                "dataset": None,
+                "tasks": ["t1"],
+                "task_id_map": {"t1": "t1"},
+                "arms": [
+                    {
+                        "arm_id": arm_model,
+                        "agent_config_name": "custom",
+                        "harbor_model_name": "raw-model",
+                        "agent_config_sha256": (
+                            "1" * 64 if arm_model == "a" else "2" * 64
+                        ),
+                        "canonical_harness": "h",
+                        "canonical_model": arm_model,
+                    }
+                    for arm_model in ("a", "b")
+                ],
+            }
+            provenance.update({
+                "comparison_plan_schema_version": (
+                    "openbench-harbor-comparison-plan-v4"
+                ),
+                "comparison_plan_sha256": hashlib.sha256(
+                    canonical_comparison_plan_bytes(plan)
+                ).hexdigest(),
+                "comparison_plan": plan,
+                "comparison_arm_id": model,
+                "agent_config_sha256": (
+                    "1" * 64 if model == "a" else "2" * 64
+                ),
+                "comparison_resolved_tasks": ["t1"],
+                "comparison_block": {"task": "t1", "index": 1},
+                "trial_mapping": "openbench_comparison_plan_v4",
+                "temporal_matched_block_claim": False,
+            })
+        return {
+            "harness": "h",
+            "model": model,
+            "task": "t1",
+            "trial": 1,
+            "success": True,
+            "failure_class": "solved",
+            "exec_mode": "harbor",
+            "candidate_provenance": provenance,
+        }
+
+    def test_harbor_matched_stats_require_and_record_plan_identity(self):
+        self.make_task("t1")
+        result = self.build(
+            [self._harbor_row("a"), self._harbor_row("b")],
+            group="model",
+            min_n=1,
+        )
+
+        self.assertEqual(
+            result["matched"]["comparison_identity"],
+            "harbor_comparison_plan",
+        )
+        self.assertEqual(result["matched"]["matched_cells_per_group"], 1)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "requires exact OpenBench comparison-plan identity",
+        ):
+            self.build(
+                [
+                    self._harbor_row("a", with_identity=False),
+                    self._harbor_row("b", with_identity=False),
+                ],
+                group="model",
+                min_n=1,
+            )
+
+        changed_arm = [
+            self._harbor_row("a"),
+            self._harbor_row("b"),
+        ]
+        changed_arm[1]["candidate_provenance"]["comparison_arm_id"] = "a"
+        with self.assertRaisesRegex(
+            ValueError,
+            "does not match its declared plan arm",
+        ):
+            stats.validate_matched_comparison_rows(changed_arm)
+
+        changed_tasks = [
+            self._harbor_row("a"),
+            self._harbor_row("b"),
+        ]
+        changed_tasks[1]["candidate_provenance"][
+            "comparison_resolved_tasks"
+        ] = ["t1", "t2"]
+        with self.assertRaisesRegex(
+            ValueError,
+            "one lock-resolved task set",
+        ):
+            stats.validate_matched_comparison_rows(changed_tasks)
+
+        relabeled = [self._harbor_row("a"), self._harbor_row("b")]
+        relabeled[0]["model"] = "forged"
+        with self.assertRaisesRegex(
+            ValueError,
+            "does not match its declared plan arm",
+        ):
+            stats.validate_matched_comparison_rows(relabeled)
+
+    def test_same_labels_are_separate_plan_arm_groups(self):
+        self.make_task("t1")
+        rows = [self._harbor_row("a"), self._harbor_row("b")]
+        for row in rows:
+            row["model"] = "same"
+            arm_id = row["candidate_provenance"]["comparison_arm_id"]
+            for arm in row["candidate_provenance"]["comparison_plan"]["arms"]:
+                arm["canonical_model"] = "same"
+            row["candidate_provenance"]["comparison_plan_sha256"] = hashlib.sha256(
+                canonical_comparison_plan_bytes(
+                    row["candidate_provenance"]["comparison_plan"]
+                )
+            ).hexdigest()
+
+        result = self.build(rows, group="harness,model", min_n=1)
+
+        groups = {
+            item["group"]
+            for item in result["tables"]["matched_comparable"]
+        }
+        self.assertEqual(
+            groups,
+            {"harness=h,model=same,arm=a", "harness=h,model=same,arm=b"},
+        )
+        self.assertEqual(result["matched"]["groups_compared"], 2)
+
     def test_duplicate_matched_cells_are_reported_not_overwritten(self):
         self.make_task("t1")
         rows = [

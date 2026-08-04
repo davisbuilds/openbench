@@ -6,6 +6,7 @@ from dataclasses import replace
 import json
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,6 +34,31 @@ def _agent_env(argv: list[str]) -> dict[str, str]:
     return result
 
 
+def _is_metadata_preflight(argv: list[str]) -> bool:
+    return len(argv) > 1 and argv[1] == "-c"
+
+
+def _metadata_result(
+    argv: list[str],
+    *,
+    commit: str = harbor_run.HARBOR_GIT_COMMIT,
+    editable: bool = False,
+) -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(
+        argv,
+        0,
+        stdout=json.dumps(
+            {
+                "version": "0.20.0",
+                "git_commit": commit,
+                "is_editable": editable,
+            }
+        )
+        + "\n",
+        stderr="",
+    )
+
+
 class FakeProcessRunner:
     def __init__(
         self,
@@ -55,6 +81,8 @@ class FakeProcessRunner:
             return subprocess.CompletedProcess(
                 argv, 0, stdout=f"{self.version}\n", stderr=""
             )
+        if _is_metadata_preflight(argv):
+            return _metadata_result(argv)
 
         env = _agent_env(argv)
         input_path = Path(env[harbor_oauth.CODEX_AUTH_JSON_PATH])
@@ -87,7 +115,7 @@ class HarborRunTests(unittest.TestCase):
         _write_private(self.master, OLD_AUTH)
         self.jobs = self.root / "jobs"
         self.harbor = self.root / "harbor"
-        self.harbor.write_text("#!/bin/sh\n", encoding="utf-8")
+        self.harbor.write_text(f"#!{sys.executable}\n", encoding="utf-8")
         self.harbor.chmod(0o700)
 
     def tearDown(self):
@@ -136,7 +164,7 @@ class HarborRunTests(unittest.TestCase):
             "--ae",
             f"{harbor_oauth.CODEX_AUTH_RETURN_PATH}={stage_dir / 'auth-return.json'}",
         ]
-        self.assertEqual(runner.calls[1][0], expected)
+        self.assertEqual(runner.calls[2][0], expected)
         self.assertEqual(result.plan.argv, tuple(expected))
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.expected_job_path, self.jobs.resolve() / "oauth-one")
@@ -145,14 +173,14 @@ class HarborRunTests(unittest.TestCase):
 
         loggable = json.dumps(
             {
-                "argv": runner.calls[1][0],
-                "kwargs": runner.calls[1][1],
+                "argv": runner.calls[2][0],
+                "kwargs": runner.calls[2][1],
                 "plan": result.plan.argv,
             }
         )
         for secret in ("old-r", "new-r", '"access_token":"old"', '"access_token":"new"'):
             self.assertNotIn(secret, loggable)
-        self.assertNotIn("env", runner.calls[1][1])
+        self.assertNotIn("env", runner.calls[2][1])
 
     def test_nonzero_harbor_exit_is_preserved_after_rotation_and_cleanup(self):
         runner = FakeProcessRunner([ROTATED_AUTH], run_returncodes=[37])
@@ -175,7 +203,10 @@ class HarborRunTests(unittest.TestCase):
     def test_unsupported_agent_lifecycle_fails_closed_and_cleans_staging(self):
         class UnsupportedRunner(FakeProcessRunner):
             def __call__(self, argv, **kwargs):
-                if list(argv)[-1] == "--version":
+                if (
+                    list(argv)[-1] == "--version"
+                    or _is_metadata_preflight(list(argv))
+                ):
                     return super().__call__(argv, **kwargs)
                 env = _agent_env(list(argv))
                 stage_dir = Path(env[harbor_oauth.CODEX_AUTH_JSON_PATH]).parent
@@ -202,6 +233,28 @@ class HarborRunTests(unittest.TestCase):
         enter.assert_not_called()
         self.assertEqual(len(runner.calls), 1)
         self.assertFalse(self.jobs.exists())
+
+    def test_commit_preflight_happens_before_credential_staging(self):
+        class WrongCommitRunner(FakeProcessRunner):
+            def __call__(self, argv, **kwargs):
+                argv = list(argv)
+                if _is_metadata_preflight(argv):
+                    self.calls.append((argv, dict(kwargs)))
+                    return _metadata_result(argv, commit="0" * 40)
+                return super().__call__(argv, **kwargs)
+
+        runner = WrongCommitRunner([])
+        with mock.patch.object(
+            harbor_run.HarborOAuthCredential,
+            "__enter__",
+            side_effect=AssertionError("credential was staged"),
+        ) as enter:
+            with self.assertRaisesRegex(
+                harbor_run.HarborRunError, "provenance mismatch"
+            ):
+                self._run(runner)
+        enter.assert_not_called()
+        self.assertEqual(len(runner.calls), 2)
 
     def test_no_network_fails_before_binary_or_credential_preflight(self):
         task_toml = self.task / "task.toml"
@@ -348,7 +401,10 @@ class HarborRunTests(unittest.TestCase):
     def test_staged_paths_are_private(self):
         class PermissionRunner(FakeProcessRunner):
             def __call__(self, argv, **kwargs):
-                if list(argv)[-1] == "--version":
+                if (
+                    list(argv)[-1] == "--version"
+                    or _is_metadata_preflight(list(argv))
+                ):
                     return super().__call__(argv, **kwargs)
                 env = _agent_env(list(argv))
                 auth_path = Path(env[harbor_oauth.CODEX_AUTH_JSON_PATH])
@@ -368,7 +424,10 @@ class HarborRunTests(unittest.TestCase):
             task = exports / name
             task.mkdir(parents=True)
             (task / "task.toml").write_text(
-                (self.task / "task.toml").read_text(encoding="utf-8"),
+                (self.task / "task.toml").read_text(encoding="utf-8").replace(
+                    'name = "openbench/example"',
+                    f'name = "openbench/{name}"',
+                ),
                 encoding="utf-8",
             )
             (task / "instruction.md").write_text("Task.\n", encoding="utf-8")
@@ -396,6 +455,8 @@ class HarborRunTests(unittest.TestCase):
                 return subprocess.CompletedProcess(
                     argv, 0, stdout="0.20.0\n", stderr=""
                 )
+            if _is_metadata_preflight(argv):
+                return _metadata_result(argv)
             env = kwargs["env"]
             for harness in ("CODEX", "PI"):
                 input_path = Path(
@@ -433,6 +494,17 @@ class HarborRunTests(unittest.TestCase):
         self.assertEqual(
             result.expected_job_path,
             result.artifact.jobs_dir / "profile-job",
+        )
+        self.assertTrue(result.comparison_plan_path.is_file())
+        self.assertEqual(
+            result.comparison_plan_path,
+            (
+                self.root / "profile-job.openbench-comparison-plan.json"
+            ).resolve(),
+        )
+        self.assertEqual(
+            result.comparison_plan_path.read_bytes(),
+            result.artifact.comparison_plan.json_bytes,
         )
         rendered = result.artifact.as_dict()
         self.assertEqual(
@@ -482,6 +554,8 @@ class HarborRunTests(unittest.TestCase):
                 return subprocess.CompletedProcess(
                     argv, 0, stdout="0.20.0\n", stderr=""
                 )
+            if _is_metadata_preflight(argv):
+                return _metadata_result(argv)
             env = kwargs["env"]
             return_path = Path(env["OPENBENCH_HARBOR_CODEX_AUTH_RETURN"])
             observed_return.append(return_path.read_bytes())
@@ -510,6 +584,84 @@ class HarborRunTests(unittest.TestCase):
         self.assertTrue(result.resumes_existing_job)
         self.assertEqual(observed_return, [OLD_AUTH])
         self.assertEqual(codex_auth.read_bytes(), OLD_AUTH)
+
+    def test_subscription_profile_stages_read_only_archive_without_return(self):
+        exports = self.root / "exports"
+        task = exports / "make-it-run"
+        task.mkdir(parents=True)
+        (task / "task.toml").write_text(
+            (self.task / "task.toml").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        (task / "instruction.md").write_text("Task.\n", encoding="utf-8")
+        cursor_auth = self.root / "auth.json"
+        _write_private(cursor_auth, b'{"accessToken":"cursor-secret"}')
+        observed_archive: list[Path] = []
+
+        def profile(harness: str, model: str):
+            resolved = harbor_profiles.resolve_harbor_profile(harness, model)
+            return replace(
+                resolved,
+                auth=replace(
+                    resolved.auth,
+                    source_candidates=(str(cursor_auth),),
+                ),
+            )
+
+        def runner(argv, **kwargs):
+            argv = list(argv)
+            if argv[-1] == "--version":
+                return subprocess.CompletedProcess(
+                    argv, 0, stdout="0.20.0\n", stderr=""
+                )
+            if _is_metadata_preflight(argv):
+                return _metadata_result(argv)
+            env = kwargs["env"]
+            archive = Path(env["OPENBENCH_HARBOR_CURSOR_AUTH_INPUT"])
+            observed_archive.append(archive)
+            self.assertTrue(archive.is_file())
+            self.assertEqual(stat.S_IMODE(archive.stat().st_mode), 0o600)
+            self.assertNotIn(
+                "OPENBENCH_HARBOR_CURSOR_AUTH_RETURN", env
+            )
+            return subprocess.CompletedProcess(argv, 0)
+
+        with mock.patch.object(
+            harbor_run,
+            "resolve_harbor_profile",
+            side_effect=profile,
+        ):
+            result = harbor_run.run_harbor_profile_job(
+                exported_tasks_dir=exports,
+                task_names=("make-it-run",),
+                harnesses=("cursor",),
+                model="gpt-5.6-sol",
+                attempts=1,
+                n_concurrent_trials=1,
+                max_retries=0,
+                jobs_dir=self.jobs,
+                job_name="cursor-profile",
+                config_path=self.root / "cursor-profile.json",
+                harbor_binary=self.harbor,
+                run_process=runner,
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(observed_archive), 1)
+        self.assertFalse(observed_archive[0].exists())
+        agent = result.artifact.as_dict()["agents"][0]
+        self.assertEqual(agent["model_name"], "gpt-5.6-sol")
+        self.assertEqual(
+            agent["env"],
+            {
+                "OPENBENCH_CURSOR_AUTH_ARCHIVE": (
+                    "${OPENBENCH_HARBOR_CURSOR_AUTH_INPUT}"
+                )
+            },
+        )
+        self.assertEqual(
+            cursor_auth.read_bytes(), b'{"accessToken":"cursor-secret"}'
+        )
 
 
 if __name__ == "__main__":

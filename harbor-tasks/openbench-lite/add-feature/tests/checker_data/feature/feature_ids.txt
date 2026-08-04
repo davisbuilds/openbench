@@ -1,0 +1,6 @@
+test_include.IncludeTest.test_basic_include
+test_include.IncludeTest.test_nested_include
+test_include.IncludeTest.test_relative_to_including_file
+test_include.IncludeTest.test_override_after_include
+test_include.IncludeTest.test_missing_include_raises
+test_include.IncludeTest.test_cycle_raises

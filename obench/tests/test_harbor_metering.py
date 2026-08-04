@@ -290,7 +290,7 @@ class HarborMeteringSessionTests(unittest.TestCase):
         ):
             harbor_metering.verify_evidence_dir(root)
 
-    def test_mismatch_is_machine_visible_and_required_evidence_blocks(self):
+    def test_mismatch_is_publishable_but_usage_ranking_is_blocked(self):
         with self._session("mismatch") as session:
             self._post_model_call(session)
             evidence = session.seal(
@@ -302,14 +302,22 @@ class HarborMeteringSessionTests(unittest.TestCase):
             evidence["reconciliation"]["fields"]["input_tokens"]["status"],
             "mismatch",
         )
-        self.assertFalse(evidence["publication"]["eligible"])
-        with self.assertRaisesRegex(
-            harbor_metering.HarborMeteringPublicationError,
-            "proxy_evidence_mismatch",
-        ):
-            harbor_metering.require_publication_eligible(
-                evidence, proxy_required=True
-            )
+        self.assertTrue(evidence["publication"]["eligible"])
+        self.assertFalse(
+            evidence["publication"]["usage_ranking_eligible"]
+        )
+        self.assertEqual(
+            evidence["publication"]["usage_ranking_exclusion_reasons"],
+            ["proxy_evidence_mismatch"],
+        )
+        harbor_metering.require_publication_eligible(
+            evidence, proxy_required=True
+        )
+        verified = harbor_metering.verify_evidence_dir(
+            Path(self.temp.name) / "mismatch",
+            expected_agent_usage=harbor_metering.UsageCounters(1, 13, 3, 4),
+        )
+        self.assertEqual(verified["reconciliation"]["status"], "mismatch")
         harbor_metering.require_publication_eligible(
             evidence, proxy_required=False
         )
@@ -331,6 +339,13 @@ class HarborMeteringSessionTests(unittest.TestCase):
             evidence["publication"]["blocking_reasons"],
             ["proxy_evidence_incomplete"],
         )
+        with self.assertRaisesRegex(
+            harbor_metering.HarborMeteringPublicationError,
+            "proxy_evidence_incomplete",
+        ):
+            harbor_metering.require_publication_eligible(
+                evidence, proxy_required=True
+            )
 
     def test_context_teardown_runs_on_exception(self):
         session = self._session("exception")
@@ -373,6 +388,7 @@ class HarborMeteringContractTests(unittest.TestCase):
             "tokens_input_uncached": 80,
             "tokens_cache_read": 20,
             "tokens_output": 7,
+            "token_basis": "harbor_agent_reported",
             "candidate_provenance": {"kind": "harbor_job"},
         }
         usage = harbor_metering.UsageCounters.from_openbench_row(row)
@@ -398,8 +414,49 @@ class HarborMeteringContractTests(unittest.TestCase):
         self.assertEqual(updated["tokens_proxy_calls"], 2)
         self.assertEqual(updated["tokens_proxy_input_uncached"], 80)
         self.assertEqual(updated["token_basis_proxy"], "proxy_measured")
+        self.assertEqual(
+            updated["usage_evidence_grade"],
+            "harbor_reported_proxy_verified",
+        )
+        self.assertTrue(updated["usage_ranking_eligible"])
         gate = updated["candidate_provenance"]["harbor_metering"]["publication"]
         self.assertTrue(gate["eligible"])
+
+    def test_integrator_preserves_mismatch_lanes_and_excludes_rankings(self):
+        row = {
+            "tokens_input_uncached": 80,
+            "tokens_cache_read": 20,
+            "tokens_output": 7,
+            "token_basis": "harbor_agent_reported",
+            "candidate_provenance": {"kind": "harbor_job"},
+        }
+        evidence = {
+            "schema_version": harbor_metering.SCHEMA_VERSION,
+            "proxy_complete": True,
+            "proxy_measured": {
+                "calls": 2,
+                "input_tokens": 101,
+                "cache_tokens": 20,
+                "output_tokens": 7,
+            },
+            "ledger_seal": {"root_hash": "abc"},
+            "reconciliation": {"status": "mismatch"},
+        }
+
+        updated = harbor_metering.apply_to_imported_row(
+            row, evidence, proxy_required=True
+        )
+
+        self.assertEqual(updated["tokens_input_uncached"], 80)
+        self.assertEqual(updated["tokens_proxy_input_uncached"], 81)
+        self.assertEqual(
+            updated["usage_evidence_grade"],
+            "harbor_reported_proxy_mismatch",
+        )
+        self.assertFalse(updated["usage_ranking_eligible"])
+        self.assertEqual(
+            updated["usage_ranking_exclusion_reason"], "proxy_mismatch"
+        )
 
     def test_atif_usage_sums_llm_call_count_not_step_count(self):
         trajectory = {

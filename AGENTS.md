@@ -21,7 +21,22 @@ active benchmark processes before starting another run.
 A benchmark framework for comparing coding-agent **harnesses** (codex, pi,
 opencode, cursor, devin, claude, ...) — the CLI products that wrap a model in a
 run loop, tool set, and permission policy. Tasks are self-contained
-(`instruction.md` + `workspace/` + `checker.sh`); the checker is the sole judge.
+(`task.toml` + `instruction.md` + Docker environment + verifier); the verifier
+is the sole judge.
+
+## Execution ownership
+
+The canonical path is `obench run [suite.toml]`. OpenBench compiles immutable
+suite intent, stock/custom profiles, one exact Harbor job per task set, and
+comparison-plan sidecars. Pinned Harbor owns task/trial execution, Docker
+sandboxes, concurrency, retries, resume, locks, verifier execution, and ATIF
+artifacts. OpenBench then validates/imports every intended job as one atomic
+suite result, reconciles optional proxy evidence, and owns comparison,
+statistics, publication policy, and site acceptance.
+
+`obench legacy run` is compatibility only. Manual Harbor export, job-run, and
+result-import commands remain diagnostics and migration tools; do not describe
+them as the default workflow.
 
 ## Product goals (the two things we are building toward)
 
@@ -39,9 +54,9 @@ run loop, tool set, and permission policy. Tasks are self-contained
 ## Our niche vs. the landscape (assessed Jul 2026)
 
 - **Harbor** (Apache-2.0, Terminal-Bench 2.0's official harness) owns
-  cloud-scale general agent evals, dataset registry, and the TB leaderboard.
-  We do not compete on scale — we bridge to it (OpenBench task → Harbor task is
-  a straightforward export) and keep our layer on top.
+  task/trial execution, Docker isolation, retries/resume, locks, verifiers,
+  ATIF artifacts, cloud-scale evals, its dataset registry, and the TB
+  leaderboard. OpenBench is the suite/comparison/evidence/publication layer.
 - **Prime Intellect verifiers / Environments Hub** (MIT) owns RL+eval
   environments with a package hub (versioned wheels per environment, 1k+ envs).
   Their distribution mechanics (versioned installable task packs, hub
@@ -60,7 +75,8 @@ run loop, tool set, and permission policy. Tasks are self-contained
 | Area | Path |
 |------|------|
 | CLI entry (`obench …`) | `obench/cli.py`, `obench/__main__.py` |
-| Cell runner / resume / proxy row fill | `obench/run.py` |
+| Canonical suite run / sealing | `obench/suite_run.py`, `obench/suite.py` |
+| Legacy cell runner | `obench/run.py` |
 | Task workspace (snapshot + git archive) | `obench/workspace.py` |
 | Checker polarity / validate | `obench/validate_tasks.py` |
 | Task admission (structure, ownership, determinism) | `obench/admission_gate.py` |
@@ -69,11 +85,11 @@ run loop, tool set, and permission policy. Tasks are self-contained
 | Publish / verify digests | `obench/publish.py` |
 | Leaderboard site (harness + gateway) | `obench/site.py`, `obench/leaderboard.py`, `docs/site.md` |
 | Counting proxy | `obench/proxy.py` |
-| Harbor bridge | `obench/export_harbor.py`, `obench/harbor_run.py`, `obench/harbor_results.py` |
+| Harbor jobs/results/evidence | `obench/harbor_job.py`, `obench/harbor_results.py`, `obench/harbor_run.py` |
 | Versioned packs (tasks + harness) | `obench/packs.py`, `docs/task-packs.md`, `docs/packs.json` |
 | Stock adapters | `obench/adapters/` |
 | Unit tests | `obench/tests/` |
-| Tasks | `tasks/` (public), `.openbench/tasks/` (private-init), `.openbench/packs/` (installed packs) |
+| Tasks | `harbor-tasks/` (canonical), `tasks/` (historical compatibility), `.openbench/tasks/` (private-init) |
 
 ## Always-run CI (offline)
 
@@ -95,6 +111,9 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
 - **`obench/run.py` `ROW_FIELDS` / append / resume** — corrupt JSONL or dropped
   fields silently skew resume and published claims; keep append fsync + fail-closed
   corrupt-line handling.
+- **Suite config/plan/result seals** — final Harbor config bytes, plan digest,
+  suite manifest, task-set identity, and atomic result/run-manifest pair must
+  remain mutually bound. Never write partial suite results.
 - **`exec_mode` / docker fallback** — never mix docker and local cells in one
   comparable results file (`docker_fallback` defaults off).
 - **Publish digests** — `task_content_digest` must cover oracle inputs
@@ -127,15 +146,11 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
   proxy metering for manifests is declaration-driven (`base_url_env` +
   `proxy_route`); candidate auth persist-back defaults off with
   `persist_auth = true` opt-in. Docker image's fixed CLI set remains a follow-up.
-- **P1 — Harbor bridge. [DONE Aug 2026]** OpenBench tasks remain the canonical
-  lightweight authoring format, with deterministic conversion to Harbor 0.20
-  tasks (`obench export harbor`) and Harbor-format task import
-  (`obench import harbor`). The optional local Codex OAuth runner
-  (`obench harbor oauth-run`) executes one exported task at a time, and
-  `obench import harbor-results` fail-closed imports pinned Harbor artifacts,
-  ATIF trajectories, verifier evidence, final workspaces, and agent-reported
-  usage for OpenBench reporting/publication. OpenBench does not implement a
-  cloud scheduler; Harbor owns sandbox execution and parallel job orchestration.
+- **P1 — Harbor-first suites. [DONE Aug 2026]** `obench run [suite.toml]`
+  compiles one deterministic pinned Harbor job per task set, executes all jobs,
+  fail-closed imports Harbor locks/results/verifier/ATIF/workspace/usage
+  evidence, and atomically seals one suite JSONL plus public and local run
+  records. Exact resume is idempotent; divergent output fails.
 - **P2 — Versioned packs. [DONE Jul 2026]** Task and harness packs as
   versioned, installable-by-name artifacts (`org/pack@version`) via
   `obench pack` (`init` / `install` / `list` / `verify` / `publish-index`):
@@ -150,8 +165,8 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
 
 ## Non-goals
 
-- No cloud execution backend, no hosted leaderboard infrastructure, no RL
-  training story — bridge to Harbor / verifiers instead.
+- No OpenBench-owned task scheduler, sandbox runtime, cloud backend, or RL
+  training story. Harbor owns execution; OpenBench owns intent and evidence.
 - Do not abandon the stdlib-only, files-plus-shell-checker task contract; it is
   the accessibility edge.
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -14,6 +15,8 @@ from unittest import mock
 
 from obench import publish
 from obench import scrub
+from obench.harbor_job import canonical_agent_config_sha256
+from obench.run import make_run_id
 
 # The e2e tests run `python -m obench.cli` from a temp cwd; the repo root must
 # be importable regardless of where the suite is invoked from.
@@ -88,6 +91,9 @@ def _harbor_row(
             "cost_usd": 0.5,
         },
         "token_basis": "harbor_agent_reported",
+        "usage_evidence_grade": "harbor_reported",
+        "usage_ranking_eligible": True,
+        "usage_ranking_exclusion_reason": None,
         "candidate_provenance": {
             "kind": "harbor_job",
             "harbor_version": "0.20.0",
@@ -117,9 +123,17 @@ def _harbor_row(
             "harbor_task_checksum": digest,
             "harbor_agent_config_name": "codex",
             "harbor_model_name": "model-x",
+            "agent_config_sha256": None,
             "harbor_verifier_time_s": 1.25,
             "harbor_job_retries": 0,
             "harbor_job_max_retries": 1,
+            "harbor_exception_type": None,
+            "comparison_plan_schema_version": None,
+            "comparison_plan_sha256": None,
+            "comparison_plan": None,
+            "comparison_arm_id": None,
+            "comparison_resolved_tasks": None,
+            "comparison_block": None,
             "usage_source": "harbor_agent_reported",
             "proxy_measured": False,
             "harbor_metering": None,
@@ -139,6 +153,143 @@ def _write_jsonl(path, rows):
     with open(path, "w", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row) + "\n")
+
+
+def _suite_harbor_row(row, *, scope):
+    rendered_agent = {"model_name": "model-x", "name": "codex"}
+    agent_digest = canonical_agent_config_sha256(rendered_agent)
+    plan = {
+        "schema_version": "openbench-harbor-comparison-plan-v4",
+        "harbor_version": "0.20.0",
+        "harbor_git_commit_hash": "b" * 40,
+        "job_name": "suite-core-job",
+        "submitted_job_config_sha256": "c" * 64,
+        "effective_job_config_sha256": "d" * 64,
+        "attempts": 1,
+        "dataset": None,
+        "tasks": ["alpha"],
+        "task_id_map": {"alpha": "alpha"},
+        "arms": [{
+            "arm_id": "codex-arm",
+            "agent_config_name": "codex",
+            "harbor_model_name": "model-x",
+            "agent_config_sha256": agent_digest,
+            "canonical_harness": "codex",
+            "canonical_model": "model-x",
+        }],
+    }
+    plan_sha256 = hashlib.sha256(
+        publish.canonical_comparison_plan_bytes(plan)
+    ).hexdigest()
+    manifest = {
+        "schema_version": 1,
+        "suite": {"id": "public-suite", "title": "Public suite"},
+        "harbor": {"version": "0.20.0", "commit": "b" * 40},
+        "task_sets": [{
+            "id": "core",
+            "kind": "local",
+            "path": "harbor-tasks",
+            "content_sha256": "e" * 64,
+            "tasks": [{"directory": "alpha", "logical_name": "alpha"}],
+        }],
+        "arms": [{
+            "id": "codex-arm",
+            "harness": "codex",
+            "profile": {
+                "id": "codex",
+                "kind": "stock",
+                "harness": "codex",
+            },
+            "canonical_model": "model-x",
+            "agent_config_sha256": agent_digest,
+            "agent": {"execution_id": "codex-arm", **rendered_agent},
+        }],
+        "run": {
+            "attempts": 1,
+            "concurrency": 1,
+            "max_retries": 0,
+            "timeout_seconds": 60.0,
+            "scheduler": "harbor",
+        },
+        "evidence": {
+            "harbor_lock": True,
+            "verifier": True,
+            "trajectory": True,
+            "usage": True,
+        },
+        "publication": {"scope": scope, "completeness": "complete"},
+        "jobs": [{
+            "task_set_id": "core",
+            "arm_ids": ["codex-arm"],
+            "attempts": 1,
+            "concurrency": 1,
+            "max_retries": 0,
+            "timeout_seconds": 60.0,
+            "semantic_sha256": "",
+        }],
+    }
+    semantic_job = {
+        key: manifest["jobs"][0][key]
+        for key in (
+            "task_set_id",
+            "arm_ids",
+            "attempts",
+            "concurrency",
+            "max_retries",
+            "timeout_seconds",
+        )
+    }
+    manifest["jobs"][0]["semantic_sha256"] = hashlib.sha256(
+        (
+            json.dumps(
+                semantic_job,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            )
+            + "\n"
+        ).encode()
+    ).hexdigest()
+    manifest_bytes = (
+        json.dumps(
+            manifest,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        + "\n"
+    ).encode()
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    plan["job_name"] = f"public-suite-core-{manifest_sha256[:12]}"
+    plan_sha256 = hashlib.sha256(
+        publish.canonical_comparison_plan_bytes(plan)
+    ).hexdigest()
+    provenance = row["candidate_provenance"]
+    provenance.update({
+        "comparison_plan_schema_version": plan["schema_version"],
+        "comparison_plan_sha256": plan_sha256,
+        "comparison_plan": plan,
+        "comparison_arm_id": "codex-arm",
+        "agent_config_sha256": agent_digest,
+        "comparison_resolved_tasks": ["alpha"],
+        "comparison_block": {"task": "alpha", "index": 1},
+        "trial_mapping": "openbench_comparison_plan_v4",
+        "suite_manifest_schema_version": 1,
+        "suite_manifest_sha256": manifest_sha256,
+        "suite_manifest": manifest,
+        "suite_task_set_id": "core",
+        "suite_publication_scope": scope,
+        "suite_completeness": "complete",
+    })
+    row["run_id"] = make_run_id(
+        "codex",
+        "alpha",
+        "model-x",
+        1,
+        candidate_digest=agent_digest,
+        full_candidate_digest=True,
+    )
+    return row
 
 
 def _make_task(root, name):
@@ -281,6 +432,430 @@ class PublishBundleTests(unittest.TestCase):
         )
         self.assertEqual(harbor_check["status"], "PASS", harbor_check)
 
+    def test_suite_publication_rejects_local_only_and_accepts_public_complete(self):
+        local_results = os.path.join(self.tmp.name, "suite-local.jsonl")
+        _write_jsonl(
+            local_results,
+            [_suite_harbor_row(self._harbor_row(), scope="local_only")],
+        )
+        with self.assertRaisesRegex(
+            publish.PublishError, "local_only suite results cannot be published"
+        ):
+            publish.create_bundle(
+                local_results,
+                self.out,
+                tasks_dirs=[self.tasks],
+                scrub_ctx=self.scrub_ctx,
+            )
+
+        public_results = os.path.join(self.tmp.name, "suite-public.jsonl")
+        harbor_task = os.path.join(self.tmp.name, "harbor-tasks", "alpha")
+        os.makedirs(harbor_task)
+        with open(
+            os.path.join(harbor_task, "task.toml"),
+            "w",
+            encoding="utf-8",
+        ) as handle:
+            handle.write(
+                '[task]\nname = "alpha"\n\n'
+                '[metadata]\nsource_task = "tasks/alpha"\n'
+            )
+        _write_jsonl(
+            public_results,
+            [_suite_harbor_row(self._harbor_row(), scope="public")],
+        )
+        provenance = publish.create_bundle(
+            public_results,
+            self.out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+        self.assertEqual(len(provenance["harbor_import_evidence"]), 1)
+        checks = publish.verify_bundle(self.out, tasks_dirs=[self.tasks])
+        suite_check = next(
+            item
+            for item in checks
+            if item["name"] == "suite_publication_policy"
+        )
+        self.assertEqual(suite_check["status"], "PASS", checks)
+
+    def test_harbor_publish_validates_comparison_plan_identity(self):
+        codex = self._harbor_row()
+        opencode = self._harbor_row()
+        opencode.update({
+            "run_id": "opencode:alpha:model-x:trial1",
+            "harness": "opencode",
+        })
+        opencode_provenance = opencode["candidate_provenance"]
+        opencode_provenance.update({
+            "harbor_trial_id": "trial-2",
+            "harbor_trial_name": "alpha__opencode",
+            "harbor_agent_config_name": (
+                "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth"
+            ),
+            "harbor_model_name": "openai/model-x",
+        })
+        missing_path = os.path.join(
+            self.tmp.name,
+            "harbor-missing-plan.jsonl",
+        )
+        _write_jsonl(missing_path, [codex, opencode])
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "requires exact OpenBench comparison-plan identity",
+        ):
+            publish.create_bundle(
+                missing_path,
+                os.path.join(self.tmp.name, "missing-plan-bundle"),
+                tasks_dirs=[self.tasks],
+                scrub_ctx=self.scrub_ctx,
+            )
+
+        codex_agent = {"name": "codex", "model_name": "model-x"}
+        opencode_agent = {
+            "import_path": (
+                "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth"
+            ),
+            "model_name": "openai/model-x",
+        }
+        codex_agent_digest = canonical_agent_config_sha256(codex_agent)
+        opencode_agent_digest = canonical_agent_config_sha256(opencode_agent)
+        comparison_plan = {
+            "schema_version": "openbench-harbor-comparison-plan-v4",
+            "harbor_version": "0.20.0",
+            "harbor_git_commit_hash": "b" * 40,
+            "job_name": "job-1",
+            "submitted_job_config_sha256": "7" * 64,
+            "effective_job_config_sha256": "8" * 64,
+            "attempts": 1,
+            "dataset": None,
+            "tasks": ["alpha"],
+            "task_id_map": {"alpha": "alpha"},
+            "arms": [
+                {
+                    "arm_id": "codex",
+                    "agent_config_name": "codex",
+                    "harbor_model_name": "model-x",
+                    "agent_config_sha256": codex_agent_digest,
+                    "canonical_harness": "codex",
+                    "canonical_model": "model-x",
+                },
+                {
+                    "arm_id": "opencode",
+                    "agent_config_name": (
+                        "obench.harbor_agents.opencode:"
+                        "OpenBenchOpenCodeOAuth"
+                    ),
+                    "harbor_model_name": "openai/model-x",
+                    "agent_config_sha256": opencode_agent_digest,
+                    "canonical_harness": "opencode",
+                    "canonical_model": "model-x",
+                },
+            ],
+        }
+        comparison_plan_sha256 = hashlib.sha256(
+            publish.canonical_comparison_plan_bytes(comparison_plan)
+        ).hexdigest()
+        for row, arm_id, agent_digest in (
+            (codex, "codex", codex_agent_digest),
+            (opencode, "opencode", opencode_agent_digest),
+        ):
+            provenance = row["candidate_provenance"]
+            provenance.update({
+                "comparison_plan_schema_version": (
+                    "openbench-harbor-comparison-plan-v4"
+                ),
+                "comparison_plan_sha256": comparison_plan_sha256,
+                "comparison_plan": comparison_plan,
+                "comparison_arm_id": arm_id,
+                "agent_config_sha256": agent_digest,
+                "comparison_resolved_tasks": ["alpha"],
+                "comparison_block": {"task": "alpha", "index": 1},
+                "trial_mapping": "openbench_comparison_plan_v4",
+            })
+            row["run_id"] = publish.make_run_id(
+                row["harness"],
+                row["task"],
+                row["model"],
+                row["trial"],
+                candidate_digest=agent_digest,
+                full_candidate_digest=True,
+            )
+        exact_path = os.path.join(
+            self.tmp.name,
+            "harbor-exact-plan.jsonl",
+        )
+        exact_out = os.path.join(self.tmp.name, "exact-plan-bundle")
+        _write_jsonl(exact_path, [codex, opencode])
+
+        provenance = publish.create_bundle(
+            exact_path,
+            exact_out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+
+        self.assertEqual(
+            {
+                item["candidate_provenance"]["comparison_plan_sha256"]
+                for item in provenance["harbor_import_evidence"]
+            },
+            {comparison_plan_sha256},
+        )
+        partial = copy.deepcopy(codex)
+        partial["candidate_provenance"]["comparison_block"] = None
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "partial comparison identity",
+        ):
+            publish.sanitize_row_for_publish(partial)
+
+        relabeled = copy.deepcopy(codex)
+        relabeled["harness"] = "tampered"
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "comparison arm does not match plan",
+        ):
+            publish.sanitize_row_for_publish(relabeled)
+
+    def test_terminal_harbor_publish_preserves_only_available_evidence(self):
+        row = self._harbor_row(
+            success=False,
+            completed=False,
+            score=None,
+            checker_exit=None,
+            t_agent_s=None,
+            t_checker_s=None,
+            turns=None,
+            tokens=None,
+            tokens_input_uncached=None,
+            tokens_cache_read=None,
+            tokens_output=None,
+            tokens_fresh=None,
+            usage_raw=None,
+            token_basis="unmetered",
+            usage_evidence_grade="usage_unavailable",
+            usage_ranking_eligible=False,
+            usage_ranking_exclusion_reason="usage_unavailable",
+            failure_class="timeout",
+            failure_reason="harbor_timeout:AgentTimeoutError",
+            error="Harbor terminal failure: AgentTimeoutError",
+            workspace_source=None,
+        )
+        provenance = row["candidate_provenance"]
+        provenance.update({
+            "harbor_exception_type": "AgentTimeoutError",
+            "harbor_verifier_time_s": None,
+            "usage_source": "unmetered",
+            "openbench_task_content_digest": None,
+            "openbench_harbor_export": None,
+        })
+        for key in publish.HARBOR_OPTIONAL_DIGEST_KEYS:
+            provenance[key] = None
+
+        published = publish.sanitize_row_for_publish(row)
+
+        self.assertEqual(published["failure_class"], "timeout")
+        self.assertIsNone(published["workspace_source"])
+        self.assertIsNone(
+            published["candidate_provenance"]["reward_sha256"]
+        )
+        tampered = copy.deepcopy(row)
+        tampered["failure_class"] = "wrong_answer"
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "terminal failure semantics disagree",
+        ):
+            publish.sanitize_row_for_publish(tampered)
+
+    def test_terminal_harbor_task_requires_another_verifier_binding(self):
+        terminal = self._harbor_row(
+            success=False,
+            completed=False,
+            score=None,
+            checker_exit=None,
+            t_agent_s=None,
+            t_checker_s=None,
+            turns=None,
+            tokens=None,
+            tokens_input_uncached=None,
+            tokens_cache_read=None,
+            tokens_output=None,
+            tokens_fresh=None,
+            usage_raw=None,
+            token_basis="unmetered",
+            usage_evidence_grade="usage_unavailable",
+            usage_ranking_eligible=False,
+            usage_ranking_exclusion_reason="usage_unavailable",
+            failure_class="timeout",
+            failure_reason="harbor_timeout:AgentTimeoutError",
+            error="Harbor terminal failure: AgentTimeoutError",
+            workspace_source=None,
+        )
+        terminal_provenance = terminal["candidate_provenance"]
+        terminal_provenance.update({
+            "harbor_exception_type": "AgentTimeoutError",
+            "harbor_verifier_time_s": None,
+            "usage_source": "unmetered",
+            "openbench_task_content_digest": None,
+            "openbench_harbor_export": None,
+        })
+        for key in publish.HARBOR_OPTIONAL_DIGEST_KEYS:
+            terminal_provenance[key] = None
+
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "no verifier-bound OpenBench execution evidence",
+        ):
+            publish._harbor_task_bindings([terminal])
+        self.assertEqual(
+            publish._harbor_task_bindings([terminal, self._harbor_row()]),
+            {
+                "alpha": {
+                    "source": {
+                        "canonical_id": "alpha",
+                        "selector": "alpha",
+                        "suite_manifest_sha256": None,
+                        "suite_task_set_id": None,
+                        "suite_task_set_path": None,
+                    },
+                    "openbench_sha256": self.alpha_digest,
+                    "harbor_sha256": self.alpha_harbor_digest,
+                    "export": {
+                        "schema_version": 1,
+                        "base_image": "python:3.11-slim",
+                        "network_mode": "no-network",
+                    },
+                }
+            },
+        )
+
+    def test_mixed_rows_share_the_same_unbound_task_source_binding(self):
+        self.assertEqual(
+            publish._task_source_binding(self._harbor_row()),
+            publish._task_source_binding(
+                _row("null", "alpha", 1, False)
+            ),
+        )
+
+    def test_harbor_publication_uses_raw_selector_for_canonical_task_id(self):
+        row = self._harbor_row()
+        row["task"] = "openbench/alpha"
+        rendered_agent = {"name": "codex", "model_name": "model-x"}
+        agent_digest = canonical_agent_config_sha256(rendered_agent)
+        plan = {
+            "schema_version": "openbench-harbor-comparison-plan-v4",
+            "harbor_version": "0.20.0",
+            "harbor_git_commit_hash": "b" * 40,
+            "job_name": "canonical-task-publication",
+            "submitted_job_config_sha256": "c" * 64,
+            "effective_job_config_sha256": "d" * 64,
+            "attempts": 1,
+            "dataset": None,
+            "tasks": ["alpha"],
+            "task_id_map": {"alpha": "openbench/alpha"},
+            "arms": [{
+                "arm_id": "codex",
+                "agent_config_name": "codex",
+                "harbor_model_name": "model-x",
+                "agent_config_sha256": agent_digest,
+                "canonical_harness": "codex",
+                "canonical_model": "model-x",
+            }],
+        }
+        plan_sha256 = hashlib.sha256(
+            publish.canonical_comparison_plan_bytes(plan)
+        ).hexdigest()
+        provenance = row["candidate_provenance"]
+        provenance.update({
+            "comparison_plan_schema_version": plan["schema_version"],
+            "comparison_plan_sha256": plan_sha256,
+            "comparison_plan": plan,
+            "comparison_arm_id": "codex",
+            "agent_config_sha256": agent_digest,
+            "comparison_resolved_tasks": ["openbench/alpha"],
+            "comparison_block": {"task": "openbench/alpha", "index": 1},
+            "trial_mapping": "openbench_comparison_plan_v4",
+        })
+        row["run_id"] = make_run_id(
+            "codex",
+            "openbench/alpha",
+            "model-x",
+            1,
+            candidate_digest=agent_digest,
+            full_candidate_digest=True,
+        )
+
+        publish._validate_harbor_task_bindings([row], [self.tasks])
+        generated = publish.build_provenance(
+            [row],
+            "e" * 64,
+            tasks_dirs=[self.tasks],
+        )
+
+        self.assertEqual(
+            generated["tasks"],
+            [{
+                "task": "openbench/alpha",
+                "content_digest": self.alpha_digest,
+                "workspace_source_samples": [{
+                    "kind": "harbor_artifact",
+                    "sha256": "a" * 64,
+                }],
+            }],
+        )
+
+    def test_suite_binding_selects_exact_source_when_selectors_overlap(self):
+        other_tasks = os.path.join(self.tmp.name, "other-tasks")
+        os.makedirs(other_tasks)
+        _make_task(other_tasks, "alpha")
+        harbor_task = os.path.join(self.tmp.name, "harbor-tasks", "alpha")
+        os.makedirs(harbor_task)
+        with open(
+            os.path.join(harbor_task, "task.toml"),
+            "w",
+            encoding="utf-8",
+        ) as handle:
+            handle.write(
+                '[task]\nname = "alpha"\n\n'
+                '[metadata]\nsource_task = "tasks/alpha"\n'
+            )
+
+        ambiguous = self._harbor_row()
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "ambiguous across configured task roots",
+        ):
+            publish._validate_harbor_task_bindings(
+                [ambiguous],
+                [self.tasks, other_tasks],
+            )
+
+        bound = _suite_harbor_row(self._harbor_row(), scope="public")
+        publish._validate_harbor_task_bindings(
+            [bound],
+            [self.tasks, other_tasks],
+        )
+        generated = publish.build_provenance(
+            [bound],
+            "e" * 64,
+            tasks_dirs=[self.tasks, other_tasks],
+        )
+
+        self.assertEqual(
+            generated["tasks"][0]["content_digest"],
+            self.alpha_digest,
+        )
+        os.remove(os.path.join(harbor_task, "task.toml"))
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "cannot read sealed Harbor task source",
+        ):
+            publish._validate_harbor_task_bindings(
+                [bound],
+                [self.tasks, other_tasks],
+            )
+
     def test_harbor_publish_accepts_exact_proxy_reconciliation(self):
         harbor_results = os.path.join(self.tmp.name, "harbor-metered.jsonl")
         row = self._harbor_row(
@@ -294,6 +869,7 @@ class PublishBundleTests(unittest.TestCase):
             proxy_capture_truncated=None,
         )
         row["candidate_provenance"]["proxy_measured"] = True
+        row["usage_evidence_grade"] = "harbor_reported_proxy_verified"
         row["candidate_provenance"]["harbor_metering"] = {
             "schema_version": "openbench.harbor-metering.v2",
             "reconciliation_status": "exact",
@@ -302,8 +878,11 @@ class PublishBundleTests(unittest.TestCase):
             "model_call_count": 1,
             "auxiliary_request_count": 1,
             "publication": {
+                "proxy_evidence_required": True,
                 "eligible": True,
                 "blocking_reasons": [],
+                "usage_ranking_eligible": True,
+                "usage_ranking_exclusion_reasons": [],
             },
             "proxy_required": True,
             "evidence_sha256": "2" * 64,
@@ -326,6 +905,10 @@ class PublishBundleTests(unittest.TestCase):
             ],
             "exact",
         )
+        with open(
+            os.path.join(self.out, "index.html"), encoding="utf-8"
+        ) as fh:
+            self.assertIn("Harbor-reported + proxy-verified", fh.read())
         self.assertTrue(
             all(
                 item["status"] == "PASS"
@@ -349,6 +932,7 @@ class PublishBundleTests(unittest.TestCase):
             proxy_capture_truncated=None,
         )
         row["candidate_provenance"]["proxy_measured"] = True
+        row["usage_evidence_grade"] = "harbor_reported_proxy_verified"
         row["candidate_provenance"]["harbor_metering"] = {
             "schema_version": "openbench.harbor-metering.v2",
             "reconciliation_status": "exact",
@@ -357,8 +941,11 @@ class PublishBundleTests(unittest.TestCase):
             "model_call_count": 1,
             "auxiliary_request_count": 1,
             "publication": {
+                "proxy_evidence_required": True,
                 "eligible": True,
                 "blocking_reasons": [],
+                "usage_ranking_eligible": True,
+                "usage_ranking_exclusion_reasons": [],
             },
             "proxy_required": True,
             "evidence_sha256": "2" * 64,
@@ -394,7 +981,7 @@ class PublishBundleTests(unittest.TestCase):
                 scrub_ctx=self.scrub_ctx,
             )
 
-    def test_harbor_publish_rejects_unmetered_opencode_profile(self):
+    def test_harbor_publish_accepts_harbor_reported_opencode_profile(self):
         harbor_results = os.path.join(
             self.tmp.name,
             "harbor-opencode-unmetered.jsonl",
@@ -407,16 +994,93 @@ class PublishBundleTests(unittest.TestCase):
         row["candidate_provenance"]["harbor_model_name"] = "openai/model-x"
         _write_jsonl(harbor_results, [row])
 
-        with self.assertRaisesRegex(
-            publish.PublishError,
-            "execution-only",
-        ):
-            publish.create_bundle(
-                harbor_results,
-                self.out,
-                tasks_dirs=[self.tasks],
-                scrub_ctx=self.scrub_ctx,
-            )
+        provenance = publish.create_bundle(
+            harbor_results,
+            self.out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+        evidence = provenance["harbor_import_evidence"][0]
+        self.assertEqual(
+            evidence["usage"]["token_basis"], "harbor_agent_reported"
+        )
+        with open(
+            os.path.join(self.out, "index.html"), encoding="utf-8"
+        ) as fh:
+            self.assertIn("Harbor-reported", fh.read())
+
+    def test_harbor_publish_accepts_mismatch_and_preserves_both_lanes(self):
+        harbor_results = os.path.join(self.tmp.name, "harbor-mismatch.jsonl")
+        row = self._harbor_row(
+            tokens_proxy_calls=1,
+            tokens_proxy_input_uncached=76,
+            tokens_proxy_cache_read=25,
+            tokens_proxy_cache_write=None,
+            tokens_proxy_output=40,
+            tokens_proxy_reasoning=None,
+            token_basis_proxy="proxy_measured",
+            proxy_capture_truncated=None,
+            usage_evidence_grade="harbor_reported_proxy_mismatch",
+            usage_ranking_eligible=False,
+            usage_ranking_exclusion_reason="proxy_mismatch",
+        )
+        row["candidate_provenance"]["proxy_measured"] = True
+        row["candidate_provenance"]["harbor_metering"] = {
+            "schema_version": "openbench.harbor-metering.v2",
+            "reconciliation_status": "mismatch",
+            "ledger_root_hash": "1" * 64,
+            "ledger_record_count": 1,
+            "model_call_count": 1,
+            "auxiliary_request_count": 0,
+            "publication": {
+                "proxy_evidence_required": True,
+                "eligible": True,
+                "blocking_reasons": [],
+                "usage_ranking_eligible": False,
+                "usage_ranking_exclusion_reasons": [
+                    "proxy_evidence_mismatch"
+                ],
+            },
+            "proxy_required": True,
+            "evidence_sha256": "2" * 64,
+            "ledger_sha256": "3" * 64,
+        }
+        _write_jsonl(harbor_results, [row])
+
+        provenance = publish.create_bundle(
+            harbor_results,
+            os.path.join(self.tmp.name, "bundle-mismatch"),
+            tasks_dirs=[self.tasks],
+            allow_incomplete=True,
+            scrub_ctx=self.scrub_ctx,
+        )
+
+        evidence = provenance["harbor_import_evidence"][0]
+        self.assertEqual(
+            evidence["candidate_provenance"]["harbor_metering"][
+                "reconciliation_status"
+            ],
+            "mismatch",
+        )
+        with open(
+            os.path.join(
+                self.tmp.name, "bundle-mismatch", "results.jsonl"
+            ),
+            encoding="utf-8",
+        ) as fh:
+            published_row = json.loads(fh.read())
+        self.assertEqual(published_row["tokens_input_uncached"], 75)
+        self.assertEqual(published_row["tokens_proxy_input_uncached"], 76)
+        self.assertFalse(published_row["usage_ranking_eligible"])
+        with open(
+            os.path.join(
+                self.tmp.name, "bundle-mismatch", "index.html"
+            ),
+            encoding="utf-8",
+        ) as fh:
+            page = fh.read()
+        self.assertIn("Usage evidence warning", page)
+        self.assertIn("Harbor/proxy mismatch", page)
 
     def test_harbor_publish_rejects_partial_or_inconsistent_provenance(self):
         cases = []

@@ -24,6 +24,18 @@ headline metrics. Duplicate cells within an arm are ambiguous, so they are
 removed from matching and reported. The scorecard states the matched `n` before
 the table and reports unmatched rows per arm.
 
+For Harbor rows, matched claims use the OpenBench comparison-plan digest and
+`(task, block)` coordinate instead. Every compared Harbor arm must carry one
+exact canonical plan identity. Missing identity, different plan digests, or a
+mix of Harbor and legacy rows rejects the matched comparison. Legacy
+non-Harbor inputs continue to use explicit `(task, trial)` matching. Harbor
+plan blocks are deterministic denominator coordinates, not evidence of
+temporal matched scheduling.
+
+Local comparison-plan v4 rows use canonical OpenBench task IDs for these
+coordinates. Harbor's directory selectors remain execution-only identities
+bound one-to-one through the plan's `task_id_map`.
+
 Rows classified as `infra` or `rate_limited` are excluded before matching and
 from solve-rate denominators. Their counts are shown separately for every arm,
 along with invalid-row and dropped-task quarantine counts. Invalid rows that

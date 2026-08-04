@@ -32,8 +32,9 @@ release-tag lookup, is the source of truth for this module. At that commit:
 
 `obench harbor job-run` is the end-to-end local/Mini path. It exports the
 selected tasks with public agent networking, resolves exact OAuth harness/model
-profiles, holds one credential lease per harness, writes canonical job JSON,
-and invokes one native `harbor run -c` command:
+profiles, holds one credential lease per harness, writes canonical job JSON
+plus an OpenBench comparison-plan sidecar, and invokes one native
+`harbor run -c` command:
 
 ```bash
 obench harbor job-run \
@@ -52,6 +53,19 @@ obench harbor job-run \
 ```
 
 This example resolves to 2 tasks x 2 harnesses x 2 attempts = 8 trials.
+The sidecar is written beside the config as
+`openbench-harness-smoke.openbench-comparison-plan.json`. It binds the job
+config's exact submitted SHA-256 and pinned semantic SHA-256, exact task source,
+full rendered agent-config SHA-256 values, canonical OpenBench harness/model
+labels, and attempt count. The semantic digest normalizes only Harbor 0.20.0's
+default elision and unordered retry exception sets; all other changes remain
+identity changes. Local task names are fixed before execution. For immutable
+registry/package datasets, the sidecar fixes the exact name/version or
+package/ref descriptor and leaves `tasks` null; the importer later binds
+Harbor's lock-resolved task set without rewriting the canonical pre-run
+sidecar. Harbor still chooses execution order. The sidecar proves intended and
+lock-resolved denominator identity, not temporal matched scheduling, so
+`temporal_matched_block_claim` remains false.
 Codex and Pi each have an independent OAuth lane, but each credential is used
 by at most one trial at a time. A rerun with the identical config resumes the
 same Harbor job. OpenBench does not replay completed trials itself.
@@ -85,17 +99,29 @@ spec = HarborJobSpec(
     jobs_dir="/absolute/path/to/harbor-jobs",
     source=LocalTaskSet("/absolute/path/to/harbor-export"),
     agent_profiles=(
-        AgentProfile(profile_id="codex", name="codex"),
+        AgentProfile(
+            profile_id="codex",
+            arm_id="codex",
+            canonical_harness="codex",
+            canonical_model="gpt-5",
+            name="codex",
+            model_name="openai/gpt-5",
+        ),
         AgentProfile(
             profile_id="candidate",
+            arm_id="candidate-strict",
+            canonical_harness="candidate",
+            canonical_model="gpt-5",
             import_path="company.harbor:CandidateAgent",
+            model_name="openai/gpt-5",
+            kwargs={"mode": "strict"},
             n_concurrent=2,
             concurrency_group="company-api",
             env={"OPENAI_BASE_URL": "${OPENBENCH_PROXY_URL}"},
             extra_allowed_hosts=("proxy.internal",),
         ),
     ),
-    models=("openai/gpt-5", "openai/gpt-5-mini"),
+    models=(),
     attempts=3,
     concurrency=ConcurrencyPolicy(n_concurrent_trials=8),
     retry=RetryPolicy(max_retries=1),
@@ -114,7 +140,7 @@ from obench.harbor_job import Dataset
 
 source = Dataset(
     name="openbench/core-smoke",
-    ref="sha256:0123456789abcdef",
+    ref="sha256:" + "0" * 64,
     task_names=("make-it-run",),
 )
 ```
@@ -131,6 +157,20 @@ expansion are deterministic. `write_job_config` creates the file atomically,
 allows an identical existing file, and refuses replacement with different
 bytes. Publish the JSON and `artifact.sha256` together; do not add OpenBench
 metadata keys to the JSON because Harbor's native `JobConfig` is the contract.
+`artifact.comparison_plan` contains the canonical create-once sidecar for both
+local task sets and immutable datasets. Each arm may set `arm_id`,
+`canonical_harness`, and `canonical_model`; its identity also includes every
+secret-free rendered agent field, including kwargs, env templates, concurrency,
+and host allowlists. Env values are never resolved into the plan. The resulting
+task x arm x attempt matrix is a stable OpenBench denominator plan, not a second
+scheduler.
+
+For local task sets, comparison-plan v4 keeps Harbor's directory selector in
+`tasks` and binds it one-to-one to the canonical OpenBench task ID through
+`task_id_map`. Harbor config and lock validation use the selector; result rows,
+matched blocks, statistics, and publication use the canonical ID. Immutable
+registry/package datasets set both fields to `null` because Harbor resolves
+their task identities into the lock.
 
 The config fixes `job_name` and `jobs_dir`. Re-running the same
 `harbor run -c <config>` points Harbor at the same job directory. Harbor then
@@ -154,9 +194,10 @@ and
 - Runtime values enter only through `AgentProfile.env` Harbor templates of the
   form `${HOST_ENV}`. Literal values are rejected so configs remain safe to
   publish. The integrator populates those host variables before execution.
-- `AgentProfile.import_path`, `kwargs`, `env`, `extra_allowed_hosts`,
-  `n_concurrent`, and `concurrency_group` are the structured extension fields
-  available to agent/auth/proxy integration.
+- `AgentProfile.arm_id`, `canonical_harness`, and `canonical_model` let a suite
+  compiler name each comparison arm explicitly. `import_path`, `kwargs`, `env`,
+  `extra_allowed_hosts`, `n_concurrent`, and `concurrency_group` remain the
+  structured agent/auth/proxy fields.
 - Sensitive-looking kwargs are rejected. Put credentials in env hooks, not in
   config fields.
 - The integrator records `artifact.sha256`, `HARBOR_VERSION`, and
@@ -166,3 +207,7 @@ and
 `artifact.trial_count` is exact for local exported task sets because task names
 are enumerated before rendering. It is `None` for registry/package datasets;
 Harbor resolves those task contents and records them in its lock file.
+
+One comparison plan still covers one Harbor job and one task set. Grouping
+multiple job plans into one suite comparison is a separate integration layer
+and is intentionally not implemented here.

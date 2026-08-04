@@ -429,6 +429,8 @@ def _token_lane(rows, source):
     complete = []
     bases = set()
     for row in rows:
+        if not stats.usage_evidence.ranking_eligible(row):
+            continue
         values = {split: row.get(prefix + split) for split in TOKEN_SPLITS}
         measured = (
             row.get("token_basis_proxy") == "proxy_measured"
@@ -456,6 +458,16 @@ def token_telemetry_per_solve(rows, solved=None):
     total_rows = len(rows)
     proxy_rows, proxy_bases = _token_lane(rows, "proxy")
     native_rows, native_bases = _token_lane(rows, "native")
+    evidence_labels = sorted({
+        label
+        for row in rows
+        if (label := stats.usage_evidence.display_label(row)) is not None
+    })
+    ranking_exclusions = sorted({
+        stats.usage_evidence.exclusion_reason(row)
+        for row in rows
+        if not stats.usage_evidence.ranking_eligible(row)
+    })
     coverage = {
         "total_rows": total_rows,
         "proxy_covered_rows": len(proxy_rows),
@@ -513,6 +525,8 @@ def token_telemetry_per_solve(rows, solved=None):
         "token_telemetry_source": source,
         "token_telemetry_bases": bases,
         "token_telemetry_coverage": coverage,
+        "usage_evidence_labels": evidence_labels,
+        "usage_ranking_exclusions": ranking_exclusions,
     }
 
 

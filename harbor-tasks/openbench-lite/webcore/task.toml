@@ -1,0 +1,33 @@
+schema_version = "1.4"
+source = "tasks/webcore@802014700f6b3c62eddc1a406e3062a438ce572f"
+artifacts = [
+    { source = "/app", destination = "workspace" },
+]
+
+[task]
+name = "openbench/webcore"
+description = "Add typed routing, mounting, and content-negotiation to webcore"
+authors = [{ name = "Matthew Lam" }]
+keywords = ["openbench"]
+
+[metadata]
+origin = "openbench"
+source_task = "tasks/webcore"
+source_commit = "802014700f6b3c62eddc1a406e3062a438ce572f"
+
+[metadata.openbench_task_content_digest]
+scheme = 2
+sha256 = "82143db4ae3131ecb35c35d8876978d87deaa8b3ae77dbf5b90c3d6d527de8a5"
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 2400.0
+
+[environment]
+build_timeout_sec = 600.0
+network_mode = "public"
+os = "linux"
+cpus = 4
+gpus = 0

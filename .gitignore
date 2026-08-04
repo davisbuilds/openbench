@@ -28,6 +28,9 @@ results/
 
 # Installed versioned packs (reinstall with obench pack install)
 .openbench/packs/
+.openbench/jobs/
+.openbench/results/
+.openbench/trajectories/
 
 # LOCAL-ONLY agent transcripts (raw, unscrubbed harness output) and any
 # scrubbed copies. Never committed; publishing requires a manual
