@@ -271,6 +271,7 @@ def _run_profile_job(
         f"Harbor job {action}; exited with code {result.returncode}; "
         f"trials: {result.artifact.trial_count}; "
         f"config sha256: {result.artifact.sha256}; "
+        f"comparison plan: {result.comparison_plan_path}; "
         f"job output: {result.expected_job_path}"
     )
     print(message, file=sys.stdout if result.returncode == 0 else sys.stderr)

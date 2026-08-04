@@ -1,6 +1,6 @@
 # OpenBench comparison scorecard
 
-**Matched n: 2** `(task, trial)` cells present in every arm.
+**Matched n: 2** legacy `(task, trial)` cells present in every arm.
 
 **All-solved n: 1 of 2 matched**
 

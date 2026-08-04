@@ -22,6 +22,10 @@ from .harbor_metering import (
     apply_to_imported_row,
     verify_evidence_dir,
 )
+from .harbor_job import (
+    COMPARISON_PLAN_SCHEMA_VERSION,
+    canonical_comparison_plan_bytes,
+)
 from .harbor_oauth import AGENT_IMPORT_PATH
 from .harbor_profiles import (
     CODEX_PROFILE_IMPORT,
@@ -1708,7 +1712,260 @@ def _normalized_task_name(task_name: str) -> str:
     return task_name.removeprefix("openbench/")
 
 
-def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
+def _validate_comparison_plan(
+    path: str | os.PathLike[str],
+    *,
+    job_root: Path,
+    job_lock: dict[str, Any],
+    trials: list[dict[str, Any]],
+) -> tuple[str, dict[str, Any], dict[str, dict[str, Any]]]:
+    plan_path = Path(path).expanduser()
+    plan = _object(
+        _read_json(plan_path, "comparison plan"),
+        "comparison plan",
+    )
+    expected_fields = {
+        "schema_version",
+        "harbor_version",
+        "harbor_git_commit_hash",
+        "job_name",
+        "job_config_sha256",
+        "attempts",
+        "tasks",
+        "arms",
+    }
+    if set(plan) != expected_fields:
+        raise _fail(
+            "comparison plan",
+            "unexpected or missing fields",
+        )
+    if plan_path.read_bytes() != canonical_comparison_plan_bytes(plan):
+        raise _fail(
+            "comparison plan",
+            "must use canonical OpenBench JSON encoding",
+        )
+    if plan.get("schema_version") != COMPARISON_PLAN_SCHEMA_VERSION:
+        raise _fail(
+            "comparison plan.schema_version",
+            f"expected {COMPARISON_PLAN_SCHEMA_VERSION!r}",
+        )
+    if plan.get("harbor_version") != HARBOR_VERSION:
+        raise _fail(
+            "comparison plan.harbor_version",
+            f"expected {HARBOR_VERSION!r}",
+        )
+    if plan.get("harbor_git_commit_hash") != HARBOR_GIT_COMMIT:
+        raise _fail(
+            "comparison plan.harbor_git_commit_hash",
+            f"expected {HARBOR_GIT_COMMIT}",
+        )
+    job_name = _string(plan.get("job_name"), "comparison plan.job_name")
+    if job_name != job_root.name:
+        raise _fail(
+            "comparison plan.job_name",
+            "does not match Harbor job directory",
+        )
+    config_digest = _string(
+        plan.get("job_config_sha256"),
+        "comparison plan.job_config_sha256",
+    )
+    if re.fullmatch(r"[0-9a-f]{64}", config_digest) is None:
+        raise _fail(
+            "comparison plan.job_config_sha256",
+            "expected a lowercase SHA-256",
+        )
+    job_config_path = job_root / "config.json"
+    if _sha256_file(job_config_path) != config_digest:
+        raise _fail(
+            "comparison plan.job_config_sha256",
+            "does not match Harbor's persisted job config",
+        )
+    job_config = _object(
+        _read_json(job_config_path, "job config"),
+        "job config",
+    )
+    attempts = _integer(
+        plan.get("attempts"),
+        "comparison plan.attempts",
+        minimum=1,
+    )
+    if job_config.get("job_name") != job_name:
+        raise _fail(
+            "job config.job_name",
+            "does not match comparison plan",
+        )
+    if job_config.get("n_attempts") != attempts:
+        raise _fail(
+            "job config.n_attempts",
+            "does not match comparison plan",
+        )
+
+    raw_tasks = _array(plan.get("tasks"), "comparison plan.tasks")
+    tasks = tuple(
+        _string(task, f"comparison plan.tasks[{index}]")
+        for index, task in enumerate(raw_tasks)
+    )
+    if not tasks or tuple(sorted(set(tasks))) != tasks:
+        raise _fail(
+            "comparison plan.tasks",
+            "must be a nonempty sorted unique list",
+        )
+    if any(_normalized_task_name(task) != task for task in tasks):
+        raise _fail(
+            "comparison plan.tasks",
+            "must contain normalized OpenBench task names",
+        )
+    datasets = _array(job_config.get("datasets"), "job config.datasets")
+    if len(datasets) != 1:
+        raise _fail(
+            "job config.datasets",
+            "comparison plan requires one local task set",
+        )
+    dataset = _object(datasets[0], "job config.datasets[0]")
+    if dataset.get("task_names") != list(tasks):
+        raise _fail(
+            "job config.datasets[0].task_names",
+            "does not match comparison plan",
+        )
+    if job_config.get("tasks") != []:
+        raise _fail(
+            "job config.tasks",
+            "comparison plan requires local dataset expansion",
+        )
+
+    raw_arms = _array(plan.get("arms"), "comparison plan.arms")
+    arms_by_key: dict[tuple[str, str], str] = {}
+    arm_ids: set[str] = set()
+    for index, raw_arm in enumerate(raw_arms):
+        location = f"comparison plan.arms[{index}]"
+        arm = _object(raw_arm, location)
+        if set(arm) != {"arm_id", "agent_config_name", "model_name"}:
+            raise _fail(location, "unexpected or missing fields")
+        arm_id = _string(arm.get("arm_id"), f"{location}.arm_id")
+        if "\\" in arm_id or "\x00" in arm_id:
+            raise _fail(f"{location}.arm_id", "contains an unsafe character")
+        agent_config_name = _string(
+            arm.get("agent_config_name"),
+            f"{location}.agent_config_name",
+        )
+        model_name = _string(
+            arm.get("model_name"),
+            f"{location}.model_name",
+        )
+        key = (agent_config_name, model_name)
+        if arm_id in arm_ids:
+            raise _fail(f"{location}.arm_id", "duplicate comparison arm")
+        if key in arms_by_key:
+            raise _fail(
+                location,
+                "duplicate immutable agent/model identity",
+            )
+        arm_ids.add(arm_id)
+        arms_by_key[key] = arm_id
+    if not arms_by_key:
+        raise _fail("comparison plan.arms", "must not be empty")
+
+    config_arm_keys = []
+    for index, raw_agent in enumerate(
+        _array(job_config.get("agents"), "job config.agents")
+    ):
+        agent = _object(raw_agent, f"job config.agents[{index}]")
+        config_arm_keys.append(
+            (
+                _agent_config_identity(
+                    agent,
+                    f"job config.agents[{index}]",
+                ),
+                _string(
+                    agent.get("model_name"),
+                    f"job config.agents[{index}].model_name",
+                ),
+            )
+        )
+    if Counter(config_arm_keys) != Counter(arms_by_key.keys()):
+        raise _fail(
+            "job config.agents",
+            "does not match comparison plan arms",
+        )
+
+    expected_cells = Counter(
+        (task, agent_config_name, model_name)
+        for task in tasks
+        for agent_config_name, model_name in arms_by_key
+        for _attempt in range(attempts)
+    )
+    actual_cells: Counter[tuple[str, str, str]] = Counter()
+    for index, raw_lock in enumerate(
+        _array(job_lock.get("trials"), "job lock.trials")
+    ):
+        lock = _object(raw_lock, f"job lock.trials[{index}]")
+        task = _object(lock.get("task"), f"job lock.trials[{index}].task")
+        agent = _object(lock.get("agent"), f"job lock.trials[{index}].agent")
+        actual_cells[
+            (
+                _normalized_task_name(
+                    _string(
+                        task.get("name"),
+                        f"job lock.trials[{index}].task.name",
+                    )
+                ),
+                _agent_config_identity(
+                    agent,
+                    f"job lock.trials[{index}].agent",
+                ),
+                _string(
+                    agent.get("model_name"),
+                    f"job lock.trials[{index}].agent.model_name",
+                ),
+            )
+        ] += 1
+    if actual_cells != expected_cells:
+        raise _fail(
+            "comparison plan",
+            "task/arm/attempt matrix does not match immutable Harbor job lock",
+        )
+
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for item in trials:
+        grouped[
+            (
+                _normalized_task_name(item["task_name"]),
+                item["agent_config_name"],
+                item["harbor_model_name"],
+            )
+        ].append(item)
+    coordinates: dict[str, dict[str, Any]] = {}
+    for key, group_trials in grouped.items():
+        task, agent_config_name, model_name = key
+        arm_id = arms_by_key[(agent_config_name, model_name)]
+        ordered = sorted(
+            group_trials,
+            key=lambda item: (item["trial_name"], item["trial_id"]),
+        )
+        if len(ordered) != attempts:
+            raise _fail(
+                "comparison plan",
+                f"resolved cell count disagrees for {task!r} and {arm_id!r}",
+            )
+        for block_index, item in enumerate(ordered, 1):
+            coordinates[item["trial_id"]] = {
+                "arm_id": arm_id,
+                "task": task,
+                "index": block_index,
+            }
+    if len(coordinates) != len(trials):
+        raise _fail(
+            "comparison plan",
+            "did not assign every completed Harbor trial",
+        )
+    return _sha256_file(plan_path), plan, coordinates
+
+
+def load_rows(
+    job_dir: str | os.PathLike[str],
+    *,
+    comparison_plan_path: str | os.PathLike[str] | None = None,
+) -> list[dict[str, Any]]:
     """Validate a complete Harbor 0.20.0 job and return normalized rows."""
     requested_root = Path(job_dir).expanduser()
     if requested_root.is_symlink():
@@ -1748,6 +2005,20 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
     ]
     if any(expected_locks.values()):
         raise _fail("job directory", "not every job-lock trial has completed evidence")
+    comparison_plan_sha256 = None
+    comparison_plan = None
+    comparison_coordinates: dict[str, dict[str, Any]] = {}
+    if comparison_plan_path is not None:
+        (
+            comparison_plan_sha256,
+            comparison_plan,
+            comparison_coordinates,
+        ) = _validate_comparison_plan(
+            comparison_plan_path,
+            job_root=root,
+            job_lock=job_lock,
+            trials=trials,
+        )
     checksums_by_digest: dict[str, set[str]] = defaultdict(set)
     content_digests_by_task: dict[str, set[str]] = defaultdict(set)
     content_digests_by_harbor_digest: dict[str, set[str]] = defaultdict(set)
@@ -1826,6 +2097,9 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
             key=lambda item: (item["trial_name"], item["trial_id"]),
         )
         for trial_number, item in enumerate(group_trials, 1):
+            comparison_coordinate = comparison_coordinates.get(item["trial_id"])
+            if comparison_coordinate is not None:
+                trial_number = comparison_coordinate["index"]
             score = item["score"]
             exception = item["exception"]
             terminal_failure = exception is not None
@@ -1874,10 +2148,42 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "harbor_job_retries": job_retry_count,
                 "harbor_job_max_retries": job_max_retries,
                 "harbor_exception_type": exception_type,
+                "comparison_plan_schema_version": (
+                    COMPARISON_PLAN_SCHEMA_VERSION
+                    if comparison_coordinate is not None
+                    else None
+                ),
+                "comparison_plan_sha256": (
+                    comparison_plan_sha256
+                    if comparison_coordinate is not None
+                    else None
+                ),
+                "comparison_plan": (
+                    dict(comparison_plan)
+                    if comparison_coordinate is not None
+                    else None
+                ),
+                "comparison_arm_id": (
+                    comparison_coordinate["arm_id"]
+                    if comparison_coordinate is not None
+                    else None
+                ),
+                "comparison_block": (
+                    {
+                        "task": comparison_coordinate["task"],
+                        "index": comparison_coordinate["index"],
+                    }
+                    if comparison_coordinate is not None
+                    else None
+                ),
                 "usage_source": item["usage"]["token_basis"],
                 "proxy_measured": False,
                 "harbor_metering": None,
-                "trial_mapping": "lexicographic_name_within_task_agent_model",
+                "trial_mapping": (
+                    "openbench_comparison_plan_v1"
+                    if comparison_coordinate is not None
+                    else "lexicographic_name_within_task_agent_model"
+                ),
                 "temporal_matched_block_claim": False,
             }
             row = {field: None for field in ROW_FIELDS}
@@ -1957,10 +2263,16 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
 
 
 def import_results(
-    job_dir: str | os.PathLike[str], results_path: str | os.PathLike[str]
+    job_dir: str | os.PathLike[str],
+    results_path: str | os.PathLike[str],
+    *,
+    comparison_plan_path: str | os.PathLike[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Validate, lock, collision-check, and append one rollback-safe batch."""
-    rows = load_rows(job_dir)
+    rows = load_rows(
+        job_dir,
+        comparison_plan_path=comparison_plan_path,
+    )
     requested_output = Path(results_path).expanduser()
     if requested_output.is_symlink():
         raise _fail("output", f"symlink is not accepted: {requested_output}")
@@ -2029,13 +2341,24 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="OpenBench results JSONL to append",
     )
+    parser.add_argument(
+        "--comparison-plan",
+        help=(
+            "OpenBench comparison-plan sidecar emitted beside the Harbor "
+            "job config"
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        rows = import_results(args.job_dir, args.output)
+        rows = import_results(
+            args.job_dir,
+            args.output,
+            comparison_plan_path=args.comparison_plan,
+        )
     except HarborResultsError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

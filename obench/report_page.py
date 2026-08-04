@@ -157,17 +157,22 @@ def assemble_tables(datasets, pricing=None, tasks_dirs=None):
         arms = []
         prepared = {}
         arm_labels = _arm_labels(model_rows)
+        matched = matching_policy.get(model, False)
+        if matched:
+            stats.validate_matched_comparison_rows(model_rows)
         for identity, arm_label in arm_labels.items():
             eligible, excluded = compare._filter_arm(
                 [row for row in model_rows if _arm_identity(row) == identity], roots)
-            unique, duplicates = compare._unique_cells(eligible)
+            unique, duplicates = compare._unique_cells(
+                eligible,
+                require_harbor_identity=matched,
+            )
             if duplicates:
                 raise ValueError(
                     f"{model} × {arm_label}: {duplicates} duplicate (task, trial) cell(s)"
                 )
             prepared[arm_label] = (eligible, unique, excluded, duplicates)
         common_cells = set.intersection(*(set(values[1]) for values in prepared.values()))
-        matched = matching_policy.get(model, False)
         provenance_rows = []
         for harness, (eligible, unique, excluded, duplicates) in prepared.items():
             rows = ([unique[cell] for cell in sorted(common_cells)]

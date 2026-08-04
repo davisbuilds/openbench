@@ -46,6 +46,12 @@ def _path_labels(paths):
 
 def _row_arm(row):
     provenance = row.get("candidate_provenance")
+    if (
+        isinstance(provenance, dict)
+        and provenance.get("kind") == "harbor_job"
+        and provenance.get("comparison_arm_id")
+    ):
+        return str(provenance["comparison_arm_id"])
     if isinstance(provenance, dict) and provenance.get("name"):
         return str(provenance["name"])
     return str(row.get("harness") or "-")
@@ -99,10 +105,15 @@ def _filter_arm(rows, tasks_dirs):
     return filtered["countable_rows"], filtered["excluded_counts"]
 
 
-def _unique_cells(rows):
+def _unique_cells(rows, *, require_harbor_identity=True):
     cells = defaultdict(list)
     for row in rows:
-        cells[(row["task"], row["trial"])].append(row)
+        cells[
+            stats.comparison_cell_key(
+                row,
+                require_harbor_identity=require_harbor_identity,
+            )
+        ].append(row)
     duplicates = sum(1 for values in cells.values() if len(values) != 1)
     return {cell: values[0] for cell, values in cells.items() if len(values) == 1}, duplicates
 
@@ -200,10 +211,15 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
     unknown_timeout_rows = 0
     provenance_rows = []
     anomalies = []
+    countable_by_arm = {}
+    identity_rows = []
     for arm, rows in arms.items():
         anomalies.extend(_arm_anomalies(arm, rows))
+        identity_rows.extend(
+            row for row in rows if stats.is_valid_result_row(row)
+        )
         countable, exclusions[arm] = _filter_arm(rows, task_roots)
-        eligible[arm], duplicate_counts[arm] = _unique_cells(countable)
+        countable_by_arm[arm] = countable
         countable_counts[arm] = len(countable)
         versions_by_arm[arm] = sorted({str(row["harness_version"]) for row in countable
                                        if row.get("harness_version") not in (None, "")})
@@ -216,6 +232,12 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
         if timeout_count:
             exclusions[arm]["timeout"] = timeout_count
         provenance_rows.extend(dict(row, _compare_arm=arm) for row in countable)
+
+    comparison_identity = stats.validate_matched_comparison_rows(
+        identity_rows
+    )
+    for arm, countable in countable_by_arm.items():
+        eligible[arm], duplicate_counts[arm] = _unique_cells(countable)
 
     provenance = stats.build_provenance(provenance_rows, ("_compare_arm",))
     common = set.intersection(*(set(cells) for cells in eligible.values()))
@@ -311,6 +333,7 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
         "unknown_timeout_rows": unknown_timeout_rows,
         "unassigned_excluded": unassigned_excluded,
         "anomalies": anomalies,
+        "comparison_identity": comparison_identity,
     }
 
 
@@ -461,7 +484,13 @@ def _solved_intersection_status(report):
 def render_text(report):
     rows = [[metric] + values for metric, values in scorecard_rows(report)]
     solved_status = _solved_intersection_status(report)
-    headline = f"Matched n: {report['matched_n']} (task, trial cells present in all arms)\n"
+    if report.get("comparison_identity") == "harbor_comparison_plan":
+        identity_label = (
+            "OpenBench Harbor comparison-plan blocks present in all arms"
+        )
+    else:
+        identity_label = "legacy (task, trial) cells present in all arms"
+    headline = f"Matched n: {report['matched_n']} ({identity_label})\n"
     if solved_status:
         headline += solved_status + "\n"
     statuses = [*report.get("anomalies", []), _provenance_status(report),
@@ -482,7 +511,15 @@ def render_markdown(report):
     lines = [
         "# OpenBench comparison scorecard",
         "",
-        f"**Matched n: {report['matched_n']}** `(task, trial)` cells present in every arm.",
+        (
+            f"**Matched n: {report['matched_n']}** OpenBench Harbor "
+            "comparison-plan blocks present in every arm."
+            if report.get("comparison_identity") == "harbor_comparison_plan"
+            else (
+                f"**Matched n: {report['matched_n']}** legacy "
+                "`(task, trial)` cells present in every arm."
+            )
+        ),
         "",
     ]
     solved_status = _solved_intersection_status(report)

@@ -125,6 +125,11 @@ def _harbor_row(
             "harbor_job_retries": 0,
             "harbor_job_max_retries": 1,
             "harbor_exception_type": None,
+            "comparison_plan_schema_version": None,
+            "comparison_plan_sha256": None,
+            "comparison_plan": None,
+            "comparison_arm_id": None,
+            "comparison_block": None,
             "usage_source": "harbor_agent_reported",
             "proxy_measured": False,
             "harbor_metering": None,
@@ -285,6 +290,106 @@ class PublishBundleTests(unittest.TestCase):
             item for item in checks if item["name"] == "harbor_import_evidence"
         )
         self.assertEqual(harbor_check["status"], "PASS", harbor_check)
+
+    def test_harbor_publish_validates_comparison_plan_identity(self):
+        codex = self._harbor_row()
+        opencode = self._harbor_row()
+        opencode.update({
+            "run_id": "opencode:alpha:model-x:trial1",
+            "harness": "opencode",
+        })
+        opencode_provenance = opencode["candidate_provenance"]
+        opencode_provenance.update({
+            "harbor_trial_id": "trial-2",
+            "harbor_trial_name": "alpha__opencode",
+            "harbor_agent_config_name": (
+                "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth"
+            ),
+            "harbor_model_name": "openai/model-x",
+        })
+        missing_path = os.path.join(
+            self.tmp.name,
+            "harbor-missing-plan.jsonl",
+        )
+        _write_jsonl(missing_path, [codex, opencode])
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "requires exact OpenBench comparison-plan identity",
+        ):
+            publish.create_bundle(
+                missing_path,
+                os.path.join(self.tmp.name, "missing-plan-bundle"),
+                tasks_dirs=[self.tasks],
+                scrub_ctx=self.scrub_ctx,
+            )
+
+        comparison_plan = {
+            "schema_version": "openbench-harbor-comparison-plan-v1",
+            "harbor_version": "0.20.0",
+            "harbor_git_commit_hash": "b" * 40,
+            "job_name": "job-1",
+            "job_config_sha256": "8" * 64,
+            "attempts": 1,
+            "tasks": ["alpha"],
+            "arms": [
+                {
+                    "arm_id": "codex",
+                    "agent_config_name": "codex",
+                    "model_name": "model-x",
+                },
+                {
+                    "arm_id": "opencode",
+                    "agent_config_name": (
+                        "obench.harbor_agents.opencode:"
+                        "OpenBenchOpenCodeOAuth"
+                    ),
+                    "model_name": "openai/model-x",
+                },
+            ],
+        }
+        comparison_plan_sha256 = hashlib.sha256(
+            publish.canonical_comparison_plan_bytes(comparison_plan)
+        ).hexdigest()
+        for row, arm_id in ((codex, "codex"), (opencode, "opencode")):
+            provenance = row["candidate_provenance"]
+            provenance.update({
+                "comparison_plan_schema_version": (
+                    "openbench-harbor-comparison-plan-v1"
+                ),
+                "comparison_plan_sha256": comparison_plan_sha256,
+                "comparison_plan": comparison_plan,
+                "comparison_arm_id": arm_id,
+                "comparison_block": {"task": "alpha", "index": 1},
+                "trial_mapping": "openbench_comparison_plan_v1",
+            })
+        exact_path = os.path.join(
+            self.tmp.name,
+            "harbor-exact-plan.jsonl",
+        )
+        exact_out = os.path.join(self.tmp.name, "exact-plan-bundle")
+        _write_jsonl(exact_path, [codex, opencode])
+
+        provenance = publish.create_bundle(
+            exact_path,
+            exact_out,
+            tasks_dirs=[self.tasks],
+            scrub_ctx=self.scrub_ctx,
+        )
+
+        self.assertEqual(
+            {
+                item["candidate_provenance"]["comparison_plan_sha256"]
+                for item in provenance["harbor_import_evidence"]
+            },
+            {comparison_plan_sha256},
+        )
+        partial = copy.deepcopy(codex)
+        partial["candidate_provenance"]["comparison_block"] = None
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "partial comparison identity",
+        ):
+            publish.sanitize_row_for_publish(partial)
 
     def test_terminal_harbor_publish_preserves_only_available_evidence(self):
         row = self._harbor_row(

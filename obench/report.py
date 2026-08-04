@@ -34,7 +34,10 @@ from .paths import default_results_path
 from .stats import (
     TOKEN_BASIS_PROXY,
     TOKEN_BASIS_SELF,
+    comparison_cell_key,
     effective_tokens,
+    is_harbor_result_row,
+    validate_matched_comparison_rows,
 )
 from . import usage_evidence
 
@@ -126,6 +129,17 @@ def aggregate(rows):
     value, so an empty list means "no data" (rendered ``-``) rather than zero.
     Effective tokens prefer self-reported ``tokens``, else proxy fresh totals.
     """
+    comparable_rows = [
+        row
+        for row in rows
+        if _arm_key(row) is not None and row.get("task") is not None
+    ]
+    if (
+        len({_arm_key(row) for row in comparable_rows}) >= 2
+        and any(is_harbor_result_row(row) for row in comparable_rows)
+    ):
+        validate_matched_comparison_rows(comparable_rows)
+
     arms = []
     tasks = []
     stats = {}
@@ -157,7 +171,10 @@ def aggregate(rows):
         # still proves it was attempted) and SATISFIED only once some attempt
         # produced a countable verdict. Tracking distinct cells rather than row
         # counts keeps retries from inflating either side.
-        cell = (task, row.get("trial"))
+        cell = comparison_cell_key(
+            row,
+            require_harbor_identity=False,
+        )
         st["cells_planned"].add(cell)
         if is_excluded_from_solve_rate(row):
             continue
@@ -233,7 +250,14 @@ def _one_row_per_cell(rows):
         # Every row in the current corpus carries a trial (3875/3875), so this
         # only guards older or hand-written data.
         trial = row.get("trial")
-        cell = (key, task, trial) if trial is not None else ("__no_trial__", index)
+        cell = (
+            (key, *comparison_cell_key(
+                row,
+                require_harbor_identity=False,
+            ))
+            if trial is not None
+            else ("__no_trial__", index)
+        )
         rank = (not is_excluded_from_solve_rate(row), row.get("ts_iso") or "")
         prev = chosen.get(cell)
         if prev is None or rank > prev[0]:

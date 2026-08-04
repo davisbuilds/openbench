@@ -41,6 +41,10 @@ from .harbor_profiles import (
     expected_harbor_model_name,
 )
 from .harbor_metering import publication_decision
+from .harbor_job import (
+    COMPARISON_PLAN_SCHEMA_VERSION,
+    canonical_comparison_plan_bytes,
+)
 from .paths import default_results_path, default_tasks_dir, resolve_tasks_dir
 from .usage_evidence import harbor_usage_policy
 
@@ -87,6 +91,11 @@ HARBOR_PROVENANCE_KEYS = frozenset({
     "harbor_job_retries",
     "harbor_job_max_retries",
     "harbor_exception_type",
+    "comparison_plan_schema_version",
+    "comparison_plan_sha256",
+    "comparison_plan",
+    "comparison_arm_id",
+    "comparison_block",
     "usage_source",
     "proxy_measured",
     "harbor_metering",
@@ -690,8 +699,155 @@ def _validate_harbor_row(row):
         raise PublishError(f"Harbor row {run_id!r}: invalid harbor_verifier_time_s")
     if not terminal_failure and provenance["harbor_verifier_time_s"] is None:
         raise PublishError(f"Harbor row {run_id!r}: missing harbor_verifier_time_s")
-    if provenance["trial_mapping"] != "lexicographic_name_within_task_agent_model":
-        raise PublishError(f"Harbor row {run_id!r}: invalid trial_mapping")
+    comparison_values = (
+        provenance["comparison_plan_schema_version"],
+        provenance["comparison_plan_sha256"],
+        provenance["comparison_plan"],
+        provenance["comparison_arm_id"],
+        provenance["comparison_block"],
+    )
+    has_comparison_plan = any(value is not None for value in comparison_values)
+    if has_comparison_plan:
+        if any(value is None for value in comparison_values):
+            raise PublishError(
+                f"Harbor row {run_id!r}: partial comparison identity"
+            )
+        if (
+            provenance["comparison_plan_schema_version"]
+            != COMPARISON_PLAN_SCHEMA_VERSION
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: invalid comparison plan schema"
+            )
+        if (
+            not isinstance(provenance["comparison_plan_sha256"], str)
+            or re.fullmatch(
+                r"[0-9a-f]{64}",
+                provenance["comparison_plan_sha256"],
+            )
+            is None
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: invalid comparison plan digest"
+            )
+        comparison_plan = provenance["comparison_plan"]
+        expected_plan_fields = {
+            "schema_version",
+            "harbor_version",
+            "harbor_git_commit_hash",
+            "job_name",
+            "job_config_sha256",
+            "attempts",
+            "tasks",
+            "arms",
+        }
+        if (
+            not isinstance(comparison_plan, dict)
+            or set(comparison_plan) != expected_plan_fields
+            or comparison_plan.get("schema_version")
+            != COMPARISON_PLAN_SCHEMA_VERSION
+            or comparison_plan.get("harbor_version")
+            != provenance["harbor_version"]
+            or comparison_plan.get("harbor_git_commit_hash")
+            != provenance["harbor_git_commit_hash"]
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: invalid comparison plan manifest"
+            )
+        try:
+            canonical_plan = canonical_comparison_plan_bytes(comparison_plan)
+        except (TypeError, ValueError) as exc:
+            raise PublishError(
+                f"Harbor row {run_id!r}: invalid comparison plan manifest"
+            ) from exc
+        if (
+            hashlib.sha256(canonical_plan).hexdigest()
+            != provenance["comparison_plan_sha256"]
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: comparison plan digest disagrees"
+            )
+        job_name = comparison_plan.get("job_name")
+        config_sha256 = comparison_plan.get("job_config_sha256")
+        attempts = comparison_plan.get("attempts")
+        tasks = comparison_plan.get("tasks")
+        arms = comparison_plan.get("arms")
+        if (
+            not isinstance(job_name, str)
+            or not job_name
+            or "/" in job_name
+            or "\\" in job_name
+            or not isinstance(config_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", config_sha256) is None
+            or not isinstance(attempts, int)
+            or isinstance(attempts, bool)
+            or attempts < 1
+            or not isinstance(tasks, list)
+            or not tasks
+            or tasks != sorted(set(tasks))
+            or any(not isinstance(task, str) or not task for task in tasks)
+            or not isinstance(arms, list)
+            or not arms
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: invalid comparison plan manifest"
+            )
+        arm_id = provenance["comparison_arm_id"]
+        if (
+            not isinstance(arm_id, str)
+            or not arm_id
+            or "\\" in arm_id
+            or "\x00" in arm_id
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: invalid comparison arm identity"
+            )
+        matching_arms = [
+            arm
+            for arm in arms
+            if (
+                isinstance(arm, dict)
+                and set(arm)
+                == {"arm_id", "agent_config_name", "model_name"}
+                and arm.get("arm_id") == arm_id
+                and arm.get("agent_config_name")
+                == provenance["harbor_agent_config_name"]
+                and arm.get("model_name") == provenance["harbor_model_name"]
+            )
+        ]
+        if len(matching_arms) != 1:
+            raise PublishError(
+                f"Harbor row {run_id!r}: comparison arm does not match plan"
+            )
+        block = provenance["comparison_block"]
+        if (
+            not isinstance(block, dict)
+            or set(block) != {"task", "index"}
+            or block.get("task") != row.get("task")
+            or block.get("index") != row.get("trial")
+            or block.get("task") not in tasks
+            or not isinstance(block.get("index"), int)
+            or isinstance(block.get("index"), bool)
+            or block["index"] < 1
+            or block["index"] > attempts
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: invalid comparison block identity"
+            )
+        if provenance["trial_mapping"] != "openbench_comparison_plan_v1":
+            raise PublishError(
+                f"Harbor row {run_id!r}: invalid comparison trial mapping"
+            )
+    else:
+        if any(value is not None for value in comparison_values):
+            raise PublishError(
+                f"Harbor row {run_id!r}: partial comparison identity"
+            )
+        if (
+            provenance["trial_mapping"]
+            != "lexicographic_name_within_task_agent_model"
+        ):
+            raise PublishError(f"Harbor row {run_id!r}: invalid trial_mapping")
     if provenance["temporal_matched_block_claim"] is not False:
         raise PublishError(
             f"Harbor row {run_id!r}: temporal_matched_block_claim must be false"
@@ -1416,7 +1572,10 @@ def create_bundle(results_path, out_dir, *, candidate_specs=None, tasks_dirs=Non
         })
 
     publish_rows = [sanitize_row_for_publish(row) for row in rows]
-    warnings = unmatched_arm_warnings(publish_rows)
+    try:
+        warnings = unmatched_arm_warnings(publish_rows)
+    except ValueError as exc:
+        raise PublishError(str(exc)) from exc
     warnings.extend(gate_missing_warnings(publish_rows, search_dirs=gate_search_dirs))
     if warnings and not allow_incomplete:
         raise PublishError(

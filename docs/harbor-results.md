@@ -5,6 +5,7 @@ directory into OpenBench `ROW_FIELDS` JSONL.
 
 ```bash
 obench import harbor-results /path/to/harbor-job \
+  --comparison-plan /path/to/job.openbench-comparison-plan.json \
   --output results/harbor.jsonl
 ```
 
@@ -53,9 +54,16 @@ rejects the whole job before the output file is opened for append.
 
 ## Row semantics
 
-Trials are grouped by `(task, agent, model)`, sorted by Harbor trial name and
-ID, and numbered from one within each group. This is deterministic bookkeeping;
-it does not claim that trials are temporal matched blocks.
+With `--comparison-plan`, the importer verifies the canonical sidecar digest,
+the persisted Harbor `config.json` digest, and the exact task x agent/model x
+attempt multiset in Harbor's immutable job lock. Within each task/arm, completed
+trial names and IDs are sorted and assigned sidecar block indexes. Every arm
+therefore receives the same stable `(task, block)` coordinates. Harbor remains
+the scheduler and `temporal_matched_block_claim` stays false.
+
+Without the sidecar, trials retain the legacy deterministic
+`(task, agent, model)` name/ID numbering for inspection, but Harbor matched
+comparison and publication claims fail closed.
 
 - `exec_mode` is `harbor`.
 - Harbor's `agent_result` usage is labeled `harbor_agent_reported`.
@@ -92,7 +100,9 @@ it does not claim that trials are temporal matched blocks.
 - `candidate_provenance` records Harbor build, job/trial IDs, evidence SHA-256
   digests, both Harbor task hashes, the structured OpenBench scheme-2 task
   content digest, structured exporter parameters, workspace tree digest, usage
-  source, job retry count/configured maximum, and mapping semantics.
+  source, job retry count/configured maximum, and mapping semantics. Plan-backed
+  rows also carry the canonical sidecar manifest and digest, exact arm identity,
+  and `(task, block)` coordinate so publication can revalidate the binding.
 
 ## Publishing imported rows
 

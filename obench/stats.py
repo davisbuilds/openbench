@@ -68,6 +68,7 @@ Z_95 = 1.96
 
 from .failure_class import class_for_report
 from .failure_class import EXCLUDED_FROM_SOLVE_RATE as _EXCLUDED_FROM_SOLVE_RATE
+from .harbor_job import COMPARISON_PLAN_SCHEMA_VERSION
 from . import usage_evidence
 
 EXCLUDED_FAILURE_CLASSES = set(_EXCLUDED_FROM_SOLVE_RATE)
@@ -363,8 +364,86 @@ def group_label(key, fields):
     return ",".join(f"{field}={value}" for field, value in zip(fields, key))
 
 
+def is_harbor_result_row(row):
+    provenance = row.get("candidate_provenance")
+    return (
+        row.get("exec_mode") == "harbor"
+        or (
+            isinstance(provenance, dict)
+            and provenance.get("kind") == "harbor_job"
+        )
+    )
+
+
+def comparison_cell_key(row, *, require_harbor_identity=True):
+    """Return the supported matched-cell identity for one normalized row."""
+
+    if not is_harbor_result_row(row):
+        return (row.get("task"), row.get("trial"))
+    provenance = row.get("candidate_provenance")
+    if not isinstance(provenance, dict):
+        if require_harbor_identity:
+            raise ValueError(
+                "Harbor matched comparison requires exact OpenBench "
+                "comparison-plan identity"
+            )
+        return (row.get("task"), row.get("trial"))
+    schema = provenance.get("comparison_plan_schema_version")
+    plan_sha256 = provenance.get("comparison_plan_sha256")
+    arm_id = provenance.get("comparison_arm_id")
+    block = provenance.get("comparison_block")
+    exact = (
+        schema == COMPARISON_PLAN_SCHEMA_VERSION
+        and isinstance(plan_sha256, str)
+        and len(plan_sha256) == 64
+        and all(char in "0123456789abcdef" for char in plan_sha256)
+        and isinstance(arm_id, str)
+        and bool(arm_id)
+        and isinstance(block, dict)
+        and set(block) == {"task", "index"}
+        and block.get("task") == row.get("task")
+        and block.get("index") == row.get("trial")
+        and isinstance(block.get("index"), int)
+        and not isinstance(block.get("index"), bool)
+        and block["index"] >= 1
+        and provenance.get("trial_mapping")
+        == "openbench_comparison_plan_v1"
+        and provenance.get("temporal_matched_block_claim") is False
+    )
+    if not exact:
+        if require_harbor_identity:
+            raise ValueError(
+                "Harbor matched comparison requires exact OpenBench "
+                "comparison-plan identity"
+            )
+        return (row.get("task"), row.get("trial"))
+    return (plan_sha256, block["task"], block["index"])
+
+
+def validate_matched_comparison_rows(rows):
+    """Return the matched identity mode or reject unsupported mixed evidence."""
+
+    rows = list(rows)
+    harbor_rows = [row for row in rows if is_harbor_result_row(row)]
+    if not harbor_rows:
+        return "legacy_task_trial"
+    if len(harbor_rows) != len(rows):
+        raise ValueError(
+            "matched comparison cannot mix Harbor comparison-plan identity "
+            "with legacy non-Harbor task/trial identity"
+        )
+    keys = [comparison_cell_key(row) for row in harbor_rows]
+    plan_sha256s = {key[0] for key in keys}
+    if len(plan_sha256s) != 1:
+        raise ValueError(
+            "Harbor matched comparison requires one exact comparison-plan "
+            "digest across every arm"
+        )
+    return "harbor_comparison_plan"
+
+
 def matched_cell_key(row, fields):
-    parts = [str(row.get("task") or "-"), str(row.get("trial") if row.get("trial") is not None else "-")]
+    parts = [str(value) for value in comparison_cell_key(row)]
     for field in ("harness", "model"):
         if field not in fields:
             parts.append(str(row.get(field) or "-"))
@@ -705,13 +784,19 @@ def filter_rows(rows, tasks_dirs):
 
 
 def matched_rows(countable_rows, fields):
-    by_group = defaultdict(lambda: defaultdict(list))
+    rows_by_group = defaultdict(list)
     for row in countable_rows:
         gkey = group_key(row, fields)
-        ckey = matched_cell_key(row, fields)
-        by_group[gkey][ckey].append(row)
-    if len(by_group) < 2:
+        rows_by_group[gkey].append(row)
+    if len(rows_by_group) < 2:
         return list(countable_rows), None
+
+    comparison_identity = validate_matched_comparison_rows(countable_rows)
+    by_group = defaultdict(lambda: defaultdict(list))
+    for gkey, rows in rows_by_group.items():
+        for row in rows:
+            ckey = matched_cell_key(row, fields)
+            by_group[gkey][ckey].append(row)
 
     duplicate_cells = 0
     duplicate_rows = 0
@@ -744,6 +829,7 @@ def matched_rows(countable_rows, fields):
         "unmatched_countable_rows": len(countable_rows) - len(out),
         "duplicate_cells_excluded": duplicate_cells,
         "duplicate_rows_excluded": duplicate_rows,
+        "comparison_identity": comparison_identity,
     }
     return out, diagnostics
 

@@ -492,6 +492,17 @@ class HarborRunTests(unittest.TestCase):
             result.expected_job_path,
             result.artifact.jobs_dir / "profile-job",
         )
+        self.assertTrue(result.comparison_plan_path.is_file())
+        self.assertEqual(
+            result.comparison_plan_path,
+            (
+                self.root / "profile-job.openbench-comparison-plan.json"
+            ).resolve(),
+        )
+        self.assertEqual(
+            result.comparison_plan_path.read_bytes(),
+            result.artifact.comparison_plan.json_bytes,
+        )
         rendered = result.artifact.as_dict()
         self.assertEqual(
             [agent["model_name"] for agent in rendered["agents"]],

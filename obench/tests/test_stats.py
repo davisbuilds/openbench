@@ -116,6 +116,58 @@ class TestExclusionsAndQuarantine(StatsTestCase):
 
 
 class TestMatchedDenominators(StatsTestCase):
+    @staticmethod
+    def _harbor_row(model, *, plan_sha256="a" * 64, with_identity=True):
+        provenance = {"kind": "harbor_job"}
+        if with_identity:
+            provenance.update({
+                "comparison_plan_schema_version": (
+                    "openbench-harbor-comparison-plan-v1"
+                ),
+                "comparison_plan_sha256": plan_sha256,
+                "comparison_arm_id": model,
+                "comparison_block": {"task": "t1", "index": 1},
+                "trial_mapping": "openbench_comparison_plan_v1",
+                "temporal_matched_block_claim": False,
+            })
+        return {
+            "harness": "h",
+            "model": model,
+            "task": "t1",
+            "trial": 1,
+            "success": True,
+            "failure_class": "solved",
+            "exec_mode": "harbor",
+            "candidate_provenance": provenance,
+        }
+
+    def test_harbor_matched_stats_require_and_record_plan_identity(self):
+        self.make_task("t1")
+        result = self.build(
+            [self._harbor_row("a"), self._harbor_row("b")],
+            group="model",
+            min_n=1,
+        )
+
+        self.assertEqual(
+            result["matched"]["comparison_identity"],
+            "harbor_comparison_plan",
+        )
+        self.assertEqual(result["matched"]["matched_cells_per_group"], 1)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "requires exact OpenBench comparison-plan identity",
+        ):
+            self.build(
+                [
+                    self._harbor_row("a", with_identity=False),
+                    self._harbor_row("b", with_identity=False),
+                ],
+                group="model",
+                min_n=1,
+            )
+
     def test_duplicate_matched_cells_are_reported_not_overwritten(self):
         self.make_task("t1")
         rows = [

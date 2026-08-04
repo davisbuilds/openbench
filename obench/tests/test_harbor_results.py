@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 import shutil
@@ -16,6 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from obench import harbor_results, run, stats
+from obench.harbor_job import COMPARISON_PLAN_SCHEMA_VERSION
 from obench.harbor_results import (
     HARBOR_GIT_COMMIT,
     HARBOR_VERSION,
@@ -352,6 +354,85 @@ class GoldenHarborJob:
         _write_json(result_path, result)
         self.sync_aggregate()
 
+    def set_builtin_agent(
+        self,
+        index: int,
+        agent_name: str,
+        *,
+        model_name: str = "model-x",
+    ) -> None:
+        trial_dir = self.trial(index)
+        trial_lock_path = trial_dir / "lock.json"
+        trial_lock = json.loads(trial_lock_path.read_text())
+        trial_lock["agent"]["name"] = agent_name
+        trial_lock["agent"]["model_name"] = model_name
+        _write_json(trial_lock_path, trial_lock)
+
+        job_lock_path = self.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"][index] = trial_lock
+        _write_json(job_lock_path, job_lock)
+
+        result_path = trial_dir / "result.json"
+        result = json.loads(result_path.read_text())
+        result["config"]["agent"]["name"] = agent_name
+        result["config"]["agent"]["model_name"] = model_name
+        result["agent_info"]["name"] = agent_name
+        result["agent_info"]["model_info"] = {
+            "name": model_name,
+            "provider": None,
+        }
+        _write_json(result_path, result)
+
+        trajectory_path = trial_dir / "agent" / "trajectory.json"
+        trajectory = json.loads(trajectory_path.read_text())
+        trajectory["agent"]["name"] = agent_name
+        trajectory["steps"][1]["model_name"] = model_name
+        _write_json(trajectory_path, trajectory)
+
+    def write_comparison_plan(
+        self,
+        *,
+        attempts: int,
+        arms: list[dict[str, str]],
+    ) -> Path:
+        tasks = sorted({spec["task"] for spec in self.specs})
+        config = {
+            "job_name": self.root.name,
+            "n_attempts": attempts,
+            "agents": [
+                {
+                    "name": arm["agent_config_name"],
+                    "model_name": arm["model_name"],
+                }
+                for arm in arms
+            ],
+            "datasets": [
+                {
+                    "path": "/tmp/exported",
+                    "task_names": tasks,
+                }
+            ],
+            "tasks": [],
+        }
+        config_path = self.root / "config.json"
+        _write_json(config_path, config)
+        plan = {
+            "schema_version": COMPARISON_PLAN_SCHEMA_VERSION,
+            "harbor_version": HARBOR_VERSION,
+            "harbor_git_commit_hash": HARBOR_GIT_COMMIT,
+            "job_name": self.root.name,
+            "job_config_sha256": hashlib.sha256(
+                config_path.read_bytes()
+            ).hexdigest(),
+            "attempts": attempts,
+            "tasks": tasks,
+            "arms": arms,
+        }
+        path = self.root.parent / f"{self.root.name}-comparison-plan.json"
+        _write_json(path, plan)
+        return path
+
     @staticmethod
     def _stats(results: list[dict]) -> dict:
         reward_stats: dict[str, list[str]] = {}
@@ -519,6 +600,167 @@ class HarborResultsTests(unittest.TestCase):
             self.assertIsInstance(row["checker_exit"], int)
             self.assertIsNone(row["checker_stdout"])
             self.assertIsNone(row["checker_stderr"])
+
+    def test_comparison_plan_binds_every_arm_to_shared_block_coordinates(self):
+        fixture = GoldenHarborJob(
+            self.root / "comparison-job",
+            specs=[
+                {
+                    "name": "alpha__codex_zeta",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000011",
+                    "score": 1.0,
+                    "offset": 0,
+                },
+                {
+                    "name": "alpha__codex_able",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000012",
+                    "score": 0.0,
+                    "offset": 2,
+                },
+                {
+                    "name": "alpha__pi_able",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000013",
+                    "score": 1.0,
+                    "offset": 5,
+                },
+                {
+                    "name": "alpha__pi_zeta",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000014",
+                    "score": 0.0,
+                    "offset": 7,
+                },
+            ],
+        )
+        fixture.set_builtin_agent(2, "pi")
+        fixture.set_builtin_agent(3, "pi")
+        arms = [
+            {
+                "arm_id": "codex",
+                "agent_config_name": "codex",
+                "model_name": "model-x",
+            },
+            {
+                "arm_id": "pi",
+                "agent_config_name": "pi",
+                "model_name": "model-x",
+            },
+        ]
+        plan_path = fixture.write_comparison_plan(
+            attempts=2,
+            arms=arms,
+        )
+
+        rows = load_rows(
+            fixture.root,
+            comparison_plan_path=plan_path,
+        )
+
+        plan_sha256 = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+        by_harness = {
+            harness: sorted(
+                (row for row in rows if row["harness"] == harness),
+                key=lambda row: row["trial"],
+            )
+            for harness in ("codex", "pi")
+        }
+        for harness, arm_rows in by_harness.items():
+            self.assertEqual(
+                [row["trial"] for row in arm_rows],
+                [1, 2],
+            )
+            self.assertEqual(
+                [
+                    row["candidate_provenance"]["comparison_block"]
+                    for row in arm_rows
+                ],
+                [
+                    {"task": "alpha", "index": 1},
+                    {"task": "alpha", "index": 2},
+                ],
+            )
+            for row in arm_rows:
+                provenance = row["candidate_provenance"]
+                self.assertEqual(
+                    provenance["comparison_plan_schema_version"],
+                    COMPARISON_PLAN_SCHEMA_VERSION,
+                )
+                self.assertEqual(
+                    provenance["comparison_plan_sha256"],
+                    plan_sha256,
+                )
+                self.assertEqual(provenance["comparison_arm_id"], harness)
+                self.assertEqual(
+                    provenance["trial_mapping"],
+                    "openbench_comparison_plan_v1",
+                )
+                self.assertFalse(
+                    provenance["temporal_matched_block_claim"]
+                )
+
+        self.assertEqual(
+            by_harness["codex"][0]["candidate_provenance"][
+                "harbor_trial_name"
+            ],
+            "alpha__codex_able",
+        )
+        self.assertEqual(
+            by_harness["pi"][0]["candidate_provenance"]["harbor_trial_name"],
+            "alpha__pi_able",
+        )
+
+    def test_comparison_plan_rejects_config_or_lock_matrix_drift(self):
+        fixture = GoldenHarborJob(
+            self.root / "comparison-drift",
+            specs=[
+                {
+                    "name": "alpha__one",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000021",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        arms = [
+            {
+                "arm_id": "codex",
+                "agent_config_name": "codex",
+                "model_name": "model-x",
+            }
+        ]
+        plan_path = fixture.write_comparison_plan(
+            attempts=1,
+            arms=arms,
+        )
+        config_path = fixture.root / "config.json"
+        config = json.loads(config_path.read_text())
+        config["n_attempts"] = 2
+        _write_json(config_path, config)
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "persisted job config",
+        ):
+            load_rows(
+                fixture.root,
+                comparison_plan_path=plan_path,
+            )
+
+        plan_path = fixture.write_comparison_plan(
+            attempts=2,
+            arms=arms,
+        )
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            "matrix does not match immutable Harbor job lock",
+        ):
+            load_rows(
+                fixture.root,
+                comparison_plan_path=plan_path,
+            )
 
     def test_terminal_failures_map_without_fabricated_optional_evidence(self):
         exception_types = (

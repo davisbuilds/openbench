@@ -182,6 +182,46 @@ class HarborJobTest(unittest.TestCase):
         )
         self.assertEqual(artifact.source_task_count, 2)
         self.assertEqual(artifact.trial_count, 24)
+        self.assertIsNotNone(artifact.comparison_plan)
+        comparison_plan = artifact.comparison_plan.as_dict()
+        self.assertEqual(
+            comparison_plan,
+            {
+                "schema_version": hj.COMPARISON_PLAN_SCHEMA_VERSION,
+                "harbor_version": hj.HARBOR_VERSION,
+                "harbor_git_commit_hash": hj.HARBOR_GIT_COMMIT,
+                "job_name": "openbench-smoke",
+                "job_config_sha256": artifact.sha256,
+                "attempts": 3,
+                "tasks": ["alpha", "zeta"],
+                "arms": [
+                    {
+                        "arm_id": "codex@provider/model-b",
+                        "agent_config_name": "codex",
+                        "model_name": "provider/model-b",
+                    },
+                    {
+                        "arm_id": "codex@provider/model-a",
+                        "agent_config_name": "codex",
+                        "model_name": "provider/model-a",
+                    },
+                    {
+                        "arm_id": "custom@provider/model-b",
+                        "agent_config_name": "acme.agent:Agent",
+                        "model_name": "provider/model-b",
+                    },
+                    {
+                        "arm_id": "custom@provider/model-a",
+                        "agent_config_name": "acme.agent:Agent",
+                        "model_name": "provider/model-a",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(
+            artifact.comparison_plan.sha256,
+            hashlib.sha256(artifact.comparison_plan.json_bytes).hexdigest(),
+        )
         self.assertEqual(artifact.json_bytes, hj.build_job_config(
             self._local_spec(
                 agent_profiles=profiles,
@@ -341,14 +381,45 @@ class HarborJobTest(unittest.TestCase):
     def test_write_is_atomic_idempotent_and_refuses_replacement(self):
         artifact = hj.build_job_config(self._local_spec())
         path = self.root / "configs" / "job.json"
+        comparison_path = hj.comparison_plan_path_for_config(path)
 
         self.assertEqual(hj.write_job_config(artifact, path), path.resolve())
         self.assertEqual(hj.write_job_config(artifact, path), path.resolve())
         self.assertEqual(path.read_bytes(), artifact.json_bytes)
+        self.assertEqual(
+            comparison_path,
+            self.root / "configs" / "job.openbench-comparison-plan.json",
+        )
+        self.assertEqual(
+            hj.write_comparison_plan(artifact.comparison_plan, comparison_path),
+            comparison_path.resolve(),
+        )
+        self.assertEqual(
+            hj.write_comparison_plan(artifact.comparison_plan, comparison_path),
+            comparison_path.resolve(),
+        )
 
         different = hj.build_job_config(self._local_spec(attempts=3))
         with self.assertRaisesRegex(hj.HarborJobError, "refusing to overwrite"):
             hj.write_job_config(different, path)
+        with self.assertRaisesRegex(hj.HarborJobError, "refusing to overwrite"):
+            hj.write_comparison_plan(
+                different.comparison_plan,
+                comparison_path,
+            )
+
+    def test_rejects_comparison_arms_with_ambiguous_lock_identity(self):
+        profiles = (
+            hj.AgentProfile(profile_id="first", name="codex"),
+            hj.AgentProfile(profile_id="second", name="codex"),
+        )
+        with self.assertRaisesRegex(
+            hj.HarborJobError,
+            "unique immutable agent/model identities",
+        ):
+            hj.build_job_config(
+                self._local_spec(agent_profiles=profiles)
+            )
 
     def test_command_plan_binds_digest_and_uses_native_config_command(self):
         artifact = hj.build_job_config(self._local_spec())

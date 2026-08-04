@@ -31,6 +31,8 @@ from obench.harbor_job import (
     RetryPolicy,
     build_command_plan,
     build_job_config,
+    comparison_plan_path_for_config,
+    write_comparison_plan,
     write_job_config,
 )
 from obench.harbor_profiles import (
@@ -88,6 +90,7 @@ class HarborProfileJobResult:
     returncode: int
     artifact: HarborJobArtifact
     config_path: Path
+    comparison_plan_path: Path
     expected_job_path: Path
     resumes_existing_job: bool
 
@@ -503,6 +506,14 @@ def run_harbor_profile_job(
             )
         )
         written_config = write_job_config(artifact, config_path)
+        if artifact.comparison_plan is None:
+            raise HarborRunError(
+                "local Harbor profile jobs require a comparison plan"
+            )
+        written_comparison_plan = write_comparison_plan(
+            artifact.comparison_plan,
+            comparison_plan_path_for_config(written_config),
+        )
         plan = build_command_plan(
             artifact,
             written_config,
@@ -521,6 +532,7 @@ def run_harbor_profile_job(
         returncode=int(completed.returncode),
         artifact=artifact,
         config_path=written_config,
+        comparison_plan_path=written_comparison_plan,
         expected_job_path=plan.expected_job_path,
         resumes_existing_job=plan.resumes_existing_job,
     )

@@ -32,8 +32,9 @@ release-tag lookup, is the source of truth for this module. At that commit:
 
 `obench harbor job-run` is the end-to-end local/Mini path. It exports the
 selected tasks with public agent networking, resolves exact OAuth harness/model
-profiles, holds one credential lease per harness, writes canonical job JSON,
-and invokes one native `harbor run -c` command:
+profiles, holds one credential lease per harness, writes canonical job JSON
+plus an OpenBench comparison-plan sidecar, and invokes one native
+`harbor run -c` command:
 
 ```bash
 obench harbor job-run \
@@ -52,6 +53,11 @@ obench harbor job-run \
 ```
 
 This example resolves to 2 tasks x 2 harnesses x 2 attempts = 8 trials.
+The sidecar is written beside the config as
+`openbench-harness-smoke.openbench-comparison-plan.json`. It binds the job
+config SHA-256, exact task list, immutable Harbor agent/model identities, and
+attempt count. Harbor still chooses execution order; the sidecar does not claim
+temporal matched scheduling.
 Codex and Pi each have an independent OAuth lane, but each credential is used
 by at most one trial at a time. A rerun with the identical config resumes the
 same Harbor job. OpenBench does not replay completed trials itself.
@@ -131,6 +137,9 @@ expansion are deterministic. `write_job_config` creates the file atomically,
 allows an identical existing file, and refuses replacement with different
 bytes. Publish the JSON and `artifact.sha256` together; do not add OpenBench
 metadata keys to the JSON because Harbor's native `JobConfig` is the contract.
+For local task sets, `artifact.comparison_plan` contains the canonical
+create-once sidecar. Its task x arm x attempt matrix is a stable OpenBench
+denominator plan, not a second scheduler.
 
 The config fixes `job_name` and `jobs_dir`. Re-running the same
 `harbor run -c <config>` points Harbor at the same job directory. Harbor then

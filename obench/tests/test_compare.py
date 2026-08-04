@@ -49,8 +49,153 @@ class CompareTestCase(unittest.TestCase):
         row.update(extra)
         return row
 
+    @classmethod
+    def harbor_row(
+        cls,
+        harness,
+        task,
+        trial,
+        success,
+        *,
+        arm_id,
+        plan_sha256="a" * 64,
+        **extra,
+    ):
+        return cls.row(
+            harness,
+            task,
+            trial,
+            success,
+            exec_mode="harbor",
+            candidate_provenance={
+                "kind": "harbor_job",
+                "comparison_plan_schema_version": (
+                    "openbench-harbor-comparison-plan-v1"
+                ),
+                "comparison_plan_sha256": plan_sha256,
+                "comparison_arm_id": arm_id,
+                "comparison_block": {
+                    "task": task,
+                    "index": trial,
+                },
+                "trial_mapping": "openbench_comparison_plan_v1",
+                "temporal_matched_block_claim": False,
+            },
+            **extra,
+        )
+
 
 class TestMatchedComparison(CompareTestCase):
+    def test_harbor_uses_exact_plan_blocks_without_temporal_claim(self):
+        path = self.write(
+            "harbor.jsonl",
+            [
+                self.harbor_row(
+                    "codex",
+                    "t",
+                    1,
+                    True,
+                    arm_id="codex",
+                ),
+                self.harbor_row(
+                    "pi",
+                    "t",
+                    1,
+                    False,
+                    arm_id="pi",
+                ),
+            ],
+        )
+
+        result = compare.build_comparison([path], tasks_dirs=[self.tasks])
+
+        self.assertEqual(result["arms"], ["codex", "pi"])
+        self.assertEqual(result["matched_n"], 1)
+        self.assertEqual(
+            result["comparison_identity"],
+            "harbor_comparison_plan",
+        )
+        self.assertIn(
+            "OpenBench Harbor comparison-plan blocks",
+            compare.render_text(result),
+        )
+        self.assertNotIn("temporal", compare.render_text(result).lower())
+
+    def test_harbor_matched_claims_reject_missing_mixed_or_cross_plan_identity(self):
+        missing = self.write(
+            "missing.jsonl",
+            [
+                self.row(
+                    "codex",
+                    "t",
+                    1,
+                    True,
+                    exec_mode="harbor",
+                    candidate_provenance={"kind": "harbor_job"},
+                ),
+                self.row(
+                    "pi",
+                    "t",
+                    1,
+                    True,
+                    exec_mode="harbor",
+                    candidate_provenance={"kind": "harbor_job"},
+                ),
+            ],
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "requires exact OpenBench comparison-plan identity",
+        ):
+            compare.build_comparison([missing], tasks_dirs=[self.tasks])
+
+        harbor = self.write(
+            "harbor-arm.jsonl",
+            [
+                self.harbor_row(
+                    "codex",
+                    "t",
+                    1,
+                    True,
+                    arm_id="codex",
+                )
+            ],
+        )
+        legacy = self.write(
+            "legacy-arm.jsonl",
+            [self.row("pi", "t", 1, True)],
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "cannot mix Harbor",
+        ):
+            compare.build_comparison(
+                [harbor, legacy],
+                tasks_dirs=[self.tasks],
+            )
+
+        other_plan = self.write(
+            "other-plan.jsonl",
+            [
+                self.harbor_row(
+                    "pi",
+                    "t",
+                    1,
+                    True,
+                    arm_id="pi",
+                    plan_sha256="b" * 64,
+                )
+            ],
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "one exact comparison-plan digest",
+        ):
+            compare.build_comparison(
+                [harbor, other_plan],
+                tasks_dirs=[self.tasks],
+            )
+
     def test_path_labels_cannot_collide_with_generated_suffixes(self):
         labels = compare._path_labels(["a.jsonl", "a.jsonl", "a-2.jsonl"])
         self.assertEqual(len(labels), len(set(labels)))

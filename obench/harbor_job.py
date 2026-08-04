@@ -24,6 +24,8 @@ HARBOR_JOB_CONFIG_SOURCE = (
     "https://github.com/harbor-framework/harbor/blob/"
     f"{HARBOR_GIT_COMMIT}/src/harbor/models/job/config.py"
 )
+COMPARISON_PLAN_SCHEMA_VERSION = "openbench-harbor-comparison-plan-v1"
+COMPARISON_PLAN_SUFFIX = ".openbench-comparison-plan.json"
 
 DEFAULT_RETRY_EXCLUSIONS = (
     "AgentAuthenticationError",
@@ -116,6 +118,17 @@ class HarborJobSpec:
 
 
 @dataclass(frozen=True)
+class HarborComparisonPlanArtifact:
+    """OpenBench comparison coordinates bound to one native Harbor job config."""
+
+    json_bytes: bytes
+    sha256: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return json.loads(self.json_bytes)
+
+
+@dataclass(frozen=True)
 class HarborJobArtifact:
     """Canonical publishable config bytes and their immutable identity."""
 
@@ -125,6 +138,7 @@ class HarborJobArtifact:
     jobs_dir: Path
     trial_count: int | None
     source_task_count: int | None
+    comparison_plan: HarborComparisonPlanArtifact | None
 
     def as_dict(self) -> dict[str, Any]:
         return json.loads(self.json_bytes)
@@ -159,9 +173,12 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
     )
     profiles = _validate_profiles(spec.agent_profiles, spec.concurrency)
     retry = _render_retry(spec.retry)
-    source, source_task_count = _render_source(spec.source)
+    source, source_task_count, source_task_names = _render_source(spec.source)
 
     agents = []
+    comparison_arms = []
+    comparison_arm_keys: set[tuple[str, str]] = set()
+    comparison_arm_ids: set[str] = set()
     for profile in profiles:
         profile_models = (
             (profile.model_name,)
@@ -173,7 +190,34 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
                 f"profile {profile.profile_id} requires model_name when "
                 "the job has no shared models"
             )
-        agents.extend(_render_agent(profile, model) for model in profile_models)
+        for model in profile_models:
+            rendered_agent = _render_agent(profile, model)
+            agent_config_name = (
+                rendered_agent.get("name") or rendered_agent["import_path"]
+            )
+            arm_key = (agent_config_name, model)
+            if arm_key in comparison_arm_keys:
+                raise HarborJobError(
+                    "comparison arms must have unique immutable "
+                    f"agent/model identities: {agent_config_name} {model}"
+                )
+            comparison_arm_keys.add(arm_key)
+            arm_id = (
+                profile.profile_id
+                if len(profile_models) == 1
+                else f"{profile.profile_id}@{model}"
+            )
+            if arm_id in comparison_arm_ids:
+                raise HarborJobError(
+                    f"comparison arm identity is ambiguous: {arm_id}"
+                )
+            comparison_arm_ids.add(arm_id)
+            agents.append(rendered_agent)
+            comparison_arms.append({
+                "arm_id": arm_id,
+                "agent_config_name": agent_config_name,
+                "model_name": model,
+            })
     config = {
         "job_name": job_name,
         "jobs_dir": str(jobs_dir),
@@ -198,13 +242,89 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
         if source_task_count is not None
         else None
     )
+    config_sha256 = hashlib.sha256(json_bytes).hexdigest()
+    comparison_plan = (
+        _build_comparison_plan(
+            job_name=job_name,
+            job_config_sha256=config_sha256,
+            tasks=source_task_names,
+            arms=comparison_arms,
+            attempts=spec.attempts,
+        )
+        if source_task_names is not None
+        else None
+    )
     return HarborJobArtifact(
         json_bytes=json_bytes,
-        sha256=hashlib.sha256(json_bytes).hexdigest(),
+        sha256=config_sha256,
         job_name=job_name,
         jobs_dir=jobs_dir,
         trial_count=trial_count,
         source_task_count=source_task_count,
+        comparison_plan=comparison_plan,
+    )
+
+
+def _build_comparison_plan(
+    *,
+    job_name: str,
+    job_config_sha256: str,
+    tasks: tuple[str, ...],
+    arms: list[dict[str, str]],
+    attempts: int,
+) -> HarborComparisonPlanArtifact:
+    value = {
+        "schema_version": COMPARISON_PLAN_SCHEMA_VERSION,
+        "harbor_version": HARBOR_VERSION,
+        "harbor_git_commit_hash": HARBOR_GIT_COMMIT,
+        "job_name": job_name,
+        "job_config_sha256": job_config_sha256,
+        "attempts": attempts,
+        "tasks": list(tasks),
+        "arms": arms,
+    }
+    json_bytes = canonical_comparison_plan_bytes(value)
+    return HarborComparisonPlanArtifact(
+        json_bytes=json_bytes,
+        sha256=hashlib.sha256(json_bytes).hexdigest(),
+    )
+
+
+def canonical_comparison_plan_bytes(value: Mapping[str, Any]) -> bytes:
+    """Serialize a comparison plan in its single supported canonical form."""
+
+    return (
+        json.dumps(
+            value,
+            sort_keys=True,
+            indent=2,
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def comparison_plan_path_for_config(
+    config_path: str | os.PathLike[str],
+) -> Path:
+    """Return the deterministic OpenBench sidecar path for a Harbor config."""
+
+    path = Path(config_path).expanduser()
+    return path.with_name(path.stem + COMPARISON_PLAN_SUFFIX)
+
+
+def write_comparison_plan(
+    artifact: HarborComparisonPlanArtifact,
+    path: str | os.PathLike[str],
+) -> Path:
+    """Atomically create a sidecar, allowing only identical existing bytes."""
+
+    return _write_immutable_bytes(
+        artifact.json_bytes,
+        path,
+        path_label="comparison plan path",
+        artifact_label="Harbor comparison plan",
     )
 
 
@@ -213,19 +333,36 @@ def write_job_config(
 ) -> Path:
     """Atomically create a config, allowing only an identical existing file."""
 
+    return _write_immutable_bytes(
+        artifact.json_bytes,
+        path,
+        path_label="config path",
+        artifact_label="Harbor job config",
+    )
+
+
+def _write_immutable_bytes(
+    payload: bytes,
+    path: str | os.PathLike[str],
+    *,
+    path_label: str,
+    artifact_label: str,
+) -> Path:
     destination = Path(path).expanduser()
     if destination.suffix.lower() != ".json":
-        raise HarborJobError("Harbor job config path must end in .json")
+        raise HarborJobError(f"{artifact_label} path must end in .json")
     if destination.is_symlink():
-        raise HarborJobError(f"config path must not be a symlink: {destination}")
+        raise HarborJobError(f"{path_label} must not be a symlink: {destination}")
     destination = destination.resolve(strict=False)
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         if not destination.is_file():
-            raise HarborJobError(f"config path is not a regular file: {destination}")
-        if destination.read_bytes() != artifact.json_bytes:
             raise HarborJobError(
-                f"refusing to overwrite different Harbor job config: {destination}"
+                f"{path_label} is not a regular file: {destination}"
+            )
+        if destination.read_bytes() != payload:
+            raise HarborJobError(
+                f"refusing to overwrite different {artifact_label}: {destination}"
             )
         return destination
 
@@ -235,15 +372,15 @@ def write_job_config(
     temporary = Path(temporary_name)
     try:
         with os.fdopen(fd, "wb") as handle:
-            handle.write(artifact.json_bytes)
+            handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
         try:
             os.link(temporary, destination)
         except FileExistsError:
-            if destination.is_symlink() or destination.read_bytes() != artifact.json_bytes:
+            if destination.is_symlink() or destination.read_bytes() != payload:
                 raise HarborJobError(
-                    f"refusing to overwrite different Harbor job config: {destination}"
+                    f"refusing to overwrite different {artifact_label}: {destination}"
                 ) from None
         return destination
     finally:
@@ -314,17 +451,23 @@ def _normalize_output_dir(value: str | os.PathLike[str]) -> Path:
 
 def _render_source(
     source: LocalTaskSet | Dataset,
-) -> tuple[dict[str, list[dict[str, Any]]], int | None]:
+) -> tuple[
+    dict[str, list[dict[str, Any]]],
+    int | None,
+    tuple[str, ...] | None,
+]:
     if isinstance(source, LocalTaskSet):
-        dataset, count = _render_local_task_set(source)
-        return {"datasets": [dataset], "tasks": []}, count
+        dataset, task_names = _render_local_task_set(source)
+        return {"datasets": [dataset], "tasks": []}, len(task_names), task_names
     if isinstance(source, Dataset):
         dataset = _render_dataset(source)
-        return {"datasets": [dataset], "tasks": []}, None
+        return {"datasets": [dataset], "tasks": []}, None, None
     raise HarborJobError("source must be exactly one LocalTaskSet or Dataset")
 
 
-def _render_local_task_set(source: LocalTaskSet) -> tuple[dict[str, Any], int]:
+def _render_local_task_set(
+    source: LocalTaskSet,
+) -> tuple[dict[str, Any], tuple[str, ...]]:
     raw = Path(source.path).expanduser()
     if raw.is_symlink():
         raise HarborJobError(f"local task-set path must not be a symlink: {raw}")
@@ -369,7 +512,7 @@ def _render_local_task_set(source: LocalTaskSet) -> tuple[dict[str, Any], int]:
                 + ", ".join(unavailable)
             )
         selected = tuple(sorted(selected))
-    return {"path": str(root), "task_names": list(selected)}, len(selected)
+    return {"path": str(root), "task_names": list(selected)}, selected
 
 
 def _render_dataset(source: Dataset) -> dict[str, Any]:

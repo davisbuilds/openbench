@@ -83,6 +83,9 @@ class HarborCliTests(unittest.TestCase):
             returncode=0,
             artifact=artifact,
             config_path=Path("/tmp/job.json"),
+            comparison_plan_path=Path(
+                "/tmp/job.openbench-comparison-plan.json"
+            ),
             expected_job_path=expected_job,
             resumes_existing_job=False,
         )
@@ -142,6 +145,10 @@ class HarborCliTests(unittest.TestCase):
         self.assertIn("Harbor job started; exited with code 0", stdout)
         self.assertIn("trials: 8", stdout)
         self.assertIn("config sha256: " + "a" * 64, stdout)
+        self.assertIn(
+            "comparison plan: /tmp/job.openbench-comparison-plan.json",
+            stdout,
+        )
 
     def test_oauth_run_constructs_exact_library_call_without_credential_bytes(self):
         expected_job = Path("/tmp/jobs/oauth-smoke-001")
