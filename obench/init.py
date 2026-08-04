@@ -74,18 +74,17 @@ trajectory = true
 usage = true
 
 [publication]
+scope = "local_only"
 completeness = "complete"
 """
 
 HARNESS_PROFILE_TOML = """\
-# Declarative harness profile intent. Suite execution is not wired yet.
+# Declarative stock harness profile intent.
 # Keep credentials and machine-local auth paths out of committed profiles.
 schema_version = 1
 id = "local-codex"
+kind = "stock"
 harness = "codex"
-harbor_agent = "codex"
-auth = "oauth"
-cli_version = "0.144.5"
 """
 
 EXAMPLE_INSTRUCTION = """\
@@ -626,11 +625,9 @@ def main(argv=None):
         print(f"  {note}")
     print()
     print(
-        "Next command (parse and validate suite intent):\n"
-        "  python3 -c 'from obench.suite import load_suite; "
-        "load_suite(\".openbench/suites/default.toml\")'\n"
+        "Next command (validate the default suite plan):\n"
+        "  obench run --plan\n"
         "Then edit the suite, task, and profile for this repository.\n"
-        "Suite execution is intentionally not wired to `obench run` yet.\n"
         "See docs/private-evals.md and docs/harbor-suites.md."
     )
     return 0

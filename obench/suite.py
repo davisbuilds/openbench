@@ -77,6 +77,7 @@ class EvidenceRequirements:
 
 @dataclass(frozen=True)
 class PublicationPolicy:
+    scope: str
     completeness: str
 
 
@@ -321,7 +322,12 @@ def _parse_evidence(value: Any) -> EvidenceRequirements:
 
 def _parse_publication(value: Any) -> PublicationPolicy:
     table = _expect_table(value, "publication")
-    _expect_keys(table, {"completeness"}, "publication")
+    _expect_keys(table, {"scope", "completeness"}, "publication")
+    scope = _string(table.get("scope"), "publication.scope")
+    if scope not in {"local_only", "public"}:
+        raise SuiteError(
+            "publication.scope must be 'local_only' or 'public'"
+        )
     completeness = _string(
         table.get("completeness"), "publication.completeness"
     )
@@ -329,7 +335,7 @@ def _parse_publication(value: Any) -> PublicationPolicy:
         raise SuiteError(
             "publication.completeness must be 'complete' or 'allow_incomplete'"
         )
-    return PublicationPolicy(completeness=completeness)
+    return PublicationPolicy(scope=scope, completeness=completeness)
 
 
 def _local_task_set_path(value: Any, root: Path, label: str) -> Path:

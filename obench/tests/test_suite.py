@@ -70,6 +70,7 @@ trajectory = true
 usage = true
 
 [publication]
+scope = "local_only"
 completeness = "complete"
 """
 
@@ -87,6 +88,7 @@ completeness = "complete"
         self.assertEqual(suite.arms[0].profile, "local-codex")
         self.assertEqual(suite.run.timeout_seconds, 900.0)
         self.assertTrue(suite.evidence.trajectory)
+        self.assertEqual(suite.publication.scope, "local_only")
         self.assertEqual(suite.publication.completeness, "complete")
 
     def test_rejects_unknown_keys_at_every_level(self):
@@ -103,6 +105,14 @@ completeness = "complete"
             with self.subTest(marker=marker):
                 with self.assertRaisesRegex(SuiteError, "unknown keys"):
                     self._load(self._valid().replace(marker, replacement, 1))
+
+    def test_rejects_invalid_publication_scope(self):
+        with self.assertRaisesRegex(SuiteError, "publication.scope"):
+            self._load(
+                self._valid().replace(
+                    'scope = "local_only"', 'scope = "private"', 1
+                )
+            )
 
     def test_rejects_duplicate_ids_and_duplicate_arms(self):
         duplicate_id = self._valid().replace(

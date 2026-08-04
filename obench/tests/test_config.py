@@ -53,6 +53,63 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNone(cfg.tasks_dir)
         self.assertEqual(cfg.harnesses, [])
 
+    def test_requires_complete_harbor_suite_runtime_config(self):
+        root = os.path.join(self.tmp, "project")
+        nested = os.path.join(root, "src")
+        os.makedirs(nested)
+        openbench = os.path.join(root, ".openbench")
+        os.makedirs(openbench)
+        with open(
+            os.path.join(openbench, "openbench.toml"), "w", encoding="utf-8"
+        ) as handle:
+            handle.write(
+                'default_suite = ".openbench/suites/default.toml"\n'
+                'jobs_dir = ".openbench/jobs"\n'
+                'results_dir = ".openbench/results"\n'
+                'trajectories_dir = ".openbench/trajectories"\n'
+            )
+        cfg = config.require_suite_config(nested)
+        self.assertEqual(
+            cfg.default_suite,
+            os.path.join(root, ".openbench", "suites", "default.toml"),
+        )
+
+        with open(
+            os.path.join(openbench, "openbench.toml"), "w", encoding="utf-8"
+        ) as handle:
+            handle.write('default_suite = ".openbench/suites/default.toml"\n')
+        with self.assertRaisesRegex(ValueError, "missing required suite settings"):
+            config.require_suite_config(nested)
+
+    def test_suite_runtime_config_rejects_output_symlink_escape(self):
+        root = os.path.join(self.tmp, "project")
+        nested = os.path.join(root, "src")
+        openbench = os.path.join(root, ".openbench")
+        outside = os.path.join(self.tmp, "outside")
+        os.makedirs(nested)
+        os.makedirs(outside)
+        os.makedirs(os.path.join(openbench, "suites"))
+        with open(
+            os.path.join(openbench, "suites", "default.toml"),
+            "w",
+            encoding="utf-8",
+        ) as handle:
+            handle.write("schema_version = 1\n")
+        os.symlink(outside, os.path.join(openbench, "results"))
+        with open(
+            os.path.join(openbench, "openbench.toml"), "w", encoding="utf-8"
+        ) as handle:
+            handle.write(
+                'default_suite = ".openbench/suites/default.toml"\n'
+                'jobs_dir = ".openbench/jobs"\n'
+                'results_dir = ".openbench/results"\n'
+                'trajectories_dir = ".openbench/trajectories"\n'
+            )
+
+        with self.assertRaisesRegex(ValueError, "results_dir.*symlink"):
+            config.require_suite_config(nested)
+        self.assertEqual(os.listdir(outside), [])
+
 
 if __name__ == "__main__":
     unittest.main()

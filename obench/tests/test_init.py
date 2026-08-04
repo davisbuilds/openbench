@@ -16,6 +16,7 @@ import tomllib
 import unittest
 
 from obench import init
+from obench.profile_spec import load_profile_registry
 from obench.suite import load_suite
 
 
@@ -53,6 +54,9 @@ class InitTests(unittest.TestCase):
         self.assertEqual(suite.harbor.version, init.HARBOR_VERSION)
         self.assertEqual(suite.harbor.commit, init.HARBOR_COMMIT)
         self.assertEqual(suite.task_sets[0].path, root / "tasks")
+        self.assertEqual(suite.publication.scope, "local_only")
+        profiles = load_profile_registry(self.tmp)
+        self.assertEqual(profiles.get("local-codex").harness, "codex")
 
         task = tomllib.loads(
             (root / "tasks" / "example-greeting" / "task.toml").read_text(
@@ -236,14 +240,13 @@ class InitTests(unittest.TestCase):
 
         self.assertFalse((outside / "escaped.sh").exists())
 
-    def test_cli_prints_validation_command_and_no_run_command(self):
+    def test_cli_prints_harbor_plan_command(self):
         output = io.StringIO()
         with redirect_stdout(output):
             self.assertEqual(init.main([]), 0)
         text = output.getvalue()
-        self.assertIn("from obench.suite import load_suite", text)
-        self.assertIn("not wired to `obench run`", text)
-        self.assertNotIn("obench run --", text)
+        self.assertIn("obench run --plan", text)
+        self.assertNotIn("not wired", text)
 
     def test_legacy_task_is_separate_and_explicit(self):
         seed = self.tmp / "seed"
