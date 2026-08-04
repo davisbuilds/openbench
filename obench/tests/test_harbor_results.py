@@ -424,6 +424,9 @@ class HarborResultsTests(unittest.TestCase):
         )
         self.assertEqual(rows[0]["exec_mode"], "harbor")
         self.assertEqual(rows[0]["token_basis"], "harbor_agent_reported")
+        self.assertEqual(rows[0]["usage_evidence_grade"], "harbor_reported")
+        self.assertTrue(rows[0]["usage_ranking_eligible"])
+        self.assertIsNone(rows[0]["usage_ranking_exclusion_reason"])
         self.assertEqual(rows[0]["tokens_input_uncached"], 75)
         self.assertEqual(rows[0]["tokens_cache_read"], 25)
         self.assertEqual(rows[0]["tokens_output"], 40)
@@ -1254,6 +1257,72 @@ class HarborResultsTests(unittest.TestCase):
             "metering",
         ):
             load_rows(fixture.root)
+
+    def test_profile_agent_imports_structurally_valid_usage_mismatch(self):
+        fixture = GoldenHarborJob(
+            self.root / "job-profile-metering-mismatch",
+            specs=[
+                {
+                    "name": "alpha__profile",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000015",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        profile_import = (
+            "obench.harbor_agents.codex_profile:"
+            "OpenBenchCodexOAuthProfile"
+        )
+        lock_path = fixture.trial() / "lock.json"
+        trial_lock = json.loads(lock_path.read_text())
+        trial_lock["agent"]["name"] = profile_import
+        _write_json(lock_path, trial_lock)
+        job_lock_path = fixture.root / "lock.json"
+        job_lock = json.loads(job_lock_path.read_text())
+        job_lock["trials"] = [trial_lock]
+        _write_json(job_lock_path, job_lock)
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["config"]["agent"]["name"] = profile_import
+        _write_json(result_path, result)
+
+        metering_path = fixture.trial() / "agent" / "harbor-metering"
+        evidence_path = metering_path / "harbor-metering.json"
+        _write_json(evidence_path, {"placeholder": True})
+        evidence = {
+            "schema_version": "openbench.harbor-metering.v2",
+            "proxy_complete": True,
+            "proxy_measured": {
+                "calls": 1,
+                "input_tokens": 101,
+                "cache_tokens": 25,
+                "output_tokens": 40,
+            },
+            "request_counts": {"total": 1, "model": 1, "auxiliary": 0},
+            "ledger_seal": {
+                "root_hash": "a" * 64,
+                "ledger_sha256": "b" * 64,
+            },
+            "reconciliation": {"status": "mismatch"},
+        }
+        with mock.patch(
+            "obench.harbor_results.verify_evidence_dir",
+            return_value=evidence,
+        ):
+            row = load_rows(fixture.root)[0]
+
+        self.assertEqual(row["tokens_input_uncached"], 75)
+        self.assertEqual(row["tokens_proxy_input_uncached"], 76)
+        self.assertEqual(
+            row["usage_evidence_grade"],
+            "harbor_reported_proxy_mismatch",
+        )
+        self.assertFalse(row["usage_ranking_eligible"])
+        self.assertEqual(
+            row["usage_ranking_exclusion_reason"], "proxy_mismatch"
+        )
 
     def test_rejects_coherent_result_and_atif_agent_relabeling(self):
         fixture = self.fixture()

@@ -93,6 +93,8 @@ ROW_FIELDS = (
     "tokens_proxy_input_uncached", "tokens_proxy_cache_read", "tokens_proxy_cache_write",
     "tokens_proxy_output", "tokens_proxy_reasoning", "tokens_proxy_calls",
     "sampling_observed", "token_basis_proxy", "proxy_capture_truncated",
+    "usage_evidence_grade", "usage_ranking_eligible",
+    "usage_ranking_exclusion_reason",
     "tokens_fresh", "turns", "cmd", "checker_exit", "exec_mode", "score", "harness_version",
     "harness_version_source", "failure_class", "failure_reason", "workspace_changed", "checker_stdout", "checker_stderr", "checker_workspace_files",
     "image_digest", "candidate_provenance", "version_drift", "timeout_s",

@@ -36,6 +36,7 @@ from .run import (
     make_run_id,
     results_file_lock,
 )
+from .usage_evidence import harbor_usage_policy
 
 HARBOR_VERSION = "0.20.0"
 HARBOR_GIT_COMMIT = "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767"
@@ -1688,6 +1689,14 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                         ]["ledger_sha256"],
                     }
                 )
+            else:
+                grade, ranking_eligible, exclusion_reason = harbor_usage_policy(
+                    row.get("token_basis"),
+                    proxy_required=False,
+                )
+                row["usage_evidence_grade"] = grade
+                row["usage_ranking_eligible"] = ranking_eligible
+                row["usage_ranking_exclusion_reason"] = exclusion_reason
             rows.append(row)
     run_ids = [row["run_id"] for row in rows]
     if len(run_ids) != len(set(run_ids)):
