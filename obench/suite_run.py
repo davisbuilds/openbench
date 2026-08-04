@@ -10,13 +10,12 @@ import argparse
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 import hashlib
-from importlib import metadata
-from importlib.machinery import all_suffixes
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -77,8 +76,8 @@ class SuiteRunError(RuntimeError):
     """A suite cannot be safely compiled or executed."""
 
 
-class _NonzeroHarborExit(HarborOAuthError):
-    """Unwind OAuth contexts without requiring a return after process failure."""
+class _OAuthReturnFreshnessError(SuiteRunError, HarborOAuthError):
+    """A Harbor job did not produce its own staged OAuth return."""
 
 
 @dataclass(frozen=True)
@@ -180,6 +179,7 @@ def compile_suite(
     registry = load_profile_registry(suite.project_root)
 
     compiled_arms: list[CompiledArm] = []
+    custom_harnesses: dict[str, str] = {}
     for arm in suite.arms:
         profile = registry.get(arm.profile)
         if isinstance(profile, StockProfileSpec) and arm.harness != profile.harness:
@@ -187,6 +187,16 @@ def compile_suite(
                 f"arm {arm.id!r} harness {arm.harness!r} does not match "
                 f"stock profile {profile.id!r} harness {profile.harness!r}"
             )
+        if isinstance(profile, CustomProfileSpec):
+            previous_harness = custom_harnesses.setdefault(
+                profile.id, arm.harness
+            )
+            if previous_harness != arm.harness:
+                raise SuiteRunError(
+                    f"custom profile {profile.id!r} cannot use conflicting "
+                    f"harness identities {previous_harness!r} and "
+                    f"{arm.harness!r}"
+                )
         agent = replace(compile_profile(profile, arm.model), profile_id=arm.id)
         compiled_arms.append(
             CompiledArm(arm=arm, profile=profile, agent=agent)
@@ -296,7 +306,7 @@ def run_suite(
     """Execute planned jobs while Harbor owns scheduling, retry, and resume."""
 
     jobs = plan_jobs(compiled)
-    custom_env = _validate_custom_runtime(compiled)
+    custom_env = _validate_custom_environment(compiled)
 
     harbor = preflight(
         harbor_binary,
@@ -309,6 +319,7 @@ def run_suite(
         or harbor.is_editable
     ):
         raise SuiteRunError("Harbor preflight did not return the pinned build")
+    _verify_custom_runtimes(compiled, harbor, run_process=run_process)
 
     manifest_path = _write_manifest(compiled)
     process_env = dict(os.environ)
@@ -325,49 +336,49 @@ def run_suite(
         label="Harbor suite config directory",
     )
 
-    try:
-        with ExitStack() as stack:
-            oauth_credentials = _stage_stock_credentials(
-                stack, compiled, process_env
+    with ExitStack() as stack:
+        oauth_credentials = _stage_stock_credentials(
+            stack, compiled, process_env
+        )
+        for job_index, job in enumerate(jobs):
+            config_path = configs_dir / f"{job.task_set_id}.json"
+            written = write_job_config(job.artifact, config_path)
+            command = build_command_plan(
+                job.artifact,
+                written,
+                harbor_binary=harbor.path,
             )
-            for job in jobs:
-                config_path = configs_dir / f"{job.task_set_id}.json"
-                written = write_job_config(job.artifact, config_path)
-                command = build_command_plan(
-                    job.artifact,
-                    written,
-                    harbor_binary=harbor.path,
+            no_op_resume = (
+                command.resumes_existing_job
+                and _completed_harbor_job(command.expected_job_path)
+            )
+            _prepare_oauth_returns(oauth_credentials)
+            completed = run_process(
+                list(command.argv),
+                check=False,
+                env=process_env,
+            )
+            artifacts.append(
+                SuiteRunArtifact(
+                    task_set_id=job.task_set_id,
+                    returncode=int(completed.returncode),
+                    config_path=written,
+                    config_sha256=job.artifact.sha256,
+                    harbor_job_path=command.expected_job_path,
+                    resumed=command.resumes_existing_job,
                 )
-                no_op_resume = (
-                    command.resumes_existing_job
-                    and _completed_harbor_job(command.expected_job_path)
-                )
-                completed = run_process(
-                    list(command.argv),
-                    check=False,
-                    env=process_env,
-                )
-                artifacts.append(
-                    SuiteRunArtifact(
-                        task_set_id=job.task_set_id,
-                        returncode=int(completed.returncode),
-                        config_path=written,
-                        config_sha256=job.artifact.sha256,
-                        harbor_job_path=command.expected_job_path,
-                        resumed=command.resumes_existing_job,
-                    )
-                )
-                if completed.returncode:
-                    if _oauth_return_missing(oauth_credentials):
-                        raise _NonzeroHarborExit(
-                            f"Harbor exited with {completed.returncode} "
-                            "before returning staged OAuth"
-                        )
-                    break
-                if no_op_resume:
-                    _seed_missing_oauth_returns(oauth_credentials)
-    except _NonzeroHarborExit:
-        pass
+            )
+            if no_op_resume:
+                _seed_missing_oauth_returns(oauth_credentials)
+            _require_fresh_oauth_returns(
+                oauth_credentials,
+                task_set_id=job.task_set_id,
+                returncode=int(completed.returncode),
+            )
+            if completed.returncode:
+                break
+            if job_index < len(jobs) - 1:
+                _promote_oauth_returns_to_inputs(oauth_credentials)
 
     result = SuiteRunResult(
         manifest_path=manifest_path,
@@ -660,13 +671,11 @@ def _assert_semantic_manifest_safe(value: Any, path: str = "manifest") -> None:
         )
 
 
-def _validate_custom_runtime(compiled: CompiledSuite) -> dict[str, str]:
+def _validate_custom_environment(compiled: CompiledSuite) -> dict[str, str]:
     forwarded: dict[str, str] = {}
-    profiles: dict[str, CustomProfileSpec] = {}
     for item in compiled.arms:
         if not isinstance(item.profile, CustomProfileSpec):
             continue
-        profiles[item.profile.id] = item.profile
         for _, template in item.profile.env:
             match = _ENV_TEMPLATE_RE.fullmatch(template)
             if match is None:
@@ -681,60 +690,176 @@ def _validate_custom_runtime(compiled: CompiledSuite) -> dict[str, str]:
                     f"host environment variable {host_name}"
                 )
             forwarded[host_name] = value
-    for profile in profiles.values():
-        _verify_custom_distribution(profile)
     return forwarded
 
 
-def _verify_custom_distribution(profile: CustomProfileSpec) -> None:
-    try:
-        distribution = metadata.distribution(profile.distribution)
-    except metadata.PackageNotFoundError as exc:
-        raise SuiteRunError(
-            f"custom profile {profile.id!r} requires installed distribution "
-            f"{profile.distribution}=={profile.version}"
-        ) from exc
-    installed = distribution.version
-    if installed != profile.version:
-        raise SuiteRunError(
-            f"custom profile {profile.id!r} requires "
-            f"{profile.distribution}=={profile.version}, found {installed}"
-        )
+_CUSTOM_RUNTIME_PROBE = """\
+import importlib
+import importlib.metadata
+import inspect
+import json
+import pathlib
+import sys
 
-    installed_name = distribution.metadata.get("Name")
+request = json.load(sys.stdin)
+module_name, class_name = request["import_path"].split(":", 1)
+module = importlib.import_module(module_name)
+agent_class = getattr(module, class_name)
+if not isinstance(agent_class, type):
+    raise TypeError("declared custom agent is not a class")
+module_origin = pathlib.Path(inspect.getfile(module)).absolute()
+class_origin = pathlib.Path(inspect.getfile(agent_class)).absolute()
+distribution = importlib.metadata.distribution(request["distribution"])
+owned = (
+    module_origin.is_file()
+    and not module_origin.is_symlink()
+    and any(
+        pathlib.Path(distribution.locate_file(item)).absolute() == module_origin
+        and not pathlib.Path(distribution.locate_file(item)).is_symlink()
+        for item in (distribution.files or ())
+    )
+)
+print(json.dumps({
+    "class_module": agent_class.__module__,
+    "class_origin_matches_module": class_origin == module_origin,
+    "distribution": distribution.metadata.get("Name"),
+    "import_path": module_name + ":" + class_name,
+    "owned": owned,
+    "version": distribution.version,
+}, sort_keys=True))
+"""
+
+
+def _verify_custom_runtimes(
+    compiled: CompiledSuite,
+    harbor: HarborBinary,
+    *,
+    run_process: ProcessRunner,
+) -> None:
+    profiles: dict[str, CustomProfileSpec] = {}
+    for item in compiled.arms:
+        if isinstance(item.profile, CustomProfileSpec):
+            profiles[item.profile.id] = item.profile
+    if not profiles:
+        return
+
+    interpreter = _harbor_python_interpreter(harbor)
+    probe_env = {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONNOUSERSITE": "1",
+    }
+    for profile in profiles.values():
+        request = json.dumps(
+            {
+                "distribution": profile.distribution,
+                "import_path": profile.import_path,
+            },
+            sort_keys=True,
+        )
+        try:
+            completed = run_process(
+                [str(interpreter), "-c", _CUSTOM_RUNTIME_PROBE],
+                check=False,
+                capture_output=True,
+                text=True,
+                input=request,
+                env=probe_env,
+            )
+        except OSError as exc:
+            raise SuiteRunError(
+                f"cannot inspect custom profile {profile.id!r} in Harbor's "
+                "Python interpreter"
+            ) from exc
+        if completed.returncode != 0:
+            raise SuiteRunError(
+                f"custom profile {profile.id!r} cannot be imported by "
+                "Harbor's Python interpreter"
+            )
+        try:
+            observed = json.loads(completed.stdout or "")
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise SuiteRunError(
+                f"custom profile {profile.id!r} runtime probe returned "
+                "invalid identity data"
+            ) from exc
+        _require_custom_runtime_identity(profile, observed)
+
+
+def _harbor_python_interpreter(harbor: HarborBinary) -> Path:
+    launcher = harbor.path
+    try:
+        launcher_info = os.lstat(launcher)
+        with launcher.open("rb") as handle:
+            first_line = handle.readline(4096).decode(
+                "utf-8", "strict"
+            ).strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SuiteRunError(
+            "cannot prove the pinned Harbor launcher's Python interpreter"
+        ) from exc
     if (
-        not isinstance(installed_name, str)
-        or _canonical_distribution_name(installed_name)
-        != _canonical_distribution_name(profile.distribution)
+        stat.S_ISLNK(launcher_info.st_mode)
+        or not stat.S_ISREG(launcher_info.st_mode)
+        or not first_line.startswith("#!")
     ):
         raise SuiteRunError(
-            f"custom profile {profile.id!r} resolved a different distribution "
-            f"identity for {profile.distribution!r}"
+            "cannot prove the pinned Harbor launcher's Python interpreter"
         )
+    rendered = first_line[2:].strip()
+    interpreter = Path(rendered)
+    if (
+        not rendered
+        or any(character.isspace() for character in rendered)
+        or not interpreter.is_absolute()
+    ):
+        raise SuiteRunError(
+            "cannot prove the pinned Harbor launcher's Python interpreter"
+        )
+    try:
+        interpreter_info = os.stat(interpreter)
+    except OSError as exc:
+        raise SuiteRunError(
+            "cannot prove the pinned Harbor launcher's Python interpreter"
+        ) from exc
+    if (
+        not stat.S_ISREG(interpreter_info.st_mode)
+        or not os.access(interpreter, os.X_OK)
+    ):
+        raise SuiteRunError(
+            "cannot prove the pinned Harbor launcher's Python interpreter"
+        )
+    return interpreter
 
-    module_path = profile.import_path.split(":", 1)[0].replace(".", "/")
-    candidates = {
-        f"{module_path}{suffix}" for suffix in all_suffixes()
-    } | {
-        f"{module_path}/__init__{suffix}" for suffix in all_suffixes()
-    }
-    files = distribution.files
-    matching = [
-        file
-        for file in (files or ())
-        if Path(str(file)).as_posix() in candidates
-    ]
-    if len(matching) != 1:
+
+def _require_custom_runtime_identity(
+    profile: CustomProfileSpec,
+    observed: Any,
+) -> None:
+    if not isinstance(observed, dict):
         raise SuiteRunError(
-            f"custom profile {profile.id!r} import {profile.import_path!r} "
-            f"is not uniquely owned by installed distribution "
-            f"{profile.distribution!r}"
+            f"custom profile {profile.id!r} runtime identity is malformed"
         )
-    installed_module = Path(distribution.locate_file(matching[0]))
-    if installed_module.is_symlink() or not installed_module.is_file():
+    module_name = profile.import_path.split(":", 1)[0]
+    expected = {
+        "class_module": module_name,
+        "class_origin_matches_module": True,
+        "distribution": profile.distribution,
+        "import_path": profile.import_path,
+        "owned": True,
+        "version": profile.version,
+    }
+    comparable = dict(observed)
+    distribution = comparable.get("distribution")
+    if isinstance(distribution, str):
+        comparable["distribution"] = _canonical_distribution_name(distribution)
+        expected["distribution"] = _canonical_distribution_name(
+            profile.distribution
+        )
+    if comparable != expected:
         raise SuiteRunError(
-            f"custom profile {profile.id!r} installed module is not a "
-            f"regular file: {profile.import_path!r}"
+            f"custom profile {profile.id!r} does not match Harbor runtime "
+            f"identity {profile.distribution}=={profile.version} "
+            f"{profile.import_path}"
         )
 
 
@@ -806,6 +931,92 @@ def _seed_missing_oauth_returns(
         destination.chmod(0o600)
 
 
+def _prepare_oauth_returns(
+    credentials: dict[str, HarborOAuthCredential],
+) -> None:
+    for credential in credentials.values():
+        destination = Path(credential.config.auth_return_path)
+        try:
+            info = os.lstat(destination)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            if stat.S_ISLNK(info.st_mode):
+                destination.unlink(missing_ok=True)
+            raise _OAuthReturnFreshnessError(
+                f"staged OAuth return path is unsafe: {destination}"
+            )
+        destination.unlink()
+
+
+def _require_fresh_oauth_returns(
+    credentials: dict[str, HarborOAuthCredential],
+    *,
+    task_set_id: str,
+    returncode: int,
+) -> None:
+    for credential in credentials.values():
+        destination = Path(credential.config.auth_return_path)
+        try:
+            info = os.lstat(destination)
+        except FileNotFoundError as exc:
+            raise _OAuthReturnFreshnessError(
+                f"Harbor job {task_set_id!r} exited with {returncode} "
+                "without producing fresh staged OAuth"
+            ) from exc
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            if stat.S_ISLNK(info.st_mode):
+                destination.unlink(missing_ok=True)
+            raise _OAuthReturnFreshnessError(
+                f"Harbor job {task_set_id!r} produced an unsafe staged "
+                "OAuth return"
+            )
+
+
+def _promote_oauth_returns_to_inputs(
+    credentials: dict[str, HarborOAuthCredential],
+) -> None:
+    for credential in credentials.values():
+        config = credential.config
+        source = Path(config.auth_return_path)
+        destination = Path(config.auth_json_path)
+        for path in (source, destination):
+            try:
+                info = os.lstat(path)
+            except OSError as exc:
+                raise _OAuthReturnFreshnessError(
+                    "cannot advance staged OAuth between Harbor jobs"
+                ) from exc
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                raise _OAuthReturnFreshnessError(
+                    "cannot advance unsafe staged OAuth between Harbor jobs"
+                )
+
+        temporary: Path | None = None
+        try:
+            with source.open("rb") as source_handle, tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=destination.parent,
+                prefix=".auth-next-",
+                delete=False,
+            ) as temporary_handle:
+                temporary = Path(temporary_handle.name)
+                os.chmod(temporary, 0o600)
+                shutil.copyfileobj(source_handle, temporary_handle)
+                temporary_handle.flush()
+                os.fsync(temporary_handle.fileno())
+            os.replace(temporary, destination)
+            temporary = None
+            source.unlink()
+        except OSError as exc:
+            raise _OAuthReturnFreshnessError(
+                "cannot advance staged OAuth between Harbor jobs"
+            ) from exc
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+
 def _completed_harbor_job(job_path: Path) -> bool:
     """Return whether persisted Harbor summary proves no trial remains."""
 
@@ -828,15 +1039,6 @@ def _completed_harbor_job(job_path: Path) -> bool:
         and stats.get("n_completed_trials") == total
         and stats.get("n_running_trials") == 0
         and stats.get("n_pending_trials") == 0
-    )
-
-
-def _oauth_return_missing(
-    credentials: dict[str, HarborOAuthCredential],
-) -> bool:
-    return any(
-        not Path(credential.config.auth_return_path).is_file()
-        for credential in credentials.values()
     )
 
 

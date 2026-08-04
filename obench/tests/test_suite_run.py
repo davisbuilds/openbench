@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 from types import SimpleNamespace
 import tempfile
 import unittest
@@ -38,21 +39,34 @@ class SuiteRunTests(unittest.TestCase):
     def _write_suite(self, root: Path, text: str) -> None:
         self._suite_path(root).write_text(text, encoding="utf-8")
 
-    def _fake_distribution(
+    def _fake_harbor(self, root: Path) -> HarborBinary:
+        launcher = root / "bin" / "harbor"
+        launcher.parent.mkdir(exist_ok=True)
+        launcher.write_text(f"#!{sys.executable}\n", encoding="utf-8")
+        launcher.chmod(0o700)
+        return HarborBinary(
+            path=launcher,
+            version="0.20.0",
+            git_commit=init.HARBOR_COMMIT,
+            is_editable=False,
+        )
+
+    def _custom_probe_result(
         self,
-        root: Path,
         *,
-        version: str,
-    ):
-        installed = root / "installed"
-        module = installed / "acme" / "harbor.py"
-        module.parent.mkdir(parents=True)
-        module.write_text("class Agent: pass\n", encoding="utf-8")
-        return SimpleNamespace(
-            version=version,
-            metadata={"Name": "acme-harbor-agent"},
-            files=(Path("acme/harbor.py"),),
-            locate_file=lambda path: installed / path,
+        version: str = "2.4.1",
+        owned: bool = True,
+        class_module: str = "acme.harbor",
+    ) -> str:
+        return json.dumps(
+            {
+                "class_module": class_module,
+                "class_origin_matches_module": True,
+                "distribution": "acme-harbor-agent",
+                "import_path": "acme.harbor:Agent",
+                "owned": owned,
+                "version": version,
+            }
         )
 
     def _add_second_local_task_set(
@@ -283,7 +297,7 @@ model = "gpt-5.6-terra"
                 credential.assert_not_called()
                 preflight.assert_not_called()
 
-    def test_missing_custom_env_and_distribution_mismatch_fail_before_harbor(self):
+    def test_missing_custom_env_and_runtime_mismatch_fail_before_auth_or_harbor_run(self):
         root = self._project()
         self._add_custom_profile_and_arm(root)
         compiled = suite_run.compile_suite(start=root)
@@ -296,18 +310,58 @@ model = "gpt-5.6-terra"
                 suite_run.run_suite(compiled, preflight=preflight)
         preflight.assert_not_called()
 
+        harbor = self._fake_harbor(root)
+        preflight.return_value = harbor
+        process = mock.Mock(
+            return_value=SimpleNamespace(
+                returncode=0,
+                stdout=self._custom_probe_result(version="2.4.0"),
+            )
+        )
         with mock.patch.dict(
             os.environ, {"ACME_API_KEY": "not-in-manifest"}, clear=True
-        ), mock.patch(
-            "obench.suite_run.metadata.distribution",
-            return_value=self._fake_distribution(root, version="2.4.0"),
-        ):
+        ), mock.patch("obench.suite_run.HarborOAuthCredential") as credential:
             with self.assertRaisesRegex(
-                SuiteRunError, "requires .*acme-harbor-agent==2.4.1"
+                SuiteRunError, "does not match Harbor runtime identity"
             ):
-                suite_run.run_suite(compiled, preflight=preflight)
-        preflight.assert_not_called()
+                suite_run.run_suite(
+                    compiled,
+                    preflight=preflight,
+                    run_process=process,
+                )
+        preflight.assert_called_once()
+        credential.assert_not_called()
+        self.assertEqual(process.call_count, 1)
+        self.assertEqual(process.call_args.args[0][:2], [sys.executable, "-c"])
+        self.assertNotIn(
+            "not-in-manifest",
+            json.dumps(process.call_args.kwargs, default=str),
+        )
         self.assertNotIn("not-in-manifest", compiled.manifest_bytes.decode())
+
+    def test_custom_profile_rejects_conflicting_harness_labels(self):
+        root = self._project()
+        self._add_custom_profile_and_arm(root)
+        text = self._suite_text(root).replace(
+            "\n[run]\n",
+            """\
+
+[[arms]]
+id = "acme-terra-alias"
+harness = "acme-alias"
+profile = "acme"
+model = "gpt-5.6-terra"
+
+[run]
+""",
+            1,
+        )
+        self._write_suite(root, text)
+
+        with self.assertRaisesRegex(
+            SuiteRunError, "conflicting harness identities"
+        ):
+            suite_run.compile_suite(start=root)
 
     def test_cross_task_set_logical_collision_fails_during_compile(self):
         root = self._project()
@@ -376,6 +430,10 @@ model = "gpt-5.6-terra"
         def fake_process(argv, **kwargs):
             self.assertFalse((fake_auth_root / "return.json").exists())
             process_calls.append((argv, kwargs))
+            shutil.copyfile(
+                fake_auth_root / "input.json",
+                fake_auth_root / "return.json",
+            )
             return SimpleNamespace(returncode=0)
 
         with mock.patch(
@@ -439,30 +497,43 @@ model = "gpt-5.6-sol"
 """
         self._write_suite(root, text.replace(stock_arm, "", 1))
         compiled = suite_run.compile_suite(start=root)
-        calls = []
+        harbor = self._fake_harbor(root)
+        harbor_calls = []
+
+        def fake_process(argv, **kwargs):
+            if argv[:2] == [sys.executable, "-c"]:
+                self.assertEqual(
+                    json.loads(kwargs["input"]),
+                    {
+                        "distribution": "acme-harbor-agent",
+                        "import_path": "acme.harbor:Agent",
+                    },
+                )
+                self.assertEqual(
+                    kwargs["env"],
+                    {
+                        "PYTHONIOENCODING": "utf-8",
+                        "PYTHONNOUSERSITE": "1",
+                    },
+                )
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=self._custom_probe_result(),
+                )
+            harbor_calls.append((argv, kwargs))
+            return SimpleNamespace(returncode=0)
 
         with mock.patch.dict(
             os.environ, {"ACME_API_KEY": "runtime-secret"}, clear=True
-        ), mock.patch(
-            "obench.suite_run.metadata.distribution",
-            return_value=self._fake_distribution(root, version="2.4.1"),
         ):
             result = suite_run.run_suite(
                 compiled,
-                run_process=lambda argv, **kwargs: (
-                    calls.append((argv, kwargs))
-                    or SimpleNamespace(returncode=0)
-                ),
-                preflight=lambda *args, **kwargs: HarborBinary(
-                    path=Path("/fake/harbor"),
-                    version="0.20.0",
-                    git_commit=init.HARBOR_COMMIT,
-                    is_editable=False,
-                ),
+                run_process=fake_process,
+                preflight=lambda *args, **kwargs: harbor,
             )
 
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(harbor_calls), 1)
         config = json.loads(
             result.artifacts[0].config_path.read_text(encoding="utf-8")
         )
@@ -471,6 +542,61 @@ model = "gpt-5.6-sol"
             {"ACME_API_KEY": "${ACME_API_KEY}"},
         )
         self.assertNotIn("runtime-secret", compiled.manifest_bytes.decode())
+
+    def test_custom_runtime_rejects_shadowed_module_and_wrong_interpreter(self):
+        root = self._project()
+        self._add_custom_profile_and_arm(root)
+        text = self._suite_text(root)
+        stock_arm = """\
+[[arms]]
+id = "codex-example"
+harness = "codex"
+profile = "local-codex"
+model = "gpt-5.6-sol"
+
+"""
+        self._write_suite(root, text.replace(stock_arm, "", 1))
+        compiled = suite_run.compile_suite(start=root)
+        harbor = self._fake_harbor(root)
+
+        with mock.patch.dict(
+            os.environ, {"ACME_API_KEY": "runtime-secret"}, clear=True
+        ):
+            with self.assertRaisesRegex(
+                SuiteRunError, "does not match Harbor runtime identity"
+            ):
+                suite_run.run_suite(
+                    compiled,
+                    run_process=lambda *args, **kwargs: SimpleNamespace(
+                        returncode=0,
+                        stdout=self._custom_probe_result(owned=False),
+                    ),
+                    preflight=lambda *args, **kwargs: harbor,
+                )
+
+            harbor.path.write_text("#!/bin/sh\n", encoding="utf-8")
+            process = mock.Mock(
+                return_value=SimpleNamespace(returncode=2, stdout="")
+            )
+            with self.assertRaisesRegex(
+                SuiteRunError, "cannot be imported by Harbor's Python interpreter"
+            ):
+                suite_run.run_suite(
+                    compiled,
+                    run_process=process,
+                    preflight=lambda *args, **kwargs: harbor,
+                )
+            self.assertEqual(process.call_args.args[0][:2], ["/bin/sh", "-c"])
+
+            harbor.path.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                SuiteRunError, "cannot prove.*interpreter"
+            ):
+                suite_run.run_suite(
+                    compiled,
+                    run_process=mock.Mock(),
+                    preflight=lambda *args, **kwargs: harbor,
+                )
 
     def test_zero_exit_resume_seeds_return_only_after_harbor(self):
         root = self._project()
@@ -601,6 +727,10 @@ model = "gpt-5.6-sol"
 
         def fake_process(argv, **kwargs):
             calls.append(argv)
+            shutil.copyfile(
+                fake_auth_root / "input.json",
+                fake_auth_root / "return.json",
+            )
             return SimpleNamespace(returncode=23)
 
         with mock.patch(
@@ -622,6 +752,67 @@ model = "gpt-5.6-sol"
         self.assertEqual(result.returncode, 23)
         self.assertEqual(len(result.artifacts), 1)
         self.assertEqual(len(calls), 1)
+
+    def test_second_job_cannot_reuse_first_jobs_oauth_return(self):
+        root = self._project()
+        self._add_external_task_set(root)
+        compiled = suite_run.compile_suite(start=root)
+        auth_master = root / "auth.json"
+        auth_master.write_text('{"generation":0}\n', encoding="utf-8")
+        fake_auth_root = root / "fake-auth"
+        calls = []
+
+        class FakeCredential:
+            def __init__(self, master):
+                self.master = master
+
+            def __enter__(self):
+                fake_auth_root.mkdir()
+                shutil.copyfile(self.master, fake_auth_root / "input.json")
+                self.config = SimpleNamespace(
+                    auth_json_path=str(fake_auth_root / "input.json"),
+                    auth_return_path=str(fake_auth_root / "return.json"),
+                )
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        def fake_process(argv, **kwargs):
+            calls.append(argv)
+            self.assertFalse((fake_auth_root / "return.json").exists())
+            if len(calls) == 1:
+                (fake_auth_root / "return.json").write_text(
+                    '{"generation":1}\n', encoding="utf-8"
+                )
+            else:
+                self.assertEqual(
+                    (fake_auth_root / "input.json").read_text(encoding="utf-8"),
+                    '{"generation":1}\n',
+                )
+            return SimpleNamespace(returncode=0)
+
+        with mock.patch(
+            "obench.suite_run._resolve_auth_source", return_value=auth_master
+        ), mock.patch(
+            "obench.suite_run.HarborOAuthCredential", FakeCredential
+        ):
+            with self.assertRaisesRegex(
+                SuiteRunError, "without producing fresh staged OAuth"
+            ):
+                suite_run.run_suite(
+                    compiled,
+                    run_process=fake_process,
+                    preflight=lambda *args, **kwargs: HarborBinary(
+                        path=Path("/fake/harbor"),
+                        version="0.20.0",
+                        git_commit=init.HARBOR_COMMIT,
+                        is_editable=False,
+                    ),
+                )
+
+        self.assertEqual(len(calls), 2)
+        self.assertFalse((fake_auth_root / "return.json").exists())
 
     def test_bare_registry_name_rejects_non_version_immutable_ref(self):
         root = self._project()
