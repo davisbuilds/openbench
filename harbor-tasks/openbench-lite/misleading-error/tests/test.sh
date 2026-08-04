@@ -78,7 +78,7 @@ cat >"$REWARD_DIR/openbench-verifier-evidence.json" <<EOF
   "openbench_harbor_export": {
     "schema_version": 1,
     "base_image": "python:3.11-slim",
-    "network_mode": "no-network"
+    "network_mode": "public"
   },
   "checker_exit": $RC,
   "parsed_score": $PARSED_SCORE_JSON,

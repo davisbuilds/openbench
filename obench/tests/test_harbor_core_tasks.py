@@ -8,7 +8,7 @@ from pathlib import Path
 import tomllib
 import unittest
 
-from obench import export_harbor
+from obench import export_harbor, harbor_run
 from obench.paths import SOURCE_ROOT
 from obench.publish import DIGEST_SCHEME_CURRENT, task_content_digest
 
@@ -130,12 +130,27 @@ class HarborCoreTaskContractTests(unittest.TestCase):
                     config["environment"],
                     {
                         "build_timeout_sec": 600.0,
-                        "network_mode": "no-network",
+                        "network_mode": "public",
                         "os": "linux",
                         "cpus": 4,
                         "gpus": 0,
                     },
                 )
+
+    def test_every_task_is_accepted_by_harbor_oauth_runner(self):
+        for name in sorted(CORE_TASKS):
+            with self.subTest(task=name):
+                task = (HARBOR_ROOT / name).resolve()
+                self.assertEqual(harbor_run.validate_task_root(task), task)
+
+    def test_verifier_evidence_records_public_networking(self):
+        for name in sorted(CORE_TASKS):
+            with self.subTest(task=name):
+                test_sh = (
+                    HARBOR_ROOT / name / "tests" / "test.sh"
+                ).read_text()
+                self.assertIn('"network_mode": "public"', test_sh)
+                self.assertNotIn('"network_mode": "no-network"', test_sh)
 
     def test_native_payloads_match_all_legacy_sources(self):
         for name in sorted(CORE_TASKS):
