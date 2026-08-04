@@ -15,17 +15,12 @@ mkdir -p data
 obench gate path/to/my-cli.toml \
   --model deepseek-v4-flash --live > data/my-cli-gate.json
 
-# 2. Run a matrix: candidate + stock arms, same tasks / model / trials.
-obench run --harness null,pi \
-  --candidate path/to/my-cli.toml \
-  --task fix-failing-test,build-a-cli \
-  --model deepseek-v4-flash \
-  --trials 2 \
-  --results-path results/my-claim.jsonl
+# 2. Declare the stock/custom arms and tasks in a public, complete suite.
+obench run path/to/my-public-suite.toml
 
 # 3. Publish a shareable bundle (no transcripts ever leave the machine).
 obench publish \
-  --results-path results/my-claim.jsonl \
+  --results-path .openbench/results/suite-runs/<digest>.results.jsonl \
   --candidate my-cli \
   --out openbench-publish/my-claim
 
@@ -64,6 +59,10 @@ Default output directory: `./openbench-publish/<timestamp>/` (override with
   record under `data/`, `.openbench/gate/`, or `results/gate/`. Use
   `--allow-incomplete` only for an intentionally caveated artifact; the
   resulting warnings remain in terminal output, provenance, and HTML.
+- **Suite scope is authoritative.** `local_only` suite rows are rejected by
+  publish, bundle verification, community acceptance/sync, and site ingestion,
+  even if files are copied. Public suite rows require `complete`, the full
+  declared denominator, and all declared evidence. Smoke suites never publish.
 - **Harbor imports have a strict publication schema.** A row marked as Harbor
   execution must contain the complete normalized importer provenance and agree
   with its workspace and usage fields. Publish retains the Harbor build, job

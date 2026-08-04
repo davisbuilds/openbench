@@ -13,20 +13,16 @@ has the milestone analyses; [`SETUP.md`](SETUP.md) is the practical runbook for 
 first local cell, Docker, imported tasks, and open-model keys. Evaluating
 harnesses on a **private codebase**? Start with
 [`docs/private-evals.md`](docs/private-evals.md) (`obench init` creates a
-Harbor-native task, suite, and profile scaffold; execution wiring is still
-separate). The strict suite contract is in
-[`docs/harbor-suites.md`](docs/harbor-suites.md). To run existing OpenBench
-exports as a native Harbor task x harness x attempt job,
-see [`docs/harbor-jobs.md`](docs/harbor-jobs.md) (`obench harbor job-run`).
-The exporter, exact OAuth harness profiles, sealed proxy metering, and strict
-result importer are documented in
+Harbor-native task, suite, and profile scaffold). The canonical command is
+`obench run [suite.toml]`; the strict end-to-end contract is in
+[`docs/harbor-suites.md`](docs/harbor-suites.md). Exact OAuth harness profiles,
+sealed proxy metering, and strict Harbor evidence validation are documented in
 [`docs/harbor-export.md`](docs/harbor-export.md),
 [`docs/harbor-profiles.md`](docs/harbor-profiles.md),
 [`docs/harbor-metering.md`](docs/harbor-metering.md), and
-[`docs/harbor-results.md`](docs/harbor-results.md). The older one-trial
-Codex-only bridge remains available as `obench harbor oauth-run`.
-To pull Harbor-format tasks into OpenBench, see
-[`docs/harbor-import.md`](docs/harbor-import.md) (`obench import harbor`).
+[`docs/harbor-results.md`](docs/harbor-results.md). Manual export/import and
+`obench harbor ...` commands remain advanced migration/diagnostic tools, not
+the default run workflow.
 Versioned packs (`org/name@version`, tasks or harness manifests) are covered in
 [`docs/task-packs.md`](docs/task-packs.md) (`obench pack install …`).
 To compare a fixed coding harness and model over direct and gateway serving
@@ -67,7 +63,10 @@ contract without claiming a working runner.
 
 Current Harness Bench tiers:
 
-- **Core synthetic tasks (`tasks/`).** Small-to-medium tasks built in this repo,
+- **Canonical Harbor tasks (`harbor-tasks/openbench-lite/`).** Native Harbor
+  tasks used by the default local-only suite.
+- **Historical core tasks (`tasks/`).** Compatibility tasks for
+  `obench legacy run`, including
   including partial-credit harder tasks such as `make-ci-green`, `add-feature`,
   and `misleading-error`.
 - **Exercism imported tier (`tasks-imported/exercism/`).** MIT-licensed problem-
@@ -162,7 +161,8 @@ runs through the bridge, use [`SETUP.md`](SETUP.md).
 tasks/                 core benchmark tasks (see "Task format")
 tasks-imported/        separately scored Exercism and Terminal-Bench tiers
 obench/                installable package (CLI: obench)
-obench/run.py          the runner (one row per task x harness x trial)
+obench/suite_run.py    Harbor-first suite execution and atomic result sealing
+obench/run.py          legacy compatibility runner
 obench/report.py       aggregates results into a table with Wilson CIs
 obench/adapters/*.py   one adapter per harness (+ built-in "null" control)
 obench/ADAPTER_SPEC.md the adapter contract
@@ -227,26 +227,23 @@ For each harness it checks — spending no tokens — that the CLI is installed,
 auth/login or required key name is present, and the canonical model pin resolves
 to the harness's own model string. A failing preflight exits nonzero.
 
-**3. Run.** Pick harnesses and tasks. Start with the zero-cost `null` control to
-confirm the plumbing, then add real harnesses:
+**3. Run.** The repository default is a secret-free, `local_only` suite over
+`harbor-tasks/openbench-lite` using the stock Codex and Pi profiles:
 
 ```
-# negative control — does nothing, so every task should fail (no tokens used)
-obench legacy run --harness null --task fix-failing-test,build-a-cli,make-it-run
-# legacy: python3 bench/run.py --harness null --task ...
-
-# a real harness, 3 trials per task
-obench legacy run --harness codex --task fix-failing-test,build-a-cli,make-it-run --trials 3
+obench run --plan   # offline; validates and prints canonical suite intent
+obench run          # executes pinned Harbor, imports all jobs, seals one JSONL
 ```
 
-Multiple harnesses/tasks are comma-separated. The run loop is **resumable**: a
-cell whose `run_id` already appears in `results/results.jsonl` is skipped, so you
-can stop and re-run freely. Use `--force` to re-run existing cells. Full options:
+Harbor owns Docker execution, retries, resume, locks, verifier runs, and ATIF.
+OpenBench writes no suite results until every intended Harbor job imports and
+passes the suite evidence/denominator policy. Exact reruns are idempotent;
+divergent existing outputs fail. The command prints the result JSONL, semantic
+manifest, sealed run manifest, and local run-record paths. Verify a local seal
+with `obench run --verify-run-manifest <path>`.
+
+Historical `tasks/` and the old native cell runner remain available only via
 `obench legacy run --help`.
-
-`obench run` is the Harbor-first suite control plane. With no path it discovers
-the nearest `.openbench/openbench.toml` and its `default_suite`; use
-`obench run --plan` for an offline, credential-free semantic manifest.
 
 **4. Report.**
 

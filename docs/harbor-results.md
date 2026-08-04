@@ -1,7 +1,12 @@
-# Import Harbor Results
+# Harbor Result Evidence
+
+`obench run [suite.toml]` is the canonical workflow. It invokes this
+fail-closed importer internally for every task-set job and only seals the suite
+JSONL after all imports and suite evidence checks succeed.
 
 `obench import harbor-results` converts a completed Harbor `0.20.0` job
-directory into OpenBench `ROW_FIELDS` JSONL.
+directory into OpenBench `ROW_FIELDS` JSONL manually. It remains useful for
+diagnostics and migration, but manual import is not the default suite workflow.
 
 ```bash
 obench import harbor-results /path/to/harbor-job \
@@ -53,6 +58,13 @@ harness identity, and reconciles calls/input/cache/output with ATIF.
 
 Any missing, partial, random, duplicate, unresolved, or contradictory evidence
 rejects the whole job before the output file is opened for append.
+
+Suite execution adds a second gate over the validated job rows. Required
+trajectory/verifier/usage evidence must be present for every complete cell;
+proxy-required profiles need exact or structurally valid mismatch
+reconciliation. A mismatch remains usage-ranking-ineligible. Terminal failures
+are retained for local measurement but cannot satisfy a declared complete
+suite when required evidence is absent.
 
 ## Row semantics
 

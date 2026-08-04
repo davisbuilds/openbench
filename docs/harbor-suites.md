@@ -102,10 +102,11 @@ Publication completeness is either:
 - `complete`: every intended task x arm x attempt cell must have acceptable
   evidence before publication.
 - `allow_incomplete`: an explicitly partial artifact may be produced by future
-  publication integration.
+  local measured output that is never public.
 
-This runner only creates local suite manifests and Harbor job/run artifacts. It
-does not publish or sync results.
+`scope = "public"` requires `completeness = "complete"`. Smoke suites and
+`local_only` suites cannot be published, accepted by community sync, or
+ingested by the site.
 
 ## Plan
 
@@ -164,11 +165,33 @@ missing values fail before Harbor. Their required `distribution` and exact
 declared import's top-level package, before Harbor or stock auth staging.
 
 The immutable semantic manifest is written under
-`.openbench/results/suite-runs/`; native job configs and Harbor state stay under
-`.openbench/jobs/`. A narrow post-run artifact hook exposes task-set ID, Harbor
-exit status, config digest/path, job path, and resume state for later result
-import integration. No result importer is invoked in this phase. A nonzero
-Harbor exit is returned explicitly and later task-set jobs are not started.
+`.openbench/results/suite-runs/`; exact native configs and canonical comparison
+plan sidecars stay under `.openbench/jobs/suite-configs/`; Harbor job state
+stays under `.openbench/jobs/`.
+
+After every Harbor command succeeds, OpenBench imports every intended job,
+enforces the declared task x arm x attempt denominator and evidence policy, and
+writes one suite results JSONL atomically. A failure in any job, import, binding,
+or evidence check leaves no partial results file. Exact existing results and
+run-manifest bytes are accepted on resume; divergence fails.
+
+Each row embeds the canonical secret-free suite semantic manifest and digest,
+task-set identity, publication scope/completeness, and its exact per-job
+comparison plan. Multi-task-set matched comparisons include suite, task-set,
+plan, task, and attempt identity. They never claim temporal scheduling;
+`temporal_matched_block_claim` remains false.
+
+The sealed public run manifest binds the suite semantic body/digest, each
+task-set config path identity and SHA-256, comparison-plan body/digest, expected
+Harbor job name, and final result SHA-256/count. Absolute runtime paths live
+only in the separate local record. The CLI prints all paths.
+
+Verify a local or public suite seal without executing Harbor:
+
+```bash
+obench run --verify-run-manifest \
+  .openbench/results/suite-runs/<digest>.run.json
+```
 
 The old OpenBench cell runner is available only through:
 

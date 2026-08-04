@@ -79,7 +79,10 @@ redistributing imported tasks.** The importer records a reminder in each
 `PROVENANCE.md` but does not inspect or grant rights. Harbor is Apache-2.0;
 Terminal-Bench and Harbor registry datasets carry their own terms.
 
-## Combined story with export
+## Manual migration with export
+
+This is an interoperability/migration path. New benchmark execution uses
+Harbor-native suites through `obench run [suite.toml]`.
 
 ```bash
 # OpenBench → Harbor (cloud sandboxes)
@@ -89,7 +92,7 @@ harbor run -p ./harbor-out/make-it-run -a oracle
 # Harbor → OpenBench (harness comparison / metering / report)
 obench import harbor --from ./harbor-out/make-it-run --out ./tasks-imported --collection from-harbor
 obench validate --tasks-dir ./tasks-imported/from-harbor
-obench run --tasks-dir ./tasks-imported --task from-harbor/make-it-run --harness pi
+obench legacy run --tasks-dir ./tasks-imported --task from-harbor/make-it-run --harness pi
 obench report
 ```
 

@@ -87,7 +87,10 @@ parameters needed to reproduce the exact Harbor package (`base_image` and
 This keeps the script Harbor-compatible without requiring root or a `/logs`
 mount for unit tests.
 
-## Recommended flow
+## Manual legacy conversion flow
+
+New suites should author Harbor-native tasks and use `obench run`. This
+conversion path remains for historical `tasks/` and interoperability work.
 
 ```bash
 # 1. Export
@@ -98,7 +101,7 @@ harbor run -p ./harbor-out/make-it-run -a oracle   # polarity smoke via oracle
 harbor run -p ./harbor-out/make-it-run -a <agent> -m <model>
 
 # 3. Keep scoring / comparison in OpenBench
-obench run --harness pi,opencode --task make-it-run --trials 3
+obench legacy run --harness pi,opencode --task make-it-run --trials 3
 obench report
 obench compare ...
 ```
