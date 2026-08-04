@@ -6,6 +6,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from obench import harbor_results, run
+from obench import harbor_results, run, stats
 from obench.harbor_results import (
     HARBOR_GIT_COMMIT,
     HARBOR_VERSION,
@@ -24,7 +25,11 @@ from obench.harbor_results import (
     load_rows,
 )
 from obench.harbor_oauth import AGENT_IMPORT_PATH
-from obench.harbor_profiles import OPENCODE_PROFILE_IMPORT
+from obench.harbor_profiles import (
+    CURSOR_PROFILE_IMPORT,
+    DEVIN_PROFILE_IMPORT,
+    OPENCODE_PROFILE_IMPORT,
+)
 from obench.run import ROW_FIELDS
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -320,33 +325,80 @@ class GoldenHarborJob:
         job_result["stats"] = self._stats(results)
         _write_json(job_result_path, job_result)
 
+    def make_terminal(
+        self,
+        exception_type: str,
+        *,
+        index: int = 0,
+        retain_optional_evidence: bool = False,
+    ) -> None:
+        trial_dir = self.trial(index)
+        result_path = trial_dir / "result.json"
+        result = json.loads(result_path.read_text())
+        result["exception_info"] = {
+            "exception_type": exception_type,
+            "exception_message": "terminal failure",
+            "exception_traceback": "traceback",
+            "occurred_at": result["finished_at"],
+        }
+        if not retain_optional_evidence:
+            result["agent_result"] = None
+            result["verifier_result"] = None
+            result["agent_execution"] = None
+            result["verifier"] = None
+            shutil.rmtree(trial_dir / "agent")
+            shutil.rmtree(trial_dir / "verifier")
+            shutil.rmtree(trial_dir / "artifacts")
+        _write_json(result_path, result)
+        self.sync_aggregate()
+
     @staticmethod
     def _stats(results: list[dict]) -> dict:
         reward_stats: dict[str, list[str]] = {}
+        exception_stats: dict[str, list[str]] = {}
+        usage_totals = {
+            "n_input_tokens": [],
+            "n_cache_tokens": [],
+            "n_output_tokens": [],
+            "cost_usd": [],
+        }
         for result in results:
-            score = result["verifier_result"]["rewards"]["reward"]
-            reward_stats.setdefault(str(score), []).append(result["trial_name"])
+            verifier_result = result.get("verifier_result")
+            if verifier_result is not None:
+                score = verifier_result["rewards"]["reward"]
+                reward_stats.setdefault(str(score), []).append(result["trial_name"])
+            exception = result.get("exception_info")
+            if exception is not None:
+                exception_stats.setdefault(
+                    exception["exception_type"], []
+                ).append(result["trial_name"])
+            agent_result = result.get("agent_result")
+            if isinstance(agent_result, dict):
+                for field in usage_totals:
+                    if agent_result.get(field) is not None:
+                        usage_totals[field].append(agent_result[field])
+        n_errors = sum(len(names) for names in exception_stats.values())
         return {
             "n_completed_trials": len(results),
-            "n_errored_trials": 0,
+            "n_errored_trials": n_errors,
             "n_running_trials": 0,
             "n_pending_trials": 0,
-            "n_cancelled_trials": 0,
+            "n_cancelled_trials": len(exception_stats.get("CancelledError", [])),
             "n_retries": 0,
             "evals": {
                 "codex__model-x__openbench": {
-                    "n_trials": len(results),
-                    "n_errors": 0,
+                    "n_trials": sum(len(names) for names in reward_stats.values()),
+                    "n_errors": n_errors,
                     "metrics": [],
                     "pass_at_k": {},
                     "reward_stats": {"reward": reward_stats},
-                    "exception_stats": {},
+                    "exception_stats": exception_stats,
                 }
             },
-            "n_input_tokens": 100 * len(results),
-            "n_cache_tokens": 25 * len(results),
-            "n_output_tokens": 40 * len(results),
-            "cost_usd": 0.5 * len(results),
+            **{
+                field: (sum(values) if values else None)
+                for field, values in usage_totals.items()
+            },
         }
 
 
@@ -467,6 +519,220 @@ class HarborResultsTests(unittest.TestCase):
             self.assertIsInstance(row["checker_exit"], int)
             self.assertIsNone(row["checker_stdout"])
             self.assertIsNone(row["checker_stderr"])
+
+    def test_terminal_failures_map_without_fabricated_optional_evidence(self):
+        exception_types = (
+            "AgentTimeoutError",
+            "ApiUsageLimitError",
+            "AgentAuthenticationError",
+            "AgentSafetyRefusalError",
+            "RuntimeError",
+        )
+        specs = [
+            {
+                "name": f"alpha__terminal_{index}",
+                "task": "alpha",
+                "id": f"00000000-0000-0000-0000-{index:012d}",
+                "score": 0.0,
+                "offset": index,
+            }
+            for index in range(1, len(exception_types) + 1)
+        ]
+        fixture = GoldenHarborJob(self.root / "terminal-job", specs=specs)
+        for index, exception_type in enumerate(exception_types):
+            fixture.make_terminal(exception_type, index=index)
+
+        rows = load_rows(fixture.root)
+        by_type = {
+            row["candidate_provenance"]["harbor_exception_type"]: row
+            for row in rows
+        }
+
+        expected = {
+            "AgentTimeoutError": ("timeout", "harbor_timeout:AgentTimeoutError"),
+            "ApiUsageLimitError": (
+                "rate_limited",
+                "harbor_rate_limit:ApiUsageLimitError",
+            ),
+            "AgentAuthenticationError": (
+                "infra",
+                "harbor_auth:AgentAuthenticationError",
+            ),
+            "AgentSafetyRefusalError": (
+                "infra",
+                "harbor_safety:AgentSafetyRefusalError",
+            ),
+            "RuntimeError": (
+                "infra",
+                "harbor_infrastructure:RuntimeError",
+            ),
+        }
+        self.assertEqual(set(by_type), set(expected))
+        for exception_type, (failure_class, failure_reason) in expected.items():
+            row = by_type[exception_type]
+            self.assertFalse(row["success"])
+            self.assertFalse(row["completed"])
+            self.assertEqual(row["failure_class"], failure_class)
+            self.assertEqual(row["failure_reason"], failure_reason)
+            self.assertEqual(
+                row["error"], f"Harbor terminal failure: {exception_type}"
+            )
+            for field in (
+                "score",
+                "checker_exit",
+                "t_agent_s",
+                "t_checker_s",
+                "turns",
+                "tokens",
+                "usage_raw",
+                "workspace_source",
+            ):
+                self.assertIsNone(row[field], (exception_type, field))
+            provenance = row["candidate_provenance"]
+            for field in (
+                "reward_sha256",
+                "openbench_verifier_evidence_sha256",
+                "atif_sha256",
+                "artifact_manifest_sha256",
+                "final_workspace_sha256",
+                "openbench_task_content_digest",
+                "openbench_harbor_export",
+            ):
+                self.assertIsNone(provenance[field], (exception_type, field))
+            self.assertEqual(row["usage_evidence_grade"], "usage_unavailable")
+            self.assertFalse(row["usage_ranking_eligible"])
+
+        filtered = stats.filter_rows(rows, [])
+        self.assertEqual(len(filtered["countable_rows"]), 1)
+        self.assertEqual(filtered["excluded_counts"], {"infra": 3, "rate_limited": 1})
+
+    def test_terminal_failure_preserves_valid_optional_evidence(self):
+        fixture = GoldenHarborJob(
+            self.root / "terminal-with-evidence",
+            specs=[
+                {
+                    "name": "alpha__terminal",
+                    "task": "alpha",
+                    "id": "00000000-0000-0000-0000-000000000099",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        fixture.make_terminal(
+            "AgentAuthenticationError",
+            retain_optional_evidence=True,
+        )
+
+        row = load_rows(fixture.root)[0]
+
+        self.assertFalse(row["success"])
+        self.assertFalse(row["completed"])
+        self.assertEqual(row["failure_class"], "infra")
+        self.assertEqual(row["checker_exit"], 0)
+        self.assertEqual(row["score"], 1.0)
+        self.assertEqual(row["tokens"], 115)
+        self.assertEqual(row["turns"], 1)
+        self.assertIsNotNone(row["workspace_source"])
+        self.assertIsNotNone(
+            row["candidate_provenance"]["openbench_verifier_evidence_sha256"]
+        )
+
+    def test_terminal_evidence_still_rejects_internal_contradictions(self):
+        fixture = GoldenHarborJob(self.root / "terminal-contradiction")
+        fixture.make_terminal("AgentTimeoutError")
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["exception_info"]["occurred_at"] = "2026-07-21T10:00:00+00:00"
+        _write_json(result_path, result)
+        with self.assertRaisesRegex(HarborResultsError, "within trial timing"):
+            load_rows(fixture.root)
+
+        fixture = GoldenHarborJob(self.root / "terminal-partial-reward")
+        fixture.make_terminal(
+            "AgentAuthenticationError",
+            retain_optional_evidence=True,
+        )
+        (fixture.trial() / "verifier" / "openbench-verifier-evidence.json").unlink()
+        with self.assertRaisesRegex(HarborResultsError, "verifier_evidence"):
+            load_rows(fixture.root)
+
+        fixture = GoldenHarborJob(self.root / "terminal-partial-usage")
+        fixture.make_terminal("AgentTimeoutError")
+        result_path = fixture.trial() / "result.json"
+        result = json.loads(result_path.read_text())
+        result["agent_result"] = {
+            "n_input_tokens": 1,
+            "n_cache_tokens": 0,
+            "n_output_tokens": 1,
+            "cost_usd": 0.0,
+        }
+        _write_json(result_path, result)
+        fixture.sync_aggregate()
+        with self.assertRaisesRegex(HarborResultsError, "requires matching ATIF"):
+            load_rows(fixture.root)
+
+        fixture = GoldenHarborJob(self.root / "terminal-workspace-without-manifest")
+        fixture.make_terminal("RuntimeError")
+        workspace = fixture.trial() / "artifacts" / "workspace"
+        workspace.mkdir(parents=True)
+        (workspace / "unbound.txt").write_text("unbound\n")
+        with self.assertRaisesRegex(HarborResultsError, "without an artifact manifest"):
+            load_rows(fixture.root)
+
+    def test_cursor_and_devin_profile_aliases_are_non_proxy_harbor_reported(self):
+        profiles = (
+            (CURSOR_PROFILE_IMPORT, "cursor", "gpt-5.6-sol-medium"),
+            (DEVIN_PROFILE_IMPORT, "devin", "gpt-5-6-sol-medium"),
+        )
+        for index, (import_path, harness, harbor_model) in enumerate(profiles):
+            with self.subTest(harness=harness):
+                fixture = GoldenHarborJob(
+                    self.root / f"profile-{harness}",
+                    specs=[
+                        {
+                            "name": f"alpha__{harness}",
+                            "task": "alpha",
+                            "id": f"00000000-0000-0000-0000-{index + 50:012d}",
+                            "score": 1.0,
+                            "offset": 0,
+                        }
+                    ],
+                )
+                trial_lock_path = fixture.trial() / "lock.json"
+                trial_lock = json.loads(trial_lock_path.read_text())
+                trial_lock["agent"].pop("name")
+                trial_lock["agent"]["import_path"] = import_path
+                trial_lock["agent"]["model_name"] = harbor_model
+                _write_json(trial_lock_path, trial_lock)
+                job_lock_path = fixture.root / "lock.json"
+                job_lock = json.loads(job_lock_path.read_text())
+                job_lock["trials"] = [trial_lock]
+                _write_json(job_lock_path, job_lock)
+
+                result_path = fixture.trial() / "result.json"
+                result = json.loads(result_path.read_text())
+                result["config"]["agent"]["name"] = None
+                result["config"]["agent"]["import_path"] = import_path
+                result["config"]["agent"]["model_name"] = harbor_model
+                result["agent_info"]["name"] = harness
+                result["agent_info"]["model_info"] = {
+                    "name": harbor_model,
+                    "provider": None,
+                }
+                _write_json(result_path, result)
+                trajectory_path = fixture.trial() / "agent" / "trajectory.json"
+                trajectory = json.loads(trajectory_path.read_text())
+                trajectory["agent"]["name"] = harness
+                trajectory["agent"]["model_name"] = harbor_model
+                trajectory["steps"][1]["model_name"] = harbor_model
+                _write_json(trajectory_path, trajectory)
+
+                row = load_rows(fixture.root)[0]
+                self.assertEqual(row["harness"], harness)
+                self.assertEqual(row["model"], harbor_model)
+                self.assertEqual(row["usage_evidence_grade"], "harbor_reported")
+                self.assertFalse(row["candidate_provenance"]["proxy_measured"])
 
     def test_custom_agent_import_path_is_the_lock_identity(self):
         fixture = self.fixture()
@@ -1457,28 +1723,15 @@ class HarborResultsTests(unittest.TestCase):
                 with self.assertRaises(HarborResultsError):
                     load_rows(fixture.root)
 
-    def test_rejects_exception_and_multistep_states(self):
-        for field, value in (
-            (
-                "exception_info",
-                {
-                    "exception_type": "RuntimeError",
-                    "exception_message": "failed",
-                    "exception_traceback": "trace",
-                    "occurred_at": "2026-07-20T10:02:00+00:00",
-                },
-            ),
-            ("step_results", []),
-        ):
-            with self.subTest(field=field):
-                fixture = GoldenHarborJob(self.root / f"job-{field}")
-                path = fixture.trial() / "result.json"
-                result = json.loads(path.read_text())
-                result[field] = value
-                _write_json(path, result)
-                fixture.sync_aggregate()
-                with self.assertRaises(HarborResultsError):
-                    load_rows(fixture.root)
+    def test_rejects_multistep_states(self):
+        fixture = GoldenHarborJob(self.root / "job-step_results")
+        path = fixture.trial() / "result.json"
+        result = json.loads(path.read_text())
+        result["step_results"] = []
+        _write_json(path, result)
+        fixture.sync_aggregate()
+        with self.assertRaises(HarborResultsError):
+            load_rows(fixture.root)
 
     def test_cli_e2e_imports_and_reports_failures_without_partial_output(self):
         fixture = self.fixture()

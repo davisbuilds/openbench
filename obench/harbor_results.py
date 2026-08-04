@@ -25,6 +25,8 @@ from .harbor_metering import (
 from .harbor_oauth import AGENT_IMPORT_PATH
 from .harbor_profiles import (
     CODEX_PROFILE_IMPORT,
+    CURSOR_PROFILE_IMPORT,
+    DEVIN_PROFILE_IMPORT,
     OPENCODE_PROFILE_IMPORT,
     PI_PROFILE_IMPORT,
     HarborProfileError,
@@ -52,11 +54,23 @@ HARBOR_AGENT_SEMANTIC_NAME_ALIASES = {
     CODEX_PROFILE_IMPORT: "codex",
     PI_PROFILE_IMPORT: "pi",
     OPENCODE_PROFILE_IMPORT: "opencode",
+    CURSOR_PROFILE_IMPORT: "cursor",
+    DEVIN_PROFILE_IMPORT: "devin",
 }
 HARBOR_PROXY_REQUIRED_AGENTS = frozenset({
     CODEX_PROFILE_IMPORT,
     PI_PROFILE_IMPORT,
 })
+HARBOR_TIMEOUT_EXCEPTIONS = frozenset({
+    "AgentSetupTimeoutError",
+    "AgentTimeoutError",
+    "EnvironmentStartTimeoutError",
+    "TimeoutError",
+    "VerifierTimeoutError",
+})
+HARBOR_RATE_LIMIT_EXCEPTIONS = frozenset({"ApiUsageLimitError"})
+HARBOR_AUTH_EXCEPTIONS = frozenset({"AgentAuthenticationError"})
+HARBOR_SAFETY_EXCEPTIONS = frozenset({"AgentSafetyRefusalError"})
 
 
 class HarborResultsError(ValueError):
@@ -70,6 +84,19 @@ def _fail(location: str, message: str) -> HarborResultsError:
 def expected_harbor_agent_semantic_name(config_name: str) -> str:
     """Resolve a pinned Harbor config identity to its reported agent name."""
     return HARBOR_AGENT_SEMANTIC_NAME_ALIASES.get(config_name, config_name)
+
+
+def harbor_exception_semantics(exception_type: str) -> tuple[str, str]:
+    """Map a Harbor terminal exception to OpenBench class and stable reason."""
+    if exception_type in HARBOR_TIMEOUT_EXCEPTIONS:
+        return "timeout", f"harbor_timeout:{exception_type}"
+    if exception_type in HARBOR_RATE_LIMIT_EXCEPTIONS:
+        return "rate_limited", f"harbor_rate_limit:{exception_type}"
+    if exception_type in HARBOR_AUTH_EXCEPTIONS:
+        return "infra", f"harbor_auth:{exception_type}"
+    if exception_type in HARBOR_SAFETY_EXCEPTIONS:
+        return "infra", f"harbor_safety:{exception_type}"
+    return "infra", f"harbor_infrastructure:{exception_type}"
 
 
 def _agent_config_identity(agent: dict[str, Any], location: str) -> str:
@@ -184,6 +211,10 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _optional_sha256_file(path: Path | None) -> str | None:
+    return None if path is None else _sha256_file(path)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -638,12 +669,34 @@ def _validate_job_result(
     for field in ("n_running_trials", "n_pending_trials"):
         if stats.get(field) != 0:
             raise _fail(f"job result.stats.{field}", "completed job must report zero")
-    for field in ("n_errored_trials", "n_cancelled_trials"):
-        if stats.get(field) != 0:
-            raise _fail(
-                f"job result.stats.{field}",
-                "exception-free completed job must report zero",
-            )
+    expected_exceptions = sorted(
+        (
+            _string(
+                _object(
+                    item.get("exception_info"),
+                    "trial result.exception_info",
+                ).get("exception_type"),
+                "trial result.exception_info.exception_type",
+            ),
+            _string(item.get("trial_name"), "trial result.trial_name"),
+        )
+        for item in actual_trial_results
+        if item.get("exception_info") is not None
+    )
+    expected_cancelled = sum(
+        exception_type == "CancelledError"
+        for exception_type, _trial_name in expected_exceptions
+    )
+    if stats.get("n_errored_trials") != len(expected_exceptions):
+        raise _fail(
+            "job result.stats.n_errored_trials",
+            f"expected {len(expected_exceptions)!r}",
+        )
+    if stats.get("n_cancelled_trials") != expected_cancelled:
+        raise _fail(
+            "job result.stats.n_cancelled_trials",
+            f"expected {expected_cancelled!r}",
+        )
     _integer(stats.get("n_retries"), "job result.stats.n_retries")
 
     expected_reward_entries = sorted(
@@ -663,16 +716,13 @@ def _validate_job_result(
             ),
         )
         for item in actual_trial_results
+        if item.get("verifier_result") is not None
     )
     actual_reward_entries: list[tuple[str, float]] = []
+    actual_exceptions: list[tuple[str, str]] = []
     evals = _object(stats.get("evals"), "job result.stats.evals")
     for eval_name, raw_eval in evals.items():
         eval_stats = _object(raw_eval, f"job result.stats.evals.{eval_name}")
-        if eval_stats.get("n_errors") != 0:
-            raise _fail(
-                f"job result.stats.evals.{eval_name}.n_errors",
-                "exception-free job must report zero",
-            )
         reward_stats = _object(
             eval_stats.get("reward_stats"),
             f"job result.stats.evals.{eval_name}.reward_stats",
@@ -720,15 +770,42 @@ def _validate_job_result(
             eval_stats.get("exception_stats"),
             f"job result.stats.evals.{eval_name}.exception_stats",
         )
-        if exception_stats:
-            raise _fail(
+        eval_error_count = 0
+        for exception_type, raw_names in exception_stats.items():
+            exception_type = _string(
+                exception_type,
                 f"job result.stats.evals.{eval_name}.exception_stats",
-                "exception-free job must have no exception entries",
+            )
+            names = _array(
+                raw_names,
+                f"job result.stats.evals.{eval_name}.exception_stats.{exception_type}",
+            )
+            for trial_name in names:
+                actual_exceptions.append(
+                    (
+                        exception_type,
+                        _string(
+                            trial_name,
+                            f"job result.stats.evals.{eval_name}.exception_stats."
+                            f"{exception_type}",
+                        ),
+                    )
+                )
+                eval_error_count += 1
+        if eval_stats.get("n_errors") != eval_error_count:
+            raise _fail(
+                f"job result.stats.evals.{eval_name}.n_errors",
+                f"expected {eval_error_count!r}",
             )
     if sorted(actual_reward_entries) != expected_reward_entries:
         raise _fail(
             "job result.stats.evals",
             "reward aggregates do not match enumerated trial directories",
+        )
+    if sorted(actual_exceptions) != expected_exceptions:
+        raise _fail(
+            "job result.stats.evals",
+            "exception aggregates do not match enumerated trial directories",
         )
     aggregate_fields = {
         "n_input_tokens": "n_input_tokens",
@@ -739,8 +816,11 @@ def _validate_job_result(
     for stats_field, result_field in aggregate_fields.items():
         values = []
         for trial_result in actual_trial_results:
+            raw_agent_result = trial_result.get("agent_result")
+            if raw_agent_result is None:
+                continue
             agent_result = _object(
-                trial_result.get("agent_result"),
+                raw_agent_result,
                 f"trial result.agent_result for aggregate {stats_field}",
             )
             value = agent_result.get(result_field)
@@ -852,6 +932,50 @@ def _validate_timing(
         durations["agent_execution"],
         durations["verifier"],
     )
+
+
+def _validate_exception_info(
+    value: Any,
+    *,
+    started: datetime,
+    finished: datetime,
+    location: str,
+) -> tuple[str, str, str] | None:
+    if value is None:
+        return None
+    exception = _object(value, f"{location}.result.exception_info")
+    expected_fields = {
+        "exception_type",
+        "exception_message",
+        "exception_traceback",
+        "occurred_at",
+    }
+    if set(exception) != expected_fields:
+        raise _fail(
+            f"{location}.result.exception_info",
+            "unexpected or missing exception fields",
+        )
+    exception_type = _string(
+        exception.get("exception_type"),
+        f"{location}.result.exception_info.exception_type",
+    )
+    for field in ("exception_message", "exception_traceback"):
+        if not isinstance(exception.get(field), str):
+            raise _fail(
+                f"{location}.result.exception_info.{field}",
+                "expected a string",
+            )
+    occurred_at = _timestamp(
+        exception.get("occurred_at"),
+        f"{location}.result.exception_info.occurred_at",
+    )
+    if not started <= occurred_at <= finished:
+        raise _fail(
+            f"{location}.result.exception_info.occurred_at",
+            "must fall within trial timing",
+        )
+    failure_class, failure_reason = harbor_exception_semantics(exception_type)
+    return exception_type, failure_class, failure_reason
 
 
 def _validate_reward(
@@ -1025,8 +1149,12 @@ def _path_is_at_or_below(path: str, root: str) -> bool:
 
 
 def _validate_artifacts(
-    trial_dir: Path, result: dict[str, Any], location: str
-) -> tuple[Path, str]:
+    trial_dir: Path,
+    result: dict[str, Any],
+    location: str,
+    *,
+    required: bool,
+) -> tuple[Path | None, str | None]:
     config = _object(result.get("config"), f"{location}.result.config")
     artifacts = _array(config.get("artifacts"), f"{location}.result.config.artifacts")
     configured_workspace_entries: list[tuple[str, str]] = []
@@ -1064,6 +1192,19 @@ def _validate_artifacts(
         )
 
     manifest_path = trial_dir / "artifacts" / "manifest.json"
+    workspace_path = trial_dir / FINAL_WORKSPACE_MANIFEST_DESTINATION
+    if not manifest_path.exists():
+        if required:
+            raise _fail(
+                f"{location}.artifacts",
+                "required artifact manifest is missing",
+            )
+        if workspace_path.exists() or workspace_path.is_symlink():
+            raise _fail(
+                f"{location}.artifacts",
+                "workspace exists without an artifact manifest",
+            )
+        return None, None
     manifest = _array(
         _read_json(manifest_path, f"{location}.artifacts"),
         f"{location}.artifacts",
@@ -1109,6 +1250,8 @@ def _validate_artifacts(
             final_entry = entry
 
     if final_entry is None:
+        if not required:
+            return manifest_path, None
         raise _fail(
             f"{location}.artifacts",
             "manifest does not contain the required workspace",
@@ -1122,16 +1265,28 @@ def _validate_artifacts(
             "workspace entry must map "
             f"{FINAL_WORKSPACE_SOURCE} to {FINAL_WORKSPACE_MANIFEST_DESTINATION}",
         )
-    if (
-        final_entry.get("type") != "directory"
-        or final_entry.get("status") != "ok"
-        or final_entry.get("service") is not None
-    ):
+    if final_entry.get("type") != "directory" or final_entry.get("service") is not None:
         raise _fail(
             f"{location}.artifacts",
-            "workspace must have type='directory', status='ok', and service=null",
+            "workspace must have type='directory' and service=null",
         )
-    workspace_path = trial_dir / FINAL_WORKSPACE_MANIFEST_DESTINATION
+    if final_entry.get("status") != "ok":
+        if required:
+            raise _fail(
+                f"{location}.artifacts",
+                "workspace must have status='ok'",
+            )
+        if workspace_path.is_symlink():
+            raise _fail(f"{location}.artifacts", "workspace must not be a symlink")
+        if workspace_path.exists():
+            if not workspace_path.is_dir():
+                raise _fail(f"{location}.artifacts", "workspace must be a directory")
+            if any(workspace_path.iterdir()):
+                raise _fail(
+                    f"{location}.artifacts",
+                    "non-ok workspace artifact must not contain files",
+                )
+        return manifest_path, None
     return manifest_path, _tree_digest(workspace_path)
 
 
@@ -1292,8 +1447,6 @@ def _validate_trial(
         raise _fail(f"{location}.result.trial_name", "duplicate trial name")
     seen_ids.add(trial_id)
     seen_names.add(trial_name)
-    if result.get("exception_info") is not None:
-        raise _fail(f"{location}.result.exception_info", "exception-bearing trials are rejected")
     if result.get("step_results") is not None:
         raise _fail(f"{location}.result.step_results", "multi-step trials are not supported")
     _validate_lock_backed_config(
@@ -1377,32 +1530,93 @@ def _validate_trial(
     started, finished, t_env, t_agent, harbor_verifier_time = _validate_timing(
         result, location
     )
-    (
-        score,
-        checker_exit,
-        t_checker,
-        reward_path,
-        verifier_evidence_path,
-        openbench_task_content_digest,
-        openbench_harbor_export,
-    ) = _validate_reward(trial_dir, result, location)
-    manifest_path, workspace_digest = _validate_artifacts(trial_dir, result, location)
-    trajectory_path, agent_result, turns, trajectory = _validate_atif(
+    exception = _validate_exception_info(
+        result.get("exception_info"),
+        started=started,
+        finished=finished,
+        location=location,
+    )
+    terminal_failure = exception is not None
+
+    reward_files = (
+        trial_dir / "verifier" / "reward.json",
+        trial_dir / "verifier" / "reward.txt",
+        trial_dir / "verifier" / "openbench-verifier-evidence.json",
+    )
+    has_reward_evidence = (
+        result.get("verifier_result") is not None
+        or any(path.exists() or path.is_symlink() for path in reward_files)
+    )
+    score = None
+    checker_exit = None
+    t_checker = None
+    reward_path = None
+    verifier_evidence_path = None
+    openbench_task_content_digest = None
+    openbench_harbor_export = None
+    if not terminal_failure or has_reward_evidence:
+        (
+            score,
+            checker_exit,
+            t_checker,
+            reward_path,
+            verifier_evidence_path,
+            openbench_task_content_digest,
+            openbench_harbor_export,
+        ) = _validate_reward(trial_dir, result, location)
+
+    manifest_path, workspace_digest = _validate_artifacts(
         trial_dir,
         result,
-        agent_name,
-        agent_version,
-        model,
-        canonical_model,
-        model_name,
         location,
+        required=not terminal_failure,
     )
-    usage = _usage_fields(agent_result, location)
+
+    trajectory_candidate = trial_dir / "agent" / "trajectory.json"
+    has_trajectory = trajectory_candidate.exists() or trajectory_candidate.is_symlink()
+    raw_agent_result = result.get("agent_result")
+    has_agent_usage = (
+        isinstance(raw_agent_result, dict)
+        and any(
+            raw_agent_result.get(field) is not None
+            for field in (
+                "n_input_tokens",
+                "n_cache_tokens",
+                "n_output_tokens",
+                "cost_usd",
+            )
+        )
+    )
+    trajectory_path = None
+    trajectory = None
+    turns = None
+    usage = _usage_fields({}, location)
+    if not terminal_failure or has_trajectory:
+        trajectory_path, agent_result, turns, trajectory = _validate_atif(
+            trial_dir,
+            result,
+            agent_name,
+            agent_version,
+            model,
+            canonical_model,
+            model_name,
+            location,
+        )
+        usage = _usage_fields(agent_result, location)
+    elif has_agent_usage:
+        raise _fail(
+            f"{location}.result.agent_result",
+            "usage-bearing terminal result requires matching ATIF evidence",
+        )
+    elif raw_agent_result is not None:
+        _object(raw_agent_result, f"{location}.result.agent_result")
+
     proxy_required = agent_config_name in HARBOR_PROXY_REQUIRED_AGENTS
     metering_path = trial_dir / "agent" / "harbor-metering"
     metering_evidence = None
     metering_evidence_path = None
-    if proxy_required:
+    has_metering = metering_path.exists() or metering_path.is_symlink()
+    if proxy_required and trajectory is not None:
         try:
             metering_evidence = verify_evidence_dir(
                 metering_path,
@@ -1416,6 +1630,17 @@ def _validate_trial(
         except HarborMeteringError as exc:
             raise _fail(f"{location}.metering", str(exc)) from exc
         metering_evidence_path = metering_path / "harbor-metering.json"
+    elif proxy_required and has_metering:
+        try:
+            verify_evidence_dir(
+                metering_path,
+                expected_trial_id=trial_dir.name,
+                expected_harness=agent_name,
+                proxy_required=False,
+                expected_agent_usage=UsageCounters(None, None, None, None),
+            )
+        except HarborMeteringError as exc:
+            raise _fail(f"{location}.metering", str(exc)) from exc
     return {
         "trial_dir": trial_dir,
         "result": result,
@@ -1443,6 +1668,7 @@ def _validate_trial(
         "t_agent_s": t_agent,
         "t_checker_s": t_checker,
         "harbor_verifier_time_s": harbor_verifier_time,
+        "exception": exception,
         "score": score,
         "checker_exit": checker_exit,
         "turns": turns,
@@ -1527,6 +1753,8 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
     content_digests_by_harbor_digest: dict[str, set[str]] = defaultdict(set)
     for item in trials:
         checksums_by_digest[item["task_digest"]].add(item["task_checksum"])
+        if item["openbench_task_content_digest"] is None:
+            continue
         content_sha256 = item["openbench_task_content_digest"]["sha256"]
         content_digests_by_task[
             _normalized_task_name(item["task_name"])
@@ -1599,7 +1827,15 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
         )
         for trial_number, item in enumerate(group_trials, 1):
             score = item["score"]
-            success = item["checker_exit"] == 0
+            exception = item["exception"]
+            terminal_failure = exception is not None
+            success = not terminal_failure and item["checker_exit"] == 0
+            if terminal_failure:
+                exception_type, failure_class, failure_reason = exception
+            else:
+                exception_type = None
+                failure_class = "solved" if success else "wrong_answer"
+                failure_reason = None
             provenance = {
                 "kind": "harbor_job",
                 "harbor_version": HARBOR_VERSION,
@@ -1611,19 +1847,25 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "job_result_sha256": job_result_digest,
                 "trial_lock_sha256": _sha256_file(item["trial_lock_path"]),
                 "trial_result_sha256": _sha256_file(item["result_path"]),
-                "reward_sha256": _sha256_file(item["reward_path"]),
-                "openbench_verifier_evidence_sha256": _sha256_file(
+                "reward_sha256": _optional_sha256_file(item["reward_path"]),
+                "openbench_verifier_evidence_sha256": _optional_sha256_file(
                     item["verifier_evidence_path"]
                 ),
-                "atif_sha256": _sha256_file(item["trajectory_path"]),
-                "artifact_manifest_sha256": _sha256_file(item["manifest_path"]),
+                "atif_sha256": _optional_sha256_file(item["trajectory_path"]),
+                "artifact_manifest_sha256": _optional_sha256_file(
+                    item["manifest_path"]
+                ),
                 "final_workspace_sha256": item["workspace_digest"],
                 "task_digest": item["task_digest"],
-                "openbench_task_content_digest": dict(
-                    item["openbench_task_content_digest"]
+                "openbench_task_content_digest": (
+                    None
+                    if item["openbench_task_content_digest"] is None
+                    else dict(item["openbench_task_content_digest"])
                 ),
-                "openbench_harbor_export": dict(
-                    item["openbench_harbor_export"]
+                "openbench_harbor_export": (
+                    None
+                    if item["openbench_harbor_export"] is None
+                    else dict(item["openbench_harbor_export"])
                 ),
                 "harbor_task_checksum": item["task_checksum"],
                 "harbor_agent_config_name": item["agent_config_name"],
@@ -1631,6 +1873,7 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "harbor_verifier_time_s": item["harbor_verifier_time_s"],
                 "harbor_job_retries": job_retry_count,
                 "harbor_job_max_retries": job_max_retries,
+                "harbor_exception_type": exception_type,
                 "usage_source": item["usage"]["token_basis"],
                 "proxy_measured": False,
                 "harbor_metering": None,
@@ -1647,8 +1890,12 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                     "task": task,
                     "trial": trial_number,
                     "success": success,
-                    "completed": True,
-                    "error": None,
+                    "completed": not terminal_failure,
+                    "error": (
+                        None
+                        if exception_type is None
+                        else f"Harbor terminal failure: {exception_type}"
+                    ),
                     "wall_time_s": round(
                         (item["finished"] - item["started"]).total_seconds(), 3
                     ),
@@ -1661,13 +1908,18 @@ def load_rows(job_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:
                     "checker_exit": item["checker_exit"],
                     "harness_version": item["agent_version"],
                     "harness_version_source": "harbor_trial_result",
-                    "failure_class": "solved" if success else "wrong_answer",
+                    "failure_class": failure_class,
+                    "failure_reason": failure_reason,
                     "candidate_provenance": provenance,
                     "version_drift": False,
-                    "workspace_source": {
-                        "kind": "harbor_artifact",
-                        "sha256": item["workspace_digest"],
-                    },
+                    "workspace_source": (
+                        None
+                        if item["workspace_digest"] is None
+                        else {
+                            "kind": "harbor_artifact",
+                            "sha256": item["workspace_digest"],
+                        }
+                    ),
                 }
             )
             row.update(item["usage"])

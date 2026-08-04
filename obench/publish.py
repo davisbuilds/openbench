@@ -33,7 +33,10 @@ from . import compare
 from . import report_page
 from . import scrub
 from . import stats
-from .harbor_results import expected_harbor_agent_semantic_name
+from .harbor_results import (
+    expected_harbor_agent_semantic_name,
+    harbor_exception_semantics,
+)
 from .harbor_profiles import (
     expected_harbor_model_name,
 )
@@ -83,24 +86,28 @@ HARBOR_PROVENANCE_KEYS = frozenset({
     "harbor_verifier_time_s",
     "harbor_job_retries",
     "harbor_job_max_retries",
+    "harbor_exception_type",
     "usage_source",
     "proxy_measured",
     "harbor_metering",
     "trial_mapping",
     "temporal_matched_block_claim",
 })
-HARBOR_DIGEST_KEYS = frozenset({
+HARBOR_CORE_DIGEST_KEYS = frozenset({
     "job_lock_sha256",
     "job_result_sha256",
     "trial_lock_sha256",
     "trial_result_sha256",
+    "harbor_task_checksum",
+})
+HARBOR_OPTIONAL_DIGEST_KEYS = frozenset({
     "reward_sha256",
     "openbench_verifier_evidence_sha256",
     "atif_sha256",
     "artifact_manifest_sha256",
     "final_workspace_sha256",
-    "harbor_task_checksum",
 })
+HARBOR_DIGEST_KEYS = HARBOR_CORE_DIGEST_KEYS | HARBOR_OPTIONAL_DIGEST_KEYS
 HARBOR_MARKER_KEYS = HARBOR_DIGEST_KEYS | frozenset({
     "harbor_version",
     "harbor_git_commit_hash",
@@ -123,7 +130,7 @@ HARBOR_PUBLISH_ROW_KEYS = (
     "tokens_reasoning", "usage_raw", "token_basis", "tokens_fresh", "turns",
     "checker_exit", "exec_mode", "score", "harness_version",
     "harness_version_source", "failure_class", "candidate_provenance",
-    "version_drift", "workspace_source",
+    "failure_reason", "version_drift", "workspace_source",
     "tokens_proxy_input_uncached", "tokens_proxy_cache_read",
     "tokens_proxy_cache_write", "tokens_proxy_output",
     "tokens_proxy_reasoning", "tokens_proxy_calls", "token_basis_proxy",
@@ -576,15 +583,33 @@ def _validate_harbor_row(row):
         value = provenance[key]
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise PublishError(f"Harbor row {run_id!r}: invalid {key}")
-    for key in HARBOR_DIGEST_KEYS:
+    exception_type = provenance["harbor_exception_type"]
+    terminal_failure = exception_type is not None
+    if terminal_failure and (
+        not isinstance(exception_type, str)
+        or not exception_type
+        or "/" in exception_type
+        or "\\" in exception_type
+    ):
+        raise PublishError(f"Harbor row {run_id!r}: invalid harbor_exception_type")
+    for key in HARBOR_CORE_DIGEST_KEYS:
         if not isinstance(provenance[key], str) or re.fullmatch(
                 r"[0-9a-f]{64}", provenance[key]) is None:
             raise PublishError(f"Harbor row {run_id!r}: invalid {key}")
+    for key in HARBOR_OPTIONAL_DIGEST_KEYS:
+        value = provenance[key]
+        if value is not None and (
+            not isinstance(value, str)
+            or re.fullmatch(r"[0-9a-f]{64}", value) is None
+        ):
+            raise PublishError(f"Harbor row {run_id!r}: invalid {key}")
+        if not terminal_failure and value is None:
+            raise PublishError(f"Harbor row {run_id!r}: missing {key}")
     if not isinstance(provenance["task_digest"], str) or re.fullmatch(
             r"sha256:[0-9a-f]{64}", provenance["task_digest"]) is None:
         raise PublishError(f"Harbor row {run_id!r}: invalid task_digest")
     content_digest = provenance["openbench_task_content_digest"]
-    if (
+    if content_digest is not None and (
         not isinstance(content_digest, dict)
         or set(content_digest) != {"scheme", "sha256"}
         or content_digest.get("scheme") != DIGEST_SCHEME_CURRENT
@@ -596,7 +621,7 @@ def _validate_harbor_row(row):
             f"Harbor row {run_id!r}: invalid openbench_task_content_digest"
         )
     export_config = provenance["openbench_harbor_export"]
-    if (
+    if export_config is not None and (
         not isinstance(export_config, dict)
         or set(export_config)
         != {"schema_version", "base_image", "network_mode"}
@@ -609,6 +634,14 @@ def _validate_harbor_row(row):
     ):
         raise PublishError(
             f"Harbor row {run_id!r}: invalid openbench_harbor_export"
+        )
+    if (content_digest is None) != (export_config is None):
+        raise PublishError(
+            f"Harbor row {run_id!r}: partial OpenBench verifier binding"
+        )
+    if not terminal_failure and content_digest is None:
+        raise PublishError(
+            f"Harbor row {run_id!r}: missing OpenBench verifier binding"
         )
     if not isinstance(provenance["harbor_git_commit_hash"], str) or re.fullmatch(
             r"[0-9a-f]{40}", provenance["harbor_git_commit_hash"]) is None:
@@ -650,15 +683,26 @@ def _validate_harbor_row(row):
             f"Harbor row {run_id!r}: canonical model does not match immutable "
             "Harbor model identity"
         )
-    if not _is_nonnegative_number(provenance["harbor_verifier_time_s"]):
+    if (
+        provenance["harbor_verifier_time_s"] is not None
+        and not _is_nonnegative_number(provenance["harbor_verifier_time_s"])
+    ):
         raise PublishError(f"Harbor row {run_id!r}: invalid harbor_verifier_time_s")
+    if not terminal_failure and provenance["harbor_verifier_time_s"] is None:
+        raise PublishError(f"Harbor row {run_id!r}: missing harbor_verifier_time_s")
     if provenance["trial_mapping"] != "lexicographic_name_within_task_agent_model":
         raise PublishError(f"Harbor row {run_id!r}: invalid trial_mapping")
     if provenance["temporal_matched_block_claim"] is not False:
         raise PublishError(
             f"Harbor row {run_id!r}: temporal_matched_block_claim must be false"
         )
-    if (
+    if provenance["final_workspace_sha256"] is None:
+        if workspace is not None:
+            raise PublishError(
+                f"Harbor row {run_id!r}: workspace_source must be null without "
+                "final workspace evidence"
+            )
+    elif (
         not isinstance(workspace, dict)
         or set(workspace) != {"kind", "sha256"}
         or workspace.get("kind") != "harbor_artifact"
@@ -668,7 +712,19 @@ def _validate_harbor_row(row):
             f"Harbor row {run_id!r}: workspace_source must bind "
             "final_workspace_sha256"
         )
-    if row.get("error") is not None:
+    if terminal_failure:
+        expected_class, expected_reason = harbor_exception_semantics(exception_type)
+        if (
+            row.get("success") is not False
+            or row.get("completed") is not False
+            or row.get("error") != f"Harbor terminal failure: {exception_type}"
+            or row.get("failure_class") != expected_class
+            or row.get("failure_reason") != expected_reason
+        ):
+            raise PublishError(
+                f"Harbor row {run_id!r}: terminal failure semantics disagree"
+            )
+    elif row.get("error") is not None:
         raise PublishError(f"Harbor row {run_id!r}: imported error must be null")
     _validate_harbor_usage(row, provenance)
 
@@ -691,7 +747,11 @@ def _harbor_import_evidence(rows):
                 "token_basis": row["token_basis"],
                 "usage_raw": row["usage_raw"],
             },
-            "workspace_source": dict(row["workspace_source"]),
+            "workspace_source": (
+                None
+                if row["workspace_source"] is None
+                else dict(row["workspace_source"])
+            ),
         })
     return sorted(evidence, key=lambda item: item["run_id"])
 
@@ -699,17 +759,27 @@ def _harbor_import_evidence(rows):
 def _harbor_task_bindings(rows):
     """Return one imported execution binding per task, rejecting conflicts."""
     bindings = {}
+    locked_task_digests = {}
     for row in rows:
         if not _is_harbor_row(row):
             continue
         _validate_harbor_row(row)
         task = row.get("task")
         provenance = row["candidate_provenance"]
+        locked_digest = provenance["task_digest"].removeprefix("sha256:")
+        previous_locked = locked_task_digests.setdefault(task, locked_digest)
+        if previous_locked != locked_digest:
+            raise PublishError(
+                f"Harbor task {task!r}: imported rows disagree on "
+                "locked task digest"
+            )
+        if provenance["openbench_task_content_digest"] is None:
+            continue
         binding = {
             "openbench_sha256": provenance["openbench_task_content_digest"][
                 "sha256"
             ],
-            "harbor_sha256": provenance["task_digest"].removeprefix("sha256:"),
+            "harbor_sha256": locked_digest,
             "export": dict(provenance["openbench_harbor_export"]),
         }
         previous = bindings.setdefault(task, binding)
@@ -718,6 +788,12 @@ def _harbor_task_bindings(rows):
                 f"Harbor task {task!r}: imported rows disagree on "
                 "execution binding"
             )
+    unbound = sorted(set(locked_task_digests) - set(bindings))
+    if unbound:
+        raise PublishError(
+            "Harbor tasks have no verifier-bound OpenBench execution evidence: "
+            + ", ".join(repr(task) for task in unbound)
+        )
     return bindings
 
 

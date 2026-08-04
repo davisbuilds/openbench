@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -123,6 +124,7 @@ def _harbor_row(
             "harbor_verifier_time_s": 1.25,
             "harbor_job_retries": 0,
             "harbor_job_max_retries": 1,
+            "harbor_exception_type": None,
             "usage_source": "harbor_agent_reported",
             "proxy_measured": False,
             "harbor_metering": None,
@@ -283,6 +285,111 @@ class PublishBundleTests(unittest.TestCase):
             item for item in checks if item["name"] == "harbor_import_evidence"
         )
         self.assertEqual(harbor_check["status"], "PASS", harbor_check)
+
+    def test_terminal_harbor_publish_preserves_only_available_evidence(self):
+        row = self._harbor_row(
+            success=False,
+            completed=False,
+            score=None,
+            checker_exit=None,
+            t_agent_s=None,
+            t_checker_s=None,
+            turns=None,
+            tokens=None,
+            tokens_input_uncached=None,
+            tokens_cache_read=None,
+            tokens_output=None,
+            tokens_fresh=None,
+            usage_raw=None,
+            token_basis="unmetered",
+            usage_evidence_grade="usage_unavailable",
+            usage_ranking_eligible=False,
+            usage_ranking_exclusion_reason="usage_unavailable",
+            failure_class="timeout",
+            failure_reason="harbor_timeout:AgentTimeoutError",
+            error="Harbor terminal failure: AgentTimeoutError",
+            workspace_source=None,
+        )
+        provenance = row["candidate_provenance"]
+        provenance.update({
+            "harbor_exception_type": "AgentTimeoutError",
+            "harbor_verifier_time_s": None,
+            "usage_source": "unmetered",
+            "openbench_task_content_digest": None,
+            "openbench_harbor_export": None,
+        })
+        for key in publish.HARBOR_OPTIONAL_DIGEST_KEYS:
+            provenance[key] = None
+
+        published = publish.sanitize_row_for_publish(row)
+
+        self.assertEqual(published["failure_class"], "timeout")
+        self.assertIsNone(published["workspace_source"])
+        self.assertIsNone(
+            published["candidate_provenance"]["reward_sha256"]
+        )
+        tampered = copy.deepcopy(row)
+        tampered["failure_class"] = "wrong_answer"
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "terminal failure semantics disagree",
+        ):
+            publish.sanitize_row_for_publish(tampered)
+
+    def test_terminal_harbor_task_requires_another_verifier_binding(self):
+        terminal = self._harbor_row(
+            success=False,
+            completed=False,
+            score=None,
+            checker_exit=None,
+            t_agent_s=None,
+            t_checker_s=None,
+            turns=None,
+            tokens=None,
+            tokens_input_uncached=None,
+            tokens_cache_read=None,
+            tokens_output=None,
+            tokens_fresh=None,
+            usage_raw=None,
+            token_basis="unmetered",
+            usage_evidence_grade="usage_unavailable",
+            usage_ranking_eligible=False,
+            usage_ranking_exclusion_reason="usage_unavailable",
+            failure_class="timeout",
+            failure_reason="harbor_timeout:AgentTimeoutError",
+            error="Harbor terminal failure: AgentTimeoutError",
+            workspace_source=None,
+        )
+        terminal_provenance = terminal["candidate_provenance"]
+        terminal_provenance.update({
+            "harbor_exception_type": "AgentTimeoutError",
+            "harbor_verifier_time_s": None,
+            "usage_source": "unmetered",
+            "openbench_task_content_digest": None,
+            "openbench_harbor_export": None,
+        })
+        for key in publish.HARBOR_OPTIONAL_DIGEST_KEYS:
+            terminal_provenance[key] = None
+
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "no verifier-bound OpenBench execution evidence",
+        ):
+            publish._harbor_task_bindings([terminal])
+        self.assertEqual(
+            publish._harbor_task_bindings([terminal, self._harbor_row()]),
+            {
+                "alpha": {
+                    "openbench_sha256": self.alpha_digest,
+                    "harbor_sha256": self.alpha_harbor_digest,
+                    "export": {
+                        "schema_version": 1,
+                        "base_image": "python:3.11-slim",
+                        "network_mode": "no-network",
+                    },
+                }
+            },
+        )
 
     def test_harbor_publish_accepts_exact_proxy_reconciliation(self):
         harbor_results = os.path.join(self.tmp.name, "harbor-metered.jsonl")

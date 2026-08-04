@@ -18,26 +18,30 @@ The contract is intentionally narrow and fail-closed:
 - Harbor version `0.20.0`, git commit
   `72bc40b1e58b47a9cc6e0f14c29aced3a9e53767`
 - job lock schema `3` and trial lock schema `2`
-- a finished top-level `result.json` whose completed counts, reward groups, and
-  usage aggregates match the independently enumerated trial directories
+- a finished top-level `result.json` whose completed counts, reward groups,
+  exception groups, and usage aggregates match the independently enumerated
+  trial directories
 - one directory for every resolved job-lock trial, with no extra directories
-- single-step, exception-free trials
-- each trial's `lock.json`, `result.json`, verifier reward, ATIF-v1.7
-  `agent/trajectory.json`, `verifier/openbench-verifier-evidence.json`, and
-  `artifacts/manifest.json`
-- an explicitly requested artifact with destination `workspace`, a
-  matching manifest entry with `type: "directory"` and `status: "ok"`, and a
-  non-empty `artifacts/workspace/` directory
+- single-step trials, including terminal exception results
+- each trial's immutable `lock.json` and `result.json`
+- for exception-free trials, verifier reward, ATIF-v1.7
+  `agent/trajectory.json`, `verifier/openbench-verifier-evidence.json`, and a
+  successful `artifacts/manifest.json` workspace entry
+- for terminal failures, any reward, ATIF, metering, artifact, or workspace
+  evidence that exists must satisfy the same complete cross-checks; evidence
+  that Harbor did not produce remains null
 
 The importer cross-checks the job/trial lock multiset, the lock task digest,
 Harbor's separate legacy task checksum, task/agent/model identity, phase timing,
 scalar reward in `[0, 1]`, OpenBench verifier evidence, ATIF identity and usage
-totals, job aggregates, artifact status, and duplicate identities.
+totals, job reward/exception/usage aggregates, artifact status, and duplicate
+identities.
 The result-reported `agent_info.name` and ATIF agent name must also resolve from
 the immutable trial-lock/config agent identity. Unlisted identities must match
-exactly. The pinned OpenBench OAuth profile imports are explicit aliases for
-`codex`, `pi`, and `opencode`. Any other custom identity that reports a
-different semantic name is rejected.
+exactly. The pinned OpenBench profile imports are explicit aliases for `codex`,
+`pi`, `opencode`, `cursor`, and `devin`. Cursor, Devin, and OpenCode use
+Harbor-reported usage without proxy claims. Any other custom identity that
+reports a different semantic name is rejected.
 
 Codex-profile and Pi-profile trials additionally require
 `agent/harbor-metering/`: one public evidence JSON plus one private durable
@@ -62,6 +66,21 @@ it does not claim that trials are temporal matched blocks.
   job.
 - `success` is strictly `checker_exit == 0`, matching `obench.run`; a nonzero
   exit remains unsuccessful even when its parsed and clamped score is `1.0`.
+- A terminal Harbor exception always emits an attempted row with
+  `success = false` and `completed = false`, even when valid reward or workspace
+  evidence survived the failure. The stable mappings are:
+
+  | Harbor exception | `failure_class` | `failure_reason` prefix |
+  | --- | --- | --- |
+  | agent/setup/environment/verifier timeout | `timeout` | `harbor_timeout:` |
+  | `ApiUsageLimitError` | `rate_limited` | `harbor_rate_limit:` |
+  | `AgentAuthenticationError` | `infra` | `harbor_auth:` |
+  | `AgentSafetyRefusalError` | `infra` | `harbor_safety:` |
+  | all other terminal exceptions | `infra` | `harbor_infrastructure:` |
+
+  Timeout rows remain in attempted solve-rate denominators. Rate-limit,
+  authentication, safety, and other infrastructure rows remain visible but
+  follow OpenBench's existing excluded-failure policy.
 - `score` and `checker_exit` come from the exporter's
   `openbench-verifier-evidence-v2` record after matching it to Harbor's reward
   file and trial result. `t_checker_s` uses that record's checker duration;
@@ -83,6 +102,9 @@ contract must be present and internally consistent. Partial Harbor provenance,
 unknown provenance keys, invalid digests, workspace-digest disagreement, proxy
 claims, semantic harness/config identity disagreement, or usage-total
 disagreement fail before a bundle is written.
+Terminal rows may publish null optional evidence fields. A task must still have
+at least one imported row with verifier-bound OpenBench source/export evidence;
+otherwise publication cannot reproduce the task binding and fails closed.
 For metered profiles, exact equality supports the `proxy-verified` label.
 Structurally valid mismatches remain publishable with both values and a visible
 warning, but cannot contribute to token, cost, or efficiency rankings.
@@ -119,6 +141,6 @@ Accepted rows use `ROW_FIELDS` order. The collision scan and full-batch append
 run under one exclusive file lock; the batch is flushed and `fsync`ed once, and
 the output is truncated back to its prior length if append fails.
 
-Multi-step and exception-bearing Harbor trials are rejected rather than
-partially interpreted. Supporting them requires a separate contract for
-step-level reward, trajectory, artifact, and failure evidence.
+Multi-step Harbor trials remain rejected. Terminal single-step trials are
+normalized only from the immutable lock/result exception record and whatever
+complete optional evidence Harbor actually retained.
