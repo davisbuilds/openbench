@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
+import hashlib
 import io
 import json
 import os
@@ -239,6 +240,16 @@ model = "gpt-5.6-terra"
             self.assertEqual(
                 [agent["override_timeout_sec"] for agent in agents],
                 [900.0, 900.0],
+            )
+            plan = job.artifact.comparison_plan.as_dict()
+            self.assertEqual(plan["job_config_sha256"], job.artifact.sha256)
+            self.assertEqual(
+                hashlib.sha256(job.artifact.json_bytes).hexdigest(),
+                plan["job_config_sha256"],
+            )
+            self.assertEqual(
+                [arm["arm_id"] for arm in plan["arms"]],
+                ["codex-example", "acme-terra"],
             )
         registry_source = jobs[1].artifact.as_dict()["datasets"][0]
         self.assertEqual(

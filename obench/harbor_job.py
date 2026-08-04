@@ -84,6 +84,7 @@ class AgentProfile:
     model_name: str | None = None
     name: str | None = None
     import_path: str | None = None
+    override_timeout_sec: float | None = None
     n_concurrent: int | None = None
     concurrency_group: str | None = None
     kwargs: Mapping[str, Any] = field(default_factory=dict)
@@ -631,6 +632,11 @@ def _validate_profiles(
                 profile.canonical_model,
                 f"profile {profile_id} canonical_model",
             )
+        if profile.override_timeout_sec is not None:
+            _validate_positive_number(
+                profile.override_timeout_sec,
+                f"profile {profile_id} override_timeout_sec",
+            )
         if profile.n_concurrent is not None:
             if not isinstance(profile.n_concurrent, int) or isinstance(
                 profile.n_concurrent, bool
@@ -671,6 +677,8 @@ def _render_agent(profile: AgentProfile, model: str) -> dict[str, Any]:
         rendered["name"] = profile.name
     else:
         rendered["import_path"] = profile.import_path
+    if profile.override_timeout_sec is not None:
+        rendered["override_timeout_sec"] = profile.override_timeout_sec
     if profile.n_concurrent is not None:
         rendered["n_concurrent"] = profile.n_concurrent
     if profile.concurrency_group is not None:

@@ -197,7 +197,14 @@ def compile_suite(
                     f"harness identities {previous_harness!r} and "
                     f"{arm.harness!r}"
                 )
-        agent = replace(compile_profile(profile, arm.model), profile_id=arm.id)
+        agent = replace(
+            compile_profile(profile, arm.model),
+            profile_id=arm.id,
+            arm_id=arm.id,
+            canonical_harness=arm.harness,
+            canonical_model=arm.model,
+            override_timeout_sec=suite.run.timeout_seconds,
+        )
         compiled_arms.append(
             CompiledArm(arm=arm, profile=profile, agent=agent)
         )
@@ -265,7 +272,7 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
             f"{compiled.suite.id}-{item.task_set.id}-"
             f"{compiled.manifest_sha256[:12]}"
         )
-        base_artifact = build_job_config(
+        artifact = build_job_config(
             HarborJobSpec(
                 job_name=job_name,
                 jobs_dir=jobs_dir,
@@ -284,11 +291,7 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
         jobs.append(
             PlannedJob(
                 task_set_id=item.task_set.id,
-                artifact=_build_suite_job_artifact(
-                    base_artifact,
-                    compiled.arms,
-                    compiled.suite.run.timeout_seconds,
-                ),
+                artifact=artifact,
             )
         )
     return tuple(jobs)
@@ -604,28 +607,6 @@ def _semantic_arm(
             **rendered_agent,
         },
     }
-
-
-def _build_suite_job_artifact(
-    base_artifact: HarborJobArtifact,
-    arms: tuple[CompiledArm, ...],
-    timeout_seconds: float,
-) -> HarborJobArtifact:
-    """Build final job bytes from the same rendered configs bound in the plan."""
-
-    data = base_artifact.as_dict()
-    built_agents = data.get("agents")
-    if not isinstance(built_agents, list) or len(built_agents) != len(arms):
-        raise SuiteRunError("generated Harbor job agent expansion is inconsistent")
-    data["agents"] = [
-        _render_agent_config(item, timeout_seconds) for item in arms
-    ]
-    json_bytes = _canonical_json(data, indent=2)
-    return replace(
-        base_artifact,
-        json_bytes=json_bytes,
-        sha256=hashlib.sha256(json_bytes).hexdigest(),
-    )
 
 
 def _render_agent_config(
