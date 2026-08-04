@@ -424,6 +424,8 @@ class ReportPageTest(unittest.TestCase):
         arm = model["arms"][0]
         self.assertEqual(arm["rate"], 1.0)
         self.assertEqual(arm["med_wall"], 10.0)
+        for field in report_page.TOKEN_FIELDS:
+            self.assertIsNone(arm[field])
         self.assertIsNone(arm["total_tokens"])
         self.assertIsNone(arm["cost_per_solve"])
         self.assertEqual(arm["token_basis"], "Harbor/proxy mismatch")

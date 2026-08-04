@@ -108,6 +108,11 @@ def _unique_cells(rows):
 
 
 def _measurement(row, field):
+    if (
+        field.startswith("tokens_")
+        and not stats.usage_evidence.ranking_eligible(row)
+    ):
+        return None
     value = row.get(field)
     if stats.is_nonnegative_number(value):
         if field == "wall_time_s":

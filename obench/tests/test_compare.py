@@ -103,6 +103,33 @@ class TestMatchedComparison(CompareTestCase):
         self.assertEqual(rendered_rows["Cache-write tokens / solve"], ["3.0", "3.0"])
         self.assertEqual(rendered_rows["Output tokens / solve"], ["44.0", "44.0"])
 
+    def test_usage_mismatch_excludes_tokens_but_keeps_correctness_and_latency(self):
+        mismatch = {
+            "usage_evidence_grade": "harbor_reported_proxy_mismatch",
+            "usage_ranking_eligible": False,
+            "usage_ranking_exclusion_reason": "proxy_mismatch",
+        }
+        a = self.write("a.jsonl", [
+            self.row("pi", "t", 1, True, **mismatch),
+        ])
+        b = self.write("b.jsonl", [
+            self.row("opencode", "t", 1, True),
+        ])
+
+        report = compare.build_comparison([a, b], tasks_dirs=[self.tasks])
+        summary = report["summaries"]["a"]
+        self.assertEqual(summary["solve_rate"], 1.0)
+        self.assertEqual(summary["wall_time_per_solve"], 10.0)
+        self.assertIsNone(summary["tokens_input_uncached_per_solve"])
+        self.assertIsNone(
+            summary["tokens_input_uncached_per_cell_mean"]
+        )
+        rendered_rows = dict(compare.scorecard_rows(report))
+        self.assertEqual(
+            rendered_rows["Uncached input tokens / solve"],
+            ["-", "100.0"],
+        )
+
     def test_solved_intersection_uses_only_cells_every_arm_solved_for_efficiency(self):
         a = self.write("a.jsonl", [
             self.row("h", "only-a-solve", 1, True, wall_time_s=100),
