@@ -14,24 +14,53 @@ from typing import Any
 
 HARBOR_VERSION = "0.20.0"
 AUTH_STRATEGY_OAUTH = "oauth"
+AUTH_STRATEGY_SUBSCRIPTION = "subscription"
 
 CODEX_PROFILE_IMPORT = (
     "obench.harbor_agents.codex_profile:OpenBenchCodexOAuthProfile"
 )
 PI_PROFILE_IMPORT = "obench.harbor_agents.pi:OpenBenchPiOAuth"
 OPENCODE_PROFILE_IMPORT = "obench.harbor_agents.opencode:OpenBenchOpenCodeOAuth"
+CURSOR_PROFILE_IMPORT = "obench.harbor_agents.cursor:OpenBenchCursorSubscription"
+DEVIN_PROFILE_IMPORT = "obench.harbor_agents.devin:OpenBenchDevinSubscription"
 
 _MODEL_PREFIX_BY_PROFILE = {
     CODEX_PROFILE_IMPORT: "",
     PI_PROFILE_IMPORT: "openai-codex/",
     OPENCODE_PROFILE_IMPORT: "openai/",
+    CURSOR_PROFILE_IMPORT: "",
+    DEVIN_PROFILE_IMPORT: "",
 }
 
-_MODEL_IDS = {
-    "gpt-5.5-medium": "gpt-5.5",
-    "gpt-5.6-sol": "gpt-5.6-sol",
-    "gpt-5.6-terra": "gpt-5.6-terra",
-    "gpt-5.6-luna": "gpt-5.6-luna",
+_MODEL_IDS_BY_HARNESS = {
+    "codex": {
+        "gpt-5.5-medium": "gpt-5.5",
+        "gpt-5.6-sol": "gpt-5.6-sol",
+        "gpt-5.6-terra": "gpt-5.6-terra",
+        "gpt-5.6-luna": "gpt-5.6-luna",
+    },
+    "pi": {
+        "gpt-5.5-medium": "gpt-5.5",
+        "gpt-5.6-sol": "gpt-5.6-sol",
+        "gpt-5.6-terra": "gpt-5.6-terra",
+        "gpt-5.6-luna": "gpt-5.6-luna",
+    },
+    "opencode": {
+        "gpt-5.5-medium": "gpt-5.5",
+        "gpt-5.6-sol": "gpt-5.6-sol",
+        "gpt-5.6-terra": "gpt-5.6-terra",
+        "gpt-5.6-luna": "gpt-5.6-luna",
+    },
+    "cursor": {
+        "gpt-5.5-medium": "gpt-5.5-medium",
+        "gpt-5.6-sol": "gpt-5.6-sol-medium",
+        "gpt-5.6-terra": "gpt-5.6-terra-medium",
+        "gpt-5.6-luna": "gpt-5.6-luna-medium",
+    },
+    "devin": {
+        "gpt-5.5-medium": "",
+        "gpt-5.6-sol": "gpt-5-6-sol-medium",
+    },
 }
 
 
@@ -46,7 +75,8 @@ class HarborAuthContract:
     strategy: str
     source_candidates: tuple[str, ...]
     input_env: str
-    return_env: str
+    return_env: str | None
+    staging_kind: str = "oauth-json"
     persist_back: bool = True
     lease_required: bool = True
     max_concurrent_uses: int = 1
@@ -92,7 +122,7 @@ class HarborHarnessProfile:
         self,
         *,
         auth_json_path: str,
-        auth_return_path: str,
+        auth_return_path: str | None = None,
     ) -> dict[str, Any]:
         """Return programmatic ``harbor.models.trial.config.AgentConfig`` data.
 
@@ -102,14 +132,29 @@ class HarborHarnessProfile:
 
         if not isinstance(auth_json_path, str) or not auth_json_path.startswith("/"):
             raise HarborProfileError("auth_json_path must be an absolute path")
-        if not isinstance(auth_return_path, str) or not auth_return_path.startswith("/"):
-            raise HarborProfileError("auth_return_path must be an absolute path")
-        if auth_json_path == auth_return_path:
-            raise HarborProfileError("auth input and return paths must be distinct")
-
         env = dict(self.agent_env)
         env[self.auth.input_env] = auth_json_path
-        env[self.auth.return_env] = auth_return_path
+        if self.auth.persist_back:
+            if (
+                not isinstance(auth_return_path, str)
+                or not auth_return_path.startswith("/")
+            ):
+                raise HarborProfileError(
+                    "auth_return_path must be an absolute path"
+                )
+            if auth_json_path == auth_return_path:
+                raise HarborProfileError(
+                    "auth input and return paths must be distinct"
+                )
+            if self.auth.return_env is None:
+                raise HarborProfileError(
+                    "persist-back auth requires a return environment"
+                )
+            env[self.auth.return_env] = auth_return_path
+        elif auth_return_path is not None:
+            raise HarborProfileError(
+                "read-only subscription auth does not accept a return path"
+            )
         return {
             "name": None,
             "import_path": self.agent_import_path,
@@ -146,6 +191,34 @@ _AUTH = {
         return_env="OPENBENCH_OPENCODE_AUTH_RETURN_PATH",
         concurrency_group="openbench-oauth-opencode",
     ),
+    "cursor": HarborAuthContract(
+        strategy=AUTH_STRATEGY_SUBSCRIPTION,
+        source_candidates=(
+            "~/.config/cursor/auth.json",
+            "~/.openbench/cursor-container-auth/.config/cursor/auth.json",
+            "~/.cursor/cli-config.json",
+        ),
+        input_env="OPENBENCH_CURSOR_AUTH_ARCHIVE",
+        return_env=None,
+        staging_kind="cursor-subscription",
+        persist_back=False,
+        lease_required=False,
+        concurrency_group="openbench-subscription-cursor",
+    ),
+    "devin": HarborAuthContract(
+        strategy=AUTH_STRATEGY_SUBSCRIPTION,
+        source_candidates=(
+            "~/.devin",
+            "~/.config/devin",
+            "~/.local/share/devin",
+        ),
+        input_env="OPENBENCH_DEVIN_AUTH_ARCHIVE",
+        return_env=None,
+        staging_kind="devin-subscription",
+        persist_back=False,
+        lease_required=False,
+        concurrency_group="openbench-subscription-devin",
+    ),
 }
 
 _PROXY = {
@@ -170,18 +243,34 @@ _PROXY = {
             "OpenBench adapter"
         ),
     ),
+    "cursor": HarborProxyContract(
+        supported=False,
+        route=None,
+        agent_env=None,
+        configuration="Cursor subscription inference is not proxy-routable",
+    ),
+    "devin": HarborProxyContract(
+        supported=False,
+        route=None,
+        agent_env=None,
+        configuration="Devin subscription inference is not proxy-routable",
+    ),
 }
 
 _VERSIONS = {
     "codex": "0.144.5",
     "pi": "0.80.10",
     "opencode": "1.18.3",
+    "cursor": "2026.07.09-a3815c0",
+    "devin": "3000.2.17",
 }
 
 _IMPORTS = {
     "codex": CODEX_PROFILE_IMPORT,
     "pi": PI_PROFILE_IMPORT,
     "opencode": OPENCODE_PROFILE_IMPORT,
+    "cursor": CURSOR_PROFILE_IMPORT,
+    "devin": DEVIN_PROFILE_IMPORT,
 }
 
 
@@ -232,7 +321,7 @@ def resolve_harbor_profile(
     harness: str,
     model: str,
     *,
-    auth_strategy: str = AUTH_STRATEGY_OAUTH,
+    auth_strategy: str | None = None,
     proxy_base_url: str | None = None,
 ) -> HarborHarnessProfile:
     """Resolve one supported OpenBench arm, rejecting implicit fallbacks."""
@@ -242,15 +331,17 @@ def resolve_harbor_profile(
             f"unsupported Harbor harness {harness!r}; "
             f"expected one of {sorted(_IMPORTS)}"
         )
-    if model not in _MODEL_IDS:
+    model_ids = _MODEL_IDS_BY_HARNESS[harness]
+    if model not in model_ids:
         raise HarborProfileError(
             f"unsupported {harness} Harbor model {model!r}; "
-            f"expected one of {sorted(_MODEL_IDS)}"
+            f"expected one of {sorted(model_ids)}"
         )
-    if auth_strategy != AUTH_STRATEGY_OAUTH:
+    expected_auth_strategy = _AUTH[harness].strategy
+    if auth_strategy is not None and auth_strategy != expected_auth_strategy:
         raise HarborProfileError(
             f"unsupported {harness} auth strategy {auth_strategy!r}; "
-            "OpenBench Harbor profiles require oauth"
+            f"expected {expected_auth_strategy!r}"
         )
     if proxy_base_url is not None:
         if not isinstance(proxy_base_url, str) or not proxy_base_url.startswith(
@@ -264,7 +355,7 @@ def resolve_harbor_profile(
                 f"{harness} OAuth counting-proxy routing is unsupported"
             )
 
-    model_id = _MODEL_IDS[model]
+    model_id = model_ids[model]
     if harness == "codex":
         harbor_model = model_id
         flags = (("reasoning_effort", "medium"),)
@@ -273,9 +364,13 @@ def resolve_harbor_profile(
         harbor_model = f"openai-codex/{model_id}"
         flags = (("thinking", "medium"),)
         config_json = None
-    else:
+    elif harness == "opencode":
         harbor_model = f"openai/{model_id}"
         flags = (("variant", "medium"),)
+        config_json = None
+    else:
+        harbor_model = model
+        flags = ()
         config_json = None
 
     env: tuple[tuple[str, str], ...] = ()
@@ -304,5 +399,5 @@ def supported_harbor_matrix() -> tuple[tuple[str, str], ...]:
     return tuple(
         (harness, model)
         for harness in sorted(_IMPORTS)
-        for model in sorted(_MODEL_IDS)
+        for model in sorted(_MODEL_IDS_BY_HARNESS[harness])
     )
