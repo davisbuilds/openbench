@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
+from pathlib import PurePosixPath
 import stat
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
 from obench.atif import validate_trajectory
 from obench.harbor_agents import _subscription
+from obench.harbor_agents import cursor as cursor_agent
+from obench.harbor_agents import devin as devin_agent
 from obench.harbor_agents.cursor import convert_cursor_stream
 from obench.harbor_agents.devin import normalize_devin_export
 from obench.harbor_oauth import (
@@ -255,6 +260,127 @@ class HarborStockAgentTests(unittest.TestCase):
                 version="3000.2.17",
                 model_name="gpt-5.6-sol",
             )
+
+    def test_custom_agents_use_canonical_native_commands_and_pins(self):
+        class FakeBase:
+            def __init__(
+                self,
+                *,
+                logs_dir,
+                model_name,
+                version,
+                extra_env,
+                **kwargs,
+            ):
+                del kwargs
+                self.logs_dir = Path(logs_dir)
+                self.model_name = model_name
+                self._version = version
+                self._extra_env = dict(extra_env)
+                self.commands = []
+
+            def _get_env(self, key):
+                return self._extra_env.get(key)
+
+            def version(self):
+                return self._version
+
+            def render_instruction(self, instruction):
+                return instruction
+
+            async def ensure_system_dependencies(self, environment, dependencies):
+                del environment, dependencies
+
+            async def exec_as_agent(self, environment, command, **kwargs):
+                del environment
+                self.commands.append(("agent", command, kwargs))
+
+            async def exec_as_root(self, environment, command, **kwargs):
+                del environment
+                self.commands.append(("root", command, kwargs))
+
+        class FakeEnvironment:
+            default_user = None
+
+            def __init__(self):
+                self.uploads = []
+
+            async def upload_file(self, source, destination):
+                self.uploads.append((Path(source), destination))
+
+        paths = SimpleNamespace(app_dir=PurePosixPath("/app"))
+        cases = (
+            (
+                cursor_agent,
+                "OpenBenchCursorSubscription",
+                "cursor",
+                "2026.07.09-a3815c0",
+                "gpt-5.6-terra",
+                _subscription.CURSOR_AUTH_ARCHIVE_ENV,
+                "cursor-agent -p --force --trust "
+                "--model gpt-5.6-terra-medium "
+                "--output-format stream-json --workspace /app",
+                "downloads.cursor.com/lab/2026.07.09-a3815c0/",
+            ),
+            (
+                devin_agent,
+                "OpenBenchDevinSubscription",
+                "devin",
+                "3000.2.17",
+                "gpt-5.6-sol",
+                _subscription.DEVIN_AUTH_ARCHIVE_ENV,
+                "devin -p --permission-mode dangerous "
+                "--model gpt-5-6-sol-medium "
+                "--export /logs/agent/devin-export.json --",
+                _DEVIN_INSTALL_PROOF,
+            ),
+        )
+        for (
+            module,
+            class_name,
+            harness,
+            version,
+            model,
+            env_name,
+            run_fragment,
+            install_fragment,
+        ) in cases:
+            with self.subTest(harness=harness):
+                archive = self.root / f"{harness}.tar.gz"
+                archive.write_bytes(b"private")
+                archive.chmod(0o600)
+                self.root.chmod(0o700)
+                agent_class = module._build_agent_class(FakeBase, paths)
+                self.assertEqual(agent_class.__name__, class_name)
+                agent = agent_class(
+                    logs_dir=self.root / f"{harness}-logs",
+                    model_name=model,
+                    version=version,
+                    extra_env={env_name: str(archive)},
+                )
+                environment = FakeEnvironment()
+                asyncio.run(agent.install(environment))
+                asyncio.run(agent.run("Fix it", environment, object()))
+
+                install_command = next(
+                    command
+                    for role, command, _ in agent.commands
+                    if role == "root"
+                )
+                run_command = next(
+                    command
+                    for role, command, _ in agent.commands
+                    if role == "agent" and run_fragment in command
+                )
+                self.assertIn(install_fragment, install_command)
+                self.assertIn(run_fragment, run_command)
+                self.assertNotIn("API_KEY=", run_command)
+                self.assertEqual(len(environment.uploads), 1)
+
+
+_DEVIN_INSTALL_PROOF = (
+    "f0e1e9363afc6ee68c4ef87bab4aeb7ff5cc08a5fa838350ef3ceefdbb2a2be2"
+)
 
 
 if __name__ == "__main__":
