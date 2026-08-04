@@ -36,6 +36,7 @@ from .stats import (
     TOKEN_BASIS_SELF,
     effective_tokens,
 )
+from . import usage_evidence
 
 DEFAULT_RESULTS_PATH = default_results_path()
 
@@ -137,7 +138,7 @@ def aggregate(rows):
         if key not in stats:
             stats[key] = {"per_task": {}, "succ": 0, "n": 0, "scores": [],
                           "wall_times": [], "token_vals": [], "token_bases": set(),
-                          "turn_vals": [],
+                          "turn_vals": [], "usage_exclusions": set(),
                           "cells_planned": set(), "cells_satisfied": set(),
                           "taxonomy": {fc: 0 for fc in FAILURE_CLASSES}}
             arms.append(key)
@@ -145,6 +146,10 @@ def aggregate(rows):
             tasks.append(task)
 
         st = stats[key]
+        if not usage_evidence.ranking_eligible(row):
+            st["usage_exclusions"].add(
+                usage_evidence.exclusion_reason(row) or "usage_unavailable"
+            )
         fc = class_for_report(row)
         st["taxonomy"][fc] = st["taxonomy"].get(fc, 0) + 1
         # Coverage: a (task, trial) cell is PLANNED as soon as any row exists for
@@ -357,6 +362,22 @@ def _token_notes(stats, arms, used_proxy):
         notes.append(PROXY_FOOTNOTE)
     if table_has_mixed_token_bases(stats, arms):
         notes.append(MIXED_BASIS_WARNING)
+    excluded = []
+    for arm in arms:
+        reasons = sorted(stats[arm].get("usage_exclusions") or ())
+        if reasons:
+            excluded.append(
+                "%s: %s" % (
+                    " x ".join(str(value) for value in arm),
+                    ", ".join(reasons),
+                )
+            )
+    if excluded:
+        notes.append(
+            "USAGE EVIDENCE: token/cost/efficiency metrics excluded for "
+            + "; ".join(excluded)
+            + ". Correctness and latency remain reportable."
+        )
     notes.extend("COVERAGE: " + w for w in coverage_warnings(stats, arms))
     return notes
 

@@ -147,6 +147,25 @@ class TestTables(unittest.TestCase):
 
 
 class TestProxyTokenBasis(unittest.TestCase):
+    def test_mismatch_keeps_correctness_and_latency_but_excludes_efficiency(self):
+        rows = [{
+            "harness": "pi", "model": "model-x", "task": "t", "trial": 1,
+            "success": True, "wall_time_s": 2.0, "tokens": 200,
+            "usage_evidence_grade": "harbor_reported_proxy_mismatch",
+            "usage_ranking_eligible": False,
+            "usage_ranking_exclusion_reason": "proxy_mismatch",
+        }]
+        arms, _tasks, aggregated = report.aggregate(rows)
+        arm = aggregated[_arm("pi", "model-x")]
+        self.assertEqual(arm["succ"], 1)
+        self.assertEqual(arm["wall_times"], [2.0])
+        self.assertEqual(arm["token_vals"], [])
+        text = report.format_efficiency(arms, aggregated)
+        self.assertIn("1/1", text)
+        self.assertIn("2.00", text)
+        self.assertIn("USAGE EVIDENCE", text)
+        self.assertIn("proxy_mismatch", text)
+
     def test_candidate_proxy_only_fills_tok_slv_with_star(self):
         rows = [{
             "harness": "aider", "task": "t", "trial": 1, "success": True,

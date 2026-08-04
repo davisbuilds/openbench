@@ -260,6 +260,29 @@ class AggregateBundleTests(unittest.TestCase):
         self.assertEqual(coverage["native_covered_rows"], 1)
         self.assertEqual(coverage["total_rows"], 2)
 
+    def test_mismatch_excludes_telemetry_but_retains_visible_grade(self):
+        rows = [_row("pi", "alpha", 1, True, tokens=100)]
+        rows[0].update({
+            "tokens_proxy_input_uncached": 81,
+            "tokens_proxy_output": 20,
+            "tokens_proxy_cache_read": 50,
+            "token_basis_proxy": "proxy_measured",
+            "usage_evidence_grade": "harbor_reported_proxy_mismatch",
+            "usage_ranking_eligible": False,
+            "usage_ranking_exclusion_reason": "proxy_mismatch",
+        })
+
+        telemetry = leaderboard.token_telemetry_per_solve(rows)
+
+        self.assertIsNone(telemetry["token_telemetry_source"])
+        self.assertIsNone(telemetry["fresh_tokens_per_solve"])
+        self.assertEqual(
+            telemetry["usage_evidence_labels"], ["Harbor/proxy mismatch"]
+        )
+        self.assertEqual(
+            telemetry["usage_ranking_exclusions"], ["proxy_mismatch"]
+        )
+
 
 class BuildLeaderboardTests(unittest.TestCase):
     def setUp(self):

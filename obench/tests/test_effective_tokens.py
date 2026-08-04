@@ -112,6 +112,37 @@ class TestEffectiveTokens(unittest.TestCase):
             stats.TOKEN_BASIS_UNMETERED,
         )
 
+    def test_proxy_mismatch_excludes_all_usage_metrics(self):
+        row = {
+            "model": "model-x",
+            "tokens": 200,
+            "tokens_input_uncached": 150,
+            "tokens_output": 50,
+            "tokens_proxy_input_uncached": 151,
+            "tokens_proxy_output": 50,
+            "token_basis_proxy": "proxy_measured",
+            "usage_evidence_grade": "harbor_reported_proxy_mismatch",
+            "usage_ranking_eligible": False,
+            "usage_ranking_exclusion_reason": "proxy_mismatch",
+        }
+        self.assertEqual(stats.effective_tokens(row), (None, None))
+        self.assertIsNone(stats.input_tokens(row))
+        self.assertIsNone(stats.output_tokens(row))
+        self.assertIsNone(
+            stats.row_cost(
+                row,
+                {
+                    "model-x": {
+                        "input_per_mtok": 1.0,
+                        "output_per_mtok": 2.0,
+                    }
+                },
+            )
+        )
+        self.assertEqual(
+            stats.display_token_basis(row), "Harbor/proxy mismatch"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

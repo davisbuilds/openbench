@@ -392,5 +392,46 @@ class ReportPageTest(unittest.TestCase):
         self.assertIsNone(by_arm["quiet"]["total_tokens"])
         self.assertEqual(by_arm["quiet"]["token_basis"], "unmetered")
 
+    def test_mismatch_is_visible_without_token_or_cost_metrics(self):
+        row = self.row(
+            "pi",
+            1,
+            True,
+            tokens=120,
+            tokens_input_uncached=75,
+            tokens_output=40,
+            tokens_cache_read=25,
+            tokens_proxy_input_uncached=76,
+            tokens_proxy_output=40,
+            tokens_proxy_cache_read=25,
+            token_basis="harbor_agent_reported",
+            token_basis_proxy="proxy_measured",
+            usage_evidence_grade="harbor_reported_proxy_mismatch",
+            usage_ranking_eligible=False,
+            usage_ranking_exclusion_reason="proxy_mismatch",
+        )
+        path = self.write([row])
+        model = report_page.assemble_tables(
+            [{"path": path}],
+            pricing={
+                "model-x": {
+                    "input_per_mtok": 1.0,
+                    "output_per_mtok": 2.0,
+                }
+            },
+            tasks_dirs=[self.tmp.name],
+        )[0]
+        arm = model["arms"][0]
+        self.assertEqual(arm["rate"], 1.0)
+        self.assertEqual(arm["med_wall"], 10.0)
+        self.assertIsNone(arm["total_tokens"])
+        self.assertIsNone(arm["cost_per_solve"])
+        self.assertEqual(arm["token_basis"], "Harbor/proxy mismatch")
+
+        page = report_page.render_page([model], "Method")
+        self.assertIn("Usage evidence warning", page)
+        self.assertIn("Harbor/proxy mismatch", page)
+        self.assertIn("Correctness and latency remain publishable", page)
+
 
 if __name__ == "__main__": unittest.main()

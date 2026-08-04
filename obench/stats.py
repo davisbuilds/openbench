@@ -68,6 +68,7 @@ Z_95 = 1.96
 
 from .failure_class import class_for_report
 from .failure_class import EXCLUDED_FROM_SOLVE_RATE as _EXCLUDED_FROM_SOLVE_RATE
+from . import usage_evidence
 
 EXCLUDED_FAILURE_CLASSES = set(_EXCLUDED_FROM_SOLVE_RATE)
 
@@ -230,6 +231,8 @@ def effective_tokens(row):
     scalar contributes. Large ``tokens_proxy_cache_read`` never inflates the
     fresh total.
     """
+    if not usage_evidence.ranking_eligible(row):
+        return None, None
     if is_nonnegative_number(row.get("tokens")):
         return float(row["tokens"]), TOKEN_BASIS_SELF
     if row.get("token_basis_proxy") == "proxy_measured":
@@ -243,6 +246,9 @@ def effective_tokens(row):
 
 def display_token_basis(row):
     """Normalize a row's token accounting into a badge label, or None."""
+    evidence_label = usage_evidence.display_label(row)
+    if evidence_label is not None:
+        return evidence_label
     _value, basis = effective_tokens(row)
     if basis is not None:
         return basis
@@ -259,6 +265,8 @@ def display_token_basis(row):
 
 
 def total_tokens(row):
+    if not usage_evidence.ranking_eligible(row):
+        return None
     if is_nonnegative_number(row.get("tokens_total")):
         return row.get("tokens_total")
     value, _basis = effective_tokens(row)
@@ -266,6 +274,8 @@ def total_tokens(row):
 
 
 def input_tokens(row):
+    if not usage_evidence.ranking_eligible(row):
+        return None
     if is_nonnegative_number(row.get("tokens_input")):
         return row.get("tokens_input")
     if is_nonnegative_number(row.get("tokens_input_uncached")):
@@ -278,6 +288,8 @@ def input_tokens(row):
 
 
 def output_tokens(row):
+    if not usage_evidence.ranking_eligible(row):
+        return None
     if is_nonnegative_number(row.get("tokens_output")):
         return row.get("tokens_output")
     if row.get("token_basis_proxy") == "proxy_measured":
