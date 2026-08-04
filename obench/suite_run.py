@@ -35,6 +35,10 @@ from .harbor_job import (
     RetryPolicy,
     build_command_plan,
     build_job_config,
+    canonical_agent_config_sha256,
+    canonical_comparison_plan_bytes,
+    comparison_plan_path_for_config,
+    write_comparison_plan,
     write_job_config,
 )
 from .harbor_oauth import HarborOAuthCredential, HarborOAuthError
@@ -57,10 +61,12 @@ from .profile_spec import (
     compile_profile,
     load_profile_registry,
 )
+from .run import ROW_FIELDS, results_file_lock
 from .suite import Arm, Suite, SuiteError, TaskSet, load_suite
 
 
 MANIFEST_SCHEMA_VERSION = 1
+RUN_MANIFEST_SCHEMA_VERSION = "openbench-suite-run-v1"
 _ENV_TEMPLATE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}\Z")
 _SEMVER_RE = re.compile(
     r"v?[0-9]+\.[0-9]+\.[0-9]+"
@@ -70,6 +76,7 @@ _SEMVER_RE = re.compile(
 
 ProcessRunner = Callable[..., Any]
 PostRunHook = Callable[[tuple["SuiteRunArtifact", ...]], None]
+JobImporter = Callable[..., list[dict[str, Any]]]
 
 
 class SuiteRunError(RuntimeError):
@@ -119,6 +126,9 @@ class SuiteRunArtifact:
     returncode: int
     config_path: Path
     config_sha256: str
+    comparison_plan_path: Path
+    comparison_plan_sha256: str
+    harbor_job_name: str
     harbor_job_path: Path
     resumed: bool
 
@@ -127,6 +137,11 @@ class SuiteRunArtifact:
 class SuiteRunResult:
     manifest_path: Path
     manifest_sha256: str
+    run_manifest_path: Path | None
+    local_record_path: Path | None
+    results_path: Path | None
+    results_sha256: str | None
+    result_count: int
     artifacts: tuple[SuiteRunArtifact, ...]
 
     @property
@@ -176,6 +191,15 @@ def compile_suite(
 
     suite, config = discover_suite(path, start=start)
     _validate_harbor_pin(suite)
+    if (
+        suite.publication.scope == "public"
+        and suite.publication.completeness != "complete"
+    ):
+        raise SuiteRunError(
+            "public suites must declare publication.completeness = 'complete'"
+        )
+    if suite.publication.scope == "public" and _suite_is_smoke(suite):
+        raise SuiteRunError("smoke suites cannot declare public publication scope")
     registry = load_profile_registry(suite.project_root)
 
     compiled_arms: list[CompiledArm] = []
@@ -305,8 +329,10 @@ def run_suite(
     which: Callable[[str], str | None] = shutil.which,
     preflight: Callable[..., HarborBinary] = preflight_harbor_binary,
     post_run_hook: PostRunHook | None = None,
+    import_job: JobImporter | None = None,
+    finalize: bool = False,
 ) -> SuiteRunResult:
-    """Execute planned jobs while Harbor owns scheduling, retry, and resume."""
+    """Execute Harbor jobs and atomically seal one canonical suite result."""
 
     jobs = plan_jobs(compiled)
     custom_env = _validate_custom_environment(compiled)
@@ -346,6 +372,13 @@ def run_suite(
         for job_index, job in enumerate(jobs):
             config_path = configs_dir / f"{job.task_set_id}.json"
             written = write_job_config(job.artifact, config_path)
+            comparison_plan = job.artifact.comparison_plan
+            if comparison_plan is None:
+                raise SuiteRunError(
+                    f"suite job {job.task_set_id!r} lacks a comparison plan"
+                )
+            comparison_plan_path = comparison_plan_path_for_config(written)
+            write_comparison_plan(comparison_plan, comparison_plan_path)
             command = build_command_plan(
                 job.artifact,
                 written,
@@ -367,6 +400,9 @@ def run_suite(
                     returncode=int(completed.returncode),
                     config_path=written,
                     config_sha256=job.artifact.sha256,
+                    comparison_plan_path=comparison_plan_path,
+                    comparison_plan_sha256=comparison_plan.sha256,
+                    harbor_job_name=job.artifact.job_name,
                     harbor_job_path=command.expected_job_path,
                     resumed=command.resumes_existing_job,
                 )
@@ -383,14 +419,515 @@ def run_suite(
             if job_index < len(jobs) - 1:
                 _promote_oauth_returns_to_inputs(oauth_credentials)
 
-    result = SuiteRunResult(
-        manifest_path=manifest_path,
-        manifest_sha256=compiled.manifest_sha256,
-        artifacts=tuple(artifacts),
-    )
     if post_run_hook is not None:
-        post_run_hook(result.artifacts)
-    return result
+        post_run_hook(tuple(artifacts))
+    if not finalize:
+        return SuiteRunResult(
+            manifest_path=manifest_path,
+            manifest_sha256=compiled.manifest_sha256,
+            run_manifest_path=None,
+            local_record_path=None,
+            results_path=None,
+            results_sha256=None,
+            result_count=0,
+            artifacts=tuple(artifacts),
+        )
+    if len(artifacts) != len(jobs) or any(item.returncode for item in artifacts):
+        raise SuiteRunError("not every intended Harbor job completed successfully")
+
+    if import_job is None:
+        from .harbor_results import load_rows
+
+        import_job = load_rows
+    rows: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        try:
+            imported = import_job(
+                artifact.harbor_job_path,
+                comparison_plan_path=artifact.comparison_plan_path,
+            )
+        except Exception as exc:
+            raise SuiteRunError(
+                f"cannot import Harbor job for task set {artifact.task_set_id!r}: {exc}"
+            ) from exc
+        rows.extend(
+            _bind_suite_provenance(compiled, artifact.task_set_id, imported)
+        )
+    _validate_suite_rows(compiled, jobs, rows)
+    return _seal_suite_run(compiled, tuple(artifacts), rows, manifest_path)
+
+
+def _bind_suite_provenance(
+    compiled: CompiledSuite,
+    task_set_id: str,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    bound: list[dict[str, Any]] = []
+    for row in rows:
+        provenance = row.get("candidate_provenance")
+        if not isinstance(provenance, dict):
+            raise SuiteRunError("suite import produced a row without Harbor provenance")
+        if any(key.startswith("suite_") for key in provenance):
+            raise SuiteRunError("suite import produced pre-existing suite provenance")
+        copied = dict(row)
+        copied["candidate_provenance"] = {
+            **provenance,
+            "suite_manifest_schema_version": MANIFEST_SCHEMA_VERSION,
+            "suite_manifest_sha256": compiled.manifest_sha256,
+            "suite_manifest": json.loads(compiled.manifest_bytes),
+            "suite_task_set_id": task_set_id,
+            "suite_publication_scope": compiled.suite.publication.scope,
+            "suite_completeness": compiled.suite.publication.completeness,
+        }
+        bound.append(copied)
+    return bound
+
+
+def _validate_suite_rows(
+    compiled: CompiledSuite,
+    jobs: tuple[PlannedJob, ...],
+    rows: list[dict[str, Any]],
+) -> None:
+    from . import stats
+
+    try:
+        stats.validate_suite_rows(rows)
+    except ValueError as exc:
+        raise SuiteRunError(str(exc)) from exc
+
+    planned = {job.task_set_id: job for job in jobs}
+    coordinates: set[tuple[str, str, str, int]] = set()
+    counts: dict[str, int] = {}
+    for row in rows:
+        provenance = row["candidate_provenance"]
+        task_set_id = provenance["suite_task_set_id"]
+        job = planned.get(task_set_id)
+        if job is None:
+            raise SuiteRunError(f"unexpected imported task set {task_set_id!r}")
+        plan = job.artifact.comparison_plan
+        assert plan is not None
+        if (
+            provenance.get("comparison_plan_sha256") != plan.sha256
+            or provenance.get("comparison_plan") != plan.as_dict()
+        ):
+            raise SuiteRunError(
+                f"task set {task_set_id!r} does not preserve its exact comparison plan"
+            )
+        block = provenance["comparison_block"]
+        coordinate = (
+            task_set_id,
+            provenance["comparison_arm_id"],
+            block["task"],
+            block["index"],
+        )
+        if coordinate in coordinates:
+            raise SuiteRunError(f"duplicate suite cell: {coordinate!r}")
+        coordinates.add(coordinate)
+        counts[task_set_id] = counts.get(task_set_id, 0) + 1
+
+        complete = row.get("completed") is True
+        if compiled.suite.evidence.trajectory and complete:
+            _require_digest(provenance.get("atif_sha256"), "ATIF", coordinate)
+        if compiled.suite.evidence.verifier and complete:
+            _require_digest(
+                provenance.get("openbench_verifier_evidence_sha256"),
+                "verifier",
+                coordinate,
+            )
+        if compiled.suite.evidence.usage and complete:
+            _require_usage_evidence(row, coordinate)
+
+    if set(counts) != set(planned):
+        missing = sorted(set(planned) - set(counts))
+        raise SuiteRunError(f"suite imports are missing task sets: {missing}")
+    for task_set_id, job in planned.items():
+        plan = job.artifact.comparison_plan
+        assert plan is not None
+        task_names = {
+            row["task"]
+            for row in rows
+            if row["candidate_provenance"]["suite_task_set_id"] == task_set_id
+        }
+        expected = (
+            len(task_names)
+            * len(plan.as_dict()["arms"])
+            * compiled.suite.run.attempts
+        )
+        if counts[task_set_id] != expected:
+            raise SuiteRunError(
+                f"task set {task_set_id!r} is incomplete: expected {expected} "
+                f"cells, imported {counts[task_set_id]}"
+            )
+    if (
+        compiled.suite.publication.completeness == "complete"
+        and any(row.get("completed") is not True for row in rows)
+    ):
+        raise SuiteRunError(
+            "suite declares completeness=complete but has terminal failure cells"
+        )
+
+
+def _require_digest(value: Any, label: str, coordinate: tuple[Any, ...]) -> None:
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"[0-9a-f]{64}", value) is None
+    ):
+        raise SuiteRunError(
+            f"suite cell {coordinate!r} lacks validated {label} evidence"
+        )
+
+
+def _require_usage_evidence(
+    row: dict[str, Any],
+    coordinate: tuple[Any, ...],
+) -> None:
+    from .usage_evidence import (
+        GRADE_HARBOR_REPORTED,
+        GRADE_PROXY_MISMATCH,
+        GRADE_PROXY_VERIFIED,
+    )
+    from .harbor_results import HARBOR_PROXY_REQUIRED_AGENTS
+
+    provenance = row["candidate_provenance"]
+    metering = provenance.get("harbor_metering")
+    proxy_required = provenance.get(
+        "harbor_agent_config_name"
+    ) in HARBOR_PROXY_REQUIRED_AGENTS
+    metering_valid = (
+        isinstance(metering, dict)
+        and metering.get("proxy_required") is True
+    )
+    grade = row.get("usage_evidence_grade")
+    if proxy_required:
+        status = metering.get("reconciliation_status") if metering_valid else None
+        valid = (
+            metering_valid
+            and (
+                (status == "exact" and grade == GRADE_PROXY_VERIFIED)
+                or (status == "mismatch" and grade == GRADE_PROXY_MISMATCH)
+            )
+        )
+    else:
+        valid = (
+            row.get("token_basis") == "harbor_agent_reported"
+            and grade == GRADE_HARBOR_REPORTED
+        )
+    if not valid:
+        raise SuiteRunError(
+            f"suite cell {coordinate!r} lacks structurally valid usage evidence"
+        )
+
+
+def _seal_suite_run(
+    compiled: CompiledSuite,
+    artifacts: tuple[SuiteRunArtifact, ...],
+    rows: list[dict[str, Any]],
+    semantic_manifest_path: Path,
+) -> SuiteRunResult:
+    results_dir = Path(compiled.config.results_dir or "")
+    run_dir = results_dir / "suite-runs"
+    results_path = run_dir / f"{compiled.manifest_sha256}.results.jsonl"
+    run_manifest_path = run_dir / f"{compiled.manifest_sha256}.run.json"
+    local_record_path = run_dir / f"{compiled.manifest_sha256}.local.json"
+    payload = _results_jsonl(rows)
+    results_sha256 = hashlib.sha256(payload).hexdigest()
+    run_manifest = {
+        "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
+        "suite_manifest_sha256": compiled.manifest_sha256,
+        "suite_manifest": json.loads(compiled.manifest_bytes),
+        "jobs": [
+            {
+                "task_set_id": item.task_set_id,
+                "config": {
+                    "sha256": item.config_sha256,
+                    "path": _relative_artifact(
+                        item.config_path, compiled.suite.project_root
+                    ),
+                },
+                "comparison_plan": {
+                    "sha256": item.comparison_plan_sha256,
+                    "path": _relative_artifact(
+                        item.comparison_plan_path, compiled.suite.project_root
+                    ),
+                    "body": json.loads(
+                        item.comparison_plan_path.read_text(encoding="utf-8")
+                    ),
+                },
+                "harbor_job": {"name": item.harbor_job_name},
+            }
+            for item in artifacts
+        ],
+        "results": {
+            "sha256": results_sha256,
+            "count": len(rows),
+            "path": _relative_artifact(results_path, compiled.suite.project_root),
+        },
+        "publication": {
+            "scope": compiled.suite.publication.scope,
+            "completeness": compiled.suite.publication.completeness,
+        },
+    }
+    _assert_semantic_manifest_safe(run_manifest, path="run_manifest")
+    run_manifest_bytes = _canonical_json(run_manifest, indent=2)
+    local_record = {
+        "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
+        "suite_manifest_sha256": compiled.manifest_sha256,
+        "semantic_manifest_path": str(semantic_manifest_path),
+        "run_manifest_path": str(run_manifest_path),
+        "results_path": str(results_path),
+        "jobs": [
+            {
+                "task_set_id": item.task_set_id,
+                "config_path": str(item.config_path),
+                "comparison_plan_path": str(item.comparison_plan_path),
+                "harbor_job_path": str(item.harbor_job_path),
+            }
+            for item in artifacts
+        ],
+    }
+    _write_immutable(local_record_path, _canonical_json(local_record, indent=2))
+    _write_suite_outputs(
+        results_path,
+        payload,
+        run_manifest_path,
+        run_manifest_bytes,
+    )
+    return SuiteRunResult(
+        manifest_path=semantic_manifest_path,
+        manifest_sha256=compiled.manifest_sha256,
+        run_manifest_path=run_manifest_path,
+        local_record_path=local_record_path,
+        results_path=results_path,
+        results_sha256=results_sha256,
+        result_count=len(rows),
+        artifacts=artifacts,
+    )
+
+
+def _results_jsonl(rows: list[dict[str, Any]]) -> bytes:
+    return "".join(
+        json.dumps(
+            {key: row.get(key) for key in ROW_FIELDS},
+            sort_keys=False,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        + "\n"
+        for row in rows
+    ).encode("utf-8")
+
+
+def _write_suite_outputs(
+    results_path: Path,
+    results_bytes: bytes,
+    run_manifest_path: Path,
+    run_manifest_bytes: bytes,
+) -> None:
+    with results_file_lock(results_path):
+        results_exists = results_path.exists() or results_path.is_symlink()
+        manifest_exists = (
+            run_manifest_path.exists() or run_manifest_path.is_symlink()
+        )
+        if results_exists != manifest_exists:
+            raise SuiteRunError(
+                "divergent existing suite output: results and run manifest "
+                "must either both exist or both be absent"
+            )
+        if results_exists:
+            if (
+                results_path.is_symlink()
+                or run_manifest_path.is_symlink()
+                or not results_path.is_file()
+                or not run_manifest_path.is_file()
+                or results_path.read_bytes() != results_bytes
+                or run_manifest_path.read_bytes() != run_manifest_bytes
+            ):
+                raise SuiteRunError("divergent existing suite output")
+            return
+        _write_immutable(results_path, results_bytes)
+        try:
+            _write_immutable(run_manifest_path, run_manifest_bytes)
+        except Exception:
+            results_path.unlink(missing_ok=True)
+            raise
+
+
+def verify_suite_run(
+    run_manifest_path: str | os.PathLike[str],
+) -> dict[str, Any]:
+    """Verify a sealed suite run, including local config and plan artifacts."""
+
+    requested = Path(run_manifest_path).expanduser()
+    if requested.is_symlink():
+        raise SuiteRunError("run manifest must not be a symlink")
+    path = requested.resolve()
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SuiteRunError(f"cannot read suite run manifest: {exc}") from exc
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest)
+        != {
+            "schema_version",
+            "suite_manifest_sha256",
+            "suite_manifest",
+            "jobs",
+            "results",
+            "publication",
+        }
+        or manifest.get("schema_version") != RUN_MANIFEST_SCHEMA_VERSION
+        or path.read_bytes() != _canonical_json(manifest, indent=2)
+    ):
+        raise SuiteRunError("suite run manifest is not canonical")
+    root = next(
+        (
+            parent
+            for parent in path.parents
+            if (parent / ".openbench").is_dir()
+        ),
+        None,
+    )
+    if root is None:
+        raise SuiteRunError("cannot resolve project root for suite run manifest")
+    _assert_semantic_manifest_safe(manifest, path="run_manifest")
+
+    results = manifest.get("results")
+    if not isinstance(results, dict) or set(results) != {
+        "sha256",
+        "count",
+        "path",
+    }:
+        raise SuiteRunError("suite run manifest has invalid results binding")
+    results_path = _bound_local_artifact(root, results["path"], "suite results")
+    results_bytes = results_path.read_bytes()
+    if (
+        hashlib.sha256(results_bytes).hexdigest() != results.get("sha256")
+        or not isinstance(results.get("count"), int)
+        or isinstance(results.get("count"), bool)
+        or results["count"] < 1
+    ):
+        raise SuiteRunError("suite results hash or count binding does not match")
+    from . import stats
+
+    rows = stats.load_rows([results_path])
+    if len(rows) != results["count"]:
+        raise SuiteRunError("suite results count does not match manifest")
+    try:
+        embedded = stats.validate_suite_rows(rows)
+    except ValueError as exc:
+        raise SuiteRunError(str(exc)) from exc
+    if (
+        embedded != manifest.get("suite_manifest")
+        or hashlib.sha256(_canonical_json(embedded)).hexdigest()
+        != manifest.get("suite_manifest_sha256")
+        or manifest.get("publication") != embedded.get("publication")
+    ):
+        raise SuiteRunError("suite run manifest semantic binding does not match rows")
+
+    jobs = manifest.get("jobs")
+    if not isinstance(jobs, list) or len(jobs) != len(embedded["task_sets"]):
+        raise SuiteRunError("suite run manifest has invalid job bindings")
+    seen_task_sets = set()
+    for job in jobs:
+        if (
+            not isinstance(job, dict)
+            or set(job)
+            != {
+                "task_set_id",
+                "config",
+                "comparison_plan",
+                "harbor_job",
+            }
+        ):
+            raise SuiteRunError("suite run manifest has invalid job binding")
+        task_set_id = job.get("task_set_id")
+        if task_set_id in seen_task_sets:
+            raise SuiteRunError("suite run manifest repeats a task set")
+        seen_task_sets.add(task_set_id)
+        config = job.get("config")
+        plan_binding = job.get("comparison_plan")
+        harbor_job = job.get("harbor_job")
+        if (
+            not isinstance(config, dict)
+            or set(config) != {"sha256", "path"}
+            or not isinstance(plan_binding, dict)
+            or set(plan_binding) != {"sha256", "path", "body"}
+            or not isinstance(harbor_job, dict)
+            or set(harbor_job) != {"name"}
+        ):
+            raise SuiteRunError("suite run manifest has invalid artifact binding")
+        config_path = _bound_local_artifact(root, config["path"], "Harbor config")
+        plan_path = _bound_local_artifact(
+            root, plan_binding["path"], "comparison plan"
+        )
+        config_bytes = config_path.read_bytes()
+        plan_bytes = plan_path.read_bytes()
+        plan_body = plan_binding["body"]
+        if (
+            hashlib.sha256(config_bytes).hexdigest() != config.get("sha256")
+            or hashlib.sha256(plan_bytes).hexdigest()
+            != plan_binding.get("sha256")
+            or not isinstance(plan_body, dict)
+            or plan_bytes != canonical_comparison_plan_bytes(plan_body)
+            or plan_body.get("job_config_sha256") != config.get("sha256")
+            or plan_body.get("job_name") != harbor_job.get("name")
+        ):
+            raise SuiteRunError("suite run config or comparison-plan binding differs")
+        selected = [
+            row
+            for row in rows
+            if row["candidate_provenance"]["suite_task_set_id"] == task_set_id
+        ]
+        if (
+            not selected
+            or {
+                row["candidate_provenance"]["comparison_plan_sha256"]
+                for row in selected
+            }
+            != {plan_binding["sha256"]}
+        ):
+            raise SuiteRunError("suite run rows do not match a declared job plan")
+    if seen_task_sets != {
+        item["id"] for item in embedded["task_sets"]
+    }:
+        raise SuiteRunError("suite run jobs do not cover every task set")
+    return {
+        "run_manifest_path": path,
+        "results_path": results_path,
+        "suite_manifest_sha256": manifest["suite_manifest_sha256"],
+        "results_sha256": results["sha256"],
+        "result_count": results["count"],
+        "scope": manifest["publication"]["scope"],
+        "completeness": manifest["publication"]["completeness"],
+    }
+
+
+def _bound_local_artifact(root: Path, value: Any, label: str) -> Path:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value.startswith(("/", "~/"))
+        or ".." in Path(value).parts
+    ):
+        raise SuiteRunError(f"{label} path identity is invalid")
+    path = root / value
+    current = root
+    for part in Path(value).parts:
+        current = current / part
+        if current.is_symlink():
+            raise SuiteRunError(f"{label} path is missing or unsafe")
+    if not path.is_file():
+        raise SuiteRunError(f"{label} path is missing or unsafe")
+    return path
+
+
+def _suite_is_smoke(suite: Suite) -> bool:
+    values = [suite.id, suite.title]
+    values.extend(item.id for item in suite.task_sets)
+    values.extend(item.name or "" for item in suite.task_sets)
+    return any("smoke" in value.lower() for value in values)
 
 
 def _validate_harbor_pin(suite: Suite) -> None:
@@ -593,9 +1130,7 @@ def _semantic_arm(
             "version": item.profile.version,
         }
     rendered_agent = _render_agent_config(item, timeout_seconds)
-    agent_config_sha256 = hashlib.sha256(
-        _canonical_json(rendered_agent)
-    ).hexdigest()
+    agent_config_sha256 = canonical_agent_config_sha256(rendered_agent)
     return {
         "id": item.arm.id,
         "harness": item.arm.harness,
@@ -1136,7 +1671,9 @@ def _canonical_json(value: Any, *, indent: int | None = None) -> bytes:
 
 def _relative_artifact(path: Path, root: Path) -> str:
     try:
-        return path.relative_to(root).as_posix()
+        return path.resolve(strict=False).relative_to(
+            root.resolve(strict=False)
+        ).as_posix()
     except ValueError:
         return "<outside-project>"
 
@@ -1157,9 +1694,29 @@ def main(argv: list[str] | None = None) -> int:
         default="harbor",
         help="Harbor executable name or path (default: harbor)",
     )
+    parser.add_argument(
+        "--verify-run-manifest",
+        metavar="PATH",
+        help="verify a sealed local suite run without executing Harbor",
+    )
     args = parser.parse_args(argv)
 
     try:
+        if args.verify_run_manifest:
+            if args.suite or args.plan:
+                parser.error(
+                    "--verify-run-manifest cannot be combined with a suite or --plan"
+                )
+            verified = verify_suite_run(args.verify_run_manifest)
+            print(
+                "verified suite run: "
+                f"rows={verified['result_count']} "
+                f"scope={verified['scope']} "
+                f"completeness={verified['completeness']}"
+            )
+            print(f"results: {verified['results_path']}")
+            print(f"run manifest: {verified['run_manifest_path']}")
+            return 0
         compiled = compile_suite(args.suite)
         if args.plan:
             plan_jobs(compiled)
@@ -1169,7 +1726,11 @@ def main(argv: list[str] | None = None) -> int:
             }
             sys.stdout.write(_canonical_json(output, indent=2).decode("utf-8"))
             return 0
-        result = run_suite(compiled, harbor_binary=args.harbor_binary)
+        result = run_suite(
+            compiled,
+            harbor_binary=args.harbor_binary,
+            finalize=True,
+        )
     except (
         OSError,
         ProfileSpecError,
@@ -1183,13 +1744,16 @@ def main(argv: list[str] | None = None) -> int:
 
     root = compiled.suite.project_root
     print(f"suite manifest: {result.manifest_sha256}")
-    print(f"manifest artifact: {_relative_artifact(result.manifest_path, root)}")
+    print(f"semantic manifest: {_relative_artifact(result.manifest_path, root)}")
     for artifact in result.artifacts:
         print(
             f"{artifact.task_set_id}: harbor exit={artifact.returncode} "
             f"config={_relative_artifact(artifact.config_path, root)} "
             f"job={_relative_artifact(artifact.harbor_job_path, root)}"
         )
+    print(f"results: {_relative_artifact(result.results_path, root)}")
+    print(f"run manifest: {_relative_artifact(result.run_manifest_path, root)}")
+    print(f"local record: {_relative_artifact(result.local_record_path, root)}")
     return result.returncode
 
 

@@ -473,6 +473,323 @@ def _comparison_plan_arm(row):
     return arm
 
 
+def _canonical_suite_manifest_bytes(value):
+    return (
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def validate_suite_rows(rows, *, for_publication=False):
+    """Validate canonical suite bindings and the declared complete matrix."""
+
+    rows = list(rows)
+    suite_rows = [
+        row
+        for row in rows
+        if isinstance(row.get("candidate_provenance"), dict)
+        and any(
+            key.startswith("suite_")
+            for key in row["candidate_provenance"]
+        )
+    ]
+    if not suite_rows:
+        return None
+    if len(suite_rows) != len(rows):
+        raise ValueError("suite results cannot mix suite-bound and unbound rows")
+
+    manifests = {}
+    task_set_plans = defaultdict(set)
+    coordinates = set()
+    rows_by_task_set = defaultdict(list)
+    for row in suite_rows:
+        provenance = row["candidate_provenance"]
+        manifest = provenance.get("suite_manifest")
+        digest = provenance.get("suite_manifest_sha256")
+        if (
+            provenance.get("suite_manifest_schema_version") != 1
+            or not isinstance(manifest, dict)
+            or manifest.get("schema_version") != 1
+            or not isinstance(digest, str)
+            or hashlib.sha256(_canonical_suite_manifest_bytes(manifest)).hexdigest()
+            != digest
+        ):
+            raise ValueError("suite row has a non-canonical embedded manifest")
+        _validate_suite_manifest_shape(manifest, digest)
+        manifests[digest] = manifest
+        publication = manifest.get("publication")
+        if (
+            not isinstance(publication, dict)
+            or set(publication) != {"scope", "completeness"}
+            or provenance.get("suite_publication_scope")
+            != publication.get("scope")
+            or provenance.get("suite_completeness")
+            != publication.get("completeness")
+        ):
+            raise ValueError("suite row publication policy does not match manifest")
+        task_set_id = provenance.get("suite_task_set_id")
+        task_sets = manifest.get("task_sets")
+        if (
+            not isinstance(task_set_id, str)
+            or not isinstance(task_sets, list)
+            or sum(
+                isinstance(item, dict) and item.get("id") == task_set_id
+                for item in task_sets
+            )
+            != 1
+        ):
+            raise ValueError("suite row task-set binding does not match manifest")
+        arm = _comparison_plan_arm(row)
+        manifest_arms = manifest.get("arms")
+        matching_manifest_arms = [
+            item
+            for item in manifest_arms
+            if isinstance(item, dict)
+            and item.get("id") == arm["arm_id"]
+            and item.get("harness") == arm["canonical_harness"]
+            and item.get("canonical_model") == arm["canonical_model"]
+            and item.get("agent_config_sha256")
+            == arm["agent_config_sha256"]
+        ] if isinstance(manifest_arms, list) else []
+        if len(matching_manifest_arms) != 1:
+            raise ValueError("suite row plan arm does not match suite manifest")
+        run = manifest.get("run")
+        plan = provenance["comparison_plan"]
+        if (
+            not isinstance(run, dict)
+            or plan.get("attempts") != run.get("attempts")
+            or plan.get("job_name")
+            != (
+                f"{manifest['suite']['id']}-{task_set_id}-"
+                f"{digest[:12]}"
+            )
+        ):
+            raise ValueError("suite row plan does not match suite manifest job")
+        plan_sha256 = provenance["comparison_plan_sha256"]
+        task_set_plans[task_set_id].add(plan_sha256)
+        block = provenance.get("comparison_block")
+        coordinate = (
+            task_set_id,
+            plan_sha256,
+            arm["arm_id"],
+            block.get("task") if isinstance(block, dict) else None,
+            block.get("index") if isinstance(block, dict) else None,
+        )
+        if coordinate in coordinates:
+            raise ValueError("suite results contain a duplicate bound cell")
+        coordinates.add(coordinate)
+        rows_by_task_set[task_set_id].append(row)
+
+    if len(manifests) != 1:
+        raise ValueError(
+            "multi-plan suite comparison requires one canonical suite manifest"
+        )
+    manifest = next(iter(manifests.values()))
+    declared_task_sets = {
+        item["id"] for item in manifest["task_sets"] if isinstance(item, dict)
+    }
+    if set(rows_by_task_set) != declared_task_sets:
+        raise ValueError("suite results do not cover every declared task set")
+    if any(len(digests) != 1 for digests in task_set_plans.values()):
+        raise ValueError("each suite task set must bind exactly one comparison plan")
+
+    arm_count = len(manifest["arms"])
+    attempts = manifest["run"]["attempts"]
+    for task_set_id, selected in rows_by_task_set.items():
+        tasks = {row["task"] for row in selected}
+        expected = len(tasks) * arm_count * attempts
+        if len(selected) != expected:
+            raise ValueError(
+                f"suite task set {task_set_id!r} has an incomplete denominator"
+            )
+
+    publication = manifest["publication"]
+    complete = publication["completeness"] == "complete"
+    if complete and any(row.get("completed") is not True for row in suite_rows):
+        raise ValueError("complete suite contains terminal failure cells")
+    evidence = manifest.get("evidence")
+    if not isinstance(evidence, dict):
+        raise ValueError("suite manifest has invalid evidence policy")
+    for row in suite_rows:
+        if row.get("completed") is not True:
+            continue
+        provenance = row["candidate_provenance"]
+        if evidence.get("trajectory") and not _sha256_hex(
+            provenance.get("atif_sha256")
+        ):
+            raise ValueError("suite row lacks required ATIF evidence")
+        if evidence.get("verifier") and not _sha256_hex(
+            provenance.get("openbench_verifier_evidence_sha256")
+        ):
+            raise ValueError("suite row lacks required verifier evidence")
+        if evidence.get("usage") and row.get("usage_evidence_grade") not in {
+            usage_evidence.GRADE_HARBOR_REPORTED,
+            usage_evidence.GRADE_PROXY_VERIFIED,
+            usage_evidence.GRADE_PROXY_MISMATCH,
+        }:
+            raise ValueError("suite row lacks required usage evidence")
+        if evidence.get("usage"):
+            from .harbor_results import HARBOR_PROXY_REQUIRED_AGENTS
+
+            proxy_required = provenance.get(
+                "harbor_agent_config_name"
+            ) in HARBOR_PROXY_REQUIRED_AGENTS
+            metering = provenance.get("harbor_metering")
+            if proxy_required and (
+                not isinstance(metering, dict)
+                or metering.get("proxy_required") is not True
+                or metering.get("reconciliation_status")
+                not in {"exact", "mismatch"}
+            ):
+                raise ValueError(
+                    "suite row lacks required proxy usage reconciliation"
+                )
+    if for_publication:
+        if publication["scope"] != "public":
+            raise ValueError("local_only suite results cannot be published")
+        if not complete:
+            raise ValueError("public suite results must be complete")
+        smoke_values = [
+            manifest["suite"]["id"],
+            manifest["suite"]["title"],
+            *(
+                str(item.get("id") or "")
+                for item in manifest["task_sets"]
+            ),
+            *(
+                str(item.get("name") or "")
+                for item in manifest["task_sets"]
+            ),
+        ]
+        if any("smoke" in value.lower() for value in smoke_values):
+            raise ValueError("smoke suite results cannot be published")
+    return manifest
+
+
+def _validate_suite_manifest_shape(manifest, digest):
+    expected_fields = {
+        "schema_version",
+        "suite",
+        "harbor",
+        "task_sets",
+        "arms",
+        "run",
+        "evidence",
+        "publication",
+        "jobs",
+    }
+    if set(manifest) != expected_fields:
+        raise ValueError("suite manifest has unexpected or missing fields")
+    if (
+        not isinstance(manifest.get("suite"), dict)
+        or set(manifest["suite"]) != {"id", "title"}
+        or not all(
+            isinstance(manifest["suite"].get(key), str)
+            and manifest["suite"][key]
+            for key in ("id", "title")
+        )
+        or not isinstance(manifest.get("task_sets"), list)
+        or not manifest["task_sets"]
+        or not isinstance(manifest.get("arms"), list)
+        or not manifest["arms"]
+        or not isinstance(manifest.get("jobs"), list)
+    ):
+        raise ValueError("suite manifest structure is invalid")
+    task_set_ids = [
+        item.get("id") for item in manifest["task_sets"]
+        if isinstance(item, dict)
+    ]
+    arm_ids = [
+        item.get("id") for item in manifest["arms"]
+        if isinstance(item, dict)
+    ]
+    if (
+        len(task_set_ids) != len(manifest["task_sets"])
+        or len(task_set_ids) != len(set(task_set_ids))
+        or any(not isinstance(value, str) or not value for value in task_set_ids)
+        or len(arm_ids) != len(manifest["arms"])
+        or len(arm_ids) != len(set(arm_ids))
+        or any(not isinstance(value, str) or not value for value in arm_ids)
+    ):
+        raise ValueError("suite manifest identities are invalid")
+    jobs_by_task_set = {}
+    for job in manifest["jobs"]:
+        if (
+            not isinstance(job, dict)
+            or set(job)
+            != {
+                "task_set_id",
+                "arm_ids",
+                "attempts",
+                "concurrency",
+                "max_retries",
+                "timeout_seconds",
+                "semantic_sha256",
+            }
+        ):
+            raise ValueError("suite manifest job is invalid")
+        semantic = {
+            key: job[key]
+            for key in (
+                "task_set_id",
+                "arm_ids",
+                "attempts",
+                "concurrency",
+                "max_retries",
+                "timeout_seconds",
+            )
+        }
+        semantic_sha256 = hashlib.sha256(
+            _canonical_suite_manifest_bytes(semantic)
+        ).hexdigest()
+        if (
+            job["task_set_id"] in jobs_by_task_set
+            or job["task_set_id"] not in task_set_ids
+            or job["arm_ids"] != arm_ids
+            or job["semantic_sha256"] != semantic_sha256
+        ):
+            raise ValueError("suite manifest job binding is invalid")
+        jobs_by_task_set[job["task_set_id"]] = job
+    if set(jobs_by_task_set) != set(task_set_ids):
+        raise ValueError("suite manifest jobs do not cover every task set")
+    _reject_public_manifest_paths(manifest)
+    if hashlib.sha256(_canonical_suite_manifest_bytes(manifest)).hexdigest() != digest:
+        raise ValueError("suite manifest digest does not match canonical body")
+
+
+def _reject_public_manifest_paths(value):
+    if isinstance(value, dict):
+        for child in value.values():
+            _reject_public_manifest_paths(child)
+    elif isinstance(value, list):
+        for child in value:
+            _reject_public_manifest_paths(child)
+    elif isinstance(value, str) and (
+        value.startswith(("/", "~/"))
+        or (
+            len(value) >= 3
+            and value[0].isalpha()
+            and value[1] == ":"
+            and value[2] in "\\/"
+        )
+    ):
+        raise ValueError("suite manifest contains a local absolute path")
+
+
+def _sha256_hex(value):
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
 def comparison_cell_key(row, *, require_harbor_identity=True):
     """Return the supported matched-cell identity for one normalized row."""
 
@@ -525,6 +842,22 @@ def comparison_cell_key(row, *, require_harbor_identity=True):
             )
         return (row.get("task"), row.get("trial"))
     _comparison_plan_arm(row)
+    suite_manifest_sha256 = provenance.get("suite_manifest_sha256")
+    suite_task_set_id = provenance.get("suite_task_set_id")
+    if suite_manifest_sha256 is not None or suite_task_set_id is not None:
+        if not _sha256_hex(suite_manifest_sha256) or not isinstance(
+            suite_task_set_id, str
+        ) or not suite_task_set_id:
+            if require_harbor_identity:
+                raise ValueError("Harbor suite row has invalid suite identity")
+            return (row.get("task"), row.get("trial"))
+        return (
+            suite_manifest_sha256,
+            suite_task_set_id,
+            plan_sha256,
+            block["task"],
+            block["index"],
+        )
     return (plan_sha256, block["task"], block["index"])
 
 
@@ -540,18 +873,21 @@ def validate_matched_comparison_rows(rows):
             "matched comparison cannot mix Harbor comparison-plan identity "
             "with legacy non-Harbor task/trial identity"
         )
+    suite_manifest = validate_suite_rows(harbor_rows)
     keys = [comparison_cell_key(row) for row in harbor_rows]
     plan_sha256s = {key[0] for key in keys}
-    if len(plan_sha256s) != 1:
+    if suite_manifest is None and len(plan_sha256s) != 1:
         raise ValueError(
             "Harbor matched comparison requires one exact comparison-plan "
             "digest across every arm"
         )
-    resolved_task_sets = {
-        tuple(row["candidate_provenance"]["comparison_resolved_tasks"])
-        for row in harbor_rows
-    }
-    if len(resolved_task_sets) != 1:
+    resolved_task_sets = defaultdict(set)
+    for row in harbor_rows:
+        provenance = row["candidate_provenance"]
+        resolved_task_sets[provenance.get("suite_task_set_id")].add(
+            tuple(provenance["comparison_resolved_tasks"])
+        )
+    if any(len(values) != 1 for values in resolved_task_sets.values()):
         raise ValueError(
             "Harbor matched comparison requires one lock-resolved task set "
             "across every arm"
@@ -570,7 +906,11 @@ def validate_matched_comparison_rows(rows):
             "Harbor matched comparison arm changed rendered config or "
             "canonical labels"
         )
-    return "harbor_comparison_plan"
+    return (
+        "harbor_suite_manifest"
+        if suite_manifest is not None
+        else "harbor_comparison_plan"
+    )
 
 
 def matched_cell_key(row, fields):

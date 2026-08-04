@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
+import copy
 import hashlib
 import io
 import json
@@ -15,8 +16,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from obench import init, suite_run
+from obench import compare, init, stats, suite_run
 from obench.harbor_run import HarborBinary
+from obench.harbor_results import HARBOR_PROXY_REQUIRED_AGENTS
 from obench.suite_run import SuiteRunError
 
 
@@ -175,6 +177,106 @@ model = "gpt-5.6-terra"
             1,
         )
         self._write_suite(root, text)
+
+    def _simulated_rows(self, comparison_plan_path: Path):
+        plan = json.loads(comparison_plan_path.read_text(encoding="utf-8"))
+        plan_sha256 = hashlib.sha256(
+            comparison_plan_path.read_bytes()
+        ).hexdigest()
+        tasks = plan["tasks"] or [comparison_plan_path.stem.split(".", 1)[0]]
+        rows = []
+        for task in tasks:
+            for arm in plan["arms"]:
+                for attempt in range(1, plan["attempts"] + 1):
+                    proxy_required = (
+                        arm["agent_config_name"]
+                        in HARBOR_PROXY_REQUIRED_AGENTS
+                    )
+                    rows.append({
+                        "run_id": (
+                            f"{plan['job_name']}:{task}:{arm['arm_id']}:{attempt}"
+                        ),
+                        "ts_iso": "2026-08-04T12:00:00+00:00",
+                        "harness": arm["canonical_harness"],
+                        "model": arm["canonical_model"],
+                        "task": task,
+                        "trial": attempt,
+                        "success": True,
+                        "completed": True,
+                        "error": None,
+                        "exec_mode": "harbor",
+                        "score": 1.0,
+                        "token_basis": "harbor_agent_reported",
+                        "usage_evidence_grade": (
+                            "harbor_reported_proxy_verified"
+                            if proxy_required
+                            else "harbor_reported"
+                        ),
+                        "usage_ranking_eligible": True,
+                        "candidate_provenance": {
+                            "kind": "harbor_job",
+                            "comparison_plan_schema_version": plan["schema_version"],
+                            "comparison_plan_sha256": plan_sha256,
+                            "comparison_plan": plan,
+                            "comparison_arm_id": arm["arm_id"],
+                            "harbor_agent_config_name": arm[
+                                "agent_config_name"
+                            ],
+                            "agent_config_sha256": arm["agent_config_sha256"],
+                            "comparison_resolved_tasks": sorted(tasks),
+                            "comparison_block": {
+                                "task": task,
+                                "index": attempt,
+                            },
+                            "openbench_verifier_evidence_sha256": "a" * 64,
+                            "atif_sha256": "b" * 64,
+                            "harbor_metering": (
+                                {
+                                    "proxy_required": True,
+                                    "reconciliation_status": "exact",
+                                }
+                                if proxy_required
+                                else None
+                            ),
+                            "trial_mapping": "openbench_comparison_plan_v2",
+                            "temporal_matched_block_claim": False,
+                        },
+                    })
+        return rows
+
+    def _run_simulated(
+        self,
+        compiled,
+        *,
+        returncodes=None,
+        importer=None,
+    ):
+        codes = iter(returncodes or [0] * len(compiled.task_sets))
+
+        def process(argv, **kwargs):
+            return SimpleNamespace(returncode=next(codes))
+
+        harbor = HarborBinary(
+            path=Path("/fake/harbor"),
+            version="0.20.0",
+            git_commit=init.HARBOR_COMMIT,
+            is_editable=False,
+        )
+        with mock.patch(
+            "obench.suite_run._stage_stock_credentials",
+            return_value={},
+        ):
+            return suite_run.run_suite(
+                compiled,
+                run_process=process,
+                preflight=lambda *args, **kwargs: harbor,
+                import_job=importer or (
+                    lambda job_path, *, comparison_plan_path: (
+                        self._simulated_rows(Path(comparison_plan_path))
+                    )
+                ),
+                finalize=True,
+            )
 
     def test_fresh_init_loads_profile_default_suite_and_discovery(self):
         root = self._project()
@@ -489,10 +591,164 @@ model = "gpt-5.6-terra"
             ):
                 self.assertEqual(
                     manifest_arm["agent_config_sha256"],
-                    suite_run.hashlib.sha256(
-                        suite_run._canonical_json(config_agent)
-                    ).hexdigest(),
+                    suite_run.canonical_agent_config_sha256(config_agent),
                 )
+
+    def test_two_task_sets_two_arms_seal_one_results_file_and_compare(self):
+        root = self._project()
+        self._add_second_local_task_set(root)
+        self._add_second_stock_arm(root)
+        compiled = suite_run.compile_suite(start=root)
+
+        result = self._run_simulated(compiled)
+
+        self.assertEqual(result.result_count, 4)
+        self.assertTrue(result.results_path.is_file())
+        self.assertTrue(result.run_manifest_path.is_file())
+        self.assertTrue(result.local_record_path.is_file())
+        rows = stats.load_rows([result.results_path])
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(
+            {
+                row["candidate_provenance"]["suite_task_set_id"]
+                for row in rows
+            },
+            {"private", "second"},
+        )
+        report = compare.build_comparison([str(result.results_path)])
+        self.assertEqual(report["matched_n"], 2)
+        self.assertEqual(
+            report["comparison_identity"], "harbor_suite_manifest"
+        )
+        sealed = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(sealed["results"]["sha256"], result.results_sha256)
+        self.assertEqual(sealed["results"]["count"], 4)
+        self.assertEqual(len(sealed["jobs"]), 2)
+        self.assertNotIn(str(root), result.run_manifest_path.read_text())
+        verified = suite_run.verify_suite_run(result.run_manifest_path)
+        self.assertEqual(verified["scope"], "local_only")
+        self.assertEqual(verified["result_count"], 4)
+
+    def test_second_job_or_import_failure_leaves_no_results(self):
+        for failure in ("job", "import"):
+            with self.subTest(failure=failure):
+                root = self._project(failure)
+                self._add_second_local_task_set(root)
+                compiled = suite_run.compile_suite(start=root)
+                results_path = (
+                    Path(compiled.config.results_dir)
+                    / "suite-runs"
+                    / f"{compiled.manifest_sha256}.results.jsonl"
+                )
+                if failure == "job":
+                    with self.assertRaisesRegex(
+                        SuiteRunError, "not every intended Harbor job"
+                    ):
+                        self._run_simulated(
+                            compiled,
+                            returncodes=[0, 9],
+                        )
+                else:
+                    imports = 0
+
+                    def importer(job_path, *, comparison_plan_path):
+                        nonlocal imports
+                        imports += 1
+                        if imports == 2:
+                            raise ValueError("simulated import failure")
+                        return self._simulated_rows(
+                            Path(comparison_plan_path)
+                        )
+
+                    with self.assertRaisesRegex(
+                        SuiteRunError, "simulated import failure"
+                    ):
+                        self._run_simulated(compiled, importer=importer)
+                self.assertFalse(results_path.exists())
+
+    def test_resume_accepts_exact_outputs_and_rejects_divergence(self):
+        root = self._project()
+        compiled = suite_run.compile_suite(start=root)
+        first = self._run_simulated(compiled)
+        second = self._run_simulated(compiled)
+
+        self.assertEqual(first.results_sha256, second.results_sha256)
+        self.assertEqual(
+            first.run_manifest_path.read_bytes(),
+            second.run_manifest_path.read_bytes(),
+        )
+
+        first.results_path.write_text("{}\n", encoding="utf-8")
+        with self.assertRaisesRegex(SuiteRunError, "divergent existing"):
+            self._run_simulated(compiled)
+
+    def test_local_verifier_rejects_config_and_run_manifest_tampering(self):
+        root = self._project()
+        compiled = suite_run.compile_suite(start=root)
+        result = self._run_simulated(compiled)
+        config_path = result.artifacts[0].config_path
+        original_config = config_path.read_bytes()
+        config_path.write_text("{}\n", encoding="utf-8")
+        with self.assertRaisesRegex(
+            SuiteRunError, "config or comparison-plan binding"
+        ):
+            suite_run.verify_suite_run(result.run_manifest_path)
+        config_path.write_bytes(original_config)
+
+        manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
+        manifest["results"]["count"] += 1
+        result.run_manifest_path.write_bytes(
+            suite_run._canonical_json(manifest, indent=2)
+        )
+        with self.assertRaisesRegex(
+            SuiteRunError, "results hash or count|results count"
+        ):
+            suite_run.verify_suite_run(result.run_manifest_path)
+
+    def test_public_smoke_suite_is_rejected(self):
+        root = self._project()
+        text = self._suite_text(root)
+        text = text.replace('id = "private-default"', 'id = "smoke"', 1)
+        text = text.replace('scope = "local_only"', 'scope = "public"', 1)
+        self._write_suite(root, text)
+        with self.assertRaisesRegex(SuiteRunError, "smoke suites"):
+            suite_run.compile_suite(start=root)
+
+    def test_suite_manifest_task_set_plan_and_evidence_tampering_fail(self):
+        root = self._project()
+        compiled = suite_run.compile_suite(start=root)
+        result = self._run_simulated(compiled)
+        original = stats.load_rows([result.results_path])
+
+        cases = {
+            "manifest": lambda row: row["candidate_provenance"][
+                "suite_manifest"
+            ]["suite"].update({"title": "tampered"}),
+            "task_set": lambda row: row["candidate_provenance"].update(
+                {"suite_task_set_id": "missing"}
+            ),
+            "plan": lambda row: row["candidate_provenance"][
+                "comparison_plan"
+            ].update({"job_name": "tampered"}),
+            "trajectory": lambda row: row["candidate_provenance"].update(
+                {"atif_sha256": None}
+            ),
+            "verifier": lambda row: row["candidate_provenance"].update(
+                {"openbench_verifier_evidence_sha256": None}
+            ),
+            "usage": lambda row: row.update(
+                {"usage_evidence_grade": "usage_unavailable"}
+            ),
+            "proxy_usage": lambda row: row["candidate_provenance"].update(
+                {"harbor_metering": None}
+            ),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name):
+                rows = copy.deepcopy(original)
+                mutate(rows[0])
+                with self.assertRaises(ValueError):
+                    stats.validate_suite_rows(rows)
 
     def test_custom_distribution_executes_after_exact_ownership_verification(self):
         root = self._project()
