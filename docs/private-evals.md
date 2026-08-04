@@ -36,13 +36,23 @@ The generated suite records the isolated path. A colliding
 `tasks/example-greeting/` directory is likewise preserved as a unit rather than
 being merged with generated files.
 
-Parse the generated suite without running anything:
+Validate and print the generated suite plan without running anything:
 
 ```bash
-python3 -c 'from obench.suite import load_suite; load_suite(".openbench/suites/default.toml")'
+obench run --plan
 ```
 
-Suite execution is intentionally not wired to `obench run` in this change.
+The command discovers the nearest `.openbench/openbench.toml` and its required
+`default_suite`. It does not stage credentials, invoke Harbor, contact a model,
+or create job/result artifacts. An explicit suite path overrides discovery:
+
+```bash
+obench run .openbench/suites/alternate.toml --plan
+```
+
+Run the default suite with `obench run`. OpenBench creates one native Harbor job
+per task set and invokes one `harbor run -c` for each. Harbor owns scheduling,
+retries, lock files, resume, Docker execution, and verification.
 
 ## Author local tasks
 
@@ -86,9 +96,11 @@ git_commit = "0123456789abcdef0123456789abcdef01234567"
 subdir = "tasks/coding"
 ```
 
-`ref` must be a SHA-256 digest, exact 40/64-hex commit, or exact semantic
-version. Floating labels such as `latest`, `main`, and version ranges fail
-validation. Optional source provenance uses an exact `git_commit`; `subdir`
+For names containing `/`, `ref` must be an immutable SHA-256 digest, exact
+40/64-hex commit, or exact semantic version and maps to Harbor's package `ref`.
+For a bare registry name, `ref` must be an exact semantic version and maps to
+Harbor's `version`. Floating labels such as `latest`, `main`, and version ranges
+fail validation. Optional source provenance uses an exact `git_commit`; `subdir`
 requires that commit and must be a safe relative path.
 
 See [Harbor suites](harbor-suites.md) for the complete v1 contract.
@@ -103,6 +115,11 @@ host-managed at execution time.
 `.openbench/.gitignore` excludes jobs, results, and trajectories because these
 can contain private source, prompts, tool output, and provider evidence.
 
+Generated suites default to `publication.scope = "local_only"`. Suite execution
+does not publish or sync results. Custom profiles require an exact installed
+Python `distribution` and `version`; OpenBench verifies both the version and
+ownership of the declared import before Harbor or stock auth staging.
+
 ## Legacy migration
 
 The old `instruction.md + workspace/ + checker.sh` format remains available
@@ -114,6 +131,7 @@ obench init --legacy-task old-task --from path/to/fixture
 obench init --task old-task --from path/to/fixture
 
 obench validate --tasks-dir .openbench/legacy-tasks
+obench legacy run --tasks-dir .openbench/legacy-tasks ...
 ```
 
 Legacy scaffolds land under `.openbench/legacy-tasks/`; they are never inserted

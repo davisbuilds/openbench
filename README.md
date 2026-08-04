@@ -141,7 +141,7 @@ Run the resumable matrix:
 
 ```bash
 for m in glm-4.7-flash glm-5.2 deepseek-v4-flash kimi-k2.7-code; do
-  obench run --harness pi,opencode \
+  obench legacy run --harness pi,opencode \
     --task make-ci-green,add-feature,misleading-error \
     --model "$m" --trials 3
 done
@@ -191,7 +191,8 @@ pip install "git+https://github.com/minghinmatthewlam/openbench.git"
 # future: pip install obench
 ```
 
-Then use the umbrella CLI: `obench init`, `obench run`, `obench report`,
+Then use the umbrella CLI: `obench init`, `obench run [suite.toml]`,
+`obench legacy run`, `obench report`,
 `obench doctor`, `obench validate`, `obench admit`, `obench gate`, `obench compare`,
 `obench publish`, `obench verify`, `obench pack`, `obench export`,
 `obench import`, `obench import harbor-results`, `obench harbor job-run`, and
@@ -231,17 +232,21 @@ confirm the plumbing, then add real harnesses:
 
 ```
 # negative control — does nothing, so every task should fail (no tokens used)
-obench run --harness null --task fix-failing-test,build-a-cli,make-it-run
+obench legacy run --harness null --task fix-failing-test,build-a-cli,make-it-run
 # legacy: python3 bench/run.py --harness null --task ...
 
 # a real harness, 3 trials per task
-obench run --harness codex --task fix-failing-test,build-a-cli,make-it-run --trials 3
+obench legacy run --harness codex --task fix-failing-test,build-a-cli,make-it-run --trials 3
 ```
 
 Multiple harnesses/tasks are comma-separated. The run loop is **resumable**: a
 cell whose `run_id` already appears in `results/results.jsonl` is skipped, so you
 can stop and re-run freely. Use `--force` to re-run existing cells. Full options:
-`obench run --help`.
+`obench legacy run --help`.
+
+`obench run` is the Harbor-first suite control plane. With no path it discovers
+the nearest `.openbench/openbench.toml` and its `default_suite`; use
+`obench run --plan` for an offline, credential-free semantic manifest.
 
 **4. Report.**
 

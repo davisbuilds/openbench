@@ -43,6 +43,7 @@ trajectory = true
 usage = true
 
 [publication]
+scope = "local_only"
 completeness = "complete"
 ```
 
@@ -66,7 +67,9 @@ Accepted refs are exact semantic versions, full 40/64-hex commits, and
 `sha256:<64 hex>`. Optional `git_commit` records exact source provenance;
 optional `subdir` requires that commit.
 
-Task-set IDs and source identities must be unique.
+Task-set IDs and source identities must be unique. Bare registry names map
+`ref` to Harbor's exact `version` field and therefore require a semantic
+version. Names containing `/` map `ref` to Harbor's immutable package `ref`.
 Hexadecimal commits and digests are canonicalized to lowercase before source
 identity comparisons.
 
@@ -89,6 +92,11 @@ The four evidence fields are explicit booleans:
 - `trajectory`: require the agent trajectory.
 - `usage`: require usage evidence under the selected profile policy.
 
+Publication scope is explicit:
+
+- `local_only`: artifacts must remain machine-local.
+- `public`: publication is permitted after the evidence and completeness gates.
+
 Publication completeness is either:
 
 - `complete`: every intended task x arm x attempt cell must have acceptable
@@ -96,18 +104,74 @@ Publication completeness is either:
 - `allow_incomplete`: an explicitly partial artifact may be produced by future
   publication integration.
 
-The suite records policy only. Current run, result, report, and publication
-modules do not consume it yet.
+This runner only creates local suite manifests and Harbor job/run artifacts. It
+does not publish or sync results.
 
-## Validate
+## Plan
 
-```python
-from obench.suite import load_suite
+From any directory under a configured project, the suite path may be omitted:
 
-suite = load_suite(".openbench/suites/default.toml")
-print(suite.id, suite.harbor.version, len(suite.arms))
+```bash
+obench run --plan
+obench run .openbench/suites/alternate.toml --plan
 ```
 
-The conventional `.openbench/suites/` location lets the parser discover the
-project root. Call `load_suite(path, project_root=...)` for a suite stored
-elsewhere.
+The omitted form discovers the nearest `.openbench/openbench.toml` and requires
+its `default_suite`. An explicit suite path overrides only that selection.
+`--plan` validates suite/profile/model compatibility and native Harbor job
+compilation, then prints a canonical semantic manifest and SHA-256. It does not
+inspect Harbor, stage credentials, invoke a model, or create runtime artifacts.
+
+The manifest records:
+
+- the exact Harbor pin and each task-set source identity;
+- content digests and logical task names for local task sets;
+- canonical OpenBench harness/model identity per arm;
+- the full secret-free rendered Harbor agent config and its digest;
+- run, evidence, and publication policy;
+- one declared Harbor job per task set.
+
+Absolute paths, host credential paths, and credential contents are excluded.
+Relocating an otherwise identical project preserves the manifest digest.
+
+## Execute
+
+```bash
+obench run
+obench run .openbench/suites/alternate.toml
+```
+
+OpenBench enforces the suite pin against its Harbor `0.20.0` constants before
+auth staging. It emits one native `harbor run -c` per task set. Harbor alone
+owns scheduling, task resolution, retries, locks, resume, Docker environments,
+and verification. OpenBench does not add a scheduler or claim temporally
+matched arm execution.
+
+Each arm is compiled independently and uses its arm ID as execution identity.
+Stock profiles reject harness mismatches and unsupported models. One stock
+profile used by several model arms gets one staged credential/lease for the
+suite execution; rotation is persisted once after all Harbor commands.
+Read-only Cursor and Devin subscription archives remain read-only.
+
+`run.timeout_seconds` maps to pinned Harbor
+`AgentConfig.override_timeout_sec` on every generated agent config. A Harbor
+schema without that field must be rejected rather than silently ignoring the
+policy.
+
+Custom profiles resolve only their declared `${HOST_ENV}` templates, and
+missing values fail before Harbor. Their required `distribution` and exact
+`version` are verified through `importlib.metadata`, including ownership of the
+declared import's top-level package, before Harbor or stock auth staging.
+
+The immutable semantic manifest is written under
+`.openbench/results/suite-runs/`; native job configs and Harbor state stay under
+`.openbench/jobs/`. A narrow post-run artifact hook exposes task-set ID, Harbor
+exit status, config digest/path, job path, and resume state for later result
+import integration. No result importer is invoked in this phase. A nonzero
+Harbor exit is returned explicitly and later task-set jobs are not started.
+
+The old OpenBench cell runner is available only through:
+
+```bash
+obench legacy run ...
+```

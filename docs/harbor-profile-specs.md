@@ -27,6 +27,7 @@ schema_version = 1
 id = "acme-agent"
 kind = "custom"
 import_path = "acme.harbor.agent:AcmeAgent"
+distribution = "acme-harbor-agent"
 version = "2.4.1"
 extra_allowed_hosts = ["api.acme.example"]
 concurrency_group = "acme-api"
@@ -46,10 +47,16 @@ temperature = 0
 features = ["tools", "atif"]
 ```
 
-`import_path` is an exact Python `module:Class` path and `version` is an exact
-semantic version. Every supported canonical model has one explicit Harbor
-model mapping; two canonical models cannot collapse to the same Harbor model.
-There is no fallback for an unlisted model.
+`import_path` is an exact Python `module:Class` path. `distribution` names the
+installable Python distribution that owns the import, and `version` is its
+exact semantic version. Before Harbor or stock auth staging, suite execution
+uses `importlib.metadata` to require that exact installed version and verify
+that the distribution owns the import's top-level package. An unverifiable
+version claim fails closed.
+
+Every supported canonical model has one explicit Harbor model mapping; two
+canonical models cannot collapse to the same Harbor model. There is no fallback
+for an unlisted model.
 
 `env` is optional, but every value must be exactly `${HOST_ENV}`. Literal
 values and credential paths are rejected. `kwargs` is optional and must be
