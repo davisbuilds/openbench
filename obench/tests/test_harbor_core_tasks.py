@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import tempfile
 import tomllib
 import unittest
 
-from obench import export_harbor, harbor_run
+from obench import export_harbor, harbor_run, workspace
 from obench.paths import SOURCE_ROOT
 from obench.publish import DIGEST_SCHEME_CURRENT, task_content_digest
 
@@ -32,17 +33,54 @@ def _tree(root: Path, *, exclude: set[str] | None = None) -> dict[str, tuple[byt
     if not root.is_dir():
         return {}
     excluded = exclude or set()
-    return {
-        path.relative_to(root).as_posix(): (
+    files = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        if "__pycache__" in relative.parts or path.suffix in {".pyc", ".pyo"}:
+            continue
+        if relative.as_posix() in excluded:
+            continue
+        files[relative.as_posix()] = (
             path.read_bytes(),
             path.stat().st_mode & 0o111,
         )
-        for path in sorted(root.rglob("*"))
-        if path.is_file() and path.relative_to(root).as_posix() not in excluded
-    }
+    return files
+
+
+def _pinned_task_content_digest(name: str) -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        workspace._git_archive_extract(
+            str(SOURCE_ROOT),
+            SOURCE_COMMIT,
+            tmp,
+            f"tasks/{name}",
+        )
+        return task_content_digest(
+            tmp,
+            scheme=DIGEST_SCHEME_CURRENT,
+        )
 
 
 class HarborCoreTaskContractTests(unittest.TestCase):
+    def test_tree_ignores_only_generated_python_bytecode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "authored.py").write_text("VALUE = 1\n")
+            (root / "authored.txt").write_text("keep\n")
+            (root / "__pycache__").mkdir()
+            (root / "__pycache__" / "authored.cpython-314.pyc").write_bytes(
+                b"generated"
+            )
+            (root / "loose.pyc").write_bytes(b"generated")
+            (root / "loose.pyo").write_bytes(b"generated")
+
+            self.assertEqual(
+                set(_tree(root)),
+                {"authored.py", "authored.txt"},
+            )
+
     def test_task_set_is_complete_and_harbor_native(self):
         actual = {
             path.name
@@ -183,10 +221,7 @@ class HarborCoreTaskContractTests(unittest.TestCase):
                 self.assertEqual(digest["scheme"], DIGEST_SCHEME_CURRENT)
                 self.assertEqual(
                     digest["sha256"],
-                    task_content_digest(
-                        str(legacy),
-                        scheme=DIGEST_SCHEME_CURRENT,
-                    ),
+                    _pinned_task_content_digest(name),
                 )
 
     def test_every_untouched_task_fails_and_oracle_passes(self):
