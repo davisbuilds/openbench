@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import unittest
 
+from obench import harbor_job as hj
 from obench.profile_spec import (
     CustomProfileSpec,
     ProfileSpecError,
@@ -119,6 +120,53 @@ features = ["tools", "atif"]
         self.assertEqual(
             compiled.extra_allowed_hosts, ("api.acme.test", "10.0.0.8")
         )
+
+    def test_compiled_profiles_render_as_native_harbor_job_agents(self):
+        task_set = self.tmp / "tasks"
+        task = task_set / "example"
+        task.mkdir(parents=True)
+        (task / "task.toml").write_text(
+            'schema_version = "1.4"\n', encoding="utf-8"
+        )
+        (task / "instruction.md").write_text("# Example\n", encoding="utf-8")
+        stock = compile_profile(
+            load_profile(self._write("local-codex", self._stock())),
+            "gpt-5.6-sol",
+        )
+        custom = compile_profile(
+            load_profile(self._write("acme-agent", self._custom())),
+            "gpt-5.6-sol",
+        )
+
+        artifact = hj.build_job_config(
+            hj.HarborJobSpec(
+                job_name="profile-contract",
+                jobs_dir=self.tmp / "jobs",
+                source=hj.LocalTaskSet(task_set),
+                agent_profiles=(stock, custom),
+                models=(),
+                attempts=1,
+                concurrency=hj.ConcurrencyPolicy(n_concurrent_trials=2),
+                retry=hj.RetryPolicy(max_retries=0),
+            )
+        )
+
+        agents = artifact.as_dict()["agents"]
+        self.assertEqual(
+            [(agent["import_path"], agent["model_name"]) for agent in agents],
+            [
+                (
+                    "obench.harbor_agents.codex_profile:"
+                    "OpenBenchCodexOAuthProfile",
+                    "gpt-5.6-sol",
+                ),
+                (
+                    "acme.harbor.agent:AcmeAgent",
+                    "openai/gpt-5.6-sol-2026-08-01",
+                ),
+            ],
+        )
+        self.assertEqual(agents[1]["kwargs"]["version"], "2.4.1")
 
     def test_rejects_unknown_keys_for_each_kind(self):
         with self.assertRaisesRegex(ProfileSpecError, "unknown keys"):
