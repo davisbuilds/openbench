@@ -28,6 +28,9 @@ _EXACT_VERSION_RE = re.compile(
     r"(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?"
     r"(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?\Z"
 )
+_DISTRIBUTION_RE = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?\Z"
+)
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _ENV_TEMPLATE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}\Z")
 _DNS_HOST_RE = re.compile(
@@ -66,6 +69,7 @@ class CustomProfileSpec:
     id: str
     kind: str
     import_path: str
+    distribution: str
     version: str
     models: tuple[tuple[str, str], ...]
     env: tuple[tuple[str, str], ...]
@@ -120,6 +124,7 @@ def load_profile(
             "kind",
             "harness",
             "import_path",
+            "distribution",
             "version",
             "models",
             "env",
@@ -174,6 +179,7 @@ def load_profile(
                 "id",
                 "kind",
                 "import_path",
+                "distribution",
                 "version",
                 "models",
                 "env",
@@ -188,6 +194,7 @@ def load_profile(
                 "id",
                 "kind",
                 "import_path",
+                "distribution",
                 "version",
                 "models",
                 "extra_allowed_hosts",
@@ -197,6 +204,11 @@ def load_profile(
         if _IMPORT_PATH_RE.fullmatch(import_path) is None:
             raise ProfileSpecError(
                 "import_path must be an exact Python module:Class path"
+            )
+        distribution = _string(table.get("distribution"), "distribution")
+        if _DISTRIBUTION_RE.fullmatch(distribution) is None:
+            raise ProfileSpecError(
+                "distribution must be an exact installed distribution name"
             )
         version = _string(table.get("version"), "version")
         if _EXACT_VERSION_RE.fullmatch(version) is None:
@@ -213,6 +225,7 @@ def load_profile(
             id=profile_id,
             kind=kind,
             import_path=import_path,
+            distribution=distribution,
             version=version,
             models=models,
             env=env,
@@ -464,6 +477,7 @@ def _execution_identity(profile: ProfileSpec) -> tuple[Any, ...]:
     return (
         "custom",
         profile.import_path,
+        profile.distribution,
         profile.version,
         profile.models,
         profile.env,

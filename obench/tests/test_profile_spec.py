@@ -45,6 +45,7 @@ schema_version = 1
 id = "{profile_id}"
 kind = "custom"
 import_path = "acme.harbor.agent:AcmeAgent"
+distribution = "acme-harbor-agent"
 version = "2.4.1"
 extra_allowed_hosts = ["api.acme.test", "10.0.0.8"]
 concurrency_group = "acme-api"
@@ -93,6 +94,7 @@ features = ["tools", "atif"]
         spec = load_profile(self._write("acme-agent", self._custom()))
 
         self.assertIsInstance(spec, CustomProfileSpec)
+        self.assertEqual(spec.distribution, "acme-harbor-agent")
         compiled = compile_profile(spec, "gpt-5.6-terra")
         self.assertEqual(compiled.profile_id, "acme-agent")
         self.assertEqual(compiled.import_path, "acme.harbor.agent:AcmeAgent")
@@ -176,6 +178,20 @@ features = ["tools", "atif"]
                     self._stock() + 'credential_path = "/tmp/auth.json"\n',
                 )
             )
+
+    def test_custom_profile_requires_exact_distribution_identity(self):
+        missing = self._custom().replace(
+            'distribution = "acme-harbor-agent"\n', ""
+        )
+        with self.assertRaisesRegex(ProfileSpecError, "distribution"):
+            load_profile(self._write("acme-agent", missing))
+
+        invalid = self._custom().replace(
+            'distribution = "acme-harbor-agent"',
+            'distribution = "acme/harbor"',
+        )
+        with self.assertRaisesRegex(ProfileSpecError, "distribution"):
+            load_profile(self._write("acme-agent", invalid))
         with self.assertRaisesRegex(ProfileSpecError, "unknown keys"):
             load_profile(
                 self._write(

@@ -1,0 +1,610 @@
+"""End-to-end contract tests for the Harbor-first suite control plane."""
+
+from __future__ import annotations
+
+from contextlib import redirect_stderr, redirect_stdout
+import io
+import json
+import os
+from pathlib import Path
+import shutil
+from types import SimpleNamespace
+import tempfile
+import unittest
+from unittest import mock
+
+from obench import init, suite_run
+from obench.harbor_run import HarborBinary
+from obench.suite_run import SuiteRunError
+
+
+class SuiteRunTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="obench_suite_run_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def _project(self, name: str = "project") -> Path:
+        root = self.tmp / name
+        root.mkdir()
+        init.init_scaffold(root)
+        return root
+
+    def _suite_path(self, root: Path) -> Path:
+        return root / ".openbench" / "suites" / "default.toml"
+
+    def _suite_text(self, root: Path) -> str:
+        return self._suite_path(root).read_text(encoding="utf-8")
+
+    def _write_suite(self, root: Path, text: str) -> None:
+        self._suite_path(root).write_text(text, encoding="utf-8")
+
+    def _add_second_local_task_set(
+        self,
+        root: Path,
+        *,
+        logical_name: str = "private/second",
+    ) -> None:
+        task = root / ".openbench" / "second-tasks" / "second"
+        task.mkdir(parents=True)
+        (task / "instruction.md").write_text("# Second\n", encoding="utf-8")
+        (task / "task.toml").write_text(
+            'schema_version = "1.4"\n'
+            "[task]\n"
+            f'name = "{logical_name}"\n'
+            'version = "1.0.0"\n',
+            encoding="utf-8",
+        )
+        text = self._suite_text(root).replace(
+            "\n[[arms]]\n",
+            """\
+
+[[task_sets]]
+id = "second"
+kind = "local"
+path = ".openbench/second-tasks"
+
+[[arms]]
+""",
+            1,
+        )
+        self._write_suite(root, text)
+
+    def _add_external_task_set(self, root: Path) -> None:
+        text = self._suite_text(root).replace(
+            "\n[[arms]]\n",
+            """\
+
+[[task_sets]]
+id = "registry"
+kind = "harbor"
+name = "terminal-bench"
+ref = "2.1.0"
+
+[[arms]]
+""",
+            1,
+        )
+        self._write_suite(root, text)
+
+    def _add_second_stock_arm(self, root: Path) -> None:
+        text = self._suite_text(root).replace(
+            "\n[run]\n",
+            """\
+
+[[arms]]
+id = "codex-terra"
+harness = "codex"
+profile = "local-codex"
+model = "gpt-5.6-terra"
+
+[run]
+""",
+            1,
+        )
+        self._write_suite(root, text)
+
+    def _add_custom_profile_and_arm(self, root: Path) -> None:
+        profile = root / ".openbench" / "profiles" / "acme.toml"
+        profile.write_text(
+            """\
+schema_version = 1
+id = "acme"
+kind = "custom"
+import_path = "acme.harbor:Agent"
+distribution = "acme-harbor-agent"
+version = "2.4.1"
+extra_allowed_hosts = ["api.acme.test"]
+concurrency_group = "acme"
+concurrency_limit = 1
+
+[models]
+"gpt-5.6-terra" = "acme/gpt-5.6-terra-pinned"
+
+[env]
+ACME_API_KEY = "${ACME_API_KEY}"
+
+[kwargs]
+mode = "strict"
+""",
+            encoding="utf-8",
+        )
+        text = self._suite_text(root).replace(
+            "\n[run]\n",
+            """\
+
+[[arms]]
+id = "acme-terra"
+harness = "acme"
+profile = "acme"
+model = "gpt-5.6-terra"
+
+[run]
+""",
+            1,
+        )
+        self._write_suite(root, text)
+
+    def test_fresh_init_loads_profile_default_suite_and_discovery(self):
+        root = self._project()
+        nested = root / "src" / "package"
+        nested.mkdir(parents=True)
+
+        compiled = suite_run.compile_suite(start=nested)
+
+        self.assertEqual(compiled.suite.id, "private-default")
+        self.assertEqual(compiled.registry.get("local-codex").harness, "codex")
+        self.assertEqual(compiled.suite.publication.scope, "local_only")
+        self.assertEqual(len(compiled.task_sets), 1)
+
+    def test_explicit_suite_overrides_discovered_default(self):
+        root = self._project()
+        alternate = root / ".openbench" / "suites" / "alternate.toml"
+        alternate.write_text(
+            self._suite_text(root).replace(
+                'id = "private-default"', 'id = "alternate"', 1
+            ),
+            encoding="utf-8",
+        )
+
+        default = suite_run.compile_suite(start=root)
+        explicit = suite_run.compile_suite(alternate, start=root)
+
+        self.assertEqual(default.suite.id, "private-default")
+        self.assertEqual(explicit.suite.id, "alternate")
+
+    def test_relocation_preserves_semantic_manifest_digest(self):
+        first = self._project("first")
+        second = self._project("second")
+
+        left = suite_run.compile_suite(start=first)
+        right = suite_run.compile_suite(start=second)
+
+        self.assertEqual(left.manifest, right.manifest)
+        self.assertEqual(left.manifest_sha256, right.manifest_sha256)
+        rendered = left.manifest_bytes.decode("utf-8")
+        self.assertNotIn(str(first), rendered)
+        self.assertNotIn(str(second), rendered)
+
+    def test_two_task_sets_and_mixed_profiles_expand_deterministically(self):
+        root = self._project()
+        self._add_external_task_set(root)
+        self._add_custom_profile_and_arm(root)
+
+        compiled = suite_run.compile_suite(start=root)
+        jobs = suite_run.plan_jobs(compiled)
+        jobs_again = suite_run.plan_jobs(compiled)
+
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual(
+            [job.artifact.json_bytes for job in jobs],
+            [job.artifact.json_bytes for job in jobs_again],
+        )
+        for job in jobs:
+            agents = job.artifact.as_dict()["agents"]
+            self.assertEqual(
+                [agent["model_name"] for agent in agents],
+                ["gpt-5.6-sol", "acme/gpt-5.6-terra-pinned"],
+            )
+            self.assertEqual(
+                [agent["override_timeout_sec"] for agent in agents],
+                [900.0, 900.0],
+            )
+        registry_source = jobs[1].artifact.as_dict()["datasets"][0]
+        self.assertEqual(
+            registry_source,
+            {"name": "terminal-bench", "version": "2.1.0"},
+        )
+        self.assertEqual(
+            [arm["id"] for arm in compiled.manifest["arms"]],
+            ["codex-example", "acme-terra"],
+        )
+        self.assertTrue(
+            all(arm["agent_config_sha256"] for arm in compiled.manifest["arms"])
+        )
+
+    def test_validation_failures_happen_before_staging_or_process(self):
+        cases = []
+
+        mismatch = self._project("mismatch")
+        self._write_suite(
+            mismatch,
+            self._suite_text(mismatch).replace(
+                'harness = "codex"', 'harness = "pi"', 1
+            ),
+        )
+        cases.append((mismatch, "does not match stock profile"))
+
+        unsupported = self._project("unsupported")
+        self._write_suite(
+            unsupported,
+            self._suite_text(unsupported).replace(
+                'model = "gpt-5.6-sol"', 'model = "not-a-model"', 1
+            ),
+        )
+        cases.append((unsupported, "unsupported codex Harbor model"))
+
+        bad_pin = self._project("bad-pin")
+        self._write_suite(
+            bad_pin,
+            self._suite_text(bad_pin).replace(
+                'version = "0.20.0"', 'version = "0.21.0"', 1
+            ),
+        )
+        cases.append((bad_pin, "suite Harbor pin"))
+
+        for root, message in cases:
+            with self.subTest(case=root.name):
+                with mock.patch(
+                    "obench.suite_run.HarborOAuthCredential"
+                ) as credential, mock.patch(
+                    "obench.suite_run.preflight_harbor_binary"
+                ) as preflight:
+                    with self.assertRaisesRegex(
+                        (SuiteRunError, ValueError), message
+                    ):
+                        suite_run.compile_suite(start=root)
+                credential.assert_not_called()
+                preflight.assert_not_called()
+
+    def test_missing_custom_env_and_distribution_mismatch_fail_before_harbor(self):
+        root = self._project()
+        self._add_custom_profile_and_arm(root)
+        compiled = suite_run.compile_suite(start=root)
+        preflight = mock.Mock()
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(
+                SuiteRunError, "missing host environment variable ACME_API_KEY"
+            ):
+                suite_run.run_suite(compiled, preflight=preflight)
+        preflight.assert_not_called()
+
+        with mock.patch.dict(
+            os.environ, {"ACME_API_KEY": "not-in-manifest"}, clear=True
+        ), mock.patch(
+            "obench.suite_run.metadata.version", return_value="2.4.0"
+        ):
+            with self.assertRaisesRegex(
+                SuiteRunError, "requires acme-harbor-agent==2.4.1"
+            ):
+                suite_run.run_suite(compiled, preflight=preflight)
+        preflight.assert_not_called()
+        self.assertNotIn("not-in-manifest", compiled.manifest_bytes.decode())
+
+    def test_cross_task_set_logical_collision_fails_during_compile(self):
+        root = self._project()
+        self._add_second_local_task_set(
+            root, logical_name="private/example-greeting"
+        )
+
+        with self.assertRaisesRegex(SuiteRunError, "collides across task sets"):
+            suite_run.compile_suite(start=root)
+
+    def test_mocked_execution_runs_one_harbor_command_per_task_set_and_one_lease(self):
+        root = self._project()
+        self._add_external_task_set(root)
+        self._add_second_stock_arm(root)
+        compiled = suite_run.compile_suite(start=root)
+        auth_master = root / "auth.json"
+        auth_master.write_text('{"tokens":{"access_token":"x"}}\n', encoding="utf-8")
+        fake_auth_root = root / "fake-auth"
+        process_calls = []
+        hook_calls = []
+
+        class FakeCredential:
+            entries = 0
+
+            def __init__(self, master):
+                self.master = master
+                self.input = fake_auth_root / "input.json"
+                self.returned = fake_auth_root / "return.json"
+
+            def __enter__(self):
+                type(self).entries += 1
+                fake_auth_root.mkdir()
+                shutil.copyfile(self.master, self.input)
+                self.config = SimpleNamespace(
+                    auth_json_path=str(self.input),
+                    auth_return_path=str(self.returned),
+                )
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        def fake_preflight(binary, **kwargs):
+            return HarborBinary(
+                path=Path("/fake/harbor"),
+                version="0.20.0",
+                git_commit=init.HARBOR_COMMIT,
+                is_editable=False,
+            )
+
+        def fake_process(argv, **kwargs):
+            self.assertFalse((fake_auth_root / "return.json").exists())
+            process_calls.append((argv, kwargs))
+            return SimpleNamespace(returncode=0)
+
+        with mock.patch(
+            "obench.suite_run._resolve_auth_source", return_value=auth_master
+        ), mock.patch(
+            "obench.suite_run.HarborOAuthCredential", FakeCredential
+        ):
+            result = suite_run.run_suite(
+                compiled,
+                run_process=fake_process,
+                preflight=fake_preflight,
+                post_run_hook=lambda artifacts: hook_calls.append(artifacts),
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(FakeCredential.entries, 1)
+        self.assertEqual(len(process_calls), 2)
+        self.assertTrue(
+            all(call[0][1:3] == ["run", "-c"] for call in process_calls)
+        )
+        self.assertEqual(len(result.artifacts), 2)
+        self.assertEqual(hook_calls, [result.artifacts])
+        self.assertEqual(
+            result.manifest_path.read_bytes(), compiled.manifest_bytes
+        )
+        rendered = compiled.manifest_bytes.decode("utf-8")
+        self.assertNotIn(str(auth_master), rendered)
+        self.assertNotIn(str(root), rendered)
+        for artifact in result.artifacts:
+            config = json.loads(artifact.config_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(config["agents"]), 2)
+            self.assertEqual(
+                [agent["model_name"] for agent in config["agents"]],
+                ["gpt-5.6-sol", "gpt-5.6-terra"],
+            )
+            self.assertEqual(
+                {agent["override_timeout_sec"] for agent in config["agents"]},
+                {900.0},
+            )
+            for manifest_arm, config_agent in zip(
+                compiled.manifest["arms"], config["agents"]
+            ):
+                self.assertEqual(
+                    manifest_arm["agent_config_sha256"],
+                    suite_run.hashlib.sha256(
+                        suite_run._canonical_json(config_agent)
+                    ).hexdigest(),
+                )
+
+    def test_custom_distribution_executes_after_exact_ownership_verification(self):
+        root = self._project()
+        self._add_custom_profile_and_arm(root)
+        text = self._suite_text(root)
+        stock_arm = """\
+[[arms]]
+id = "codex-example"
+harness = "codex"
+profile = "local-codex"
+model = "gpt-5.6-sol"
+
+"""
+        self._write_suite(root, text.replace(stock_arm, "", 1))
+        compiled = suite_run.compile_suite(start=root)
+        calls = []
+
+        with mock.patch.dict(
+            os.environ, {"ACME_API_KEY": "runtime-secret"}, clear=True
+        ), mock.patch(
+            "obench.suite_run.metadata.version", return_value="2.4.1"
+        ), mock.patch(
+            "obench.suite_run.metadata.packages_distributions",
+            return_value={"acme": ["acme-harbor-agent"]},
+        ):
+            result = suite_run.run_suite(
+                compiled,
+                run_process=lambda argv, **kwargs: (
+                    calls.append((argv, kwargs))
+                    or SimpleNamespace(returncode=0)
+                ),
+                preflight=lambda *args, **kwargs: HarborBinary(
+                    path=Path("/fake/harbor"),
+                    version="0.20.0",
+                    git_commit=init.HARBOR_COMMIT,
+                    is_editable=False,
+                ),
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(calls), 1)
+        config = json.loads(
+            result.artifacts[0].config_path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            config["agents"][0]["env"],
+            {"ACME_API_KEY": "${ACME_API_KEY}"},
+        )
+        self.assertNotIn("runtime-secret", compiled.manifest_bytes.decode())
+
+    def test_zero_exit_resume_seeds_return_only_after_harbor(self):
+        root = self._project()
+        compiled = suite_run.compile_suite(start=root)
+        planned = suite_run.plan_jobs(compiled)[0].artifact
+        job_path = planned.jobs_dir / planned.job_name
+        job_path.mkdir(parents=True)
+        (job_path / "config.json").write_text("{}\n", encoding="utf-8")
+        (job_path / "result.json").write_text(
+            json.dumps(
+                {
+                    "finished_at": "2026-08-04T12:00:00+00:00",
+                    "n_total_trials": 1,
+                    "stats": {
+                        "n_completed_trials": 1,
+                        "n_running_trials": 0,
+                        "n_pending_trials": 0,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        auth_master = root / "auth.json"
+        auth_master.write_text('{"tokens":{"access_token":"x"}}\n', encoding="utf-8")
+        fake_auth_root = root / "fake-auth"
+        observed_return_before_harbor = []
+
+        class FakeCredential:
+            def __init__(self, master):
+                self.master = master
+
+            def __enter__(self):
+                fake_auth_root.mkdir()
+                input_path = fake_auth_root / "input.json"
+                shutil.copyfile(self.master, input_path)
+                self.config = SimpleNamespace(
+                    auth_json_path=str(input_path),
+                    auth_return_path=str(fake_auth_root / "return.json"),
+                )
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        def fake_process(argv, **kwargs):
+            observed_return_before_harbor.append(
+                (fake_auth_root / "return.json").exists()
+            )
+            return SimpleNamespace(returncode=0)
+
+        with mock.patch(
+            "obench.suite_run._resolve_auth_source", return_value=auth_master
+        ), mock.patch(
+            "obench.suite_run.HarborOAuthCredential", FakeCredential
+        ):
+            result = suite_run.run_suite(
+                compiled,
+                run_process=fake_process,
+                preflight=lambda *args, **kwargs: HarborBinary(
+                    path=Path("/fake/harbor"),
+                    version="0.20.0",
+                    git_commit=init.HARBOR_COMMIT,
+                    is_editable=False,
+                ),
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(observed_return_before_harbor, [False])
+        self.assertTrue((fake_auth_root / "return.json").is_file())
+
+    def test_nonzero_harbor_exit_is_returned_and_stops_later_jobs(self):
+        root = self._project()
+        self._add_external_task_set(root)
+        compiled = suite_run.compile_suite(start=root)
+        auth_master = root / "auth.json"
+        auth_master.write_text('{"tokens":{"access_token":"x"}}\n', encoding="utf-8")
+        fake_auth_root = root / "fake-auth"
+        calls = []
+
+        class FakeCredential:
+            def __init__(self, master):
+                self.master = master
+
+            def __enter__(self):
+                fake_auth_root.mkdir()
+                input_path = fake_auth_root / "input.json"
+                shutil.copyfile(self.master, input_path)
+                self.config = SimpleNamespace(
+                    auth_json_path=str(input_path),
+                    auth_return_path=str(fake_auth_root / "return.json"),
+                )
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        def fake_process(argv, **kwargs):
+            calls.append(argv)
+            return SimpleNamespace(returncode=23)
+
+        with mock.patch(
+            "obench.suite_run._resolve_auth_source", return_value=auth_master
+        ), mock.patch(
+            "obench.suite_run.HarborOAuthCredential", FakeCredential
+        ):
+            result = suite_run.run_suite(
+                compiled,
+                run_process=fake_process,
+                preflight=lambda *args, **kwargs: HarborBinary(
+                    path=Path("/fake/harbor"),
+                    version="0.20.0",
+                    git_commit=init.HARBOR_COMMIT,
+                    is_editable=False,
+                ),
+            )
+
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(len(result.artifacts), 1)
+        self.assertEqual(len(calls), 1)
+
+    def test_bare_registry_name_rejects_non_version_immutable_ref(self):
+        root = self._project()
+        self._add_external_task_set(root)
+        self._write_suite(
+            root,
+            self._suite_text(root).replace(
+                'ref = "2.1.0"',
+                f'ref = "{"a" * 40}"',
+                1,
+            ),
+        )
+        compiled = suite_run.compile_suite(start=root)
+
+        with self.assertRaisesRegex(
+            SuiteRunError, "requires an exact semantic version"
+        ):
+            suite_run.plan_jobs(compiled)
+
+    def test_cli_plan_from_nested_directory_emits_no_artifacts(self):
+        root = self._project()
+        nested = root / "src"
+        nested.mkdir()
+        prior = Path.cwd()
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        try:
+            os.chdir(nested)
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                returncode = suite_run.main(["--plan"])
+        finally:
+            os.chdir(prior)
+
+        self.assertEqual(returncode, 0, stderr.getvalue())
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(
+            payload["manifest_sha256"],
+            suite_run.compile_suite(start=root).manifest_sha256,
+        )
+        self.assertFalse(
+            (root / ".openbench" / "results" / "suite-runs").exists()
+        )
+        self.assertFalse(
+            (root / ".openbench" / "jobs" / "suite-configs").exists()
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
