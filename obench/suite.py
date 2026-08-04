@@ -350,6 +350,7 @@ def _local_task_set_path(value: Any, root: Path, label: str) -> Path:
     if (lexical / "task.toml").exists():
         raise SuiteError(f"{label} must name a task-set directory, not one task")
 
+    _reject_tree_symlinks(lexical, label)
     complete = 0
     partial: list[str] = []
     for child in sorted(lexical.iterdir(), key=lambda item: item.name):
@@ -360,7 +361,6 @@ def _local_task_set_path(value: Any, root: Path, label: str) -> Path:
         has_task = (child / "task.toml").is_file()
         has_instruction = (child / "instruction.md").is_file()
         if has_task and has_instruction:
-            _reject_tree_symlinks(child, label)
             complete += 1
         elif has_task or has_instruction:
             partial.append(child.name)
@@ -384,16 +384,16 @@ def _reject_tree_symlinks(task: Path, label: str) -> None:
 
 def _immutable_ref(value: Any, label: str) -> str:
     ref = _string(value, label)
-    if (
-        _DIGEST_REF_RE.fullmatch(ref) is None
-        and _COMMIT_RE.fullmatch(ref) is None
-        and _VERSION_REF_RE.fullmatch(ref) is None
-    ):
-        raise SuiteError(
-            f"{label} must be an immutable sha256 digest, exact commit, "
-            "or exact semantic version"
-        )
-    return ref
+    if _DIGEST_REF_RE.fullmatch(ref) is not None:
+        return ref.lower()
+    if _COMMIT_RE.fullmatch(ref) is not None:
+        return ref.lower()
+    if _VERSION_REF_RE.fullmatch(ref) is not None:
+        return ref
+    raise SuiteError(
+        f"{label} must be an immutable sha256 digest, exact commit, "
+        "or exact semantic version"
+    )
 
 
 def _safe_relative(value: Any, label: str) -> str:

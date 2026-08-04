@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Scaffold Harbor-native private-repository benchmark intent.
 
-``obench init`` is idempotent: existing files are never replaced.  The
+``obench init`` is idempotent: authored files are never replaced, and the local
+artifact ignore file is only augmented with missing safety rules.  The
 historical OpenBench task scaffolder remains available only as explicit legacy
 compatibility through ``--legacy-task`` (with ``--task`` as its old alias).
 """
@@ -197,10 +198,96 @@ def _ensure_dir(path: str, notes: list[str]) -> None:
     notes.append(f"created: {path}/")
 
 
+def _ensure_gitignore(path: str, notes: list[str]) -> None:
+    if not os.path.exists(path):
+        _write_new(path, GITIGNORE, notes)
+        return
+    if os.path.islink(path) or not os.path.isfile(path):
+        notes.append(f"skip (exists, not a regular file): {path}")
+        return
+    with open(path, "r+", encoding="utf-8") as handle:
+        contents = handle.read()
+        existing = set(contents.splitlines())
+        missing = [
+            entry for entry in ("jobs/", "results/", "trajectories/")
+            if entry not in existing
+        ]
+        if not missing:
+            notes.append(f"skip (exists): {path}")
+            return
+        if contents and not contents.endswith("\n"):
+            handle.write("\n")
+        handle.write(
+            "\n# Harbor/OpenBench private runtime artifacts.\n"
+            + "".join(f"{entry}\n" for entry in missing)
+        )
+        handle.flush()
+        os.fsync(handle.fileno())
+    notes.append(f"updated: {path} (added {', '.join(missing)})")
+
+
+def _requires_harbor_task_isolation(tasks_dir: str) -> bool:
+    if os.path.islink(tasks_dir) or (
+        os.path.exists(tasks_dir) and not os.path.isdir(tasks_dir)
+    ):
+        return True
+    if not os.path.isdir(tasks_dir):
+        return False
+    for name in os.listdir(tasks_dir):
+        child = os.path.join(tasks_dir, name)
+        if os.path.islink(child):
+            return True
+        if not os.path.isdir(child):
+            continue
+        complete_harbor = (
+            os.path.isfile(os.path.join(child, "task.toml"))
+            and os.path.isfile(os.path.join(child, "instruction.md"))
+        )
+        legacy_markers = (
+            os.path.exists(os.path.join(child, "checker.sh"))
+            or os.path.exists(os.path.join(child, "workspace"))
+            or os.path.exists(os.path.join(child, "workspace.toml"))
+            or (
+                os.path.isfile(os.path.join(child, "instruction.md"))
+                and not os.path.isfile(os.path.join(child, "task.toml"))
+            )
+        )
+        if legacy_markers:
+            return True
+        if name == "example-greeting" and not complete_harbor:
+            return True
+    return False
+
+
+def _select_harbor_tasks_dir(root: str, notes: list[str]) -> str:
+    default = os.path.join(root, "tasks")
+    if not _requires_harbor_task_isolation(default):
+        return default
+    isolated = os.path.join(root, "harbor-tasks")
+    notes.append(
+        f"legacy/colliding task tree preserved: {default}/; "
+        f"using {isolated}/"
+    )
+    return isolated
+
+
+def _suite_toml(root: str, tasks_dir: str) -> str:
+    project_root = os.path.dirname(root)
+    relative = os.path.relpath(tasks_dir, project_root).replace(os.sep, "/")
+    return DEFAULT_SUITE_TOML.replace(
+        'path = ".openbench/tasks"',
+        f'path = "{relative}"',
+        1,
+    )
+
+
 def scaffold_harbor_example_task(tasks_dir: str, notes: list[str]) -> None:
     """Create one small Harbor schema 1.4 coding task without running it."""
 
     example = os.path.join(tasks_dir, "example-greeting")
+    if os.path.exists(example):
+        notes.append(f"skip (exists): {example}/")
+        return
     _ensure_dir(example, notes)
     _write_new(
         os.path.join(example, "instruction.md"),
@@ -240,18 +327,19 @@ def init_scaffold(start: str | None = None) -> list[str]:
     for directory in (
         root,
         os.path.join(root, "suites"),
-        os.path.join(root, "tasks"),
         os.path.join(root, "profiles"),
         os.path.join(root, "jobs"),
         os.path.join(root, "results"),
         os.path.join(root, "trajectories"),
     ):
         _ensure_dir(directory, notes)
+    tasks_dir = _select_harbor_tasks_dir(root, notes)
+    _ensure_dir(tasks_dir, notes)
     _write_new(os.path.join(root, CONFIG_FILENAME), OPENBENCH_TOML, notes)
-    _write_new(os.path.join(root, ".gitignore"), GITIGNORE, notes)
+    _ensure_gitignore(os.path.join(root, ".gitignore"), notes)
     _write_new(
         os.path.join(root, "suites", "default.toml"),
-        DEFAULT_SUITE_TOML,
+        _suite_toml(root, tasks_dir),
         notes,
     )
     _write_new(
@@ -259,7 +347,7 @@ def init_scaffold(start: str | None = None) -> list[str]:
         HARNESS_PROFILE_TOML,
         notes,
     )
-    scaffold_harbor_example_task(os.path.join(root, "tasks"), notes)
+    scaffold_harbor_example_task(tasks_dir, notes)
     return notes
 
 

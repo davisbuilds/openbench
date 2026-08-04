@@ -57,7 +57,7 @@ A suite has one or more task sets.
 
 - is relative to the project root;
 - cannot be the project root, absolute, home-relative, or contain `..`;
-- cannot traverse a symlink;
+- cannot contain or traverse a symlink anywhere in the task-set tree;
 - must contain at least one child with `task.toml` and `instruction.md`;
 - rejects partial Harbor task children and symlink children.
 
@@ -67,6 +67,8 @@ Accepted refs are exact semantic versions, full 40/64-hex commits, and
 optional `subdir` requires that commit.
 
 Task-set IDs and source identities must be unique.
+Hexadecimal commits and digests are canonicalized to lowercase before source
+identity comparisons.
 
 ## Arms and run policy
 

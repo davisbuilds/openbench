@@ -127,6 +127,24 @@ model = "gpt-5.6-sol"
         with self.assertRaisesRegex(SuiteError, "duplicate arm:"):
             self._load(duplicate_arm)
 
+    def test_rejects_duplicate_external_source_with_mixed_hex_case(self):
+        digest = "sha256:" + ("ab" * 32)
+        duplicate = self._valid().replace(
+            "\n[[arms]]\n",
+            f"""\
+
+[[task_sets]]
+id = "same-external"
+kind = "harbor"
+name = "org/package"
+ref = "{digest.upper().replace('SHA256:', 'sha256:')}"
+
+[[arms]]
+""",
+        ).replace("sha256:" + ("a" * 64), digest, 1)
+        with self.assertRaisesRegex(SuiteError, "duplicate task set source"):
+            self._load(duplicate)
+
     def test_rejects_floating_external_refs_and_unpinned_git(self):
         with self.assertRaisesRegex(SuiteError, "immutable"):
             self._load(
@@ -171,6 +189,15 @@ model = "gpt-5.6-sol"
             self.tmp / ".openbench" / "tasks" / "example" / "instruction.md",
             self.tmp / ".openbench" / "tasks" / "example" / "linked.md",
         )
+        with self.assertRaisesRegex(SuiteError, "contains a symlink"):
+            self._load()
+
+        (
+            self.tmp / ".openbench" / "tasks" / "example" / "linked.md"
+        ).unlink()
+        staging = self.tmp / ".openbench" / "tasks" / "staging"
+        staging.mkdir()
+        os.symlink(self.tmp / "outside", staging / "nested-link")
         with self.assertRaisesRegex(SuiteError, "contains a symlink"):
             self._load()
 

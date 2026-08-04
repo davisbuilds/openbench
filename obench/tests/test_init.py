@@ -87,6 +87,60 @@ class InitTests(unittest.TestCase):
         )
         self.assertTrue({"jobs/", "results/", "trajectories/"} <= lines)
 
+    def test_upgrade_isolates_legacy_tasks_and_augments_old_gitignore(self):
+        root = self.tmp / ".openbench"
+        legacy = root / "tasks" / "example"
+        (legacy / "workspace").mkdir(parents=True)
+        (legacy / "instruction.md").write_text(
+            "# Old task\n", encoding="utf-8"
+        )
+        (legacy / "checker.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        old_ignore = "# Old scaffold\nresults/\ntranscripts/\n"
+        (root / ".gitignore").write_text(old_ignore, encoding="utf-8")
+
+        notes = init.init_scaffold()
+
+        self.assertEqual(
+            (legacy / "instruction.md").read_text(encoding="utf-8"),
+            "# Old task\n",
+        )
+        self.assertFalse((legacy / "task.toml").exists())
+        self.assertTrue(
+            (root / "harbor-tasks" / "example-greeting" / "task.toml").is_file()
+        )
+        suite = load_suite(root / "suites" / "default.toml")
+        self.assertEqual(suite.task_sets[0].path, root / "harbor-tasks")
+        ignore = (root / ".gitignore").read_text(encoding="utf-8")
+        self.assertTrue(ignore.startswith(old_ignore))
+        self.assertIn("jobs/\n", ignore)
+        self.assertIn("trajectories/\n", ignore)
+        self.assertTrue(any("legacy/colliding" in note for note in notes))
+
+        contents = (root / ".gitignore").read_bytes()
+        init.init_scaffold()
+        self.assertEqual((root / ".gitignore").read_bytes(), contents)
+
+    def test_existing_example_collision_is_preserved_and_isolated(self):
+        collision = (
+            self.tmp / ".openbench" / "tasks" / "example-greeting"
+        )
+        collision.mkdir(parents=True)
+        (collision / "user.txt").write_text("mine\n", encoding="utf-8")
+
+        init.init_scaffold()
+
+        self.assertEqual(
+            sorted(path.name for path in collision.iterdir()),
+            ["user.txt"],
+        )
+        suite = load_suite(
+            self.tmp / ".openbench" / "suites" / "default.toml"
+        )
+        self.assertEqual(
+            suite.task_sets[0].path,
+            self.tmp / ".openbench" / "harbor-tasks",
+        )
+
     def test_example_task_oracle_changes_reward_from_zero_to_one(self):
         init.init_scaffold()
         task = self.tmp / ".openbench" / "tasks" / "example-greeting"

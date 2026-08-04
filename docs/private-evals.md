@@ -16,8 +16,9 @@ obench init
 ```
 
 The command is offline and idempotent. It does not contact Harbor, Docker, a
-model provider, or an authentication service. Existing files are never
-overwritten.
+model provider, or an authentication service. Authored files are never
+overwritten; an existing `.openbench/.gitignore` is only appended with missing
+private-runtime rules.
 
 | Path | Commit? | Purpose |
 |---|---:|---|
@@ -29,6 +30,12 @@ overwritten.
 | `.openbench/results/` | no | Local normalized results |
 | `.openbench/trajectories/` | no | Private ATIF trajectories |
 
+If a previous OpenBench scaffold already owns `.openbench/tasks/`, init
+preserves it and places the native example under `.openbench/harbor-tasks/`.
+The generated suite records the isolated path. A colliding
+`tasks/example-greeting/` directory is likewise preserved as a unit rather than
+being merged with generated files.
+
 Parse the generated suite without running anything:
 
 ```bash
@@ -39,7 +46,8 @@ Suite execution is intentionally not wired to `obench run` in this change.
 
 ## Author local tasks
 
-Each child of `.openbench/tasks/` is a normal Harbor task directory:
+Each child of the local task-set path named by `suite.toml` is a normal Harbor
+task directory (fresh scaffolds use `.openbench/tasks/`):
 
 ```text
 my-task/
