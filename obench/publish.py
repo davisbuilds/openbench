@@ -773,6 +773,7 @@ def _validate_harbor_row(row):
             "attempts",
             "dataset",
             "tasks",
+            "task_id_map",
             "arms",
         }
         if (
@@ -811,6 +812,7 @@ def _validate_harbor_row(row):
         attempts = comparison_plan.get("attempts")
         dataset = comparison_plan.get("dataset")
         tasks = comparison_plan.get("tasks")
+        task_id_map = comparison_plan.get("task_id_map")
         arms = comparison_plan.get("arms")
         if (
             not isinstance(job_name, str)
@@ -841,6 +843,22 @@ def _validate_harbor_row(row):
                 and not _valid_comparison_dataset_descriptor(dataset)
             )
             or (dataset is None) == (tasks is None)
+            or (
+                tasks is not None
+                and (
+                    not isinstance(task_id_map, dict)
+                    or set(task_id_map) != set(tasks)
+                    or len(set(task_id_map.values())) != len(tasks)
+                    or any(
+                        not isinstance(task_id, str)
+                        or not task_id
+                        or task_id != task_id.strip()
+                        or "\x00" in task_id
+                        for task_id in task_id_map.values()
+                    )
+                )
+            )
+            or (tasks is None and task_id_map is not None)
             or not isinstance(arms, list)
             or not arms
         ):
@@ -871,7 +889,10 @@ def _validate_harbor_row(row):
             or not resolved_tasks
             or resolved_tasks != sorted(set(resolved_tasks))
             or any(not isinstance(task, str) or not task for task in resolved_tasks)
-            or (tasks is not None and resolved_tasks != tasks)
+            or (
+                tasks is not None
+                and resolved_tasks != sorted(task_id_map.values())
+            )
         ):
             raise PublishError(
                 f"Harbor row {run_id!r}: invalid resolved comparison task set"
@@ -931,7 +952,7 @@ def _validate_harbor_row(row):
             raise PublishError(
                 f"Harbor row {run_id!r}: run_id does not bind rendered agent config"
             )
-        if provenance["trial_mapping"] != "openbench_comparison_plan_v3":
+        if provenance["trial_mapping"] != "openbench_comparison_plan_v4":
             raise PublishError(
                 f"Harbor row {run_id!r}: invalid comparison trial mapping"
             )
@@ -1035,6 +1056,10 @@ def _harbor_task_bindings(rows):
         _validate_harbor_row(row)
         task = row.get("task")
         provenance = row["candidate_provenance"]
+        try:
+            source_binding = stats.harbor_task_source_binding(row)
+        except ValueError as exc:
+            raise PublishError(str(exc)) from exc
         locked_digest = provenance["task_digest"].removeprefix("sha256:")
         previous_locked = locked_task_digests.setdefault(task, locked_digest)
         if previous_locked != locked_digest:
@@ -1045,6 +1070,7 @@ def _harbor_task_bindings(rows):
         if provenance["openbench_task_content_digest"] is None:
             continue
         binding = {
+            "source": source_binding,
             "openbench_sha256": provenance["openbench_task_content_digest"][
                 "sha256"
             ],
@@ -1064,6 +1090,29 @@ def _harbor_task_bindings(rows):
             + ", ".join(repr(task) for task in unbound)
         )
     return bindings
+
+
+def _harbor_task_selector(row):
+    try:
+        return stats.harbor_task_source_binding(row)["selector"]
+    except ValueError as exc:
+        raise PublishError(str(exc)) from exc
+
+
+def _task_source_binding(row):
+    task = row.get("task")
+    if _is_harbor_row(row):
+        try:
+            return stats.harbor_task_source_binding(row)
+        except ValueError as exc:
+            raise PublishError(str(exc)) from exc
+    return {
+        "canonical_id": task,
+        "selector": task,
+        "suite_manifest_sha256": None,
+        "suite_task_set_id": None,
+        "suite_task_set_path": None,
+    }
 
 
 def _harbor_packager_content_hash(task_dir):
@@ -1150,10 +1199,19 @@ def _validate_harbor_task_bindings(rows, tasks_dirs):
     """Require imported execution digests to match publication task trees."""
     roots = stats.parse_tasks_dirs(tasks_dirs)
     for task, binding in _harbor_task_bindings(rows).items():
-        task_dir = resolve_task_dir(task, roots)
+        selector = binding["source"]["selector"]
+        try:
+            task_dir = stats.resolve_task_source_binding(
+                binding["source"],
+                roots,
+                required=True,
+            )
+        except ValueError as exc:
+            raise PublishError(str(exc)) from exc
         if task_dir is None:
             raise PublishError(
-                f"Harbor task {task!r}: local publication task tree not found"
+                f"Harbor task {task!r}: local publication task tree "
+                f"{selector!r} not found"
             )
         local_digest = task_content_digest(
             task_dir,
@@ -1167,7 +1225,7 @@ def _validate_harbor_task_bindings(rows, tasks_dirs):
             )
         canonical_harbor_digest = _canonical_harbor_export_digest(
             task_dir,
-            task,
+            selector,
             binding["export"],
         )
         if canonical_harbor_digest != binding["harbor_sha256"]:
@@ -1431,6 +1489,7 @@ def build_provenance(rows, results_sha256, tasks_dirs=None, warnings=None,
     roots = stats.parse_tasks_dirs(tasks_dirs)
     arms = {}
     tasks = {}
+    harbor_task_bindings = _harbor_task_bindings(rows)
     models = sorted({str(row.get("model")) for row in rows})
     trial_counts = defaultdict(set)
     run_dates = []
@@ -1459,7 +1518,19 @@ def build_provenance(rows, results_sha256, tasks_dirs=None, warnings=None,
 
         task = row.get("task")
         if task and task not in tasks:
-            task_dir = resolve_task_dir(task, roots)
+            binding = harbor_task_bindings.get(task)
+            try:
+                task_dir = (
+                    stats.resolve_task_source_binding(
+                        binding["source"],
+                        roots,
+                        required=True,
+                    )
+                    if binding is not None
+                    else resolve_task_dir(task, roots)
+                )
+            except ValueError as exc:
+                raise PublishError(str(exc)) from exc
             digest = None
             if task_dir is not None:
                 try:
@@ -1998,6 +2069,27 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
         discovered = default_tasks_dir()
         tasks_dirs = [discovered] if discovered else []
     roots = stats.parse_tasks_dirs(tasks_dirs) if tasks_dirs else []
+    source_bindings_by_task = {}
+    for row in rows:
+        task = row.get("task")
+        if not task:
+            continue
+        try:
+            source_binding = _task_source_binding(row)
+        except PublishError as exc:
+            checks.append({
+                "name": f"task_digest:{task}",
+                "status": "FAIL",
+                "detail": str(exc),
+            })
+            continue
+        previous = source_bindings_by_task.setdefault(task, source_binding)
+        if previous != source_binding:
+            checks.append({
+                "name": f"task_digest:{task}",
+                "status": "FAIL",
+                "detail": "rows disagree on sealed local task source",
+            })
 
     for task_entry in task_entries:
         if not isinstance(task_entry, dict):
@@ -2015,7 +2107,24 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
             continue
         if not verify_task_trees:
             continue
-        task_dir = resolve_task_dir(task, roots) if roots else None
+        source_binding = source_bindings_by_task.get(task)
+        try:
+            task_dir = (
+                stats.resolve_task_source_binding(
+                    source_binding,
+                    roots,
+                    required=True,
+                )
+                if roots and source_binding is not None
+                else None
+            )
+        except ValueError as exc:
+            checks.append({
+                "name": name,
+                "status": "FAIL",
+                "detail": str(exc),
+            })
+            continue
         if task_dir is None:
             checks.append({
                 "name": name,
@@ -2041,7 +2150,7 @@ def verify_bundle(bundle_dir, tasks_dirs=None, *, verify_task_trees=True):
             try:
                 canonical_harbor_digest = _canonical_harbor_export_digest(
                     task_dir,
-                    task,
+                    binding["source"]["selector"],
                     binding["export"],
                 )
                 export_binding_error = None

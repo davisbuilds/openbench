@@ -274,7 +274,6 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
             source = LocalTaskSet(
                 item.task_set.path,
                 task_names=item.task_names,
-                comparison_task_names=item.logical_names,
             )
         else:
             assert item.task_set.name is not None

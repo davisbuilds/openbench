@@ -25,7 +25,11 @@ class HarborJobTest(unittest.TestCase):
         task = self.task_set / name
         task.mkdir()
         if config:
-            (task / "task.toml").write_text('schema_version = "1.4"\n')
+            (task / "task.toml").write_text(
+                'schema_version = "1.4"\n\n'
+                "[task]\n"
+                f'name = "{name}"\n'
+            )
         if instruction:
             (task / "instruction.md").write_text(f"# {name}\n")
         return task
@@ -149,6 +153,7 @@ class HarborJobTest(unittest.TestCase):
             },
         )
         self.assertIsNone(artifact.comparison_plan.as_dict()["tasks"])
+        self.assertIsNone(artifact.comparison_plan.as_dict()["task_id_map"])
 
     def test_local_task_set_expands_profiles_models_and_attempts(self):
         profiles = (
@@ -207,6 +212,7 @@ class HarborJobTest(unittest.TestCase):
                 "attempts": 3,
                 "dataset": None,
                 "tasks": ["alpha", "zeta"],
+                "task_id_map": {"alpha": "alpha", "zeta": "zeta"},
                 "arms": [
                     {
                         "arm_id": "codex@provider/model-b",
@@ -452,12 +458,17 @@ class HarborJobTest(unittest.TestCase):
         )
 
     def test_local_comparison_tasks_can_bind_logical_names(self):
+        (self.task_set / "zeta" / "task.toml").write_text(
+            'schema_version = "1.4"\n\n[task]\nname = "private/zeta"\n'
+        )
+        (self.task_set / "alpha" / "task.toml").write_text(
+            'schema_version = "1.4"\n\n[task]\nname = "private/alpha"\n'
+        )
         artifact = hj.build_job_config(
             self._local_spec(
                 source=hj.LocalTaskSet(
                     self.task_set,
                     task_names=("zeta", "alpha"),
-                    comparison_task_names=("private/zeta", "private/alpha"),
                 )
             )
         )
@@ -467,8 +478,23 @@ class HarborJobTest(unittest.TestCase):
         )
         self.assertEqual(
             artifact.comparison_plan.as_dict()["tasks"],
-            ["private/alpha", "private/zeta"],
+            ["alpha", "zeta"],
         )
+        self.assertEqual(
+            artifact.comparison_plan.as_dict()["task_id_map"],
+            {"alpha": "private/alpha", "zeta": "private/zeta"},
+        )
+
+    def test_local_task_set_rejects_duplicate_canonical_task_ids(self):
+        for name in ("alpha", "zeta"):
+            (self.task_set / name / "task.toml").write_text(
+                'schema_version = "1.4"\n\n[task]\nname = "shared/task"\n'
+            )
+        with self.assertRaisesRegex(
+            hj.HarborJobError,
+            r"unique \[task\]\.name",
+        ):
+            hj.build_job_config(self._local_spec())
 
     def test_local_source_rejects_one_task_partial_and_unknown_selection(self):
         with self.assertRaisesRegex(hj.HarborJobError, "points to one task"):
@@ -485,13 +511,11 @@ class HarborJobTest(unittest.TestCase):
             hj.build_job_config(self._local_spec(source=hj.LocalTaskSet(
                 self.task_set, task_names=("missing",)
             )))
-        with self.assertRaisesRegex(
-            hj.HarborJobError, "identify every selected local task"
-        ):
-            hj.build_job_config(self._local_spec(source=hj.LocalTaskSet(
-                self.task_set,
-                comparison_task_names=("private/alpha",),
-            )))
+        (self.task_set / "zeta" / "task.toml").write_text(
+            'schema_version = "1.4"\n'
+        )
+        with self.assertRaisesRegex(hj.HarborJobError, r"\[task\]\.name"):
+            hj.build_job_config(self._local_spec())
 
     def test_dataset_requires_immutable_unambiguous_reference(self):
         cases = (

@@ -10,6 +10,7 @@ import math
 import os
 import re
 import sys
+import tomllib
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -1705,6 +1706,7 @@ def _validate_trial(
         "trial_id": trial_id,
         "trial_name": trial_name,
         "task_name": task_name,
+        "task_lock": task,
         "task_digest": task_digest,
         "openbench_task_content_digest": openbench_task_content_digest,
         "openbench_harbor_export": openbench_harbor_export,
@@ -1761,6 +1763,56 @@ def _normalized_task_name(task_name: str) -> str:
     return task_name.removeprefix("openbench/")
 
 
+def _local_task_selector(
+    task: dict[str, Any],
+    *,
+    dataset_root: Path,
+    task_id_map: dict[str, str],
+    location: str,
+) -> str:
+    if task.get("type") != "local":
+        raise _fail(location, "local comparison plan resolved a non-local task")
+    raw_path = Path(_string(task.get("path"), f"{location}.path")).expanduser()
+    if raw_path.is_symlink():
+        raise _fail(f"{location}.path", "local task path must not be a symlink")
+    task_path = raw_path.resolve()
+    if task_path.parent != dataset_root:
+        raise _fail(
+            f"{location}.path",
+            "must be one direct child of the configured local task set",
+        )
+    selector = task_path.name
+    if selector not in task_id_map:
+        raise _fail(
+            f"{location}.path",
+            "does not identify a task selector in the comparison plan",
+        )
+    config_path = task_path / "task.toml"
+    if config_path.is_symlink() or not config_path.is_file():
+        raise _fail(
+            f"{location}.path",
+            "selected local task has no safe task.toml",
+        )
+    try:
+        with config_path.open("rb") as handle:
+            config = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise _fail(
+            f"{location}.path",
+            f"cannot read selected local task.toml: {exc}",
+        ) from exc
+    task_config = config.get("task")
+    canonical_id = (
+        task_config.get("name") if isinstance(task_config, dict) else None
+    )
+    if canonical_id != task_id_map[selector]:
+        raise _fail(
+            f"{location}.path",
+            "task.toml identity does not match comparison plan.task_id_map",
+        )
+    return selector
+
+
 def _validate_comparison_plan(
     path: str | os.PathLike[str],
     *,
@@ -1789,6 +1841,7 @@ def _validate_comparison_plan(
         "attempts",
         "dataset",
         "tasks",
+        "task_id_map",
         "arms",
     }
     if set(plan) != expected_fields:
@@ -1916,6 +1969,7 @@ def _validate_comparison_plan(
 
     plan_dataset = plan.get("dataset")
     raw_tasks = plan.get("tasks")
+    raw_task_id_map = plan.get("task_id_map")
     if plan_dataset is None:
         if "path" not in dataset or "name" in dataset:
             raise _fail(
@@ -1932,6 +1986,49 @@ def _validate_comparison_plan(
                 "job config.datasets[0].task_names",
                 "does not match comparison plan",
             )
+        dataset_path = Path(
+            _string(dataset.get("path"), "job config.datasets[0].path")
+        ).expanduser()
+        if dataset_path.is_symlink():
+            raise _fail(
+                "job config.datasets[0].path",
+                "local task-set path must not be a symlink",
+            )
+        dataset_root = dataset_path.resolve()
+        if not dataset_root.is_dir():
+            raise _fail(
+                "job config.datasets[0].path",
+                "local task-set path is not a directory",
+            )
+        task_id_map = _object(
+            raw_task_id_map,
+            "comparison plan.task_id_map",
+        )
+        if set(task_id_map) != set(tasks):
+            raise _fail(
+                "comparison plan.task_id_map",
+                "keys must match every Harbor task selector exactly",
+            )
+        canonical_task_ids = tuple(
+            _string(
+                task_id_map[task],
+                f"comparison plan.task_id_map[{task!r}]",
+            )
+            for task in tasks
+        )
+        if any(
+            task_id != task_id.strip() or "\x00" in task_id
+            for task_id in canonical_task_ids
+        ):
+            raise _fail(
+                "comparison plan.task_id_map",
+                "canonical task IDs contain unsafe whitespace or NUL",
+            )
+        if len(set(canonical_task_ids)) != len(canonical_task_ids):
+            raise _fail(
+                "comparison plan.task_id_map",
+                "canonical task IDs must be unique",
+            )
     else:
         descriptor = _object(plan_dataset, "comparison plan.dataset")
         if descriptor != dataset:
@@ -1944,18 +2041,19 @@ def _validate_comparison_plan(
                 "comparison plan.tasks",
                 "must be null when Harbor resolves an immutable dataset",
             )
+        if raw_task_id_map is not None:
+            raise _fail(
+                "comparison plan.task_id_map",
+                "must be null when Harbor resolves an immutable dataset",
+            )
         tasks = ()
+        task_id_map = {}
+        dataset_root = None
     if tasks and tuple(sorted(set(tasks))) != tasks:
         raise _fail(
             "comparison plan.tasks",
             "must be a sorted unique list",
         )
-    if any(_normalized_task_name(task) != task for task in tasks):
-        raise _fail(
-            "comparison plan.tasks",
-            "must contain normalized OpenBench task names",
-        )
-
     raw_arms = _array(plan.get("arms"), "comparison plan.arms")
     arms_by_digest: dict[str, dict[str, str]] = {}
     arm_ids: set[str] = set()
@@ -2065,8 +2163,18 @@ def _validate_comparison_plan(
             _object(raw_lock, f"job lock.trials[{index}]").get("task"),
             f"job lock.trials[{index}].task",
         )
-        task_name = _normalized_task_name(
-            _string(task.get("name"), f"job lock.trials[{index}].task.name")
+        task_name = (
+            _local_task_selector(
+                task,
+                dataset_root=dataset_root,
+                task_id_map=task_id_map,
+                location=f"job lock.trials[{index}].task",
+            )
+            if tasks
+            else _string(
+                task.get("name"),
+                f"job lock.trials[{index}].task.name",
+            )
         )
         task_digests_by_name[task_name].add(
             _validate_digest(
@@ -2088,17 +2196,22 @@ def _validate_comparison_plan(
         task_name: next(iter(digests))
         for task_name, digests in task_digests_by_name.items()
     }
-    resolved_tasks = tuple(sorted(task_digest_by_name))
-    if not resolved_tasks:
+    resolved_harbor_tasks = tuple(sorted(task_digest_by_name))
+    if not resolved_harbor_tasks:
         raise _fail("job lock.trials", "resolved task set must not be empty")
-    if tasks and resolved_tasks != tasks:
+    if tasks and resolved_harbor_tasks != tasks:
         raise _fail(
             "comparison plan.tasks",
             "does not match the resolved Harbor lock task set",
         )
+    resolved_tasks = (
+        tuple(sorted(task_id_map[task] for task in resolved_harbor_tasks))
+        if tasks
+        else resolved_harbor_tasks
+    )
     expected_cells = Counter(
         (task, task_digest_by_name[task], agent_config_sha256)
-        for task in resolved_tasks
+        for task in resolved_harbor_tasks
         for agent_config_sha256 in arms_by_digest
         for _attempt in range(attempts)
     )
@@ -2116,8 +2229,15 @@ def _validate_comparison_plan(
                 f"job lock.trials[{index}].agent",
                 "does not match any exact rendered agent config",
             )
-        task_name = _normalized_task_name(
-            _string(
+        task_name = (
+            _local_task_selector(
+                task,
+                dataset_root=dataset_root,
+                task_id_map=task_id_map,
+                location=f"job lock.trials[{index}].task",
+            )
+            if tasks
+            else _string(
                 task.get("name"),
                 f"job lock.trials[{index}].task.name",
             )
@@ -2148,7 +2268,19 @@ def _validate_comparison_plan(
                 f"trial {item['trial_name']!r}.lock.agent",
                 "does not match any exact rendered agent config",
             )
-        task_name = _normalized_task_name(item["task_name"])
+        task_name = (
+            _local_task_selector(
+                item["task_lock"],
+                dataset_root=dataset_root,
+                task_id_map=task_id_map,
+                location=f"trial {item['trial_name']!r}.lock.task",
+            )
+            if tasks
+            else _string(
+                item["task_lock"].get("name"),
+                f"trial {item['trial_name']!r}.lock.task.name",
+            )
+        )
         if item["task_digest"] != task_digest_by_name.get(task_name):
             raise _fail(
                 f"trial {item['trial_name']!r}.lock.task.digest",
@@ -2157,7 +2289,7 @@ def _validate_comparison_plan(
         grouped[(task_name, agent_config_sha256)].append(item)
     coordinates: dict[str, dict[str, Any]] = {}
     for key, group_trials in grouped.items():
-        task, agent_config_sha256 = key
+        harbor_task, agent_config_sha256 = key
         arm = arms_by_digest[agent_config_sha256]
         arm_id = arm["arm_id"]
         ordered = sorted(
@@ -2167,12 +2299,12 @@ def _validate_comparison_plan(
         if len(ordered) != attempts:
             raise _fail(
                 "comparison plan",
-                f"resolved cell count disagrees for {task!r} and {arm_id!r}",
+                f"resolved cell count disagrees for {harbor_task!r} and {arm_id!r}",
             )
         for block_index, item in enumerate(ordered, 1):
             coordinates[item["trial_id"]] = {
                 "arm_id": arm_id,
-                "task": task,
+                "task": task_id_map.get(harbor_task, harbor_task),
                 "index": block_index,
                 "agent_config_sha256": agent_config_sha256,
                 "canonical_harness": arm["canonical_harness"],
@@ -2262,9 +2394,13 @@ def load_rows(
         if item["openbench_task_content_digest"] is None:
             continue
         content_sha256 = item["openbench_task_content_digest"]["sha256"]
-        content_digests_by_task[
-            _normalized_task_name(item["task_name"])
-        ].add(content_sha256)
+        comparison_coordinate = comparison_coordinates.get(item["trial_id"])
+        content_task = (
+            comparison_coordinate["task"]
+            if comparison_coordinate is not None
+            else _normalized_task_name(item["task_name"])
+        )
+        content_digests_by_task[content_task].add(content_sha256)
         content_digests_by_harbor_digest[item["task_digest"]].add(content_sha256)
     for task_digest, checksums in checksums_by_digest.items():
         if len(checksums) != 1:
@@ -2435,7 +2571,7 @@ def load_rows(
                 "proxy_measured": False,
                 "harbor_metering": None,
                 "trial_mapping": (
-                    "openbench_comparison_plan_v3"
+                    "openbench_comparison_plan_v4"
                     if comparison_coordinate is not None
                     else "lexicographic_name_within_task_agent_model"
                 ),

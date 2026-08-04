@@ -424,7 +424,10 @@ class HarborRunTests(unittest.TestCase):
             task = exports / name
             task.mkdir(parents=True)
             (task / "task.toml").write_text(
-                (self.task / "task.toml").read_text(encoding="utf-8"),
+                (self.task / "task.toml").read_text(encoding="utf-8").replace(
+                    'name = "openbench/example"',
+                    f'name = "openbench/{name}"',
+                ),
                 encoding="utf-8",
             )
             (task / "instruction.md").write_text("Task.\n", encoding="utf-8")

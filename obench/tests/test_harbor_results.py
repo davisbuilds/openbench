@@ -76,14 +76,14 @@ def _openbench_task_content_digest(task: str) -> dict:
     }
 
 
-def _trial_lock(task: str, model: str = "model-x") -> dict:
+def _trial_lock(task: str, task_root: Path, model: str = "model-x") -> dict:
     return {
         "schema_version": 2,
         "task": {
             "name": f"openbench/{task}",
             "type": "local",
             "digest": "sha256:" + ("a" if task == "alpha" else "b") * 64,
-            "path": f"/tmp/tasks/{task}",
+            "path": str(task_root / task),
         },
         "install_only": False,
         "timeout_multiplier": 1.0,
@@ -114,6 +114,7 @@ def _trial_lock(task: str, model: str = "model-x") -> dict:
 def _trial_result(
     name: str,
     task: str,
+    task_root: Path,
     trial_id: str,
     score: float,
     *,
@@ -126,11 +127,11 @@ def _trial_result(
         "task_name": f"openbench/{task}",
         "trial_name": name,
         "trial_uri": f"file:///tmp/job/{name}",
-        "task_id": {"path": f"/tmp/tasks/{task}"},
+        "task_id": {"path": str(task_root / task)},
         "source": "openbench",
         "task_checksum": ("a" if task == "alpha" else "b") * 64,
         "config": {
-            "task": {"path": f"/tmp/tasks/{task}"},
+            "task": {"path": str(task_root / task)},
             "trial_name": name,
             "trials_dir": "/tmp/job",
             "job_id": "10000000-0000-0000-0000-000000000000",
@@ -216,6 +217,7 @@ class GoldenHarborJob:
 
     def __init__(self, root: Path, specs: list[dict] | None = None):
         self.root = root
+        self.task_root = root.parent / f"{root.name}-tasks"
         self.submitted_config_path = root.parent / f"{root.name}-submitted.json"
         self.specs = specs or [
             {
@@ -244,7 +246,19 @@ class GoldenHarborJob:
 
     def write(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        locks = [_trial_lock(spec["task"]) for spec in self.specs]
+        self.task_root.mkdir(parents=True, exist_ok=True)
+        for task in sorted({spec["task"] for spec in self.specs}):
+            task_dir = self.task_root / task
+            task_dir.mkdir(parents=True, exist_ok=True)
+            (task_dir / "task.toml").write_text(
+                'schema_version = "1.4"\n\n'
+                "[task]\n"
+                f'name = "{task}"\n'
+            )
+        locks = [
+            _trial_lock(spec["task"], self.task_root)
+            for spec in self.specs
+        ]
         _write_json(
             self.root / "lock.json",
             {
@@ -270,6 +284,7 @@ class GoldenHarborJob:
             result = _trial_result(
                 spec["name"],
                 spec["task"],
+                self.task_root,
                 spec["id"],
                 spec["score"],
                 offset_minutes=spec["offset"],
@@ -467,6 +482,7 @@ class GoldenHarborJob:
         arms: list[dict[str, str]],
         agents: list[dict] | None = None,
         dataset_descriptor: dict | None = None,
+        task_id_map: dict[str, str] | None = None,
     ) -> Path:
         tasks = sorted({spec["task"] for spec in self.specs})
         if agents is None:
@@ -483,7 +499,7 @@ class GoldenHarborJob:
             "agents": agents,
             "datasets": [
                 dataset_descriptor
-                or {"path": "/tmp/exported", "task_names": tasks}
+                or {"path": str(self.task_root), "task_names": tasks}
             ],
             "tasks": [],
         }
@@ -504,8 +520,20 @@ class GoldenHarborJob:
             "attempts": attempts,
             "dataset": dataset_descriptor,
             "tasks": None if dataset_descriptor is not None else tasks,
+            "task_id_map": (
+                None
+                if dataset_descriptor is not None
+                else task_id_map or {task: task for task in tasks}
+            ),
             "arms": arms,
         }
+        if dataset_descriptor is None:
+            for selector, canonical_id in plan["task_id_map"].items():
+                (self.task_root / selector / "task.toml").write_text(
+                    'schema_version = "1.4"\n\n'
+                    "[task]\n"
+                    f'name = "{canonical_id}"\n'
+                )
         path = self.root.parent / f"{self.root.name}-comparison-plan.json"
         _write_json(path, plan)
         return path
@@ -771,7 +799,7 @@ class HarborResultsTests(unittest.TestCase):
                 self.assertEqual(provenance["comparison_arm_id"], harness)
                 self.assertEqual(
                     provenance["trial_mapping"],
-                    "openbench_comparison_plan_v3",
+                    "openbench_comparison_plan_v4",
                 )
                 self.assertFalse(
                     provenance["temporal_matched_block_claim"]
@@ -884,7 +912,7 @@ class HarborResultsTests(unittest.TestCase):
         _write_json(plan_path, plan)
         with self.assertRaisesRegex(
             HarborResultsError,
-            "openbench-harbor-comparison-plan-v3",
+            "openbench-harbor-comparison-plan-v4",
         ):
             load_rows(
                 fixture.root,
@@ -1065,7 +1093,7 @@ class HarborResultsTests(unittest.TestCase):
         )
         self.assertEqual(
             rows[0]["candidate_provenance"]["comparison_resolved_tasks"],
-            ["alpha"],
+            ["openbench/alpha"],
         )
 
         plan = json.loads(plan_path.read_text())
@@ -1134,8 +1162,71 @@ class HarborResultsTests(unittest.TestCase):
         )
         self.assertEqual(
             row["candidate_provenance"]["comparison_resolved_tasks"],
-            ["alpha"],
+            ["openbench/alpha"],
         )
+
+    def test_local_comparison_plan_maps_harbor_selector_to_canonical_task_id(self):
+        fixture = GoldenHarborJob(
+            self.root / "canonical-task-id",
+            specs=[
+                {
+                    "name": "fix-failing-test__one",
+                    "task": "fix-failing-test",
+                    "id": "00000000-0000-0000-0000-000000000071",
+                    "score": 1.0,
+                    "offset": 0,
+                }
+            ],
+        )
+        agent = {"name": "codex", "model_name": "model-x"}
+        plan_path = fixture.write_comparison_plan(
+            attempts=1,
+            arms=[_comparison_arm("codex", agent)],
+            agents=[agent],
+            task_id_map={
+                "fix-failing-test": "openbench/fix-failing-test",
+            },
+        )
+
+        row = load_rows(
+            fixture.root,
+            comparison_plan_path=plan_path,
+            submitted_job_config_path=fixture.submitted_config_path,
+        )[0]
+
+        self.assertEqual(row["task"], "openbench/fix-failing-test")
+        self.assertEqual(
+            row["candidate_provenance"]["comparison_plan"]["tasks"],
+            ["fix-failing-test"],
+        )
+        self.assertEqual(
+            row["candidate_provenance"]["comparison_plan"]["task_id_map"],
+            {"fix-failing-test": "openbench/fix-failing-test"},
+        )
+        self.assertEqual(
+            row["candidate_provenance"]["comparison_resolved_tasks"],
+            ["openbench/fix-failing-test"],
+        )
+        self.assertEqual(
+            row["candidate_provenance"]["comparison_block"],
+            {"task": "openbench/fix-failing-test", "index": 1},
+        )
+
+        (
+            fixture.task_root / "fix-failing-test" / "task.toml"
+        ).write_text(
+            'schema_version = "1.4"\n\n'
+            '[task]\nname = "openbench/tampered"\n'
+        )
+        with self.assertRaisesRegex(
+            HarborResultsError,
+            r"task\.toml identity",
+        ):
+            load_rows(
+                fixture.root,
+                comparison_plan_path=plan_path,
+                submitted_job_config_path=fixture.submitted_config_path,
+            )
 
     def test_terminal_failures_map_without_fabricated_optional_evidence(self):
         exception_types = (

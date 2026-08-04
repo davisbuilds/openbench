@@ -69,7 +69,7 @@ suite when required evidence is absent.
 
 ## Row semantics
 
-With `--comparison-plan`, `--job-config` is also required. The v3 sidecar binds
+With `--comparison-plan`, `--job-config` is also required. The v4 sidecar binds
 both the exact submitted config bytes and a pinned semantic digest. The latter
 normalizes only Harbor 0.20.0's documented default elision and retry-set order,
 so Harbor's persisted `config.json` may serialize differently but cannot change

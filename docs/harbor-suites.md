@@ -184,6 +184,10 @@ matched comparisons include suite, task-set, plan, task, and attempt identity.
 They never claim temporal scheduling; `temporal_matched_block_claim` remains
 false.
 
+For local suites, the comparison plan also binds each Harbor task-directory
+selector to its canonical `[task].name`. Harbor executes and locks the selector;
+OpenBench uses the canonical ID in sealed rows and cross-suite comparisons.
+
 The sealed public run manifest binds the suite semantic body/digest, each
 task-set config path identity and SHA-256, comparison-plan body/digest, expected
 Harbor job name, and final result SHA-256/count. Absolute runtime paths live

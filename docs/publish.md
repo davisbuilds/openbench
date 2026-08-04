@@ -94,7 +94,9 @@ obench verify openbench-publish/my-claim
   usage-provenance claims without publishing the underlying private artifacts.
 - For each Harbor task, the structured executed digest is scheme 2 and equals
   the task digest recorded by publication. `obench publish` also requires it
-  to match the local task tree before writing the bundle.
+  to match the local task tree before writing the bundle. For local comparison
+  plans, the row keeps the canonical task ID while the sealed `task_id_map`
+  selects the actual source directory used for this recomputation.
 - Using the evidence-bound exporter parameters, publish and verify reproduce
   the Harbor 0.20.0 package content hash from a canonical re-export and require
   it to equal the locked Harbor task digest. A modified post-export task cannot

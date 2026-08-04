@@ -116,6 +116,27 @@ class TestExclusionsAndQuarantine(StatsTestCase):
         self.assertEqual(result["excluded_counts"], {"quarantined_dropped_task": 2})
         self.assertEqual(result["quarantined_tasks"], {"dropped": 1, dropped_abs: 1})
 
+    def test_harbor_dropped_lookup_uses_raw_selector_not_canonical_id(self):
+        self.make_task("t1", dropped=True)
+        row = TestMatchedDenominators._harbor_row("a")
+        provenance = row["candidate_provenance"]
+        plan = provenance["comparison_plan"]
+        plan["task_id_map"] = {"t1": "private/t1"}
+        provenance["comparison_plan_sha256"] = hashlib.sha256(
+            canonical_comparison_plan_bytes(plan)
+        ).hexdigest()
+        provenance["comparison_resolved_tasks"] = ["private/t1"]
+        provenance["comparison_block"]["task"] = "private/t1"
+        row["task"] = "private/t1"
+
+        result = self.build([row], group="model", min_n=1)
+
+        self.assertEqual(result["excluded_counts"], {
+            "quarantined_dropped_task": 1,
+        })
+        self.assertEqual(result["quarantined_tasks"], {"private/t1": 1})
+        self.assertEqual(result["tables"]["all_countable_non_comparable"], [])
+
 
 class TestMatchedDenominators(StatsTestCase):
     @staticmethod
@@ -123,7 +144,7 @@ class TestMatchedDenominators(StatsTestCase):
         provenance = {"kind": "harbor_job"}
         if with_identity:
             plan = {
-                "schema_version": "openbench-harbor-comparison-plan-v3",
+                "schema_version": "openbench-harbor-comparison-plan-v4",
                 "harbor_version": "0.20.0",
                 "harbor_git_commit_hash": "0" * 40,
                 "job_name": "stats-fixture",
@@ -132,6 +153,7 @@ class TestMatchedDenominators(StatsTestCase):
                 "attempts": 1,
                 "dataset": None,
                 "tasks": ["t1"],
+                "task_id_map": {"t1": "t1"},
                 "arms": [
                     {
                         "arm_id": arm_model,
@@ -148,7 +170,7 @@ class TestMatchedDenominators(StatsTestCase):
             }
             provenance.update({
                 "comparison_plan_schema_version": (
-                    "openbench-harbor-comparison-plan-v3"
+                    "openbench-harbor-comparison-plan-v4"
                 ),
                 "comparison_plan_sha256": hashlib.sha256(
                     canonical_comparison_plan_bytes(plan)
@@ -160,7 +182,7 @@ class TestMatchedDenominators(StatsTestCase):
                 ),
                 "comparison_resolved_tasks": ["t1"],
                 "comparison_block": {"task": "t1", "index": 1},
-                "trial_mapping": "openbench_comparison_plan_v3",
+                "trial_mapping": "openbench_comparison_plan_v4",
                 "temporal_matched_block_claim": False,
             })
         return {

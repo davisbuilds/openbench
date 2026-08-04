@@ -165,6 +165,13 @@ and host allowlists. Env values are never resolved into the plan. The resulting
 task x arm x attempt matrix is a stable OpenBench denominator plan, not a second
 scheduler.
 
+For local task sets, comparison-plan v4 keeps Harbor's directory selector in
+`tasks` and binds it one-to-one to the canonical OpenBench task ID through
+`task_id_map`. Harbor config and lock validation use the selector; result rows,
+matched blocks, statistics, and publication use the canonical ID. Immutable
+registry/package datasets set both fields to `null` because Harbor resolves
+their task identities into the lock.
+
 The config fixes `job_name` and `jobs_dir`. Re-running the same
 `harbor run -c <config>` points Harbor at the same job directory. Harbor then
 compares its persisted `config.json` and resolved `lock.json`, preserves the

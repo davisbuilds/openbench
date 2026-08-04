@@ -13,6 +13,7 @@ import math
 import os
 import re
 import tempfile
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -24,7 +25,7 @@ HARBOR_JOB_CONFIG_SOURCE = (
     "https://github.com/harbor-framework/harbor/blob/"
     f"{HARBOR_GIT_COMMIT}/src/harbor/models/job/config.py"
 )
-COMPARISON_PLAN_SCHEMA_VERSION = "openbench-harbor-comparison-plan-v3"
+COMPARISON_PLAN_SCHEMA_VERSION = "openbench-harbor-comparison-plan-v4"
 COMPARISON_PLAN_SUFFIX = ".openbench-comparison-plan.json"
 
 DEFAULT_RETRY_EXCLUSIONS = (
@@ -76,7 +77,6 @@ class LocalTaskSet:
 
     path: str | os.PathLike[str]
     task_names: tuple[str, ...] | None = None
-    comparison_task_names: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -201,7 +201,7 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
         source,
         source_task_count,
         source_task_names,
-        comparison_task_names,
+        task_id_map,
         dataset_descriptor,
     ) = _render_source(spec.source)
 
@@ -287,7 +287,8 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
         submitted_job_config_sha256=config_sha256,
         effective_job_config_sha256=canonical_harbor_job_config_sha256(config),
         dataset=dataset_descriptor,
-        tasks=comparison_task_names,
+        tasks=source_task_names,
+        task_id_map=task_id_map,
         arms=comparison_arms,
         attempts=spec.attempts,
     )
@@ -309,6 +310,7 @@ def _build_comparison_plan(
     effective_job_config_sha256: str,
     dataset: dict[str, Any] | None,
     tasks: tuple[str, ...] | None,
+    task_id_map: dict[str, str] | None,
     arms: list[dict[str, str]],
     attempts: int,
 ) -> HarborComparisonPlanArtifact:
@@ -322,6 +324,7 @@ def _build_comparison_plan(
         "attempts": attempts,
         "dataset": dataset,
         "tasks": None if tasks is None else list(tasks),
+        "task_id_map": task_id_map,
         "arms": arms,
     }
     json_bytes = canonical_comparison_plan_bytes(value)
@@ -579,33 +582,42 @@ def _render_source(
 ]:
     if isinstance(source, LocalTaskSet):
         dataset, task_names = _render_local_task_set(source)
-        comparison_task_names = (
-            task_names
-            if source.comparison_task_names is None
-            else tuple(
-                sorted(
-                    _validate_unique_strings(
-                        source.comparison_task_names,
-                        "comparison_task_names",
-                    )
-                )
-            )
-        )
-        if len(comparison_task_names) != len(task_names):
-            raise HarborJobError(
-                "comparison_task_names must identify every selected local task"
-            )
+        task_id_map = _local_task_id_map(Path(dataset["path"]), task_names)
         return (
             {"datasets": [dataset], "tasks": []},
             len(task_names),
             task_names,
-            comparison_task_names,
+            task_id_map,
             None,
         )
     if isinstance(source, Dataset):
         dataset = _render_dataset(source)
         return {"datasets": [dataset], "tasks": []}, None, None, None, dataset
     raise HarborJobError("source must be exactly one LocalTaskSet or Dataset")
+
+
+def _local_task_id_map(root: Path, task_names: tuple[str, ...]) -> dict[str, str]:
+    task_id_map: dict[str, str] = {}
+    for selector in task_names:
+        config_path = root / selector / "task.toml"
+        try:
+            with config_path.open("rb") as handle:
+                raw = tomllib.load(handle)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise HarborJobError(
+                f"cannot read selected Harbor task config {config_path}: {exc}"
+            ) from exc
+        task = raw.get("task")
+        canonical_id = task.get("name") if isinstance(task, dict) else None
+        task_id_map[selector] = _validate_nonempty(
+            canonical_id,
+            f"{config_path} [task].name",
+        )
+    if len(set(task_id_map.values())) != len(task_id_map):
+        raise HarborJobError(
+            "selected local Harbor tasks must have unique [task].name identities"
+        )
+    return task_id_map
 
 
 def _render_local_task_set(

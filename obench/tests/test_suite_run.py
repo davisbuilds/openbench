@@ -17,7 +17,10 @@ import unittest
 from unittest import mock
 
 from obench import compare, init, stats, suite_run
-from obench.harbor_job import canonical_harbor_job_config_sha256
+from obench.harbor_job import (
+    canonical_comparison_plan_bytes,
+    canonical_harbor_job_config_sha256,
+)
 from obench.harbor_run import HarborBinary
 from obench.harbor_results import HARBOR_PROXY_REQUIRED_AGENTS
 from obench.suite_run import SuiteRunError
@@ -200,7 +203,15 @@ model = "gpt-5.6-terra"
         plan_sha256 = hashlib.sha256(
             comparison_plan_path.read_bytes()
         ).hexdigest()
-        tasks = plan["tasks"] or [comparison_plan_path.stem.split(".", 1)[0]]
+        harbor_tasks = (
+            plan["tasks"] or [comparison_plan_path.stem.split(".", 1)[0]]
+        )
+        tasks = [
+            plan["task_id_map"].get(task, task)
+            if plan["task_id_map"] is not None
+            else task
+            for task in harbor_tasks
+        ]
         rows = []
         for task in tasks:
             for arm in plan["arms"]:
@@ -266,7 +277,7 @@ model = "gpt-5.6-terra"
                                 if proxy_required
                                 else None
                             ),
-                            "trial_mapping": "openbench_comparison_plan_v3",
+                            "trial_mapping": "openbench_comparison_plan_v4",
                             "temporal_matched_block_claim": False,
                         },
                     })
@@ -325,7 +336,11 @@ model = "gpt-5.6-terra"
         )
         self.assertEqual(
             planned.comparison_plan.as_dict()["tasks"],
-            ["private/example-greeting"],
+            ["example-greeting"],
+        )
+        self.assertEqual(
+            planned.comparison_plan.as_dict()["task_id_map"],
+            {"example-greeting": "private/example-greeting"},
         )
 
     def test_explicit_suite_overrides_discovered_default(self):
@@ -795,6 +810,25 @@ model = "gpt-5.6-terra"
                 mutate(rows[0])
                 with self.assertRaises(ValueError):
                     stats.validate_suite_rows(rows)
+
+    def test_suite_rejects_rehashed_plan_task_map_that_disagrees_with_manifest(self):
+        root = self._project()
+        compiled = suite_run.compile_suite(start=root)
+        result = self._run_simulated(compiled)
+        rows = stats.load_rows([result.results_path])
+
+        for row in rows:
+            provenance = row["candidate_provenance"]
+            plan = provenance["comparison_plan"]
+            plan["task_id_map"] = {
+                "example-greeting": "private/tampered",
+            }
+            provenance["comparison_plan_sha256"] = hashlib.sha256(
+                canonical_comparison_plan_bytes(plan)
+            ).hexdigest()
+
+        with self.assertRaisesRegex(ValueError, "task identities"):
+            stats.validate_suite_rows(rows)
 
     def test_complete_denominator_uses_resolved_tasks_not_observed_rows(self):
         root = self._project()

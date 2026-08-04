@@ -25,6 +25,7 @@ import json
 import math
 import os
 import sys
+import tomllib
 from collections import Counter, defaultdict
 
 from .paths import SOURCE_ROOT, default_imported_tasks_dir, default_tasks_dir, find_repo_root
@@ -408,6 +409,7 @@ def _comparison_plan_arm(row):
         "attempts",
         "dataset",
         "tasks",
+        "task_id_map",
         "arms",
     }
     if not isinstance(plan, dict) or set(plan) != expected_plan_fields:
@@ -472,6 +474,234 @@ def _comparison_plan_arm(row):
             "Harbor matched comparison row does not match its declared plan arm"
         )
     return arm
+
+
+def harbor_task_source_binding(row):
+    """Return the sealed filesystem binding for one Harbor result task."""
+
+    task = row.get("task")
+    if not isinstance(task, str) or not task:
+        raise ValueError("Harbor result row has no canonical task identity")
+    provenance = row.get("candidate_provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError("Harbor result row has no provenance")
+
+    plan = provenance.get("comparison_plan")
+    selector = task
+    if isinstance(plan, dict) and plan.get("tasks") is not None:
+        _comparison_plan_arm(row)
+        task_id_map = plan.get("task_id_map")
+        matches = [
+            raw_selector
+            for raw_selector, canonical_id in task_id_map.items()
+            if canonical_id == task
+        ] if isinstance(task_id_map, dict) else []
+        if len(matches) != 1:
+            raise ValueError(
+                f"Harbor task {task!r}: canonical ID has no unique local selector"
+            )
+        selector = matches[0]
+
+    binding = {
+        "canonical_id": task,
+        "selector": selector,
+        "suite_manifest_sha256": None,
+        "suite_task_set_id": None,
+        "suite_task_set_path": None,
+    }
+    manifest = provenance.get("suite_manifest")
+    manifest_sha256 = provenance.get("suite_manifest_sha256")
+    task_set_id = provenance.get("suite_task_set_id")
+    if manifest is None and manifest_sha256 is None and task_set_id is None:
+        return binding
+    if (
+        not isinstance(manifest, dict)
+        or not _sha256_hex(manifest_sha256)
+        or hashlib.sha256(_canonical_suite_manifest_bytes(manifest)).hexdigest()
+        != manifest_sha256
+        or not isinstance(task_set_id, str)
+        or not task_set_id
+    ):
+        raise ValueError("Harbor suite task source has invalid manifest identity")
+    _validate_suite_manifest_shape(manifest, manifest_sha256)
+    matches = [
+        item
+        for item in manifest["task_sets"]
+        if isinstance(item, dict) and item.get("id") == task_set_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("Harbor suite task source has no unique task-set binding")
+    task_set = matches[0]
+    if task_set.get("kind") != "local":
+        return {
+            **binding,
+            "suite_manifest_sha256": manifest_sha256,
+            "suite_task_set_id": task_set_id,
+        }
+
+    task_set_path = task_set.get("path")
+    task_entries = task_set.get("tasks")
+    path_parts = (
+        task_set_path.split("/")
+        if isinstance(task_set_path, str)
+        else []
+    )
+    expected_task_map = (
+        {
+            item["directory"]: item["logical_name"]
+            for item in task_entries
+        }
+        if isinstance(task_entries, list)
+        and all(
+            isinstance(item, dict)
+            and set(item) == {"directory", "logical_name"}
+            and isinstance(item["directory"], str)
+            and item["directory"]
+            and isinstance(item["logical_name"], str)
+            and item["logical_name"]
+            for item in task_entries
+        )
+        else None
+    )
+    if (
+        not path_parts
+        or any(part in ("", ".", "..") for part in path_parts)
+        or os.path.isabs(task_set_path)
+        or expected_task_map is None
+        or expected_task_map.get(selector) != task
+    ):
+        raise ValueError("Harbor suite task source does not match its manifest")
+    return {
+        **binding,
+        "suite_manifest_sha256": manifest_sha256,
+        "suite_task_set_id": task_set_id,
+        "suite_task_set_path": task_set_path,
+    }
+
+
+def _path_is_under(path, root):
+    path_real = os.path.realpath(path)
+    root_real = os.path.realpath(root)
+    return os.path.commonpath([root_real, path_real]) == root_real
+
+
+def _unique_existing_task_dir(task, roots):
+    candidates = {
+        os.path.realpath(path)
+        for path in _candidate_task_dirs(task, roots)
+        if os.path.isdir(path)
+    }
+    if len(candidates) > 1:
+        raise ValueError(
+            f"task source {task!r} is ambiguous across configured task roots"
+        )
+    return next(iter(candidates), None)
+
+
+def resolve_task_source_binding(binding, roots, *, required=False):
+    """Resolve a sealed task binding to exactly one current source directory."""
+
+    roots = parse_tasks_dirs(roots)
+    selector = binding["selector"]
+    task_set_path = binding.get("suite_task_set_path")
+    if task_set_path is None:
+        return _unique_existing_task_dir(selector, roots)
+
+    project_roots = set()
+    for root in roots:
+        current = os.path.realpath(root)
+        while True:
+            project_roots.add(current)
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+
+    source_dirs = set()
+    found_suite_task = False
+    for project_root in sorted(project_roots):
+        task_set_root = _safe_join_under(project_root, task_set_path)
+        if (
+            task_set_root is None
+            or not os.path.isdir(task_set_root)
+            or os.path.islink(task_set_root)
+        ):
+            continue
+        task_dir = _safe_join_under(task_set_root, selector)
+        if (
+            task_dir is None
+            or os.path.dirname(task_dir) != os.path.realpath(task_set_root)
+            or not os.path.isdir(task_dir)
+            or os.path.islink(task_dir)
+        ):
+            continue
+        config_path = os.path.join(task_dir, "task.toml")
+        try:
+            with open(config_path, "rb") as handle:
+                config = tomllib.load(handle)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ValueError(
+                f"cannot read sealed Harbor task source {config_path}: {exc}"
+            ) from exc
+        task_config = config.get("task")
+        if (
+            not isinstance(task_config, dict)
+            or task_config.get("name") != binding["canonical_id"]
+        ):
+            continue
+        found_suite_task = True
+        metadata = config.get("metadata")
+        source_task = (
+            metadata.get("source_task")
+            if isinstance(metadata, dict)
+            else None
+        )
+        if source_task is None:
+            if any(_path_is_under(task_dir, root) for root in roots):
+                source_dirs.add(os.path.realpath(task_dir))
+            continue
+        source_parts = source_task.split("/") if isinstance(source_task, str) else []
+        if (
+            not source_parts
+            or os.path.isabs(source_task)
+            or any(part in ("", ".", "..") for part in source_parts)
+        ):
+            raise ValueError(
+                f"Harbor task {binding['canonical_id']!r} has unsafe source_task metadata"
+            )
+        source_dir = _safe_join_under(project_root, source_task)
+        if (
+            source_dir is not None
+            and os.path.isdir(source_dir)
+            and any(_path_is_under(source_dir, root) for root in roots)
+        ):
+            source_dirs.add(os.path.realpath(source_dir))
+
+    if len(source_dirs) > 1:
+        raise ValueError(
+            f"Harbor task {binding['canonical_id']!r} resolves to multiple source trees"
+        )
+    if source_dirs:
+        return next(iter(source_dirs))
+    if found_suite_task:
+        if required:
+            raise ValueError(
+                f"Harbor task {binding['canonical_id']!r} source tree is not among "
+                "the configured task roots"
+            )
+        return None
+    if required:
+        raise ValueError(
+            f"Harbor task {binding['canonical_id']!r} does not match the sealed "
+            f"suite task-set path {task_set_path!r}"
+        )
+    return None
+
+
+def resolve_row_task_dir(row, roots):
+    if not is_harbor_result_row(row):
+        return _unique_existing_task_dir(row.get("task"), roots)
+    return resolve_task_source_binding(harbor_task_source_binding(row), roots)
 
 
 def _canonical_suite_manifest_bytes(value):
@@ -619,8 +849,49 @@ def validate_suite_rows(rows, *, for_publication=False):
                 f"suite task set {task_set_id!r} has inconsistent resolved tasks"
             )
         resolved_tasks = next(iter(resolved_task_sets))
-        plan_tasks = selected[0]["candidate_provenance"]["comparison_plan"]["tasks"]
-        if plan_tasks is not None and tuple(plan_tasks) != resolved_tasks:
+        plan = selected[0]["candidate_provenance"]["comparison_plan"]
+        plan_tasks = plan["tasks"]
+        task_id_map = plan["task_id_map"]
+        manifest_task_set = next(
+            item
+            for item in manifest["task_sets"]
+            if item["id"] == task_set_id
+        )
+        if manifest_task_set.get("kind") == "local":
+            manifest_tasks = manifest_task_set.get("tasks")
+            expected_task_id_map = (
+                {
+                    item["directory"]: item["logical_name"]
+                    for item in manifest_tasks
+                }
+                if isinstance(manifest_tasks, list)
+                and all(
+                    isinstance(item, dict)
+                    and set(item) == {"directory", "logical_name"}
+                    for item in manifest_tasks
+                )
+                else None
+            )
+            if (
+                expected_task_id_map is None
+                or plan_tasks != sorted(expected_task_id_map)
+                or task_id_map != expected_task_id_map
+            ):
+                raise ValueError(
+                    f"suite task set {task_set_id!r} plan task identities "
+                    "do not match the suite manifest"
+                )
+        elif plan_tasks is not None or task_id_map is not None:
+            raise ValueError(
+                f"suite task set {task_set_id!r} immutable Harbor dataset "
+                "must not declare local task identities"
+            )
+        expected_resolved_tasks = (
+            tuple(sorted(task_id_map.values()))
+            if plan_tasks is not None
+            else resolved_tasks
+        )
+        if expected_resolved_tasks != resolved_tasks:
             raise ValueError(
                 f"suite task set {task_set_id!r} plan does not bind resolved tasks"
             )
@@ -883,7 +1154,7 @@ def comparison_cell_key(row, *, require_harbor_identity=True):
         and not isinstance(block.get("index"), bool)
         and block["index"] >= 1
         and provenance.get("trial_mapping")
-        == "openbench_comparison_plan_v3"
+        == "openbench_comparison_plan_v4"
         and provenance.get("temporal_matched_block_claim") is False
     )
     if not exact:
@@ -1288,7 +1559,27 @@ def filter_rows(rows, tasks_dirs):
             excluded_counts["invalid_row"] += 1
             continue
         task = row.get("task")
-        dropped_path = task_is_dropped(task, tasks_dirs, dropped_cache)
+        if is_harbor_result_row(row):
+            binding = harbor_task_source_binding(row)
+            cache_key = (
+                binding["canonical_id"],
+                binding["selector"],
+                binding["suite_manifest_sha256"],
+                binding["suite_task_set_id"],
+            )
+            if cache_key not in dropped_cache:
+                task_dir = resolve_task_source_binding(binding, tasks_dirs)
+                dropped = (
+                    os.path.join(task_dir, "DROPPED.md")
+                    if task_dir is not None
+                    else None
+                )
+                dropped_cache[cache_key] = (
+                    dropped if dropped and os.path.isfile(dropped) else None
+                )
+            dropped_path = dropped_cache[cache_key]
+        else:
+            dropped_path = task_is_dropped(task, tasks_dirs, dropped_cache)
         if dropped_path:
             excluded_counts["quarantined_dropped_task"] += 1
             quarantined_tasks[str(task)] += 1

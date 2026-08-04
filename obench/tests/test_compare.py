@@ -64,7 +64,7 @@ class CompareTestCase(unittest.TestCase):
         **extra,
     ):
         plan = {
-            "schema_version": "openbench-harbor-comparison-plan-v3",
+            "schema_version": "openbench-harbor-comparison-plan-v4",
             "harbor_version": "0.20.0",
             "harbor_git_commit_hash": "0" * 40,
             "job_name": "compare-fixture" + plan_variant,
@@ -73,6 +73,7 @@ class CompareTestCase(unittest.TestCase):
             "attempts": 1,
             "dataset": None,
             "tasks": [task],
+            "task_id_map": {task: task},
             "arms": [
                 {
                     "arm_id": candidate_arm,
@@ -108,7 +109,7 @@ class CompareTestCase(unittest.TestCase):
             candidate_provenance={
                 "kind": "harbor_job",
                 "comparison_plan_schema_version": (
-                    "openbench-harbor-comparison-plan-v3"
+                    "openbench-harbor-comparison-plan-v4"
                 ),
                 "comparison_plan_sha256": plan_sha256,
                 "comparison_plan": plan,
@@ -119,7 +120,7 @@ class CompareTestCase(unittest.TestCase):
                     "task": task,
                     "index": trial,
                 },
-                "trial_mapping": "openbench_comparison_plan_v3",
+                "trial_mapping": "openbench_comparison_plan_v4",
                 "temporal_matched_block_claim": False,
             },
             **extra,

@@ -32,6 +32,10 @@ non-Harbor inputs continue to use explicit `(task, trial)` matching. Harbor
 plan blocks are deterministic denominator coordinates, not evidence of
 temporal matched scheduling.
 
+Local comparison-plan v4 rows use canonical OpenBench task IDs for these
+coordinates. Harbor's directory selectors remain execution-only identities
+bound one-to-one through the plan's `task_id_map`.
+
 Rows classified as `infra` or `rate_limited` are excluded before matching and
 from solve-rate denominators. Their counts are shown separately for every arm,
 along with invalid-row and dropped-task quarantine counts. Invalid rows that

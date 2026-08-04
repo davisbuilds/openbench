@@ -159,7 +159,7 @@ def _suite_harbor_row(row, *, scope):
     rendered_agent = {"model_name": "model-x", "name": "codex"}
     agent_digest = canonical_agent_config_sha256(rendered_agent)
     plan = {
-        "schema_version": "openbench-harbor-comparison-plan-v3",
+        "schema_version": "openbench-harbor-comparison-plan-v4",
         "harbor_version": "0.20.0",
         "harbor_git_commit_hash": "b" * 40,
         "job_name": "suite-core-job",
@@ -168,6 +168,7 @@ def _suite_harbor_row(row, *, scope):
         "attempts": 1,
         "dataset": None,
         "tasks": ["alpha"],
+        "task_id_map": {"alpha": "alpha"},
         "arms": [{
             "arm_id": "codex-arm",
             "agent_config_name": "codex",
@@ -272,7 +273,7 @@ def _suite_harbor_row(row, *, scope):
         "agent_config_sha256": agent_digest,
         "comparison_resolved_tasks": ["alpha"],
         "comparison_block": {"task": "alpha", "index": 1},
-        "trial_mapping": "openbench_comparison_plan_v3",
+        "trial_mapping": "openbench_comparison_plan_v4",
         "suite_manifest_schema_version": 1,
         "suite_manifest_sha256": manifest_sha256,
         "suite_manifest": manifest,
@@ -448,6 +449,17 @@ class PublishBundleTests(unittest.TestCase):
             )
 
         public_results = os.path.join(self.tmp.name, "suite-public.jsonl")
+        harbor_task = os.path.join(self.tmp.name, "harbor-tasks", "alpha")
+        os.makedirs(harbor_task)
+        with open(
+            os.path.join(harbor_task, "task.toml"),
+            "w",
+            encoding="utf-8",
+        ) as handle:
+            handle.write(
+                '[task]\nname = "alpha"\n\n'
+                '[metadata]\nsource_task = "tasks/alpha"\n'
+            )
         _write_jsonl(
             public_results,
             [_suite_harbor_row(self._harbor_row(), scope="public")],
@@ -509,7 +521,7 @@ class PublishBundleTests(unittest.TestCase):
         codex_agent_digest = canonical_agent_config_sha256(codex_agent)
         opencode_agent_digest = canonical_agent_config_sha256(opencode_agent)
         comparison_plan = {
-            "schema_version": "openbench-harbor-comparison-plan-v3",
+            "schema_version": "openbench-harbor-comparison-plan-v4",
             "harbor_version": "0.20.0",
             "harbor_git_commit_hash": "b" * 40,
             "job_name": "job-1",
@@ -518,6 +530,7 @@ class PublishBundleTests(unittest.TestCase):
             "attempts": 1,
             "dataset": None,
             "tasks": ["alpha"],
+            "task_id_map": {"alpha": "alpha"},
             "arms": [
                 {
                     "arm_id": "codex",
@@ -550,7 +563,7 @@ class PublishBundleTests(unittest.TestCase):
             provenance = row["candidate_provenance"]
             provenance.update({
                 "comparison_plan_schema_version": (
-                    "openbench-harbor-comparison-plan-v3"
+                    "openbench-harbor-comparison-plan-v4"
                 ),
                 "comparison_plan_sha256": comparison_plan_sha256,
                 "comparison_plan": comparison_plan,
@@ -558,7 +571,7 @@ class PublishBundleTests(unittest.TestCase):
                 "agent_config_sha256": agent_digest,
                 "comparison_resolved_tasks": ["alpha"],
                 "comparison_block": {"task": "alpha", "index": 1},
-                "trial_mapping": "openbench_comparison_plan_v3",
+                "trial_mapping": "openbench_comparison_plan_v4",
             })
             row["run_id"] = publish.make_run_id(
                 row["harness"],
@@ -699,6 +712,13 @@ class PublishBundleTests(unittest.TestCase):
             publish._harbor_task_bindings([terminal, self._harbor_row()]),
             {
                 "alpha": {
+                    "source": {
+                        "canonical_id": "alpha",
+                        "selector": "alpha",
+                        "suite_manifest_sha256": None,
+                        "suite_task_set_id": None,
+                        "suite_task_set_path": None,
+                    },
                     "openbench_sha256": self.alpha_digest,
                     "harbor_sha256": self.alpha_harbor_digest,
                     "export": {
@@ -709,6 +729,132 @@ class PublishBundleTests(unittest.TestCase):
                 }
             },
         )
+
+    def test_mixed_rows_share_the_same_unbound_task_source_binding(self):
+        self.assertEqual(
+            publish._task_source_binding(self._harbor_row()),
+            publish._task_source_binding(
+                _row("null", "alpha", 1, False)
+            ),
+        )
+
+    def test_harbor_publication_uses_raw_selector_for_canonical_task_id(self):
+        row = self._harbor_row()
+        row["task"] = "openbench/alpha"
+        rendered_agent = {"name": "codex", "model_name": "model-x"}
+        agent_digest = canonical_agent_config_sha256(rendered_agent)
+        plan = {
+            "schema_version": "openbench-harbor-comparison-plan-v4",
+            "harbor_version": "0.20.0",
+            "harbor_git_commit_hash": "b" * 40,
+            "job_name": "canonical-task-publication",
+            "submitted_job_config_sha256": "c" * 64,
+            "effective_job_config_sha256": "d" * 64,
+            "attempts": 1,
+            "dataset": None,
+            "tasks": ["alpha"],
+            "task_id_map": {"alpha": "openbench/alpha"},
+            "arms": [{
+                "arm_id": "codex",
+                "agent_config_name": "codex",
+                "harbor_model_name": "model-x",
+                "agent_config_sha256": agent_digest,
+                "canonical_harness": "codex",
+                "canonical_model": "model-x",
+            }],
+        }
+        plan_sha256 = hashlib.sha256(
+            publish.canonical_comparison_plan_bytes(plan)
+        ).hexdigest()
+        provenance = row["candidate_provenance"]
+        provenance.update({
+            "comparison_plan_schema_version": plan["schema_version"],
+            "comparison_plan_sha256": plan_sha256,
+            "comparison_plan": plan,
+            "comparison_arm_id": "codex",
+            "agent_config_sha256": agent_digest,
+            "comparison_resolved_tasks": ["openbench/alpha"],
+            "comparison_block": {"task": "openbench/alpha", "index": 1},
+            "trial_mapping": "openbench_comparison_plan_v4",
+        })
+        row["run_id"] = make_run_id(
+            "codex",
+            "openbench/alpha",
+            "model-x",
+            1,
+            candidate_digest=agent_digest,
+            full_candidate_digest=True,
+        )
+
+        publish._validate_harbor_task_bindings([row], [self.tasks])
+        generated = publish.build_provenance(
+            [row],
+            "e" * 64,
+            tasks_dirs=[self.tasks],
+        )
+
+        self.assertEqual(
+            generated["tasks"],
+            [{
+                "task": "openbench/alpha",
+                "content_digest": self.alpha_digest,
+                "workspace_source_samples": [{
+                    "kind": "harbor_artifact",
+                    "sha256": "a" * 64,
+                }],
+            }],
+        )
+
+    def test_suite_binding_selects_exact_source_when_selectors_overlap(self):
+        other_tasks = os.path.join(self.tmp.name, "other-tasks")
+        os.makedirs(other_tasks)
+        _make_task(other_tasks, "alpha")
+        harbor_task = os.path.join(self.tmp.name, "harbor-tasks", "alpha")
+        os.makedirs(harbor_task)
+        with open(
+            os.path.join(harbor_task, "task.toml"),
+            "w",
+            encoding="utf-8",
+        ) as handle:
+            handle.write(
+                '[task]\nname = "alpha"\n\n'
+                '[metadata]\nsource_task = "tasks/alpha"\n'
+            )
+
+        ambiguous = self._harbor_row()
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "ambiguous across configured task roots",
+        ):
+            publish._validate_harbor_task_bindings(
+                [ambiguous],
+                [self.tasks, other_tasks],
+            )
+
+        bound = _suite_harbor_row(self._harbor_row(), scope="public")
+        publish._validate_harbor_task_bindings(
+            [bound],
+            [self.tasks, other_tasks],
+        )
+        generated = publish.build_provenance(
+            [bound],
+            "e" * 64,
+            tasks_dirs=[self.tasks, other_tasks],
+        )
+
+        self.assertEqual(
+            generated["tasks"][0]["content_digest"],
+            self.alpha_digest,
+        )
+        os.remove(os.path.join(harbor_task, "task.toml"))
+        with self.assertRaisesRegex(
+            publish.PublishError,
+            "cannot read sealed Harbor task source",
+        ):
+            publish._validate_harbor_task_bindings(
+                [bound],
+                [self.tasks, other_tasks],
+            )
 
     def test_harbor_publish_accepts_exact_proxy_reconciliation(self):
         harbor_results = os.path.join(self.tmp.name, "harbor-metered.jsonl")
