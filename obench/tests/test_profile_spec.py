@@ -128,7 +128,8 @@ features = ["tools", "atif"]
         task = task_set / "example"
         task.mkdir(parents=True)
         (task / "task.toml").write_text(
-            'schema_version = "1.4"\n', encoding="utf-8"
+            'schema_version = "1.4"\n\n[task]\nname = "example"\n',
+            encoding="utf-8",
         )
         (task / "instruction.md").write_text("# Example\n", encoding="utf-8")
         stock = compile_profile(
