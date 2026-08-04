@@ -252,8 +252,17 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
         timeouts = timeouts_by_arm[arm]
         efficiency_rows = all_solved[arm]
         wall_mean, wall_median = _mean_median(efficiency_rows, "wall_time_s")
+        usage_exclusions = sorted({
+            stats.usage_evidence.display_label(row)
+            for row in rows
+            if not stats.usage_evidence.ranking_eligible(row)
+        })
         token_stats = {
-            field: _mean_median(efficiency_rows, field)
+            field: (
+                (None, None)
+                if usage_exclusions
+                else _mean_median(efficiency_rows, field)
+            )
             for _, field in TOKEN_METRICS
         }
         summaries[arm] = {
@@ -284,6 +293,7 @@ def build_comparison(paths, tasks_dirs=None, solved_intersection=False):
             "timeouts": timeouts,
             "timeout_mixed": len(timeouts) > 1,
             "timeout_unknown": unknown_timeouts_by_arm[arm],
+            "usage_exclusions": usage_exclusions,
             "excluded": exclusions[arm],
             "duplicate_cells_excluded": duplicate_counts[arm],
             "unmatched_countable_rows": countable_counts[arm] - len(common),
@@ -424,6 +434,21 @@ def _unassigned_status(report):
         f"{key}={value}" for key, value in sorted(excluded.items()))
 
 
+def _usage_evidence_status(report):
+    exclusions = [
+        f"{arm}={', '.join(report['summaries'][arm]['usage_exclusions'])}"
+        for arm in report["arms"]
+        if report["summaries"][arm]["usage_exclusions"]
+    ]
+    if not exclusions:
+        return None
+    return (
+        "USAGE EVIDENCE WARNING: "
+        + "; ".join(exclusions)
+        + ". Token efficiency is excluded; correctness and latency remain."
+    )
+
+
 def _solved_intersection_status(report):
     if not report["solved_intersection"]:
         return None
@@ -440,7 +465,8 @@ def render_text(report):
     if solved_status:
         headline += solved_status + "\n"
     statuses = [*report.get("anomalies", []), _provenance_status(report),
-                _timeout_status(report), _unassigned_status(report)]
+                _timeout_status(report), _usage_evidence_status(report),
+                _unassigned_status(report)]
     return ("OpenBench matched comparison\n" + headline
             + "\n".join(status for status in statuses if status) + "\n\n"
             + _plain_table(["Metric"] + report["arms"], rows))
@@ -463,7 +489,8 @@ def render_markdown(report):
     if solved_status:
         lines.extend([f"**{_markdown_cell(solved_status)}**", ""])
     statuses = [*report.get("anomalies", []), _provenance_status(report),
-                _timeout_status(report), _unassigned_status(report)]
+                _timeout_status(report), _usage_evidence_status(report),
+                _unassigned_status(report)]
     lines.extend([
         *("> " + _markdown_cell(status) for status in statuses if status),
         "",

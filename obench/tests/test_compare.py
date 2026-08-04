@@ -124,11 +124,20 @@ class TestMatchedComparison(CompareTestCase):
         self.assertIsNone(
             summary["tokens_input_uncached_per_cell_mean"]
         )
+        self.assertEqual(
+            summary["usage_exclusions"],
+            ["Harbor/proxy mismatch"],
+        )
         rendered_rows = dict(compare.scorecard_rows(report))
         self.assertEqual(
             rendered_rows["Uncached input tokens / solve"],
             ["-", "100.0"],
         )
+        text = compare.render_text(report)
+        markdown = compare.render_markdown(report)
+        self.assertIn("USAGE EVIDENCE WARNING", text)
+        self.assertIn("Harbor/proxy mismatch", text)
+        self.assertIn("correctness and latency remain", markdown)
 
     def test_solved_intersection_uses_only_cells_every_arm_solved_for_efficiency(self):
         a = self.write("a.jsonl", [

@@ -166,6 +166,28 @@ class TestProxyTokenBasis(unittest.TestCase):
         self.assertIn("USAGE EVIDENCE", text)
         self.assertIn("proxy_mismatch", text)
 
+    def test_one_mismatch_excludes_mixed_arm_usage_metrics(self):
+        rows = [
+            {
+                "harness": "pi", "model": "model-x", "task": "a", "trial": 1,
+                "success": True, "wall_time_s": 2.0, "tokens": 200,
+            },
+            {
+                "harness": "pi", "model": "model-x", "task": "b", "trial": 1,
+                "success": True, "wall_time_s": 3.0, "tokens": 300,
+                "usage_evidence_grade": "harbor_reported_proxy_mismatch",
+                "usage_ranking_eligible": False,
+                "usage_ranking_exclusion_reason": "proxy_mismatch",
+            },
+        ]
+        arms, _tasks, aggregated = report.aggregate(rows)
+        arm = aggregated[_arm("pi", "model-x")]
+        self.assertEqual(arm["succ"], 2)
+        self.assertEqual(arm["wall_times"], [2.0, 3.0])
+        self.assertEqual(arm["token_vals"], [])
+        self.assertIsNone(report.tokens_per_solve(arm))
+        self.assertIn("proxy_mismatch", report.format_efficiency(arms, aggregated))
+
     def test_candidate_proxy_only_fills_tok_slv_with_star(self):
         rows = [{
             "harness": "aider", "task": "t", "trial": 1, "success": True,

@@ -192,6 +192,10 @@ def aggregate(rows):
         turn = row.get("turns")
         if isinstance(turn, (int, float)) and not isinstance(turn, bool):
             st["turn_vals"].append(turn)
+    for st in stats.values():
+        if st["usage_exclusions"]:
+            st["token_vals"].clear()
+            st["token_bases"].clear()
     return arms, tasks, stats
 
 
