@@ -1,0 +1,33 @@
+schema_version = "1.4"
+source = "tasks/add-feature@802014700f6b3c62eddc1a406e3062a438ce572f"
+artifacts = [
+    { source = "/app", destination = "workspace" },
+]
+
+[task]
+name = "openbench/add-feature"
+description = "Add `@include` support to miniconf"
+authors = [{ name = "Matthew Lam" }]
+keywords = ["openbench"]
+
+[metadata]
+origin = "openbench"
+source_task = "tasks/add-feature"
+source_commit = "802014700f6b3c62eddc1a406e3062a438ce572f"
+
+[metadata.openbench_task_content_digest]
+scheme = 2
+sha256 = "bee0e4e9fb3ee5d391882189aa5e1bb3f35dfb652ce98c345d8521b1c02bccc4"
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 2400.0
+
+[environment]
+build_timeout_sec = 600.0
+network_mode = "no-network"
+os = "linux"
+cpus = 4
+gpus = 0

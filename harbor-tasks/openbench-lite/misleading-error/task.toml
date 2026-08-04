@@ -1,0 +1,33 @@
+schema_version = "1.4"
+source = "tasks/misleading-error@802014700f6b3c62eddc1a406e3062a438ce572f"
+artifacts = [
+    { source = "/app", destination = "workspace" },
+]
+
+[task]
+name = "openbench/misleading-error"
+description = "Fix the crashing report script"
+authors = [{ name = "Matthew Lam" }]
+keywords = ["openbench"]
+
+[metadata]
+origin = "openbench"
+source_task = "tasks/misleading-error"
+source_commit = "802014700f6b3c62eddc1a406e3062a438ce572f"
+
+[metadata.openbench_task_content_digest]
+scheme = 2
+sha256 = "0049b22b033d1df2c229d0f24ab681bb3ed3f450cb7f9aaa6c6c01899401290e"
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 2400.0
+
+[environment]
+build_timeout_sec = 600.0
+network_mode = "no-network"
+os = "linux"
+cpus = 4
+gpus = 0

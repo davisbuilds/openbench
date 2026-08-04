@@ -1,0 +1,33 @@
+schema_version = "1.4"
+source = "tasks/fix-failing-test@802014700f6b3c62eddc1a406e3062a438ce572f"
+artifacts = [
+    { source = "/app", destination = "workspace" },
+]
+
+[task]
+name = "openbench/fix-failing-test"
+description = "Fix the failing calculator tests"
+authors = [{ name = "Matthew Lam" }]
+keywords = ["openbench"]
+
+[metadata]
+origin = "openbench"
+source_task = "tasks/fix-failing-test"
+source_commit = "802014700f6b3c62eddc1a406e3062a438ce572f"
+
+[metadata.openbench_task_content_digest]
+scheme = 2
+sha256 = "57cc75a6fb25ac9fe1a99b769000a96d1744a35d8d724d900f1fb37cf3da1e29"
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 2400.0
+
+[environment]
+build_timeout_sec = 600.0
+network_mode = "no-network"
+os = "linux"
+cpus = 4
+gpus = 0

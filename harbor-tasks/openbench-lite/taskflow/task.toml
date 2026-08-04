@@ -1,0 +1,33 @@
+schema_version = "1.4"
+source = "tasks/taskflow@802014700f6b3c62eddc1a406e3062a438ce572f"
+artifacts = [
+    { source = "/app", destination = "workspace" },
+]
+
+[task]
+name = "openbench/taskflow"
+description = "Fix the failing tests in `taskflow`"
+authors = [{ name = "Matthew Lam" }]
+keywords = ["openbench"]
+
+[metadata]
+origin = "openbench"
+source_task = "tasks/taskflow"
+source_commit = "802014700f6b3c62eddc1a406e3062a438ce572f"
+
+[metadata.openbench_task_content_digest]
+scheme = 2
+sha256 = "4f0d8bad19e23dc5a32f68498c6df6af7e08442e0a69470b3b6921129d351d77"
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 2400.0
+
+[environment]
+build_timeout_sec = 600.0
+network_mode = "no-network"
+os = "linux"
+cpus = 4
+gpus = 0
