@@ -12,9 +12,11 @@ the same underlying model and task, how much does the harness around it matter?*
 has the milestone analyses; [`SETUP.md`](SETUP.md) is the practical runbook for a
 first local cell, Docker, imported tasks, and open-model keys. Evaluating
 harnesses on a **private codebase**? Start with
-[`docs/private-evals.md`](docs/private-evals.md) (`obench init`, author a task
-from a small code slice, validate polarity, run, report — transcripts stay
-local). To run OpenBench tasks as a native Harbor task x harness x attempt job,
+[`docs/private-evals.md`](docs/private-evals.md) (`obench init` creates a
+Harbor-native task, suite, and profile scaffold; execution wiring is still
+separate). The strict suite contract is in
+[`docs/harbor-suites.md`](docs/harbor-suites.md). To run existing OpenBench
+exports as a native Harbor task x harness x attempt job,
 see [`docs/harbor-jobs.md`](docs/harbor-jobs.md) (`obench harbor job-run`).
 The exporter, exact OAuth harness profiles, sealed proxy metering, and strict
 result importer are documented in
