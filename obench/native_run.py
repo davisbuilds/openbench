@@ -504,6 +504,19 @@ def _probe_version(config: NativeRunConfig, adapter: Any) -> str | None:
     return probe_version(config.harness_name, str(config.adapters_dir), candidate)
 
 
+def _harness_version_matches(expected: str, observed: str | None) -> bool:
+    if observed == expected:
+        return True
+    if observed is None or not observed.endswith(")"):
+        return False
+    semantic, separator, path_text = observed.rpartition(" (")
+    return (
+        bool(separator)
+        and semantic == expected
+        and Path(path_text[:-1]).is_absolute()
+    )
+
+
 def _server_executable(command: Sequence[str]) -> Path:
     first = Path(command[0]).expanduser()
     resolved = first if first.is_absolute() else Path(shutil.which(command[0]) or "")
@@ -1827,7 +1840,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
     with WholeRunLease(config.lease_path, owner=owner):
         adapter = (hooks.adapter_loader or _load_adapter)(config)
         observed_version = (hooks.version_probe or _probe_version)(config, adapter)
-        if observed_version != config.harness_version:
+        if not _harness_version_matches(config.harness_version, observed_version):
             raise NativeRunError(
                 f"harness version mismatch: expected {config.harness_version!r}, observed {observed_version!r}"
             )

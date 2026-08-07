@@ -28,6 +28,7 @@ from obench.native_run import (
     NativeRunError,
     NativeRunHooks,
     _content_bound_command_digest,
+    _harness_version_matches,
     _inspect_setup_app_identity,
     _inspect_setup_app_process,
     _mcp_serve_owners,
@@ -401,6 +402,28 @@ media_type = "application/json"
             version_probe=lambda config, loaded: "1.2.3",
         )
         return hooks, monitor
+
+    def test_native_harness_version_accepts_resolved_binary_suffix(self):
+        self.assertTrue(
+            _harness_version_matches(
+                "codex-cli 0.146.1",
+                "codex-cli 0.146.1 (/opt/homebrew/bin/codex)",
+            )
+        )
+
+    def test_native_harness_version_rejects_other_versions_and_relative_paths(self):
+        self.assertFalse(
+            _harness_version_matches(
+                "codex-cli 0.146.1",
+                "codex-cli 0.147.0 (/opt/homebrew/bin/codex)",
+            )
+        )
+        self.assertFalse(
+            _harness_version_matches(
+                "codex-cli 0.146.1",
+                "codex-cli 0.146.1 (codex)",
+            )
+        )
 
     def test_preflight_uses_locked_executable_and_setup_owns_target_app_start(self):
         preflight_observations = []
