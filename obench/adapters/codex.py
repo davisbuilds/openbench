@@ -69,7 +69,7 @@ _NATIVE_MCP_COMMAND_ENV = "CUB_MCP_COMMAND"
 _NATIVE_MARKER_ENVS = (
     "OPENBENCH_NATIVE_MCP_SERVER_COMMAND",
     "OPENBENCH_NATIVE_MCP_LEDGER",
-    "OPENBENCH_NATIVE_COLLECTOR_RUN_ID",
+    "OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID",
     "OPENBENCH_NATIVE_TRIAL_ID",
 )
 _NATIVE_MODEL = "gpt-5.6-sol"
@@ -106,6 +106,28 @@ _NATIVE_DISABLED_TOOL_FEATURES = (
     "workspace_dependencies",
     "goals",
 )
+_NATIVE_PROCESS_ENV_ALLOWLIST = frozenset({
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LOGNAME",
+    "PATH",
+    "SHELL",
+    "TEMP",
+    "TERM",
+    "TMP",
+    "TMPDIR",
+    "USER",
+    "__CF_USER_TEXT_ENCODING",
+})
+_NATIVE_CONTROL_ENVS = frozenset({
+    _NATIVE_MCP_COMMAND_ENV,
+    *_NATIVE_MARKER_ENVS,
+    "OPENBENCH_PROXY",
+    "OPENBENCH_PROXY_BASE_URL",
+    "OPENBENCH_PROXY_CELL_TOKEN",
+})
 
 
 def _feature_flags(env_override=None):
@@ -167,6 +189,15 @@ def _native_launcher(env_override=None):
     if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
         raise ValueError(f"{_NATIVE_MCP_COMMAND_ENV} must be an absolute executable file")
     return value
+
+
+def _native_child_env(source):
+    """Expose only runtime essentials and explicit native benchmark controls."""
+    return {
+        key: value
+        for key, value in source.items()
+        if key in _NATIVE_PROCESS_ENV_ALLOWLIST or key in _NATIVE_CONTROL_ENVS
+    }
 
 
 def _native_error(message):
@@ -826,6 +857,8 @@ def run(
             "--dangerously-bypass-hook-trust",
             "-c", f"mcp_servers.computer-use.command={json.dumps(native_launcher)}",
             "-c", "mcp_servers.computer-use.args=[]",
+            "-c", "mcp_servers.computer-use.enabled=true",
+            "-c", "mcp_servers.computer-use.required=true",
         ]
     if model in MODELS:
         cmd = base + [
@@ -867,6 +900,8 @@ def run(
         child_env.update(env_override)
         # This is an adapter control, not child-process configuration.
         child_env.pop(_MULTI_AGENT_ENV, None)
+    if native:
+        child_env = _native_child_env(child_env)
 
     # Stock runs get a fresh CODEX_HOME containing authentication only.  In
     # particular, never copy config.toml, AGENTS.md, skills, MCP definitions,

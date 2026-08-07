@@ -1523,7 +1523,7 @@ def collector_main() -> int:
         result = collect_stdio(
             command,
             ledger_path=os.environ["OPENBENCH_NATIVE_MCP_LEDGER"],
-            run_id=os.environ["OPENBENCH_NATIVE_COLLECTOR_RUN_ID"],
+            run_id=os.environ["OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID"],
             trial_id=os.environ["OPENBENCH_NATIVE_TRIAL_ID"],
             stdin=sys.stdin.buffer,
             stdout=sys.stdout.buffer,
@@ -2001,7 +2001,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     config.mcp_client_command_env: str(launcher),
                     "OPENBENCH_NATIVE_MCP_SERVER_COMMAND": json.dumps(list(config.mcp_command)),
                     "OPENBENCH_NATIVE_MCP_LEDGER": str(ledger),
-                    "OPENBENCH_NATIVE_COLLECTOR_RUN_ID": collector_run_id,
+                    "OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID": collector_run_id,
                     "OPENBENCH_NATIVE_TRIAL_ID": config.trial_id,
                 }
                 token = f"native-{attempt}"

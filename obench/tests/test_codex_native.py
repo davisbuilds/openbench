@@ -116,8 +116,19 @@ class CodexNativeProfileTests(unittest.TestCase):
         supplied_home.mkdir()
         (supplied_home / "config.toml").write_text("mcp_servers.bad.command='bad'\n", encoding="utf-8")
         env_override = self.native_env() | {"CODEX_HOME": str(supplied_home)}
-        with mock.patch.dict(os.environ, {"CODEX_HOME": str(self.auth_home)}, clear=True), \
-                mock.patch.object(self.codex.subprocess, "run", side_effect=fake_run):
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "CODEX_HOME": str(self.auth_home),
+                    "HOME": str(self.root),
+                    "PATH": os.environ.get("PATH", ""),
+                    "HOST_API_KEY": "must-not-reach-native-child",
+                },
+                clear=True,
+            ),
+            mock.patch.object(self.codex.subprocess, "run", side_effect=fake_run),
+        ):
             result = self.codex.run(
                 "use the app", str(self.workspace), "gpt-5.6-sol", 10,
                 env_override=env_override,
@@ -134,6 +145,8 @@ class CodexNativeProfileTests(unittest.TestCase):
             overrides,
         )
         self.assertIn("mcp_servers.computer-use.args=[]", overrides)
+        self.assertIn("mcp_servers.computer-use.enabled=true", overrides)
+        self.assertIn("mcp_servers.computer-use.required=true", overrides)
         self.assertIn('model_reasoning_effort="medium"', overrides)
         self.assertIn('service_tier="default"', overrides)
         self.assertIn("shell_tool", cmd)
@@ -146,6 +159,11 @@ class CodexNativeProfileTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-s") + 1], "read-only")
         self.assertEqual(cmd[-1], "use the app")
         self.assertNotEqual(kwargs["env"]["CODEX_HOME"], str(supplied_home))
+        self.assertNotIn("HOST_API_KEY", kwargs["env"])
+        self.assertEqual(
+            kwargs["env"]["OPENBENCH_NATIVE_TRIAL_ID"],
+            "trial-1",
+        )
         self.assertFalse(kwargs["text"])
         self.assertEqual(
             [path.name for path in isolated_files],

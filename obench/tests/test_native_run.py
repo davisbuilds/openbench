@@ -37,6 +37,7 @@ from obench.native_run import (
     _recheck_process_identity,
     _require_setup_app,
     _require_setup_processes,
+    collector_main,
     load_config,
     run_native,
 )
@@ -45,6 +46,28 @@ from obench.native_trial import NativeTrialError, load_native_trial
 
 HEX_A = "a" * 64
 PROCESS_START_TOKEN = "Fri Aug 7 12:00:00 2026"
+
+
+class NativeCollectorEntrypointTests(unittest.TestCase):
+    def test_collector_uses_canonical_mcp_collector_run_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = Path(directory) / "ledger.jsonl"
+            environment = {
+                "OPENBENCH_NATIVE_MCP_SERVER_COMMAND": '["/bin/cat"]',
+                "OPENBENCH_NATIVE_MCP_LEDGER": str(ledger),
+                "OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID": "collector-run-1",
+                "OPENBENCH_NATIVE_TRIAL_ID": "trial-1",
+            }
+            with patch.dict(os.environ, environment, clear=True), patch(
+                "obench.native_run.collect_stdio"
+            ) as collect:
+                collect.return_value.returncode = 0
+                self.assertEqual(collector_main(), 0)
+
+            self.assertEqual(
+                collect.call_args.kwargs["run_id"],
+                "collector-run-1",
+            )
 
 
 class FakeFocusMonitor:
