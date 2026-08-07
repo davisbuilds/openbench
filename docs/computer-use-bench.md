@@ -30,6 +30,12 @@ instead of replacing it.
 - exact normalized rows returned by the strict native importer; or
 - native bundle directories that pass `load_native_trial()`.
 
+Row inputs are checked for importer-equivalent verdict, timing, token, trial,
+run, and identity invariants, then bound by a canonical normalized-row digest.
+Because their bundle bytes are unavailable, their publication status remains
+`complete_row_bound_bundle_not_revalidated`. Bundle inputs are the stronger
+publication surface.
+
 Bundle inputs add per-tool MCP counts, p50/p95 call latency, and categorical
 error, outcome, delivery, and focus counts from the sealed privacy-safe ledger.
 Row-only input cannot recover those details, so the report marks them
@@ -37,7 +43,9 @@ unavailable rather than deriving them from the total call count.
 
 Only blocks containing every arm enter arm aggregates or matched deltas.
 Missing cells and incomplete blocks remain visible in `coverage`. Duplicate
-identical evidence is idempotent; conflicting evidence for one cell fails.
+identical evidence is idempotent; conflicting normalized rows fail. When the
+same exact row is supplied both directly and through a validated bundle, the
+bundle-backed MCP detail is retained independent of input order.
 
 The first declared arm is the matched-delta reference. Deltas are candidate
 minus reference within the same repetition.

@@ -11,11 +11,12 @@ from obench.native_report import (
     _Observation,
     _aggregate_observations,
     _load_bundle,
+    _merge_observation,
     assert_public_native_report,
     build_native_report,
 )
 from obench.native_trial import BUNDLE_SCHEMA_VERSION
-from obench.run import ROW_FIELDS
+from obench.run import ROW_FIELDS, make_run_id
 from obench.tests.test_native_trial import FIXTURE_CASES, _build_bundle
 
 
@@ -67,7 +68,14 @@ def _row(plan, arm_id, block, **overrides):
     row = {field: None for field in ROW_FIELDS}
     row.update(
         {
-            "run_id": f"{arm_id}-run-{block}",
+            "run_id": make_run_id(
+                HARNESS["name"],
+                TASK["name"],
+                MODEL["name"],
+                block,
+                candidate_digest="5" * 64,
+                full_candidate_digest=True,
+            ),
             "ts_iso": f"2026-08-{block:02d}T12:00:00+00:00",
             "harness": HARNESS["name"],
             "model": MODEL["name"],
@@ -83,9 +91,9 @@ def _row(plan, arm_id, block, **overrides):
             "tokens": 100,
             "tokens_input_uncached": 70,
             "tokens_cache_read": 20,
-            "tokens_cache_write": 0,
+            "tokens_cache_write": None,
             "tokens_output": 30,
-            "tokens_reasoning": 10,
+            "tokens_reasoning": None,
             "usage_raw": {
                 "source": "native_atif",
                 "input_tokens": 90,
@@ -106,6 +114,8 @@ def _row(plan, arm_id, block, **overrides):
                 "schema_version": BUNDLE_SCHEMA_VERSION,
                 "trial_id": cell["trial_id"],
                 "lock_sha256": "1" * 64,
+                "terminal_evidence_root": "6" * 64,
+                "result_identity_sha256": "5" * 64,
                 "result_sha256": f"{block:064x}",
                 "manifest_sha256": (
                     ("a" if arm_id == "baseline" else "b") * 64
@@ -141,6 +151,26 @@ def _row(plan, arm_id, block, **overrides):
         }
     )
     row.update(overrides)
+    uncached = row["tokens_input_uncached"]
+    cached = row["tokens_cache_read"]
+    output = row["tokens_output"]
+    row["tokens"] = uncached + output
+    row["tokens_fresh"] = uncached + output
+    row["usage_raw"] = {
+        "source": "native_atif",
+        "input_tokens": uncached + cached,
+        "cached_tokens": cached,
+        "output_tokens": output,
+    }
+    row["candidate_provenance"]["phase_timings"] = {
+        "env_setup_s": row["t_env_setup_s"],
+        "agent_s": row["t_agent_s"],
+        "verifier_s": row["t_checker_s"],
+        "total_s": row["wall_time_s"],
+    }
+    if row["completed"] and not row["success"]:
+        row["checker_exit"] = 1
+        row["failure_class"] = "wrong_answer"
     return row
 
 
@@ -206,6 +236,43 @@ class NativeReportTests(unittest.TestCase):
         )
         self.assertEqual(len(report["evidence_digests"]), 3)
 
+    def test_duplicate_rows_conflict_and_bundle_enrichment_is_order_independent(self):
+        plan = _plan(repetitions=1)
+        baseline = _row(plan, "baseline", 1)
+        changed = _row(
+            plan,
+            "baseline",
+            1,
+            wall_time_s=11.0,
+            t_agent_s=9.0,
+        )
+        with self.assertRaisesRegex(NativeReportError, "conflicting results"):
+            build_native_report(
+                plan,
+                [baseline, changed, _row(plan, "candidate", 1)],
+            )
+
+        row_only = _Observation(
+            row=baseline,
+            mcp_calls=None,
+            bundle_sha256="a" * 64,
+            result_sha256="b" * 64,
+            row_sha256="c" * 64,
+        )
+        bundle = _Observation(
+            row=baseline,
+            mcp_calls=(_call("click", 10.0),),
+            bundle_sha256="a" * 64,
+            result_sha256="b" * 64,
+            row_sha256="c" * 64,
+        )
+        self.assertIsNotNone(
+            _merge_observation(row_only, bundle, cell_id="block1:baseline").mcp_calls
+        )
+        self.assertIsNotNone(
+            _merge_observation(bundle, row_only, cell_id="block1:baseline").mcp_calls
+        )
+
     def test_metric_math_wilson_token_splits_and_outlier_summary(self):
         plan = _plan(repetitions=10)
         rows = []
@@ -222,8 +289,6 @@ class NativeReportTests(unittest.TestCase):
                     tokens_input_uncached=140,
                     tokens_cache_read=40,
                     tokens_output=60,
-                    tokens_reasoning=20,
-                    tokens=200,
                     turns=4,
                 )
             )
@@ -238,7 +303,8 @@ class NativeReportTests(unittest.TestCase):
         self.assertEqual(
             candidate["metrics"]["tokens_input_uncached"]["median"], 140.0
         )
-        self.assertEqual(candidate["metrics"]["tokens_reasoning"]["p95"], 20.0)
+        self.assertEqual(candidate["metrics"]["tokens_reasoning"]["missing_n"], 10)
+        self.assertIsNone(candidate["metrics"]["tokens_reasoning"]["p95"])
         self.assertEqual(candidate["efficiency"]["success_per_fresh_token"], 0.005)
         self.assertEqual(candidate["efficiency"]["success_per_turn"], 0.25)
         self.assertEqual(
@@ -260,6 +326,7 @@ class NativeReportTests(unittest.TestCase):
             ),
             bundle_sha256="a" * 64,
             result_sha256="b" * 64,
+            row_sha256="c" * 64,
         )
         aggregate = _aggregate_observations([observation])
 
@@ -293,14 +360,27 @@ class NativeReportTests(unittest.TestCase):
             "mcp_breakdown_requires_validated_bundles",
             baseline["unavailable_metrics"],
         )
+        self.assertEqual(
+            report["publication_status"],
+            "complete_row_bound_bundle_not_revalidated",
+        )
+        self.assertEqual(report["coverage"]["row_only_cells"], 2)
+        self.assertRegex(
+            report["evidence_digests"][0]["normalized_row_sha256"],
+            r"^[0-9a-f]{64}$",
+        )
 
     def test_privacy_rejects_sensitive_rows_and_public_raw_fields(self):
         plan = _plan(repetitions=1)
+        sensitive = _row(plan, "baseline", 1)
+        sensitive["candidate_provenance"]["environment_identity"][
+            "operator"
+        ] = "person@example.com"
         with self.assertRaisesRegex(NativeReportError, "email address"):
             build_native_report(
                 plan,
                 [
-                    _row(plan, "baseline", 1, error="contact person@example.com"),
+                    sensitive,
                     _row(plan, "candidate", 1),
                 ],
             )

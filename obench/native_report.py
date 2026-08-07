@@ -14,7 +14,7 @@ from typing import Any, Mapping, Sequence
 from .mcp_stdio_collector import verify_ledger
 from .native_matrix import canonical_sha256, validate_native_matrix
 from .native_trial import BUNDLE_SCHEMA_VERSION, load_native_trial
-from .run import ROW_FIELDS
+from .run import ROW_FIELDS, make_run_id
 from .stats import wilson_ci
 
 
@@ -71,6 +71,7 @@ class _Observation:
     mcp_calls: tuple[Mapping[str, Any], ...] | None
     bundle_sha256: str
     result_sha256: str
+    row_sha256: str
 
 
 def _number(value: Any) -> float | None:
@@ -161,6 +162,8 @@ def _strict_native_row(row: Any) -> dict[str, Any]:
         "manifest_sha256",
         "task_content_sha256",
         "mcp_ledger_sha256",
+        "terminal_evidence_root",
+        "result_identity_sha256",
     ):
         if not isinstance(provenance.get(field), str) or _DIGEST_RE.fullmatch(
             provenance[field]
@@ -176,6 +179,117 @@ def _strict_native_row(row: Any) -> dict[str, Any]:
         value = provenance.get(field)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise NativeReportError(f"native row has invalid {field}")
+    trial = normalized.get("trial")
+    trial_id = provenance.get("trial_id")
+    if (
+        isinstance(trial, bool)
+        or not isinstance(trial, int)
+        or trial < 1
+        or not isinstance(trial_id, str)
+        or re.search(rf"(?:^|[-_:])trial{trial}\Z", trial_id) is None
+    ):
+        raise NativeReportError("native row trial and trial_id disagree")
+    expected_run_id = make_run_id(
+        normalized.get("harness"),
+        normalized.get("task"),
+        normalized.get("model"),
+        trial,
+        candidate_digest=provenance["result_identity_sha256"],
+        full_candidate_digest=True,
+    )
+    if normalized.get("run_id") != expected_run_id:
+        raise NativeReportError("native row run_id is not bound to its lock and trial")
+
+    timings = provenance.get("phase_timings")
+    if not isinstance(timings, Mapping) or set(timings) != {
+        "env_setup_s",
+        "agent_s",
+        "verifier_s",
+        "total_s",
+    }:
+        raise NativeReportError("native row phase timings are invalid")
+    timing_pairs = (
+        ("t_env_setup_s", "env_setup_s"),
+        ("t_agent_s", "agent_s"),
+        ("t_checker_s", "verifier_s"),
+        ("wall_time_s", "total_s"),
+    )
+    for row_field, timing_field in timing_pairs:
+        if (
+            _number(normalized.get(row_field)) is None
+            or _number(timings.get(timing_field)) is None
+            or abs(float(normalized[row_field]) - float(timings[timing_field])) > 0.001
+        ):
+            raise NativeReportError(f"native row {row_field} disagrees with phase timings")
+
+    completed = normalized["completed"]
+    success = normalized["success"]
+    score = normalized.get("score")
+    checker_exit = normalized.get("checker_exit")
+    terminal_status = provenance.get("terminal_status")
+    if completed:
+        if (
+            normalized.get("error") is not None
+            or terminal_status is not None
+            or _number(score) is None
+            or float(score) > 1.0
+            or isinstance(checker_exit, bool)
+            or not isinstance(checker_exit, int)
+            or checker_exit < 0
+            or success != (checker_exit == 0 and float(score) == 1.0)
+            or normalized.get("failure_class")
+            != ("solved" if success else "wrong_answer")
+        ):
+            raise NativeReportError("native completed verdict fields disagree")
+    elif (
+        success
+        or score is not None
+        or checker_exit is not None
+        or not isinstance(normalized.get("error"), str)
+        or not normalized["error"]
+        or terminal_status != normalized.get("failure_class")
+    ):
+        raise NativeReportError("native terminal verdict fields disagree")
+
+    usage = normalized.get("usage_raw")
+    if normalized.get("token_basis") == "native_atif":
+        if (
+            not isinstance(usage, Mapping)
+            or usage.get("source") != "native_atif"
+            or any(
+                isinstance(usage.get(field), bool)
+                or not isinstance(usage.get(field), int)
+                or usage[field] < 0
+                for field in ("input_tokens", "cached_tokens", "output_tokens")
+            )
+            or usage["cached_tokens"] > usage["input_tokens"]
+        ):
+            raise NativeReportError("native ATIF token accounting is invalid")
+        uncached = usage["input_tokens"] - usage["cached_tokens"]
+        fresh = uncached + usage["output_tokens"]
+        if (
+            normalized.get("tokens_input_uncached") != uncached
+            or normalized.get("tokens_cache_read") != usage["cached_tokens"]
+            or normalized.get("tokens_output") != usage["output_tokens"]
+            or normalized.get("tokens") != fresh
+            or normalized.get("tokens_fresh") != fresh
+            or normalized.get("tokens_cache_write") is not None
+            or normalized.get("tokens_reasoning") is not None
+        ):
+            raise NativeReportError("native row token fields disagree with ATIF usage")
+    elif normalized.get("token_basis") == "unmetered":
+        if any(
+            normalized.get(field) is not None
+            for field in (
+                "usage_raw",
+                "tokens",
+                "tokens_fresh",
+                *_TOKEN_FIELDS,
+            )
+        ):
+            raise NativeReportError("unmetered native row contains token measurements")
+    else:
+        raise NativeReportError("native row has unsupported token basis")
     _privacy_scan(normalized, "native_row", reject_raw_keys=False)
     return normalized
 
@@ -199,6 +313,7 @@ def _load_bundle(path: str | Path) -> _Observation:
         mcp_calls=calls,
         bundle_sha256=provenance["manifest_sha256"],
         result_sha256=provenance["result_sha256"],
+        row_sha256=canonical_sha256({field: row[field] for field in ROW_FIELDS}),
     )
 
 
@@ -212,7 +327,25 @@ def _load_observation(value: Mapping[str, Any] | str | Path) -> _Observation:
         mcp_calls=None,
         bundle_sha256=provenance["manifest_sha256"],
         result_sha256=provenance["result_sha256"],
+        row_sha256=canonical_sha256({field: row[field] for field in ROW_FIELDS}),
     )
+
+
+def _merge_observation(
+    previous: _Observation,
+    observation: _Observation,
+    *,
+    cell_id: str,
+) -> _Observation:
+    if (
+        previous.result_sha256 != observation.result_sha256
+        or previous.bundle_sha256 != observation.bundle_sha256
+        or previous.row_sha256 != observation.row_sha256
+    ):
+        raise NativeReportError(f"planned cell {cell_id!r} has conflicting results")
+    if previous.mcp_calls is None and observation.mcp_calls is not None:
+        return observation
+    return previous
 
 
 def _row_identity(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -510,13 +643,11 @@ def build_native_report(
         arm, cell = _match_cell(validated_plan, observation)
         previous = observations_by_cell.get(cell["cell_id"])
         if previous is not None:
-            if (
-                previous.result_sha256 != observation.result_sha256
-                or previous.bundle_sha256 != observation.bundle_sha256
-            ):
-                raise NativeReportError(
-                    f"planned cell {cell['cell_id']!r} has conflicting results"
-                )
+            observations_by_cell[cell["cell_id"]] = _merge_observation(
+                previous,
+                observation,
+                cell_id=cell["cell_id"],
+            )
             continue
         observations_by_cell[cell["cell_id"]] = observation
         arm_by_cell[cell["cell_id"]] = arm["id"]
@@ -550,6 +681,8 @@ def build_native_report(
             "config_sha256": cell_by_id[cell_id]["config_sha256"],
             "bundle_sha256": observation.bundle_sha256,
             "result_sha256": observation.result_sha256,
+            "normalized_row_sha256": observation.row_sha256,
+            "bundle_validated": observation.mcp_calls is not None,
         }
         for cell_id, observation in sorted(
             observations_by_cell.items(),
@@ -557,13 +690,18 @@ def build_native_report(
         )
     ]
     reference_id = arm_ids[0]
+    row_only_cells = sum(
+        observation.mcp_calls is None for observation in observations_by_cell.values()
+    )
     report = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "comparison_id": validated_plan["comparison_id"],
         "publication_status": (
-            "complete"
-            if not incomplete_blocks
-            else "incomplete_noncomparable_cells_excluded"
+            "incomplete_noncomparable_cells_excluded"
+            if incomplete_blocks
+            else "complete_bundle_validated"
+            if row_only_cells == 0
+            else "complete_row_bound_bundle_not_revalidated"
         ),
         "methodology": {
             **validated_plan["methodology"],
@@ -571,6 +709,7 @@ def build_native_report(
             "matched_delta_direction": "candidate_minus_reference",
             "raw_evidence_included": False,
             "operator_evidence_attested": False,
+            "row_evidence_binding": "canonical_normalized_row_sha256",
         },
         "identities": {
             "plan_sha256": validated_plan["plan_sha256"],
@@ -587,6 +726,8 @@ def build_native_report(
             "incomplete_blocks": incomplete_blocks,
             "observed_cells": len(observations_by_cell),
             "planned_cells": len(validated_plan["schedule"]),
+            "bundle_validated_cells": len(observations_by_cell) - row_only_cells,
+            "row_only_cells": row_only_cells,
             "publish_repetition_recommendation_met": validated_plan[
                 "publish_repetition_recommendation_met"
             ],
