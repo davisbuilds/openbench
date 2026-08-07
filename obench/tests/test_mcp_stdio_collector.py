@@ -472,6 +472,27 @@ class MCPStdioCollectorTests(unittest.TestCase):
         with self.assertRaises(collector.LedgerIntegrityError):
             collector.verify_ledger(tampered_seal)
 
+    def test_invalid_summary_is_rejected_before_terminal_seal(self):
+        path = Path(self.tmp.name) / "invalid-summary.jsonl"
+        ledger = collector.CallLedger(path, "run-1", "invalid-summary")
+        try:
+            with self.assertRaises(ValueError):
+                ledger.seal(
+                    {
+                        "returncode": 9,
+                        "integrity_ok": True,
+                        "malformed_frames": 0,
+                        "partial_frames": 0,
+                        "duplicate_request_ids": 0,
+                        "missing_responses": 0,
+                    }
+                )
+            self.assertEqual(path.read_bytes(), b"")
+            with self.assertRaises(collector.LedgerIntegrityError):
+                collector.verify_ledger(path)
+        finally:
+            ledger.abort()
+
     def test_existing_ledger_is_never_overwritten(self):
         path = Path(self.tmp.name) / "existing.jsonl"
         path.write_bytes(b"owned\n")

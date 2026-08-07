@@ -331,6 +331,39 @@ def _privacy_safe_meta(metadata: Any) -> dict[str, Any]:
     }
 
 
+def _validated_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(summary)
+    normalized.setdefault("input_incomplete", False)
+    integer_fields = (
+        "returncode",
+        "malformed_frames",
+        "partial_frames",
+        "duplicate_request_ids",
+        "missing_responses",
+    )
+    for field in integer_fields:
+        value = normalized.get(field)
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or (field != "returncode" and value < 0)
+        ):
+            raise ValueError(f"invalid MCP collector summary {field}")
+    if not isinstance(normalized.get("input_incomplete"), bool):
+        raise ValueError("invalid MCP collector summary input_incomplete")
+    expected_integrity = (
+        normalized["returncode"] == 0
+        and normalized["malformed_frames"] == 0
+        and normalized["partial_frames"] == 0
+        and normalized["duplicate_request_ids"] == 0
+        and normalized["missing_responses"] == 0
+        and not normalized["input_incomplete"]
+    )
+    if normalized.get("integrity_ok") is not expected_integrity:
+        raise ValueError("MCP collector summary integrity state disagrees")
+    return normalized
+
+
 class CallLedger:
     """Exclusive, append-only, hash-chained ledger for one benchmark trial."""
 
@@ -393,6 +426,7 @@ class CallLedger:
             self._root_hash = record_hash
 
     def seal(self, summary: Mapping[str, Any]) -> CollectionResult:
+        validated_summary = _validated_summary(summary)
         with self._lock:
             if self._sealed:
                 raise CollectorError("MCP collector ledger is already sealed")
@@ -403,7 +437,7 @@ class CallLedger:
                 "call_count": self._call_count,
                 "last_sequence": self._call_count,
                 "root_hash": self._root_hash,
-                "summary": dict(summary),
+                "summary": validated_summary,
             }
             terminal["seal_hash"] = hashlib.sha256(
                 _canonical_bytes(terminal)
@@ -413,15 +447,15 @@ class CallLedger:
             self._sealed = True
             self._fsync_directory()
             return CollectionResult(
-                returncode=int(summary["returncode"]),
+                returncode=validated_summary["returncode"],
                 ledger_path=self.path,
                 call_count=self._call_count,
                 root_hash=self._root_hash,
-                integrity_ok=bool(summary["integrity_ok"]),
-                malformed_frames=int(summary["malformed_frames"]),
-                partial_frames=int(summary["partial_frames"]),
-                missing_responses=int(summary["missing_responses"]),
-                input_incomplete=bool(summary["input_incomplete"]),
+                integrity_ok=validated_summary["integrity_ok"],
+                malformed_frames=validated_summary["malformed_frames"],
+                partial_frames=validated_summary["partial_frames"],
+                missing_responses=validated_summary["missing_responses"],
+                input_incomplete=validated_summary["input_incomplete"],
             )
 
     def abort(self) -> None:
