@@ -12,6 +12,7 @@ import json
 import os
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -744,6 +745,72 @@ def _read_relay_chunk(stream: BinaryIO, size: int) -> bytes:
     return stream.read(size)
 
 
+def _command_sha256(command: Sequence[str]) -> str:
+    encoded = json.dumps(
+        list(command),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _write_owner_marker(
+    path: str | os.PathLike[str],
+    *,
+    command: Sequence[str],
+    child_pid: int | None,
+) -> None:
+    marker = Path(path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    command_sha256 = _command_sha256(command)
+    payload = {
+        "schema_version": "openbench.mcp-process-owner.v1",
+        "state": "ready" if child_pid is not None else "starting",
+        "collector_pid": os.getpid(),
+        "child_pid": child_pid,
+        "command_sha256": command_sha256,
+    }
+    replacing = child_pid is not None
+    if replacing:
+        try:
+            existing = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CollectorError(
+                f"cannot upgrade MCP owner marker: {exc}"
+            ) from exc
+        expected = {
+            "schema_version": "openbench.mcp-process-owner.v1",
+            "state": "starting",
+            "collector_pid": os.getpid(),
+            "child_pid": None,
+            "command_sha256": command_sha256,
+        }
+        if existing != expected:
+            raise CollectorError("MCP owner marker changed before child binding")
+    fd, temporary = tempfile.mkstemp(
+        prefix=f".{marker.name}.",
+        dir=marker.parent,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        if replacing:
+            os.replace(temporary, marker)
+            temporary = ""
+        else:
+            os.link(temporary, marker)
+    finally:
+        if temporary:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+
+
 def collect_stdio(
     command: Sequence[str],
     *,
@@ -755,6 +822,7 @@ def collect_stdio(
     stderr: BinaryIO,
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
+    owner_path: str | os.PathLike[str] | None = None,
     max_frame_bytes: int = 16 * 1024 * 1024,
 ) -> CollectionResult:
     """Launch and transparently observe one newline-delimited MCP server."""
@@ -791,6 +859,12 @@ def collect_stdio(
             kill_owned_processes()
 
     try:
+        if owner_path is not None:
+            _write_owner_marker(
+                owner_path,
+                command=command,
+                child_pid=None,
+            )
         process = subprocess.Popen(
             list(command),
             stdin=subprocess.PIPE,
@@ -801,6 +875,12 @@ def collect_stdio(
             bufsize=0,
             start_new_session=(os.name == "posix"),
         )
+        if owner_path is not None:
+            _write_owner_marker(
+                owner_path,
+                command=command,
+                child_pid=process.pid,
+            )
         assert process.stdin is not None
         assert process.stdout is not None
         assert process.stderr is not None

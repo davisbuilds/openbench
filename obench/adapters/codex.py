@@ -48,6 +48,7 @@ models to cross-check against.
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -66,10 +67,12 @@ NAME = "codex"
 _EXE = "codex"
 _MULTI_AGENT_ENV = "OPENBENCH_CODEX_MULTI_AGENT"
 _NATIVE_MCP_COMMAND_ENV = "CUB_MCP_COMMAND"
+_NATIVE_ALLOWED_TOOLS_ENV = "OPENBENCH_NATIVE_MCP_ALLOWED_TOOLS"
 _NATIVE_MARKER_ENVS = (
     "OPENBENCH_NATIVE_MCP_SERVER_COMMAND",
     "OPENBENCH_NATIVE_MCP_LEDGER",
     "OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID",
+    "OPENBENCH_NATIVE_MCP_OWNER_PATH",
     "OPENBENCH_NATIVE_TRIAL_ID",
 )
 _NATIVE_MCP_ENV_VARS = _NATIVE_MARKER_ENVS
@@ -95,7 +98,7 @@ _NATIVE_NON_TOOL_ITEM_TYPES = {
     "error",
 }
 _NATIVE_ALLOWED_MCP_SERVER = "computer-use"
-_NATIVE_ALLOWED_TOOL_PREFIX = f"mcp__{_NATIVE_ALLOWED_MCP_SERVER}__"
+_NATIVE_HOOK_MCP_SERVER = "computer_use"
 _NATIVE_DISABLED_TOOL_FEATURES = (
     "shell_tool",
     "browser_use",
@@ -124,6 +127,7 @@ _NATIVE_PROCESS_ENV_ALLOWLIST = frozenset({
 })
 _NATIVE_CONTROL_ENVS = frozenset({
     _NATIVE_MCP_COMMAND_ENV,
+    _NATIVE_ALLOWED_TOOLS_ENV,
     *_NATIVE_MARKER_ENVS,
     "OPENBENCH_PROXY",
     "OPENBENCH_PROXY_BASE_URL",
@@ -192,6 +196,32 @@ def _native_launcher(env_override=None):
     return value
 
 
+def _native_allowed_tools(env_override=None):
+    raw = _native_value(_NATIVE_ALLOWED_TOOLS_ENV, env_override)
+    if not isinstance(raw, str):
+        raise ValueError(f"{_NATIVE_ALLOWED_TOOLS_ENV} must be a JSON array")
+    try:
+        tools = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"{_NATIVE_ALLOWED_TOOLS_ENV} must be a JSON array: {exc}"
+        ) from exc
+    if (
+        not isinstance(tools, list)
+        or not tools
+        or not all(
+            isinstance(tool, str)
+            and re.fullmatch(r"[A-Za-z0-9_-]+", tool)
+            for tool in tools
+        )
+        or len(tools) != len(set(tools))
+    ):
+        raise ValueError(
+            f"{_NATIVE_ALLOWED_TOOLS_ENV} must contain unique tool names"
+        )
+    return tuple(tools)
+
+
 def _native_child_env(source):
     """Expose only runtime essentials and explicit native benchmark controls."""
     return {
@@ -237,10 +267,14 @@ def _atomic_write_private(path, text):
     _atomic_write_private_bytes(path, text.encode("utf-8"))
 
 
-def _install_native_tool_policy(codex_home, *, launcher):
+def _install_native_tool_policy(codex_home, *, launcher, allowed_tools):
     ledger_path = Path(launcher).parent / _NATIVE_TOOL_POLICY_LEDGER_NAME
     hook_path = Path(codex_home) / _NATIVE_TOOL_POLICY_HOOK_NAME
     _atomic_write_private(ledger_path, "")
+    allowed_hook_tools = tuple(
+        f"mcp__{_NATIVE_HOOK_MCP_SERVER}__{tool}"
+        for tool in allowed_tools
+    )
     script = f"""#!{sys.executable}
 import hashlib
 import json
@@ -248,7 +282,7 @@ import os
 import sys
 
 LEDGER_PATH = {str(ledger_path)!r}
-ALLOWED_PREFIX = {_NATIVE_ALLOWED_TOOL_PREFIX!r}
+ALLOWED_TOOLS = frozenset({allowed_hook_tools!r})
 
 try:
     payload = json.load(sys.stdin)
@@ -256,8 +290,7 @@ try:
     tool_use_id = payload.get("tool_use_id")
     allowed = (
         isinstance(tool_name, str)
-        and tool_name.startswith(ALLOWED_PREFIX)
-        and len(tool_name) > len(ALLOWED_PREFIX)
+        and tool_name in ALLOWED_TOOLS
         and isinstance(tool_use_id, str)
         and bool(tool_use_id)
     )
@@ -333,8 +366,9 @@ def _codex_events(stdout):
     return events
 
 
-def _assert_native_tool_policy(events):
+def _assert_native_tool_policy(events, allowed_tools):
     """Require the native Codex trajectory to use only computer-use MCP tools."""
+    allowed_tools = frozenset(allowed_tools)
     for index, event in enumerate(events, start=1):
         event_type = event.get("type")
         if event_type not in _NATIVE_ALLOWED_EVENT_TYPES:
@@ -372,10 +406,19 @@ def _assert_native_tool_policy(events):
             raise ValueError(
                 f"native tool policy rejected MCP server {server!r} at event {index}"
             )
+        tool = item.get("tool")
+        if tool not in allowed_tools:
+            raise ValueError(
+                f"native tool policy rejected MCP tool {tool!r} at event {index}"
+            )
 
 
-def _assert_native_tool_policy_ledger(path, events):
+def _assert_native_tool_policy_ledger(path, events, allowed_tools):
     path = Path(path)
+    allowed_hook_tools = frozenset(
+        f"mcp__{_NATIVE_HOOK_MCP_SERVER}__{tool}"
+        for tool in allowed_tools
+    )
     if path.is_symlink() or not path.is_file():
         raise ValueError("native tool policy ledger is missing or invalid")
     allowed = []
@@ -421,7 +464,7 @@ def _assert_native_tool_policy_ledger(path, events):
             )
         ledger_ids.add(tool_use_id)
         if decision == "allow":
-            if not tool_name.startswith(_NATIVE_ALLOWED_TOOL_PREFIX):
+            if tool_name not in allowed_hook_tools:
                 raise ValueError(
                     f"native tool policy ledger allowed forbidden tool {tool_name!r}"
                 )
@@ -451,7 +494,7 @@ def _assert_native_tool_policy_ledger(path, events):
             ensure_ascii=False,
         ).encode("utf-8")
         identity = (
-            f"mcp__{item.get('server')}__{item.get('tool')}",
+            f"mcp__{_NATIVE_HOOK_MCP_SERVER}__{item.get('tool')}",
             hashlib.sha256(encoded_arguments).hexdigest(),
         )
         existing = trajectory_tools.setdefault(item["id"], identity)
@@ -481,7 +524,9 @@ def _assert_native_tool_policy_ledger(path, events):
         )
 
 
-def _write_and_verify_native_events(stdout, *, launcher, tool_policy_ledger):
+def _write_and_verify_native_events(
+    stdout, *, launcher, tool_policy_ledger, allowed_tools
+):
     raw_path = Path(launcher).parent / _NATIVE_RAW_EVENTS_NAME
     if isinstance(stdout, bytes):
         raw_bytes = stdout
@@ -490,8 +535,8 @@ def _write_and_verify_native_events(stdout, *, launcher, tool_policy_ledger):
     _atomic_write_private_bytes(raw_path, raw_bytes)
     decoded = raw_bytes.decode("utf-8")
     events = _codex_events(decoded)
-    _assert_native_tool_policy(events)
-    _assert_native_tool_policy_ledger(tool_policy_ledger, events)
+    _assert_native_tool_policy(events, allowed_tools)
+    _assert_native_tool_policy_ledger(tool_policy_ledger, events, allowed_tools)
     return events
 
 
@@ -500,6 +545,7 @@ def _write_native_evidence(
     *,
     launcher,
     tool_policy_ledger,
+    allowed_tools,
     workdir,
     model,
 ):
@@ -510,6 +556,7 @@ def _write_native_evidence(
         stdout,
         launcher=launcher,
         tool_policy_ledger=tool_policy_ledger,
+        allowed_tools=allowed_tools,
     )
     trajectory = convert_codex_events(
         events,
@@ -520,6 +567,7 @@ def _write_native_evidence(
     trajectory["extra"]["tool_policy"] = {
         "mode": "native_mcp_only",
         "allowed_mcp_servers": [_NATIVE_ALLOWED_MCP_SERVER],
+        "allowed_tools": list(allowed_tools),
         "verified": True,
     }
     assert_valid_trajectory(trajectory)
@@ -823,11 +871,13 @@ def run(
 ) -> dict:
     native = _native_requested(env_override)
     native_launcher = None
+    native_allowed_tools = ()
     if native:
         if model != _NATIVE_MODEL:
             return _native_error(f"model must be {_NATIVE_MODEL!r}, got {model!r}")
         try:
             native_launcher = _native_launcher(env_override)
+            native_allowed_tools = _native_allowed_tools(env_override)
         except ValueError as exc:
             return _native_error(str(exc))
 
@@ -861,6 +911,10 @@ def run(
             "-c", (
                 "mcp_servers.computer-use.env_vars="
                 + json.dumps(list(_NATIVE_MCP_ENV_VARS), separators=(",", ":"))
+            ),
+            "-c", (
+                "mcp_servers.computer-use.enabled_tools="
+                + json.dumps(list(native_allowed_tools), separators=(",", ":"))
             ),
             "-c", "mcp_servers.computer-use.enabled=true",
             "-c", "mcp_servers.computer-use.required=true",
@@ -951,6 +1005,7 @@ def run(
                 native_tool_policy_ledger = _install_native_tool_policy(
                     child_env["CODEX_HOME"],
                     launcher=native_launcher,
+                    allowed_tools=native_allowed_tools,
                 )
             proc = subprocess.run(
                 cmd,
@@ -970,6 +1025,7 @@ def run(
                         e.stdout or b"",
                         launcher=native_launcher,
                         tool_policy_ledger=native_tool_policy_ledger,
+                        allowed_tools=native_allowed_tools,
                     )
                 except (OSError, TypeError, ValueError) as exc:
                     native_timeout_evidence_error = str(exc)
@@ -1026,6 +1082,7 @@ def run(
                 raw_stdout,
                 launcher=native_launcher,
                 tool_policy_ledger=native_tool_policy_ledger,
+                allowed_tools=native_allowed_tools,
                 workdir=workdir,
                 model=model,
             )

@@ -26,6 +26,7 @@ from obench.native_macos import (
     WholeRunLease,
 )
 from obench.native_run import (
+    _McpServeOwnerMonitor,
     NativeRunError,
     NativeRunHooks,
     _content_bound_command_digest,
@@ -33,6 +34,7 @@ from obench.native_run import (
     _inspect_setup_app_identity,
     _inspect_setup_app_process,
     _managed_proxy,
+    _mcp_command_sha256,
     _mcp_serve_owners,
     _recheck_process_identity,
     _require_setup_app,
@@ -56,7 +58,12 @@ class NativeCollectorEntrypointTests(unittest.TestCase):
                 "OPENBENCH_NATIVE_MCP_SERVER_COMMAND": '["/bin/cat"]',
                 "OPENBENCH_NATIVE_MCP_LEDGER": str(ledger),
                 "OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID": "collector-run-1",
+                "OPENBENCH_NATIVE_MCP_OWNER_PATH": str(
+                    Path(directory) / "owner.json"
+                ),
                 "OPENBENCH_NATIVE_TRIAL_ID": "trial-1",
+                "OPENBENCH_PROXY_CELL_TOKEN": "must-not-reach-server",
+                "CUB_MCP_COMMAND": "/private/launcher",
             }
             with patch.dict(os.environ, environment, clear=True), patch(
                 "obench.native_run.collect_stdio"
@@ -67,6 +74,18 @@ class NativeCollectorEntrypointTests(unittest.TestCase):
             self.assertEqual(
                 collect.call_args.kwargs["run_id"],
                 "collector-run-1",
+            )
+            self.assertEqual(
+                collect.call_args.kwargs["owner_path"],
+                str(Path(directory) / "owner.json"),
+            )
+            self.assertNotIn(
+                "OPENBENCH_PROXY_CELL_TOKEN",
+                collect.call_args.kwargs["env"],
+            )
+            self.assertNotIn(
+                "CUB_MCP_COMMAND",
+                collect.call_args.kwargs["env"],
             )
 
 
@@ -111,9 +130,10 @@ class FakeFocusMonitor:
 
 
 class FakeMcpOwnerMonitor:
-    def __init__(self, command, probe, activity=None):
+    def __init__(self, command, probe, owner_path, activity=None):
         self.command = command
         self.probe = probe
+        self.owner_path = owner_path
         self.activity = activity
         self.samples = ()
 
@@ -122,6 +142,7 @@ class FakeMcpOwnerMonitor:
         sample = {
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "observed_at_monotonic": 0.0,
+            "owned_serve_pid": 4321,
             "unrelated_serve_pids": sorted(owner["pid"] for owner in owners),
         }
         self.samples = self.samples + (sample,)
@@ -420,8 +441,8 @@ media_type = "application/json"
                 "process_start_token": PROCESS_START_TOKEN,
             },
             mcp_owner_probe=lambda command: (),
-            mcp_monitor_factory=lambda command, probe: FakeMcpOwnerMonitor(
-                command, probe
+            mcp_monitor_factory=lambda command, probe, owner_path: FakeMcpOwnerMonitor(
+                command, probe, owner_path
             ),
             adapter_loader=lambda config: adapter or FakeAdapter(),
             version_probe=lambda config, loaded: "1.2.3",
@@ -1065,7 +1086,9 @@ media_type = "application/json"
         adapter = FakeAdapter()
         hooks, monitor = self._hooks(adapter)
         hooks.mcp_monitor_factory = (
-            lambda command, probe: DeadMonitor(command, probe)
+            lambda command, probe, owner_path: DeadMonitor(
+                command, probe, owner_path
+            )
         )
         with self.assertRaisesRegex(NativeRunError, "probe thread died"):
             run_native(self.config_path, hooks=hooks)
@@ -1298,6 +1321,87 @@ media_type = "application/json"
         )
         self.assertEqual([owner["pid"] for owner in owners], [4312])
 
+    def test_owner_monitor_excludes_only_exact_collector_child(self):
+        owner_path = self.root / "mcp-owner.json"
+        command = (str(Path(sys.executable).resolve()), "serve")
+        owner_path.write_text(
+            json.dumps({
+                "schema_version": "openbench.mcp-process-owner.v1",
+                "state": "ready",
+                "collector_pid": 7001,
+                "child_pid": 7002,
+                "command_sha256": _mcp_command_sha256(command),
+            }),
+            encoding="utf-8",
+        )
+        monitor = _McpServeOwnerMonitor(
+            command,
+            lambda _command: (
+                {"pid": 7002, "parent_pid": 7001},
+                {"pid": 8002, "parent_pid": 8001},
+            ),
+            owner_path,
+            clock=lambda: datetime.now(timezone.utc),
+            monotonic=lambda: 1.0,
+        )
+
+        monitor._sample()
+
+        self.assertEqual(monitor.samples[0]["owned_serve_pid"], 7002)
+        self.assertEqual(
+            monitor.samples[0]["unrelated_serve_pids"],
+            [8002],
+        )
+
+    def test_owner_monitor_accepts_pre_spawn_collector_binding(self):
+        owner_path = self.root / "mcp-owner.json"
+        command = (str(Path(sys.executable).resolve()), "serve")
+        owner_path.write_text(
+            json.dumps({
+                "schema_version": "openbench.mcp-process-owner.v1",
+                "state": "starting",
+                "collector_pid": 7001,
+                "child_pid": None,
+                "command_sha256": _mcp_command_sha256(command),
+            }),
+            encoding="utf-8",
+        )
+        monitor = _McpServeOwnerMonitor(
+            command,
+            lambda _command: ({"pid": 7002, "parent_pid": 7001},),
+            owner_path,
+            clock=lambda: datetime.now(timezone.utc),
+            monotonic=lambda: 1.0,
+        )
+
+        monitor._sample()
+
+        self.assertEqual(monitor.samples[0]["owned_serve_pid"], 7002)
+        self.assertEqual(monitor.samples[0]["unrelated_serve_pids"], [])
+
+    def test_owner_monitor_rejects_command_mismatched_marker(self):
+        owner_path = self.root / "mcp-owner.json"
+        owner_path.write_text(
+            json.dumps({
+                "schema_version": "openbench.mcp-process-owner.v1",
+                "state": "ready",
+                "collector_pid": 7001,
+                "child_pid": 7002,
+                "command_sha256": "a" * 64,
+            }),
+            encoding="utf-8",
+        )
+        monitor = _McpServeOwnerMonitor(
+            (str(Path(sys.executable).resolve()), "serve"),
+            lambda _command: (),
+            owner_path,
+            clock=lambda: datetime.now(timezone.utc),
+            monotonic=lambda: 1.0,
+        )
+
+        with self.assertRaisesRegex(NativeRunError, "command-mismatched"):
+            monitor._sample()
+
     def test_source_arm_rejects_installed_computer_use_mcp_serve_owner(self):
         source_executable = self.root / "source-arm-server"
         source_executable.write_text("source", encoding="utf-8")
@@ -1429,6 +1533,19 @@ media_type = "application/json"
         )
         self.config_path.write_text(content, encoding="utf-8")
         with self.assertRaisesRegex(NativeRunError, "unknown tools"):
+            load_config(self.config_path)
+
+    def test_empty_mcp_allowlist_is_rejected(self):
+        text = self.config_path.read_text(encoding="utf-8")
+        self.config_path.write_text(
+            text.replace('allowed_tools = ["click"]', "allowed_tools = []"),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(
+            NativeRunError,
+            "mcp.allowed_tools must be non-empty",
+        ):
             load_config(self.config_path)
 
     def test_whole_run_lease_conflict_prevents_runtime_work(self):

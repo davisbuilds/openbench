@@ -493,6 +493,7 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
                     "mcp_owner_sample",
                     {
                         "attempt": attempt,
+                        "owned_serve_pid": 4321,
                         "unrelated_serve_pids": [],
                     },
                 ))
@@ -1132,7 +1133,11 @@ class NativeTrialTests(unittest.TestCase):
             for timestamp in owner_times:
                 process_records.append((
                     "mcp_owner_sample",
-                    {"attempt": attempt, "unrelated_serve_pids": []},
+                    {
+                        "attempt": attempt,
+                        "owned_serve_pid": 4321,
+                        "unrelated_serve_pids": [],
+                    },
                 ))
                 process_timestamps.append(timestamp)
         ordered = sorted(

@@ -1390,7 +1390,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         tuple[int, str, str], tuple[dict[str, Any], datetime]
     ] = {}
     agent_boundaries: dict[tuple[int, str], datetime] = {}
-    owner_samples: dict[int, list[datetime]] = {}
+    owner_samples: dict[int, list[tuple[datetime, int | None]]] = {}
     identity_fields = {
         "attempt",
         "phase",
@@ -1426,9 +1426,16 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         if record["kind"] == "mcp_owner_sample":
             _exact_fields(
                 payload,
-                {"attempt", "unrelated_serve_pids"},
+                {"attempt", "owned_serve_pid", "unrelated_serve_pids"},
                 location,
             )
+            owned_pid = payload["owned_serve_pid"]
+            if owned_pid is not None:
+                owned_pid = _integer(
+                    owned_pid,
+                    f"{location}.owned_serve_pid",
+                    minimum=1,
+                )
             pids = [
                 _integer(value, f"{location}.unrelated_serve_pids[{pid_index}]", minimum=1)
                 for pid_index, value in enumerate(
@@ -1439,12 +1446,13 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 raise _fail(f"{location}.unrelated_serve_pids", "must be sorted and unique")
             if pids:
                 raise _fail(location, "unrelated computer-use-mcp serve owner observed")
-            owner_samples.setdefault(attempt, []).append(
+            owner_samples.setdefault(attempt, []).append((
                 _timestamp(
                     record["timestamp"],
                     f"process/ledger.jsonl:{index + 1}.timestamp",
-                )
-            )
+                ),
+                owned_pid,
+            ))
             continue
         _exact_fields(payload, identity_fields, location)
         phase = payload["phase"]
@@ -1592,10 +1600,12 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 )
             samples = owner_samples.get(attempt, [])
             before = [
-                sample for sample in samples if sample <= attempt_started
+                sample for sample, _owned_pid in samples
+                if sample <= attempt_started
             ]
             after = [
-                sample for sample in samples if sample >= attempt_finished
+                sample for sample, _owned_pid in samples
+                if sample >= attempt_finished
             ]
             if (
                 not before
@@ -1610,9 +1620,18 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                     f"attempt {attempt} MCP owner monitor does not cover "
                     "agent boundaries",
                 )
+            if not any(
+                owned_pid is not None
+                and before[-1] <= sample <= after[0]
+                for sample, owned_pid in samples
+            ):
+                raise _fail(
+                    "process/ledger.jsonl",
+                    f"attempt {attempt} has no benchmark-owned MCP serve evidence",
+                )
             covered = [
                 sample
-                for sample in samples
+                for sample, _owned_pid in samples
                 if before[-1] <= sample <= after[0]
             ]
             for index, (left, right) in enumerate(

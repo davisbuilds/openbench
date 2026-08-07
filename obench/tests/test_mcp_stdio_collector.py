@@ -200,6 +200,35 @@ class MCPStdioCollectorTests(unittest.TestCase):
         self.assertTrue(result.integrity_ok)
         self.assertEqual([row["record_type"] for row in rows], ["ledger_seal"])
 
+    def test_owner_marker_binds_child_to_collector_and_command(self):
+        owner_path = Path(self.tmp.name) / "owner.json"
+        command = [sys.executable, str(self.fixture)]
+        collector.collect_stdio(
+            command,
+            ledger_path=Path(self.tmp.name) / "owner-ledger.jsonl",
+            run_id="run-owner",
+            trial_id="trial-owner",
+            owner_path=owner_path,
+            stdin=io.BytesIO(rpc("initialize", 1)),
+            stdout=io.BytesIO(),
+            stderr=io.BytesIO(),
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        )
+
+        marker = json.loads(owner_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            marker["schema_version"],
+            "openbench.mcp-process-owner.v1",
+        )
+        self.assertEqual(marker["state"], "ready")
+        self.assertEqual(marker["collector_pid"], os.getpid())
+        self.assertGreater(marker["child_pid"], 0)
+        self.assertEqual(
+            marker["command_sha256"],
+            collector._command_sha256(command),
+        )
+        self.assertEqual(owner_path.stat().st_mode & 0o777, 0o600)
+
     def test_buffered_live_input_is_forwarded_before_eof(self):
         input_read_fd, input_write_fd = os.pipe()
         output_read_fd, output_write_fd = os.pipe()

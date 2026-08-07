@@ -391,6 +391,8 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
             or len(values) != len(set(values))
         ):
             raise NativeRunError(f"{field} must contain unique tool names")
+    if not allowed_tools:
+        raise NativeRunError("mcp.allowed_tools must be non-empty")
     if set(allowed_tools) & set(forbidden_tools):
         raise NativeRunError("MCP tools cannot be both allowed and forbidden")
     unknown_policy_tools = (
@@ -464,7 +466,11 @@ class NativeRunHooks:
         lambda command: _mcp_serve_owners(command)
     )
     mcp_monitor_factory: Callable[
-        [Sequence[str], Callable[[Sequence[str]], Sequence[Mapping[str, Any]]]],
+        [
+            Sequence[str],
+            Callable[[Sequence[str]], Sequence[Mapping[str, Any]]],
+            Path,
+        ],
         Any,
     ] | None = None
     app_probe: Callable[[AppRequirement], Sequence[AppEvidence]] = (
@@ -587,11 +593,64 @@ def _mcp_serve_owners(
     return tuple(owners)
 
 
+def _mcp_command_sha256(command: Sequence[str]) -> str:
+    encoded = json.dumps(
+        list(command),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_mcp_owner_marker(
+    path: Path,
+    command: Sequence[str],
+) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise NativeRunError("MCP owner marker is not a regular file")
+    try:
+        marker = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise NativeRunError(f"cannot read MCP owner marker: {exc}") from exc
+    expected_fields = {
+        "schema_version",
+        "state",
+        "collector_pid",
+        "child_pid",
+        "command_sha256",
+    }
+    if (
+        not isinstance(marker, dict)
+        or set(marker) != expected_fields
+        or marker.get("schema_version") != "openbench.mcp-process-owner.v1"
+        or marker.get("state") not in {"starting", "ready"}
+        or type(marker.get("collector_pid")) is not int
+        or marker["collector_pid"] <= 0
+        or marker.get("command_sha256") != _mcp_command_sha256(command)
+        or (
+            marker["state"] == "starting"
+            and marker.get("child_pid") is not None
+        )
+        or (
+            marker["state"] == "ready"
+            and (
+                type(marker.get("child_pid")) is not int
+                or marker["child_pid"] <= 0
+            )
+        )
+    ):
+        raise NativeRunError("MCP owner marker is malformed or command-mismatched")
+    return marker
+
+
 class _McpServeOwnerMonitor:
     def __init__(
         self,
         command: Sequence[str],
         owner_probe: Callable[[Sequence[str]], Sequence[Mapping[str, Any]]],
+        owner_path: Path,
         *,
         clock: Callable[[], datetime],
         monotonic: Callable[[], float],
@@ -599,6 +658,7 @@ class _McpServeOwnerMonitor:
     ):
         self.command = tuple(command)
         self.owner_probe = owner_probe
+        self.owner_path = owner_path
         self.clock = clock
         self.monotonic = monotonic
         self.interval_s = interval_s
@@ -625,18 +685,43 @@ class _McpServeOwnerMonitor:
 
     def _sample(self) -> None:
         owners = tuple(self.owner_probe(self.command))
-        pids = []
+        marker = _load_mcp_owner_marker(self.owner_path, self.command)
+        unrelated_pids = []
+        owned_pid = None
         for owner in owners:
             pid = owner.get("pid") if isinstance(owner, Mapping) else None
-            if type(pid) is not int or pid <= 0:
+            parent_pid = (
+                owner.get("parent_pid") if isinstance(owner, Mapping) else None
+            )
+            if (
+                type(pid) is not int
+                or pid <= 0
+                or type(parent_pid) is not int
+                or parent_pid <= 0
+            ):
                 raise NativeRunError(
                     "MCP owner monitor received malformed process evidence"
                 )
-            pids.append(pid)
+            if (
+                marker is not None
+                and parent_pid == marker["collector_pid"]
+                and (
+                    marker["state"] == "starting"
+                    or pid == marker["child_pid"]
+                )
+            ):
+                if owned_pid is not None:
+                    raise NativeRunError(
+                        "MCP owner monitor found duplicate owned process evidence"
+                    )
+                owned_pid = pid
+            else:
+                unrelated_pids.append(pid)
         sample = {
             "observed_at": self.clock().isoformat(),
             "observed_at_monotonic": self.monotonic(),
-            "unrelated_serve_pids": sorted(pids),
+            "owned_serve_pid": owned_pid,
+            "unrelated_serve_pids": sorted(unrelated_pids),
         }
         with self._lock:
             self._samples.append(sample)
@@ -1520,11 +1605,19 @@ def collector_main() -> int:
         command = json.loads(os.environ["OPENBENCH_NATIVE_MCP_SERVER_COMMAND"])
         if not isinstance(command, list):
             raise ValueError("server command must be an array")
+        server_env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("OPENBENCH_")
+            and key != "CUB_MCP_COMMAND"
+        }
         result = collect_stdio(
             command,
             ledger_path=os.environ["OPENBENCH_NATIVE_MCP_LEDGER"],
             run_id=os.environ["OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID"],
             trial_id=os.environ["OPENBENCH_NATIVE_TRIAL_ID"],
+            owner_path=os.environ["OPENBENCH_NATIVE_MCP_OWNER_PATH"],
+            env=server_env,
             stdin=sys.stdin.buffer,
             stdout=sys.stdout.buffer,
             stderr=sys.stderr.buffer,
@@ -1996,12 +2089,18 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
 
                 launcher = attempt_root / "computer-use-mcp-collector"
                 ledger = attempt_root / "mcp-ledger.jsonl"
+                owner_path = attempt_root / "mcp-process-owner.json"
                 _collector_launcher(launcher)
                 env = {
                     config.mcp_client_command_env: str(launcher),
                     "OPENBENCH_NATIVE_MCP_SERVER_COMMAND": json.dumps(list(config.mcp_command)),
                     "OPENBENCH_NATIVE_MCP_LEDGER": str(ledger),
                     "OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID": collector_run_id,
+                    "OPENBENCH_NATIVE_MCP_OWNER_PATH": str(owner_path),
+                    "OPENBENCH_NATIVE_MCP_ALLOWED_TOOLS": json.dumps(
+                        config.mcp_policy["allowed_tools"],
+                        separators=(",", ":"),
+                    ),
                     "OPENBENCH_NATIVE_TRIAL_ID": config.trial_id,
                 }
                 token = f"native-{attempt}"
@@ -2016,12 +2115,13 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 )
                 owner_monitor = (
                     hooks.mcp_monitor_factory(
-                        config.mcp_command, hooks.mcp_owner_probe
+                        config.mcp_command, hooks.mcp_owner_probe, owner_path
                     )
                     if hooks.mcp_monitor_factory is not None
                     else _McpServeOwnerMonitor(
                         config.mcp_command,
                         hooks.mcp_owner_probe,
+                        owner_path,
                         clock=hooks.clock,
                         monotonic=hooks.monotonic,
                     )
@@ -2094,11 +2194,20 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         "mcp_owner_sample",
                         {
                             "attempt": attempt,
+                            "owned_serve_pid": sample["owned_serve_pid"],
                             "unrelated_serve_pids": sample[
                                 "unrelated_serve_pids"
                             ],
                         },
                     ))
+                if not any(
+                    sample["owned_serve_pid"] is not None
+                    for sample in owner_monitor.samples
+                ):
+                    raise NativeRunError(
+                        "MCP owner monitor never observed the benchmark-owned "
+                        "serve process"
+                    )
                 if attempt_agent_finished_at < attempt_agent_started_at:
                     raise NativeRunError(
                         "agent phase wall-clock boundaries are not ordered"

@@ -46,7 +46,7 @@ def write_fixture_policy_ledger(path):
     ).encode("utf-8")
     path.write_text(
         json.dumps({
-            "tool_name": "mcp__computer-use__click",
+            "tool_name": "mcp__computer_use__click",
             "tool_use_id": "call-click-1",
             "input_sha256": hashlib.sha256(encoded_input).hexdigest(),
             "decision": "allow",
@@ -81,6 +81,7 @@ class CodexNativeProfileTests(unittest.TestCase):
             "CUB_MCP_COMMAND": str(self.launcher),
             "OPENBENCH_NATIVE_TRIAL_ID": "trial-1",
             "OPENBENCH_NATIVE_MCP_LEDGER": str(self.attempt / "mcp-ledger.jsonl"),
+            "OPENBENCH_NATIVE_MCP_ALLOWED_TOOLS": '["click"]',
         }
 
     def test_stock_command_and_artifacts_are_unchanged(self):
@@ -153,6 +154,10 @@ class CodexNativeProfileTests(unittest.TestCase):
             ),
             overrides,
         )
+        self.assertIn(
+            'mcp_servers.computer-use.enabled_tools=["click"]',
+            overrides,
+        )
         self.assertIn("mcp_servers.computer-use.enabled=true", overrides)
         self.assertIn("mcp_servers.computer-use.required=true", overrides)
         self.assertIn('model_reasoning_effort="medium"', overrides)
@@ -192,6 +197,7 @@ class CodexNativeProfileTests(unittest.TestCase):
             {
                 "mode": "native_mcp_only",
                 "allowed_mcp_servers": ["computer-use"],
+                "allowed_tools": ["click"],
                 "verified": True,
             },
         )
@@ -203,7 +209,7 @@ class CodexNativeProfileTests(unittest.TestCase):
                     encoding="utf-8"
                 )
             )["tool_name"],
-            "mcp__computer-use__click",
+            "mcp__computer_use__click",
         )
 
     def test_stock_profile_keeps_workspace_write_sandbox(self):
@@ -286,11 +292,13 @@ class CodexNativeProfileTests(unittest.TestCase):
         ledger = self.codex._install_native_tool_policy(
             home,
             launcher=self.launcher,
+            allowed_tools=("click",),
         )
         hooks = json.loads((home / "hooks.json").read_text(encoding="utf-8"))
         command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         cases = (
-            ("mcp__computer-use__click", None),
+            ("mcp__computer_use__click", None),
+            ("mcp__computer_use__open_url", "deny"),
             ("apply_patch", "deny"),
             ("mcp__filesystem__write_file", "deny"),
         )
@@ -320,7 +328,7 @@ class CodexNativeProfileTests(unittest.TestCase):
         ]
         self.assertEqual(
             [record["decision"] for record in records],
-            ["allow", "block", "block"],
+            ["allow", "block", "block", "block"],
         )
         self.assertNotIn("secret", ledger.read_text(encoding="utf-8"))
         self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), 0o600)
@@ -355,7 +363,7 @@ class CodexNativeProfileTests(unittest.TestCase):
             ledger = self.attempt / "codex-tool-policy.jsonl"
             ledger.write_text(
                 json.dumps({
-                    "tool_name": "mcp__computer-use__click",
+                    "tool_name": "mcp__computer_use__click",
                     "tool_use_id": "call-click-1",
                     "input_sha256": "a" * 64,
                     "decision": "allow",
