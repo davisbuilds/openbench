@@ -39,3 +39,8 @@ class CliEntrypointTests(unittest.TestCase):
         with mock.patch("obench.run.main", return_value=4) as legacy_main:
             self.assertEqual(cli.main(["legacy", "run", "--task", "demo"]), 4)
         legacy_main.assert_called_once_with(["--task", "demo"])
+
+    def test_native_routes_to_experimental_native_runner(self):
+        with mock.patch("obench.native_run.main", return_value=5) as native_main:
+            self.assertEqual(cli.main(["native", "run", "fixture.toml"]), 5)
+        native_main.assert_called_once_with(["run", "fixture.toml"])
