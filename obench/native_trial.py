@@ -4,6 +4,11 @@ This module validates evidence produced by a native macOS runner. It does not
 run an app, synthesize Harbor data, or publish results. The bundle manifest is
 the complete file inventory and every semantic evidence object is also bound to
 the same trial and immutable lock.
+
+The seals and result identity detect accidental or post-publication mutation.
+They do not authenticate a benchmark operator who controls every bundle input.
+Publication must state that operator trust boundary; this importer deliberately
+does not claim cryptographic attestation.
 """
 
 from __future__ import annotations
@@ -31,6 +36,51 @@ TASK_SIDECAR_SCHEMA_VERSION = "openbench.native-task.v1"
 NATIVE_SIDECAR_SCHEMA_VERSION = "openbench.native-sidecar.v1"
 LEDGER_SCHEMA_VERSION = "openbench.native-ledger.v1"
 MAX_TEXT_ARTIFACT_BYTES = 1024 * 1024
+MAX_FOCUS_SAMPLE_GAP_S = 1.5
+PUBLISHABLE_ARTIFACT_MEDIA_TYPES = frozenset({
+    "application/json",
+    "text/plain",
+    "text/plain; charset=utf-8",
+    "text/csv",
+    "text/csv; charset=utf-8",
+})
+MCP_TOOL_CATEGORIES = {
+    "batch": frozenset({"mutation", "automation"}),
+    "click": frozenset({"mutation", "interaction"}),
+    "click_menu_item": frozenset({"mutation", "interaction"}),
+    "delete_skill": frozenset({"mutation", "automation"}),
+    "drag": frozenset({"mutation", "interaction"}),
+    "find": frozenset({"observation"}),
+    "get_app_state": frozenset({"observation"}),
+    "get_skill": frozenset({"observation", "automation"}),
+    "health_report": frozenset({"observation"}),
+    "list_apps": frozenset({"observation"}),
+    "list_skills": frozenset({"observation", "automation"}),
+    "list_windows": frozenset({"observation", "window"}),
+    "manage_window": frozenset({"mutation", "window"}),
+    "open_app": frozenset({"mutation", "navigation"}),
+    "open_url": frozenset({"mutation", "navigation"}),
+    "page": frozenset({"mutation", "navigation"}),
+    "perform_secondary_action": frozenset({"mutation", "interaction"}),
+    "press_key": frozenset({"mutation", "text_entry"}),
+    "read_clipboard": frozenset({"observation"}),
+    "read_text": frozenset({"observation"}),
+    "record_skill_start": frozenset({"mutation", "automation"}),
+    "record_skill_stop": frozenset({"mutation", "automation"}),
+    "run_skill": frozenset({"mutation", "automation"}),
+    "save_skill": frozenset({"mutation", "automation"}),
+    "scroll": frozenset({"mutation", "navigation"}),
+    "select_text": frozenset({"mutation", "text_entry"}),
+    "set_value": frozenset({"mutation", "text_entry"}),
+    "type_text": frozenset({"mutation", "text_entry"}),
+    "wait_for": frozenset({"observation"}),
+    "write_clipboard": frozenset({"mutation", "text_entry"}),
+}
+MCP_POLICY_CATEGORIES = frozenset(
+    category
+    for categories in MCP_TOOL_CATEGORIES.values()
+    for category in categories
+)
 
 MANIFEST_PATH = "manifest.json"
 REQUIRED_FILES = frozenset(
@@ -237,6 +287,46 @@ def _reject_private_text(text: str, location: str) -> None:
         raise _fail(location, "credential-like token is not accepted")
     if _PRIVATE_PATH_RE.search(text):
         raise _fail(location, "absolute home/file path is not accepted")
+
+
+def _publishable_artifact_text(
+    path: Path,
+    *,
+    media_type: str,
+    expected_size: int,
+    location: str,
+) -> str:
+    if media_type not in PUBLISHABLE_ARTIFACT_MEDIA_TYPES:
+        raise _fail(
+            location,
+            f"media type is not publishable: {media_type!r}",
+        )
+    if expected_size > MAX_TEXT_ARTIFACT_BYTES:
+        raise _fail(
+            location,
+            f"text artifact exceeds privacy scan limit of {MAX_TEXT_ARTIFACT_BYTES} bytes",
+        )
+    try:
+        raw = path.read_bytes()
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _fail(location, "publishable artifact is not UTF-8 text") from exc
+    if b"\x00" in raw or any(
+        ord(character) < 0x20 and character not in "\t\n\r"
+        for character in text
+    ):
+        raise _fail(location, "publishable artifact contains binary control bytes")
+    if media_type == "application/json":
+        try:
+            json.loads(
+                text,
+                object_pairs_hook=_unique_object,
+                parse_constant=_reject_json_constant,
+            )
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise _fail(location, f"declared JSON artifact is invalid: {exc}") from exc
+    _reject_private_text(text, location)
+    return text
 
 
 def _scan_privacy(value: Any, location: str) -> None:
@@ -516,20 +606,25 @@ def _validate_sidecars(
         raise _fail("task/task.json", "digest does not match lock")
 
     native = _read_json(root / "task/native.json", "task/native.json")
-    _exact_fields(
-        native,
-        {
-            "schema_version",
-            "trial_id",
-            "task_id",
-            "app_bundle_id",
-            "reset_contract_sha256",
-            "success_contract_sha256",
-            "final_state_allowlist",
-            "focus_policy",
-        },
-        "task/native.json",
-    )
+    native_required_fields = {
+        "schema_version",
+        "trial_id",
+        "task_id",
+        "app_bundle_id",
+        "reset_contract_sha256",
+        "success_contract_sha256",
+        "final_state_allowlist",
+        "focus_policy",
+    }
+    missing_native = sorted(native_required_fields - set(native))
+    extra_native = sorted(set(native) - native_required_fields - {"mcp_policy"})
+    if missing_native or extra_native:
+        details = []
+        if missing_native:
+            details.append(f"missing fields: {', '.join(missing_native)}")
+        if extra_native:
+            details.append(f"unexpected fields: {', '.join(extra_native)}")
+        raise _fail("task/native.json", "; ".join(details))
     if native["schema_version"] != NATIVE_SIDECAR_SCHEMA_VERSION:
         raise _fail("task/native.json.schema_version", "unexpected native sidecar schema")
     if native["trial_id"] != trial_id or native["task_id"] != lock["task"]["name"]:
@@ -589,10 +684,59 @@ def _validate_sidecars(
     ]
     if len(tiers) != len(set(tiers)) or not tiers:
         raise _fail("task/native.json.focus_policy.allowed_delivery_tiers", "must be non-empty and unique")
+    raw_mcp_policy = native.get("mcp_policy")
+    if raw_mcp_policy is None:
+        mcp_policy = {
+            "minimum_calls": 1,
+            "required_tool_categories": ["mutation"],
+            "source": "native-sidecar-v1-primary-default",
+        }
+    else:
+        mcp_policy_value = _object(raw_mcp_policy, "task/native.json.mcp_policy")
+        _exact_fields(
+            mcp_policy_value,
+            {"minimum_calls", "required_tool_categories"},
+            "task/native.json.mcp_policy",
+        )
+        minimum_calls = _integer(
+            mcp_policy_value["minimum_calls"],
+            "task/native.json.mcp_policy.minimum_calls",
+            minimum=1,
+        )
+        required_categories = [
+            _string(
+                value,
+                f"task/native.json.mcp_policy.required_tool_categories[{index}]",
+            )
+            for index, value in enumerate(
+                _array(
+                    mcp_policy_value["required_tool_categories"],
+                    "task/native.json.mcp_policy.required_tool_categories",
+                )
+            )
+        ]
+        if (
+            not required_categories
+            or len(required_categories) != len(set(required_categories))
+            or any(category not in MCP_POLICY_CATEGORIES for category in required_categories)
+        ):
+            raise _fail(
+                "task/native.json.mcp_policy.required_tool_categories",
+                "must contain unique known MCP tool categories",
+            )
+        mcp_policy = {
+            "minimum_calls": minimum_calls,
+            "required_tool_categories": required_categories,
+            "source": "task-native-sidecar",
+        }
+    native["_normalized_mcp_policy"] = mcp_policy
     if _sha256_file(root / "task/native.json") != lock["native_sidecar"]["sha256"]:
         raise _fail("task/native.json", "digest does not match lock")
     _scan_privacy(task, "task/task.json")
-    _scan_privacy(native, "task/native.json")
+    _scan_privacy(
+        {key: value for key, value in native.items() if not key.startswith("_")},
+        "task/native.json",
+    )
     return task, native
 
 
@@ -845,23 +989,19 @@ def _validate_artifacts(
             raise _fail(f"{location}.path", "duplicate artifact")
         if entry["classification"] != "public_evidence":
             raise _fail(f"{location}.classification", "must be 'public_evidence'")
-        _string(entry["media_type"], f"{location}.media_type")
+        media_type = _string(entry["media_type"], f"{location}.media_type")
         expected_digest = _digest(entry["sha256"], f"{location}.sha256")
         expected_size = _integer(entry["size"], f"{location}.size")
         artifact_path = root / path
         _require_regular_file(artifact_path, path)
         if artifact_path.stat().st_size != expected_size or _sha256_file(artifact_path) != expected_digest:
             raise _fail(path, "artifact bytes do not match artifact manifest")
-        if entry["media_type"].startswith("text/") or entry["media_type"] == "application/json":
-            if expected_size > MAX_TEXT_ARTIFACT_BYTES:
-                raise _fail(
-                    path,
-                    f"text artifact exceeds privacy scan limit of {MAX_TEXT_ARTIFACT_BYTES} bytes",
-                )
-            try:
-                _reject_private_text(artifact_path.read_text(encoding="utf-8"), path)
-            except UnicodeDecodeError as exc:
-                raise _fail(path, "declared text artifact is not UTF-8") from exc
+        _publishable_artifact_text(
+            artifact_path,
+            media_type=media_type,
+            expected_size=expected_size,
+            location=path,
+        )
         declared.append(path)
         aggregate.append({"path": path, "sha256": expected_digest, "size": expected_size})
     if not declared:
@@ -1158,6 +1298,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             previous_observed = observed
     target_bundle_id = lock["environment"]["app"]["bundle_id"]
     focus_policy = native_sidecar["focus_policy"]
+    mcp_policy = native_sidecar["_normalized_mcp_policy"]
     required_foreground = focus_policy["required_foreground_bundle_id"]
     forbidden_bundles = set(focus_policy["forbidden_bundle_ids"])
     if (
@@ -1190,6 +1331,44 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             )
         if payload["frontmost_bundle_id"] in forbidden_bundles:
             raise _fail(f"focus/ledger.jsonl:{index + 1}.payload", "forbidden app became foreground")
+        if (
+            result["status"] == "completed"
+            and focus_policy["require_foreground_full_agent_phase"]
+            and payload["state"] != "observed"
+        ):
+            raise _fail(
+                f"focus/ledger.jsonl:{index + 1}.payload.state",
+                "completed trial contains an unhealthy or unlocked-coverage gap",
+            )
+
+    focus_observed_times = [
+        _timestamp(record["timestamp"], f"focus/ledger.jsonl:{index + 1}.timestamp")
+        for index, record in enumerate(focus_records)
+    ]
+    if (
+        result["status"] == "completed"
+        and focus_policy["require_foreground_full_agent_phase"]
+    ):
+        if (
+            not focus_observed_times
+            or (focus_observed_times[0] - started).total_seconds()
+            > MAX_FOCUS_SAMPLE_GAP_S
+            or (finished - focus_observed_times[-1]).total_seconds()
+            > MAX_FOCUS_SAMPLE_GAP_S
+        ):
+            raise _fail(
+                "focus/ledger.jsonl",
+                "focus/session health does not cover the completed trial boundaries",
+            )
+        for index, (left, right) in enumerate(
+            zip(focus_observed_times, focus_observed_times[1:]),
+            1,
+        ):
+            if (right - left).total_seconds() > MAX_FOCUS_SAMPLE_GAP_S:
+                raise _fail(
+                    f"focus/ledger.jsonl:{index + 1}.timestamp",
+                    "focus/session heartbeat gap exceeds the allowed interval",
+                )
 
     proxy_present = PROXY_FILES <= set(inventory)
     if lock["evidence"]["proxy_required"] != proxy_present:
@@ -1281,6 +1460,30 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             response_ns / 1_000_000_000,
             tz=started.tzinfo,
         )
+        prior_samples = [
+            (observed, state)
+            for observed, state in focus_timeline
+            if observed <= call_time
+        ]
+        following_samples = [
+            (observed, state)
+            for observed, state in focus_timeline
+            if observed >= response_time
+        ]
+        if (
+            not prior_samples
+            or not following_samples
+            or prior_samples[-1][1] != "observed"
+            or following_samples[0][1] != "observed"
+            or (
+                following_samples[0][0] - prior_samples[-1][0]
+            ).total_seconds()
+            > MAX_FOCUS_SAMPLE_GAP_S
+        ):
+            raise _fail(
+                f"mcp/ledger.jsonl:{index}",
+                "MCP call is outside a proven unlocked healthy monitor interval",
+            )
         for observed, replay_state in focus_timeline:
             if call_time < observed <= response_time and replay_state != "observed":
                 raise _fail(
@@ -1300,6 +1503,31 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 "global delivery is forbidden",
             )
 
+    if result["status"] == "completed":
+        minimum_calls = mcp_policy["minimum_calls"]
+        if len(mcp_records) < minimum_calls:
+            raise _fail(
+                "mcp/ledger.jsonl",
+                f"completed primary task requires at least {minimum_calls} MCP calls",
+            )
+        observed_categories = {
+            category
+            for call in mcp_records
+            for category in MCP_TOOL_CATEGORIES.get(
+                call.get("tool"),
+                frozenset(),
+            )
+        }
+        missing_categories = sorted(
+            set(mcp_policy["required_tool_categories"]) - observed_categories
+        )
+        if missing_categories:
+            raise _fail(
+                "mcp/ledger.jsonl",
+                "completed primary task is missing required MCP tool categories: "
+                + ", ".join(missing_categories),
+            )
+
     outcome = result["outcome"]
     success = result["status"] == "completed" and outcome["checker_exit"] == 0
     match = re.search(r"(?:^|[-_:])trial(\d+)$", trial_id)
@@ -1309,6 +1537,49 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             "must end with an explicit positive trialN index",
         )
     trial_number = int(match.group(1))
+    evidence_digests = {
+        "manifest_sha256": _sha256_file(root / MANIFEST_PATH),
+        "result_sha256": _sha256_file(root / "result.json"),
+        "atif_sha256": _sha256_file(root / "agent/trajectory.json"),
+        "reward_sha256": _sha256_file(root / "verifier/reward.json"),
+        "verifier_evidence_sha256": _sha256_file(
+            root / "verifier/evidence.json"
+        ),
+        "artifact_manifest_sha256": _sha256_file(
+            root / "artifacts/manifest.json"
+        ),
+        "mcp_ledger_sha256": _sha256_file(root / "mcp/ledger.jsonl"),
+        "focus_ledger_sha256": _sha256_file(root / "focus/ledger.jsonl"),
+        "focus_seal_sha256": _sha256_file(root / "focus/seal.json"),
+        "proxy_ledger_sha256": (
+            _sha256_file(root / "proxy/ledger.jsonl")
+            if proxy_present
+            else None
+        ),
+        "proxy_seal_sha256": (
+            _sha256_file(root / "proxy/seal.json")
+            if proxy_present
+            else None
+        ),
+    }
+    terminal_evidence_root = _canonical_digest({
+        "schema_version": BUNDLE_SCHEMA_VERSION,
+        "lock_sha256": lock_sha256,
+        "final_state_sha256": final_state_sha256,
+        "mcp_root_hash": mcp_verification.root_hash,
+        "mcp_seal_hash": mcp_seal["seal_hash"],
+        "evidence_digests": evidence_digests,
+    })
+    result_identity_sha256 = _canonical_digest({
+        "terminal_evidence_root": terminal_evidence_root,
+        "verdict": {
+            "status": result["status"],
+            "completed": outcome["completed"],
+            "score": outcome["score"],
+            "checker_exit": outcome["checker_exit"],
+            "failure_class": outcome["failure_class"],
+        },
+    })
     row = {field: None for field in ROW_FIELDS}
     row.update(
         {
@@ -1317,7 +1588,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 lock["task"]["name"],
                 lock["model"]["name"],
                 trial_number,
-                candidate_digest=lock_sha256,
+                candidate_digest=result_identity_sha256,
                 full_candidate_digest=True,
             ),
             "ts_iso": started.isoformat(),
@@ -1345,38 +1616,39 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 "schema_version": BUNDLE_SCHEMA_VERSION,
                 "trial_id": trial_id,
                 "lock_sha256": lock_sha256,
-                "result_sha256": _sha256_file(root / "result.json"),
-                "manifest_sha256": _sha256_file(root / MANIFEST_PATH),
-                "atif_sha256": _sha256_file(root / "agent/trajectory.json"),
-                "reward_sha256": _sha256_file(root / "verifier/reward.json"),
-                "verifier_evidence_sha256": _sha256_file(
-                    root / "verifier/evidence.json"
+                "terminal_evidence_root": terminal_evidence_root,
+                "result_identity_sha256": result_identity_sha256,
+                "operator_trust_boundary": (
+                    "self_sealed_operator_asserted; detects accidental or "
+                    "post-publication mutation, not malicious operator forgery"
                 ),
-                "artifact_manifest_sha256": _sha256_file(
-                    root / "artifacts/manifest.json"
-                ),
+                "monitor_health_evidence": {
+                    "maximum_sample_gap_s": MAX_FOCUS_SAMPLE_GAP_S,
+                    "first_sample_at": (
+                        focus_observed_times[0].isoformat()
+                        if focus_observed_times
+                        else None
+                    ),
+                    "terminal_sample_at": (
+                        focus_observed_times[-1].isoformat()
+                        if focus_observed_times
+                        else None
+                    ),
+                    "terminal_focus_seal_sha256": evidence_digests[
+                        "focus_seal_sha256"
+                    ],
+                },
+                **evidence_digests,
                 "final_state_sha256": final_state_sha256,
-                "mcp_ledger_sha256": _sha256_file(root / "mcp/ledger.jsonl"),
                 "mcp_root_hash": mcp_verification.root_hash,
                 "mcp_seal_hash": mcp_seal["seal_hash"],
-                "focus_ledger_sha256": _sha256_file(root / "focus/ledger.jsonl"),
-                "focus_seal_sha256": _sha256_file(root / "focus/seal.json"),
-                "proxy_ledger_sha256": (
-                    _sha256_file(root / "proxy/ledger.jsonl")
-                    if proxy_present
-                    else None
-                ),
-                "proxy_seal_sha256": (
-                    _sha256_file(root / "proxy/seal.json")
-                    if proxy_present
-                    else None
-                ),
                 "task_sidecar_sha256": lock["task"]["sidecar_sha256"],
                 "native_sidecar_sha256": lock["native_sidecar"]["sha256"],
                 "task_content_sha256": task_sidecar["task_content_sha256"],
                 "harness_identity": dict(lock["harness"]),
                 "model_identity": dict(lock["model"]),
                 "mcp_identity": dict(lock["mcp"]),
+                "mcp_policy": dict(mcp_policy),
                 "environment_identity": dict(lock["environment"]),
                 "phase_timings": dict(result["timings"]),
                 "retry_count": result["retry_count"],

@@ -201,6 +201,12 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
                 "allowed_delivery_tiers", ["tier1-ax-attribute"]
             ),
         },
+        "mcp_policy": {
+            "minimum_calls": case.get("minimum_mcp_calls", 1),
+            "required_tool_categories": case.get(
+                "required_tool_categories", ["mutation"]
+            ),
+        },
     }
     _write_json(root / "task/native.json", native_sidecar)
 
@@ -379,7 +385,7 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
                 "failure_reason": None if completed else "deadline_exceeded",
             },
             "mcp_event_count": 0 if preflight_failed else 1,
-            "focus_event_count": 0 if preflight_failed else 1,
+            "focus_event_count": 0 if preflight_failed else 11,
         },
     )
     verifier_status = "judged" if completed else "not_run"
@@ -429,7 +435,16 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
                     "target_bundle_id": "com.openbench.fixture",
                 },
             )
+            for _ in range(11)
         ],
+        timestamps=(
+            None
+            if preflight_failed
+            else [
+                f"2026-08-06T12:00:{second:02d}+00:00"
+                for second in range(11)
+            ]
+        ),
     )
     if case["proxy"]:
         _write_ledger(
@@ -482,7 +497,9 @@ class NativeTrialTests(unittest.TestCase):
         self.assertEqual(provenance["kind"], "native_macos_trial")
         self.assertEqual(provenance["mcp_identity"]["version"], "0.9.0")
         self.assertEqual(provenance["environment_identity"]["platform"], "macos")
-        self.assertEqual(provenance["focus_event_count"], 1)
+        self.assertEqual(provenance["focus_event_count"], 11)
+        self.assertEqual(provenance["mcp_policy"]["source"], "task-native-sidecar")
+        self.assertIn("not malicious operator forgery", provenance["operator_trust_boundary"])
 
     def test_terminal_fixture_preserves_timeout_and_retry_outcome(self):
         row = load_native_trial(self.bundle("terminal"))
@@ -627,7 +644,10 @@ class NativeTrialTests(unittest.TestCase):
         result["focus_event_count"] = 2
         _write_json(result_path, result)
         _reseal_manifest(yielded)
-        with self.assertRaisesRegex(NativeTrialError, "overlapped focus yielded"):
+        with self.assertRaisesRegex(
+            NativeTrialError,
+            "unhealthy or unlocked-coverage gap|overlapped focus yielded",
+        ):
             load_native_trial(yielded)
 
         concurrent = self.bundle("happy")
@@ -715,8 +735,130 @@ class NativeTrialTests(unittest.TestCase):
         result["focus_event_count"] = 3
         _write_json(result_path, result)
         _reseal_manifest(concurrent)
-        with self.assertRaisesRegex(NativeTrialError, "overlapped focus yielded"):
+        with self.assertRaisesRegex(
+            NativeTrialError,
+            "unhealthy or unlocked-coverage gap|overlapped focus yielded",
+        ):
             load_native_trial(concurrent)
+
+    def test_completed_trial_requires_dense_monitor_and_declared_mcp_policy(self):
+        sparse = self.bundle("happy")
+        lock_sha256 = _sha256(sparse / "lock.json")
+        payload = {
+            "state": "observed",
+            "frontmost_bundle_id": "com.openbench.fixture",
+            "target_bundle_id": "com.openbench.fixture",
+        }
+        _write_ledger(
+            sparse,
+            "focus",
+            "native-cub-v0-trial1",
+            lock_sha256,
+            [("focus_sample", payload), ("focus_sample", payload)],
+            timestamps=[
+                "2026-08-06T12:00:00+00:00",
+                "2026-08-06T12:00:10+00:00",
+            ],
+        )
+        result_path = sparse / "result.json"
+        result = json.loads(result_path.read_text())
+        result["focus_event_count"] = 2
+        _write_json(result_path, result)
+        _reseal_manifest(sparse)
+        with self.assertRaisesRegex(NativeTrialError, "heartbeat gap"):
+            load_native_trial(sparse)
+
+        no_calls = self.bundle("happy")
+        (no_calls / "mcp/ledger.jsonl").unlink()
+        _write_mcp_ledger(no_calls, "native-cub-v0-trial1", with_call=False)
+        result_path = no_calls / "result.json"
+        result = json.loads(result_path.read_text())
+        result["mcp_event_count"] = 0
+        _write_json(result_path, result)
+        _reseal_manifest(no_calls)
+        with self.assertRaisesRegex(NativeTrialError, "at least 1 MCP calls"):
+            load_native_trial(no_calls)
+
+        wrong_category = {
+            **self.cases["happy"],
+            "required_tool_categories": ["observation"],
+        }
+        category_bundle = self.root / "wrong-category"
+        _build_bundle(category_bundle, wrong_category)
+        with self.assertRaisesRegex(NativeTrialError, "missing required MCP tool categories"):
+            load_native_trial(category_bundle)
+
+    def test_public_artifacts_reject_mime_spoofing_and_binary_content(self):
+        spoofed = self.bundle("happy")
+        artifact_manifest_path = spoofed / "artifacts/manifest.json"
+        artifact_manifest = json.loads(artifact_manifest_path.read_text())
+        artifact_manifest["artifacts"][0]["media_type"] = "application/octet-stream"
+        _write_json(artifact_manifest_path, artifact_manifest)
+        _reseal_manifest(spoofed)
+        with self.assertRaisesRegex(NativeTrialError, "media type is not publishable"):
+            load_native_trial(spoofed)
+
+        binary = self.bundle("happy")
+        artifact_path = binary / "artifacts/final-state/state.json"
+        artifact_path.write_bytes(b"text\x00operator@example.com")
+        artifact_manifest_path = binary / "artifacts/manifest.json"
+        artifact_manifest = json.loads(artifact_manifest_path.read_text())
+        artifact_manifest["artifacts"][0]["media_type"] = "text/plain"
+        artifact_manifest["artifacts"][0]["sha256"] = _sha256(artifact_path)
+        artifact_manifest["artifacts"][0]["size"] = artifact_path.stat().st_size
+        _write_json(artifact_manifest_path, artifact_manifest)
+        aggregate = [{
+            "path": "artifacts/final-state/state.json",
+            "sha256": _sha256(artifact_path),
+            "size": artifact_path.stat().st_size,
+        }]
+        verifier_path = binary / "verifier/evidence.json"
+        verifier = json.loads(verifier_path.read_text())
+        verifier["final_state_sha256"] = _canonical_digest(aggregate)
+        _write_json(verifier_path, verifier)
+        _reseal_manifest(binary)
+        with self.assertRaisesRegex(NativeTrialError, "binary control bytes"):
+            load_native_trial(binary)
+
+    def test_resealed_verdict_changes_terminal_result_identity(self):
+        wrong_case = {
+            **self.cases["happy"],
+            "score": 0.0,
+            "checker_exit": 1,
+        }
+        bundle = self.root / "resealed-verdict"
+        _build_bundle(bundle, wrong_case)
+        before = load_native_trial(bundle)
+
+        result_path = bundle / "result.json"
+        result = json.loads(result_path.read_text())
+        result["outcome"].update(
+            score=1.0,
+            checker_exit=0,
+            failure_class="solved",
+        )
+        _write_json(result_path, result)
+        reward_path = bundle / "verifier/reward.json"
+        reward = json.loads(reward_path.read_text())
+        reward["reward"] = 1.0
+        _write_json(reward_path, reward)
+        evidence_path = bundle / "verifier/evidence.json"
+        evidence = json.loads(evidence_path.read_text())
+        evidence["checker_exit"] = 0
+        evidence["reward"] = 1.0
+        _write_json(evidence_path, evidence)
+        _reseal_manifest(bundle)
+
+        after = load_native_trial(bundle)
+        self.assertEqual(
+            before["candidate_provenance"]["lock_sha256"],
+            after["candidate_provenance"]["lock_sha256"],
+        )
+        self.assertNotEqual(before["run_id"], after["run_id"])
+        self.assertNotEqual(
+            before["candidate_provenance"]["result_identity_sha256"],
+            after["candidate_provenance"]["result_identity_sha256"],
+        )
 
     def test_trial_index_and_verifier_types_are_unambiguous(self):
         ambiguous = self.root / "ambiguous"
