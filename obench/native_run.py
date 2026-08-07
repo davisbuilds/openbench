@@ -33,9 +33,12 @@ from .mcp_stdio_collector import (
     verify_ledger,
 )
 from .native_macos import (
+    AppEvidence,
     AppRequirement,
     LeaseOwner,
+    MacOSAppInspector,
     MacOSFocusMonitor,
+    NativeMacOSHelperResolver,
     PhaseName,
     PhaseSpec,
     PreflightResult,
@@ -450,9 +453,15 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
 
 @dataclass
 class NativeRunHooks:
-    preflight: Callable[[PreflightSpec], PreflightResult] = run_preflight
+    preflight: Callable[..., PreflightResult] = run_preflight
     phase_runner_factory: Callable[[], SubprocessPhaseRunner] = SubprocessPhaseRunner
     focus_monitor_factory: Callable[[Sequence[str]], Any] = lambda allowed: MacOSFocusMonitor(allowed)
+    mcp_owner_probe: Callable[[Sequence[str]], Sequence[Mapping[str, Any]]] = (
+        lambda command: _mcp_serve_owners(command)
+    )
+    app_probe: Callable[[AppRequirement], Sequence[AppEvidence]] = (
+        lambda requirement: _inspect_setup_app(requirement)
+    )
     adapter_loader: Callable[[NativeRunConfig], Any] | None = None
     version_probe: Callable[[NativeRunConfig, Any], str | None] | None = None
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
@@ -486,6 +495,118 @@ def _server_executable(command: Sequence[str]) -> Path:
     if not resolved or not resolved.is_file():
         raise NativeRunError(f"MCP server executable is not a regular file: {command[0]!r}")
     return resolved.resolve()
+
+
+def _mcp_serve_owners(
+    command: Sequence[str],
+    *,
+    command_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> tuple[dict[str, Any], ...]:
+    """Return pre-existing configured or computer-use-mcp serve owners."""
+
+    executable = _server_executable(command)
+    try:
+        completed = command_runner(
+            ["ps", "-ww", "-axo", "pid=,ppid=,ucomm=,args="],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise NativeRunError(f"cannot enumerate MCP serve owners: {exc}") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or "").strip()[-1000:]
+        raise NativeRunError(
+            f"cannot enumerate MCP serve owners: ps exited {completed.returncode}: {detail}"
+        )
+
+    owners = []
+    configured_first = Path(command[0]).expanduser()
+    configured_observed = (
+        configured_first
+        if configured_first.is_absolute()
+        else Path(shutil.which(command[0]) or "")
+    )
+    configured_prefixes = {str(executable)}
+    if configured_observed:
+        configured_prefixes.add(str(configured_observed))
+    for raw_line in completed.stdout.splitlines():
+        fields = raw_line.strip().split(None, 3)
+        if len(fields) != 4:
+            continue
+        try:
+            pid, parent_pid = int(fields[0]), int(fields[1])
+        except ValueError:
+            continue
+        process_name, args = fields[2], fields[3]
+        if re.search(r"(?:^|\s)serve(?:\s|$)", args) is None:
+            continue
+        configured_owner = any(
+            args == prefix or args.startswith(prefix + " ")
+            for prefix in configured_prefixes
+        )
+        if process_name != "computer-use-mcp" and not configured_owner:
+            continue
+        owners.append({
+            "pid": pid,
+            "parent_pid": parent_pid,
+            "process_name": process_name,
+            "command": args,
+        })
+    return tuple(owners)
+
+
+def _inspect_setup_app(requirement: AppRequirement) -> Sequence[AppEvidence]:
+    helper_path = NativeMacOSHelperResolver().resolve()
+    return MacOSAppInspector(helper_path).inspect((requirement,))
+
+
+def _require_setup_app(
+    hooks: NativeRunHooks,
+    requirement: AppRequirement,
+) -> None:
+    evidence = tuple(hooks.app_probe(requirement))
+    if any(item.bundle_identifier != requirement.bundle_identifier for item in evidence):
+        raise NativeRunError("setup app probe returned an undeclared bundle identifier")
+    exact = [
+        item
+        for item in evidence
+        if item.running and item.version == requirement.version
+    ]
+    if len(exact) != 1:
+        observed = [
+            {"version": item.version, "running": item.running, "path": item.path}
+            for item in evidence
+        ]
+        raise NativeRunError(
+            "setup did not establish exactly one required target app: "
+            f"{requirement.bundle_identifier!r} version {requirement.version!r}; "
+            f"observed {observed!r}"
+        )
+
+
+def _run_locked_preflight(
+    hooks: NativeRunHooks,
+    spec: PreflightSpec,
+    mcp_executable: Path,
+) -> PreflightResult:
+    preflight = hooks.preflight(
+        spec,
+        computer_use_binary=str(mcp_executable),
+    )
+    preflight.require_passed()
+    if preflight.health is None:
+        if hooks.preflight is run_preflight:
+            raise NativeRunError("native preflight omitted source-proven MCP health")
+    else:
+        health_executable = Path(preflight.health.executable_path).expanduser().resolve()
+        if health_executable != mcp_executable:
+            raise NativeRunError(
+                "MCP health executable does not match the locked server executable"
+            )
+    return preflight
 
 
 def _path_inventory(
@@ -1018,22 +1139,22 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 f"harness version mismatch: expected {config.harness_version!r}, observed {observed_version!r}"
             )
         mcp_executable = _server_executable(config.mcp_command)
+        serve_owners = tuple(hooks.mcp_owner_probe(config.mcp_command))
+        if serve_owners:
+            owner_pids = sorted(
+                str(owner.get("pid", "unknown"))
+                if isinstance(owner, Mapping)
+                else "unknown"
+                for owner in serve_owners
+            )
+            raise NativeRunError(
+                f"unrelated computer-use-mcp serve owners are already running: {owner_pids!r}"
+            )
         preflight_spec = PreflightSpec(
-            required_apps=(AppRequirement(config.app_bundle_id, str(config.environment["app"]["version"])),),
             computer_use_version=config.mcp_version,
             computer_use_bundle_identifier=config.environment.get("mcp_bundle_id"),
         )
-        preflight = hooks.preflight(preflight_spec)
-        preflight.require_passed()
-        if preflight.health is None:
-            if hooks.preflight is run_preflight:
-                raise NativeRunError("native preflight omitted source-proven MCP health")
-        else:
-            health_executable = Path(preflight.health.executable_path).expanduser().resolve()
-            if health_executable != mcp_executable:
-                raise NativeRunError(
-                    "MCP health executable does not match the locked server executable"
-                )
+        _run_locked_preflight(hooks, preflight_spec, mcp_executable)
         phase_runner = hooks.phase_runner_factory()
         setup_spec = _phase(config, PhaseName.SETUP, config.setup)
         verifier_spec = _phase(config, PhaseName.VERIFIER, config.verifier)
@@ -1098,11 +1219,8 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         judged_snapshot: Path | None = None
         judged_snapshot_sha256: str | None = None
         completed_attempts = 0
-        monitor = hooks.focus_monitor_factory(
-            (config.focus_policy["required_foreground_bundle_id"],)
-        )
+        focus_violations = []
         try:
-            monitor.start()
             for attempt in range(1, config.max_retries + 2):
                 completed_attempts = attempt
                 attempt_root = attempts_dir / f"attempt{attempt}"
@@ -1115,6 +1233,14 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         "exit_code": setup_outcome.exit_code,
                     })
                     raise NativeRunError(f"setup phase {setup_outcome.status.value}")
+
+                _require_setup_app(
+                    hooks,
+                    AppRequirement(
+                        config.app_bundle_id,
+                        str(config.environment["app"]["version"]),
+                    ),
+                )
 
                 launcher = attempt_root / "computer-use-mcp-collector"
                 ledger = attempt_root / "mcp-ledger.jsonl"
@@ -1134,15 +1260,43 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     or getattr(adapter, "base_adapter", None)
                     or config.harness_name
                 )
+                monitor = hooks.focus_monitor_factory(
+                    (config.focus_policy["required_foreground_bundle_id"],)
+                )
                 with _managed_proxy(
                     config, proxy_dir, hooks, token, proxy_harness
                 ) as proxy_context:
                     if proxy_context:
                         env.update(proxy_context["env"])
                     with _temporary_environ(env):
-                        adapter_result = adapter.run(
-                            instruction, str(config.workspace), config.model_name, int(config.timeout_s)
+                        monitor.start()
+                        try:
+                            adapter_result = adapter.run(
+                                instruction, str(config.workspace), config.model_name, int(config.timeout_s)
+                            )
+                        except BaseException as adapter_error:
+                            try:
+                                monitor.stop()
+                            except BaseException as monitor_error:
+                                setattr(
+                                    adapter_error,
+                                    "focus_monitor_error",
+                                    monitor_error,
+                                )
+                            raise
+                        else:
+                            monitor.stop()
+                focus_violations.extend(monitor.violations)
+                for event in monitor.events:
+                    if event.observed_at is None:
+                        raise NativeRunError(
+                            "focus helper event omitted its wall-clock timestamp"
                         )
+                    focus_events.append((event.observed_at, {
+                        "state": "observed",
+                        "frontmost_bundle_id": event.bundle_identifier,
+                        "target_bundle_id": config.app_bundle_id,
+                    }))
                 proxy_usage = _proxy_usage(proxy_context)
                 if not isinstance(adapter_result, Mapping):
                     raise NativeRunError("adapter returned a non-object result")
@@ -1183,7 +1337,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 if not adapter_result.get("completed"):
                     raise NativeRunError(str(adapter_result.get("error") or "agent phase failed"))
                 chosen_mcp = ledger
-                if monitor.violations:
+                if focus_violations:
                     raise NativeRunError(
                         "focus policy violation observed during agent phase"
                     )
@@ -1200,34 +1354,20 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 raise NativeRunError("retry budget exhausted")
         finally:
             reset_error = None
-            try:
-                reset_outcome = phase_runner.run_phase(reset_spec)
-                if not reset_outcome.passed:
-                    reset_error = NativeRunError(f"reset phase {reset_outcome.status.value}")
-            finally:
-                try:
-                    monitor.stop()
-                except BaseException as exc:
-                    reset_error = reset_error or NativeRunError(f"focus monitor cleanup failed: {exc}")
+            reset_outcome = phase_runner.run_phase(reset_spec)
+            if not reset_outcome.passed:
+                reset_error = NativeRunError(f"reset phase {reset_outcome.status.value}")
             if reset_error is not None and sys.exc_info()[0] is None:
                 raise reset_error
 
-        if monitor.violations:
-            for violation in monitor.violations:
+        if focus_violations:
+            for violation in focus_violations:
                 focus_events.append((hooks.clock().isoformat(), {
                     "state": "yielded_to_human",
                     "frontmost_bundle_id": violation.event.bundle_identifier,
                     "target_bundle_id": config.app_bundle_id,
                 }))
             raise NativeRunError("focus policy violation observed during native trial")
-        for event in monitor.events:
-            if event.observed_at is None:
-                raise NativeRunError("focus helper event omitted its wall-clock timestamp")
-            focus_events.append((event.observed_at, {
-                "state": "observed",
-                "frontmost_bundle_id": event.bundle_identifier,
-                "target_bundle_id": config.app_bundle_id,
-            }))
         if not focus_events:
             raise NativeRunError("focus helper produced no observed foreground samples")
         if chosen_mcp is None or verifier_outcome is None:

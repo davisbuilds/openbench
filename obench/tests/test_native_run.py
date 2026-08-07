@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import hashlib
 import os
@@ -10,18 +11,22 @@ import tempfile
 import textwrap
 from datetime import datetime, timezone
 import unittest
+from unittest.mock import patch
 
 from obench.native_macos import (
+    AppEvidence,
     FocusEvent,
     LeaseUnavailableError,
     PreflightCheck,
     PreflightResult,
+    SubprocessPhaseRunner,
     WholeRunLease,
 )
 from obench.native_run import (
     NativeRunError,
     NativeRunHooks,
     _content_bound_command_digest,
+    _mcp_serve_owners,
     load_config,
     run_native,
 )
@@ -32,14 +37,17 @@ HEX_A = "a" * 64
 
 
 class FakeFocusMonitor:
-    def __init__(self, bundle_id="com.openbench.fixture"):
+    def __init__(self, bundle_id="com.openbench.fixture", activity=None):
         self.started = False
         self.stopped = False
         self.violations = ()
         self.bundle_id = bundle_id
         self.events = ()
+        self.activity = activity
 
     def start(self):
+        if self.activity is not None:
+            self.activity.append("focus:start")
         self.started = True
         self.events = (FocusEvent(
             self.bundle_id,
@@ -50,6 +58,8 @@ class FakeFocusMonitor:
         ),)
 
     def stop(self):
+        if self.activity is not None:
+            self.activity.append("focus:stop")
         self.stopped = True
         self.events = self.events + (FocusEvent(
             self.bundle_id,
@@ -61,13 +71,16 @@ class FakeFocusMonitor:
 
 
 class FakeAdapter:
-    def __init__(self, *, fail=False, retry_once=False, tool="click"):
+    def __init__(self, *, fail=False, retry_once=False, tool="click", activity=None):
         self.fail = fail
         self.retry_once = retry_once
         self.calls = 0
         self.tool = tool
+        self.activity = activity
 
     def run(self, instruction, workdir, model, timeout_s):
+        if self.activity is not None:
+            self.activity.append("agent:run")
         self.calls += 1
         if self.retry_once and self.calls == 1:
             return {
@@ -152,6 +165,8 @@ class NativeRunTests(unittest.TestCase):
                 workspace = Path.cwd()
                 if (workspace / ("fail-" + phase)).exists():
                     raise SystemExit(17)
+                if phase == "setup":
+                    (workspace / "setup.log").write_text("setup complete\\n")
                 if phase == "verifier":
                     (workspace / "verdict.json").write_text(
                         json.dumps({"score": 1.0, "checker_exit": 0})
@@ -305,12 +320,239 @@ media_type = "application/json"
     def _hooks(self, adapter=None, *, preflight=True):
         monitor = FakeFocusMonitor()
         hooks = NativeRunHooks(
-            preflight=lambda spec: self._preflight(preflight),
+            preflight=lambda spec, **kwargs: self._preflight(preflight),
             focus_monitor_factory=lambda allowed: monitor,
+            app_probe=lambda requirement: (
+                AppEvidence(
+                    requirement.bundle_identifier,
+                    requirement.version,
+                    True,
+                    "/Applications/Fixture.app",
+                ),
+            ),
+            mcp_owner_probe=lambda command: (),
             adapter_loader=lambda config: adapter or FakeAdapter(),
             version_probe=lambda config, loaded: "1.2.3",
         )
         return hooks, monitor
+
+    def test_preflight_uses_locked_executable_and_setup_owns_target_app_start(self):
+        preflight_observations = []
+        app_observations = []
+
+        def preflight(spec, *, computer_use_binary):
+            preflight_observations.append({
+                "apps": spec.required_apps,
+                "binary": computer_use_binary,
+                "setup_complete": (self.workspace / "setup.log").exists(),
+            })
+            return self._preflight()
+
+        def app_probe(requirement):
+            app_observations.append({
+                "requirement": requirement,
+                "setup_complete": (self.workspace / "setup.log").exists(),
+            })
+            return AppEvidence(
+                requirement.bundle_identifier,
+                requirement.version,
+                True,
+                "/Applications/Fixture.app",
+            ),
+
+        hooks, _ = self._hooks()
+        hooks.preflight = preflight
+        hooks.app_probe = app_probe
+        run_native(self.config_path, hooks=hooks)
+
+        self.assertEqual(len(preflight_observations), 1)
+        self.assertEqual(preflight_observations[0]["apps"], ())
+        self.assertFalse(preflight_observations[0]["setup_complete"])
+        self.assertEqual(
+            preflight_observations[0]["binary"],
+            str(Path(sys.executable).resolve()),
+        )
+        self.assertEqual(len(app_observations), 1)
+        self.assertEqual(
+            app_observations[0]["requirement"].bundle_identifier,
+            "com.openbench.fixture",
+        )
+        self.assertTrue(app_observations[0]["setup_complete"])
+
+    def test_focus_monitor_wraps_only_agent_phase(self):
+        activity = []
+        adapter = FakeAdapter(activity=activity)
+        monitor = FakeFocusMonitor(activity=activity)
+        runner = SubprocessPhaseRunner()
+
+        class RecordingRunner:
+            def run_phase(inner_self, spec):
+                activity.append(f"{spec.name.value}:start")
+                outcome = runner.run_phase(spec)
+                activity.append(f"{spec.name.value}:end")
+                return outcome
+
+        hooks, _ = self._hooks(adapter)
+        hooks.phase_runner_factory = RecordingRunner
+        hooks.focus_monitor_factory = lambda allowed: monitor
+        run_native(self.config_path, hooks=hooks)
+
+        expected = [
+            "setup:start",
+            "setup:end",
+            "focus:start",
+            "agent:run",
+            "focus:stop",
+            "verifier:start",
+            "verifier:end",
+            "reset:start",
+            "reset:end",
+        ]
+        self.assertEqual(activity, expected)
+
+    def test_focus_monitor_excludes_proxy_lifecycle(self):
+        activity = []
+        adapter = FakeAdapter(activity=activity)
+        monitor = FakeFocusMonitor(activity=activity)
+
+        @contextmanager
+        def managed_proxy(*args, **kwargs):
+            activity.append("proxy:start")
+            yield None
+            activity.append("proxy:stop")
+
+        hooks, _ = self._hooks(adapter)
+        hooks.focus_monitor_factory = lambda allowed: monitor
+        with patch("obench.native_run._managed_proxy", managed_proxy):
+            run_native(self.config_path, hooks=hooks)
+
+        self.assertEqual(
+            activity,
+            [
+                "proxy:start",
+                "focus:start",
+                "agent:run",
+                "focus:stop",
+                "proxy:stop",
+            ],
+        )
+
+    def test_focus_cleanup_does_not_mask_adapter_exception(self):
+        class RaisingAdapter(FakeAdapter):
+            def run(inner_self, instruction, workdir, model, timeout_s):
+                raise RuntimeError("primary adapter failure")
+
+        class StopFailingMonitor(FakeFocusMonitor):
+            def stop(inner_self):
+                super().stop()
+                raise RuntimeError("focus cleanup failure")
+
+        monitor = StopFailingMonitor()
+        hooks, _ = self._hooks(RaisingAdapter())
+        hooks.focus_monitor_factory = lambda allowed: monitor
+        with self.assertRaisesRegex(RuntimeError, "primary adapter failure") as raised:
+            run_native(self.config_path, hooks=hooks)
+        self.assertRegex(
+            str(raised.exception.focus_monitor_error),
+            "focus cleanup failure",
+        )
+        self.assertTrue((self.workspace / "reset.log").is_file())
+
+    def test_unrelated_mcp_serve_owner_fails_before_preflight_or_setup(self):
+        adapter = FakeAdapter()
+        hooks, monitor = self._hooks(adapter)
+        preflight_calls = []
+        hooks.preflight = lambda spec, **kwargs: preflight_calls.append(spec)
+        hooks.mcp_owner_probe = lambda command: ({"pid": 4312},)
+
+        with self.assertRaisesRegex(
+            NativeRunError, "unrelated computer-use-mcp serve owners.*4312"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertEqual(preflight_calls, [])
+        self.assertEqual(adapter.calls, 0)
+        self.assertFalse(monitor.started)
+        self.assertFalse((self.workspace / "setup.log").exists())
+
+    def test_owner_probe_runs_once_before_setup_and_collector_launch(self):
+        observations = []
+        hooks, _ = self._hooks()
+
+        def probe(command):
+            observations.append((
+                tuple(command),
+                (self.workspace / "setup.log").exists(),
+                list(self.root.glob("bundle.attempts/*/computer-use-mcp-collector")),
+            ))
+            return ()
+
+        hooks.mcp_owner_probe = probe
+        run_native(self.config_path, hooks=hooks)
+        self.assertEqual(len(observations), 1)
+        self.assertFalse(observations[0][1])
+        self.assertEqual(observations[0][2], [])
+
+    def test_serve_owner_probe_matches_only_exact_configured_executable(self):
+        executable = str(Path(sys.executable).resolve())
+        completed = subprocess.CompletedProcess(
+            [],
+            0,
+            "\n".join((
+                f"4312 1 Python {executable} serve --stdio",
+                f"4313 1 Python {executable} /tmp/computer-use-mcp-collector",
+                "4314 1 false /usr/bin/false serve --stdio",
+            )),
+            "",
+        )
+        owners = _mcp_serve_owners(
+            [executable],
+            command_runner=lambda *args, **kwargs: completed,
+        )
+        self.assertEqual([owner["pid"] for owner in owners], [4312])
+
+    def test_source_arm_rejects_installed_computer_use_mcp_serve_owner(self):
+        source_executable = self.root / "source-arm-server"
+        source_executable.write_text("source", encoding="utf-8")
+        installed_executable = self.root / "installed" / "computer-use-mcp"
+        installed_executable.parent.mkdir()
+        installed_executable.write_text("installed", encoding="utf-8")
+        completed = subprocess.CompletedProcess(
+            [],
+            0,
+            "\n".join((
+                f"5312 1 computer-use-mcp {installed_executable} serve",
+                f"5313 1 source-arm-server {source_executable} health_report --json",
+                f"5314 1 unrelated-tool {self.root / 'unrelated-tool'} serve",
+            )),
+            "",
+        )
+        owners = _mcp_serve_owners(
+            [str(source_executable)],
+            command_runner=lambda *args, **kwargs: completed,
+        )
+        self.assertEqual([owner["pid"] for owner in owners], [5312])
+
+    def test_owner_probe_handles_unquoted_spaced_installed_app_path(self):
+        source_executable = self.root / "source-arm-server"
+        source_executable.write_text("source", encoding="utf-8")
+        installed_executable = (
+            self.root
+            / "Computer Use MCP.app"
+            / "Contents"
+            / "MacOS"
+            / "computer-use-mcp"
+        )
+        completed = subprocess.CompletedProcess(
+            [],
+            0,
+            f"73883 1 computer-use-mcp {installed_executable} serve\n",
+            "",
+        )
+        owners = _mcp_serve_owners(
+            [str(source_executable)],
+            command_runner=lambda *args, **kwargs: completed,
+        )
+        self.assertEqual([owner["pid"] for owner in owners], [73883])
 
     def test_success_generates_imports_and_seals_exact_native_bundle(self):
         hooks, monitor = self._hooks()
@@ -419,13 +661,32 @@ media_type = "application/json"
         self.assertEqual(adapter.calls, 0)
         self.assertFalse(monitor.started)
 
-    def test_setup_failure_still_resets_and_stops_monitor(self):
+    def test_setup_failure_still_resets_without_starting_focus_monitor(self):
         (self.workspace / "fail-setup").touch()
         hooks, monitor = self._hooks()
         with self.assertRaisesRegex(NativeRunError, "setup phase failed"):
             run_native(self.config_path, hooks=hooks)
         self.assertTrue((self.workspace / "reset.log").is_file())
-        self.assertTrue(monitor.stopped)
+        self.assertFalse(monitor.started)
+        self.assertFalse(monitor.stopped)
+
+    def test_setup_without_exact_running_app_fails_before_focus_and_resets(self):
+        hooks, monitor = self._hooks()
+        hooks.app_probe = lambda requirement: (
+            AppEvidence(
+                requirement.bundle_identifier,
+                "0.0.0",
+                True,
+                "/Applications/Fixture.app",
+            ),
+        )
+        with self.assertRaisesRegex(
+            NativeRunError, "setup did not establish exactly one required target app"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertTrue((self.workspace / "setup.log").is_file())
+        self.assertTrue((self.workspace / "reset.log").is_file())
+        self.assertFalse(monitor.started)
 
     def test_agent_failure_still_resets_and_stops_monitor(self):
         hooks, monitor = self._hooks(FakeAdapter(fail=True))
