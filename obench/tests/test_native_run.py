@@ -471,6 +471,37 @@ media_type = "application/json"
             )
         )
 
+    def test_native_harness_version_must_remain_stable_through_reset(self):
+        hooks, _monitor = self._hooks()
+        observed = iter(("1.2.3", "1.2.4"))
+        hooks.version_probe = lambda config, loaded: next(observed)
+
+        with self.assertRaisesRegex(
+            NativeRunError,
+            "harness version changed during native execution",
+        ):
+            run_native(self.config_path, hooks=hooks)
+
+        self.assertTrue((self.workspace / "reset.log").is_file())
+        self.assertFalse((self.root / "bundle").exists())
+
+    def test_native_harness_executable_identity_must_remain_stable(self):
+        hooks, _monitor = self._hooks()
+        observed = iter((
+            "1.2.3 (/opt/homebrew/bin/fixture)",
+            "1.2.3 (/usr/local/bin/fixture)",
+        ))
+        hooks.version_probe = lambda config, loaded: next(observed)
+
+        with self.assertRaisesRegex(
+            NativeRunError,
+            "harness executable identity changed during native execution",
+        ):
+            run_native(self.config_path, hooks=hooks)
+
+        self.assertTrue((self.workspace / "reset.log").is_file())
+        self.assertFalse((self.root / "bundle").exists())
+
     def test_preflight_uses_locked_executable_and_setup_owns_target_app_start(self):
         preflight_observations = []
         app_observations = []

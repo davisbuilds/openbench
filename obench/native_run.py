@@ -1946,7 +1946,8 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
     owner = LeaseOwner.current(config.trial_id)
     with WholeRunLease(config.lease_path, owner=owner):
         adapter = (hooks.adapter_loader or _load_adapter)(config)
-        observed_version = (hooks.version_probe or _probe_version)(config, adapter)
+        version_probe = hooks.version_probe or _probe_version
+        observed_version = version_probe(config, adapter)
         if not _harness_version_matches(config.harness_version, observed_version):
             raise NativeRunError(
                 f"harness version mismatch: expected {config.harness_version!r}, observed {observed_version!r}"
@@ -2335,6 +2336,22 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 reset_error = NativeRunError(f"reset phase {reset_outcome.status.value}")
             if reset_error is not None and sys.exc_info()[0] is None:
                 raise reset_error
+
+        terminal_observed_version = version_probe(config, adapter)
+        if not _harness_version_matches(
+            config.harness_version, terminal_observed_version
+        ):
+            raise NativeRunError(
+                "harness version changed during native execution: "
+                f"expected {config.harness_version!r}, "
+                f"observed {terminal_observed_version!r}"
+            )
+        if terminal_observed_version != observed_version:
+            raise NativeRunError(
+                "harness executable identity changed during native execution: "
+                f"started {observed_version!r}, "
+                f"finished {terminal_observed_version!r}"
+            )
 
         if focus_violations:
             for violation in focus_violations:
