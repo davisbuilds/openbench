@@ -1,0 +1,23 @@
+schema_version = "1.4"
+
+[task]
+name = "openbench/computer-use-v0-textedit-exact-file"
+description = "Create one exact UTF-8 file through TextEdit"
+authors = [{ name = "OpenBench" }]
+keywords = ["computer-use", "native-macos", "textedit", "exact-bytes"]
+
+[metadata]
+origin = "openbench"
+execution_backend = "native-macos-only"
+native_sidecar = "native-macos.toml"
+harbor_execution_supported = false
+
+[verifier]
+timeout_sec = 30.0
+
+[agent]
+timeout_sec = 300.0
+
+[environment]
+os = "macos"
+network_mode = "none"

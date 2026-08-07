@@ -1,0 +1,39 @@
+schema_version = "openbench.native-task.v1"
+task_id = "openbench/computer-use-v0-background-control"
+platform = "macos"
+execution_backend = "openbench-native"
+harbor_execution_supported = false
+
+[fixture]
+repository = "computer-use-mcp"
+revision = "1e7988c157c880a4588cdd593e42a5f86443c307"
+source = "scripts/fixtures/BackgroundControlFixture.swift"
+process_name = "BackgroundControlFixture"
+state_path_env = "COMPUTER_USE_FIXTURE_STATE_PATH"
+activation_policy = "accessory"
+
+[guard]
+require_separate_process = true
+require_foreground_for_full_agent_phase = true
+forbid_target_activation = true
+forbid_global_delivery = true
+
+[artifacts.state]
+path = "artifacts/background-control-state.json"
+authority = "fixture"
+schema = "computer-use-mcp.background-control-state.v1"
+
+[artifacts.focus_ledger]
+path_env = "OPENBENCH_FOCUS_LEDGER_PATH"
+authority = "native-runner-read-only"
+schema = "openbench.computer-use.focus-ledger.v1"
+
+[artifacts.focus_seal]
+path_env = "OPENBENCH_FOCUS_SEAL_PATH"
+authority = "native-runner-read-only"
+schema = "openbench.computer-use.focus-seal.v1"
+
+[verification]
+command = ["bash", "checker.sh"]
+authoritative_judge = "deterministic-checker"
+screenshots_authoritative = false

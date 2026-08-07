@@ -1,0 +1,26 @@
+schema_version = "openbench.native-task.v1"
+task_id = "openbench/computer-use-v0-textedit-exact-file"
+platform = "macos"
+execution_backend = "openbench-native"
+harbor_execution_supported = false
+
+[application]
+name = "TextEdit"
+bundle_id = "com.apple.TextEdit"
+
+[provided_path]
+context_file = "run-context.json"
+context_field = "output_path"
+path_env = "OPENBENCH_NATIVE_OUTPUT_PATH"
+require_run_scoped_workspace = true
+
+[artifacts.output]
+authority = "filesystem"
+media_type = "text/plain; charset=utf-8"
+exact_bytes_fixture = "checker_data/expected.txt"
+forbid_additional_files = true
+
+[verification]
+command = ["bash", "checker.sh"]
+authoritative_judge = "deterministic-checker"
+screenshots_authoritative = false

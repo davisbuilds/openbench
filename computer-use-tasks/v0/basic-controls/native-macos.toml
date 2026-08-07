@@ -1,0 +1,25 @@
+schema_version = "openbench.native-task.v1"
+task_id = "openbench/computer-use-v0-basic-controls"
+platform = "macos"
+execution_backend = "openbench-native"
+harbor_execution_supported = false
+
+[fixture]
+repository = "computer-use-mcp"
+revision = "2c5cc162e58f6486505c8c5fe87fd76980d0e6b9"
+source = "Sources/ComputerUseFixture"
+process_name = "ComputerUseFixture"
+state_path_env = "COMPUTER_USE_FIXTURE_STATE_PATH"
+
+[fixture.reset]
+contract = "launch writes the schema-v1 initial state before interaction"
+
+[artifacts.state]
+path = "artifacts/basic-controls-state.json"
+authority = "fixture"
+schema = "computer-use-mcp.basic-controls-state.v1"
+
+[verification]
+command = ["bash", "checker.sh"]
+authoritative_judge = "deterministic-checker"
+screenshots_authoritative = false
