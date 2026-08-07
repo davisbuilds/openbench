@@ -1,0 +1,530 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import tempfile
+import unittest
+
+from obench.native_trial import (
+    BUNDLE_SCHEMA_VERSION,
+    LEDGER_SCHEMA_VERSION,
+    NATIVE_SIDECAR_SCHEMA_VERSION,
+    NativeTrialError,
+    TASK_SIDECAR_SCHEMA_VERSION,
+    import_native_trial,
+    load_native_trial,
+)
+from obench.mcp_stdio_collector import CallLedger
+from obench.run import ROW_FIELDS
+
+
+FIXTURE_CASES = (
+    Path(__file__).parent / "fixtures" / "native_trial_cases.json"
+)
+HEX_A = "a" * 64
+HEX_B = "b" * 64
+HEX_C = "c" * 64
+
+
+def _canonical_bytes(value):
+    return json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _canonical_digest(value):
+    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_ledger(root, prefix, trial_id, lock_sha256, records):
+    ledger_path = root / prefix / "ledger.jsonl"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    previous_hash = "0" * 64
+    lines = []
+    for sequence, (kind, payload) in enumerate(records, 1):
+        record = {
+            "schema_version": LEDGER_SCHEMA_VERSION,
+            "trial_id": trial_id,
+            "lock_sha256": lock_sha256,
+            "sequence": sequence,
+            "kind": kind,
+            "timestamp": f"2026-08-06T12:00:0{sequence}+00:00",
+            "payload": payload,
+            "previous_hash": previous_hash,
+        }
+        record["record_hash"] = _canonical_digest(record)
+        previous_hash = record["record_hash"]
+        lines.append(json.dumps(record, separators=(",", ":"), sort_keys=True))
+    ledger_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_json(
+        root / prefix / "seal.json",
+        {
+            "schema_version": LEDGER_SCHEMA_VERSION,
+            "trial_id": trial_id,
+            "lock_sha256": lock_sha256,
+            "record_count": len(records),
+            "last_sequence": len(records),
+            "root_hash": previous_hash,
+            "ledger_sha256": _sha256(ledger_path),
+        },
+    )
+
+
+def _write_mcp_ledger(root, trial_id):
+    path = root / "mcp/ledger.jsonl"
+    ledger = CallLedger(path, "native-cub-v0-run", trial_id)
+    ledger.append_call(
+        {
+            "tool": "set_value",
+            "status": "completed",
+            "request_id_type": "str",
+            "argument_digest": "sha256:" + HEX_B,
+            "request_bytes": 100,
+            "response_bytes": 80,
+            "request_unix_ns": 1786017601000000000,
+            "response_unix_ns": 1786017602000000000,
+            "duration_ms": 1000.0,
+            "tool_is_error": False,
+            "jsonrpc_error": {"present": False, "code": None},
+            "computer_use_meta": {
+                "error": None,
+                "outcome": {
+                    "classification": "success",
+                    "failure_domain": None,
+                    "web_ax_echo_risk": None,
+                    "verification": {},
+                },
+                "focus": {"focus_changed": False},
+                "delivery": None,
+            },
+            "process_returncode": None,
+        }
+    )
+    ledger.seal(
+        {
+            "returncode": 0,
+            "integrity_ok": True,
+            "malformed_frames": 0,
+            "partial_frames": 0,
+            "duplicate_request_ids": 0,
+            "missing_responses": 0,
+        }
+    )
+
+
+def _reseal_manifest(root):
+    files = []
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and path.relative_to(root).as_posix() != "manifest.json":
+            files.append(
+                {
+                    "path": path.relative_to(root).as_posix(),
+                    "sha256": _sha256(path),
+                    "size": path.stat().st_size,
+                }
+            )
+    _write_json(
+        root / "manifest.json",
+        {
+            "schema_version": BUNDLE_SCHEMA_VERSION,
+            "trial_id": json.loads((root / "lock.json").read_text())["trial_id"],
+            "lock_sha256": _sha256(root / "lock.json"),
+            "result_sha256": _sha256(root / "result.json"),
+            "files": files,
+        },
+    )
+
+
+def _build_bundle(root, case):
+    trial_id = "native-cub-v0-trial1"
+    task_id = "computer-use-bench-v0-form-entry"
+    final_path = "artifacts/final-state/state.json"
+    final_value = {"invoice_id": "INV-1042", "saved": True}
+    _write_json(root / final_path, final_value)
+
+    task_sidecar = {
+        "schema_version": TASK_SIDECAR_SCHEMA_VERSION,
+        "trial_id": trial_id,
+        "task_id": task_id,
+        "task_content_sha256": HEX_A,
+        "instruction_sha256": HEX_B,
+        "verifier_sha256": HEX_C,
+    }
+    _write_json(root / "task/task.json", task_sidecar)
+    native_sidecar = {
+        "schema_version": NATIVE_SIDECAR_SCHEMA_VERSION,
+        "trial_id": trial_id,
+        "task_id": task_id,
+        "app_bundle_id": "com.openbench.fixture",
+        "reset_contract_sha256": HEX_B,
+        "success_contract_sha256": HEX_C,
+        "final_state_allowlist": [final_path],
+    }
+    _write_json(root / "task/native.json", native_sidecar)
+
+    lock = {
+        "schema_version": BUNDLE_SCHEMA_VERSION,
+        "trial_id": trial_id,
+        "created_at": "2026-08-06T11:59:59+00:00",
+        "task": {
+            "name": task_id,
+            "sidecar_path": "task/task.json",
+            "sidecar_sha256": _sha256(root / "task/task.json"),
+        },
+        "native_sidecar": {
+            "path": "task/native.json",
+            "sha256": _sha256(root / "task/native.json"),
+        },
+        "harness": {
+            "name": "codex",
+            "version": "0.200.0",
+            "version_source": "native_cli",
+        },
+        "model": {
+            "name": "gpt-fixture",
+            "provider": "openai",
+            "revision": "gpt-fixture-2026-08-01",
+        },
+        "mcp": {
+            "name": "computer-use-mcp",
+            "version": "0.9.0",
+            "transport": "stdio",
+            "server_sha256": HEX_A,
+            "collector_run_id": "native-cub-v0-run",
+        },
+        "environment": {
+            "platform": "macos",
+            "os": {"version": "15.6", "build": "24G84"},
+            "architecture": "arm64",
+            "hardware_model": "MacFixture1,1",
+            "app": {
+                "bundle_id": "com.openbench.fixture",
+                "version": "1.2.3",
+                "build": "45",
+                "code_signature_sha256": HEX_B,
+            },
+            "display": {
+                "width_px": 1728,
+                "height_px": 1117,
+                "scale_factor": 2.0,
+                "color_space": "Display P3",
+            },
+            "preflight": {
+                "accessibility": True,
+                "screen_recording": True,
+                "app_installed": True,
+                "display_stable": True,
+                "focus_monitor_ready": True,
+            },
+        },
+        "budget": {"timeout_s": case["timeout_s"], "max_retries": 1},
+        "evidence": {"proxy_required": case["proxy"]},
+    }
+    _write_json(root / "lock.json", lock)
+    lock_sha256 = _sha256(root / "lock.json")
+
+    trajectory = {
+        "schema_version": "ATIF-v1.7",
+        "trajectory_id": trial_id,
+        "agent": {
+            "name": "codex",
+            "version": "0.200.0",
+            "model_name": "gpt-fixture",
+        },
+        "steps": [
+            {
+                "step_id": 1,
+                "source": "user",
+                "message": "Complete the native task.",
+                "timestamp": "2026-08-06T12:00:00+00:00",
+            },
+            {
+                "step_id": 2,
+                "source": "agent",
+                "message": "Task attempt finished.",
+                "model_name": "gpt-fixture",
+                "timestamp": "2026-08-06T12:00:05+00:00",
+                "metrics": {
+                    "prompt_tokens": 100,
+                    "cached_tokens": 20,
+                    "completion_tokens": 30,
+                },
+            },
+        ],
+        "final_metrics": {
+            "total_steps": 2,
+            "total_prompt_tokens": 100,
+            "total_cached_tokens": 20,
+            "total_completion_tokens": 30,
+        },
+    }
+    _write_json(root / "agent/trajectory.json", trajectory)
+
+    artifact_entries = [
+        {
+            "path": final_path,
+            "sha256": _sha256(root / final_path),
+            "size": (root / final_path).stat().st_size,
+            "media_type": "application/json",
+            "classification": "public_evidence",
+        }
+    ]
+    _write_json(
+        root / "artifacts/manifest.json",
+        {
+            "schema_version": BUNDLE_SCHEMA_VERSION,
+            "trial_id": trial_id,
+            "lock_sha256": lock_sha256,
+            "reviewed": True,
+            "contains_sensitive_data": False,
+            "artifacts": artifact_entries,
+        },
+    )
+    final_state_sha256 = _canonical_digest(
+        [
+            {
+                "path": final_path,
+                "sha256": artifact_entries[0]["sha256"],
+                "size": artifact_entries[0]["size"],
+            }
+        ]
+    )
+
+    completed = case["status"] == "completed"
+    error = None if completed else "native trial exceeded its locked timeout"
+    failure_class = (
+        "solved"
+        if completed and case["checker_exit"] == 0
+        else "wrong_answer"
+        if completed
+        else case["status"]
+    )
+    _write_json(
+        root / "result.json",
+        {
+            "schema_version": BUNDLE_SCHEMA_VERSION,
+            "trial_id": trial_id,
+            "lock_sha256": lock_sha256,
+            "status": case["status"],
+            "attempts": case["retry_count"] + 1,
+            "retry_count": case["retry_count"],
+            "timeout_s": case["timeout_s"],
+            "started_at": "2026-08-06T12:00:00+00:00",
+            "finished_at": "2026-08-06T12:00:10+00:00",
+            "timings": {
+                "env_setup_s": 1.0,
+                "agent_s": 7.0,
+                "verifier_s": 2.0 if completed else 0.0,
+                "total_s": 10.0,
+            },
+            "outcome": {
+                "completed": completed,
+                "score": case["score"],
+                "checker_exit": case["checker_exit"],
+                "error": error,
+                "failure_class": failure_class,
+                "failure_reason": None if completed else "deadline_exceeded",
+            },
+            "mcp_event_count": 1,
+            "focus_event_count": 1,
+        },
+    )
+    verifier_status = "judged" if completed else "not_run"
+    _write_json(
+        root / "verifier/reward.json",
+        {
+            "schema_version": BUNDLE_SCHEMA_VERSION,
+            "trial_id": trial_id,
+            "lock_sha256": lock_sha256,
+            "status": verifier_status,
+            "reward": case["score"],
+        },
+    )
+    _write_json(
+        root / "verifier/evidence.json",
+        {
+            "schema_version": BUNDLE_SCHEMA_VERSION,
+            "trial_id": trial_id,
+            "lock_sha256": lock_sha256,
+            "status": verifier_status,
+            "checker_exit": case["checker_exit"],
+            "reward": case["score"],
+            "task_content_sha256": HEX_A,
+            "final_state_sha256": final_state_sha256,
+        },
+    )
+
+    _write_mcp_ledger(root, trial_id)
+    _write_ledger(
+        root,
+        "focus",
+        trial_id,
+        lock_sha256,
+        [
+            (
+                "focus_sample",
+                {
+                    "state": "target_focused",
+                    "frontmost_bundle_id": "com.openbench.fixture",
+                    "target_bundle_id": "com.openbench.fixture",
+                },
+            )
+        ],
+    )
+    if case["proxy"]:
+        _write_ledger(
+            root,
+            "proxy",
+            trial_id,
+            lock_sha256,
+            [
+                (
+                    "model_usage",
+                    {
+                        "input_tokens": 100,
+                        "cached_tokens": 20,
+                        "output_tokens": 30,
+                    },
+                )
+            ],
+        )
+    _reseal_manifest(root)
+
+
+class NativeTrialTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def bundle(self, name):
+        path = self.root / name
+        if path.exists():
+            shutil.rmtree(path)
+        _build_bundle(path, self.cases[name])
+        return path
+
+    def test_happy_fixture_normalizes_row_and_cross_bound_evidence(self):
+        row = load_native_trial(self.bundle("happy"))
+
+        self.assertEqual(set(row), set(ROW_FIELDS))
+        self.assertEqual(row["exec_mode"], "native_macos")
+        self.assertTrue(row["success"])
+        self.assertTrue(row["completed"])
+        self.assertEqual(row["score"], 1.0)
+        self.assertEqual(row["tokens"], 110)
+        self.assertEqual(row["tokens_proxy_calls"], 1)
+        self.assertTrue(row["usage_ranking_eligible"])
+        provenance = row["candidate_provenance"]
+        self.assertEqual(provenance["kind"], "native_macos_trial")
+        self.assertEqual(provenance["mcp_identity"]["version"], "0.9.0")
+        self.assertEqual(provenance["environment_identity"]["platform"], "macos")
+        self.assertEqual(provenance["focus_event_count"], 1)
+
+    def test_terminal_fixture_preserves_timeout_and_retry_outcome(self):
+        row = load_native_trial(self.bundle("terminal"))
+
+        self.assertFalse(row["success"])
+        self.assertFalse(row["completed"])
+        self.assertIsNone(row["score"])
+        self.assertIsNone(row["checker_exit"])
+        self.assertEqual(row["failure_class"], "timeout")
+        self.assertEqual(row["candidate_provenance"]["terminal_status"], "timeout")
+        self.assertEqual(row["candidate_provenance"]["retry_count"], 1)
+        self.assertFalse(row["candidate_provenance"]["proxy_measured"])
+
+    def test_tampered_final_state_is_rejected(self):
+        bundle = self.bundle("happy")
+        (bundle / "artifacts/final-state/state.json").write_text(
+            '{"saved":false}\n', encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(NativeTrialError, "does not match manifest"):
+            load_native_trial(bundle)
+
+    def test_privacy_leak_is_rejected_even_after_manifest_is_resealed(self):
+        bundle = self.bundle("happy")
+        trajectory_path = bundle / "agent/trajectory.json"
+        trajectory = json.loads(trajectory_path.read_text(encoding="utf-8"))
+        trajectory["steps"][1]["message"] = "Contact operator@example.com"
+        _write_json(trajectory_path, trajectory)
+        _reseal_manifest(bundle)
+
+        with self.assertRaisesRegex(NativeTrialError, "email address"):
+            load_native_trial(bundle)
+
+    def test_partial_or_duplicate_evidence_is_rejected(self):
+        bundle = self.bundle("happy")
+        (bundle / "focus/seal.json").unlink()
+        with self.assertRaisesRegex(NativeTrialError, "inventory mismatch"):
+            load_native_trial(bundle)
+
+        duplicate = self.bundle("terminal")
+        result_path = duplicate / "result.json"
+        text = result_path.read_text(encoding="utf-8")
+        result_path.write_text(
+            text.replace('"status": "timeout"', '"status": "timeout",\n  "status": "timeout"'),
+            encoding="utf-8",
+        )
+        _reseal_manifest(duplicate)
+        with self.assertRaisesRegex(NativeTrialError, "duplicate object key"):
+            load_native_trial(duplicate)
+
+        extra = self.bundle("happy")
+        _write_json(extra / "artifacts/final-state/undeclared.json", {"saved": True})
+        _reseal_manifest(extra)
+        with self.assertRaisesRegex(NativeTrialError, "final-state file exactly"):
+            load_native_trial(extra)
+
+    def test_path_unsafe_manifest_and_synthetic_harbor_evidence_are_rejected(self):
+        bundle = self.bundle("happy")
+        manifest_path = bundle / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["files"].append({"path": "../escape", "sha256": HEX_A, "size": 0})
+        _write_json(manifest_path, manifest)
+        with self.assertRaisesRegex(NativeTrialError, "safe relative POSIX path"):
+            load_native_trial(bundle)
+
+        synthetic = self.bundle("terminal")
+        trajectory_path = synthetic / "agent/trajectory.json"
+        trajectory = json.loads(trajectory_path.read_text(encoding="utf-8"))
+        trajectory["extra"] = {"harbor_job": "fabricated"}
+        _write_json(trajectory_path, trajectory)
+        _reseal_manifest(synthetic)
+        with self.assertRaisesRegex(NativeTrialError, "synthetic Harbor field"):
+            load_native_trial(synthetic)
+
+    def test_import_appends_once_and_rejects_duplicate_run_id(self):
+        bundle = self.bundle("happy")
+        results = self.root / "results.jsonl"
+        row = import_native_trial(bundle, results)
+
+        saved = json.loads(results.read_text(encoding="utf-8"))
+        self.assertEqual(saved["run_id"], row["run_id"])
+        with self.assertRaisesRegex(NativeTrialError, "duplicate run_id"):
+            import_native_trial(bundle, results)
+
+
+if __name__ == "__main__":
+    unittest.main()
