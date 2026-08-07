@@ -3,7 +3,7 @@
 
     obench run | report | doctor | validate | admit | gateway | router | harbor | gate |
          compare | init | publish | verify | community | leaderboard | site | pack |
-         export | import
+         export | import | native
          [args...]
 """
 
@@ -79,6 +79,11 @@ def main(argv=None):
     sub.add_parser("results", help="query results: summary/pertask/matched/errors/evidence", add_help=False)
     sub.add_parser("export", help="export tasks to external formats (harbor)", add_help=False)
     sub.add_parser("import", help="import tasks from external formats (harbor)", add_help=False)
+    sub.add_parser(
+        "native",
+        help="experimental native macOS Computer-Use trial runner",
+        add_help=False,
+    )
 
     if not argv:
         parser.print_help()
@@ -98,13 +103,13 @@ def main(argv=None):
         "run", "legacy", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
         "matrix", "results", "publish", "verify", "community", "leaderboard",
         "site", "pack", "export",
-        "import",
+        "import", "native",
     }
     if command not in known:
         parser.error(
             f"unknown command {command!r}; choose from run, legacy, report, doctor, "
             "validate, admit, gateway, router, harbor, gate, compare, init, publish, verify, community, "
-            "leaderboard, results, site, pack, export, import"
+            "leaderboard, results, site, pack, export, import, native"
         )
 
     if command == "results":
@@ -178,6 +183,9 @@ def main(argv=None):
             return harbor_results_main(rest[1:])
         from .import_harbor import main as import_main
         return import_main(rest)
+    if command == "native":
+        from .native_run import main as native_main
+        return native_main(rest)
     return 1
 
 
