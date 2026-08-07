@@ -1031,7 +1031,13 @@ def _validate_result_and_verifier(
     trial_id: str,
     lock_sha256: str,
     lock: dict[str, Any],
-) -> tuple[dict[str, Any], datetime, datetime]:
+) -> tuple[
+    dict[str, Any],
+    datetime,
+    datetime,
+    datetime | None,
+    datetime | None,
+]:
     result = _bound_json(
         root,
         "result.json",
@@ -1044,6 +1050,8 @@ def _validate_result_and_verifier(
             "timeout_s",
             "started_at",
             "finished_at",
+            "agent_started_at",
+            "agent_finished_at",
             "timings",
             "outcome",
             "mcp_event_count",
@@ -1073,6 +1081,54 @@ def _validate_result_and_verifier(
         raise _fail("result.timings.total_s", "does not match timestamps")
     if sum(float(timings[field]) for field in ("env_setup_s", "agent_s", "verifier_s")) > elapsed + 0.001:
         raise _fail("result.timings", "phase timings exceed total trial time")
+    agent_started_raw = result["agent_started_at"]
+    agent_finished_raw = result["agent_finished_at"]
+    if (agent_started_raw is None) != (agent_finished_raw is None):
+        raise _fail(
+            "result.agent_started_at",
+            "agent phase boundaries must both be present or both be null",
+        )
+    agent_started: datetime | None = None
+    agent_finished: datetime | None = None
+    if agent_started_raw is None:
+        if float(timings["agent_s"]) != 0.0:
+            raise _fail(
+                "result.agent_started_at",
+                "non-zero agent phase requires explicit sealed boundaries",
+            )
+    else:
+        agent_started = _timestamp(
+            agent_started_raw,
+            "result.agent_started_at",
+        )
+        agent_finished = _timestamp(
+            agent_finished_raw,
+            "result.agent_finished_at",
+        )
+        if (
+            agent_started < started
+            or agent_finished < agent_started
+            or agent_finished > finished
+        ):
+            raise _fail(
+                "result.agent_started_at",
+                "agent phase boundaries must be ordered within trial timing",
+            )
+        agent_elapsed = (agent_finished - agent_started).total_seconds()
+        measured_agent_s = float(timings["agent_s"])
+        if attempts == 1 and abs(measured_agent_s - agent_elapsed) > 0.001:
+            raise _fail(
+                "result.timings.agent_s",
+                "does not match explicit agent phase boundaries",
+            )
+        if attempts > 1 and (
+            agent_elapsed > measured_agent_s + 0.001
+            or measured_agent_s <= 0.0
+        ):
+            raise _fail(
+                "result.timings.agent_s",
+                "does not contain the final measured agent phase",
+            )
 
     outcome = _object(result["outcome"], "result.outcome")
     _exact_fields(
@@ -1167,7 +1223,7 @@ def _validate_result_and_verifier(
     _scan_privacy(reward, "verifier/reward.json")
     _scan_privacy(evidence, "verifier/evidence.json")
     _reject_harbor_shape(result, "result.json")
-    return result, started, finished
+    return result, started, finished, agent_started, agent_finished
 
 
 def _usage_fields(usage: dict[str, int | None]) -> dict[str, Any]:
@@ -1228,11 +1284,13 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         lock_sha256=lock_sha256,
         native_sidecar=native_sidecar,
     )
-    result, started, finished = _validate_result_and_verifier(
-        root,
-        trial_id=trial_id,
-        lock_sha256=lock_sha256,
-        lock=lock,
+    result, started, finished, agent_started, agent_finished = (
+        _validate_result_and_verifier(
+            root,
+            trial_id=trial_id,
+            lock_sha256=lock_sha256,
+            lock=lock,
+        )
     )
     if _timestamp(lock["created_at"], "lock.created_at") > started:
         raise _fail("lock.created_at", "immutable lock was created after trial start")
@@ -1301,14 +1359,20 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     mcp_policy = native_sidecar["_normalized_mcp_policy"]
     required_foreground = focus_policy["required_foreground_bundle_id"]
     forbidden_bundles = set(focus_policy["forbidden_bundle_ids"])
-    if (
+    require_full_agent_focus = (
         result["status"] == "completed"
         and focus_policy["require_foreground_full_agent_phase"]
-        and not focus_records
-    ):
+    )
+    if require_full_agent_focus and not focus_records:
         raise _fail("focus/ledger.jsonl", "required foreground has no observed samples")
+    focus_observed_times: list[datetime] = []
     for index, record in enumerate(focus_records):
         payload = record["payload"]
+        observed_at = _timestamp(
+            record["timestamp"],
+            f"focus/ledger.jsonl:{index + 1}.timestamp",
+        )
+        focus_observed_times.append(observed_at)
         _exact_fields(
             payload,
             {"state", "frontmost_bundle_id", "target_bundle_id"},
@@ -1324,16 +1388,25 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 f"focus/ledger.jsonl:{index + 1}.payload.target_bundle_id",
                 "does not match locked app",
             )
-        if payload["state"] == "observed" and payload["frontmost_bundle_id"] != required_foreground:
+        in_agent_phase = (
+            agent_started is not None
+            and agent_finished is not None
+            and agent_started <= observed_at <= agent_finished
+        )
+        if (
+            in_agent_phase
+            and payload["state"] == "observed"
+            and payload["frontmost_bundle_id"] != required_foreground
+        ):
             raise _fail(
                 f"focus/ledger.jsonl:{index + 1}.payload",
                 "frontmost app does not match required focus policy",
             )
-        if payload["frontmost_bundle_id"] in forbidden_bundles:
+        if in_agent_phase and payload["frontmost_bundle_id"] in forbidden_bundles:
             raise _fail(f"focus/ledger.jsonl:{index + 1}.payload", "forbidden app became foreground")
         if (
-            result["status"] == "completed"
-            and focus_policy["require_foreground_full_agent_phase"]
+            require_full_agent_focus
+            and in_agent_phase
             and payload["state"] != "observed"
         ):
             raise _fail(
@@ -1341,27 +1414,30 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 "completed trial contains an unhealthy or unlocked-coverage gap",
             )
 
-    focus_observed_times = [
-        _timestamp(record["timestamp"], f"focus/ledger.jsonl:{index + 1}.timestamp")
-        for index, record in enumerate(focus_records)
-    ]
-    if (
-        result["status"] == "completed"
-        and focus_policy["require_foreground_full_agent_phase"]
-    ):
+    if require_full_agent_focus:
+        if agent_started is None or agent_finished is None:
+            raise _fail(
+                "result.agent_started_at",
+                "completed focus policy requires explicit agent phase boundaries",
+            )
+        agent_focus_times = [
+            observed
+            for observed in focus_observed_times
+            if agent_started <= observed <= agent_finished
+        ]
         if (
-            not focus_observed_times
-            or (focus_observed_times[0] - started).total_seconds()
+            not agent_focus_times
+            or (agent_focus_times[0] - agent_started).total_seconds()
             > MAX_FOCUS_SAMPLE_GAP_S
-            or (finished - focus_observed_times[-1]).total_seconds()
+            or (agent_finished - agent_focus_times[-1]).total_seconds()
             > MAX_FOCUS_SAMPLE_GAP_S
         ):
             raise _fail(
                 "focus/ledger.jsonl",
-                "focus/session health does not cover the completed trial boundaries",
+                "focus/session health does not cover the completed agent-phase boundaries",
             )
         for index, (left, right) in enumerate(
-            zip(focus_observed_times, focus_observed_times[1:]),
+            zip(agent_focus_times, agent_focus_times[1:]),
             1,
         ):
             if (right - left).total_seconds() > MAX_FOCUS_SAMPLE_GAP_S:
@@ -1492,12 +1568,27 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 )
         delivery = call.get("computer_use_meta", {}).get("delivery")
         tier = delivery.get("delivery_tier") if isinstance(delivery, dict) else None
-        if tier not in set(focus_policy["allowed_delivery_tiers"]):
+        tool_categories = MCP_TOOL_CATEGORIES.get(
+            call.get("tool"),
+            frozenset(),
+        )
+        requires_delivery_tier = (
+            "mutation" in tool_categories or delivery is not None
+        )
+        if (
+            requires_delivery_tier
+            and tier not in set(focus_policy["allowed_delivery_tiers"])
+        ):
             raise _fail(
                 f"mcp/ledger.jsonl:{index}.computer_use_meta.delivery.delivery_tier",
                 "delivery tier is absent or forbidden by native focus policy",
             )
-        if focus_policy["forbid_global_delivery"] and isinstance(tier, str) and tier.startswith("tier4-"):
+        if (
+            requires_delivery_tier
+            and focus_policy["forbid_global_delivery"]
+            and isinstance(tier, str)
+            and tier.startswith("tier4-")
+        ):
             raise _fail(
                 f"mcp/ledger.jsonl:{index}.computer_use_meta.delivery.delivery_tier",
                 "global delivery is forbidden",
@@ -1624,6 +1715,16 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 ),
                 "monitor_health_evidence": {
                     "maximum_sample_gap_s": MAX_FOCUS_SAMPLE_GAP_S,
+                    "agent_phase_started_at": (
+                        agent_started.isoformat()
+                        if agent_started is not None
+                        else None
+                    ),
+                    "agent_phase_finished_at": (
+                        agent_finished.isoformat()
+                        if agent_finished is not None
+                        else None
+                    ),
                     "first_sample_at": (
                         focus_observed_times[0].isoformat()
                         if focus_observed_times

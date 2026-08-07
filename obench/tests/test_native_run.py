@@ -5,6 +5,7 @@ import json
 import hashlib
 import os
 from pathlib import Path
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -26,7 +27,10 @@ from obench.native_run import (
     NativeRunError,
     NativeRunHooks,
     _content_bound_command_digest,
+    _inspect_setup_app_identity,
+    _inspect_setup_app_process,
     _mcp_serve_owners,
+    _require_setup_app,
     load_config,
     run_native,
 )
@@ -330,6 +334,23 @@ media_type = "application/json"
                     "/Applications/Fixture.app",
                 ),
             ),
+            app_identity_probe=lambda app_path: {
+                "app": str(app_path),
+                "bundle_id": "com.openbench.fixture",
+                "version": "1.2.3",
+                "build": "45",
+                "executable": str(app_path / "Contents/MacOS/Fixture"),
+                "binary_sha256": "b" * 64,
+                "signature_sha256": HEX_A,
+                "cdhash": "d" * 40,
+            },
+            app_process_probe=lambda bundle_id, executable, cdhash: {
+                "pid": 123,
+                "executable": str(executable),
+                "device": 1,
+                "inode": 2,
+                "cdhash": cdhash,
+            },
             mcp_owner_probe=lambda command: (),
             adapter_loader=lambda config: adapter or FakeAdapter(),
             version_probe=lambda config, loaded: "1.2.3",
@@ -378,6 +399,267 @@ media_type = "application/json"
             "com.openbench.fixture",
         )
         self.assertTrue(app_observations[0]["setup_complete"])
+
+    def test_bundle_identity_matches_cub_v0_signature_contract(self):
+        app = self.root / "Fixture.app"
+        executable = app / "Contents/MacOS/Fixture"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"fixture executable")
+        with (app / "Contents/Info.plist").open("wb") as handle:
+            plistlib.dump({
+                "CFBundleExecutable": "Fixture",
+                "CFBundleIdentifier": "com.openbench.fixture",
+                "CFBundleShortVersionString": "1.2.3",
+                "CFBundleVersion": "45",
+            }, handle)
+        designated = 'identifier "com.openbench.fixture" and anchor apple generic'
+        def command_runner(command, **kwargs):
+            if "-r-" in command:
+                return subprocess.CompletedProcess(
+                    command, 0, "", f"# designated => {designated}\n"
+                )
+            return subprocess.CompletedProcess(
+                command, 0, "", f"CDHash={'d' * 40}\n"
+            )
+
+        identity = _inspect_setup_app_identity(
+            app,
+            command_runner=command_runner,
+        )
+        binary_sha256 = hashlib.sha256(executable.read_bytes()).hexdigest()
+        expected_signature = hashlib.sha256(
+            designated.encode("utf-8") + b"\0" + binary_sha256.encode("ascii")
+        ).hexdigest()
+        self.assertEqual(identity["build"], "45")
+        self.assertEqual(identity["executable"], str(executable.resolve()))
+        self.assertEqual(identity["signature_sha256"], expected_signature)
+
+    def test_process_identity_binds_loaded_executable_vnode(self):
+        executable = self.root / "Fixture"
+        executable.write_bytes(b"fixture executable")
+        executable_stat = executable.stat()
+        calls = []
+
+        def command_runner(command, **kwargs):
+            calls.append(command)
+            if command[:2] == ["/usr/bin/lsappinfo", "find"]:
+                return subprocess.CompletedProcess(
+                    command, 0, 'ASN:0x0-0x123-"Fixture":\n', ""
+                )
+            if command[:2] == ["/usr/bin/lsappinfo", "info"]:
+                return subprocess.CompletedProcess(command, 0, '"pid"=456\n', "")
+            if command[0] == "/usr/sbin/lsof":
+                output = (
+                    "p456\n"
+                    "ftxt\n"
+                    "tREG\n"
+                    f"D{hex(executable_stat.st_dev)}\n"
+                    f"i{executable_stat.st_ino}\n"
+                    f"n{executable}\n"
+                )
+                return subprocess.CompletedProcess(command, 0, output, "")
+            self.fail(f"unexpected command: {command!r}")
+
+        identity = _inspect_setup_app_process(
+            "com.openbench.fixture",
+            executable,
+            "d" * 40,
+            command_runner=command_runner,
+            process_cdhash_probe=lambda pid: "d" * 40,
+        )
+        self.assertEqual(identity["pid"], 456)
+        self.assertEqual(identity["inode"], executable_stat.st_ino)
+        self.assertEqual(
+            [command[0] for command in calls],
+            [
+                "/usr/bin/lsappinfo",
+                "/usr/bin/lsappinfo",
+                "/usr/sbin/lsof",
+                "/usr/bin/lsappinfo",
+                "/usr/bin/lsappinfo",
+            ],
+        )
+        with self.assertRaisesRegex(
+            NativeRunError, "code signature does not match inspected bundle"
+        ):
+            _inspect_setup_app_process(
+                "com.openbench.fixture",
+                executable,
+                "d" * 40,
+                command_runner=command_runner,
+                process_cdhash_probe=lambda pid: "e" * 40,
+            )
+
+    def test_process_identity_rejects_replaced_executable_vnode(self):
+        executable = self.root / "Fixture"
+        executable.write_bytes(b"replacement executable")
+
+        def command_runner(command, **kwargs):
+            if command[:2] == ["/usr/bin/lsappinfo", "find"]:
+                return subprocess.CompletedProcess(
+                    command, 0, 'ASN:0x0-0x123-"Fixture":\n', ""
+                )
+            if command[:2] == ["/usr/bin/lsappinfo", "info"]:
+                return subprocess.CompletedProcess(command, 0, '"pid"=456\n', "")
+            if command[0] == "/usr/sbin/lsof":
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    "p456\nftxt\ntREG\nD0x1\ni999999\nn/old/Fixture\n",
+                    "",
+                )
+            self.fail(f"unexpected command: {command!r}")
+
+        with self.assertRaisesRegex(
+            NativeRunError, "process is not using the inspected executable"
+        ):
+            _inspect_setup_app_process(
+                "com.openbench.fixture",
+                executable,
+                "d" * 40,
+                command_runner=command_runner,
+                process_cdhash_probe=lambda pid: "d" * 40,
+            )
+
+    def test_running_app_identity_path_must_match_process_evidence(self):
+        hooks, monitor = self._hooks()
+        original_probe = hooks.app_identity_probe
+        hooks.app_identity_probe = lambda app_path: {
+            **original_probe(app_path),
+            "app": "/Applications/Other.app",
+        }
+        with self.assertRaisesRegex(
+            NativeRunError, "identity path does not match process evidence"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertFalse(monitor.started)
+
+    def test_pathless_second_running_app_remains_ambiguous(self):
+        hooks, monitor = self._hooks()
+        hooks.app_probe = lambda requirement: (
+            AppEvidence(
+                requirement.bundle_identifier,
+                requirement.version,
+                True,
+                "/Applications/Fixture.app",
+            ),
+            AppEvidence(
+                requirement.bundle_identifier,
+                requirement.version,
+                True,
+                None,
+            ),
+        )
+        with self.assertRaisesRegex(
+            NativeRunError, "exactly one required target app"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertFalse(monitor.started)
+
+    def test_running_app_executable_must_be_inside_observed_bundle(self):
+        hooks, monitor = self._hooks()
+        original_probe = hooks.app_identity_probe
+        hooks.app_identity_probe = lambda app_path: {
+            **original_probe(app_path),
+            "executable": "/tmp/Fixture",
+        }
+        with self.assertRaisesRegex(
+            NativeRunError, "executable is outside its bundle"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertFalse(monitor.started)
+
+    def test_running_process_must_use_inspected_executable(self):
+        hooks, monitor = self._hooks()
+        hooks.app_process_probe = lambda bundle_id, executable, cdhash: {
+            "pid": 123,
+            "executable": "/Applications/Other.app/Contents/MacOS/Fixture",
+            "device": 1,
+            "inode": 2,
+            "cdhash": cdhash,
+        }
+        with self.assertRaisesRegex(
+            NativeRunError, "process identity evidence is malformed"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertFalse(monitor.started)
+
+    def test_running_app_build_mismatch_fails_before_agent(self):
+        hooks, monitor = self._hooks()
+        original_probe = hooks.app_identity_probe
+        hooks.app_identity_probe = lambda app_path: {
+            **original_probe(app_path),
+            "build": "44",
+        }
+        with self.assertRaisesRegex(
+            NativeRunError, "identity does not match planned environment.*build"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertFalse(monitor.started)
+
+    def test_running_app_signature_mismatch_fails_before_agent(self):
+        hooks, monitor = self._hooks()
+        original_probe = hooks.app_identity_probe
+        hooks.app_identity_probe = lambda app_path: {
+            **original_probe(app_path),
+            "signature_sha256": "c" * 64,
+        }
+        with self.assertRaisesRegex(
+            NativeRunError, "identity does not match planned environment.*signature"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertFalse(monitor.started)
+
+    def test_running_fixture_must_match_exact_build_manifest_paths(self):
+        manifest = {
+            "schema_version": "openbench.computer-use-build.v1",
+            "fixtures": {
+                "computer-use-fixture": {
+                    "app": "/Applications/PlannedFixture.app",
+                    "bundle_id": "com.openbench.fixture",
+                    "version": "1.2.3",
+                    "build": "45",
+                    "executable": (
+                        "/Applications/PlannedFixture.app/Contents/MacOS/Fixture"
+                    ),
+                    "binary_sha256": "b" * 64,
+                    "signature_sha256": HEX_A,
+                },
+            },
+        }
+        (self.root / "build-manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        adapter = FakeAdapter()
+        hooks, monitor = self._hooks(adapter)
+        with self.assertRaisesRegex(
+            NativeRunError, "does not match Computer-Use build manifest.*app"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertEqual(adapter.calls, 0)
+        self.assertFalse(monitor.started)
+
+    def test_running_fixture_matches_exact_build_manifest_identity(self):
+        app = "/Applications/Fixture.app"
+        manifest = {
+            "schema_version": "openbench.computer-use-build.v1",
+            "fixtures": {
+                "computer-use-fixture": {
+                    "app": app,
+                    "bundle_id": "com.openbench.fixture",
+                    "version": "1.2.3",
+                    "build": "45",
+                    "executable": f"{app}/Contents/MacOS/Fixture",
+                    "binary_sha256": "b" * 64,
+                    "signature_sha256": HEX_A,
+                },
+            },
+        }
+        (self.root / "build-manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        hooks, _ = self._hooks()
+        _require_setup_app(hooks, load_config(self.config_path))
 
     def test_focus_monitor_wraps_only_agent_phase(self):
         activity = []

@@ -98,13 +98,35 @@ def _write_ledger(
 
 
 def _write_mcp_ledger(
-    root, trial_id, *, with_call=True, delivery_tier="tier1-ax-attribute"
+    root,
+    trial_id,
+    *,
+    with_call=True,
+    tool="set_value",
+    delivery_tier="tier1-ax-attribute",
+    include_delivery=True,
 ):
     path = root / "mcp/ledger.jsonl"
     ledger = CallLedger(path, "native-cub-v0-run", trial_id)
     if with_call:
+        computer_use_meta = {
+            "error": None,
+            "outcome": {
+                "classification": "success",
+                "failure_domain": None,
+                "web_ax_echo_risk": None,
+                "verification": {},
+            },
+            "focus": {"focus_changed": False},
+        }
+        if include_delivery:
+            computer_use_meta["delivery"] = {
+                "delivery_tier": delivery_tier,
+                "fallback_reasons": [],
+                "chain_rung": None,
+            }
         ledger.append_call({
-            "tool": "set_value",
+            "tool": tool,
             "status": "completed",
             "request_id_type": "str",
             "argument_digest": "sha256:" + HEX_B,
@@ -115,21 +137,7 @@ def _write_mcp_ledger(
             "duration_ms": 1000.0,
             "tool_is_error": False,
             "jsonrpc_error": {"present": False, "code": None},
-            "computer_use_meta": {
-                "error": None,
-                "outcome": {
-                    "classification": "success",
-                    "failure_domain": None,
-                    "web_ax_echo_risk": None,
-                    "verification": {},
-                },
-                "focus": {"focus_changed": False},
-                "delivery": {
-                    "delivery_tier": delivery_tier,
-                    "fallback_reasons": [],
-                    "chain_rung": None,
-                },
-            },
+            "computer_use_meta": computer_use_meta,
             "process_returncode": None,
         })
     ledger.seal(
@@ -370,6 +378,16 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
             "timeout_s": case["timeout_s"],
             "started_at": "2026-08-06T12:00:00+00:00",
             "finished_at": "2026-08-06T12:00:10+00:00",
+            "agent_started_at": (
+                None
+                if preflight_failed
+                else "2026-08-06T12:00:01+00:00"
+            ),
+            "agent_finished_at": (
+                None
+                if preflight_failed
+                else "2026-08-06T12:00:08+00:00"
+            ),
             "timings": {
                 "env_setup_s": 10.0 if preflight_failed else 1.0,
                 "agent_s": 0.0 if preflight_failed else 7.0,
@@ -385,7 +403,7 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
                 "failure_reason": None if completed else "deadline_exceeded",
             },
             "mcp_event_count": 0 if preflight_failed else 1,
-            "focus_event_count": 0 if preflight_failed else 11,
+            "focus_event_count": 0 if preflight_failed else 8,
         },
     )
     verifier_status = "judged" if completed else "not_run"
@@ -417,7 +435,9 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
         root,
         trial_id,
         with_call=not preflight_failed,
+        tool=case.get("mcp_tool", "set_value"),
         delivery_tier=case.get("delivery_tier", "tier1-ax-attribute"),
+        include_delivery=case.get("include_delivery", True),
     )
     _write_ledger(
         root,
@@ -435,14 +455,14 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
                     "target_bundle_id": "com.openbench.fixture",
                 },
             )
-            for _ in range(11)
+            for _ in range(8)
         ],
         timestamps=(
             None
             if preflight_failed
             else [
                 f"2026-08-06T12:00:{second:02d}+00:00"
-                for second in range(11)
+                for second in range(1, 9)
             ]
         ),
     )
@@ -497,8 +517,16 @@ class NativeTrialTests(unittest.TestCase):
         self.assertEqual(provenance["kind"], "native_macos_trial")
         self.assertEqual(provenance["mcp_identity"]["version"], "0.9.0")
         self.assertEqual(provenance["environment_identity"]["platform"], "macos")
-        self.assertEqual(provenance["focus_event_count"], 11)
+        self.assertEqual(provenance["focus_event_count"], 8)
         self.assertEqual(provenance["mcp_policy"]["source"], "task-native-sidecar")
+        self.assertEqual(
+            provenance["monitor_health_evidence"]["agent_phase_started_at"],
+            "2026-08-06T12:00:01+00:00",
+        )
+        self.assertEqual(
+            provenance["monitor_health_evidence"]["agent_phase_finished_at"],
+            "2026-08-06T12:00:08+00:00",
+        )
         self.assertIn("not malicious operator forgery", provenance["operator_trust_boundary"])
 
     def test_terminal_fixture_preserves_timeout_and_retry_outcome(self):
@@ -554,6 +582,114 @@ class NativeTrialTests(unittest.TestCase):
         _build_bundle(globally_delivered, global_delivery)
         with self.assertRaisesRegex(NativeTrialError, "global delivery is forbidden"):
             load_native_trial(globally_delivered)
+
+    def test_focus_density_covers_only_explicit_sealed_agent_phase(self):
+        bundle = self.bundle("happy")
+        lock_sha256 = _sha256(bundle / "lock.json")
+        observed = {
+            "state": "observed",
+            "frontmost_bundle_id": "com.openbench.fixture",
+            "target_bundle_id": "com.openbench.fixture",
+        }
+        yielded = {
+            "state": "yielded_to_human",
+            "frontmost_bundle_id": "com.apple.finder",
+            "target_bundle_id": "com.openbench.fixture",
+        }
+        _write_ledger(
+            bundle,
+            "focus",
+            "native-cub-v0-trial1",
+            lock_sha256,
+            [
+                ("focus_yield", yielded),
+                *[("focus_sample", observed) for _ in range(8)],
+                ("focus_yield", yielded),
+            ],
+            timestamps=[
+                "2026-08-06T12:00:00+00:00",
+                *[
+                    f"2026-08-06T12:00:{second:02d}+00:00"
+                    for second in range(1, 9)
+                ],
+                "2026-08-06T12:00:09+00:00",
+            ],
+        )
+        result_path = bundle / "result.json"
+        result = json.loads(result_path.read_text())
+        result["focus_event_count"] = 10
+        _write_json(result_path, result)
+        _reseal_manifest(bundle)
+
+        row = load_native_trial(bundle)
+        self.assertTrue(row["success"])
+
+        result["attempts"] = 2
+        result["retry_count"] = 1
+        result["timings"]["env_setup_s"] = 0.0
+        result["timings"]["agent_s"] = 8.0
+        _write_json(result_path, result)
+        _reseal_manifest(bundle)
+        self.assertTrue(load_native_trial(bundle)["success"])
+
+        result["timings"]["agent_s"] = 6.0
+        _write_json(result_path, result)
+        _reseal_manifest(bundle)
+        with self.assertRaisesRegex(
+            NativeTrialError,
+            "does not contain the final measured agent phase",
+        ):
+            load_native_trial(bundle)
+
+        result["attempts"] = 1
+        result["retry_count"] = 0
+        result["timings"]["env_setup_s"] = 1.0
+        result["timings"]["agent_s"] = 7.0
+        result["agent_finished_at"] = "2026-08-06T12:00:09+00:00"
+        _write_json(result_path, result)
+        _reseal_manifest(bundle)
+        with self.assertRaisesRegex(
+            NativeTrialError,
+            "does not match explicit agent phase boundaries",
+        ):
+            load_native_trial(bundle)
+
+    def test_delivery_tier_policy_distinguishes_observation_and_mutation_calls(self):
+        for tool in ("list_apps", "get_app_state", "find"):
+            with self.subTest(tool=tool):
+                observation = {
+                    **self.cases["happy"],
+                    "mcp_tool": tool,
+                    "include_delivery": False,
+                    "required_tool_categories": ["observation"],
+                }
+                observation_bundle = self.root / f"{tool}-without-delivery"
+                _build_bundle(observation_bundle, observation)
+                self.assertTrue(load_native_trial(observation_bundle)["success"])
+
+        mutation = {
+            **self.cases["happy"],
+            "include_delivery": False,
+        }
+        mutation_bundle = self.root / "mutation-without-delivery"
+        _build_bundle(mutation_bundle, mutation)
+        with self.assertRaisesRegex(
+            NativeTrialError,
+            "delivery tier is absent or forbidden",
+        ):
+            load_native_trial(mutation_bundle)
+
+        forbidden_tier = {
+            **self.cases["happy"],
+            "delivery_tier": "tier2-menu-action",
+        }
+        forbidden_bundle = self.root / "mutation-forbidden-tier"
+        _build_bundle(forbidden_bundle, forbidden_tier)
+        with self.assertRaisesRegex(
+            NativeTrialError,
+            "delivery tier is absent or forbidden",
+        ):
+            load_native_trial(forbidden_bundle)
 
     def test_privacy_leak_is_rejected_even_after_manifest_is_resealed(self):
         bundle = self.bundle("happy")
@@ -756,8 +892,8 @@ class NativeTrialTests(unittest.TestCase):
             lock_sha256,
             [("focus_sample", payload), ("focus_sample", payload)],
             timestamps=[
-                "2026-08-06T12:00:00+00:00",
-                "2026-08-06T12:00:10+00:00",
+                "2026-08-06T12:00:01+00:00",
+                "2026-08-06T12:00:08+00:00",
             ],
         )
         result_path = sparse / "result.json"

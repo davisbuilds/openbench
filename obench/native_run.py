@@ -8,6 +8,7 @@ Harbor jobs, locks, or execution identity.
 from __future__ import annotations
 
 import argparse
+import ctypes
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,7 @@ import json
 import math
 import os
 from pathlib import Path, PurePosixPath
+import plistlib
 import re
 import shutil
 import subprocess
@@ -462,6 +464,14 @@ class NativeRunHooks:
     app_probe: Callable[[AppRequirement], Sequence[AppEvidence]] = (
         lambda requirement: _inspect_setup_app(requirement)
     )
+    app_identity_probe: Callable[[Path], Mapping[str, Any]] = (
+        lambda app_path: _inspect_setup_app_identity(app_path)
+    )
+    app_process_probe: Callable[[str, Path, str], Mapping[str, Any]] = (
+        lambda bundle_id, executable, cdhash: _inspect_setup_app_process(
+            bundle_id, executable, cdhash
+        )
+    )
     adapter_loader: Callable[[NativeRunConfig], Any] | None = None
     version_probe: Callable[[NativeRunConfig, Any], str | None] | None = None
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
@@ -563,10 +573,247 @@ def _inspect_setup_app(requirement: AppRequirement) -> Sequence[AppEvidence]:
     return MacOSAppInspector(helper_path).inspect((requirement,))
 
 
+def _inspect_setup_app_identity(
+    app_path: Path,
+    *,
+    command_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, Any]:
+    if not app_path.is_absolute() or app_path.is_symlink() or not app_path.is_dir():
+        raise NativeRunError(
+            f"running target app path is not an absolute regular bundle: {app_path}"
+        )
+    app = app_path.resolve()
+    plist_path = app / "Contents/Info.plist"
+    try:
+        with plist_path.open("rb") as handle:
+            info = plistlib.load(handle)
+        executable_name = info["CFBundleExecutable"]
+    except (OSError, KeyError, plistlib.InvalidFileException) as exc:
+        raise NativeRunError(f"cannot inspect running target app bundle: {exc}") from exc
+    if not isinstance(executable_name, str) or not executable_name:
+        raise NativeRunError("running target app CFBundleExecutable is invalid")
+    executable = app / "Contents/MacOS" / executable_name
+    if executable.is_symlink() or not executable.is_file():
+        raise NativeRunError(
+            f"running target app executable is unavailable: {executable}"
+        )
+    try:
+        completed = command_runner(
+            ["codesign", "-d", "-r-", str(app)],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise NativeRunError(f"cannot inspect running target app signature: {exc}") from exc
+    if completed.returncode != 0:
+        detail = ((completed.stderr or "") + (completed.stdout or "")).strip()[-1000:]
+        raise NativeRunError(
+            f"running target app codesign inspection exited {completed.returncode}: {detail}"
+        )
+    requirement_output = ((completed.stdout or "") + (completed.stderr or "")).strip()
+    designated = next(
+        (
+            line.removeprefix("# ").removeprefix("designated =>").strip()
+            for line in requirement_output.splitlines()
+            if line.startswith(("# designated =>", "designated =>"))
+        ),
+        "",
+    )
+    if not designated:
+        raise NativeRunError("running target app has no designated code requirement")
+    try:
+        details = command_runner(
+            ["codesign", "-dvvv", str(app)],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise NativeRunError(f"cannot inspect running target app CDHash: {exc}") from exc
+    cdhash_match = re.search(
+        r"^CDHash=([0-9a-fA-F]{40})$",
+        (details.stderr or "") + (details.stdout or ""),
+        re.MULTILINE,
+    )
+    if details.returncode != 0 or cdhash_match is None:
+        raise NativeRunError("running target app has no exact code-signing CDHash")
+    binary_sha256 = _sha256(executable)
+    signature_sha256 = hashlib.sha256(
+        designated.encode("utf-8") + b"\0" + binary_sha256.encode("ascii")
+    ).hexdigest()
+    return {
+        "app": str(app),
+        "bundle_id": info.get("CFBundleIdentifier"),
+        "version": info.get("CFBundleShortVersionString"),
+        "build": str(info.get("CFBundleVersion", "")),
+        "executable": str(executable.resolve()),
+        "binary_sha256": binary_sha256,
+        "signature_sha256": signature_sha256,
+        "cdhash": cdhash_match.group(1).lower(),
+    }
+
+
+def _running_app_pids(
+    bundle_id: str,
+    *,
+    command_runner: Callable[..., subprocess.CompletedProcess[str]],
+) -> tuple[int, ...]:
+    try:
+        found = command_runner(
+            ["/usr/bin/lsappinfo", "find", f"bundleID={bundle_id}"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise NativeRunError(f"cannot resolve running target app process: {exc}") from exc
+    if found.returncode != 0:
+        detail = ((found.stderr or "") + (found.stdout or "")).strip()[-1000:]
+        raise NativeRunError(
+            f"target app process lookup exited {found.returncode}: {detail}"
+        )
+    app_specifiers: list[str] = []
+    for line in (found.stdout or "").splitlines():
+        prefix, separator, _ = line.strip().rpartition('-"')
+        if separator and prefix.startswith("ASN:"):
+            app_specifiers.append(prefix)
+        elif line.strip():
+            raise NativeRunError("target app process lookup returned malformed evidence")
+    pids: list[int] = []
+    for app_specifier in app_specifiers:
+        try:
+            info = command_runner(
+                [
+                    "/usr/bin/lsappinfo",
+                    "info",
+                    "-only",
+                    "pid",
+                    "-app",
+                    app_specifier,
+                ],
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise NativeRunError(
+                f"cannot inspect running target app process: {exc}"
+            ) from exc
+        match = re.fullmatch(r'\s*"pid"=(\d+)\s*', info.stdout or "")
+        if info.returncode != 0 or match is None or int(match.group(1)) <= 0:
+            raise NativeRunError("target app process lookup returned invalid PID evidence")
+        pids.append(int(match.group(1)))
+    return tuple(sorted(pids))
+
+
+def _inspect_setup_app_process(
+    bundle_id: str,
+    executable: Path,
+    expected_cdhash: str,
+    *,
+    command_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    process_cdhash_probe: Callable[[int], str] | None = None,
+) -> dict[str, Any]:
+    pids_before = _running_app_pids(bundle_id, command_runner=command_runner)
+    if len(pids_before) != 1:
+        raise NativeRunError(
+            "setup did not establish exactly one process-bound target app"
+        )
+    pid = pids_before[0]
+    try:
+        executable_stat = executable.stat()
+        opened = command_runner(
+            ["/usr/sbin/lsof", "-F", "pDint", "-a", "-p", str(pid), "-d", "txt"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise NativeRunError(
+            f"cannot inspect running target app executable vnode: {exc}"
+        ) from exc
+    if opened.returncode != 0:
+        detail = ((opened.stderr or "") + (opened.stdout or "")).strip()[-1000:]
+        raise NativeRunError(
+            f"target app executable vnode lookup exited {opened.returncode}: {detail}"
+        )
+    text_vnodes: set[tuple[int, int]] = set()
+    current: dict[str, str] | None = None
+    try:
+        for line in (opened.stdout or "").splitlines():
+            if line.startswith("f"):
+                if current is not None and {"D", "i"} <= current.keys():
+                    text_vnodes.add((int(current["D"], 0), int(current["i"])))
+                current = {}
+            elif current is not None and line[:1] in {"D", "i", "n"}:
+                current[line[0]] = line[1:]
+        if current is not None and {"D", "i"} <= current.keys():
+            text_vnodes.add((int(current["D"], 0), int(current["i"])))
+    except ValueError as exc:
+        raise NativeRunError(
+            "target app executable vnode lookup returned malformed evidence"
+        ) from exc
+    executable_vnode = (executable_stat.st_dev, executable_stat.st_ino)
+    if executable_vnode not in text_vnodes:
+        raise NativeRunError(
+            "running target app process is not using the inspected executable"
+        )
+    observed_cdhash = (
+        process_cdhash_probe(pid)
+        if process_cdhash_probe is not None
+        else _process_cdhash(pid)
+    )
+    if observed_cdhash != expected_cdhash:
+        raise NativeRunError(
+            "running target app process code signature does not match inspected bundle"
+        )
+    pids_after = _running_app_pids(bundle_id, command_runner=command_runner)
+    if pids_after != pids_before:
+        raise NativeRunError("running target app process changed during identity proof")
+    return {
+        "pid": pid,
+        "executable": str(executable.resolve()),
+        "device": executable_stat.st_dev,
+        "inode": executable_stat.st_ino,
+        "cdhash": observed_cdhash,
+    }
+
+
+def _process_cdhash(pid: int) -> str:
+    cdhash = (ctypes.c_ubyte * 20)()
+    libc = ctypes.CDLL(None, use_errno=True)
+    try:
+        result = libc.csops(pid, 5, ctypes.byref(cdhash), len(cdhash))
+    except AttributeError as exc:
+        raise NativeRunError(
+            "macOS process code-signature inspection is unavailable"
+        ) from exc
+    if result != 0:
+        error = ctypes.get_errno()
+        raise NativeRunError(
+            "cannot inspect running target app process code signature: "
+            f"{os.strerror(error)}"
+        )
+    return bytes(cdhash).hex()
+
+
 def _require_setup_app(
     hooks: NativeRunHooks,
-    requirement: AppRequirement,
+    config: NativeRunConfig,
 ) -> None:
+    expected = config.environment["app"]
+    requirement = AppRequirement(config.app_bundle_id, str(expected["version"]))
     evidence = tuple(hooks.app_probe(requirement))
     if any(item.bundle_identifier != requirement.bundle_identifier for item in evidence):
         raise NativeRunError("setup app probe returned an undeclared bundle identifier")
@@ -585,6 +832,168 @@ def _require_setup_app(
             f"{requirement.bundle_identifier!r} version {requirement.version!r}; "
             f"observed {observed!r}"
         )
+    if not exact[0].path:
+        raise NativeRunError("running target app evidence has no bundle path")
+    running_path = Path(exact[0].path).expanduser()
+    if not running_path.is_absolute():
+        raise NativeRunError("running target app evidence path must be absolute")
+    identity = dict(hooks.app_identity_probe(running_path))
+    required_identity_fields = {
+        "app",
+        "bundle_id",
+        "version",
+        "build",
+        "executable",
+        "binary_sha256",
+        "signature_sha256",
+        "cdhash",
+    }
+    if set(identity) != required_identity_fields:
+        raise NativeRunError(
+            "running target app identity evidence has unexpected fields"
+        )
+    observed_app = Path(str(identity["app"])).expanduser()
+    observed_executable = Path(str(identity["executable"])).expanduser()
+    if (
+        not observed_app.is_absolute()
+        or observed_app.resolve() != running_path.resolve()
+    ):
+        raise NativeRunError(
+            "running target app identity path does not match process evidence"
+        )
+    expected_executable_root = observed_app.resolve() / "Contents/MacOS"
+    try:
+        executable_relative = observed_executable.resolve().relative_to(
+            expected_executable_root
+        )
+    except ValueError as exc:
+        raise NativeRunError(
+            "running target app executable is outside its bundle"
+        ) from exc
+    if len(executable_relative.parts) != 1:
+        raise NativeRunError("running target app executable identity is not exact")
+    comparisons = {
+        "bundle_id": config.app_bundle_id,
+        "version": str(expected["version"]),
+        "build": str(expected["build"]),
+        "signature_sha256": str(expected["code_signature_sha256"]),
+    }
+    mismatches = {
+        field: {"expected": value, "observed": identity.get(field)}
+        for field, value in comparisons.items()
+        if identity.get(field) != value
+    }
+    if mismatches:
+        raise NativeRunError(
+            f"running target app identity does not match planned environment: {mismatches!r}"
+        )
+    process_identity = dict(
+        hooks.app_process_probe(
+            config.app_bundle_id,
+            observed_executable,
+            str(identity["cdhash"]),
+        )
+    )
+    if set(process_identity) != {
+        "pid",
+        "executable",
+        "device",
+        "inode",
+        "cdhash",
+    }:
+        raise NativeRunError(
+            "running target app process identity evidence has unexpected fields"
+        )
+    if (
+        type(process_identity["pid"]) is not int
+        or process_identity["pid"] <= 0
+        or type(process_identity["device"]) is not int
+        or type(process_identity["inode"]) is not int
+        or process_identity["cdhash"] != identity["cdhash"]
+        or Path(str(process_identity["executable"])).resolve()
+        != observed_executable.resolve()
+    ):
+        raise NativeRunError("running target app process identity evidence is malformed")
+    manifest_paths = [
+        parent / "build-manifest.json"
+        for parent in config.source_path.parents
+        if (parent / "build-manifest.json").is_file()
+    ]
+    if len(manifest_paths) > 1:
+        raise NativeRunError("multiple Computer-Use build manifests apply to the config")
+    if manifest_paths:
+        try:
+            manifest = json.loads(manifest_paths[0].read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise NativeRunError(f"cannot read Computer-Use build manifest: {exc}") from exc
+        if not isinstance(manifest, dict):
+            raise NativeRunError("Computer-Use build manifest is malformed")
+        fixtures = manifest.get("fixtures")
+        if (
+            manifest.get("schema_version") != "openbench.computer-use-build.v1"
+            or not isinstance(fixtures, dict)
+        ):
+            raise NativeRunError("Computer-Use build manifest is malformed")
+        planned = [
+            value
+            for value in fixtures.values()
+            if isinstance(value, dict)
+            and value.get("bundle_id") == config.app_bundle_id
+        ]
+        if len(planned) > 1:
+            raise NativeRunError(
+                "Computer-Use build manifest has ambiguous target app identity"
+            )
+        if planned:
+            planned_identity = planned[0]
+            required_manifest_fields = {
+                "app",
+                "build",
+                "executable",
+                "binary_sha256",
+                "signature_sha256",
+            }
+            if (
+                any(
+                    not isinstance(planned_identity.get(field), str)
+                    or not planned_identity[field]
+                    for field in required_manifest_fields
+                )
+                or not Path(planned_identity["app"]).expanduser().is_absolute()
+                or not Path(planned_identity["executable"]).expanduser().is_absolute()
+            ):
+                raise NativeRunError(
+                    "Computer-Use build manifest target app identity is malformed"
+                )
+            manifest_expected = {
+                "app": str(Path(planned_identity["app"]).expanduser().resolve()),
+                "executable": str(
+                    Path(planned_identity["executable"]).expanduser().resolve()
+                ),
+                "binary_sha256": planned_identity["binary_sha256"],
+                "build": planned_identity["build"],
+                "signature_sha256": planned_identity["signature_sha256"],
+            }
+            manifest_observed = {
+                "app": str(observed_app.resolve()),
+                "executable": str(observed_executable.resolve()),
+                "binary_sha256": identity["binary_sha256"],
+                "build": identity["build"],
+                "signature_sha256": identity["signature_sha256"],
+            }
+            manifest_mismatches = {
+                field: {
+                    "expected": manifest_expected[field],
+                    "observed": manifest_observed[field],
+                }
+                for field in manifest_expected
+                if manifest_expected[field] != manifest_observed[field]
+            }
+            if manifest_mismatches:
+                raise NativeRunError(
+                    "running target app identity does not match Computer-Use "
+                    f"build manifest: {manifest_mismatches!r}"
+                )
 
 
 def _run_locked_preflight(
@@ -1219,6 +1628,8 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         judged_snapshot: Path | None = None
         judged_snapshot_sha256: str | None = None
         completed_attempts = 0
+        agent_started_at: datetime | None = None
+        agent_finished_at: datetime | None = None
         focus_violations = []
         try:
             for attempt in range(1, config.max_retries + 2):
@@ -1236,10 +1647,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
 
                 _require_setup_app(
                     hooks,
-                    AppRequirement(
-                        config.app_bundle_id,
-                        str(config.environment["app"]["version"]),
-                    ),
+                    config,
                 )
 
                 launcher = attempt_root / "computer-use-mcp-collector"
@@ -1254,7 +1662,6 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 }
                 token = f"native-{attempt}"
                 proxy_dir = attempt_root / "proxy-raw"
-                before = hooks.monotonic()
                 proxy_harness = (
                     getattr(adapter, "proxy_adapter", None)
                     or getattr(adapter, "base_adapter", None)
@@ -1269,6 +1676,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     if proxy_context:
                         env.update(proxy_context["env"])
                     with _temporary_environ(env):
+                        attempt_agent_started_at = hooks.clock()
                         monitor.start()
                         try:
                             adapter_result = adapter.run(
@@ -1286,6 +1694,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                             raise
                         else:
                             monitor.stop()
+                        attempt_agent_finished_at = hooks.clock()
+                if attempt_agent_finished_at < attempt_agent_started_at:
+                    raise NativeRunError(
+                        "agent phase wall-clock boundaries are not ordered"
+                    )
+                agent_started_at = attempt_agent_started_at
+                agent_finished_at = attempt_agent_finished_at
+                agent_s += (
+                    attempt_agent_finished_at - attempt_agent_started_at
+                ).total_seconds()
                 focus_violations.extend(monitor.violations)
                 for event in monitor.events:
                     if event.observed_at is None:
@@ -1300,7 +1718,6 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 proxy_usage = _proxy_usage(proxy_context)
                 if not isinstance(adapter_result, Mapping):
                     raise NativeRunError("adapter returned a non-object result")
-                agent_s += max(0.0, hooks.monotonic() - before)
                 if not ledger.exists():
                     if adapter_result.get("startup_failure") is True:
                         _empty_mcp_ledger(ledger, collector_run_id, config.trial_id)
@@ -1502,6 +1919,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 "lock_sha256": lock_sha256, "status": "completed", "attempts": completed_attempts,
                 "retry_count": completed_attempts - 1, "timeout_s": config.timeout_s,
                 "started_at": started.isoformat(), "finished_at": finished.isoformat(),
+                "agent_started_at": (
+                    agent_started_at.isoformat()
+                    if agent_started_at is not None
+                    else None
+                ),
+                "agent_finished_at": (
+                    agent_finished_at.isoformat()
+                    if agent_finished_at is not None
+                    else None
+                ),
                 "timings": {"env_setup_s": setup_s, "agent_s": agent_s, "verifier_s": verifier_s, "total_s": total_s},
                 "outcome": {"completed": True, "score": score, "checker_exit": checker_exit,
                     "error": None, "failure_class": "solved" if checker_exit == 0 else "wrong_answer",
