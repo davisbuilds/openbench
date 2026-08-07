@@ -355,11 +355,13 @@ class ComputerUseConfigTests(unittest.TestCase):
                 "ax-window-management",
             ],
         }
+        plans_by_task = {}
         for plan_entry in manifest["plans"]:
             spec_path = Path(plan_entry["spec"])
             plan_path = Path(plan_entry["plan"])
             spec = json.loads(spec_path.read_text(encoding="utf-8"))
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            plans_by_task[plan_entry["task"]] = plan
             self.assertEqual(plan, build_native_matrix(**spec))
             self.assertEqual(validate_native_matrix(plan), plan)
             self.assertEqual(
@@ -433,6 +435,18 @@ class ComputerUseConfigTests(unittest.TestCase):
                 })
                 self.assertEqual(parsed["mcp"]["client_command_env"], "CUB_MCP_COMMAND")
                 self.assertEqual(parsed["mcp"]["command"][-1], "serve")
+                planned_arm = next(
+                    arm
+                    for arm in plans_by_task[cell["task"]]["arms"]
+                    if arm["id"] == cell["arm_id"]
+                )
+                self.assertEqual(
+                    planned_arm["config_identity"]["mcp"]["server_sha256"],
+                    self.content_digest(
+                        parsed["mcp"]["command"],
+                        cwd=path.parent,
+                    ),
+                )
                 self.assertTrue(parsed["proxy"]["required"])
                 self.assertEqual(
                     parsed["focus"]["allowed_delivery_tiers"],
@@ -444,6 +458,10 @@ class ComputerUseConfigTests(unittest.TestCase):
                 setup_commands.add(tuple(command))
                 loaded = load_config(path)
                 self.assertEqual(loaded.trial_id, cell["trial_id"])
+                self.assertEqual(
+                    loaded.mcp_command,
+                    tuple(parsed["mcp"]["command"]),
+                )
                 self.assertEqual(
                     loaded.matrix["runnable_config_sha256"],
                     cell["runnable_config_sha256"],

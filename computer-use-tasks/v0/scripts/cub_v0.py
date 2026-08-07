@@ -1017,7 +1017,7 @@ def _mcp_plan_identity(
         "version": MCP_VERSION,
         "transport": "stdio",
         "server_sha256": _content_bound_command_digest(
-            [str(identity["executable"])], cwd=config_dir
+            [str(identity["executable"]), "serve"], cwd=config_dir
         ),
         "collector_run_id": f"cub-v0-{arm}-mcp",
     }
