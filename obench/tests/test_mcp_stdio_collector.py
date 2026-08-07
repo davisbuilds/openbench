@@ -10,6 +10,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -41,26 +42,59 @@ for raw in sys.stdin.buffer:
                 "error": {"code": -32001, "message": "fixture failure"},
             }
         else:
+            if name == "sensitive_meta":
+                meta = {
+                    "computer-use-mcp/error": {
+                        "code": "private-value-that-must-not-appear",
+                        "recovery": "private-value-that-must-not-appear",
+                    },
+                    "computer-use-mcp/outcome": {
+                        "classification": "private-value-that-must-not-appear",
+                        "failure_domain": "private-value-that-must-not-appear",
+                        "summary": "private-value-that-must-not-appear",
+                        "verification": {
+                            "before_value_preview": "private-value-that-must-not-appear",
+                            "notes": ["private-value-that-must-not-appear"],
+                            "rendered_text_changed": True,
+                        },
+                    },
+                    "computer-use-mcp/focus": {
+                        "frontmost_before": {
+                            "name": "private-value-that-must-not-appear"
+                        },
+                        "focus_changed": False,
+                    },
+                    "computer-use-mcp/delivery": {
+                        "delivery_tier": "private-value-that-must-not-appear",
+                        "fallback_reasons": [
+                            "private-value-that-must-not-appear"
+                        ],
+                        "chain_rung": "private-value-that-must-not-appear",
+                        "ui_changed": True,
+                    },
+                }
+            else:
+                meta = {
+                    "computer-use-mcp/error": (
+                        {"code": "ELEMENT_NOT_FOUND"} if name == "tool_error" else None
+                    ),
+                    "computer-use-mcp/outcome": {
+                        "classification": "success",
+                        "failure_domain": None,
+                    },
+                    "computer-use-mcp/focus": {"focus_changed": False},
+                    "computer-use-mcp/delivery": {
+                        "delivery_tier": "tier1-ax-action"
+                    },
+                    "unrelated": {"must": "not be collected"},
+                }
             response = {
                 "jsonrpc": "2.0",
                 "id": message["id"],
                 "result": {
                     "content": [{"type": "text", "text": "ok"}],
                     "isError": name == "tool_error",
-                    "_meta": {
-                        "computer-use-mcp/error": (
-                            {"code": "fixture_error"} if name == "tool_error" else None
-                        ),
-                        "computer-use-mcp/outcome": {
-                            "classification": "success",
-                            "failure_domain": None,
-                        },
-                        "computer-use-mcp/focus": {"focus_changed": False},
-                        "computer-use-mcp/delivery": {
-                            "delivery_tier": "accessibility_action"
-                        },
-                        "unrelated": {"must": "not be collected"},
-                    },
+                    "_meta": meta,
                 },
             }
         sys.stdout.buffer.write(
@@ -92,6 +126,14 @@ class BlockingAfterFirstRead:
         self.release.wait(5)
         self.finished.set()
         return b""
+
+
+class FailingOutput:
+    def write(self, _data):
+        raise OSError("fixture downstream closed")
+
+    def flush(self):
+        pass
 
 
 class MCPStdioCollectorTests(unittest.TestCase):
@@ -153,7 +195,7 @@ class MCPStdioCollectorTests(unittest.TestCase):
         self.assertGreaterEqual(call["duration_ms"], 0)
         self.assertEqual(
             call["computer_use_meta"]["delivery"]["delivery_tier"],
-            "accessibility_action",
+            "tier1-ax-action",
         )
         self.assertEqual(
             call["computer_use_meta"]["outcome"]["classification"], "success"
@@ -175,7 +217,7 @@ class MCPStdioCollectorTests(unittest.TestCase):
         ])
         self.assertTrue(rows[0]["tool_is_error"])
         self.assertEqual(
-            rows[0]["computer_use_meta"]["error"]["code"], "fixture_error"
+            rows[0]["computer_use_meta"]["error"]["code"], "ELEMENT_NOT_FOUND"
         )
         self.assertEqual(rows[1]["jsonrpc_error"], {"present": True, "code": -32001})
 
@@ -203,6 +245,23 @@ class MCPStdioCollectorTests(unittest.TestCase):
             collector.normalized_argument_digest(arguments),
             collector.normalized_argument_digest(changed_values),
         )
+
+    def test_sensitive_meta_is_reduced_to_safe_categories_and_booleans(self):
+        request = rpc(
+            "tools/call", 6, {"name": "sensitive_meta", "arguments": {}}
+        )
+        result, _, _, rows = self.run_fixture(request, name="safe-meta.jsonl")
+        self.assertNotIn(SECRET.encode(), result.ledger_path.read_bytes())
+        meta = rows[0]["computer_use_meta"]
+        self.assertEqual(meta["error"]["code"], "<unrecognized>")
+        self.assertEqual(meta["outcome"]["classification"], "<unrecognized>")
+        self.assertEqual(
+            meta["outcome"]["verification"], {"rendered_text_changed": True}
+        )
+        self.assertEqual(meta["focus"], {"focus_changed": False})
+        self.assertEqual(meta["delivery"]["delivery_tier"], "<unrecognized>")
+        self.assertEqual(meta["delivery"]["fallback_reasons"], ["<unrecognized>"])
+        self.assertTrue(meta["delivery"]["ui_changed"])
 
     def test_malformed_and_partial_messages_pass_through_and_fail_integrity(self):
         fixture = Path(self.tmp.name) / "malformed.py"
@@ -254,6 +313,53 @@ class MCPStdioCollectorTests(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "missing_response")
         self.assertEqual(rows[0]["process_returncode"], 23)
         collector.verify_ledger(result.ledger_path)
+
+    def test_downstream_failure_kills_chatty_child_and_leaves_unsealed_ledger(self):
+        fixture = Path(self.tmp.name) / "chatty.py"
+        fixture.write_text(
+            "import sys\n"
+            "sys.stdin.buffer.readline()\n"
+            "while True:\n"
+            "    sys.stdout.buffer.write(b'x' * 65536)\n"
+            "    sys.stdout.buffer.flush()\n",
+            encoding="utf-8",
+        )
+        ledger_path = Path(self.tmp.name) / "relay-failure.jsonl"
+        started = time.monotonic()
+        with self.assertRaises(collector.CollectorError):
+            collector.collect_stdio(
+                [sys.executable, str(fixture)],
+                ledger_path=ledger_path,
+                run_id="run-1",
+                trial_id="relay-failure",
+                stdin=io.BytesIO(rpc("tools/list", 1)),
+                stdout=FailingOutput(),
+                stderr=io.BytesIO(),
+                max_frame_bytes=32,
+            )
+        self.assertLess(time.monotonic() - started, 2)
+        with self.assertRaises(collector.LedgerIntegrityError):
+            collector.verify_ledger(ledger_path)
+
+    def test_oversized_unterminated_frame_uses_bounded_parser_memory(self):
+        ledger = collector.CallLedger(
+            Path(self.tmp.name) / "bounded.jsonl", "run-1", "bounded"
+        )
+        observer = collector._ProtocolObserver(ledger, max_frame_bytes=128)
+        try:
+            observer.feed("request", b"x" * (1024 * 1024))
+            self.assertEqual(len(observer._buffers["request"]), 0)
+            self.assertTrue(observer._discarding["request"])
+            self.assertEqual(observer.malformed_frames, 1)
+            observer.feed(
+                "request",
+                b"discarded-tail\n"
+                + rpc("tools/call", 10, {"name": "click", "arguments": {}}),
+            )
+            self.assertFalse(observer._discarding["request"])
+            self.assertEqual(len(observer._pending), 1)
+        finally:
+            ledger.abort()
 
     def test_partial_ledger_and_tampering_fail_verification(self):
         request = rpc("tools/call", 9, {"name": "click", "arguments": {}})

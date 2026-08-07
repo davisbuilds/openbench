@@ -25,6 +25,90 @@ META_KEYS = {
     "focus": "computer-use-mcp/focus",
     "delivery": "computer-use-mcp/delivery",
 }
+ERROR_CODES = frozenset({
+    "STALE_ELEMENT",
+    "AMBIGUOUS_TARGET",
+    "CONFIRMATION_REQUIRED",
+    "POLICY_DENIED",
+    "SCREEN_LOCKED",
+    "USER_INTERFERENCE",
+    "APP_NOT_FOUND",
+    "ELEMENT_NOT_FOUND",
+    "NOT_SETTABLE",
+    "OFFSCREEN_TARGET",
+    "APP_LEASE_HELD",
+    "DAEMON_UNAUTHORIZED",
+})
+OUTCOME_CLASSIFICATIONS = frozenset({
+    "success",
+    "unsupported",
+    "effect_not_verified",
+    "verifier_ambiguous",
+})
+FAILURE_DOMAINS = frozenset({
+    "targeting",
+    "unsupported",
+    "coercion",
+    "transport",
+    "verification",
+    "web",
+    "app_specific_semantics",
+})
+DELIVERY_TIERS = frozenset({
+    "tier1-ax-action",
+    "tier1-ax-attribute",
+    "tier2-per-window-nsevent",
+    "tier25-skylight-sleventpostto-pid",
+    "tier3-cgeventpostto-pid",
+    "tier4-global-cursor",
+    "tier4-global-session-tap",
+    "pasteboard",
+    "launchservices",
+    "ax-window-management",
+})
+FALLBACK_REASONS = frozenset({
+    "ax-action-unsupported",
+    "window-number-unresolved",
+    "window-frame-unresolved",
+    "event-bridge-failed",
+    "skylight-unavailable",
+    "global-cursor-requested",
+    "no-scroll-container-found",
+    "scroll-action-unverified",
+    "chain-ax-press-unverified",
+    "chain-ax-confirm-unverified",
+    "chain-ax-open-unverified",
+    "chain-ax-pick-unverified",
+    "chain-selection-relay-unverified",
+    "chain-child-action-unverified",
+    "chain-ancestor-action-unverified",
+})
+CHAIN_RUNGS = frozenset({
+    "ax-press",
+    "ax-confirm",
+    "ax-open",
+    "ax-pick",
+    "selection-relay",
+    "child-press",
+    "ancestor-press",
+})
+OUTCOME_VERIFICATION_FLAGS = frozenset({
+    "target_relocated",
+    "before_selected",
+    "after_selected",
+    "before_focused",
+    "after_focused",
+    "rendered_text_changed",
+    "focused_element_changed",
+    "window_title_changed",
+    "window_frame_changed",
+    "scroll_position_changed",
+    "scroll_content_changed",
+    "scroll_at_extent",
+    "target_in_web_area",
+    "independent_element_changed",
+    "target_state_changed",
+})
 
 
 class CollectorError(RuntimeError):
@@ -120,6 +204,97 @@ def normalized_argument_digest(arguments: Any) -> str:
     return "sha256:" + hashlib.sha256(
         _canonical_bytes(_argument_shape(arguments))
     ).hexdigest()
+
+
+def _known_enum(value: Any, allowed: frozenset[str]) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value if value in allowed else "<unrecognized>"
+
+
+def _boolean_fields(value: Any, allowed: frozenset[str]) -> dict[str, bool]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: value[key]
+        for key in sorted(allowed)
+        if isinstance(value.get(key), bool)
+    }
+
+
+def _privacy_safe_meta(metadata: Any) -> dict[str, Any]:
+    """Retain only source-defined categorical and boolean MCP telemetry."""
+    metadata = metadata if isinstance(metadata, dict) else {}
+
+    raw_error = metadata.get(META_KEYS["error"])
+    error = None
+    if isinstance(raw_error, dict) and "code" in raw_error:
+        error = {"code": _known_enum(raw_error.get("code"), ERROR_CODES)}
+
+    raw_outcome = metadata.get(META_KEYS["outcome"])
+    outcome = None
+    if isinstance(raw_outcome, dict):
+        outcome = {
+            "classification": _known_enum(
+                raw_outcome.get("classification"), OUTCOME_CLASSIFICATIONS
+            ),
+            "failure_domain": _known_enum(
+                raw_outcome.get("failure_domain"), FAILURE_DOMAINS
+            ),
+            "web_ax_echo_risk": (
+                raw_outcome.get("web_ax_echo_risk")
+                if isinstance(raw_outcome.get("web_ax_echo_risk"), bool)
+                else None
+            ),
+            "verification": _boolean_fields(
+                raw_outcome.get("verification"), OUTCOME_VERIFICATION_FLAGS
+            ),
+        }
+
+    raw_focus = metadata.get(META_KEYS["focus"])
+    focus = _boolean_fields(
+        raw_focus,
+        frozenset({
+            "focus_changed",
+            "focus_change_allowed",
+            "cursor_movement_allowed",
+        }),
+    )
+    if not isinstance(raw_focus, dict):
+        focus = None
+
+    raw_delivery = metadata.get(META_KEYS["delivery"])
+    delivery = None
+    if isinstance(raw_delivery, dict):
+        reasons = raw_delivery.get("fallback_reasons")
+        delivery = {
+            "delivery_tier": _known_enum(
+                raw_delivery.get("delivery_tier"), DELIVERY_TIERS
+            ),
+            "fallback_reasons": (
+                [
+                    _known_enum(reason, FALLBACK_REASONS)
+                    for reason in reasons
+                    if isinstance(reason, str)
+                ]
+                if isinstance(reasons, list)
+                else []
+            ),
+            "chain_rung": _known_enum(
+                raw_delivery.get("chain_rung"), CHAIN_RUNGS
+            ),
+            "ui_changed": (
+                raw_delivery.get("ui_changed")
+                if isinstance(raw_delivery.get("ui_changed"), bool)
+                else None
+            ),
+        }
+    return {
+        "error": error,
+        "outcome": outcome,
+        "focus": focus,
+        "delivery": delivery,
+    }
 
 
 class CallLedger:
@@ -245,7 +420,7 @@ class _ProtocolObserver:
         self.ledger = ledger
         self.max_frame_bytes = max_frame_bytes
         self._buffers = {"request": bytearray(), "response": bytearray()}
-        self._oversized = {"request": False, "response": False}
+        self._discarding = {"request": False, "response": False}
         self._pending: dict[str, _PendingCall] = {}
         self._lock = threading.Lock()
         self.malformed_frames = 0
@@ -258,26 +433,34 @@ class _ProtocolObserver:
             buffer = self._buffers[direction]
             buffer.extend(chunk)
             while True:
+                if self._discarding[direction]:
+                    newline = buffer.find(b"\n")
+                    if newline < 0:
+                        buffer.clear()
+                        return
+                    del buffer[: newline + 1]
+                    self._discarding[direction] = False
+                    continue
                 newline = buffer.find(b"\n")
                 if newline < 0:
                     if len(buffer) > self.max_frame_bytes:
-                        self._oversized[direction] = True
+                        self.malformed_frames += 1
+                        buffer.clear()
+                        self._discarding[direction] = True
                     return
                 frame = bytes(buffer[: newline + 1])
                 del buffer[: newline + 1]
-                oversized = self._oversized[direction] or len(frame) > self.max_frame_bytes
-                self._oversized[direction] = False
-                if oversized:
+                if len(frame) > self.max_frame_bytes:
                     self.malformed_frames += 1
                     continue
                 self._observe_frame(direction, frame)
 
     def finish(self, direction: str) -> None:
         with self._lock:
-            if self._buffers[direction]:
+            if self._buffers[direction] or self._discarding[direction]:
                 self.partial_frames += 1
                 self._buffers[direction].clear()
-                self._oversized[direction] = False
+                self._discarding[direction] = False
 
     def finalize_missing(self, returncode: int) -> None:
         with self._lock:
@@ -378,9 +561,14 @@ class _ProtocolObserver:
         result = response.get("result") if isinstance(response, dict) else None
         result = result if isinstance(result, dict) else {}
         metadata = result.get("_meta")
-        metadata = metadata if isinstance(metadata, dict) else {}
         rpc_error = response.get("error") if isinstance(response, dict) else None
-        rpc_error_code = rpc_error.get("code") if isinstance(rpc_error, dict) else None
+        raw_rpc_error_code = rpc_error.get("code") if isinstance(rpc_error, dict) else None
+        rpc_error_code = (
+            raw_rpc_error_code
+            if isinstance(raw_rpc_error_code, int)
+            and not isinstance(raw_rpc_error_code, bool)
+            else None
+        )
         duration_ms = (
             round((response_monotonic_ns - call.request_monotonic_ns) / 1_000_000, 3)
             if response_monotonic_ns is not None
@@ -401,10 +589,7 @@ class _ProtocolObserver:
                 "present": rpc_error is not None,
                 "code": rpc_error_code,
             },
-            "computer_use_meta": {
-                short: metadata.get(source)
-                for short, source in META_KEYS.items()
-            },
+            "computer_use_meta": _privacy_safe_meta(metadata),
             "process_returncode": process_returncode,
         }
 
@@ -447,6 +632,12 @@ def collect_stdio(
     def record_failure(exc: BaseException) -> None:
         with failures_lock:
             failures.append(exc)
+        active_process = process
+        if active_process is not None and active_process.poll() is None:
+            try:
+                active_process.kill()
+            except OSError:
+                pass
 
     try:
         process = subprocess.Popen(
@@ -506,7 +697,12 @@ def collect_stdio(
         for thread in (input_thread, output_thread, stderr_thread):
             thread.start()
 
-        returncode = process.wait()
+        while True:
+            try:
+                returncode = process.wait(timeout=0.05)
+                break
+            except subprocess.TimeoutExpired:
+                continue
         input_stopped.set()
         output_thread.join()
         stderr_thread.join()
