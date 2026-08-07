@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import tempfile
 import unittest
 
 from obench.native_matrix import build_native_matrix
@@ -8,11 +10,13 @@ from obench.native_report import (
     NativeReportError,
     _Observation,
     _aggregate_observations,
+    _load_bundle,
     assert_public_native_report,
     build_native_report,
 )
 from obench.native_trial import BUNDLE_SCHEMA_VERSION
 from obench.run import ROW_FIELDS
+from obench.tests.test_native_trial import FIXTURE_CASES, _build_bundle
 
 
 HARNESS = {
@@ -163,6 +167,21 @@ def _call(tool, latency, *, outcome="success", tier="tier1-ax-action"):
 
 
 class NativeReportTests(unittest.TestCase):
+    def test_validated_bundle_supplies_digest_bound_mcp_detail(self):
+        cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory(prefix="native_report_bundle_") as temp:
+            bundle = Path(temp) / "native-cub-v0-trial1"
+            _build_bundle(bundle, cases["happy"])
+            observation = _load_bundle(bundle)
+
+        self.assertEqual(observation.row["exec_mode"], "native_macos")
+        self.assertEqual(len(observation.mcp_calls), 1)
+        self.assertEqual(observation.mcp_calls[0]["tool"], "set_value")
+        self.assertEqual(
+            observation.bundle_sha256,
+            observation.row["candidate_provenance"]["manifest_sha256"],
+        )
+
     def test_incomplete_arm_is_excluded_and_surfaced(self):
         plan = _plan(repetitions=2)
         report = build_native_report(
