@@ -36,6 +36,7 @@ from obench.native_run import (
     _managed_proxy,
     _mcp_command_sha256,
     _mcp_serve_owners,
+    _proxy_usage,
     _recheck_process_identity,
     _require_setup_app,
     _require_setup_processes,
@@ -1033,6 +1034,80 @@ media_type = "application/json"
         self.assertEqual(metadata["model"], "fixture-model")
         self.assertEqual(server.registered, ["native-1"])
         self.assertEqual(server.sealed, [("native-1", 5.0)])
+
+    def test_native_proxy_aborts_durably_when_body_raises(self):
+        class Server:
+            server_address = ("127.0.0.1", 43210)
+
+            def __init__(self):
+                self.aborted = []
+                self.sealed = []
+
+            def register_cell(self, token):
+                pass
+
+            def abort_cell(self, token):
+                self.aborted.append(token)
+
+            def seal_cell(self, token, timeout_s):
+                self.sealed.append((token, timeout_s))
+
+            def shutdown(self):
+                pass
+
+            def server_close(self):
+                pass
+
+        class Thread:
+            def join(self, timeout):
+                pass
+
+        server = Server()
+        directory = self.root / "proxy-abort"
+        config = load_config(self.config_path)
+        with patch(
+            "obench.native_run._proxy_context",
+            return_value=(server, Thread()),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "agent failed"):
+                with _managed_proxy(
+                    config,
+                    directory,
+                    self._hooks()[0],
+                    "native-1",
+                    "codex",
+                ):
+                    raise RuntimeError("agent failed")
+
+        self.assertEqual(server.aborted, ["native-1"])
+        self.assertEqual(server.sealed, [])
+
+    def test_proxy_usage_requires_clean_seal_unless_failure_is_explicit(self):
+        directory = self.root / "aborted-proxy-usage"
+        directory.mkdir()
+        ledger = directory / "native-1.jsonl"
+        request = {
+            "record_type": "request",
+            "usage": {"input_tokens": 10, "output_tokens": 2},
+        }
+        aborted = {
+            "record_type": "ledger_seal",
+            "state": "ABORTED",
+            "complete": False,
+            "incomplete_in_flight_count": 1,
+        }
+        ledger.write_text(
+            json.dumps(request) + "\n" + json.dumps(aborted) + "\n",
+            encoding="utf-8",
+        )
+        context = {"ledger_dir": directory, "token": "native-1"}
+
+        with self.assertRaisesRegex(NativeRunError, "ledger is incomplete"):
+            _proxy_usage(context)
+        self.assertEqual(
+            _proxy_usage(context, allow_aborted=True),
+            [{"input_tokens": 10, "cached_tokens": 0, "output_tokens": 2}],
+        )
 
     def test_focus_cleanup_does_not_mask_adapter_exception(self):
         class RaisingAdapter(FakeAdapter):

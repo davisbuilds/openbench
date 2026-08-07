@@ -1898,20 +1898,37 @@ def _managed_proxy(
         },
     }
     try:
-        yield context
-        server.seal_cell(token, timeout_s=5.0)
+        try:
+            yield context
+        except BaseException:
+            server.abort_cell(token)
+            raise
+        else:
+            server.seal_cell(token, timeout_s=5.0)
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
 
 
-def _proxy_usage(context: Mapping[str, Any] | None) -> list[dict[str, int]]:
+def _proxy_usage(
+    context: Mapping[str, Any] | None, *, allow_aborted: bool = False
+) -> list[dict[str, int]]:
     if context is None:
         return []
     rows = read_proxy_ledger(context["ledger_dir"], context["token"])
     if not rows or rows[-1].get("record_type") != "ledger_seal":
         raise NativeRunError("counting proxy ledger is not durably sealed")
+    seal = rows[-1]
+    if seal.get("state") != "SEALED":
+        if not (
+            allow_aborted
+            and seal.get("state") == "ABORTED"
+            and seal.get("complete") is False
+            and isinstance(seal.get("incomplete_in_flight_count"), int)
+            and seal["incomplete_in_flight_count"] >= 0
+        ):
+            raise NativeRunError("counting proxy ledger is incomplete")
     measured: dict[str, Any] = {}
     apply_proxy_ledger(measured, rows[:-1])
     if measured.get("proxy_capture_truncated") or measured.get("token_basis_proxy") != "proxy_measured":
@@ -2234,6 +2251,12 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                                 attempt,
                                 monitor,
                             )
+                        if (
+                            proxy_context
+                            and isinstance(adapter_result, Mapping)
+                            and not adapter_result.get("completed")
+                        ):
+                            proxy_context["server"].abort_cell(token)
                 for sample in owner_monitor.samples:
                     process_events.append((
                         sample["observed_at"],
@@ -2320,7 +2343,13 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         ),
                     )
                 )
-                proxy_usage = _proxy_usage(proxy_context)
+                proxy_usage = _proxy_usage(
+                    proxy_context,
+                    allow_aborted=not bool(
+                        isinstance(adapter_result, Mapping)
+                        and adapter_result.get("completed")
+                    ),
+                )
                 if not isinstance(adapter_result, Mapping):
                     raise NativeRunError("adapter returned a non-object result")
                 if not ledger.exists():
