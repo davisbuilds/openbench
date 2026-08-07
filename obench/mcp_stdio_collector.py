@@ -736,6 +736,14 @@ def _write_all(stream: BinaryIO, data: bytes) -> None:
     stream.flush()
 
 
+def _read_relay_chunk(stream: BinaryIO, size: int) -> bytes:
+    """Read currently available buffered input without waiting to fill `size`."""
+    read1 = getattr(stream, "read1", None)
+    if callable(read1):
+        return read1(size)
+    return stream.read(size)
+
+
 def collect_stdio(
     command: Sequence[str],
     *,
@@ -799,7 +807,7 @@ def collect_stdio(
 
         def relay_input() -> None:
             try:
-                while chunk := stdin.read(64 * 1024):
+                while chunk := _read_relay_chunk(stdin, 64 * 1024):
                     with input_processing_lock:
                         if input_stopped.is_set():
                             return

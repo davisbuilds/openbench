@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import select
 import sys
 import tempfile
 import textwrap
@@ -198,6 +199,48 @@ class MCPStdioCollectorTests(unittest.TestCase):
         self.assertEqual(result.call_count, 0)
         self.assertTrue(result.integrity_ok)
         self.assertEqual([row["record_type"] for row in rows], ["ledger_seal"])
+
+    def test_buffered_live_input_is_forwarded_before_eof(self):
+        input_read_fd, input_write_fd = os.pipe()
+        output_read_fd, output_write_fd = os.pipe()
+        input_reader = os.fdopen(input_read_fd, "rb")
+        input_writer = os.fdopen(input_write_fd, "wb", buffering=0)
+        output_reader = os.fdopen(output_read_fd, "rb", buffering=0)
+        output_writer = os.fdopen(output_write_fd, "wb", buffering=0)
+        errors = []
+
+        def run_collector():
+            try:
+                collector.collect_stdio(
+                    [sys.executable, str(self.fixture)],
+                    ledger_path=Path(self.tmp.name) / "live-ledger.jsonl",
+                    run_id="run-live",
+                    trial_id="trial-live",
+                    stdin=input_reader,
+                    stdout=output_writer,
+                    stderr=io.BytesIO(),
+                    env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                )
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=run_collector)
+        thread.start()
+        try:
+            request = rpc("initialize", 1, {"clientInfo": {"name": "fixture"}})
+            input_writer.write(request)
+            ready, _, _ = select.select([output_reader], [], [], 3)
+            self.assertEqual(ready, [output_reader])
+            self.assertEqual(os.read(output_reader.fileno(), len(request)), request)
+        finally:
+            input_writer.close()
+            thread.join(timeout=5)
+            input_reader.close()
+            output_reader.close()
+            output_writer.close()
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
 
     def test_correlates_call_and_collects_structured_meta_and_byte_counts(self):
         request = rpc(
