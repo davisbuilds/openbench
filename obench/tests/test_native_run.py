@@ -51,6 +51,13 @@ class FakeFocusMonitor:
 
     def stop(self):
         self.stopped = True
+        self.events = self.events + (FocusEvent(
+            self.bundle_id,
+            "Fixture",
+            123,
+            1.0,
+            datetime.now(timezone.utc).isoformat(),
+        ),)
 
 
 class FakeAdapter:
@@ -369,6 +376,12 @@ media_type = "application/json"
             before = _content_bound_command_digest(
                 [sys.executable, "-m", "digest_fixture"], cwd=self.root
             )
+            cache = package / "__pycache__"
+            cache.mkdir()
+            (cache / "generated.pyc").write_bytes(b"runtime bytecode")
+            with_cache = _content_bound_command_digest(
+                [sys.executable, "-m", "digest_fixture"], cwd=self.root
+            )
             (package / "__init__.py").write_text("VALUE = 2\n", encoding="utf-8")
             after = _content_bound_command_digest(
                 [sys.executable, "-m", "digest_fixture"], cwd=self.root
@@ -376,7 +389,17 @@ media_type = "application/json"
         finally:
             sys.path.remove(str(self.root))
             sys.modules.pop("digest_fixture", None)
+        self.assertEqual(before, with_cache)
         self.assertNotEqual(before, after)
+
+    def test_unknown_mcp_policy_tool_is_rejected(self):
+        content = self.config_path.read_text(encoding="utf-8").replace(
+            'allowed_tools = ["click"]',
+            'allowed_tools = ["future_destructive_tool"]',
+        )
+        self.config_path.write_text(content, encoding="utf-8")
+        with self.assertRaisesRegex(NativeRunError, "unknown tools"):
+            load_config(self.config_path)
 
     def test_whole_run_lease_conflict_prevents_runtime_work(self):
         config = load_config(self.config_path)
