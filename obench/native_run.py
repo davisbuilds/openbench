@@ -1418,7 +1418,14 @@ def _phase(config: NativeRunConfig, name: PhaseName, item: CommandConfig) -> Pha
         name,
         _expand_command(item.argv, config),
         item.timeout_s,
-        cwd=str(config.workspace),
+        # Setup owns initial workspace materialization. Use the immutable
+        # config directory until that workspace exists so a generated cell is
+        # runnable with its advertised single command.
+        cwd=str(
+            config.source_path.parent
+            if name is PhaseName.SETUP and not config.workspace.exists()
+            else config.workspace
+        ),
         env={
             **os.environ,
             "OPENBENCH_NATIVE_TRIAL_ID": config.trial_id,
@@ -1806,9 +1813,10 @@ def _attempt_record(path: Path, value: Mapping[str, Any]) -> None:
 def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hooks: NativeRunHooks | None = None) -> NativeRunOutcome:
     config = config_or_path if isinstance(config_or_path, NativeRunConfig) else load_config(config_or_path)
     hooks = hooks or NativeRunHooks()
-    for required in (config.workspace, config.instruction_path):
-        if not required.exists():
-            raise NativeRunError(f"required native input does not exist: {required}")
+    if not config.instruction_path.exists():
+        raise NativeRunError(
+            f"required native input does not exist: {config.instruction_path}"
+        )
     if config.output_dir.exists():
         raise NativeRunError(f"native output already exists: {config.output_dir}")
     attempts_dir = config.output_dir.with_name(config.output_dir.name + ".attempts")
@@ -1847,7 +1855,11 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         instruction_sha256 = _sha256(config.instruction_path)
         verifier_content_sha256 = _content_bound_command_digest(
             verifier_spec.argv,
-            cwd=config.workspace,
+            cwd=(
+                config.workspace
+                if config.workspace.exists()
+                else config.source_path.parent
+            ),
             extra_paths=config.verifier_oracle_paths,
         )
         mcp_content_sha256 = _content_bound_command_digest(
@@ -1921,6 +1933,11 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         "exit_code": setup_outcome.exit_code,
                     })
                     raise NativeRunError(f"setup phase {setup_outcome.status.value}")
+                if not config.workspace.is_dir() or config.workspace.is_symlink():
+                    raise NativeRunError(
+                        "setup did not materialize a regular native workspace: "
+                        f"{config.workspace}"
+                    )
 
                 (
                     (target_identity, target_setup_observed_at),

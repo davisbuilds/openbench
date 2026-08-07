@@ -6,6 +6,7 @@ import hashlib
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -443,6 +444,54 @@ media_type = "application/json"
             "com.openbench.fixture",
         )
         self.assertTrue(app_observations[0]["setup_complete"])
+
+    def test_setup_can_materialize_missing_workspace(self):
+        instruction = self.root / "instruction.md"
+        instruction.write_text("Complete the fixture task.\n", encoding="utf-8")
+        self.config_path.write_text(
+            self.config_path.read_text(encoding="utf-8").replace(
+                'instruction = "workspace/instruction.md"',
+                'instruction = "instruction.md"',
+            ),
+            encoding="utf-8",
+        )
+        shutil.rmtree(self.workspace)
+        original = self.phase_script.read_text(encoding="utf-8")
+        self.phase_script.write_text(
+            original.replace(
+                'workspace = Path.cwd()',
+                'workspace = Path.cwd()\n'
+                'if phase == "setup" and workspace.name != "workspace":\n'
+                '    workspace = workspace / "workspace"\n'
+                '    workspace.mkdir()',
+            ),
+            encoding="utf-8",
+        )
+
+        outcome = run_native(self.config_path, hooks=self._hooks()[0])
+
+        self.assertTrue(outcome.bundle_dir.is_dir())
+        self.assertTrue((self.workspace / "setup.log").is_file())
+
+    def test_setup_must_materialize_missing_workspace(self):
+        instruction = self.root / "instruction.md"
+        instruction.write_text("Complete the fixture task.\n", encoding="utf-8")
+        content = self.config_path.read_text(encoding="utf-8")
+        content = content.replace(
+            'instruction = "workspace/instruction.md"',
+            'instruction = "instruction.md"',
+        ).replace(
+            json.dumps([sys.executable, str(self.phase_script), "setup"]),
+            json.dumps(["/usr/bin/true"]),
+        )
+        self.config_path.write_text(content, encoding="utf-8")
+        shutil.rmtree(self.workspace)
+
+        with self.assertRaisesRegex(
+            NativeRunError,
+            "setup did not materialize a regular native workspace",
+        ):
+            run_native(self.config_path, hooks=self._hooks()[0])
 
     def test_bundle_identity_matches_cub_v0_signature_contract(self):
         app = self.root / "Fixture.app"
