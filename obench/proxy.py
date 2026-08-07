@@ -81,6 +81,8 @@ class LedgerSeal:
     record_count: int
     last_sequence: int
     root_hash: str
+    state: str = "SEALED"
+    incomplete_in_flight_count: int = 0
 
     @property
     def ledger_path(self) -> Path:
@@ -90,6 +92,7 @@ class LedgerSeal:
 @dataclass
 class _CellLedger:
     state: str = "ACTIVE"
+    admissions_revoked: bool = False
     in_flight: int = 0
     max_calls: int | None = None
     admitted_calls: int = 0
@@ -103,6 +106,9 @@ class _CellLedger:
     seal: LedgerSeal | None = None
     write_error: str | None = None
     terminal_written: bool = False
+    terminal_record: dict[str, Any] | None = None
+    aborted_in_flight_count: int | None = None
+    aborted_completions_remaining: int = 0
     last_activity_monotonic: float = 0.0
 
 
@@ -1024,6 +1030,8 @@ class CountingProxyServer(ThreadingHTTPServer):
             if ledger is None:
                 self._legacy_in_flight[token] = self._legacy_in_flight.get(token, 0) + 1
                 return False
+            if ledger.admissions_revoked:
+                raise RuntimeError(f"cell ledger admissions are revoked: {token}")
             if ledger.max_calls is not None and ledger.admitted_calls >= ledger.max_calls:
                 record = (
                     not ledger.max_calls_exceeded
@@ -1049,6 +1057,10 @@ class CountingProxyServer(ThreadingHTTPServer):
             if ledger is None:
                 raise RuntimeError(f"cell is not registered: {token}")
             if ledger.state == "SEALED":
+                if ledger.aborted_completions_remaining:
+                    ledger.aborted_completions_remaining -= 1
+                    self._ledger_condition.notify_all()
+                    return
                 raise RuntimeError(f"cell ledger is sealed: {token}")
             if ledger.in_flight <= 0:
                 raise RuntimeError(f"cell has no admitted request: {token}")
@@ -1108,6 +1120,7 @@ class CountingProxyServer(ThreadingHTTPServer):
             ledger = self._require_cell(token)
             if ledger.state == "SEALED":
                 raise RuntimeError(f"cell ledger is sealed: {token}")
+            ledger.admissions_revoked = True
             ledger.state = "DRAINING"
 
     def seal_cell(self, token: str, timeout_s: float = 30.0) -> LedgerSeal:
@@ -1130,7 +1143,6 @@ class CountingProxyServer(ThreadingHTTPServer):
                 raise RuntimeError(
                     f"cannot seal cell {token} after ledger write failure: {ledger.write_error}")
 
-            path = self._ledger_path(token)
             terminal = {
                 "record_type": "ledger_seal",
                 "state": "SEALED",
@@ -1138,28 +1150,78 @@ class CountingProxyServer(ThreadingHTTPServer):
                 "last_sequence": ledger.last_sequence,
                 "root_hash": ledger.root_hash,
             }
-            if not ledger.terminal_written:
-                try:
-                    self._append_durable(path, terminal)
-                except Exception:
-                    if self._last_record_equals(path, terminal):
-                        ledger.terminal_written = True
-                    else:
-                        self._truncate_partial_record(path)
-                    raise
-                ledger.terminal_written = True
-            else:
-                self._fsync_file(path)
-            self._fsync_directory(path.parent)
-            ledger.state = "SEALED"
-            ledger.seal = LedgerSeal(
-                token=token,
-                path=path,
-                record_count=ledger.record_count,
-                last_sequence=ledger.last_sequence,
-                root_hash=ledger.root_hash,
-            )
-            return ledger.seal
+            return self._write_terminal_seal(token, ledger, terminal)
+
+    def abort_cell(self, token: str) -> LedgerSeal:
+        """Durably seal a revoked cell without waiting for active handlers."""
+        with self._ledger_condition:
+            ledger = self._require_cell(token)
+            if ledger.seal is not None:
+                return ledger.seal
+            ledger.admissions_revoked = True
+            ledger.state = "DRAINING"
+            if ledger.write_error is not None:
+                raise RuntimeError(
+                    f"cannot abort cell {token} after ledger write failure: {ledger.write_error}")
+
+            if ledger.aborted_in_flight_count is None:
+                ledger.aborted_in_flight_count = ledger.in_flight
+                ledger.in_flight = 0
+                ledger.aborted_completions_remaining = (
+                    ledger.aborted_in_flight_count
+                )
+            incomplete = ledger.aborted_in_flight_count
+            terminal = {
+                "record_type": "ledger_seal",
+                "state": "ABORTED",
+                "complete": False,
+                "aborted_in_flight_count": incomplete,
+                "incomplete_in_flight_count": incomplete,
+                "record_count": ledger.record_count,
+                "last_sequence": ledger.last_sequence,
+                "root_hash": ledger.root_hash,
+            }
+            return self._write_terminal_seal(token, ledger, terminal)
+
+    def _write_terminal_seal(
+            self,
+            token: str,
+            ledger: _CellLedger,
+            terminal: dict[str, Any],
+    ) -> LedgerSeal:
+        """Append and fsync one terminal record while holding the ledger lock."""
+        if ledger.terminal_record is None:
+            ledger.terminal_record = dict(terminal)
+        elif ledger.terminal_record != terminal:
+            raise RuntimeError(f"cell terminal seal already established: {token}")
+        terminal = ledger.terminal_record
+        path = self._ledger_path(token)
+        if not ledger.terminal_written:
+            try:
+                self._append_durable(path, terminal)
+            except Exception:
+                if self._last_record_equals(path, terminal):
+                    ledger.terminal_written = True
+                else:
+                    self._truncate_partial_record(path)
+                raise
+            ledger.terminal_written = True
+        else:
+            self._fsync_file(path)
+        self._fsync_directory(path.parent)
+        ledger.state = "SEALED"
+        ledger.seal = LedgerSeal(
+            token=token,
+            path=path,
+            record_count=ledger.record_count,
+            last_sequence=ledger.last_sequence,
+            root_hash=ledger.root_hash,
+            state=terminal["state"],
+            incomplete_in_flight_count=terminal.get(
+                "incomplete_in_flight_count", 0
+            ),
+        )
+        return ledger.seal
 
     def _require_cell(self, token: str) -> _CellLedger:
         ledger = self._cell_ledgers.get(token)

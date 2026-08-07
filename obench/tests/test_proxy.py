@@ -38,6 +38,9 @@ class FixtureHandler(BaseHTTPRequestHandler):
             "host": self.headers.get("host"),
             "body": self.rfile.read(length).decode("utf-8", "replace"),
         })
+        if self.path.endswith("/blocked"):
+            self.server.blocked_started.set()
+            self.server.blocked_release.wait(5)
         if self.path.endswith("/sse"):
             payload = (
                 "event: response.completed\n"
@@ -79,6 +82,8 @@ class ProxyTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="proxy_test_")
         self.upstream = FixtureUpstream(("127.0.0.1", 0), FixtureHandler)
         self.upstream.requests = []
+        self.upstream.blocked_started = threading.Event()
+        self.upstream.blocked_release = threading.Event()
         self.up_thread = threading.Thread(target=self.upstream.serve_forever, daemon=True)
         self.up_thread.start()
         upstream_url = f"http://127.0.0.1:{self.upstream.server_address[1]}"
@@ -95,11 +100,17 @@ class ProxyTests(unittest.TestCase):
         self.host, self.port = self.proxy.server_address[:2]
 
     def tearDown(self):
+        self.upstream.blocked_release.set()
         self.proxy.shutdown(); self.proxy.server_close()
         self.upstream.shutdown(); self.upstream.server_close()
         self.tmp.cleanup()
 
     def _post(self, path, body=None):
+        status, payload = self._post_status(path, body)
+        self.assertEqual(status, 200, payload)
+        return payload
+
+    def _post_status(self, path, body=None):
         body = body or {"model": "deepseek-v4-flash", "temperature": 0.2, "api_key": SECRET}
         data = json.dumps(body).encode()
         conn = http.client.HTTPConnection(self.host, self.port, timeout=5)
@@ -111,8 +122,7 @@ class ProxyTests(unittest.TestCase):
         resp = conn.getresponse()
         payload = resp.read()
         conn.close()
-        self.assertEqual(resp.status, 200, payload)
-        return payload
+        return resp.status, payload
 
     def _ledger(self, token):
         path = os.path.join(self.tmp.name, token + ".jsonl")
@@ -235,6 +245,66 @@ class ProxyTests(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.tmp.name, "tok-b.jsonl")))
         self.assertEqual(len(self._ledger("tok-a")), 1)
         self.assertEqual(len(self._ledger("tok-b")), 1)
+
+    def test_abort_seals_in_flight_count_and_ignores_late_completion(self):
+        token = "tok-aborted"
+        self.proxy.register_cell(token, max_calls=1)
+        response = []
+        request = threading.Thread(
+            target=lambda: response.append(
+                self._post_status(f"/cell/{token}/openai/blocked")
+            )
+        )
+        request.start()
+        self.assertTrue(self.upstream.blocked_started.wait(2))
+
+        self.proxy.revoke_cell(token)
+        status, _ = self._post_status(f"/cell/{token}/openai/after-revoke")
+        self.assertEqual(status, 502)
+        self.assertEqual(len(self.upstream.requests), 1)
+
+        seal = self.proxy.abort_cell(token)
+        self.assertEqual(seal.state, "ABORTED")
+        self.assertEqual(seal.incomplete_in_flight_count, 1)
+        rows = self._ledger(token)
+        self.assertEqual(rows, [{
+            "record_type": "ledger_seal",
+            "state": "ABORTED",
+            "complete": False,
+            "aborted_in_flight_count": 1,
+            "incomplete_in_flight_count": 1,
+            "record_count": 0,
+            "last_sequence": 0,
+            "root_hash": proxy.EMPTY_LEDGER_HASH,
+        }])
+        sealed_bytes = seal.path.read_bytes()
+
+        self.upstream.blocked_release.set()
+        request.join(2)
+        self.assertFalse(request.is_alive())
+        self.assertEqual(response[0][0], 200)
+        self.assertEqual(seal.path.read_bytes(), sealed_bytes)
+        self.assertEqual(self.proxy.seal_cell(token), seal)
+
+    def test_normal_managed_cell_seal_is_unchanged(self):
+        token = "tok-clean-seal"
+        self.proxy.register_cell(token)
+        self._post(f"/cell/{token}/openai/normal")
+
+        seal = self.proxy.seal_cell(token)
+        rows = self._ledger(token)
+        self.assertEqual(seal.state, "SEALED")
+        self.assertEqual(seal.incomplete_in_flight_count, 0)
+        self.assertEqual([row["record_type"] for row in rows], [
+            "request", "ledger_seal",
+        ])
+        self.assertEqual(rows[-1], {
+            "record_type": "ledger_seal",
+            "state": "SEALED",
+            "record_count": 1,
+            "last_sequence": 1,
+            "root_hash": rows[0]["record_hash"],
+        })
 
     def test_ledger_to_row_mapping(self):
         row = {}
