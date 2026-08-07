@@ -173,16 +173,19 @@ def _bundle_info(app: Path) -> dict[str, Any]:
         raise CubError(f"bundle has no designated requirement: {app}")
     details = _run(["codesign", "-dvvv", str(app)], timeout=30)
     codesign_text = (details.stderr or details.stdout).strip()
+    binary_sha256 = _sha256(executable)
     return {
         "app": str(app),
         "bundle_id": info.get("CFBundleIdentifier"),
         "version": info.get("CFBundleShortVersionString"),
         "build": str(info.get("CFBundleVersion", "")),
         "executable": str(executable.resolve()),
-        "binary_sha256": _sha256(executable),
+        "binary_sha256": binary_sha256,
         "build_stamp_unix": executable.stat().st_mtime_ns,
         "designated_requirement": designated,
-        "signature_sha256": hashlib.sha256(designated.encode("utf-8")).hexdigest(),
+        "signature_sha256": hashlib.sha256(
+            designated.encode("utf-8") + b"\0" + binary_sha256.encode("ascii")
+        ).hexdigest(),
         "adhoc": "flags=0x2(adhoc)" in codesign_text or "Signature=adhoc" in codesign_text,
     }
 
@@ -380,9 +383,13 @@ def _extract_revision(repo: Path, revision: str, destination: Path) -> None:
 def _wrap_app(binary: Path, app: Path, bundle_id: str, version: str, identity: str) -> None:
     if app.exists():
         current = _bundle_info(app)
-        if current["bundle_id"] == bundle_id and current["version"] == version:
+        if (
+            current["bundle_id"] == bundle_id
+            and current["version"] == version
+            and current["binary_sha256"] == _sha256(binary)
+        ):
             return
-        raise CubError(f"existing app has unexpected identity: {app}")
+        raise CubError(f"existing app does not match the exact built executable: {app}")
     macos = app / "Contents/MacOS"
     macos.mkdir(parents=True)
     target = macos / binary.name

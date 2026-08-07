@@ -135,6 +135,49 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertFalse(result["matched_ready"])
         self.assertFalse(self.run_root.exists())
 
+    def test_bundle_identity_binds_designated_requirement_and_executable_bytes(self):
+        app = self.base / "Fixture.app"
+        executable = app / "Contents/MacOS/fixture"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"first")
+        with (app / "Contents/Info.plist").open("wb") as handle:
+            cub.plistlib.dump({
+                "CFBundleExecutable": "fixture",
+                "CFBundleIdentifier": "org.openbench.fixture",
+                "CFBundleShortVersionString": "0.0.1",
+                "CFBundleVersion": "1",
+            }, handle)
+        codesign = [
+            mock.Mock(stdout="", stderr="designated => identifier \"org.openbench.fixture\"\n"),
+            mock.Mock(stdout="", stderr="Signature=adhoc\n"),
+        ]
+        with mock.patch.object(cub, "_run", side_effect=codesign):
+            first = cub._bundle_info(app)
+        executable.write_bytes(b"second")
+        with mock.patch.object(cub, "_run", side_effect=codesign):
+            second = cub._bundle_info(app)
+        self.assertNotEqual(first["binary_sha256"], second["binary_sha256"])
+        self.assertNotEqual(first["signature_sha256"], second["signature_sha256"])
+
+    def test_wrap_app_refuses_stale_executable_with_matching_bundle_metadata(self):
+        binary = self.base / "fixture"
+        binary.write_bytes(b"new")
+        app = self.base / "Fixture.app"
+        app.mkdir()
+        with mock.patch.object(cub, "_bundle_info", return_value={
+            "bundle_id": "org.openbench.fixture",
+            "version": "0.0.1",
+            "binary_sha256": cub.hashlib.sha256(b"old").hexdigest(),
+        }):
+            with self.assertRaisesRegex(cub.CubError, "exact built executable"):
+                cub._wrap_app(
+                    binary,
+                    app,
+                    "org.openbench.fixture",
+                    "0.0.1",
+                    "-",
+                )
+
     def test_public_preflight_scrubs_home_paths_and_signing_identity(self):
         full = {
             "schema_version": cub.PREFLIGHT_SCHEMA,
