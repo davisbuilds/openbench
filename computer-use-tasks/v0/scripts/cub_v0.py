@@ -151,9 +151,9 @@ def _bundle_info(app: Path) -> dict[str, Any]:
     requirement = _run(["codesign", "-d", "-r-", str(app)], timeout=30)
     requirement_output = (requirement.stdout + requirement.stderr).strip()
     designated = next(
-        (line.removeprefix("# designated =>").strip()
+        (line.removeprefix("# ").removeprefix("designated =>").strip()
          for line in requirement_output.splitlines()
-         if line.startswith("# designated =>")),
+         if line.startswith(("# designated =>", "designated =>"))),
         "",
     )
     if not designated:
@@ -277,7 +277,10 @@ def preflight(request_path: Path) -> int:
 
 def _extract_revision(repo: Path, revision: str, destination: Path) -> None:
     if destination.exists():
-        raise CubError(f"exact source destination already exists: {destination}")
+        marker = destination / ".openbench-source-commit"
+        if marker.is_file() and marker.read_text(encoding="ascii").strip() == revision:
+            return
+        raise CubError(f"existing source destination is not pinned to {revision}: {destination}")
     archive = subprocess.run(
         ["git", "archive", "--format=tar", revision], cwd=repo,
         stdin=subprocess.DEVNULL, capture_output=True, check=False,
@@ -297,7 +300,10 @@ def _extract_revision(repo: Path, revision: str, destination: Path) -> None:
 
 def _wrap_app(binary: Path, app: Path, bundle_id: str, version: str, identity: str) -> None:
     if app.exists():
-        raise CubError(f"app destination already exists: {app}")
+        current = _bundle_info(app)
+        if current["bundle_id"] == bundle_id and current["version"] == version:
+            return
+        raise CubError(f"existing app has unexpected identity: {app}")
     macos = app / "Contents/MacOS"
     macos.mkdir(parents=True)
     target = macos / binary.name
