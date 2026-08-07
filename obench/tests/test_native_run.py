@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -17,7 +18,13 @@ from obench.native_macos import (
     PreflightResult,
     WholeRunLease,
 )
-from obench.native_run import NativeRunError, NativeRunHooks, load_config, run_native
+from obench.native_run import (
+    NativeRunError,
+    NativeRunHooks,
+    _content_bound_command_digest,
+    load_config,
+    run_native,
+)
 from obench.native_trial import NativeTrialError, load_native_trial
 
 
@@ -47,10 +54,11 @@ class FakeFocusMonitor:
 
 
 class FakeAdapter:
-    def __init__(self, *, fail=False, retry_once=False):
+    def __init__(self, *, fail=False, retry_once=False, tool="click"):
         self.fail = fail
         self.retry_once = retry_once
         self.calls = 0
+        self.tool = tool
 
     def run(self, instruction, workdir, model, timeout_s):
         self.calls += 1
@@ -66,7 +74,7 @@ class FakeAdapter:
             "jsonrpc": "2.0",
             "id": self.calls,
             "method": "tools/call",
-            "params": {"name": "click", "arguments": {"target": "fixture"}},
+            "params": {"name": self.tool, "arguments": {"target": "fixture"}},
         }
         launcher = os.environ["CUB_MCP_COMMAND"]
         completed = subprocess.run(
@@ -92,6 +100,7 @@ class FakeAdapter:
                         "prompt_tokens": 10,
                         "cached_tokens": 2,
                         "completion_tokens": 3,
+                        "extra": {"private": "do-not-publish"},
                     },
                 },
             ],
@@ -123,6 +132,8 @@ class NativeRunTests(unittest.TestCase):
             "Complete the fixture task.\n", encoding="utf-8"
         )
         self.phase_script = self.root / "phase.py"
+        self.oracle_path = self.root / "oracle.txt"
+        self.oracle_path.write_text("oracle-v1\n", encoding="utf-8")
         self.phase_script.write_text(
             textwrap.dedent(
                 """
@@ -138,9 +149,15 @@ class NativeRunTests(unittest.TestCase):
                     (workspace / "verdict.json").write_text(
                         json.dumps({"score": 1.0, "checker_exit": 0})
                     )
+                    if (workspace / "mutate-oracle").exists():
+                        Path(__file__).with_name("oracle.txt").write_text("changed")
                 if phase == "reset":
                     path = workspace / "reset.log"
                     path.write_text(path.read_text() + "reset\\n" if path.exists() else "reset\\n")
+                    if (workspace / "destructive-reset").exists():
+                        (workspace / "state.json").write_text(json.dumps({"saved": False}))
+                        (workspace / "verdict.json").write_text("destroyed")
+                        (workspace / "trajectory.json").write_text("destroyed")
                 """
             ),
             encoding="utf-8",
@@ -195,6 +212,7 @@ verdict_path = "verdict.json"
 [task]
 id = "computer-use-fixture"
 instruction = "workspace/instruction.md"
+verifier_oracle_paths = ["phase.py", "oracle.txt"]
 
 [harness]
 name = "fixture-harness"
@@ -211,6 +229,8 @@ name = "computer-use-mcp"
 version = "0.9.0"
 command = {command}
 client_command_env = "CUB_MCP_COMMAND"
+allowed_tools = ["click"]
+forbidden_tools = ["delete_skill"]
 
 [environment]
 architecture = "arm64"
@@ -297,6 +317,66 @@ media_type = "application/json"
         self.assertNotIn("harbor", json.dumps(outcome.row).lower())
         self.assertEqual(len(outcome.results_path.read_text().splitlines()), 1)
         self.assertEqual(load_native_trial(outcome.bundle_dir)["run_id"], outcome.row["run_id"])
+        lock = json.loads((outcome.bundle_dir / "lock.json").read_text())
+        interpreter_digest = hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest()
+        self.assertNotEqual(lock["mcp"]["server_sha256"], interpreter_digest)
+        argv_only = hashlib.sha256(
+            json.dumps(
+                [sys.executable, str(self.phase_script), "verifier"],
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        task = json.loads((outcome.bundle_dir / "task/task.json").read_text())
+        self.assertNotEqual(task["verifier_sha256"], argv_only)
+        trajectory = json.loads(
+            (outcome.bundle_dir / "agent/trajectory.json").read_text()
+        )
+        self.assertEqual(
+            set(trajectory["steps"][1]["metrics"]),
+            {"prompt_tokens", "cached_tokens", "completion_tokens"},
+        )
+        self.assertNotIn("do-not-publish", json.dumps(trajectory))
+
+    def test_judged_snapshot_survives_destructive_reset(self):
+        (self.workspace / "destructive-reset").touch()
+        hooks, _ = self._hooks()
+        outcome = run_native(self.config_path, hooks=hooks)
+        captured = json.loads(
+            (outcome.bundle_dir / "artifacts/final-state/state.json").read_text()
+        )
+        self.assertEqual(captured, {"saved": True})
+        self.assertEqual(json.loads((self.workspace / "state.json").read_text()), {"saved": False})
+
+    def test_verifier_oracle_mutation_fails_closed(self):
+        (self.workspace / "mutate-oracle").touch()
+        hooks, _ = self._hooks()
+        with self.assertRaisesRegex(NativeRunError, "verifier or oracle bytes changed"):
+            run_native(self.config_path, hooks=hooks)
+
+    def test_explicit_mcp_tool_policy_fails_closed(self):
+        hooks, _ = self._hooks(FakeAdapter(tool="delete_skill"))
+        with self.assertRaisesRegex(NativeRunError, "MCP tool policy violation"):
+            run_native(self.config_path, hooks=hooks)
+
+    def test_interpreted_module_digest_binds_module_payload(self):
+        package = self.root / "digest_fixture"
+        package.mkdir()
+        (package / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+        sys.path.insert(0, str(self.root))
+        try:
+            before = _content_bound_command_digest(
+                [sys.executable, "-m", "digest_fixture"], cwd=self.root
+            )
+            (package / "__init__.py").write_text("VALUE = 2\n", encoding="utf-8")
+            after = _content_bound_command_digest(
+                [sys.executable, "-m", "digest_fixture"], cwd=self.root
+            )
+        finally:
+            sys.path.remove(str(self.root))
+            sys.modules.pop("digest_fixture", None)
+        self.assertNotEqual(before, after)
 
     def test_whole_run_lease_conflict_prevents_runtime_work(self):
         config = load_config(self.config_path)
