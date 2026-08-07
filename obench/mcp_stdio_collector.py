@@ -162,6 +162,7 @@ class CollectionResult:
     malformed_frames: int
     partial_frames: int
     missing_responses: int
+    input_incomplete: bool
 
 
 @dataclass(frozen=True)
@@ -420,6 +421,7 @@ class CallLedger:
                 malformed_frames=int(summary["malformed_frames"]),
                 partial_frames=int(summary["partial_frames"]),
                 missing_responses=int(summary["missing_responses"]),
+                input_incomplete=bool(summary["input_incomplete"]),
             )
 
     def abort(self) -> None:
@@ -756,6 +758,7 @@ def collect_stdio(
             except subprocess.TimeoutExpired:
                 continue
         input_stopped.set()
+        input_incomplete = input_thread.is_alive()
         kill_owned_processes()
         with input_processing_lock:
             pass
@@ -781,6 +784,7 @@ def collect_stdio(
             and observer.partial_frames == 0
             and observer.duplicate_request_ids == 0
             and observer.missing_responses == 0
+            and not input_incomplete
         )
         summary = {
             "returncode": returncode,
@@ -789,6 +793,7 @@ def collect_stdio(
             "partial_frames": observer.partial_frames,
             "duplicate_request_ids": observer.duplicate_request_ids,
             "missing_responses": observer.missing_responses,
+            "input_incomplete": input_incomplete,
         }
         result = ledger.seal(summary)
         verified = verify_ledger(ledger.path)
@@ -879,12 +884,18 @@ def verify_ledger(path: str | os.PathLike[str]) -> LedgerVerification:
             raise LedgerIntegrityError(
                 f"MCP collector summary has invalid {field}"
             )
+    input_incomplete = summary.get("input_incomplete")
+    if not isinstance(input_incomplete, bool):
+        raise LedgerIntegrityError(
+            "MCP collector summary has invalid input_incomplete"
+        )
     expected_integrity = (
         summary["returncode"] == 0
         and summary["malformed_frames"] == 0
         and summary["partial_frames"] == 0
         and summary["duplicate_request_ids"] == 0
         and summary["missing_responses"] == 0
+        and not input_incomplete
     )
     if integrity_ok != expected_integrity:
         raise LedgerIntegrityError("MCP collector summary integrity state disagrees")

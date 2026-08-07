@@ -128,6 +128,21 @@ class BlockingAfterFirstRead:
         return b""
 
 
+class DelayedFirstRead:
+    def __init__(self, payload):
+        self.payload = payload
+        self.release = threading.Event()
+        self.finished = threading.Event()
+
+    def read(self, _size):
+        if self.payload is None:
+            return b""
+        self.release.wait(5)
+        payload, self.payload = self.payload, None
+        self.finished.set()
+        return payload
+
+
 class FailingOutput:
     def write(self, _data):
         raise OSError("fixture downstream closed")
@@ -321,6 +336,32 @@ class MCPStdioCollectorTests(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "missing_response")
         self.assertEqual(rows[0]["process_returncode"], 23)
         collector.verify_ledger(result.ledger_path)
+
+    def test_clean_child_exit_marks_inflight_stdin_read_incomplete(self):
+        fixture = Path(self.tmp.name) / "clean-exit.py"
+        fixture.write_text("", encoding="utf-8")
+        delayed_input = DelayedFirstRead(
+            rpc("tools/call", 12, {"name": "click", "arguments": {}})
+        )
+        ledger_path = Path(self.tmp.name) / "inflight-input.jsonl"
+        result = collector.collect_stdio(
+            [sys.executable, str(fixture)],
+            ledger_path=ledger_path,
+            run_id="run-1",
+            trial_id="inflight-input",
+            stdin=delayed_input,
+            stdout=io.BytesIO(),
+            stderr=io.BytesIO(),
+        )
+        sealed_bytes = ledger_path.read_bytes()
+        delayed_input.release.set()
+        self.assertTrue(delayed_input.finished.wait(1))
+        self.assertEqual(ledger_path.read_bytes(), sealed_bytes)
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(result.input_incomplete)
+        self.assertFalse(result.integrity_ok)
+        verified = collector.verify_ledger(ledger_path)
+        self.assertTrue(verified.summary["input_incomplete"])
 
     def test_downstream_failure_kills_chatty_child_and_leaves_unsealed_ledger(self):
         fixture = Path(self.tmp.name) / "chatty.py"
