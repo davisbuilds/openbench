@@ -1,8 +1,10 @@
 import AppKit
 import CoreGraphics
+import Darwin
 import Foundation
 
-private let protocolVersion = 1
+private let protocolVersion = 2
+private let heartbeatIntervalSeconds = 0.5
 
 private struct ProtocolReply: Codable {
     let protocolVersion: Int
@@ -14,6 +16,9 @@ private struct SessionReply: Codable {
     let kind: String
     let status: String
     let screenUnlocked: Bool?
+    let observedAt: String
+    let observedAtMonotonicNs: UInt64
+    let sequence: UInt64
 }
 
 private struct AppRecord: Codable {
@@ -32,9 +37,35 @@ private struct AppsReply: Codable {
 private struct FocusReply: Codable {
     let protocolVersion: Int
     let kind: String
+    let sampleKind: String
+    let observedAt: String
+    let observedAtMonotonicNs: UInt64
+    let sequence: UInt64
     let bundleIdentifier: String?
     let applicationName: String?
     let pid: Int32?
+    let sessionStatus: String
+    let screenUnlocked: Bool?
+}
+
+private struct SessionState {
+    let status: String
+    let screenUnlocked: Bool?
+}
+
+private var sequence: UInt64 = 0
+
+private func nextSequence() -> UInt64 {
+    sequence += 1
+    return sequence
+}
+
+private func timestamp() -> String {
+    ISO8601DateFormatter.string(
+        from: Date(),
+        timeZone: TimeZone(secondsFromGMT: 0)!,
+        formatOptions: [.withInternetDateTime, .withFractionalSeconds]
+    )
 }
 
 private func emit<T: Encodable>(_ value: T) {
@@ -48,11 +79,9 @@ private func emit<T: Encodable>(_ value: T) {
     }
 }
 
-private func sessionReply() -> SessionReply {
+private func sessionState() -> SessionState {
     guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else {
-        return SessionReply(
-            protocolVersion: protocolVersion,
-            kind: "session",
+        return SessionState(
             status: "unknown",
             screenUnlocked: nil
         )
@@ -60,25 +89,32 @@ private func sessionReply() -> SessionReply {
     let key = "CGSSessionScreenIsLocked"
     if let raw = session[key] {
         guard let locked = raw as? Bool else {
-            return SessionReply(
-                protocolVersion: protocolVersion,
-                kind: "session",
+            return SessionState(
                 status: "unknown",
                 screenUnlocked: nil
             )
         }
-        return SessionReply(
-            protocolVersion: protocolVersion,
-            kind: "session",
+        return SessionState(
             status: "known",
             screenUnlocked: !locked
         )
     }
+    return SessionState(
+        status: "known",
+        screenUnlocked: true
+    )
+}
+
+private func sessionReply() -> SessionReply {
+    let session = sessionState()
     return SessionReply(
         protocolVersion: protocolVersion,
         kind: "session",
-        status: "known",
-        screenUnlocked: true
+        status: session.status,
+        screenUnlocked: session.screenUnlocked,
+        observedAt: timestamp(),
+        observedAtMonotonicNs: DispatchTime.now().uptimeNanoseconds,
+        sequence: nextSequence()
     )
 }
 
@@ -110,28 +146,65 @@ private func appsReply(bundleIdentifiers: Set<String>) -> AppsReply {
     )
 }
 
-private func focusReply(_ app: NSRunningApplication?) -> FocusReply {
-    FocusReply(
+private func focusReply(
+    _ app: NSRunningApplication?,
+    sampleKind: String
+) -> FocusReply {
+    let session = sessionState()
+    return FocusReply(
         protocolVersion: protocolVersion,
         kind: "focus",
+        sampleKind: sampleKind,
+        observedAt: timestamp(),
+        observedAtMonotonicNs: DispatchTime.now().uptimeNanoseconds,
+        sequence: nextSequence(),
         bundleIdentifier: app?.bundleIdentifier,
         applicationName: app?.localizedName,
-        pid: app?.processIdentifier
+        pid: app?.processIdentifier,
+        sessionStatus: session.status,
+        screenUnlocked: session.screenUnlocked
     )
 }
 
 private func runFocusMonitor() -> Never {
     let center = NSWorkspace.shared.notificationCenter
-    _ = center.addObserver(
+    let observer = center.addObserver(
         forName: NSWorkspace.didActivateApplicationNotification,
         object: nil,
         queue: .main
     ) { notification in
         let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
             as? NSRunningApplication
-        emit(focusReply(app))
+        emit(focusReply(app, sampleKind: "activation"))
     }
-    emit(focusReply(NSWorkspace.shared.frontmostApplication))
+    let heartbeat = Timer.scheduledTimer(
+        withTimeInterval: heartbeatIntervalSeconds,
+        repeats: true
+    ) { _ in
+        emit(focusReply(
+            NSWorkspace.shared.frontmostApplication,
+            sampleKind: "heartbeat"
+        ))
+    }
+    signal(SIGTERM, SIG_IGN)
+    let termination = DispatchSource.makeSignalSource(
+        signal: SIGTERM,
+        queue: .main
+    )
+    termination.setEventHandler {
+        heartbeat.invalidate()
+        center.removeObserver(observer)
+        emit(focusReply(
+            NSWorkspace.shared.frontmostApplication,
+            sampleKind: "terminal"
+        ))
+        exit(0)
+    }
+    termination.resume()
+    emit(focusReply(
+        NSWorkspace.shared.frontmostApplication,
+        sampleKind: "baseline"
+    ))
     RunLoop.main.run()
     exit(0)
 }

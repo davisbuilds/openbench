@@ -406,7 +406,7 @@ class SessionReader(Protocol):
         """Return True/False only when lock state is source-proven."""
 
 
-NATIVE_HELPER_PROTOCOL_VERSION = 1
+NATIVE_HELPER_PROTOCOL_VERSION = 2
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
@@ -691,7 +691,37 @@ class MacOSSessionReader:
             timeout_s=self.timeout_s,
             expected_kind="session",
         )
+        observed_at = reply.get("observedAt")
+        observed_monotonic_ns = reply.get("observedAtMonotonicNs")
+        sequence = reply.get("sequence")
+        if not isinstance(observed_at, str):
+            raise PreflightEvidenceError(
+                "native helper session observedAt must be an ISO-8601 string"
+            )
+        try:
+            parsed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise PreflightEvidenceError(
+                "native helper session observedAt is not ISO-8601"
+            ) from exc
+        if parsed.tzinfo is None:
+            raise PreflightEvidenceError(
+                "native helper session observedAt must include an offset"
+            )
+        if (
+            type(observed_monotonic_ns) is not int
+            or observed_monotonic_ns < 0
+            or type(sequence) is not int
+            or sequence != 1
+        ):
+            raise PreflightEvidenceError(
+                "native helper session source sequence/timestamp is invalid"
+            )
         if reply.get("status") == "unknown":
+            if reply.get("screenUnlocked") is not None:
+                raise PreflightEvidenceError(
+                    "native helper unknown session cannot assert screenUnlocked"
+                )
             return None
         if reply.get("status") != "known":
             raise PreflightEvidenceError(
@@ -784,6 +814,11 @@ class FocusEvent:
     pid: int | None
     observed_at_monotonic: float
     observed_at: str | None = None
+    source_sequence: int | None = None
+    source_monotonic_ns: int | None = None
+    sample_kind: str | None = None
+    session_status: str | None = None
+    screen_unlocked: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -855,15 +890,27 @@ class MacOSFocusMonitor:
     def _observe(self, event: FocusEvent) -> None:
         with self._lock:
             self._events.append(event)
-        if event.bundle_identifier in self.allowed_bundle_identifiers:
+        if (
+            event.session_status in (None, "known")
+            and event.screen_unlocked in (None, True)
+            and event.bundle_identifier in self.allowed_bundle_identifiers
+        ):
             return
-        violation = FocusViolation(
-            event=event,
-            reason=(
+        if event.session_status not in (None, "known"):
+            reason = "screen lock state is not source-proven"
+        elif event.screen_unlocked is False:
+            reason = "screen became locked during native monitoring"
+        elif event.screen_unlocked is None and event.session_status is not None:
+            reason = "screen lock state is unavailable"
+        else:
+            reason = (
                 "activated application has no bundle identifier"
                 if event.bundle_identifier is None
                 else f"bundle identifier {event.bundle_identifier!r} is not allowed"
-            ),
+            )
+        violation = FocusViolation(
+            event=event,
+            reason=reason,
         )
         with self._lock:
             self._violations.append(violation)
@@ -924,6 +971,9 @@ class NSWorkspaceActivationEventSource:
         self._stopping = threading.Event()
         self._error: BaseException | None = None
         self._error_lock = threading.Lock()
+        self._last_sequence = 0
+        self._last_source_monotonic_ns = 0
+        self._terminal_seen = False
 
     @property
     def error(self) -> BaseException | None:
@@ -941,6 +991,12 @@ class NSWorkspaceActivationEventSource:
         bundle_identifier = reply.get("bundleIdentifier")
         application_name = reply.get("applicationName")
         pid = reply.get("pid")
+        observed_at = reply.get("observedAt")
+        source_monotonic_ns = reply.get("observedAtMonotonicNs")
+        source_sequence = reply.get("sequence")
+        sample_kind = reply.get("sampleKind")
+        session_status = reply.get("sessionStatus")
+        screen_unlocked = reply.get("screenUnlocked")
         if bundle_identifier is not None and not isinstance(bundle_identifier, str):
             raise PreflightEvidenceError(
                 "native helper focus bundleIdentifier must be a string or null"
@@ -953,12 +1009,60 @@ class NSWorkspaceActivationEventSource:
             raise PreflightEvidenceError(
                 "native helper focus pid must be a positive integer or null"
             )
+        if not isinstance(observed_at, str):
+            raise PreflightEvidenceError(
+                "native helper focus observedAt must be an ISO-8601 string"
+            )
+        try:
+            parsed_at = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise PreflightEvidenceError(
+                "native helper focus observedAt is not ISO-8601"
+            ) from exc
+        if parsed_at.tzinfo is None:
+            raise PreflightEvidenceError(
+                "native helper focus observedAt must include an offset"
+            )
+        if (
+            type(source_monotonic_ns) is not int
+            or source_monotonic_ns < 0
+            or type(source_sequence) is not int
+            or source_sequence < 1
+        ):
+            raise PreflightEvidenceError(
+                "native helper focus source sequence/timestamp is invalid"
+            )
+        if sample_kind not in {"baseline", "activation", "heartbeat", "terminal"}:
+            raise PreflightEvidenceError(
+                f"native helper focus sample kind is invalid: {sample_kind!r}"
+            )
+        if session_status not in {"known", "unknown"}:
+            raise PreflightEvidenceError(
+                f"native helper focus session status is invalid: {session_status!r}"
+            )
+        if screen_unlocked is not None and type(screen_unlocked) is not bool:
+            raise PreflightEvidenceError(
+                "native helper focus screenUnlocked must be boolean or null"
+            )
+        if session_status == "known" and type(screen_unlocked) is not bool:
+            raise PreflightEvidenceError(
+                "native helper known focus session requires screenUnlocked"
+            )
+        if session_status == "unknown" and screen_unlocked is not None:
+            raise PreflightEvidenceError(
+                "native helper unknown focus session cannot assert screenUnlocked"
+            )
         return FocusEvent(
             bundle_identifier=bundle_identifier,
             application_name=application_name,
             pid=pid,
             observed_at_monotonic=self.monotonic(),
-            observed_at=datetime.now(timezone.utc).isoformat(),
+            observed_at=parsed_at.isoformat(),
+            source_sequence=source_sequence,
+            source_monotonic_ns=source_monotonic_ns,
+            sample_kind=sample_kind,
+            session_status=session_status,
+            screen_unlocked=screen_unlocked,
         )
 
     def _read_events(self, callback: Callable[[FocusEvent], None]) -> None:
@@ -977,7 +1081,28 @@ class NSWorkspaceActivationEventSource:
                             )
                         )
                     return
-                callback(self._parse_focus_event(line))
+                event = self._parse_focus_event(line)
+                if (
+                    event.source_sequence != self._last_sequence + 1
+                    or event.source_monotonic_ns is None
+                    or event.source_monotonic_ns <= self._last_source_monotonic_ns
+                ):
+                    raise PreflightEvidenceError(
+                        "native helper focus sequence has a gap or non-monotonic timestamp"
+                    )
+                if self._last_sequence == 0 and event.sample_kind != "baseline":
+                    raise PreflightEvidenceError(
+                        "native helper focus stream does not start with a baseline"
+                    )
+                if self._terminal_seen:
+                    raise PreflightEvidenceError(
+                        "native helper focus stream contains samples after terminal evidence"
+                    )
+                self._last_sequence = event.source_sequence
+                self._last_source_monotonic_ns = event.source_monotonic_ns
+                if event.sample_kind == "terminal":
+                    self._terminal_seen = True
+                callback(event)
                 self._ready.set()
         except BaseException as exc:
             if not self._stopping.is_set():
@@ -993,6 +1118,9 @@ class NSWorkspaceActivationEventSource:
         self._stopping.clear()
         with self._error_lock:
             self._error = None
+        self._last_sequence = 0
+        self._last_source_monotonic_ns = 0
+        self._terminal_seen = False
         try:
             process = self.popen(
                 [str(helper_path), "focus"],
@@ -1059,6 +1187,12 @@ class NSWorkspaceActivationEventSource:
                 )
         if self._stderr_capture is not None:
             self._stderr_capture.finish(1)
+        if self.error is None and not self._terminal_seen:
+            self._set_error(
+                NativeMacOSError(
+                    "native focus helper stopped without terminal health evidence"
+                )
+            )
         self._process = None
         self._reader_thread = None
         self._stderr_capture = None

@@ -255,7 +255,7 @@ class PreflightTests(unittest.TestCase):
                 payload = health_report()
             elif argv[1] == "apps":
                 payload = {
-                    "protocolVersion": 1,
+                    "protocolVersion": 2,
                     "kind": "apps",
                     "apps": [
                         {
@@ -268,10 +268,13 @@ class PreflightTests(unittest.TestCase):
                 }
             elif argv[1] == "session":
                 payload = {
-                    "protocolVersion": 1,
+                    "protocolVersion": 2,
                     "kind": "session",
                     "status": "known",
                     "screenUnlocked": True,
+                    "observedAt": "2026-08-06T12:00:00+00:00",
+                    "observedAtMonotonicNs": 100,
+                    "sequence": 1,
                 }
             else:
                 self.fail(f"unexpected command: {argv}")
@@ -342,7 +345,7 @@ class NativeHelperProtocolTests(unittest.TestCase):
                 return subprocess.CompletedProcess(
                     argv,
                     0,
-                    json.dumps({"protocolVersion": 1, "kind": "protocol"}),
+                    json.dumps({"protocolVersion": 2, "kind": "protocol"}),
                     "",
                 )
 
@@ -398,7 +401,7 @@ class NativeHelperProtocolTests(unittest.TestCase):
                 return subprocess.CompletedProcess(
                     argv,
                     0,
-                    json.dumps({"protocolVersion": 1, "kind": "protocol"}),
+                    json.dumps({"protocolVersion": 2, "kind": "protocol"}),
                     "",
                 )
 
@@ -426,7 +429,7 @@ class NativeHelperProtocolTests(unittest.TestCase):
                 return subprocess.CompletedProcess(
                     argv,
                     0,
-                    json.dumps({"protocolVersion": 2, "kind": "protocol"}),
+                    json.dumps({"protocolVersion": 3, "kind": "protocol"}),
                     "",
                 )
 
@@ -444,7 +447,7 @@ class NativeHelperProtocolTests(unittest.TestCase):
         def command_runner(argv, **kwargs):
             if argv[1] == "apps":
                 payload = {
-                    "protocolVersion": 1,
+                    "protocolVersion": 2,
                     "kind": "apps",
                     "apps": [
                         {
@@ -457,10 +460,13 @@ class NativeHelperProtocolTests(unittest.TestCase):
                 }
             else:
                 payload = {
-                    "protocolVersion": 1,
+                    "protocolVersion": 2,
                     "kind": "session",
                     "status": "maybe",
                     "screenUnlocked": True,
+                    "observedAt": "2026-08-06T12:00:00+00:00",
+                    "observedAtMonotonicNs": 100,
+                    "sequence": 1,
                 }
             return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
 
@@ -480,12 +486,24 @@ class NativeHelperProtocolTests(unittest.TestCase):
             helper = Path(temp) / "focus-helper"
             helper.write_text(
                 "#!/usr/bin/env python3\n"
-                "import json, time\n"
-                "print(json.dumps({"
-                "'protocolVersion': 1, 'kind': 'focus', "
+                "import json, signal, time\n"
+                "sequence = 0\n"
+                "def emit(kind):\n"
+                "  global sequence\n"
+                "  sequence += 1\n"
+                "  print(json.dumps({"
+                "'protocolVersion': 2, 'kind': 'focus', 'sampleKind': kind, "
+                "'observedAt': f'2026-08-06T12:00:0{sequence}+00:00', "
+                "'observedAtMonotonicNs': sequence * 100, 'sequence': sequence, "
                 "'bundleIdentifier': 'com.example.Target', "
-                "'applicationName': 'Target', 'pid': 123}), flush=True)\n"
-                "time.sleep(30)\n",
+                "'applicationName': 'Target', 'pid': 123, "
+                "'sessionStatus': 'known', 'screenUnlocked': True}), flush=True)\n"
+                "def stop(signum, frame):\n"
+                "  emit('terminal')\n"
+                "  raise SystemExit(0)\n"
+                "signal.signal(signal.SIGTERM, stop)\n"
+                "emit('baseline')\n"
+                "while True: time.sleep(1)\n",
                 encoding="utf-8",
             )
             helper.chmod(0o755)
@@ -501,26 +519,42 @@ class NativeHelperProtocolTests(unittest.TestCase):
             )
             source.start(events.append)
             source.stop()
-            self.assertEqual(len(events), 1)
+            self.assertEqual(len(events), 2)
             self.assertEqual(events[0].bundle_identifier, "com.example.Target")
+            self.assertEqual(events[0].source_sequence, 1)
+            self.assertEqual(events[0].source_monotonic_ns, 100)
+            self.assertEqual(
+                events[0].observed_at,
+                "2026-08-06T12:00:01+00:00",
+            )
+            self.assertEqual(events[-1].sample_kind, "terminal")
             self.assertIsNone(source.error)
 
     def test_focus_source_blocks_restart_until_reader_stops(self):
         with tempfile.TemporaryDirectory() as temp:
             helper = Path(temp) / "focus-helper"
-            message = (
-                "{'protocolVersion': 1, 'kind': 'focus', "
-                "'bundleIdentifier': 'com.example.Target', "
-                "'applicationName': 'Target', 'pid': 123}"
-            )
             helper.write_text(
                 "#!/usr/bin/env python3\n"
-                "import json, time\n"
-                f"message = {message}\n"
-                "print(json.dumps(message), flush=True)\n"
+                "import json, signal, time\n"
+                "sequence = 0\n"
+                "def emit(kind):\n"
+                "  global sequence\n"
+                "  sequence += 1\n"
+                "  print(json.dumps({"
+                "'protocolVersion': 2, 'kind': 'focus', 'sampleKind': kind, "
+                "'observedAt': f'2026-08-06T12:00:0{sequence}+00:00', "
+                "'observedAtMonotonicNs': sequence * 100, 'sequence': sequence, "
+                "'bundleIdentifier': 'com.example.Target', "
+                "'applicationName': 'Target', 'pid': 123, "
+                "'sessionStatus': 'known', 'screenUnlocked': True}), flush=True)\n"
+                "def stop(signum, frame):\n"
+                "  emit('terminal')\n"
+                "  raise SystemExit(0)\n"
+                "signal.signal(signal.SIGTERM, stop)\n"
+                "emit('baseline')\n"
                 "time.sleep(0.05)\n"
-                "print(json.dumps(message), flush=True)\n"
-                "time.sleep(30)\n",
+                "emit('heartbeat')\n"
+                "while True: time.sleep(1)\n",
                 encoding="utf-8",
             )
             helper.chmod(0o755)
@@ -557,6 +591,84 @@ class NativeHelperProtocolTests(unittest.TestCase):
             source.start(lambda event: None)
             source.stop()
             self.assertIsNone(source.error)
+
+    def test_focus_source_rejects_sequence_gaps(self):
+        with tempfile.TemporaryDirectory() as temp:
+            helper = Path(temp) / "focus-helper"
+            helper.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, time\n"
+                "def emit(sequence, kind):\n"
+                "  print(json.dumps({"
+                "'protocolVersion': 2, 'kind': 'focus', 'sampleKind': kind, "
+                "'observedAt': f'2026-08-06T12:00:0{sequence}+00:00', "
+                "'observedAtMonotonicNs': sequence * 100, 'sequence': sequence, "
+                "'bundleIdentifier': 'com.example.Target', "
+                "'applicationName': 'Target', 'pid': 123, "
+                "'sessionStatus': 'known', 'screenUnlocked': True}), flush=True)\n"
+                "emit(1, 'baseline')\n"
+                "time.sleep(0.05)\n"
+                "emit(3, 'heartbeat')\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+
+            class Resolver:
+                def resolve(inner_self):
+                    return helper
+
+            source = NSWorkspaceActivationEventSource(
+                helper_resolver=Resolver(),
+                startup_timeout_s=2,
+            )
+            monitor = MacOSFocusMonitor(
+                ["com.example.Target"],
+                event_source=source,
+            )
+            monitor.start()
+            time.sleep(0.1)
+            with self.assertRaisesRegex(
+                NativeMacOSError,
+                "sequence has a gap",
+            ):
+                monitor.stop()
+
+    def test_focus_source_requires_terminal_health_sample(self):
+        with tempfile.TemporaryDirectory() as temp:
+            helper = Path(temp) / "focus-helper"
+            helper.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, time\n"
+                "print(json.dumps({"
+                "'protocolVersion': 2, 'kind': 'focus', 'sampleKind': 'baseline', "
+                "'observedAt': '2026-08-06T12:00:00+00:00', "
+                "'observedAtMonotonicNs': 100, 'sequence': 1, "
+                "'bundleIdentifier': 'com.example.Target', "
+                "'applicationName': 'Target', 'pid': 123, "
+                "'sessionStatus': 'known', 'screenUnlocked': True}), flush=True)\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+
+            class Resolver:
+                def resolve(inner_self):
+                    return helper
+
+            monitor = MacOSFocusMonitor(
+                ["com.example.Target"],
+                event_source=NSWorkspaceActivationEventSource(
+                    helper_resolver=Resolver(),
+                    startup_timeout_s=2,
+                ),
+            )
+            monitor.start()
+            with self.assertRaisesRegex(
+                NativeMacOSError,
+                "terminal health evidence",
+            ):
+                monitor.stop()
 
 
 class ManualActivationSource:
@@ -625,6 +737,43 @@ class FocusMonitorTests(unittest.TestCase):
         self.assertEqual(observed, list(monitor.violations))
         self.assertIn("not allowed", monitor.violations[0].reason)
         self.assertIn("no bundle identifier", monitor.violations[1].reason)
+
+    def test_locked_or_unknown_session_sample_is_a_violation(self):
+        source = ManualActivationSource()
+        monitor = MacOSFocusMonitor(
+            ["com.example.Target"],
+            event_source=source,
+        )
+        monitor.start()
+        source.callback(FocusEvent(
+            "com.example.Target",
+            "Target",
+            100,
+            12.5,
+            "2026-08-06T12:00:00+00:00",
+            1,
+            100,
+            "heartbeat",
+            "known",
+            False,
+        ))
+        source.callback(FocusEvent(
+            "com.example.Target",
+            "Target",
+            100,
+            13.0,
+            "2026-08-06T12:00:01+00:00",
+            2,
+            200,
+            "heartbeat",
+            "unknown",
+            None,
+        ))
+        monitor.stop()
+
+        self.assertEqual(len(monitor.violations), 2)
+        self.assertIn("became locked", monitor.violations[0].reason)
+        self.assertIn("not source-proven", monitor.violations[1].reason)
 
     def test_empty_allowlist_is_rejected(self):
         with self.assertRaises(ValueError):
