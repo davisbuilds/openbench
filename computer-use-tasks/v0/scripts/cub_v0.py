@@ -1167,7 +1167,7 @@ revision = "gpt-5.6-sol"
 [mcp]
 name = "computer-use-mcp"
 version = "0.4.1"
-command = {_toml_array([str(mcp["executable"])])}
+command = {_toml_array([str(mcp["executable"]), "serve"])}
 client_command_env = "CUB_MCP_COMMAND"
 collector_run_id = {_toml_string(f"cub-v0-{arm}-mcp")}
 allowed_tools = {_toml_array(tools)}

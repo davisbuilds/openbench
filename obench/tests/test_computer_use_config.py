@@ -432,6 +432,7 @@ class ComputerUseConfigTests(unittest.TestCase):
                     "revision": "gpt-5.6-sol",
                 })
                 self.assertEqual(parsed["mcp"]["client_command_env"], "CUB_MCP_COMMAND")
+                self.assertEqual(parsed["mcp"]["command"][-1], "serve")
                 self.assertTrue(parsed["proxy"]["required"])
                 self.assertEqual(
                     parsed["focus"]["allowed_delivery_tiers"],
