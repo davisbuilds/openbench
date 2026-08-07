@@ -62,6 +62,7 @@ from .native_trial import (
 from .paths import default_adapters_dir
 from .run import (
     _temporary_environ,
+    _write_proxy_cell_metadata,
     apply_proxy_ledger,
     load_adapter,
     probe_version,
@@ -1779,6 +1780,19 @@ def _managed_proxy(
     server, thread = created
     host, port = server.server_address
     server.register_cell(token)
+    proxy_context = {"ledger_dir": directory}
+    _write_proxy_cell_metadata(
+        proxy_context,
+        token,
+        proxy_harness,
+        config.model_name,
+    )
+    metadata_path = directory / f"{token}.meta.json"
+    if not metadata_path.is_file():
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        raise NativeRunError("native counting proxy metadata was not persisted")
     context = {
         "server": server,
         "thread": thread,
@@ -2100,7 +2114,11 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         raise NativeRunError(
                             "focus helper event omitted its wall-clock timestamp"
                         )
-                    if event.pid != foreground_identity["pid"]:
+                    if (
+                        event.bundle_identifier
+                        == config.focus_policy["required_foreground_bundle_id"]
+                        and event.pid != foreground_identity["pid"]
+                    ):
                         raise NativeRunError(
                             "focus sample does not identify the setup-established "
                             "foreground process"

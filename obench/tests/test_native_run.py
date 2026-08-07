@@ -18,6 +18,7 @@ from unittest.mock import patch
 from obench.native_macos import (
     AppEvidence,
     FocusEvent,
+    FocusViolation,
     LeaseUnavailableError,
     PreflightCheck,
     PreflightResult,
@@ -31,6 +32,7 @@ from obench.native_run import (
     _harness_version_matches,
     _inspect_setup_app_identity,
     _inspect_setup_app_process,
+    _managed_proxy,
     _mcp_serve_owners,
     _recheck_process_identity,
     _require_setup_app,
@@ -908,6 +910,55 @@ media_type = "application/json"
             ],
         )
 
+    def test_native_proxy_persists_registered_cell_metadata(self):
+        class Server:
+            server_address = ("127.0.0.1", 43210)
+
+            def __init__(self):
+                self.registered = []
+                self.sealed = []
+
+            def register_cell(self, token):
+                self.registered.append(token)
+
+            def seal_cell(self, token, timeout_s):
+                self.sealed.append((token, timeout_s))
+
+            def shutdown(self):
+                pass
+
+            def server_close(self):
+                pass
+
+        class Thread:
+            def join(self, timeout):
+                pass
+
+        server = Server()
+        directory = self.root / "proxy-metadata"
+        config = load_config(self.config_path)
+        with patch(
+            "obench.native_run._proxy_context",
+            return_value=(server, Thread()),
+        ):
+            with _managed_proxy(
+                config,
+                directory,
+                self._hooks()[0],
+                "native-1",
+                "codex",
+            ) as context:
+                self.assertEqual(context["token"], "native-1")
+
+        metadata = json.loads(
+            (directory / "native-1.meta.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(metadata["source"], "runner_configured")
+        self.assertEqual(metadata["harness"], "codex")
+        self.assertEqual(metadata["model"], "fixture-model")
+        self.assertEqual(server.registered, ["native-1"])
+        self.assertEqual(server.sealed, [("native-1", 5.0)])
+
     def test_focus_cleanup_does_not_mask_adapter_exception(self):
         class RaisingAdapter(FakeAdapter):
             def run(inner_self, instruction, workdir, model, timeout_s):
@@ -1010,6 +1061,26 @@ media_type = "application/json"
         self.assertEqual(adapter.calls, 1)
         self.assertTrue(monitor.stopped)
         self.assertFalse((self.workspace / "verify.log").exists())
+
+    def test_forbidden_focus_bundle_reports_policy_violation_not_pid_mismatch(self):
+        adapter = FakeAdapter()
+        hooks, _ = self._hooks(adapter)
+        monitor = FakeFocusMonitor(bundle_id="com.apple.Terminal", pid=999)
+        event = FocusEvent(
+            "com.apple.Terminal",
+            "Terminal",
+            999,
+            0.0,
+            datetime.now(timezone.utc).isoformat(),
+        )
+        monitor.violations = (FocusViolation(event, "not allowed"),)
+        hooks.focus_monitor_factory = lambda allowed: monitor
+
+        with self.assertRaisesRegex(NativeRunError, "focus policy violation"):
+            run_native(self.config_path, hooks=hooks)
+
+        self.assertEqual(adapter.calls, 1)
+        self.assertTrue(monitor.stopped)
 
     def test_target_process_swap_after_agent_fails_closed(self):
         adapter = FakeAdapter()
