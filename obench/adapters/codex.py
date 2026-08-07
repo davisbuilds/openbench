@@ -1069,11 +1069,13 @@ def run(
             native_timeout_evidence_error = None
             if native_launcher:
                 try:
-                    _write_and_verify_native_events(
+                    _write_native_evidence(
                         e.stdout or b"",
                         launcher=native_launcher,
                         tool_policy_ledger=native_tool_policy_ledger,
                         allowed_tools=native_allowed_tools,
+                        workdir=workdir,
+                        model=model,
                     )
                 except (OSError, TypeError, ValueError) as exc:
                     native_timeout_evidence_error = str(exc)
@@ -1086,6 +1088,7 @@ def run(
             return {
                 "completed": False,
                 "error": error,
+                "terminal_status": "timeout",
                 "output_tail": full_output[-2000:],
                 "full_output": full_output,
                 "tokens": None,

@@ -662,7 +662,23 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
                         "cached_tokens": 20,
                         "output_tokens": 30,
                     },
-                )
+                ),
+                (
+                    "proxy_terminal",
+                    {
+                        "state": (
+                            "SEALED"
+                            if case["status"] == "completed"
+                            else "ABORTED"
+                        ),
+                        "complete": case["status"] == "completed",
+                        "incomplete_in_flight_count": (
+                            0
+                            if case["status"] == "completed"
+                            else 1
+                        ),
+                    },
+                ),
             ],
         )
     _reseal_manifest(root)
@@ -978,6 +994,25 @@ class NativeTrialTests(unittest.TestCase):
         self.assertEqual(row["candidate_provenance"]["terminal_status"], "timeout")
         self.assertEqual(row["candidate_provenance"]["retry_count"], 1)
         self.assertFalse(row["candidate_provenance"]["proxy_measured"])
+
+    def test_terminal_proxy_marks_incomplete_usage_as_non_ranking(self):
+        row = load_native_trial(self.bundle("terminal_proxy"))
+
+        self.assertEqual(row["failure_class"], "timeout")
+        self.assertEqual(row["usage_evidence_grade"], "proxy_partial")
+        self.assertFalse(row["usage_ranking_eligible"])
+        self.assertEqual(
+            row["usage_ranking_exclusion_reason"],
+            "native_proxy_incomplete_request",
+        )
+        self.assertEqual(
+            row["candidate_provenance"][
+                "proxy_incomplete_in_flight_count"
+            ],
+            1,
+        )
+        self.assertEqual(row["candidate_provenance"]["retry_count"], 0)
+        self.assertTrue(row["candidate_provenance"]["proxy_measured"])
 
     def test_preflight_fixture_accepts_clean_zero_event_focus_seal(self):
         row = load_native_trial(self.bundle("preflight"))
@@ -1336,12 +1371,22 @@ class NativeTrialTests(unittest.TestCase):
             "proxy",
             "native-cub-v0-trial1",
             lock_sha256,
-            [("model_usage", {
-                "input_tokens": 100,
-                "cached_tokens": 20,
-                "output_tokens": 30,
-            })],
-            timestamps=["2026-08-06T11:59:00+00:00"],
+            [
+                ("model_usage", {
+                    "input_tokens": 100,
+                    "cached_tokens": 20,
+                    "output_tokens": 30,
+                }),
+                ("proxy_terminal", {
+                    "state": "SEALED",
+                    "complete": True,
+                    "incomplete_in_flight_count": 0,
+                }),
+            ],
+            timestamps=[
+                "2026-08-06T11:59:00+00:00",
+                "2026-08-06T12:00:05+00:00",
+            ],
         )
         _reseal_manifest(proxy)
         with self.assertRaisesRegex(NativeTrialError, "outside trial timing"):

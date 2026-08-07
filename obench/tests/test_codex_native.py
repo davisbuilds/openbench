@@ -506,6 +506,42 @@ class CodexNativeProfileTests(unittest.TestCase):
         )
         self.assertFalse((self.workspace / "trajectory.json").exists())
 
+    def test_native_timeout_writes_atif_for_valid_completed_events(self):
+        stdout = fixture_stdout().encode("utf-8")
+        timeout = subprocess.TimeoutExpired(
+            ["codex"],
+            10,
+            output=stdout,
+            stderr=b"timed out",
+        )
+
+        def time_out(*args, **kwargs):
+            write_fixture_policy_ledger(
+                self.attempt / "codex-tool-policy.jsonl"
+            )
+            raise timeout
+
+        with mock.patch.dict(os.environ, self.native_env(), clear=True), \
+                mock.patch.object(
+                    self.codex.subprocess,
+                    "run",
+                    side_effect=time_out,
+                ):
+            result = self.codex.run(
+                "use the app", str(self.workspace), "gpt-5.6-sol", 10
+            )
+
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["terminal_status"], "timeout")
+        trajectory = json.loads(
+            (self.workspace / "trajectory.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(validate_trajectory(trajectory), [])
+        self.assertEqual(
+            trajectory["final_metrics"]["total_completion_tokens"],
+            7,
+        )
+
     def test_native_timeout_retains_non_utf8_partial_bytes_exactly(self):
         stdout = b'{"type":"thread.started","thread_id":"thread-1"}\n\xe2'
         timeout = subprocess.TimeoutExpired(

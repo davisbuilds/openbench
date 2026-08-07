@@ -1836,18 +1836,91 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             "required counting-proxy evidence presence does not match lock",
         )
     proxy_records: list[dict[str, Any]] = []
+    proxy_usage_records: list[dict[str, Any]] = []
     proxy_totals: dict[str, int] | None = None
+    proxy_incomplete_in_flight_count = 0
     if proxy_present:
         proxy_records = _verify_ledger(
             root,
             "proxy",
             trial_id=trial_id,
             lock_sha256=lock_sha256,
-            allowed_kinds={"model_usage"},
+            allowed_kinds={"model_usage", "proxy_terminal"},
         )
+        terminal_records = [
+            record
+            for record in proxy_records
+            if record["kind"] == "proxy_terminal"
+        ]
+        if len(terminal_records) != 1 or proxy_records[-1] is not terminal_records[0]:
+            raise _fail(
+                "proxy/ledger.jsonl",
+                "requires exactly one final proxy_terminal record",
+            )
+        terminal_payload = terminal_records[0]["payload"]
+        _exact_fields(
+            terminal_payload,
+            {"state", "complete", "incomplete_in_flight_count"},
+            "proxy/ledger.jsonl.proxy_terminal.payload",
+        )
+        if terminal_payload["state"] not in {"SEALED", "ABORTED"}:
+            raise _fail(
+                "proxy/ledger.jsonl.proxy_terminal.payload.state",
+                "must be SEALED or ABORTED",
+            )
+        if not isinstance(terminal_payload["complete"], bool):
+            raise _fail(
+                "proxy/ledger.jsonl.proxy_terminal.payload.complete",
+                "expected a boolean",
+            )
+        proxy_incomplete_in_flight_count = _integer(
+            terminal_payload["incomplete_in_flight_count"],
+            "proxy/ledger.jsonl.proxy_terminal.payload."
+            "incomplete_in_flight_count",
+        )
+        if result["status"] == "completed":
+            expected_terminal = {
+                "state": "SEALED",
+                "complete": True,
+                "incomplete_in_flight_count": 0,
+            }
+        else:
+            expected_terminal = {
+                "state": "ABORTED",
+                "complete": False,
+                "incomplete_in_flight_count":
+                    proxy_incomplete_in_flight_count,
+            }
+        if terminal_payload != expected_terminal:
+            raise _fail(
+                "proxy/ledger.jsonl.proxy_terminal.payload",
+                "contradicts the native trial terminal status",
+            )
+        proxy_usage_records = [
+            record
+            for record in proxy_records
+            if record["kind"] == "model_usage"
+        ]
         proxy_totals = {"input_tokens": 0, "cached_tokens": 0, "output_tokens": 0}
         previous_proxy_time: datetime | None = None
         for index, record in enumerate(proxy_records):
+            observed = _timestamp(
+                record["timestamp"],
+                f"proxy/ledger.jsonl:{index + 1}.timestamp",
+            )
+            if observed < started or observed > finished:
+                raise _fail(
+                    f"proxy/ledger.jsonl:{index + 1}.timestamp",
+                    "falls outside trial timing",
+                )
+            if previous_proxy_time is not None and observed < previous_proxy_time:
+                raise _fail(
+                    f"proxy/ledger.jsonl:{index + 1}.timestamp",
+                    "precedes the prior proxy record",
+                )
+            previous_proxy_time = observed
+            if record["kind"] != "model_usage":
+                continue
             payload = record["payload"]
             _exact_fields(
                 payload,
@@ -1864,21 +1937,6 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                     f"proxy/ledger.jsonl:{index + 1}.payload",
                     "cached tokens exceed input tokens",
                 )
-            observed = _timestamp(
-                record["timestamp"],
-                f"proxy/ledger.jsonl:{index + 1}.timestamp",
-            )
-            if observed < started or observed > finished:
-                raise _fail(
-                    f"proxy/ledger.jsonl:{index + 1}.timestamp",
-                    "falls outside trial timing",
-                )
-            if previous_proxy_time is not None and observed < previous_proxy_time:
-                raise _fail(
-                    f"proxy/ledger.jsonl:{index + 1}.timestamp",
-                    "precedes the prior proxy record",
-                )
-            previous_proxy_time = observed
         if usage["input"] is None or proxy_totals != {
             "input_tokens": usage["input"],
             "cached_tokens": usage["cached"],
@@ -2166,6 +2224,14 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 "process_event_count": len(process_records),
                 "mcp_event_count": len(mcp_records),
                 "proxy_measured": proxy_present,
+                "proxy_terminal_state": (
+                    terminal_payload["state"] if proxy_present else None
+                ),
+                "proxy_incomplete_in_flight_count": (
+                    proxy_incomplete_in_flight_count
+                    if proxy_present
+                    else None
+                ),
             },
             "version_drift": False,
             "timeout_s": float(lock["budget"]["timeout_s"]),
@@ -2174,11 +2240,21 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 "sha256": final_state_sha256,
             },
             "usage_evidence_grade": (
-                "proxy_reconciled" if proxy_present else "agent_reported"
+                "proxy_partial"
+                if proxy_incomplete_in_flight_count
+                else "proxy_reconciled"
+                if proxy_present
+                else "agent_reported"
             ),
-            "usage_ranking_eligible": proxy_present,
+            "usage_ranking_eligible": (
+                proxy_present and proxy_incomplete_in_flight_count == 0
+            ),
             "usage_ranking_exclusion_reason": (
-                None if proxy_present else "native_proxy_evidence_absent"
+                "native_proxy_incomplete_request"
+                if proxy_incomplete_in_flight_count
+                else None
+                if proxy_present
+                else "native_proxy_evidence_absent"
             ),
         }
     )
@@ -2186,7 +2262,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     if proxy_totals is not None:
         row.update(
             {
-                "tokens_proxy_calls": len(proxy_records),
+                "tokens_proxy_calls": len(proxy_usage_records),
                 "tokens_proxy_input_uncached": (
                     proxy_totals["input_tokens"] - proxy_totals["cached_tokens"]
                 ),

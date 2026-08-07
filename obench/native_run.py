@@ -1785,19 +1785,27 @@ def _copy_artifacts(
     return entries
 
 
-def _snapshot_judged_evidence(
-    config: NativeRunConfig, destination: Path
+def _snapshot_final_evidence(
+    config: NativeRunConfig,
+    destination: Path,
+    *,
+    include_verdict: bool,
 ) -> str:
-    sources = [config.atif_path, config.verdict_path]
+    sources = [config.atif_path]
+    if include_verdict:
+        sources.append(config.verdict_path)
     sources.extend(item.source for item in config.artifacts)
     for relative in sources:
         source = config.workspace / relative
         if not source.is_file() or source.is_symlink():
-            raise NativeRunError(f"judged evidence is unavailable: {relative}")
+            phase = "judged" if include_verdict else "terminal"
+            raise NativeRunError(f"{phase} evidence is unavailable: {relative}")
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
-    return _canonical_digest(_path_inventory(destination, label="judged evidence snapshot"))
+    return _canonical_digest(
+        _path_inventory(destination, label="final evidence snapshot")
+    )
 
 
 def _verify_mcp_policy(path: Path, policy: Mapping[str, Any]) -> None:
@@ -1912,11 +1920,11 @@ def _managed_proxy(
         thread.join(timeout=5)
 
 
-def _proxy_usage(
+def _proxy_evidence(
     context: Mapping[str, Any] | None, *, allow_aborted: bool = False
-) -> list[dict[str, int]]:
+) -> tuple[list[dict[str, int]], dict[str, Any] | None]:
     if context is None:
-        return []
+        return [], None
     rows = read_proxy_ledger(context["ledger_dir"], context["token"])
     if not rows or rows[-1].get("record_type") != "ledger_seal":
         raise NativeRunError("counting proxy ledger is not durably sealed")
@@ -1934,13 +1942,34 @@ def _proxy_usage(
     apply_proxy_ledger(measured, rows[:-1])
     if measured.get("proxy_capture_truncated") or measured.get("token_basis_proxy") != "proxy_measured":
         if measured.get("tokens_proxy_calls") == 0:
-            return []
-        raise NativeRunError("counting proxy evidence is incomplete")
-    return [{
-        "input_tokens": int(measured.get("tokens_proxy_input_uncached") or 0) + int(measured.get("tokens_proxy_cache_read") or 0),
-        "cached_tokens": int(measured.get("tokens_proxy_cache_read") or 0),
-        "output_tokens": int(measured.get("tokens_proxy_output") or 0),
-    }]
+            usage = []
+        else:
+            raise NativeRunError("counting proxy evidence is incomplete")
+    else:
+        usage = [{
+            "input_tokens": int(measured.get("tokens_proxy_input_uncached") or 0)
+            + int(measured.get("tokens_proxy_cache_read") or 0),
+            "cached_tokens": int(measured.get("tokens_proxy_cache_read") or 0),
+            "output_tokens": int(measured.get("tokens_proxy_output") or 0),
+        }]
+    terminal = {
+        "state": seal["state"],
+        "complete": seal.get("complete", seal["state"] == "SEALED"),
+        "incomplete_in_flight_count": seal.get(
+            "incomplete_in_flight_count", 0
+        ),
+    }
+    return usage, terminal
+
+
+def _proxy_usage(
+    context: Mapping[str, Any] | None, *, allow_aborted: bool = False
+) -> list[dict[str, int]]:
+    usage, _terminal = _proxy_evidence(
+        context,
+        allow_aborted=allow_aborted,
+    )
+    return usage
 
 
 def _attempt_record(path: Path, value: Mapping[str, Any]) -> None:
@@ -2101,12 +2130,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         setup_s = agent_s = verifier_s = 0.0
         chosen_mcp: Path | None = None
         proxy_usage: list[dict[str, int]] = []
+        proxy_terminal: dict[str, Any] | None = None
         focus_events: list[tuple[str, Mapping[str, Any]]] = []
         process_events: list[tuple[str, str, Mapping[str, Any]]] = []
         adapter_result: Mapping[str, Any] | None = None
         verifier_outcome = None
-        judged_snapshot: Path | None = None
-        judged_snapshot_sha256: str | None = None
+        evidence_snapshot: Path | None = None
+        evidence_snapshot_sha256: str | None = None
+        result_status: str | None = None
+        outcome_error: str | None = None
+        failure_reason: str | None = None
         completed_attempts = 0
         agent_started_at: datetime | None = None
         agent_finished_at: datetime | None = None
@@ -2372,7 +2405,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         ),
                     )
                 )
-                proxy_usage = _proxy_usage(
+                proxy_usage, proxy_terminal = _proxy_evidence(
                     proxy_context,
                     allow_aborted=not bool(
                         isinstance(adapter_result, Mapping)
@@ -2415,7 +2448,25 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         "startup retry refused because zero-token evidence is absent"
                     )
                 if not adapter_result.get("completed"):
-                    raise NativeRunError(str(adapter_result.get("error") or "agent phase failed"))
+                    if adapter_result.get("terminal_status") != "timeout":
+                        raise NativeRunError(
+                            str(adapter_result.get("error") or "agent phase failed")
+                        )
+                    chosen_mcp = ledger
+                    if focus_violations:
+                        raise NativeRunError(
+                            "focus policy violation observed during agent phase"
+                        )
+                    result_status = "timeout"
+                    outcome_error = f"timeout after {config.timeout_s:g}s"
+                    failure_reason = "deadline_exceeded"
+                    evidence_snapshot = attempt_root / "terminal"
+                    evidence_snapshot_sha256 = _snapshot_final_evidence(
+                        config,
+                        evidence_snapshot,
+                        include_verdict=False,
+                    )
+                    break
                 chosen_mcp = ledger
                 if focus_violations:
                     raise NativeRunError(
@@ -2425,9 +2476,12 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 verifier_s += verifier_outcome.duration_s
                 if not verifier_outcome.passed:
                     raise NativeRunError(f"verifier phase {verifier_outcome.status.value}")
-                judged_snapshot = attempt_root / "judged"
-                judged_snapshot_sha256 = _snapshot_judged_evidence(
-                    config, judged_snapshot
+                result_status = "completed"
+                evidence_snapshot = attempt_root / "judged"
+                evidence_snapshot_sha256 = _snapshot_final_evidence(
+                    config,
+                    evidence_snapshot,
+                    include_verdict=True,
                 )
                 break
             else:  # pragma: no cover - bounded loop always exits or breaks
@@ -2473,17 +2527,19 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
             raise NativeRunError("focus policy violation observed during native trial")
         if not focus_events:
             raise NativeRunError("focus helper produced no observed foreground samples")
-        if chosen_mcp is None or verifier_outcome is None:
-            raise NativeRunError("native trial did not reach verifier completion")
-        if judged_snapshot is None or judged_snapshot_sha256 is None:
-            raise NativeRunError("native trial has no judged evidence snapshot")
+        if chosen_mcp is None or result_status is None:
+            raise NativeRunError("native trial did not reach a terminal outcome")
+        if result_status == "completed" and verifier_outcome is None:
+            raise NativeRunError("completed native trial has no verifier outcome")
+        if evidence_snapshot is None or evidence_snapshot_sha256 is None:
+            raise NativeRunError("native trial has no final evidence snapshot")
         if (
             _canonical_digest(
-                _path_inventory(judged_snapshot, label="judged evidence snapshot")
+                _path_inventory(evidence_snapshot, label="final evidence snapshot")
             )
-            != judged_snapshot_sha256
+            != evidence_snapshot_sha256
         ):
-            raise NativeRunError("reset mutated the captured judged evidence")
+            raise NativeRunError("reset mutated the captured final evidence")
         if _sha256(config.instruction_path) != instruction_sha256:
             raise NativeRunError("instruction bytes changed during native execution")
         if (
@@ -2561,9 +2617,9 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
             }
             _write_json(bundle / "lock.json", lock)
             lock_sha256 = _sha256(bundle / "lock.json")
-            _copy_atif(config, bundle, started, source_root=judged_snapshot)
+            _copy_atif(config, bundle, started, source_root=evidence_snapshot)
             artifact_entries = _copy_artifacts(
-                config, bundle, source_root=judged_snapshot
+                config, bundle, source_root=evidence_snapshot
             )
             _write_json(bundle / "artifacts/manifest.json", {
                 "schema_version": BUNDLE_SCHEMA_VERSION,
@@ -2574,13 +2630,38 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 "artifacts": artifact_entries,
             })
             final_digest = _final_state_digest(artifact_entries)
-            try:
-                verdict = json.loads((judged_snapshot / config.verdict_path).read_text(encoding="utf-8"))
-                score, checker_exit = verdict["score"], verdict["checker_exit"]
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
-                raise NativeRunError(f"verifier verdict is unavailable or malformed: {exc}") from exc
-            if checker_exit == 0 and float(score) != 1.0 or checker_exit != 0 and float(score) == 1.0:
-                raise NativeRunError("verifier score and checker exit disagree")
+            score: int | float | None = None
+            checker_exit: int | None = None
+            if result_status == "completed":
+                try:
+                    verdict = json.loads(
+                        (
+                            evidence_snapshot / config.verdict_path
+                        ).read_text(encoding="utf-8")
+                    )
+                    score, checker_exit = (
+                        verdict["score"],
+                        verdict["checker_exit"],
+                    )
+                except (
+                    OSError,
+                    UnicodeDecodeError,
+                    json.JSONDecodeError,
+                    KeyError,
+                    TypeError,
+                ) as exc:
+                    raise NativeRunError(
+                        f"verifier verdict is unavailable or malformed: {exc}"
+                    ) from exc
+                if (
+                    checker_exit == 0
+                    and float(score) != 1.0
+                    or checker_exit != 0
+                    and float(score) == 1.0
+                ):
+                    raise NativeRunError(
+                        "verifier score and checker exit disagree"
+                    )
             (bundle / "mcp").mkdir(parents=True, exist_ok=True)
             shutil.copyfile(chosen_mcp, bundle / "mcp/ledger.jsonl")
             mcp_count = verify_ledger(bundle / "mcp/ledger.jsonl").call_count
@@ -2597,23 +2678,46 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 process_writer.append(kind, payload, observed)
             process_writer.seal()
             if config.proxy_required:
+                if proxy_terminal is None:
+                    raise NativeRunError(
+                        "required counting proxy terminal evidence is absent"
+                    )
                 proxy_writer = _LedgerWriter(bundle, "proxy", config.trial_id, lock_sha256)
                 for usage in proxy_usage:
                     proxy_writer.append("model_usage", usage, finished.isoformat())
+                proxy_writer.append(
+                    "proxy_terminal",
+                    proxy_terminal,
+                    finished.isoformat(),
+                )
                 proxy_writer.seal()
+            verifier_status = (
+                "judged" if result_status == "completed" else "not_run"
+            )
             _write_json(bundle / "verifier/reward.json", {
                 "schema_version": BUNDLE_SCHEMA_VERSION, "trial_id": config.trial_id,
-                "lock_sha256": lock_sha256, "status": "judged", "reward": score,
+                "lock_sha256": lock_sha256, "status": verifier_status,
+                "reward": score,
             })
             _write_json(bundle / "verifier/evidence.json", {
                 "schema_version": BUNDLE_SCHEMA_VERSION, "trial_id": config.trial_id,
-                "lock_sha256": lock_sha256, "status": "judged", "checker_exit": checker_exit,
+                "lock_sha256": lock_sha256, "status": verifier_status,
+                "checker_exit": checker_exit,
                 "reward": score, "task_content_sha256": task_sidecar["task_content_sha256"],
                 "final_state_sha256": final_digest,
             })
+            completed = result_status == "completed"
+            failure_class = (
+                "solved"
+                if completed and checker_exit == 0
+                else "wrong_answer"
+                if completed
+                else result_status
+            )
             _write_json(bundle / "result.json", {
                 "schema_version": BUNDLE_SCHEMA_VERSION, "trial_id": config.trial_id,
-                "lock_sha256": lock_sha256, "status": "completed", "attempts": completed_attempts,
+                "lock_sha256": lock_sha256, "status": result_status,
+                "attempts": completed_attempts,
                 "retry_count": completed_attempts - 1, "timeout_s": config.timeout_s,
                 "started_at": started.isoformat(), "finished_at": finished.isoformat(),
                 "agent_started_at": (
@@ -2627,9 +2731,14 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     else None
                 ),
                 "timings": {"env_setup_s": setup_s, "agent_s": agent_s, "verifier_s": verifier_s, "total_s": total_s},
-                "outcome": {"completed": True, "score": score, "checker_exit": checker_exit,
-                    "error": None, "failure_class": "solved" if checker_exit == 0 else "wrong_answer",
-                    "failure_reason": None},
+                "outcome": {
+                    "completed": completed,
+                    "score": score,
+                    "checker_exit": checker_exit,
+                    "error": outcome_error,
+                    "failure_class": failure_class,
+                    "failure_reason": failure_reason,
+                },
                 "mcp_event_count": mcp_count,
                 "focus_event_count": len(focus_events),
                 "process_event_count": len(process_events),

@@ -478,6 +478,15 @@ class ComputerUseConfigTests(unittest.TestCase):
                     expected_delivery_tiers[cell["task"]],
                 )
                 self.assertTrue(parsed["atif_path"].endswith("trajectory.json"))
+                expected_artifact_source = (
+                    "artifacts/openbench-exact.txt"
+                    if cell["task"] == "textedit-exact-file"
+                    else "artifacts/fixture-state.json"
+                )
+                self.assertEqual(
+                    parsed["artifacts"][0]["source"],
+                    expected_artifact_source,
+                )
                 command = parsed["phases"]["setup"]["command"]
                 self.assertEqual(command[-1], "setup")
                 setup_commands.add(tuple(command))

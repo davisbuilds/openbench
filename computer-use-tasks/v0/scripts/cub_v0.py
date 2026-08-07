@@ -739,7 +739,7 @@ def _initial_state_ready(root: Path, arm: str, task: str, trial_index: int) -> b
     if task == "textedit-exact-file":
         output = workspace / "artifacts/openbench-exact.txt"
         return (workspace / "run-context.json").is_file() and not output.exists()
-    state_path = _evidence(root, arm, task, trial_index) / "fixture-state.json"
+    state_path = workspace / "artifacts/fixture-state.json"
     expected = {
         "basic-controls": {
             "fixture": "basic-controls", "honest_counter": 0,
@@ -810,9 +810,9 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
             return 0
     reset_runtime(request_path, arm, task, trial_index)
     workspace = _workspace(root, arm, task, trial_index)
-    evidence = _evidence(root, arm, task, trial_index)
     workspace.mkdir(parents=True, exist_ok=True)
-    evidence.mkdir(parents=True, exist_ok=True)
+    artifacts = workspace / "artifacts"
+    artifacts.mkdir()
     logs = descendant(root, f"runtime/{task}/trial{trial_index}/{arm}/logs")
     apps = root / "apps"
     processes: list[dict[str, Any]] = []
@@ -827,7 +827,7 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
 
     env = os.environ.copy()
     if task == "basic-controls":
-        state = evidence / "fixture-state.json"
+        state = artifacts / "fixture-state.json"
         env.update({
             "COMPUTER_USE_FIXTURE_STATE_PATH": str(state),
             "COMPUTER_USE_FIXTURE_FOREGROUND": "1",
@@ -835,15 +835,13 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
         executable = apps / "ComputerUseFixture.app/Contents/MacOS/ComputerUseFixture"
         remember(_launch(executable, (), env, logs / "fixture.log"))
     elif task == "background-control":
-        state = evidence / "fixture-state.json"
+        state = artifacts / "fixture-state.json"
         env["COMPUTER_USE_FIXTURE_STATE_PATH"] = str(state)
         fixture = apps / "BackgroundControlFixture.app/Contents/MacOS/BackgroundControlFixture"
         guard = apps / "FocusGuard.app/Contents/MacOS/FocusGuard"
         remember(_launch(fixture, (), env, logs / "fixture.log"))
         remember(_launch(guard, (), os.environ.copy(), logs / "guard.log"))
     else:
-        artifacts = workspace / "artifacts"
-        artifacts.mkdir()
         relative = "artifacts/openbench-exact.txt"
         (workspace / "run-context.json").write_text(
             _canonical({"schema_version": RUN_CONTEXT_SCHEMA, "output_path": relative}) + "\n",
@@ -879,18 +877,14 @@ def verify(request_path: Path, arm: str, task: str, trial_index: int) -> int:
     request = _load_request(request_path)
     root, _repo, _installed = _request_paths(request)
     workspace = _workspace(root, arm, task, trial_index)
-    evidence = _evidence(root, arm, task, trial_index)
     runner = workspace / "runner"
-    final = runner / "final-state"
-    final.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["TASK_DIR"] = str(ROOT / task)
     if task == "textedit-exact-file":
         env["OPENBENCH_NATIVE_OUTPUT_PATH"] = str(workspace / "artifacts/openbench-exact.txt")
         command = ["bash", str(ROOT / task / "checker.sh")]
-        artifact = workspace / "artifacts/openbench-exact.txt"
     else:
-        state = evidence / "fixture-state.json"
+        state = workspace / "artifacts/fixture-state.json"
         if task == "basic-controls":
             env["OPENBENCH_FIXTURE_STATE_PATH"] = str(state)
             command = ["bash", str(ROOT / task / "checker.sh")]
@@ -902,13 +896,10 @@ def verify(request_path: Path, arm: str, task: str, trial_index: int) -> int:
                 "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.verify_state(sys.argv[2])",
                 str(ROOT / task / "checker_data/verify.py"), str(state),
             ]
-        artifact = state
     result = subprocess.run(
         command, cwd=workspace, env=env, stdin=subprocess.DEVNULL,
         capture_output=True, text=True, timeout=30, check=False,
     )
-    if result.returncode == 0:
-        shutil.copyfile(artifact, final / ("output.txt" if task == "textedit-exact-file" else "state.json"))
     verdict = {
         "checker_exit": result.returncode,
         "score": 1.0 if result.returncode == 0 else 0.0,
@@ -980,12 +971,12 @@ def _oracle_paths(task: str) -> list[Path]:
 def _artifact_contract(task: str) -> tuple[str, str, str]:
     if task == "textedit-exact-file":
         return (
-            "runner/final-state/output.txt",
+            "artifacts/openbench-exact.txt",
             "output.txt",
             "text/plain; charset=utf-8",
         )
     return (
-        "runner/final-state/state.json",
+        "artifacts/fixture-state.json",
         "state.json",
         "application/json",
     )

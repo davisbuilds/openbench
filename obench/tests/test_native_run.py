@@ -1748,6 +1748,65 @@ media_type = "application/json"
         self.assertTrue((self.workspace / "reset.log").is_file())
         self.assertTrue(monitor.stopped)
 
+    def test_agent_timeout_emits_sealed_terminal_bundle_without_verifier(self):
+        class TimeoutAdapter(FakeAdapter):
+            def run(inner_self, instruction, workdir, model, timeout_s):
+                result = super().run(
+                    instruction,
+                    workdir,
+                    model,
+                    timeout_s,
+                )
+                return {
+                    **result,
+                    "completed": False,
+                    "error": f"timeout after {timeout_s}s",
+                    "terminal_status": "timeout",
+                }
+
+        content = self.config_path.read_text(encoding="utf-8")
+        content = content.replace(
+            "timeout_s = 30\nmax_retries = 1",
+            "timeout_s = 0.001\nmax_retries = 0",
+        )
+        self.config_path.write_text(content, encoding="utf-8")
+        (self.workspace / "fail-verifier").touch()
+        hooks, monitor = self._hooks(TimeoutAdapter())
+
+        outcome = run_native(self.config_path, hooks=hooks)
+
+        self.assertTrue(monitor.stopped)
+        self.assertTrue((self.workspace / "reset.log").is_file())
+        self.assertEqual(outcome.row["failure_class"], "timeout")
+        self.assertFalse(outcome.row["completed"])
+        self.assertFalse(outcome.row["success"])
+        self.assertIsNone(outcome.row["checker_exit"])
+        self.assertIsNone(outcome.row["score"])
+        self.assertEqual(
+            outcome.row["candidate_provenance"]["terminal_status"],
+            "timeout",
+        )
+        reward = json.loads(
+            (outcome.bundle_dir / "verifier/reward.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(reward, {
+            "lock_sha256": reward["lock_sha256"],
+            "reward": None,
+            "schema_version": reward["schema_version"],
+            "status": "not_run",
+            "trial_id": "native-fixture-trial1",
+        })
+        self.assertEqual(
+            len(outcome.results_path.read_text(encoding="utf-8").splitlines()),
+            1,
+        )
+        self.assertEqual(
+            load_native_trial(outcome.bundle_dir)["run_id"],
+            outcome.row["run_id"],
+        )
+
     def test_verifier_failure_still_resets_and_stops_monitor(self):
         (self.workspace / "fail-verifier").touch()
         hooks, monitor = self._hooks()
