@@ -97,6 +97,37 @@ def _write_ledger(
     )
 
 
+def _focus_payload(
+    state,
+    frontmost_bundle_id,
+    *,
+    attempt=1,
+    frontmost_pid=123,
+):
+    return {
+        "attempt": attempt,
+        "state": state,
+        "frontmost_bundle_id": frontmost_bundle_id,
+        "frontmost_pid": frontmost_pid,
+        "target_bundle_id": "com.openbench.fixture",
+        "target_pid": 123,
+    }
+
+
+def _read_ledger(root, prefix):
+    records = [
+        json.loads(line)
+        for line in (root / prefix / "ledger.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line
+    ]
+    return (
+        [(record["kind"], record["payload"]) for record in records],
+        [record["timestamp"] for record in records],
+    )
+
+
 def _write_mcp_ledger(
     root,
     trial_id,
@@ -274,7 +305,10 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
             },
         },
         "budget": {"timeout_s": case["timeout_s"], "max_retries": 1},
-        "evidence": {"proxy_required": case["proxy"]},
+        "evidence": {
+            "proxy_required": case["proxy"],
+            "process_monitor_required": True,
+        },
     }
     _write_json(root / "lock.json", lock)
     lock_sha256 = _sha256(root / "lock.json")
@@ -366,6 +400,132 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
         if completed
         else case["status"]
     )
+    required_foreground = case.get(
+        "required_foreground_bundle_id", "com.openbench.fixture"
+    )
+    foreground_pid = 123 if required_foreground == "com.openbench.fixture" else 456
+    process_records = []
+    process_timestamps = []
+    focus_records = []
+    focus_timestamps = []
+    if not preflight_failed:
+        attempt_count = case["retry_count"] + 1
+        attempt_windows = {
+            attempt: (
+                (
+                    "2026-08-06T12:00:00.100000+00:00",
+                    "2026-08-06T12:00:00.200000+00:00",
+                    "2026-08-06T12:00:00.500000+00:00",
+                    "2026-08-06T12:00:00.600000+00:00",
+                    [
+                        "2026-08-06T12:00:00+00:00",
+                        "2026-08-06T12:00:00.300000+00:00",
+                        "2026-08-06T12:00:00.600000+00:00",
+                    ],
+                )
+                if attempt < attempt_count
+                else (
+                    "2026-08-06T12:00:00.900000+00:00",
+                    "2026-08-06T12:00:01+00:00",
+                    "2026-08-06T12:00:08+00:00",
+                    "2026-08-06T12:00:08.100000+00:00",
+                    [
+                        "2026-08-06T12:00:00.900000+00:00",
+                        "2026-08-06T12:00:01.500000+00:00",
+                        "2026-08-06T12:00:02.500000+00:00",
+                        "2026-08-06T12:00:03.500000+00:00",
+                        "2026-08-06T12:00:04.500000+00:00",
+                        "2026-08-06T12:00:05.500000+00:00",
+                        "2026-08-06T12:00:06.500000+00:00",
+                        "2026-08-06T12:00:07.500000+00:00",
+                        "2026-08-06T12:00:08.100000+00:00",
+                    ],
+                )
+            )
+            for attempt in range(1, attempt_count + 1)
+        }
+        for attempt, (
+            setup_at,
+            agent_start,
+            agent_finish,
+            terminal_at,
+            _owner_times,
+        ) in attempt_windows.items():
+            for phase, timestamp in (
+                ("setup", setup_at),
+                ("terminal", terminal_at),
+            ):
+                for role, bundle_id, pid in (
+                    ("target", "com.openbench.fixture", 123),
+                    ("foreground", required_foreground, foreground_pid),
+                ):
+                    process_records.append((
+                        "process_identity",
+                        {
+                            "attempt": attempt,
+                            "phase": phase,
+                            "role": role,
+                            "bundle_id": bundle_id,
+                            "pid": pid,
+                            "version": "1.2.3",
+                            "build": "45",
+                            "binary_sha256": HEX_A,
+                            "signature_sha256": HEX_B,
+                            "cdhash": "c" * 40,
+                            "process_start_token": (
+                                "Fri Aug 7 12:00:00 2026"
+                            ),
+                        },
+                    ))
+                    process_timestamps.append(timestamp)
+            for boundary, timestamp in (
+                ("start", agent_start),
+                ("finish", agent_finish),
+            ):
+                process_records.append((
+                    "agent_boundary",
+                    {"attempt": attempt, "boundary": boundary},
+                ))
+                process_timestamps.append(timestamp)
+        for attempt, window in attempt_windows.items():
+            for timestamp in window[4]:
+                process_records.append((
+                    "mcp_owner_sample",
+                    {
+                        "attempt": attempt,
+                        "unrelated_serve_pids": [],
+                    },
+                ))
+                process_timestamps.append(timestamp)
+        ordered_process = sorted(
+            zip(process_timestamps, process_records), key=lambda item: item[0]
+        )
+        process_timestamps = [item[0] for item in ordered_process]
+        process_records = [item[1] for item in ordered_process]
+        for attempt, window in attempt_windows.items():
+            sample_times = (
+                window[4]
+                if attempt < attempt_count
+                else [
+                    f"2026-08-06T12:00:{second:02d}+00:00"
+                    for second in range(1, 9)
+                ]
+            )
+            for timestamp in sample_times:
+                focus_records.append((
+                    "focus_sample",
+                    _focus_payload(
+                        "observed",
+                        case.get(
+                            "observed_foreground_bundle_id",
+                            required_foreground,
+                        ),
+                        attempt=attempt,
+                        frontmost_pid=foreground_pid,
+                    ),
+                ))
+                focus_timestamps.append(timestamp)
+
     _write_json(
         root / "result.json",
         {
@@ -403,7 +563,8 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
                 "failure_reason": None if completed else "deadline_exceeded",
             },
             "mcp_event_count": 0 if preflight_failed else 1,
-            "focus_event_count": 0 if preflight_failed else 8,
+            "focus_event_count": len(focus_records),
+            "process_event_count": len(process_records),
         },
     )
     verifier_status = "judged" if completed else "not_run"
@@ -444,27 +605,16 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
         "focus",
         trial_id,
         lock_sha256,
-        [] if preflight_failed else [
-            (
-                "focus_sample",
-                {
-                    "state": "observed",
-                    "frontmost_bundle_id": case.get(
-                        "observed_foreground_bundle_id", "com.openbench.fixture"
-                    ),
-                    "target_bundle_id": "com.openbench.fixture",
-                },
-            )
-            for _ in range(8)
-        ],
-        timestamps=(
-            None
-            if preflight_failed
-            else [
-                f"2026-08-06T12:00:{second:02d}+00:00"
-                for second in range(1, 9)
-            ]
-        ),
+        focus_records,
+        timestamps=focus_timestamps or None,
+    )
+    _write_ledger(
+        root,
+        "process",
+        trial_id,
+        lock_sha256,
+        process_records,
+        timestamps=process_timestamps,
     )
     if case["proxy"]:
         _write_ledger(
@@ -527,7 +677,263 @@ class NativeTrialTests(unittest.TestCase):
             provenance["monitor_health_evidence"]["agent_phase_finished_at"],
             "2026-08-06T12:00:08+00:00",
         )
-        self.assertIn("not malicious operator forgery", provenance["operator_trust_boundary"])
+        self.assertIn(
+            "not malicious operator forgery",
+            provenance["operator_trust_boundary"],
+        )
+
+    def test_process_attribution_tampering_is_rejected(self):
+        owner = self.bundle("happy")
+        records, timestamps = _read_ledger(owner, "process")
+        for kind, payload in records:
+            if kind == "mcp_owner_sample":
+                payload["unrelated_serve_pids"] = [4312]
+                break
+        _write_ledger(
+            owner,
+            "process",
+            "native-cub-v0-trial1",
+            _sha256(owner / "lock.json"),
+            records,
+            timestamps=timestamps,
+        )
+        _reseal_manifest(owner)
+        with self.assertRaisesRegex(NativeTrialError, "serve owner observed"):
+            load_native_trial(owner)
+
+        swapped = self.bundle("happy")
+        records, timestamps = _read_ledger(swapped, "process")
+        for kind, payload in records:
+            if (
+                kind == "process_identity"
+                and payload["phase"] == "terminal"
+                and payload["role"] == "target"
+            ):
+                payload["pid"] = 124
+                break
+        _write_ledger(
+            swapped,
+            "process",
+            "native-cub-v0-trial1",
+            _sha256(swapped / "lock.json"),
+            records,
+            timestamps=timestamps,
+        )
+        _reseal_manifest(swapped)
+        with self.assertRaisesRegex(NativeTrialError, "identity changed"):
+            load_native_trial(swapped)
+
+        reincarnated = self.bundle("happy")
+        records, timestamps = _read_ledger(reincarnated, "process")
+        for kind, payload in records:
+            if (
+                kind == "process_identity"
+                and payload["phase"] == "terminal"
+                and payload["role"] == "target"
+            ):
+                payload["process_start_token"] = (
+                    "Fri Aug 7 12:00:01 2026"
+                )
+                break
+        _write_ledger(
+            reincarnated,
+            "process",
+            "native-cub-v0-trial1",
+            _sha256(reincarnated / "lock.json"),
+            records,
+            timestamps=timestamps,
+        )
+        _reseal_manifest(reincarnated)
+        with self.assertRaisesRegex(NativeTrialError, "identity changed"):
+            load_native_trial(reincarnated)
+
+        substituted = self.bundle("happy")
+        records, timestamps = _read_ledger(substituted, "focus")
+        records[0][1]["frontmost_pid"] = 999
+        _write_ledger(
+            substituted,
+            "focus",
+            "native-cub-v0-trial1",
+            _sha256(substituted / "lock.json"),
+            records,
+            timestamps=timestamps,
+        )
+        _reseal_manifest(substituted)
+        with self.assertRaisesRegex(NativeTrialError, "focus PID"):
+            load_native_trial(substituted)
+
+        gap = self.bundle("happy")
+        records, timestamps = _read_ledger(gap, "process")
+        retained = [
+            (timestamp, record)
+            for timestamp, record in zip(timestamps, records)
+            if record[0] in {"process_identity", "agent_boundary"}
+            or timestamp
+            in {
+                "2026-08-06T12:00:00.900000+00:00",
+                "2026-08-06T12:00:08.100000+00:00",
+            }
+        ]
+        _write_ledger(
+            gap,
+            "process",
+            "native-cub-v0-trial1",
+            _sha256(gap / "lock.json"),
+            [record for _, record in retained],
+            timestamps=[timestamp for timestamp, _ in retained],
+        )
+        result_path = gap / "result.json"
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result["process_event_count"] = len(retained)
+        _write_json(result_path, result)
+        _reseal_manifest(gap)
+        with self.assertRaisesRegex(NativeTrialError, "heartbeat gap"):
+            load_native_trial(gap)
+
+        removed = self.bundle("happy")
+        records, timestamps = _read_ledger(removed, "process")
+        retained = [
+            (timestamp, record)
+            for timestamp, record in zip(timestamps, records)
+            if not (
+                record[0] == "process_identity"
+                and record[1]["phase"] == "terminal"
+                and record[1]["role"] == "target"
+            )
+        ]
+        _write_ledger(
+            removed,
+            "process",
+            "native-cub-v0-trial1",
+            _sha256(removed / "lock.json"),
+            [record for _, record in retained],
+            timestamps=[timestamp for timestamp, _ in retained],
+        )
+        result_path = removed / "result.json"
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result["process_event_count"] = len(retained)
+        _write_json(result_path, result)
+        _reseal_manifest(removed)
+        with self.assertRaisesRegex(
+            NativeTrialError, "lacks setup/terminal target identity"
+        ):
+            load_native_trial(removed)
+
+        reordered = self.bundle("happy")
+        records, timestamps = _read_ledger(reordered, "process")
+        rewritten = []
+        for timestamp, record in zip(timestamps, records):
+            if (
+                record[0] == "process_identity"
+                and record[1]["role"] == "target"
+            ):
+                timestamp = (
+                    "2026-08-06T12:00:07+00:00"
+                    if record[1]["phase"] == "setup"
+                    else "2026-08-06T12:00:02+00:00"
+                )
+            rewritten.append((timestamp, record))
+        rewritten.sort(key=lambda item: item[0])
+        _write_ledger(
+            reordered,
+            "process",
+            "native-cub-v0-trial1",
+            _sha256(reordered / "lock.json"),
+            [record for _, record in rewritten],
+            timestamps=[timestamp for timestamp, _ in rewritten],
+        )
+        _reseal_manifest(reordered)
+        with self.assertRaisesRegex(
+            NativeTrialError, "terminal identity precedes setup"
+        ):
+            load_native_trial(reordered)
+
+        early = self.bundle("happy")
+        records, timestamps = _read_ledger(early, "process")
+        rewritten = [
+            (
+                (
+                    "2026-08-06T12:00:07+00:00"
+                    if record[0] == "process_identity"
+                    and record[1]["phase"] == "terminal"
+                    else timestamp
+                ),
+                record,
+            )
+            for timestamp, record in zip(timestamps, records)
+        ]
+        rewritten.sort(key=lambda item: item[0])
+        _write_ledger(
+            early,
+            "process",
+            "native-cub-v0-trial1",
+            _sha256(early / "lock.json"),
+            [record for _, record in rewritten],
+            timestamps=[timestamp for timestamp, _ in rewritten],
+        )
+        _reseal_manifest(early)
+        with self.assertRaisesRegex(
+            NativeTrialError, "do not cover agent boundaries"
+        ):
+            load_native_trial(early)
+
+        missing_boundary = self.bundle("happy")
+        records, timestamps = _read_ledger(missing_boundary, "process")
+        retained = [
+            (timestamp, record)
+            for timestamp, record in zip(timestamps, records)
+            if not (
+                record[0] == "agent_boundary"
+                and record[1]["boundary"] == "finish"
+            )
+        ]
+        _write_ledger(
+            missing_boundary,
+            "process",
+            "native-cub-v0-trial1",
+            _sha256(missing_boundary / "lock.json"),
+            [record for _, record in retained],
+            timestamps=[timestamp for timestamp, _ in retained],
+        )
+        result_path = missing_boundary / "result.json"
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result["process_event_count"] = len(retained)
+        _write_json(result_path, result)
+        _reseal_manifest(missing_boundary)
+        with self.assertRaisesRegex(
+            NativeTrialError, "lacks explicit agent boundaries"
+        ):
+            load_native_trial(missing_boundary)
+
+        mismatched_boundary = self.bundle("happy")
+        records, timestamps = _read_ledger(mismatched_boundary, "process")
+        rewritten = [
+            (
+                (
+                    "2026-08-06T12:00:07.900000+00:00"
+                    if record[0] == "agent_boundary"
+                    and record[1]["boundary"] == "finish"
+                    else timestamp
+                ),
+                record,
+            )
+            for timestamp, record in zip(timestamps, records)
+        ]
+        rewritten.sort(key=lambda item: item[0])
+        _write_ledger(
+            mismatched_boundary,
+            "process",
+            "native-cub-v0-trial1",
+            _sha256(mismatched_boundary / "lock.json"),
+            [record for _, record in rewritten],
+            timestamps=[timestamp for timestamp, _ in rewritten],
+        )
+        _reseal_manifest(mismatched_boundary)
+        with self.assertRaisesRegex(
+            NativeTrialError,
+            "final agent boundary evidence does not match result",
+        ):
+            load_native_trial(mismatched_boundary)
 
     def test_terminal_fixture_preserves_timeout_and_retry_outcome(self):
         row = load_native_trial(self.bundle("terminal"))
@@ -586,16 +992,8 @@ class NativeTrialTests(unittest.TestCase):
     def test_focus_density_covers_only_explicit_sealed_agent_phase(self):
         bundle = self.bundle("happy")
         lock_sha256 = _sha256(bundle / "lock.json")
-        observed = {
-            "state": "observed",
-            "frontmost_bundle_id": "com.openbench.fixture",
-            "target_bundle_id": "com.openbench.fixture",
-        }
-        yielded = {
-            "state": "yielded_to_human",
-            "frontmost_bundle_id": "com.apple.finder",
-            "target_bundle_id": "com.openbench.fixture",
-        }
+        observed = _focus_payload("observed", "com.openbench.fixture")
+        yielded = _focus_payload("yielded_to_human", "com.apple.finder")
         _write_ledger(
             bundle,
             "focus",
@@ -628,6 +1026,127 @@ class NativeTrialTests(unittest.TestCase):
         result["retry_count"] = 1
         result["timings"]["env_setup_s"] = 0.0
         result["timings"]["agent_s"] = 8.0
+        focus_records = [
+            *[
+                ("focus_sample", {**observed, "attempt": 1})
+                for _ in range(3)
+            ],
+            ("focus_yield", {**yielded, "attempt": 2}),
+            *[
+                ("focus_sample", {**observed, "attempt": 2})
+                for _ in range(8)
+            ],
+            ("focus_yield", {**yielded, "attempt": 2}),
+        ]
+        _write_ledger(
+            bundle,
+            "focus",
+            "native-cub-v0-trial1",
+            lock_sha256,
+            focus_records,
+            timestamps=[
+                "2026-08-06T12:00:00.100000+00:00",
+                "2026-08-06T12:00:00.300000+00:00",
+                "2026-08-06T12:00:00.600000+00:00",
+                "2026-08-06T12:00:00.900000+00:00",
+                *[
+                    f"2026-08-06T12:00:{second:02d}+00:00"
+                    for second in range(1, 9)
+                ],
+                "2026-08-06T12:00:09+00:00",
+            ],
+        )
+        result["focus_event_count"] = len(focus_records)
+        process_records = []
+        process_timestamps = []
+        attempt_windows = {
+            1: (
+                "2026-08-06T12:00:00.100000+00:00",
+                "2026-08-06T12:00:00.200000+00:00",
+                "2026-08-06T12:00:00.500000+00:00",
+                "2026-08-06T12:00:00.600000+00:00",
+                (
+                    "2026-08-06T12:00:00+00:00",
+                    "2026-08-06T12:00:00.300000+00:00",
+                    "2026-08-06T12:00:00.600000+00:00",
+                ),
+            ),
+            2: (
+                "2026-08-06T12:00:00.900000+00:00",
+                "2026-08-06T12:00:01+00:00",
+                "2026-08-06T12:00:08+00:00",
+                "2026-08-06T12:00:08.100000+00:00",
+                (
+                    "2026-08-06T12:00:00.900000+00:00",
+                    "2026-08-06T12:00:01.500000+00:00",
+                    "2026-08-06T12:00:02.500000+00:00",
+                    "2026-08-06T12:00:03.500000+00:00",
+                    "2026-08-06T12:00:04.500000+00:00",
+                    "2026-08-06T12:00:05.500000+00:00",
+                    "2026-08-06T12:00:06.500000+00:00",
+                    "2026-08-06T12:00:07.500000+00:00",
+                    "2026-08-06T12:00:08.100000+00:00",
+                ),
+            ),
+        }
+        for attempt, (
+            setup_at,
+            agent_start,
+            agent_finish,
+            terminal_at,
+            owner_times,
+        ) in attempt_windows.items():
+            for phase, timestamp in (
+                ("setup", setup_at),
+                ("terminal", terminal_at),
+            ):
+                for role in ("target", "foreground"):
+                    process_records.append((
+                        "process_identity",
+                        {
+                            "attempt": attempt,
+                            "phase": phase,
+                            "role": role,
+                            "bundle_id": "com.openbench.fixture",
+                            "pid": 123,
+                            "version": "1.2.3",
+                            "build": "45",
+                            "binary_sha256": HEX_A,
+                            "signature_sha256": HEX_B,
+                            "cdhash": "c" * 40,
+                            "process_start_token": (
+                                "Fri Aug 7 12:00:00 2026"
+                            ),
+                        },
+                    ))
+                    process_timestamps.append(timestamp)
+            for boundary, timestamp in (
+                ("start", agent_start),
+                ("finish", agent_finish),
+            ):
+                process_records.append((
+                    "agent_boundary",
+                    {"attempt": attempt, "boundary": boundary},
+                ))
+                process_timestamps.append(timestamp)
+            for timestamp in owner_times:
+                process_records.append((
+                    "mcp_owner_sample",
+                    {"attempt": attempt, "unrelated_serve_pids": []},
+                ))
+                process_timestamps.append(timestamp)
+        ordered = sorted(
+            zip(process_timestamps, process_records), key=lambda item: item[0]
+        )
+        _write_ledger(
+            bundle,
+            "process",
+            "native-cub-v0-trial1",
+            lock_sha256,
+            [item[1] for item in ordered],
+            timestamps=[item[0] for item in ordered],
+        )
+        result["process_event_count"] = len(process_records)
         _write_json(result_path, result)
         _reseal_manifest(bundle)
         self.assertTrue(load_native_trial(bundle)["success"])
@@ -651,6 +1170,38 @@ class NativeTrialTests(unittest.TestCase):
         with self.assertRaisesRegex(
             NativeTrialError,
             "does not match explicit agent phase boundaries",
+        ):
+            load_native_trial(bundle)
+
+    def test_retry_requires_focus_coverage_for_every_attempt(self):
+        bundle = self.root / "completed-retry-focus"
+        _build_bundle(
+            bundle,
+            {**self.cases["happy"], "retry_count": 1},
+        )
+        records, timestamps = _read_ledger(bundle, "focus")
+        retained = [
+            (timestamp, record)
+            for timestamp, record in zip(timestamps, records)
+            if record[1]["attempt"] != 1
+        ]
+        _write_ledger(
+            bundle,
+            "focus",
+            "native-cub-v0-trial1",
+            _sha256(bundle / "lock.json"),
+            [record for _, record in retained],
+            timestamps=[timestamp for timestamp, _ in retained],
+        )
+        result_path = bundle / "result.json"
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result["focus_event_count"] = len(retained)
+        _write_json(result_path, result)
+        _reseal_manifest(bundle)
+
+        with self.assertRaisesRegex(
+            NativeTrialError,
+            "attempt 1 focus/session health does not cover",
         ):
             load_native_trial(bundle)
 
@@ -759,16 +1310,12 @@ class NativeTrialTests(unittest.TestCase):
             "native-cub-v0-trial1",
             lock_sha256,
             [
-                ("focus_sample", {
-                    "state": "observed",
-                    "frontmost_bundle_id": "com.openbench.fixture",
-                    "target_bundle_id": "com.openbench.fixture",
-                }),
-                ("focus_yield", {
-                    "state": "yielded_to_human",
-                    "frontmost_bundle_id": "com.apple.finder",
-                    "target_bundle_id": "com.openbench.fixture",
-                }),
+                ("focus_sample", _focus_payload(
+                    "observed", "com.openbench.fixture"
+                )),
+                ("focus_yield", _focus_payload(
+                    "yielded_to_human", "com.apple.finder"
+                )),
             ],
             timestamps=[
                 "2026-08-06T12:00:00+00:00",
@@ -843,21 +1390,15 @@ class NativeTrialTests(unittest.TestCase):
             "native-cub-v0-trial1",
             lock_sha256,
             [
-                ("focus_sample", {
-                    "state": "observed",
-                    "frontmost_bundle_id": "com.openbench.fixture",
-                    "target_bundle_id": "com.openbench.fixture",
-                }),
-                ("focus_yield", {
-                    "state": "yielded_to_human",
-                    "frontmost_bundle_id": "com.apple.finder",
-                    "target_bundle_id": "com.openbench.fixture",
-                }),
-                ("focus_sample", {
-                    "state": "observed",
-                    "frontmost_bundle_id": "com.openbench.fixture",
-                    "target_bundle_id": "com.openbench.fixture",
-                }),
+                ("focus_sample", _focus_payload(
+                    "observed", "com.openbench.fixture"
+                )),
+                ("focus_yield", _focus_payload(
+                    "yielded_to_human", "com.apple.finder"
+                )),
+                ("focus_sample", _focus_payload(
+                    "observed", "com.openbench.fixture"
+                )),
             ],
             timestamps=[
                 "2026-08-06T12:00:00+00:00",
@@ -880,11 +1421,7 @@ class NativeTrialTests(unittest.TestCase):
     def test_completed_trial_requires_dense_monitor_and_declared_mcp_policy(self):
         sparse = self.bundle("happy")
         lock_sha256 = _sha256(sparse / "lock.json")
-        payload = {
-            "state": "observed",
-            "frontmost_bundle_id": "com.openbench.fixture",
-            "target_bundle_id": "com.openbench.fixture",
-        }
+        payload = _focus_payload("observed", "com.openbench.fixture")
         _write_ledger(
             sparse,
             "focus",

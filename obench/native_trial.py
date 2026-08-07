@@ -37,6 +37,7 @@ NATIVE_SIDECAR_SCHEMA_VERSION = "openbench.native-sidecar.v1"
 LEDGER_SCHEMA_VERSION = "openbench.native-ledger.v1"
 MAX_TEXT_ARTIFACT_BYTES = 1024 * 1024
 MAX_FOCUS_SAMPLE_GAP_S = 1.5
+MAX_PROCESS_SAMPLE_GAP_S = 1.0
 PUBLISHABLE_ARTIFACT_MEDIA_TYPES = frozenset({
     "application/json",
     "text/plain",
@@ -94,6 +95,8 @@ REQUIRED_FILES = frozenset(
         "mcp/ledger.jsonl",
         "focus/ledger.jsonl",
         "focus/seal.json",
+        "process/ledger.jsonl",
+        "process/seal.json",
         "task/task.json",
         "task/native.json",
     }
@@ -571,9 +574,15 @@ def _validate_lock(root: Path, trial_id: str) -> tuple[dict[str, Any], str]:
     _integer(budget["max_retries"], "lock.budget.max_retries")
 
     evidence = _object(lock["evidence"], "lock.evidence")
-    _exact_fields(evidence, {"proxy_required"}, "lock.evidence")
-    if not isinstance(evidence["proxy_required"], bool):
-        raise _fail("lock.evidence.proxy_required", "expected a boolean")
+    _exact_fields(
+        evidence,
+        {"proxy_required", "process_monitor_required"},
+        "lock.evidence",
+    )
+    if any(not isinstance(evidence[field], bool) for field in evidence):
+        raise _fail("lock.evidence", "expected boolean values")
+    if not evidence["process_monitor_required"]:
+        raise _fail("lock.evidence.process_monitor_required", "must be true")
 
     _scan_privacy(lock, "lock")
     _reject_harbor_shape(lock, "lock")
@@ -1056,6 +1065,7 @@ def _validate_result_and_verifier(
             "outcome",
             "mcp_event_count",
             "focus_event_count",
+            "process_event_count",
         },
     )
     status = result["status"]
@@ -1331,13 +1341,30 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         lock_sha256=lock_sha256,
         allowed_kinds={"focus_sample", "focus_yield"},
     )
+    process_records = _verify_ledger(
+        root,
+        "process",
+        trial_id=trial_id,
+        lock_sha256=lock_sha256,
+        allowed_kinds={
+            "process_identity",
+            "mcp_owner_sample",
+            "agent_boundary",
+        },
+    )
     if result["mcp_event_count"] != len(mcp_records):
         raise _fail("result.mcp_event_count", "does not match MCP ledger")
     if result["focus_event_count"] != len(focus_records):
         raise _fail("result.focus_event_count", "does not match focus ledger")
+    if result["process_event_count"] != len(process_records):
+        raise _fail("result.process_event_count", "does not match process ledger")
     _integer(result["mcp_event_count"], "result.mcp_event_count")
     _integer(result["focus_event_count"], "result.focus_event_count")
-    for prefix, records in (("focus", focus_records),):
+    _integer(result["process_event_count"], "result.process_event_count")
+    for prefix, records in (
+        ("focus", focus_records),
+        ("process", process_records),
+    ):
         previous_observed: datetime | None = None
         for index, record in enumerate(records):
             observed = _timestamp(
@@ -1359,6 +1386,244 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     mcp_policy = native_sidecar["_normalized_mcp_policy"]
     required_foreground = focus_policy["required_foreground_bundle_id"]
     forbidden_bundles = set(focus_policy["forbidden_bundle_ids"])
+    process_identities: dict[
+        tuple[int, str, str], tuple[dict[str, Any], datetime]
+    ] = {}
+    agent_boundaries: dict[tuple[int, str], datetime] = {}
+    owner_samples: dict[int, list[datetime]] = {}
+    identity_fields = {
+        "attempt",
+        "phase",
+        "role",
+        "bundle_id",
+        "pid",
+        "version",
+        "build",
+        "binary_sha256",
+        "signature_sha256",
+        "cdhash",
+        "process_start_token",
+    }
+    for index, record in enumerate(process_records):
+        payload = record["payload"]
+        location = f"process/ledger.jsonl:{index + 1}.payload"
+        attempt = _integer(payload.get("attempt"), f"{location}.attempt", minimum=1)
+        if attempt > result["attempts"]:
+            raise _fail(f"{location}.attempt", "exceeds completed attempt count")
+        if record["kind"] == "agent_boundary":
+            _exact_fields(payload, {"attempt", "boundary"}, location)
+            boundary = payload["boundary"]
+            if boundary not in {"start", "finish"}:
+                raise _fail(f"{location}.boundary", "expected start or finish")
+            key = (attempt, boundary)
+            if key in agent_boundaries:
+                raise _fail(location, "duplicate agent boundary")
+            agent_boundaries[key] = _timestamp(
+                record["timestamp"],
+                f"process/ledger.jsonl:{index + 1}.timestamp",
+            )
+            continue
+        if record["kind"] == "mcp_owner_sample":
+            _exact_fields(
+                payload,
+                {"attempt", "unrelated_serve_pids"},
+                location,
+            )
+            pids = [
+                _integer(value, f"{location}.unrelated_serve_pids[{pid_index}]", minimum=1)
+                for pid_index, value in enumerate(
+                    _array(payload["unrelated_serve_pids"], f"{location}.unrelated_serve_pids")
+                )
+            ]
+            if pids != sorted(set(pids)):
+                raise _fail(f"{location}.unrelated_serve_pids", "must be sorted and unique")
+            if pids:
+                raise _fail(location, "unrelated computer-use-mcp serve owner observed")
+            owner_samples.setdefault(attempt, []).append(
+                _timestamp(
+                    record["timestamp"],
+                    f"process/ledger.jsonl:{index + 1}.timestamp",
+                )
+            )
+            continue
+        _exact_fields(payload, identity_fields, location)
+        phase = payload["phase"]
+        role = payload["role"]
+        if phase not in {"setup", "terminal"} or role not in {"target", "foreground"}:
+            raise _fail(location, "invalid process identity phase or role")
+        _string(payload["bundle_id"], f"{location}.bundle_id")
+        _integer(payload["pid"], f"{location}.pid", minimum=1)
+        _string(payload["version"], f"{location}.version")
+        _string(payload["build"], f"{location}.build")
+        _digest(payload["binary_sha256"], f"{location}.binary_sha256")
+        _digest(payload["signature_sha256"], f"{location}.signature_sha256")
+        if not isinstance(payload["cdhash"], str) or re.fullmatch(
+            r"[0-9a-f]{40}", payload["cdhash"]
+        ) is None:
+            raise _fail(f"{location}.cdhash", "expected a lowercase 20-byte digest")
+        if (
+            not isinstance(payload["process_start_token"], str)
+            or re.fullmatch(
+                r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun) "
+                r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
+                r"([1-9]|[12][0-9]|3[01]) "
+                r"([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [0-9]{4}",
+                payload["process_start_token"],
+            )
+            is None
+        ):
+            raise _fail(
+                f"{location}.process_start_token",
+                "expected a normalized ps lstart token",
+            )
+        key = (attempt, phase, role)
+        if key in process_identities:
+            raise _fail(location, "duplicate process identity role")
+        process_identities[key] = (
+            dict(payload),
+            _timestamp(
+                record["timestamp"],
+                f"process/ledger.jsonl:{index + 1}.timestamp",
+            ),
+        )
+
+    if agent_started is not None and agent_finished is not None:
+        previous_attempt_finished: datetime | None = None
+        for attempt in range(1, result["attempts"] + 1):
+            attempt_started = agent_boundaries.get((attempt, "start"))
+            attempt_finished = agent_boundaries.get((attempt, "finish"))
+            if attempt_started is None or attempt_finished is None:
+                raise _fail(
+                    "process/ledger.jsonl",
+                    f"attempt {attempt} lacks explicit agent boundaries",
+                )
+            if attempt_finished < attempt_started:
+                raise _fail(
+                    "process/ledger.jsonl",
+                    f"attempt {attempt} agent finish precedes start",
+                )
+            if (
+                previous_attempt_finished is not None
+                and attempt_started < previous_attempt_finished
+            ):
+                raise _fail(
+                    "process/ledger.jsonl",
+                    f"attempt {attempt} overlaps the prior agent attempt",
+                )
+            previous_attempt_finished = attempt_finished
+            if attempt == result["attempts"] and (
+                attempt_started != agent_started
+                or attempt_finished != agent_finished
+            ):
+                raise _fail(
+                    "process/ledger.jsonl",
+                    "final agent boundary evidence does not match result",
+                )
+            setup_times: list[datetime] = []
+            terminal_times: list[datetime] = []
+            for role in ("target", "foreground"):
+                setup_record = process_identities.get((attempt, "setup", role))
+                terminal_record = process_identities.get(
+                    (attempt, "terminal", role)
+                )
+                if setup_record is None or terminal_record is None:
+                    raise _fail(
+                        "process/ledger.jsonl",
+                        f"attempt {attempt} lacks setup/terminal {role} identity",
+                    )
+                setup_identity, setup_at = setup_record
+                terminal_identity, terminal_at = terminal_record
+                if terminal_at < setup_at:
+                    raise _fail(
+                        "process/ledger.jsonl",
+                        f"attempt {attempt} {role} terminal identity precedes setup",
+                    )
+                setup_times.append(setup_at)
+                terminal_times.append(terminal_at)
+                if {
+                    key: value
+                    for key, value in setup_identity.items()
+                    if key != "phase"
+                } != {
+                    key: value
+                    for key, value in terminal_identity.items()
+                    if key != "phase"
+                }:
+                    raise _fail(
+                        "process/ledger.jsonl",
+                        f"attempt {attempt} {role} process identity changed",
+                    )
+            setup_boundary = max(setup_times)
+            terminal_boundary = min(terminal_times)
+            if terminal_boundary < setup_boundary:
+                raise _fail(
+                    "process/ledger.jsonl",
+                    f"attempt {attempt} process identity boundaries are not ordered",
+                )
+            if (
+                setup_boundary > attempt_started
+                or terminal_boundary < attempt_finished
+            ):
+                raise _fail(
+                    "process/ledger.jsonl",
+                    f"attempt {attempt} process identities do not cover "
+                    "agent boundaries",
+                )
+            target_identity = process_identities[
+                (attempt, "setup", "target")
+            ][0]
+            foreground_identity = process_identities[
+                (attempt, "setup", "foreground")
+            ][0]
+            if target_identity["bundle_id"] != target_bundle_id:
+                raise _fail("process/ledger.jsonl", "target identity does not match lock")
+            if foreground_identity["bundle_id"] != required_foreground:
+                raise _fail(
+                    "process/ledger.jsonl",
+                    "foreground identity does not match focus policy",
+                )
+            if (
+                target_bundle_id != required_foreground
+                and target_identity["pid"] == foreground_identity["pid"]
+            ):
+                raise _fail(
+                    "process/ledger.jsonl",
+                    "target and foreground roles require separate PIDs",
+                )
+            samples = owner_samples.get(attempt, [])
+            before = [
+                sample for sample in samples if sample <= attempt_started
+            ]
+            after = [
+                sample for sample in samples if sample >= attempt_finished
+            ]
+            if (
+                not before
+                or not after
+                or (attempt_started - before[-1]).total_seconds()
+                > MAX_PROCESS_SAMPLE_GAP_S
+                or (after[0] - attempt_finished).total_seconds()
+                > MAX_PROCESS_SAMPLE_GAP_S
+            ):
+                raise _fail(
+                    "process/ledger.jsonl",
+                    f"attempt {attempt} MCP owner monitor does not cover "
+                    "agent boundaries",
+                )
+            covered = [
+                sample
+                for sample in samples
+                if before[-1] <= sample <= after[0]
+            ]
+            for index, (left, right) in enumerate(
+                zip(covered, covered[1:]), 1
+            ):
+                if (right - left).total_seconds() > MAX_PROCESS_SAMPLE_GAP_S:
+                    raise _fail(
+                        f"process/ledger.jsonl:{index + 1}.timestamp",
+                        f"attempt {attempt} MCP owner monitor heartbeat gap "
+                        "exceeds the allowed interval",
+                    )
     require_full_agent_focus = (
         result["status"] == "completed"
         and focus_policy["require_foreground_full_agent_phase"]
@@ -1366,6 +1631,8 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     if require_full_agent_focus and not focus_records:
         raise _fail("focus/ledger.jsonl", "required foreground has no observed samples")
     focus_observed_times: list[datetime] = []
+    focus_states: list[str] = []
+    focus_attempts: list[int] = []
     for index, record in enumerate(focus_records):
         payload = record["payload"]
         observed_at = _timestamp(
@@ -1375,23 +1642,75 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         focus_observed_times.append(observed_at)
         _exact_fields(
             payload,
-            {"state", "frontmost_bundle_id", "target_bundle_id"},
+            {
+                "attempt",
+                "state",
+                "frontmost_bundle_id",
+                "frontmost_pid",
+                "target_bundle_id",
+                "target_pid",
+            },
             f"focus/ledger.jsonl:{index + 1}.payload",
         )
+        attempt = _integer(
+            payload["attempt"],
+            f"focus/ledger.jsonl:{index + 1}.payload.attempt",
+            minimum=1,
+        )
+        if attempt > result["attempts"]:
+            raise _fail(
+                f"focus/ledger.jsonl:{index + 1}.payload.attempt",
+                "exceeds completed attempt count",
+            )
+        focus_attempts.append(attempt)
+        setup_target_record = process_identities.get(
+            (attempt, "setup", "target")
+        )
+        setup_foreground_record = process_identities.get(
+            (attempt, "setup", "foreground")
+        )
+        if setup_target_record is None or setup_foreground_record is None:
+            raise _fail(
+                f"focus/ledger.jsonl:{index + 1}.payload.attempt",
+                "has no setup process identity",
+            )
+        setup_target = setup_target_record[0]
+        setup_foreground = setup_foreground_record[0]
+        frontmost_pid = _integer(
+            payload["frontmost_pid"],
+            f"focus/ledger.jsonl:{index + 1}.payload.frontmost_pid",
+            minimum=1,
+        )
+        target_pid = _integer(
+            payload["target_pid"],
+            f"focus/ledger.jsonl:{index + 1}.payload.target_pid",
+            minimum=1,
+        )
+        if (
+            target_pid != setup_target["pid"]
+            or frontmost_pid != setup_foreground["pid"]
+        ):
+            raise _fail(
+                f"focus/ledger.jsonl:{index + 1}.payload",
+                "focus PID does not match setup-established process identity",
+            )
         if payload["state"] not in {"observed", "yielded_to_human"}:
             raise _fail(
                 f"focus/ledger.jsonl:{index + 1}.payload.state",
                 "focus violation is not importable",
             )
+        focus_states.append(payload["state"])
         if payload["target_bundle_id"] != target_bundle_id:
             raise _fail(
                 f"focus/ledger.jsonl:{index + 1}.payload.target_bundle_id",
                 "does not match locked app",
             )
+        attempt_started = agent_boundaries.get((attempt, "start"))
+        attempt_finished = agent_boundaries.get((attempt, "finish"))
         in_agent_phase = (
-            agent_started is not None
-            and agent_finished is not None
-            and agent_started <= observed_at <= agent_finished
+            attempt_started is not None
+            and attempt_finished is not None
+            and attempt_started <= observed_at <= attempt_finished
         )
         if (
             in_agent_phase
@@ -1420,31 +1739,76 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 "result.agent_started_at",
                 "completed focus policy requires explicit agent phase boundaries",
             )
-        agent_focus_times = [
-            observed
-            for observed in focus_observed_times
-            if agent_started <= observed <= agent_finished
-        ]
-        if (
-            not agent_focus_times
-            or (agent_focus_times[0] - agent_started).total_seconds()
-            > MAX_FOCUS_SAMPLE_GAP_S
-            or (agent_finished - agent_focus_times[-1]).total_seconds()
-            > MAX_FOCUS_SAMPLE_GAP_S
-        ):
-            raise _fail(
-                "focus/ledger.jsonl",
-                "focus/session health does not cover the completed agent-phase boundaries",
-            )
-        for index, (left, right) in enumerate(
-            zip(agent_focus_times, agent_focus_times[1:]),
-            1,
-        ):
-            if (right - left).total_seconds() > MAX_FOCUS_SAMPLE_GAP_S:
+        for attempt in range(1, result["attempts"] + 1):
+            attempt_started = agent_boundaries[(attempt, "start")]
+            attempt_finished = agent_boundaries[(attempt, "finish")]
+            attempt_indexes = [
+                index
+                for index, observed_attempt in enumerate(focus_attempts)
+                if observed_attempt == attempt
+            ]
+            before_indexes = [
+                index
+                for index in attempt_indexes
+                if focus_observed_times[index] <= attempt_started
+            ]
+            after_indexes = [
+                index
+                for index in attempt_indexes
+                if focus_observed_times[index] >= attempt_finished
+            ]
+            if (
+                not before_indexes
+                or not after_indexes
+                or (
+                    attempt_started
+                    - focus_observed_times[before_indexes[-1]]
+                ).total_seconds()
+                > MAX_FOCUS_SAMPLE_GAP_S
+                or (
+                    focus_observed_times[after_indexes[0]]
+                    - attempt_finished
+                ).total_seconds()
+                > MAX_FOCUS_SAMPLE_GAP_S
+            ):
                 raise _fail(
-                    f"focus/ledger.jsonl:{index + 1}.timestamp",
-                    "focus/session heartbeat gap exceeds the allowed interval",
+                    "focus/ledger.jsonl",
+                    f"attempt {attempt} focus/session health does not cover "
+                    "the agent-phase boundaries",
                 )
+            covered_indexes = [
+                index
+                for index in attempt_indexes
+                if (
+                    focus_observed_times[before_indexes[-1]]
+                    <= focus_observed_times[index]
+                    <= focus_observed_times[after_indexes[0]]
+                )
+            ]
+            if any(
+                focus_states[index] != "observed"
+                for index in covered_indexes
+            ):
+                raise _fail(
+                    "focus/ledger.jsonl",
+                    f"attempt {attempt} contains an unhealthy or "
+                    "unlocked-coverage gap",
+                )
+            agent_focus_times = [
+                focus_observed_times[index] for index in covered_indexes
+            ]
+            for index, (left, right) in enumerate(
+                zip(agent_focus_times, agent_focus_times[1:]),
+                1,
+            ):
+                if (
+                    right - left
+                ).total_seconds() > MAX_FOCUS_SAMPLE_GAP_S:
+                    raise _fail(
+                        f"focus/ledger.jsonl:{index + 1}.timestamp",
+                        f"attempt {attempt} focus/session heartbeat gap "
+                        "exceeds the allowed interval",
+                    )
 
     proxy_present = PROXY_FILES <= set(inventory)
     if lock["evidence"]["proxy_required"] != proxy_present:
@@ -1642,6 +2006,8 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         "mcp_ledger_sha256": _sha256_file(root / "mcp/ledger.jsonl"),
         "focus_ledger_sha256": _sha256_file(root / "focus/ledger.jsonl"),
         "focus_seal_sha256": _sha256_file(root / "focus/seal.json"),
+        "process_ledger_sha256": _sha256_file(root / "process/ledger.jsonl"),
+        "process_seal_sha256": _sha256_file(root / "process/seal.json"),
         "proxy_ledger_sha256": (
             _sha256_file(root / "proxy/ledger.jsonl")
             if proxy_present
@@ -1715,6 +2081,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 ),
                 "monitor_health_evidence": {
                     "maximum_sample_gap_s": MAX_FOCUS_SAMPLE_GAP_S,
+                    "maximum_process_sample_gap_s": MAX_PROCESS_SAMPLE_GAP_S,
                     "agent_phase_started_at": (
                         agent_started.isoformat()
                         if agent_started is not None
@@ -1738,6 +2105,9 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                     "terminal_focus_seal_sha256": evidence_digests[
                         "focus_seal_sha256"
                     ],
+                    "terminal_process_seal_sha256": evidence_digests[
+                        "process_seal_sha256"
+                    ],
                 },
                 **evidence_digests,
                 "final_state_sha256": final_state_sha256,
@@ -1758,6 +2128,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                     result["status"] if result["status"] in TERMINAL_STATUSES else None
                 ),
                 "focus_event_count": len(focus_records),
+                "process_event_count": len(process_records),
                 "mcp_event_count": len(mcp_records),
                 "proxy_measured": proxy_present,
             },

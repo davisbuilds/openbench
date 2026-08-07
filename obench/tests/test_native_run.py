@@ -30,7 +30,9 @@ from obench.native_run import (
     _inspect_setup_app_identity,
     _inspect_setup_app_process,
     _mcp_serve_owners,
+    _recheck_process_identity,
     _require_setup_app,
+    _require_setup_processes,
     load_config,
     run_native,
 )
@@ -38,14 +40,21 @@ from obench.native_trial import NativeTrialError, load_native_trial
 
 
 HEX_A = "a" * 64
+PROCESS_START_TOKEN = "Fri Aug 7 12:00:00 2026"
 
 
 class FakeFocusMonitor:
-    def __init__(self, bundle_id="com.openbench.fixture", activity=None):
+    def __init__(
+        self,
+        bundle_id="com.openbench.fixture",
+        activity=None,
+        pid=123,
+    ):
         self.started = False
         self.stopped = False
         self.violations = ()
         self.bundle_id = bundle_id
+        self.pid = pid
         self.events = ()
         self.activity = activity
 
@@ -56,7 +65,7 @@ class FakeFocusMonitor:
         self.events = (FocusEvent(
             self.bundle_id,
             "Fixture",
-            123,
+            self.pid,
             0.0,
             datetime.now(timezone.utc).isoformat(),
         ),)
@@ -68,10 +77,41 @@ class FakeFocusMonitor:
         self.events = self.events + (FocusEvent(
             self.bundle_id,
             "Fixture",
-            123,
+            self.pid,
             1.0,
             datetime.now(timezone.utc).isoformat(),
         ),)
+
+
+class FakeMcpOwnerMonitor:
+    def __init__(self, command, probe, activity=None):
+        self.command = command
+        self.probe = probe
+        self.activity = activity
+        self.samples = ()
+
+    def _sample(self):
+        owners = tuple(self.probe(self.command))
+        sample = {
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "observed_at_monotonic": 0.0,
+            "unrelated_serve_pids": sorted(owner["pid"] for owner in owners),
+        }
+        self.samples = self.samples + (sample,)
+
+    def start(self):
+        if self.activity is not None:
+            self.activity.append("owner:start")
+        self._sample()
+
+    def stop(self):
+        self._sample()
+        if self.activity is not None:
+            self.activity.append("owner:stop")
+        if any(sample["unrelated_serve_pids"] for sample in self.samples):
+            raise NativeRunError(
+                "unrelated computer-use-mcp serve owner appeared during agent phase"
+            )
 
 
 class FakeAdapter:
@@ -350,8 +390,12 @@ media_type = "application/json"
                 "device": 1,
                 "inode": 2,
                 "cdhash": cdhash,
+                "process_start_token": PROCESS_START_TOKEN,
             },
             mcp_owner_probe=lambda command: (),
+            mcp_monitor_factory=lambda command, probe: FakeMcpOwnerMonitor(
+                command, probe
+            ),
             adapter_loader=lambda config: adapter or FakeAdapter(),
             version_probe=lambda config, loaded: "1.2.3",
         )
@@ -458,6 +502,10 @@ media_type = "application/json"
                     f"n{executable}\n"
                 )
                 return subprocess.CompletedProcess(command, 0, output, "")
+            if command[0] == "/bin/ps":
+                return subprocess.CompletedProcess(
+                    command, 0, f"  {PROCESS_START_TOKEN}\n", ""
+                )
             self.fail(f"unexpected command: {command!r}")
 
         identity = _inspect_setup_app_process(
@@ -475,6 +523,7 @@ media_type = "application/json"
                 "/usr/bin/lsappinfo",
                 "/usr/bin/lsappinfo",
                 "/usr/sbin/lsof",
+                "/bin/ps",
                 "/usr/bin/lsappinfo",
                 "/usr/bin/lsappinfo",
             ],
@@ -507,6 +556,10 @@ media_type = "application/json"
                     0,
                     "p456\nftxt\ntREG\nD0x1\ni999999\nn/old/Fixture\n",
                     "",
+                )
+            if command[0] == "/bin/ps":
+                return subprocess.CompletedProcess(
+                    command, 0, f"{PROCESS_START_TOKEN}\n", ""
                 )
             self.fail(f"unexpected command: {command!r}")
 
@@ -577,9 +630,10 @@ media_type = "application/json"
             "device": 1,
             "inode": 2,
             "cdhash": cdhash,
+            "process_start_token": PROCESS_START_TOKEN,
         }
         with self.assertRaisesRegex(
-            NativeRunError, "process identity evidence is malformed"
+            NativeRunError, "process identity is malformed"
         ):
             run_native(self.config_path, hooks=hooks)
         self.assertFalse(monitor.started)
@@ -592,7 +646,7 @@ media_type = "application/json"
             "build": "44",
         }
         with self.assertRaisesRegex(
-            NativeRunError, "identity does not match planned environment.*build"
+            NativeRunError, "identity does not match planned identity.*build"
         ):
             run_native(self.config_path, hooks=hooks)
         self.assertFalse(monitor.started)
@@ -605,7 +659,7 @@ media_type = "application/json"
             "signature_sha256": "c" * 64,
         }
         with self.assertRaisesRegex(
-            NativeRunError, "identity does not match planned environment.*signature"
+            NativeRunError, "identity does not match planned identity.*signature"
         ):
             run_native(self.config_path, hooks=hooks)
         self.assertFalse(monitor.started)
@@ -633,7 +687,7 @@ media_type = "application/json"
         adapter = FakeAdapter()
         hooks, monitor = self._hooks(adapter)
         with self.assertRaisesRegex(
-            NativeRunError, "does not match Computer-Use build manifest.*app"
+            NativeRunError, "does not match planned identity.*app"
         ):
             run_native(self.config_path, hooks=hooks)
         self.assertEqual(adapter.calls, 0)
@@ -660,6 +714,69 @@ media_type = "application/json"
         )
         hooks, _ = self._hooks()
         _require_setup_app(hooks, load_config(self.config_path))
+
+    def test_target_manifest_cannot_override_locked_environment_identity(self):
+        app = "/Applications/Fixture.app"
+        manifest = {
+            "schema_version": "openbench.computer-use-build.v1",
+            "fixtures": {
+                "computer-use-fixture": {
+                    "app": app,
+                    "bundle_id": "com.openbench.fixture",
+                    "version": "9.9.9",
+                    "build": "45",
+                    "executable": f"{app}/Contents/MacOS/Fixture",
+                    "binary_sha256": "b" * 64,
+                    "signature_sha256": HEX_A,
+                },
+            },
+        }
+        (self.root / "build-manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        adapter = FakeAdapter()
+        hooks, monitor = self._hooks(adapter)
+
+        with self.assertRaisesRegex(
+            NativeRunError,
+            "build manifest conflicts with locked target environment.*version",
+        ):
+            run_native(self.config_path, hooks=hooks)
+
+        self.assertEqual(adapter.calls, 0)
+        self.assertFalse(monitor.started)
+
+    def test_applicable_manifest_requires_target_fixture_identity(self):
+        manifest = {
+            "schema_version": "openbench.computer-use-build.v1",
+            "fixtures": {
+                "unrelated": {
+                    "app": "/Applications/Other.app",
+                    "bundle_id": "org.openbench.Other",
+                    "version": "1.0",
+                    "build": "1",
+                    "executable": (
+                        "/Applications/Other.app/Contents/MacOS/Other"
+                    ),
+                    "binary_sha256": "b" * 64,
+                    "signature_sha256": HEX_A,
+                },
+            },
+        }
+        (self.root / "build-manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        adapter = FakeAdapter()
+        hooks, monitor = self._hooks(adapter)
+
+        with self.assertRaisesRegex(
+            NativeRunError,
+            "build manifest has no identity for 'com.openbench.fixture'",
+        ):
+            run_native(self.config_path, hooks=hooks)
+
+        self.assertEqual(adapter.calls, 0)
+        self.assertFalse(monitor.started)
 
     def test_focus_monitor_wraps_only_agent_phase(self):
         activity = []
@@ -756,7 +873,7 @@ media_type = "application/json"
         self.assertFalse(monitor.started)
         self.assertFalse((self.workspace / "setup.log").exists())
 
-    def test_owner_probe_runs_once_before_setup_and_collector_launch(self):
+    def test_owner_probe_covers_preflight_and_agent_boundaries(self):
         observations = []
         hooks, _ = self._hooks()
 
@@ -770,9 +887,232 @@ media_type = "application/json"
 
         hooks.mcp_owner_probe = probe
         run_native(self.config_path, hooks=hooks)
-        self.assertEqual(len(observations), 1)
+        self.assertEqual(len(observations), 3)
         self.assertFalse(observations[0][1])
         self.assertEqual(observations[0][2], [])
+        self.assertTrue(all(item[1] for item in observations[1:]))
+        self.assertTrue(all(len(item[2]) == 1 for item in observations[1:]))
+
+    def test_transient_serve_owner_during_agent_fails_closed(self):
+        adapter = FakeAdapter()
+        hooks, monitor = self._hooks(adapter)
+        observations = iter((
+            (),
+            ({"pid": 4312},),
+            (),
+        ))
+        hooks.mcp_owner_probe = lambda command: next(observations)
+
+        with self.assertRaisesRegex(
+            NativeRunError, "serve owner appeared during agent phase"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertEqual(adapter.calls, 1)
+        self.assertTrue(monitor.stopped)
+        self.assertTrue((self.workspace / "reset.log").is_file())
+
+    def test_mcp_owner_monitor_death_fails_closed(self):
+        class DeadMonitor(FakeMcpOwnerMonitor):
+            def stop(inner_self):
+                raise NativeRunError("MCP owner monitor failed: probe thread died")
+
+        adapter = FakeAdapter()
+        hooks, monitor = self._hooks(adapter)
+        hooks.mcp_monitor_factory = (
+            lambda command, probe: DeadMonitor(command, probe)
+        )
+        with self.assertRaisesRegex(NativeRunError, "probe thread died"):
+            run_native(self.config_path, hooks=hooks)
+        self.assertEqual(adapter.calls, 1)
+        self.assertTrue(monitor.stopped)
+
+    def test_wrong_focus_pid_fails_before_verifier(self):
+        adapter = FakeAdapter()
+        hooks, _ = self._hooks(adapter)
+        monitor = FakeFocusMonitor(pid=999)
+        hooks.focus_monitor_factory = lambda allowed: monitor
+        with self.assertRaisesRegex(
+            NativeRunError, "setup-established foreground process"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertEqual(adapter.calls, 1)
+        self.assertTrue(monitor.stopped)
+        self.assertFalse((self.workspace / "verify.log").exists())
+
+    def test_target_process_swap_after_agent_fails_closed(self):
+        adapter = FakeAdapter()
+        hooks, monitor = self._hooks(adapter)
+        calls = 0
+
+        def process_probe(bundle_id, executable, cdhash):
+            nonlocal calls
+            calls += 1
+            return {
+                "pid": 123 if calls == 1 else 124,
+                "executable": str(executable),
+                "device": 1,
+                "inode": 2,
+                "cdhash": cdhash,
+                "process_start_token": PROCESS_START_TOKEN,
+            }
+
+        hooks.app_process_probe = process_probe
+        with self.assertRaisesRegex(
+            NativeRunError, "target process identity changed"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertEqual(adapter.calls, 1)
+        self.assertTrue(monitor.stopped)
+        self.assertFalse((self.workspace / "verify.log").exists())
+
+    def test_target_process_pid_reuse_after_agent_fails_closed(self):
+        adapter = FakeAdapter()
+        hooks, monitor = self._hooks(adapter)
+        calls = 0
+
+        def process_probe(bundle_id, executable, cdhash):
+            nonlocal calls
+            calls += 1
+            return {
+                "pid": 123,
+                "executable": str(executable),
+                "device": 1,
+                "inode": 2,
+                "cdhash": cdhash,
+                "process_start_token": (
+                    PROCESS_START_TOKEN
+                    if calls == 1
+                    else "Fri Aug 7 12:00:01 2026"
+                ),
+            }
+
+        hooks.app_process_probe = process_probe
+        with self.assertRaisesRegex(
+            NativeRunError, "target process identity changed"
+        ):
+            run_native(self.config_path, hooks=hooks)
+        self.assertEqual(adapter.calls, 1)
+        self.assertTrue(monitor.stopped)
+        self.assertFalse((self.workspace / "verify.log").exists())
+
+    def test_separate_foreground_identity_comes_from_build_manifest(self):
+        config_text = self.config_path.read_text(encoding="utf-8").replace(
+            'required_foreground_bundle_id = "com.openbench.fixture"',
+            'required_foreground_bundle_id = "org.openbench.FocusGuard.v0"',
+        )
+        self.config_path.write_text(config_text, encoding="utf-8")
+        target_app = "/Applications/Fixture.app"
+        guard_app = "/Applications/FocusGuard.app"
+        manifest = {
+            "schema_version": "openbench.computer-use-build.v1",
+            "fixtures": {
+                "target": {
+                    "app": target_app,
+                    "bundle_id": "com.openbench.fixture",
+                    "version": "1.2.3",
+                    "build": "45",
+                    "executable": f"{target_app}/Contents/MacOS/Fixture",
+                    "binary_sha256": "b" * 64,
+                    "signature_sha256": HEX_A,
+                },
+                "guard": {
+                    "app": guard_app,
+                    "bundle_id": "org.openbench.FocusGuard.v0",
+                    "version": "0.0.1",
+                    "build": "1",
+                    "executable": f"{guard_app}/Contents/MacOS/FocusGuard",
+                    "binary_sha256": "f" * 64,
+                    "signature_sha256": "e" * 64,
+                },
+            },
+        }
+        (self.root / "build-manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        adapter = FakeAdapter()
+        hooks, _ = self._hooks(adapter)
+        identities = {
+            target_app: {
+                "bundle_id": "com.openbench.fixture",
+                "version": "1.2.3",
+                "build": "45",
+                "binary_sha256": "b" * 64,
+                "signature_sha256": HEX_A,
+                "cdhash": "d" * 40,
+                "executable": f"{target_app}/Contents/MacOS/Fixture",
+            },
+            guard_app: {
+                "bundle_id": "org.openbench.FocusGuard.v0",
+                "version": "0.0.1",
+                "build": "1",
+                "binary_sha256": "f" * 64,
+                "signature_sha256": "e" * 64,
+                "cdhash": "c" * 40,
+                "executable": f"{guard_app}/Contents/MacOS/FocusGuard",
+            },
+        }
+        hooks.app_probe = lambda requirement: (
+            AppEvidence(
+                requirement.bundle_identifier,
+                requirement.version,
+                True,
+                (
+                    target_app
+                    if requirement.bundle_identifier == "com.openbench.fixture"
+                    else guard_app
+                ),
+            ),
+        )
+        hooks.app_identity_probe = lambda app_path: {
+            "app": str(app_path),
+            **identities[str(app_path)],
+        }
+        hooks.app_process_probe = lambda bundle_id, executable, cdhash: {
+            "pid": 123 if bundle_id == "com.openbench.fixture" else 456,
+            "executable": str(executable),
+            "device": 1,
+            "inode": 2 if bundle_id == "com.openbench.fixture" else 3,
+            "cdhash": cdhash,
+            "process_start_token": PROCESS_START_TOKEN,
+        }
+        hooks.focus_monitor_factory = lambda allowed: FakeFocusMonitor(
+            bundle_id="org.openbench.FocusGuard.v0",
+            pid=456,
+        )
+
+        observation_times = iter((
+            datetime(2026, 8, 7, 12, 0, 1, tzinfo=timezone.utc),
+            datetime(2026, 8, 7, 12, 0, 2, tzinfo=timezone.utc),
+        ))
+        hooks.clock = lambda: next(observation_times)
+        target_observation, foreground_observation = (
+            _require_setup_processes(hooks, load_config(self.config_path))
+        )
+        self.assertLess(
+            target_observation[1],
+            foreground_observation[1],
+        )
+        terminal_times = iter((
+            datetime(2026, 8, 7, 12, 0, 3, tzinfo=timezone.utc),
+            datetime(2026, 8, 7, 12, 0, 4, tzinfo=timezone.utc),
+        ))
+        hooks.clock = lambda: next(terminal_times)
+        self.assertLess(
+            _recheck_process_identity(
+                hooks, target_observation[0], label="target"
+            ),
+            _recheck_process_identity(
+                hooks, foreground_observation[0], label="foreground"
+            ),
+        )
+        hooks.clock = lambda: datetime.now(timezone.utc)
+        outcome = run_native(self.config_path, hooks=hooks)
+        process_ledger = (
+            outcome.bundle_dir / "process/ledger.jsonl"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"role":"foreground"', process_ledger)
+        self.assertIn('"pid":456', process_ledger)
+        self.assertNotIn("/Applications/", process_ledger)
 
     def test_serve_owner_probe_matches_only_exact_configured_executable(self):
         executable = str(Path(sys.executable).resolve())

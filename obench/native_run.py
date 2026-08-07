@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 from typing import Any, Callable, Iterator, Mapping, Sequence
@@ -461,6 +462,10 @@ class NativeRunHooks:
     mcp_owner_probe: Callable[[Sequence[str]], Sequence[Mapping[str, Any]]] = (
         lambda command: _mcp_serve_owners(command)
     )
+    mcp_monitor_factory: Callable[
+        [Sequence[str], Callable[[Sequence[str]], Sequence[Mapping[str, Any]]]],
+        Any,
+    ] | None = None
     app_probe: Callable[[AppRequirement], Sequence[AppEvidence]] = (
         lambda requirement: _inspect_setup_app(requirement)
     )
@@ -566,6 +571,97 @@ def _mcp_serve_owners(
             "command": args,
         })
     return tuple(owners)
+
+
+class _McpServeOwnerMonitor:
+    def __init__(
+        self,
+        command: Sequence[str],
+        owner_probe: Callable[[Sequence[str]], Sequence[Mapping[str, Any]]],
+        *,
+        clock: Callable[[], datetime],
+        monotonic: Callable[[], float],
+        interval_s: float = 0.1,
+    ):
+        self.command = tuple(command)
+        self.owner_probe = owner_probe
+        self.clock = clock
+        self.monotonic = monotonic
+        self.interval_s = interval_s
+        self._samples: list[dict[str, Any]] = []
+        self._error: BaseException | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+    @property
+    def samples(self) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            return tuple(dict(sample) for sample in self._samples)
+
+    @property
+    def error(self) -> BaseException | None:
+        with self._lock:
+            return self._error
+
+    def _set_error(self, error: BaseException) -> None:
+        with self._lock:
+            if self._error is None:
+                self._error = error
+
+    def _sample(self) -> None:
+        owners = tuple(self.owner_probe(self.command))
+        pids = []
+        for owner in owners:
+            pid = owner.get("pid") if isinstance(owner, Mapping) else None
+            if type(pid) is not int or pid <= 0:
+                raise NativeRunError(
+                    "MCP owner monitor received malformed process evidence"
+                )
+            pids.append(pid)
+        sample = {
+            "observed_at": self.clock().isoformat(),
+            "observed_at_monotonic": self.monotonic(),
+            "unrelated_serve_pids": sorted(pids),
+        }
+        with self._lock:
+            self._samples.append(sample)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_s):
+            try:
+                self._sample()
+            except BaseException as exc:
+                self._set_error(exc)
+                return
+
+    def start(self) -> None:
+        if self._thread is not None:
+            raise RuntimeError("MCP owner monitor is already started")
+        self._sample()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="openbench-mcp-owner-monitor",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        thread = self._thread
+        if thread is None:
+            return
+        self._stop.set()
+        thread.join(timeout=max(1.0, self.interval_s * 5))
+        if thread.is_alive():
+            raise NativeRunError("MCP owner monitor did not stop")
+        if self.error is not None:
+            raise NativeRunError(f"MCP owner monitor failed: {self.error}") from self.error
+        self._sample()
+        self._thread = None
+        if any(sample["unrelated_serve_pids"] for sample in self.samples):
+            raise NativeRunError(
+                "unrelated computer-use-mcp serve owner appeared during agent phase"
+            )
 
 
 def _inspect_setup_app(requirement: AppRequirement) -> Sequence[AppEvidence]:
@@ -778,6 +874,34 @@ def _inspect_setup_app_process(
         raise NativeRunError(
             "running target app process code signature does not match inspected bundle"
         )
+    try:
+        started = command_runner(
+            ["/bin/ps", "-ww", "-p", str(pid), "-o", "lstart="],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise NativeRunError(
+            f"cannot inspect running target app process start time: {exc}"
+        ) from exc
+    process_start_token = " ".join((started.stdout or "").split())
+    if (
+        started.returncode != 0
+        or re.fullmatch(
+            r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun) "
+            r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
+            r"([1-9]|[12][0-9]|3[01]) "
+            r"([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [0-9]{4}",
+            process_start_token,
+        )
+        is None
+    ):
+        raise NativeRunError(
+            "running target app process start-time lookup returned malformed evidence"
+        )
     pids_after = _running_app_pids(bundle_id, command_runner=command_runner)
     if pids_after != pids_before:
         raise NativeRunError("running target app process changed during identity proof")
@@ -787,6 +911,7 @@ def _inspect_setup_app_process(
         "device": executable_stat.st_dev,
         "inode": executable_stat.st_ino,
         "cdhash": observed_cdhash,
+        "process_start_token": process_start_token,
     }
 
 
@@ -808,12 +933,80 @@ def _process_cdhash(pid: int) -> str:
     return bytes(cdhash).hex()
 
 
-def _require_setup_app(
+def _load_build_manifest(config: NativeRunConfig) -> dict[str, Any] | None:
+    manifest_paths = [
+        parent / "build-manifest.json"
+        for parent in config.source_path.parents
+        if (parent / "build-manifest.json").is_file()
+    ]
+    if len(manifest_paths) > 1:
+        raise NativeRunError("multiple Computer-Use build manifests apply to the config")
+    if not manifest_paths:
+        return None
+    try:
+        manifest = json.loads(manifest_paths[0].read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise NativeRunError(f"cannot read Computer-Use build manifest: {exc}") from exc
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != "openbench.computer-use-build.v1"
+        or not isinstance(manifest.get("fixtures"), dict)
+    ):
+        raise NativeRunError("Computer-Use build manifest is malformed")
+    return manifest
+
+
+def _manifest_fixture(
+    manifest: Mapping[str, Any] | None,
+    bundle_id: str,
+    *,
+    required: bool,
+) -> dict[str, str] | None:
+    fixtures = manifest["fixtures"] if manifest is not None else {}
+    matches = [
+        value
+        for value in fixtures.values()
+        if isinstance(value, dict) and value.get("bundle_id") == bundle_id
+    ]
+    if len(matches) > 1:
+        raise NativeRunError(
+            f"Computer-Use build manifest has ambiguous identity for {bundle_id!r}"
+        )
+    if not matches:
+        if required:
+            raise NativeRunError(
+                f"Computer-Use build manifest has no identity for {bundle_id!r}"
+            )
+        return None
+    value = matches[0]
+    required_fields = {
+        "app",
+        "bundle_id",
+        "version",
+        "build",
+        "executable",
+        "binary_sha256",
+        "signature_sha256",
+    }
+    if (
+        any(
+            not isinstance(value.get(field), str) or not value[field]
+            for field in required_fields
+        )
+        or not Path(value["app"]).expanduser().is_absolute()
+        or not Path(value["executable"]).expanduser().is_absolute()
+    ):
+        raise NativeRunError("Computer-Use build manifest app identity is malformed")
+    return {field: value[field] for field in required_fields}
+
+
+def _require_running_app(
     hooks: NativeRunHooks,
-    config: NativeRunConfig,
-) -> None:
-    expected = config.environment["app"]
-    requirement = AppRequirement(config.app_bundle_id, str(expected["version"]))
+    expected: Mapping[str, str],
+    *,
+    label: str,
+) -> tuple[dict[str, Any], datetime]:
+    requirement = AppRequirement(expected["bundle_id"], expected["version"])
     evidence = tuple(hooks.app_probe(requirement))
     if any(item.bundle_identifier != requirement.bundle_identifier for item in evidence):
         raise NativeRunError("setup app probe returned an undeclared bundle identifier")
@@ -828,15 +1021,15 @@ def _require_setup_app(
             for item in evidence
         ]
         raise NativeRunError(
-            "setup did not establish exactly one required target app: "
+            f"setup did not establish exactly one required {label} app: "
             f"{requirement.bundle_identifier!r} version {requirement.version!r}; "
             f"observed {observed!r}"
         )
     if not exact[0].path:
-        raise NativeRunError("running target app evidence has no bundle path")
+        raise NativeRunError(f"running {label} app evidence has no bundle path")
     running_path = Path(exact[0].path).expanduser()
     if not running_path.is_absolute():
-        raise NativeRunError("running target app evidence path must be absolute")
+        raise NativeRunError(f"running {label} app evidence path must be absolute")
     identity = dict(hooks.app_identity_probe(running_path))
     required_identity_fields = {
         "app",
@@ -850,7 +1043,7 @@ def _require_setup_app(
     }
     if set(identity) != required_identity_fields:
         raise NativeRunError(
-            "running target app identity evidence has unexpected fields"
+            f"running {label} app identity evidence has unexpected fields"
         )
     observed_app = Path(str(identity["app"])).expanduser()
     observed_executable = Path(str(identity["executable"])).expanduser()
@@ -859,7 +1052,7 @@ def _require_setup_app(
         or observed_app.resolve() != running_path.resolve()
     ):
         raise NativeRunError(
-            "running target app identity path does not match process evidence"
+            f"running {label} app identity path does not match process evidence"
         )
     expected_executable_root = observed_app.resolve() / "Contents/MacOS"
     try:
@@ -868,16 +1061,27 @@ def _require_setup_app(
         )
     except ValueError as exc:
         raise NativeRunError(
-            "running target app executable is outside its bundle"
+            f"running {label} app executable is outside its bundle"
         ) from exc
     if len(executable_relative.parts) != 1:
-        raise NativeRunError("running target app executable identity is not exact")
+        raise NativeRunError(f"running {label} app executable identity is not exact")
     comparisons = {
-        "bundle_id": config.app_bundle_id,
-        "version": str(expected["version"]),
-        "build": str(expected["build"]),
-        "signature_sha256": str(expected["code_signature_sha256"]),
+        field: expected[field]
+        for field in (
+            "bundle_id",
+            "version",
+            "build",
+            "binary_sha256",
+            "signature_sha256",
+        )
+        if field in expected
     }
+    if "app" in expected:
+        comparisons["app"] = str(Path(expected["app"]).expanduser().resolve())
+    if "executable" in expected:
+        comparisons["executable"] = str(
+            Path(expected["executable"]).expanduser().resolve()
+        )
     mismatches = {
         field: {"expected": value, "observed": identity.get(field)}
         for field, value in comparisons.items()
@@ -885,11 +1089,11 @@ def _require_setup_app(
     }
     if mismatches:
         raise NativeRunError(
-            f"running target app identity does not match planned environment: {mismatches!r}"
+            f"running {label} app identity does not match planned identity: {mismatches!r}"
         )
     process_identity = dict(
         hooks.app_process_probe(
-            config.app_bundle_id,
+            expected["bundle_id"],
             observed_executable,
             str(identity["cdhash"]),
         )
@@ -900,9 +1104,10 @@ def _require_setup_app(
         "device",
         "inode",
         "cdhash",
+        "process_start_token",
     }:
         raise NativeRunError(
-            "running target app process identity evidence has unexpected fields"
+            f"running {label} app process identity evidence has unexpected fields"
         )
     if (
         type(process_identity["pid"]) is not int
@@ -910,90 +1115,161 @@ def _require_setup_app(
         or type(process_identity["device"]) is not int
         or type(process_identity["inode"]) is not int
         or process_identity["cdhash"] != identity["cdhash"]
+        or not isinstance(process_identity["process_start_token"], str)
+        or not process_identity["process_start_token"]
         or Path(str(process_identity["executable"])).resolve()
         != observed_executable.resolve()
     ):
-        raise NativeRunError("running target app process identity evidence is malformed")
-    manifest_paths = [
-        parent / "build-manifest.json"
-        for parent in config.source_path.parents
-        if (parent / "build-manifest.json").is_file()
-    ]
-    if len(manifest_paths) > 1:
-        raise NativeRunError("multiple Computer-Use build manifests apply to the config")
-    if manifest_paths:
-        try:
-            manifest = json.loads(manifest_paths[0].read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise NativeRunError(f"cannot read Computer-Use build manifest: {exc}") from exc
-        if not isinstance(manifest, dict):
-            raise NativeRunError("Computer-Use build manifest is malformed")
-        fixtures = manifest.get("fixtures")
-        if (
-            manifest.get("schema_version") != "openbench.computer-use-build.v1"
-            or not isinstance(fixtures, dict)
-        ):
-            raise NativeRunError("Computer-Use build manifest is malformed")
-        planned = [
-            value
-            for value in fixtures.values()
-            if isinstance(value, dict)
-            and value.get("bundle_id") == config.app_bundle_id
-        ]
-        if len(planned) > 1:
+        raise NativeRunError(f"running {label} app process identity is malformed")
+    observed_at = hooks.clock()
+    return (
+        {
+            **identity,
+            **process_identity,
+            "app": str(observed_app.resolve()),
+            "executable": str(observed_executable.resolve()),
+        },
+        observed_at,
+    )
+
+
+def _require_setup_processes(
+    hooks: NativeRunHooks,
+    config: NativeRunConfig,
+) -> tuple[
+    tuple[dict[str, Any], datetime],
+    tuple[dict[str, Any], datetime],
+]:
+    manifest = _load_build_manifest(config)
+    target_manifest = _manifest_fixture(
+        manifest,
+        config.app_bundle_id,
+        required=manifest is not None,
+    )
+    configured = config.environment["app"]
+    target_expected = {
+        "bundle_id": config.app_bundle_id,
+        "version": str(configured["version"]),
+        "build": str(configured["build"]),
+        "signature_sha256": str(configured["code_signature_sha256"]),
+    }
+    if target_manifest is not None:
+        locked_manifest_fields = {
+            "bundle_id": config.app_bundle_id,
+            "version": str(configured["version"]),
+            "build": str(configured["build"]),
+            "signature_sha256": str(configured["code_signature_sha256"]),
+        }
+        manifest_mismatches = {
+            field: {
+                "configured": value,
+                "manifest": target_manifest[field],
+            }
+            for field, value in locked_manifest_fields.items()
+            if target_manifest[field] != value
+        }
+        if manifest_mismatches:
             raise NativeRunError(
-                "Computer-Use build manifest has ambiguous target app identity"
+                "Computer-Use build manifest conflicts with locked target "
+                f"environment: {manifest_mismatches!r}"
             )
-        if planned:
-            planned_identity = planned[0]
-            required_manifest_fields = {
-                "app",
-                "build",
-                "executable",
-                "binary_sha256",
-                "signature_sha256",
-            }
-            if (
-                any(
-                    not isinstance(planned_identity.get(field), str)
-                    or not planned_identity[field]
-                    for field in required_manifest_fields
-                )
-                or not Path(planned_identity["app"]).expanduser().is_absolute()
-                or not Path(planned_identity["executable"]).expanduser().is_absolute()
-            ):
-                raise NativeRunError(
-                    "Computer-Use build manifest target app identity is malformed"
-                )
-            manifest_expected = {
-                "app": str(Path(planned_identity["app"]).expanduser().resolve()),
-                "executable": str(
-                    Path(planned_identity["executable"]).expanduser().resolve()
-                ),
-                "binary_sha256": planned_identity["binary_sha256"],
-                "build": planned_identity["build"],
-                "signature_sha256": planned_identity["signature_sha256"],
-            }
-            manifest_observed = {
-                "app": str(observed_app.resolve()),
-                "executable": str(observed_executable.resolve()),
-                "binary_sha256": identity["binary_sha256"],
-                "build": identity["build"],
-                "signature_sha256": identity["signature_sha256"],
-            }
-            manifest_mismatches = {
-                field: {
-                    "expected": manifest_expected[field],
-                    "observed": manifest_observed[field],
-                }
-                for field in manifest_expected
-                if manifest_expected[field] != manifest_observed[field]
-            }
-            if manifest_mismatches:
-                raise NativeRunError(
-                    "running target app identity does not match Computer-Use "
-                    f"build manifest: {manifest_mismatches!r}"
-                )
+        target_expected.update({
+            field: target_manifest[field]
+            for field in ("app", "executable", "binary_sha256")
+        })
+    target_observation = _require_running_app(
+        hooks, target_expected, label="target"
+    )
+    target = target_observation[0]
+    foreground_bundle = config.focus_policy["required_foreground_bundle_id"]
+    if foreground_bundle == config.app_bundle_id:
+        return target_observation, target_observation
+    foreground_manifest = _manifest_fixture(
+        manifest, foreground_bundle, required=True
+    )
+    assert foreground_manifest is not None
+    foreground_observation = _require_running_app(
+        hooks, foreground_manifest, label="foreground"
+    )
+    foreground = foreground_observation[0]
+    if foreground["pid"] == target["pid"]:
+        raise NativeRunError("target and foreground roles require separate processes")
+    return target_observation, foreground_observation
+
+
+def _require_setup_app(
+    hooks: NativeRunHooks,
+    config: NativeRunConfig,
+) -> None:
+    _require_setup_processes(hooks, config)
+
+
+def _public_process_identity(
+    role: str,
+    identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "role": role,
+        "bundle_id": identity["bundle_id"],
+        "pid": identity["pid"],
+        "version": identity["version"],
+        "build": identity["build"],
+        "binary_sha256": identity["binary_sha256"],
+        "signature_sha256": identity["signature_sha256"],
+        "cdhash": identity["cdhash"],
+        "process_start_token": identity["process_start_token"],
+    }
+
+
+def _recheck_process_identity(
+    hooks: NativeRunHooks,
+    identity: Mapping[str, Any],
+    *,
+    label: str,
+) -> datetime:
+    observed = dict(
+        hooks.app_process_probe(
+            str(identity["bundle_id"]),
+            Path(str(identity["executable"])),
+            str(identity["cdhash"]),
+        )
+    )
+    expected = {
+        field: identity[field]
+        for field in (
+            "pid",
+            "executable",
+            "device",
+            "inode",
+            "cdhash",
+            "process_start_token",
+        )
+    }
+    if observed != expected:
+        raise NativeRunError(
+            f"{label} process identity changed during the agent phase"
+        )
+    return hooks.clock()
+
+
+def _stop_agent_monitors(
+    focus_monitor: Any,
+    owner_monitor: Any,
+) -> None:
+    errors: list[tuple[str, BaseException]] = []
+    for label, monitor in (
+        ("mcp_owner_monitor_error", owner_monitor),
+        ("focus_monitor_error", focus_monitor),
+    ):
+        try:
+            monitor.stop()
+        except BaseException as exc:
+            errors.append((label, exc))
+    if errors:
+        primary = errors[0][1]
+        for label, error in errors:
+            setattr(primary, label, error)
+        raise primary
 
 
 def _run_locked_preflight(
@@ -1623,6 +1899,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         chosen_mcp: Path | None = None
         proxy_usage: list[dict[str, int]] = []
         focus_events: list[tuple[str, Mapping[str, Any]]] = []
+        process_events: list[tuple[str, str, Mapping[str, Any]]] = []
         adapter_result: Mapping[str, Any] | None = None
         verifier_outcome = None
         judged_snapshot: Path | None = None
@@ -1645,9 +1922,32 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     })
                     raise NativeRunError(f"setup phase {setup_outcome.status.value}")
 
-                _require_setup_app(
-                    hooks,
-                    config,
+                (
+                    (target_identity, target_setup_observed_at),
+                    (foreground_identity, foreground_setup_observed_at),
+                ) = _require_setup_processes(hooks, config)
+                process_events.extend(
+                    (
+                        observed_at.isoformat(),
+                        "process_identity",
+                        {
+                            "attempt": attempt,
+                            **_public_process_identity(role, identity),
+                            "phase": "setup",
+                        },
+                    )
+                    for role, identity, observed_at in (
+                        (
+                            "target",
+                            target_identity,
+                            target_setup_observed_at,
+                        ),
+                        (
+                            "foreground",
+                            foreground_identity,
+                            foreground_setup_observed_at,
+                        ),
+                    )
                 )
 
                 launcher = attempt_root / "computer-use-mcp-collector"
@@ -1670,31 +1970,91 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 monitor = hooks.focus_monitor_factory(
                     (config.focus_policy["required_foreground_bundle_id"],)
                 )
+                owner_monitor = (
+                    hooks.mcp_monitor_factory(
+                        config.mcp_command, hooks.mcp_owner_probe
+                    )
+                    if hooks.mcp_monitor_factory is not None
+                    else _McpServeOwnerMonitor(
+                        config.mcp_command,
+                        hooks.mcp_owner_probe,
+                        clock=hooks.clock,
+                        monotonic=hooks.monotonic,
+                    )
+                )
                 with _managed_proxy(
                     config, proxy_dir, hooks, token, proxy_harness
                 ) as proxy_context:
                     if proxy_context:
                         env.update(proxy_context["env"])
                     with _temporary_environ(env):
-                        attempt_agent_started_at = hooks.clock()
                         monitor.start()
+                        try:
+                            owner_monitor.start()
+                        except BaseException:
+                            monitor.stop()
+                            raise
+                        attempt_agent_started_at = hooks.clock()
+                        process_events.append((
+                            attempt_agent_started_at.isoformat(),
+                            "agent_boundary",
+                            {"attempt": attempt, "boundary": "start"},
+                        ))
                         try:
                             adapter_result = adapter.run(
                                 instruction, str(config.workspace), config.model_name, int(config.timeout_s)
                             )
                         except BaseException as adapter_error:
+                            attempt_agent_finished_at = hooks.clock()
+                            process_events.append((
+                                attempt_agent_finished_at.isoformat(),
+                                "agent_boundary",
+                                {"attempt": attempt, "boundary": "finish"},
+                            ))
                             try:
-                                monitor.stop()
+                                _stop_agent_monitors(monitor, owner_monitor)
                             except BaseException as monitor_error:
                                 setattr(
                                     adapter_error,
-                                    "focus_monitor_error",
+                                    "agent_monitor_error",
                                     monitor_error,
                                 )
+                                if hasattr(
+                                    monitor_error, "focus_monitor_error"
+                                ):
+                                    setattr(
+                                        adapter_error,
+                                        "focus_monitor_error",
+                                        monitor_error.focus_monitor_error,
+                                    )
+                                if hasattr(
+                                    monitor_error, "mcp_owner_monitor_error"
+                                ):
+                                    setattr(
+                                        adapter_error,
+                                        "mcp_owner_monitor_error",
+                                        monitor_error.mcp_owner_monitor_error,
+                                    )
                             raise
                         else:
-                            monitor.stop()
-                        attempt_agent_finished_at = hooks.clock()
+                            attempt_agent_finished_at = hooks.clock()
+                            process_events.append((
+                                attempt_agent_finished_at.isoformat(),
+                                "agent_boundary",
+                                {"attempt": attempt, "boundary": "finish"},
+                            ))
+                            _stop_agent_monitors(monitor, owner_monitor)
+                for sample in owner_monitor.samples:
+                    process_events.append((
+                        sample["observed_at"],
+                        "mcp_owner_sample",
+                        {
+                            "attempt": attempt,
+                            "unrelated_serve_pids": sample[
+                                "unrelated_serve_pids"
+                            ],
+                        },
+                    ))
                 if attempt_agent_finished_at < attempt_agent_started_at:
                     raise NativeRunError(
                         "agent phase wall-clock boundaries are not ordered"
@@ -1710,11 +2070,53 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         raise NativeRunError(
                             "focus helper event omitted its wall-clock timestamp"
                         )
+                    if event.pid != foreground_identity["pid"]:
+                        raise NativeRunError(
+                            "focus sample does not identify the setup-established "
+                            "foreground process"
+                        )
                     focus_events.append((event.observed_at, {
+                        "attempt": attempt,
                         "state": "observed",
                         "frontmost_bundle_id": event.bundle_identifier,
+                        "frontmost_pid": event.pid,
                         "target_bundle_id": config.app_bundle_id,
+                        "target_pid": target_identity["pid"],
                     }))
+                target_terminal_observed_at = _recheck_process_identity(
+                    hooks, target_identity, label="target"
+                )
+                if foreground_identity is not target_identity:
+                    foreground_terminal_observed_at = _recheck_process_identity(
+                        hooks, foreground_identity, label="foreground"
+                    )
+                else:
+                    foreground_terminal_observed_at = (
+                        target_terminal_observed_at
+                    )
+                process_events.extend(
+                    (
+                        observed_at.isoformat(),
+                        "process_identity",
+                        {
+                            "attempt": attempt,
+                            **_public_process_identity(role, identity),
+                            "phase": "terminal",
+                        },
+                    )
+                    for role, identity, observed_at in (
+                        (
+                            "target",
+                            target_identity,
+                            target_terminal_observed_at,
+                        ),
+                        (
+                            "foreground",
+                            foreground_identity,
+                            foreground_terminal_observed_at,
+                        ),
+                    )
+                )
                 proxy_usage = _proxy_usage(proxy_context)
                 if not isinstance(adapter_result, Mapping):
                     raise NativeRunError("adapter returned a non-object result")
@@ -1780,9 +2182,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         if focus_violations:
             for violation in focus_violations:
                 focus_events.append((hooks.clock().isoformat(), {
+                    "attempt": completed_attempts,
                     "state": "yielded_to_human",
                     "frontmost_bundle_id": violation.event.bundle_identifier,
+                    "frontmost_pid": violation.event.pid,
                     "target_bundle_id": config.app_bundle_id,
+                    "target_pid": (
+                        target_identity["pid"]
+                        if "target_identity" in locals()
+                        else None
+                    ),
                 }))
             raise NativeRunError("focus policy violation observed during native trial")
         if not focus_events:
@@ -1868,7 +2277,10 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 "mcp": {"name": config.mcp_name, "version": config.mcp_version, "transport": "stdio", "server_sha256": mcp_content_sha256, "collector_run_id": collector_run_id},
                 "environment": lock_environment,
                 "budget": {"timeout_s": config.timeout_s, "max_retries": config.max_retries},
-                "evidence": {"proxy_required": config.proxy_required},
+                "evidence": {
+                    "proxy_required": config.proxy_required,
+                    "process_monitor_required": True,
+                },
             }
             _write_json(bundle / "lock.json", lock)
             lock_sha256 = _sha256(bundle / "lock.json")
@@ -1899,6 +2311,14 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
             for observed, payload in focus_events:
                 focus_writer.append("focus_sample" if payload["state"] == "observed" else "focus_yield", payload, observed)
             focus_writer.seal()
+            process_writer = _LedgerWriter(
+                bundle, "process", config.trial_id, lock_sha256
+            )
+            for observed, kind, payload in sorted(
+                process_events, key=lambda item: item[0]
+            ):
+                process_writer.append(kind, payload, observed)
+            process_writer.seal()
             if config.proxy_required:
                 proxy_writer = _LedgerWriter(bundle, "proxy", config.trial_id, lock_sha256)
                 for usage in proxy_usage:
@@ -1933,7 +2353,9 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 "outcome": {"completed": True, "score": score, "checker_exit": checker_exit,
                     "error": None, "failure_class": "solved" if checker_exit == 0 else "wrong_answer",
                     "failure_reason": None},
-                "mcp_event_count": mcp_count, "focus_event_count": len(focus_events),
+                "mcp_event_count": mcp_count,
+                "focus_event_count": len(focus_events),
+                "process_event_count": len(process_events),
             })
             _write_manifest(bundle, config.trial_id)
             load_native_trial(bundle)
