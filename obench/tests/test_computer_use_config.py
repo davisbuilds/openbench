@@ -9,6 +9,13 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
+from obench.native_matrix import (
+    NativeMatrixError,
+    build_native_matrix,
+    canonical_bytes,
+    reconcile_native_state,
+    validate_native_matrix,
+)
 from obench.native_run import load_config
 
 
@@ -111,15 +118,44 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertTrue(state.exists())
 
     def test_reset_is_idempotent_and_confined_to_run_root(self):
-        workspace = cub._workspace(self.run_root, "installed", "basic-controls")
+        workspace = cub._workspace(
+            self.run_root, "installed", "basic-controls", 1
+        )
+        other_workspace = cub._workspace(
+            self.run_root, "installed", "basic-controls", 2
+        )
         (workspace / "artifacts").mkdir(parents=True)
         (workspace / "artifacts/state.json").write_text("{}", encoding="utf-8")
+        (other_workspace / "artifacts").mkdir(parents=True)
+        (other_workspace / "artifacts/state.json").write_text(
+            '{"trial":2}', encoding="utf-8"
+        )
+        other_state = cub._state_path(
+            self.run_root, "installed", "basic-controls", 2
+        )
+        other_state.parent.mkdir(parents=True)
+        other_state.write_text(
+            json.dumps({"schema_version": cub.PROCESS_SCHEMA, "processes": []}),
+            encoding="utf-8",
+        )
         unrelated = self.base / "user-document.txt"
         unrelated.write_text("keep", encoding="utf-8")
-        cub.reset_runtime(self.request, "installed", "basic-controls")
-        cub.reset_runtime(self.request, "installed", "basic-controls")
+        cub.reset_runtime(self.request, "installed", "basic-controls", 1)
+        cub.reset_runtime(self.request, "installed", "basic-controls", 1)
         self.assertFalse((workspace / "artifacts").exists())
+        self.assertEqual(
+            (other_workspace / "artifacts/state.json").read_text(encoding="utf-8"),
+            '{"trial":2}',
+        )
+        self.assertTrue(other_state.is_file())
         self.assertEqual(unrelated.read_text(encoding="utf-8"), "keep")
+
+    def test_trial_index_must_be_explicitly_positive(self):
+        for value in (0, -1, True, "01", "not-a-number"):
+            with self.subTest(value=value), self.assertRaises(cub.CubError):
+                cub._workspace(
+                    self.run_root, "installed", "basic-controls", value
+                )
 
     def test_static_preflight_does_not_create_run_root(self):
         request = cub._load_request(self.request)
@@ -254,13 +290,82 @@ class ComputerUseConfigTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(cub.generate(self.request, "matched", None, None), 0)
 
-        configs = sorted((self.run_root / "configs/matched").glob("*/*.toml"))
-        self.assertEqual(len(configs), 6)
-        for path in configs:
+        manifest = json.loads(
+            (self.run_root / "configs/matched/manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(manifest["comparable"])
+        self.assertEqual(manifest["repetitions"], 5)
+        self.assertEqual(len(manifest["plans"]), 3)
+        self.assertEqual(len(manifest["cells"]), 30)
+        workspaces = set()
+        evidence_paths = set()
+        process_states = set()
+        output_paths = set()
+        results_paths = set()
+        matrix_cell_keys = set()
+        for plan_entry in manifest["plans"]:
+            spec_path = Path(plan_entry["spec"])
+            plan_path = Path(plan_entry["plan"])
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            self.assertEqual(plan, build_native_matrix(**spec))
+            self.assertEqual(validate_native_matrix(plan), plan)
+            self.assertEqual(
+                plan_entry["plan_command"],
+                ["obench", "native", "plan", str(spec_path), "--output", str(plan_path)],
+            )
+            self.assertEqual(
+                plan_entry["spec_sha256"],
+                cub._bytes_sha256(canonical_bytes(spec) + b"\n"),
+            )
+            self.assertEqual(
+                plan_entry["plan_file_sha256"],
+                cub._bytes_sha256(canonical_bytes(plan) + b"\n"),
+            )
+            orders = [
+                [
+                    cell["arm_id"]
+                    for cell in plan["schedule"]
+                    if cell["block"] == block
+                ]
+                for block in range(1, 6)
+            ]
+            self.assertEqual(
+                orders,
+                [
+                    ["installed", "source"],
+                    ["source", "installed"],
+                    ["source", "installed"],
+                    ["installed", "source"],
+                    ["installed", "source"],
+                ],
+            )
+
+        for cell in manifest["cells"]:
+            path = Path(cell["config"])
             with self.subTest(config=path):
-                text = path.read_text(encoding="utf-8")
+                raw = path.read_bytes()
+                text = raw.decode("utf-8")
                 self.assertNotIn("harbor", text.lower())
+                self.assertEqual(
+                    cell["runnable_config_sha256"],
+                    cub._bytes_sha256(raw),
+                )
                 parsed = tomllib.loads(text)
+                self.assertEqual(parsed["trial_id"], cell["trial_id"])
+                self.assertEqual(
+                    parsed["matrix"],
+                    {
+                        "plan_sha256": cell["plan_sha256"],
+                        "cell_id": cell["cell_id"],
+                        "cell_sha256": cell["cell_sha256"],
+                        "config_sha256": cell["config_sha256"],
+                    },
+                )
+                self.assertEqual(
+                    parsed["trial_id"],
+                    f"cub-v0-{cell['task']}-{cell['arm_id']}-trial{cell['trial_index']}",
+                )
                 self.assertEqual(parsed["harness"]["name"], "codex")
                 self.assertEqual(parsed["model"], {
                     "name": "gpt-5.6-sol",
@@ -270,20 +375,153 @@ class ComputerUseConfigTests(unittest.TestCase):
                 self.assertEqual(parsed["mcp"]["client_command_env"], "CUB_MCP_COMMAND")
                 self.assertTrue(parsed["proxy"]["required"])
                 self.assertTrue(parsed["atif_path"].endswith("trajectory.json"))
+                command = parsed["phases"]["setup"]["command"]
+                self.assertEqual(
+                    command[-6:],
+                    [
+                        "--arm", cell["arm_id"], "--task", cell["task"],
+                        "--trial-index", str(cell["trial_index"]),
+                    ],
+                )
                 loaded = load_config(path)
+                self.assertEqual(loaded.trial_id, cell["trial_id"])
                 self.assertEqual(loaded.model_name, "gpt-5.6-sol")
                 self.assertTrue(loaded.proxy_required)
                 self.assertEqual(loaded.mcp_client_command_env, "CUB_MCP_COMMAND")
+                workspaces.add(str(loaded.workspace))
+                output_paths.add(str(loaded.output_dir))
+                results_paths.add(str(loaded.results_path))
+                evidence_paths.add(cell["evidence"])
+                process_states.add(cell["process_state"])
+                matrix_cell_keys.add(cell["matrix_cell_key"])
+                self.assertEqual(str(loaded.output_dir), cell["output"])
+                self.assertEqual(str(loaded.results_path), cell["results"])
+        for paths in (
+            workspaces,
+            evidence_paths,
+            process_states,
+            output_paths,
+            results_paths,
+            matrix_cell_keys,
+        ):
+            self.assertEqual(len(paths), 30)
 
-        manifest = json.loads(
-            (self.run_root / "configs/matched/manifest.json").read_text(encoding="utf-8")
+        before = {
+            path: path.read_bytes()
+            for path in (self.run_root / "configs/matched").rglob("*")
+            if path.is_file()
+        }
+        with (
+            mock.patch.object(cub, "_bundle_info", side_effect=self.identity),
+            mock.patch.object(cub, "_static_preflight", return_value={
+                "matched_ready": True, "checks": []
+            }),
+            mock.patch.object(cub, "_host_environment", return_value=host),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(cub.generate(self.request, "matched", None, None), 0)
+        self.assertEqual(
+            before,
+            {
+                path: path.read_bytes()
+                for path in (self.run_root / "configs/matched").rglob("*")
+                if path.is_file()
+            },
         )
-        self.assertTrue(manifest["comparable"])
+        with (
+            mock.patch.object(cub, "_bundle_info", side_effect=self.identity),
+            mock.patch.object(cub, "_static_preflight", return_value={
+                "matched_ready": True, "checks": []
+            }),
+            mock.patch.object(cub, "_host_environment", return_value=host),
+            self.assertRaisesRegex(cub.CubError, "divergent immutable"),
+        ):
+            cub.generate(
+                self.request, "matched", None, None, repetitions=6
+            )
+        self.assertFalse(
+            any(
+                path.name.startswith("trial6-")
+                for path in (self.run_root / "configs/matched").rglob("*.toml")
+            )
+        )
+
+        first_plan = json.loads(
+            Path(manifest["plans"][0]["plan"]).read_text(encoding="utf-8")
+        )
+        first_cell = first_plan["schedule"][0]
+        observation = {
+            key: first_cell[key]
+            for key in ("cell_id", "trial_id", "config_sha256", "cell_sha256")
+        }
+        observation.update(
+            {"result_sha256": "a" * 64, "bundle_sha256": "b" * 64}
+        )
+        state = reconcile_native_state(first_plan, [observation])
+        self.assertEqual(
+            reconcile_native_state(first_plan, [observation], prior_state=state),
+            state,
+        )
+        with self.assertRaisesRegex(NativeMatrixError, "different immutable"):
+            reconcile_native_state(
+                first_plan,
+                [{**observation, "result_sha256": "c" * 64}],
+                prior_state=state,
+            )
+
         for task in cub.TASKS:
             sidecar = tomllib.loads(
                 (ROOT / f"computer-use-tasks/v0/{task}/native-macos.toml").read_text(encoding="utf-8")
             )
             self.assertFalse(sidecar["harbor_execution_supported"])
+
+    def test_pilot_config_binds_requested_trial_index(self):
+        host = {
+            "os_version": "15.6", "os_build": "24G84",
+            "architecture": "arm64", "hardware": "MacFixture1,1",
+            "display_width": 1512, "display_height": 982,
+            "display_scale": 2.0, "display_color_space": "Color LCD",
+        }
+        with (
+            mock.patch.object(cub, "_bundle_info", side_effect=self.identity),
+            mock.patch.object(cub, "_static_preflight", return_value={
+                "matched_ready": False, "checks": []
+            }),
+            mock.patch.object(cub, "_host_environment", return_value=host),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(
+                cub.generate(
+                    self.request,
+                    "pilot",
+                    "source",
+                    "basic-controls",
+                    trial_index=3,
+                ),
+                0,
+            )
+        manifest = json.loads(
+            (self.run_root / "configs/pilot/manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(len(manifest["cells"]), 1)
+        cell = manifest["cells"][0]
+        self.assertEqual(cell["trial_index"], 3)
+        self.assertEqual(
+            cell["trial_id"],
+            "cub-v0-pilot-source-basic-controls-trial3",
+        )
+        config = load_config(cell["config"])
+        self.assertEqual(config.trial_id, cell["trial_id"])
+        for path in (
+            config.workspace,
+            config.output_dir,
+            config.results_path,
+            Path(cell["evidence"]),
+            Path(cell["process_state"]),
+        ):
+            self.assertIn("trial3", str(path))
 
     def test_matched_generation_fails_closed_without_tcc_identity_proof(self):
         with mock.patch.object(cub, "_static_preflight", return_value={
