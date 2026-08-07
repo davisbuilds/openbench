@@ -45,6 +45,7 @@ from .native_macos import (
     NativeMacOSHelperResolver,
     PhaseName,
     PhaseSpec,
+    PhaseStatus,
     PreflightResult,
     PreflightSpec,
     SubprocessPhaseRunner,
@@ -2474,8 +2475,20 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     )
                 verifier_outcome = phase_runner.run_phase(verifier_spec)
                 verifier_s += verifier_outcome.duration_s
-                if not verifier_outcome.passed:
-                    raise NativeRunError(f"verifier phase {verifier_outcome.status.value}")
+                if verifier_outcome.status not in {
+                    PhaseStatus.PASSED,
+                    PhaseStatus.FAILED,
+                }:
+                    raise NativeRunError(
+                        f"verifier phase {verifier_outcome.status.value}"
+                    )
+                if (
+                    verifier_outcome.status == PhaseStatus.FAILED
+                    and not (config.workspace / config.verdict_path).is_file()
+                ):
+                    raise NativeRunError(
+                        "verifier phase failed without a verdict"
+                    )
                 result_status = "completed"
                 evidence_snapshot = attempt_root / "judged"
                 evidence_snapshot_sha256 = _snapshot_final_evidence(

@@ -303,11 +303,17 @@ class NativeRunTests(unittest.TestCase):
                 if phase == "setup":
                     (workspace / "setup.log").write_text("setup complete\\n")
                 if phase == "verifier":
+                    wrong = (workspace / "wrong-answer").exists()
                     (workspace / "verdict.json").write_text(
-                        json.dumps({"score": 1.0, "checker_exit": 0})
+                        json.dumps({
+                            "score": 0.0 if wrong else 1.0,
+                            "checker_exit": 17 if wrong else 0,
+                        })
                     )
                     if (workspace / "mutate-oracle").exists():
                         Path(__file__).with_name("oracle.txt").write_text("changed")
+                    if wrong:
+                        raise SystemExit(17)
                 if phase == "reset":
                     path = workspace / "reset.log"
                     path.write_text(path.read_text() + "reset\\n" if path.exists() else "reset\\n")
@@ -1814,6 +1820,24 @@ media_type = "application/json"
             run_native(self.config_path, hooks=hooks)
         self.assertTrue((self.workspace / "reset.log").is_file())
         self.assertTrue(monitor.stopped)
+
+    def test_verifier_wrong_answer_is_a_valid_completed_trial(self):
+        (self.workspace / "wrong-answer").touch()
+        hooks, monitor = self._hooks()
+
+        outcome = run_native(self.config_path, hooks=hooks)
+
+        self.assertTrue(monitor.stopped)
+        self.assertTrue((self.workspace / "reset.log").is_file())
+        self.assertTrue(outcome.row["completed"])
+        self.assertFalse(outcome.row["success"])
+        self.assertEqual(outcome.row["failure_class"], "wrong_answer")
+        self.assertEqual(outcome.row["checker_exit"], 17)
+        self.assertEqual(outcome.row["score"], 0.0)
+        self.assertEqual(
+            load_native_trial(outcome.bundle_dir)["run_id"],
+            outcome.row["run_id"],
+        )
 
     def test_reset_failure_fails_closed_after_successful_agent_and_verifier(self):
         (self.workspace / "fail-reset").touch()
