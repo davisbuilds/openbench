@@ -12,7 +12,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
-import importlib.util
 import json
 import math
 import os
@@ -27,7 +26,12 @@ import tomllib
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from .atif import SCHEMA_VERSION as ATIF_SCHEMA_VERSION, assert_valid_trajectory
-from .mcp_stdio_collector import CallLedger, collect_stdio, verify_ledger
+from .mcp_stdio_collector import (
+    COMPUTER_USE_TOOLS,
+    CallLedger,
+    collect_stdio,
+    verify_ledger,
+)
 from .native_macos import (
     AppRequirement,
     LeaseOwner,
@@ -296,6 +300,13 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
             raise NativeRunError(f"{field} must contain unique tool names")
     if set(allowed_tools) & set(forbidden_tools):
         raise NativeRunError("MCP tools cannot be both allowed and forbidden")
+    unknown_policy_tools = (
+        set(allowed_tools) | set(forbidden_tools)
+    ) - set(COMPUTER_USE_TOOLS)
+    if unknown_policy_tools:
+        raise NativeRunError(
+            f"MCP policy contains unknown tools: {sorted(unknown_policy_tools)!r}"
+        )
     return NativeRunConfig(
         source_path=source,
         trial_id=trial_id,
@@ -385,7 +396,12 @@ def _server_executable(command: Sequence[str]) -> Path:
     return resolved.resolve()
 
 
-def _path_inventory(path: Path, *, label: str) -> list[dict[str, Any]]:
+def _path_inventory(
+    path: Path,
+    *,
+    label: str,
+    exclude_runtime_generated: bool = False,
+) -> list[dict[str, Any]]:
     if path.is_symlink():
         raise NativeRunError(f"{label} cannot be a symlink: {path}")
     if path.is_file():
@@ -398,6 +414,13 @@ def _path_inventory(path: Path, *, label: str) -> list[dict[str, Any]]:
             raise NativeRunError(f"{label} tree cannot contain symlinks: {path}")
     else:
         raise NativeRunError(f"{label} is not a regular file or directory: {path}")
+    if exclude_runtime_generated:
+        files = [
+            item
+            for item in files
+            if "__pycache__" not in item.parts
+            and item.suffix not in {".pyc", ".pyo"}
+        ]
     return [
         {
             "path": item.relative_to(root).as_posix(),
@@ -419,6 +442,8 @@ def _content_bound_command_digest(
         {"argument_index": 0, "inventory": _path_inventory(executable, label="command executable")}
     ]
     for index, value in enumerate(command[1:], 1):
+        if index == 2 and command[1] == "-m":
+            continue
         candidate = Path(value).expanduser()
         candidate = candidate if candidate.is_absolute() else cwd / candidate
         if candidate.exists():
@@ -427,20 +452,46 @@ def _content_bound_command_digest(
                 "inventory": _path_inventory(candidate.resolve(), label="command payload"),
             })
     if len(command) >= 3 and command[1] == "-m":
-        spec = importlib.util.find_spec(command[2])
-        if spec is None:
+        resolver = (
+            "import importlib.util,json,sys;"
+            "s=importlib.util.find_spec(sys.argv[1]);"
+            "print(json.dumps(None if s is None else {"
+            "'origin':s.origin,'locations':list(s.submodule_search_locations or [])}))"
+        )
+        try:
+            completed = subprocess.run(
+                [str(executable), "-c", resolver, command[2]],
+                cwd=cwd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            resolved_module = json.loads(completed.stdout) if completed.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+            raise NativeRunError(
+                f"cannot resolve interpreted MCP module {command[2]!r}: {exc}"
+            ) from exc
+        if not isinstance(resolved_module, dict):
             raise NativeRunError(f"cannot resolve interpreted MCP module {command[2]!r}")
-        if spec.submodule_search_locations:
-            module_path = Path(next(iter(spec.submodule_search_locations))).resolve()
-        elif spec.origin and spec.origin not in {"built-in", "frozen"}:
-            module_path = Path(spec.origin).resolve()
+        locations = resolved_module.get("locations")
+        origin = resolved_module.get("origin")
+        if isinstance(locations, list) and locations:
+            module_path = Path(locations[0]).resolve()
+        elif isinstance(origin, str) and origin not in {"built-in", "frozen"}:
+            module_path = Path(origin).resolve()
         else:
             raise NativeRunError(
                 f"interpreted MCP module has no hashable payload: {command[2]!r}"
             )
         payloads.append({
             "module": command[2],
-            "inventory": _path_inventory(module_path, label="interpreted MCP module"),
+            "inventory": _path_inventory(
+                module_path,
+                label="interpreted MCP module",
+                exclude_runtime_generated=True,
+            ),
         })
     for index, path in enumerate(extra_paths):
         payloads.append({
@@ -690,6 +741,8 @@ def _verify_mcp_policy(path: Path, policy: Mapping[str, Any]) -> None:
         for line in path.read_text(encoding="utf-8").splitlines()
     ][:-1]
     observed = {record["tool"] for record in records}
+    if "<unrecognized>" in observed:
+        raise NativeRunError("MCP tool policy violation: unrecognized tool observed")
     blocked = observed & forbidden
     outside = observed - allowed if allowed else set()
     if blocked or outside:
