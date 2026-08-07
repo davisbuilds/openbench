@@ -883,10 +883,10 @@ def run(
             return _native_error(str(exc))
 
     if native:
-        # Disable known builtin tool families and block every remaining model
-        # tool through a deny-by-default PreToolUse hook. Read-only is a second
-        # barrier for the model-catalog-driven patch tool.
-        sandbox = ["-s", "read-only"]
+        # Native GUI trials must execute mutating MCP calls without an attached
+        # approval UI. Builtin tool families are disabled below and every
+        # remaining event is bound by the deny-by-default task hook.
+        sandbox = ["--dangerously-bypass-approvals-and-sandbox"]
     elif os.environ.get("BENCH_IN_CONTAINER"):
         # codex's own sandbox (bwrap) needs user namespaces and cannot nest
         # inside the bench container; the disposable container IS the external
@@ -907,7 +907,6 @@ def run(
         base += [
             "--enable", "hooks",
             "--dangerously-bypass-hook-trust",
-            "-c", 'approval_policy="never"',
             "-c", f"mcp_servers.computer-use.command={json.dumps(native_launcher)}",
             "-c", "mcp_servers.computer-use.args=[]",
             "-c", (
