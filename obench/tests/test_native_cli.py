@@ -40,7 +40,7 @@ def _write_json(path, value):
 class NativeCliTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="native_cli_test_")
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
 
     def tearDown(self):
         self.temp.cleanup()
@@ -108,8 +108,28 @@ class NativeCliTests(unittest.TestCase):
             ["plan", str(spec), "--output", str(output)]
         )
         self.assertEqual(code, 2)
-        self.assertIn("must not be a symlink", stderr)
+        self.assertIn("path is unsafe", stderr)
         self.assertEqual(target.read_text(encoding="utf-8"), "unchanged\n")
+
+    def test_plan_output_rejects_symlinked_parent(self):
+        spec = self.root / "spec.json"
+        target_dir = self.root / "target"
+        linked_dir = self.root / "linked"
+        target_dir.mkdir()
+        linked_dir.symlink_to(target_dir, target_is_directory=True)
+        _write_json(spec, self.plan_spec())
+
+        code, _stdout, stderr = _invoke(
+            [
+                "plan",
+                str(spec),
+                "--output",
+                str(linked_dir / "plan.json"),
+            ]
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("unsafe parent component", stderr)
+        self.assertFalse((target_dir / "plan.json").exists())
 
     def test_state_reconciles_prior_evidence_without_in_place_replacement(self):
         plan_path, _summary = self.compile_plan(repetitions=1)
@@ -151,6 +171,25 @@ class NativeCliTests(unittest.TestCase):
         self.assertEqual(
             json.loads(state_one.read_text(encoding="utf-8"))["completed"], []
         )
+
+        tampered_state = json.loads(state_two.read_text(encoding="utf-8"))
+        tampered_state["pending_cell_ids"] = []
+        tampered_path = self.root / "tampered-state.json"
+        _write_json(tampered_path, tampered_state)
+        rejected_state = self.root / "rejected-state.json"
+        code, _stdout, stderr = _invoke(
+            [
+                "state",
+                str(plan_path),
+                "--prior-state",
+                str(tampered_path),
+                "--output",
+                str(rejected_state),
+            ]
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("prior state digest", stderr)
+        self.assertFalse(rejected_state.exists())
 
         conflicting = {**observation, "result_sha256": "c" * 64}
         _write_json(observation_path, conflicting)

@@ -6,7 +6,8 @@ import argparse
 import json
 import os
 from pathlib import Path
-import tempfile
+import secrets
+import stat
 from typing import Any, Callable, Mapping, Sequence
 
 from .native_matrix import (
@@ -92,11 +93,46 @@ def _read_results_jsonl(path: str | os.PathLike[str]) -> list[dict[str, Any]]:
     return rows
 
 
-def _fsync_directory(path: Path) -> None:
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    descriptor = os.open(path, flags)
+def _open_output_parent(destination: Path, *, label: str) -> int:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    anchor = Path(destination.anchor)
+    descriptor = os.open(anchor, flags)
     try:
-        os.fsync(descriptor)
+        for part in destination.parent.parts[1:]:
+            try:
+                child = os.open(part, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                os.mkdir(part, 0o755, dir_fd=descriptor)
+                child = os.open(part, flags, dir_fd=descriptor)
+            except OSError as exc:
+                raise NativeCliError(
+                    f"{label} path has an unsafe parent component: {destination}"
+                ) from exc
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _read_regular_at(directory_fd: int, name: str, *, label: str) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(name, flags, dir_fd=directory_fd)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise NativeCliError(f"{label} path is unsafe or not a file: {name}") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise NativeCliError(f"{label} path is not a regular file: {name}")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            return handle.read()
     finally:
         os.close(descriptor)
 
@@ -111,45 +147,69 @@ def _write_immutable_json(
     requested = Path(path).expanduser()
     if requested.suffix.lower() != ".json":
         raise NativeCliError(f"{label} path must end in .json")
-    if requested.is_symlink():
-        raise NativeCliError(f"{label} path must not be a symlink: {requested}")
-    destination = requested.resolve(strict=False)
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination = Path(os.path.abspath(requested))
+    if destination.name in {"", ".", ".."}:
+        raise NativeCliError(f"{label} path is invalid: {requested}")
     payload = canonical_bytes(value) + b"\n"
-    if destination.exists():
-        if not destination.is_file() or destination.read_bytes() != payload:
-            raise NativeCliError(
-                f"refusing to overwrite divergent {label}: {destination}"
-            )
-        return destination, "unchanged"
-
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{destination.name}.", dir=destination.parent
+    parent_fd = _open_output_parent(destination, label=label)
+    temporary_name = (
+        f".{destination.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
     )
-    temporary = Path(temporary_name)
     try:
+        try:
+            existing = _read_regular_at(parent_fd, destination.name, label=label)
+        except FileNotFoundError:
+            pass
+        else:
+            if existing != payload:
+                raise NativeCliError(
+                    f"refusing to overwrite divergent {label}: {destination}"
+                )
+            return destination, "unchanged"
+
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(temporary_name, flags, 0o600, dir_fd=parent_fd)
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
         try:
-            os.link(temporary, destination)
+            os.link(
+                temporary_name,
+                destination.name,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
         except FileExistsError:
-            if (
-                destination.is_symlink()
-                or not destination.is_file()
-                or destination.read_bytes() != payload
-            ):
+            try:
+                existing = _read_regular_at(
+                    parent_fd, destination.name, label=label
+                )
+            except FileNotFoundError:
+                raise NativeCliError(
+                    f"{label} destination changed during creation: {destination}"
+                ) from None
+            if existing != payload:
                 raise NativeCliError(
                     f"refusing to overwrite divergent {label}: {destination}"
                 ) from None
             status = "unchanged"
         else:
             status = "created"
-        _fsync_directory(destination.parent)
+        os.fsync(parent_fd)
         return destination, status
     finally:
-        temporary.unlink(missing_ok=True)
+        try:
+            os.unlink(temporary_name, dir_fd=parent_fd)
+        except FileNotFoundError:
+            pass
+        os.close(parent_fd)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -245,6 +305,15 @@ def _state_command(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         if args.prior_state
         else None
     )
+    if prior is not None:
+        completed = prior.get("completed")
+        if not isinstance(completed, list):
+            raise NativeCliError("native prior state completed must be an array")
+        expected_prior = reconcile_native_state(plan, completed)
+        if prior != expected_prior:
+            raise NativeCliError(
+                "native prior state digest or derived completion state is invalid"
+            )
     observations = [
         _read_json_object(path, label="native cell observation")
         for path in args.observation
