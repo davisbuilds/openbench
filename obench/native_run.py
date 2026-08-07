@@ -1930,6 +1930,30 @@ def _attempt_record(path: Path, value: Mapping[str, Any]) -> None:
     _replace_json(path, value)
 
 
+def _record_focus_monitor_diagnostic(
+    path: Path, attempt: int, monitor: Any
+) -> None:
+    _attempt_record(
+        path,
+        {
+            "attempt": attempt,
+            "events": [
+                {
+                    "bundle_id": event.bundle_identifier,
+                    "pid": event.pid,
+                    "observed_at": event.observed_at,
+                    "source_monotonic_ns": event.source_monotonic_ns,
+                    "source_sequence": event.source_sequence,
+                    "sample_kind": event.sample_kind,
+                    "session_status": event.session_status,
+                    "screen_unlocked": event.screen_unlocked,
+                }
+                for event in monitor.events
+            ],
+        },
+    )
+
+
 def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hooks: NativeRunHooks | None = None) -> NativeRunOutcome:
     config = config_or_path if isinstance(config_or_path, NativeRunConfig) else load_config(config_or_path)
     hooks = hooks or NativeRunHooks()
@@ -2169,6 +2193,11 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                             ))
                             try:
                                 _stop_agent_monitors(monitor, owner_monitor)
+                                _record_focus_monitor_diagnostic(
+                                    attempt_root / "focus-monitor.json",
+                                    attempt,
+                                    monitor,
+                                )
                             except BaseException as monitor_error:
                                 setattr(
                                     adapter_error,
@@ -2200,6 +2229,11 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                                 {"attempt": attempt, "boundary": "finish"},
                             ))
                             _stop_agent_monitors(monitor, owner_monitor)
+                            _record_focus_monitor_diagnostic(
+                                attempt_root / "focus-monitor.json",
+                                attempt,
+                                monitor,
+                            )
                 for sample in owner_monitor.samples:
                     process_events.append((
                         sample["observed_at"],
@@ -2212,25 +2246,6 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                             ],
                         },
                     ))
-                _attempt_record(
-                    attempt_root / "focus-monitor.json",
-                    {
-                        "attempt": attempt,
-                        "events": [
-                            {
-                                "bundle_id": event.bundle_identifier,
-                                "pid": event.pid,
-                                "observed_at": event.observed_at,
-                                "source_monotonic_ns": event.source_monotonic_ns,
-                                "source_sequence": event.source_sequence,
-                                "sample_kind": event.sample_kind,
-                                "session_status": event.session_status,
-                                "screen_unlocked": event.screen_unlocked,
-                            }
-                            for event in monitor.events
-                        ],
-                    },
-                )
                 if not any(
                     sample["owned_serve_pid"] is not None
                     for sample in owner_monitor.samples
