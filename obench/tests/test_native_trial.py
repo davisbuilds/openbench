@@ -161,8 +161,7 @@ def _reseal_manifest(root):
     )
 
 
-def _build_bundle(root, case):
-    trial_id = "native-cub-v0-trial1"
+def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
     task_id = "computer-use-bench-v0-form-entry"
     final_path = "artifacts/final-state/state.json"
     final_value = {"invoice_id": "INV-1042", "saved": True}
@@ -501,6 +500,15 @@ class NativeTrialTests(unittest.TestCase):
         with self.assertRaisesRegex(NativeTrialError, "email address"):
             load_native_trial(bundle)
 
+        embedded_path = self.bundle("happy")
+        trajectory_path = embedded_path / "agent/trajectory.json"
+        trajectory = json.loads(trajectory_path.read_text())
+        trajectory["steps"][1]["message"] = "cwd=/Users/alice/private-project"
+        _write_json(trajectory_path, trajectory)
+        _reseal_manifest(embedded_path)
+        with self.assertRaisesRegex(NativeTrialError, "absolute home/file path"):
+            load_native_trial(embedded_path)
+
         oversized = self.bundle("happy")
         artifact_path = oversized / "artifacts/final-state/state.json"
         artifact_path.write_text("x" * (1024 * 1024) + " operator@example.com")
@@ -562,7 +570,7 @@ class NativeTrialTests(unittest.TestCase):
             ],
             timestamps=[
                 "2026-08-06T12:00:00+00:00",
-                "2026-08-06T12:00:00.500000+00:00",
+                "2026-08-06T12:00:01.500000+00:00",
             ],
         )
         result_path = yielded / "result.json"
@@ -570,8 +578,32 @@ class NativeTrialTests(unittest.TestCase):
         result["focus_event_count"] = 2
         _write_json(result_path, result)
         _reseal_manifest(yielded)
-        with self.assertRaisesRegex(NativeTrialError, "while yielded to human"):
+        with self.assertRaisesRegex(NativeTrialError, "overlapped focus yielded"):
             load_native_trial(yielded)
+
+    def test_trial_index_and_verifier_types_are_unambiguous(self):
+        ambiguous = self.root / "ambiguous"
+        _build_bundle(
+            ambiguous,
+            self.cases["happy"],
+            trial_id="native-cub-v0-attempt-a",
+        )
+        with self.assertRaisesRegex(NativeTrialError, "explicit positive trialN"):
+            load_native_trial(ambiguous)
+
+        boolean_verdict = self.bundle("happy")
+        evidence_path = boolean_verdict / "verifier/evidence.json"
+        evidence = json.loads(evidence_path.read_text())
+        evidence["checker_exit"] = False
+        evidence["reward"] = True
+        _write_json(evidence_path, evidence)
+        reward_path = boolean_verdict / "verifier/reward.json"
+        reward = json.loads(reward_path.read_text())
+        reward["reward"] = True
+        _write_json(reward_path, reward)
+        _reseal_manifest(boolean_verdict)
+        with self.assertRaisesRegex(NativeTrialError, "finite number"):
+            load_native_trial(boolean_verdict)
 
     def test_partial_or_duplicate_evidence_is_rejected(self):
         bundle = self.bundle("happy")

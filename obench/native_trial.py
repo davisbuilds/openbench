@@ -65,7 +65,7 @@ _SECRET_RE = re.compile(
     r"hf_[A-Za-z0-9]{20,}"
     r")\b"
 )
-_PRIVATE_PATH_RE = re.compile(r"(?:^|[\s\"'])(?:/Users/|/home/|file:///)")
+_PRIVATE_PATH_RE = re.compile(r"(?:/Users/|/home/|file:///)")
 _TRANSCRIPT_NAME_RE = re.compile(
     r"(?:^|/)(?:transcripts?|raw[-_.]?output|session[-_.]?log)(?:/|\.|$)",
     re.IGNORECASE,
@@ -946,6 +946,16 @@ def _validate_result_and_verifier(
         fields={"status", "checker_exit", "reward", "task_content_sha256", "final_state_sha256"},
     )
     if status == "completed":
+        _number(reward["reward"], "verifier/reward.json.reward", maximum=1.0)
+        _integer(
+            evidence["checker_exit"],
+            "verifier/evidence.json.checker_exit",
+        )
+        _number(
+            evidence["reward"],
+            "verifier/evidence.json.reward",
+            maximum=1.0,
+        )
         if reward != {
             **{key: reward[key] for key in ("schema_version", "trial_id", "lock_sha256")},
             "status": "judged",
@@ -1211,15 +1221,39 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 f"mcp/ledger.jsonl:{index}.request_unix_ns",
                 "MCP activity occurred without target focus or while yielded to human",
             )
+        response_ns = call.get("response_unix_ns")
+        if response_ns is None:
+            raise _fail(
+                f"mcp/ledger.jsonl:{index}.response_unix_ns",
+                "clean MCP evidence requires a response timestamp",
+            )
+        response_time = datetime.fromtimestamp(
+            response_ns / 1_000_000_000,
+            tz=started.tzinfo,
+        )
+        replay_index = focus_index
+        replay_state = focus_state
+        while (
+            replay_index < len(focus_timeline)
+            and focus_timeline[replay_index][0] <= response_time
+        ):
+            replay_state = focus_timeline[replay_index][1]
+            if replay_state != "target_focused":
+                raise _fail(
+                    f"mcp/ledger.jsonl:{index}.response_unix_ns",
+                    "MCP call overlapped focus yielded to human",
+                )
+            replay_index += 1
 
     outcome = result["outcome"]
     success = result["status"] == "completed" and outcome["checker_exit"] == 0
-    trial_number = 1
     match = re.search(r"(?:^|[-_:])trial(\d+)$", trial_id)
-    if match:
-        trial_number = int(match.group(1))
-        if trial_number < 1:
-            raise _fail("manifest.trial_id", "trial suffix must be positive")
+    if match is None or int(match.group(1)) < 1:
+        raise _fail(
+            "manifest.trial_id",
+            "must end with an explicit positive trialN index",
+        )
+    trial_number = int(match.group(1))
     row = {field: None for field in ROW_FIELDS}
     row.update(
         {
