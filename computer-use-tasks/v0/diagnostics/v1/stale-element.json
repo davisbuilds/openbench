@@ -1,0 +1,1 @@
+{"classification":"verifier_ambiguous","failure_domain":"targeting","fixture":"basic-controls","observed_effect":false,"schema_version":"openbench.computer-use.diagnostic.v1","stimulus":"reuse an element id after its snapshot generation is invalidated"}

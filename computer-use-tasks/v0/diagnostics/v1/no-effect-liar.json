@@ -1,0 +1,1 @@
+{"classification":"effect_not_verified","failure_domain":"verification","fixture":"liar-button","observed_effect":false,"schema_version":"openbench.computer-use.diagnostic.v1","stimulus":"press a control that reports dispatch success but mutates no state"}

@@ -1,0 +1,1 @@
+{"classification":"unsupported","failure_domain":"unsupported","fixture":"disabled-button","observed_effect":false,"schema_version":"openbench.computer-use.diagnostic.v1","stimulus":"attempt to press a present but disabled control"}

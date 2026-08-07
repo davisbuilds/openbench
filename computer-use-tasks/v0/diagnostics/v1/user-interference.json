@@ -1,0 +1,1 @@
+{"classification":"user_interference","failure_domain":"focus_safety","fixture":"background-control","observed_effect":false,"schema_version":"openbench.computer-use.diagnostic.v1","stimulus":"change the frontmost app away from the guard during the agent phase"}
