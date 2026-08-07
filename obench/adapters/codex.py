@@ -45,13 +45,16 @@ matches the vendor's own billed usage; there is no codex-native usage for these
 models to cross-check against.
 """
 
+import hashlib
 import json
 import os
 import shlex
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 try:
@@ -72,6 +75,37 @@ _NATIVE_MARKER_ENVS = (
 _NATIVE_MODEL = "gpt-5.6-sol"
 _NATIVE_ATIF_NAME = "trajectory.json"
 _NATIVE_RAW_EVENTS_NAME = "codex-events.jsonl"
+_NATIVE_TOOL_POLICY_LEDGER_NAME = "codex-tool-policy.jsonl"
+_NATIVE_TOOL_POLICY_HOOK_NAME = "native-tool-policy.py"
+_NATIVE_ALLOWED_EVENT_TYPES = {
+    "thread.started",
+    "turn.started",
+    "turn.completed",
+    "turn.failed",
+    "item.started",
+    "item.updated",
+    "item.completed",
+    "error",
+}
+_NATIVE_NON_TOOL_ITEM_TYPES = {
+    "agent_message",
+    "reasoning",
+    "todo_list",
+    "error",
+}
+_NATIVE_ALLOWED_MCP_SERVER = "computer-use"
+_NATIVE_ALLOWED_TOOL_PREFIX = f"mcp__{_NATIVE_ALLOWED_MCP_SERVER}__"
+_NATIVE_DISABLED_TOOL_FEATURES = (
+    "shell_tool",
+    "browser_use",
+    "browser_use_external",
+    "computer_use",
+    "image_generation",
+    "in_app_browser",
+    "tool_suggest",
+    "workspace_dependencies",
+    "goals",
+)
 
 
 def _feature_flags(env_override=None):
@@ -148,13 +182,13 @@ def _native_error(message):
     }
 
 
-def _atomic_write_private(path, text):
+def _atomic_write_private_bytes(path, content):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temporary, 0o600)
@@ -165,6 +199,89 @@ def _atomic_write_private(path, text):
         except FileNotFoundError:
             pass
         raise
+
+
+def _atomic_write_private(path, text):
+    _atomic_write_private_bytes(path, text.encode("utf-8"))
+
+
+def _install_native_tool_policy(codex_home, *, launcher):
+    ledger_path = Path(launcher).parent / _NATIVE_TOOL_POLICY_LEDGER_NAME
+    hook_path = Path(codex_home) / _NATIVE_TOOL_POLICY_HOOK_NAME
+    _atomic_write_private(ledger_path, "")
+    script = f"""#!{sys.executable}
+import hashlib
+import json
+import os
+import sys
+
+LEDGER_PATH = {str(ledger_path)!r}
+ALLOWED_PREFIX = {_NATIVE_ALLOWED_TOOL_PREFIX!r}
+
+try:
+    payload = json.load(sys.stdin)
+    tool_name = payload.get("tool_name")
+    tool_use_id = payload.get("tool_use_id")
+    allowed = (
+        isinstance(tool_name, str)
+        and tool_name.startswith(ALLOWED_PREFIX)
+        and len(tool_name) > len(ALLOWED_PREFIX)
+        and isinstance(tool_use_id, str)
+        and bool(tool_use_id)
+    )
+    encoded_input = json.dumps(
+        payload.get("tool_input"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    record = {{
+        "tool_name": tool_name,
+        "tool_use_id": tool_use_id,
+        "input_sha256": hashlib.sha256(encoded_input).hexdigest(),
+        "decision": "allow" if allowed else "block",
+    }}
+    fd = os.open(LEDGER_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    hook_output = {{"hookEventName": "PreToolUse"}}
+    if not allowed:
+        hook_output.update({{
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "OpenBench native trials permit only computer-use MCP tools"
+            ),
+        }})
+    print(json.dumps({{
+        "hookSpecificOutput": hook_output
+    }}))
+except BaseException:
+    print("OpenBench native tool policy hook failed closed", file=sys.stderr)
+    raise SystemExit(2)
+"""
+    _atomic_write_private(hook_path, script)
+    hook_path.chmod(0o700)
+    hooks = {
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{
+                    "type": "command",
+                    "command": (
+                        f"{shlex.quote(sys.executable)} {shlex.quote(str(hook_path))}"
+                    ),
+                    "statusMessage": "enforcing native tool policy",
+                }],
+            }],
+        },
+    }
+    _atomic_write_private(
+        Path(codex_home) / "hooks.json",
+        json.dumps(hooks, sort_keys=True) + "\n",
+    )
+    return ledger_path
 
 
 def _codex_events(stdout):
@@ -184,18 +301,195 @@ def _codex_events(stdout):
     return events
 
 
-def _write_native_evidence(stdout, *, launcher, workdir, model):
+def _assert_native_tool_policy(events):
+    """Require the native Codex trajectory to use only computer-use MCP tools."""
+    for index, event in enumerate(events, start=1):
+        event_type = event.get("type")
+        if event_type not in _NATIVE_ALLOWED_EVENT_TYPES:
+            raise ValueError(
+                f"native tool policy rejected unknown event type {event_type!r} "
+                f"at event {index}"
+            )
+        if not event_type.startswith("item."):
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"native tool policy requires an item object at event {index}"
+            )
+        item_type = item.get("type")
+        if item_type in _NATIVE_NON_TOOL_ITEM_TYPES:
+            message = item.get("message")
+            if (
+                item_type == "error"
+                and isinstance(message, str)
+                and "dropped" in message.lower()
+                and "event" in message.lower()
+            ):
+                raise ValueError(
+                    f"native tool policy rejected incomplete event stream at event {index}"
+                )
+            continue
+        if item_type != "mcp_tool_call":
+            raise ValueError(
+                f"native tool policy rejected Codex item type {item_type!r} "
+                f"at event {index}"
+            )
+        server = item.get("server")
+        if server != _NATIVE_ALLOWED_MCP_SERVER:
+            raise ValueError(
+                f"native tool policy rejected MCP server {server!r} at event {index}"
+            )
+
+
+def _assert_native_tool_policy_ledger(path, events):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("native tool policy ledger is missing or invalid")
+    allowed = []
+    blocked = []
+    ledger_ids = set()
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"native tool policy ledger line {line_number} is malformed: {exc}"
+            ) from exc
+        if not isinstance(record, dict):
+            raise ValueError(
+                f"native tool policy ledger line {line_number} is not an object"
+            )
+        tool_name = record.get("tool_name")
+        tool_use_id = record.get("tool_use_id")
+        input_sha256 = record.get("input_sha256")
+        decision = record.get("decision")
+        if (
+            set(record) != {
+                "tool_name",
+                "tool_use_id",
+                "input_sha256",
+                "decision",
+            }
+            or
+            not isinstance(tool_name, str)
+            or not isinstance(tool_use_id, str)
+            or not tool_use_id
+            or not isinstance(input_sha256, str)
+            or len(input_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in input_sha256)
+            or decision not in {"allow", "block"}
+        ):
+            raise ValueError(
+                f"native tool policy ledger line {line_number} has invalid fields"
+            )
+        if tool_use_id in ledger_ids:
+            raise ValueError(
+                f"native tool policy ledger repeats tool_use_id {tool_use_id!r}"
+            )
+        ledger_ids.add(tool_use_id)
+        if decision == "allow":
+            if not tool_name.startswith(_NATIVE_ALLOWED_TOOL_PREFIX):
+                raise ValueError(
+                    f"native tool policy ledger allowed forbidden tool {tool_name!r}"
+                )
+            allowed.append((tool_name, input_sha256))
+        else:
+            blocked.append(tool_name)
+    if blocked:
+        raise ValueError(
+            f"native tool policy blocked forbidden tool {blocked[0]!r}"
+        )
+
+    trajectory_tools = {}
+    trajectory_lifecycle = {}
+    for event in events:
+        item = event.get("item")
+        if (
+            not isinstance(item, dict)
+            or item.get("type") != "mcp_tool_call"
+            or not isinstance(item.get("id"), str)
+        ):
+            continue
+        arguments = item.get("arguments")
+        encoded_arguments = json.dumps(
+            arguments,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        identity = (
+            f"mcp__{item.get('server')}__{item.get('tool')}",
+            hashlib.sha256(encoded_arguments).hexdigest(),
+        )
+        existing = trajectory_tools.setdefault(item["id"], identity)
+        if existing != identity:
+            raise ValueError(
+                f"Codex MCP trajectory item {item['id']!r} changed identity"
+            )
+        lifecycle = trajectory_lifecycle.setdefault(
+            item["id"],
+            {"item.started": 0, "item.completed": 0},
+        )
+        event_type = event.get("type")
+        if event_type not in lifecycle:
+            raise ValueError(
+                f"Codex MCP trajectory item {item['id']!r} has unexpected "
+                f"lifecycle event {event_type!r}"
+            )
+        lifecycle[event_type] += 1
+    for item_id, lifecycle in trajectory_lifecycle.items():
+        if lifecycle != {"item.started": 1, "item.completed": 1}:
+            raise ValueError(
+                f"Codex MCP trajectory item {item_id!r} has incomplete lifecycle"
+            )
+    if Counter(allowed) != Counter(trajectory_tools.values()):
+        raise ValueError(
+            "native tool policy ledger does not match Codex MCP trajectory"
+        )
+
+
+def _write_and_verify_native_events(stdout, *, launcher, tool_policy_ledger):
+    raw_path = Path(launcher).parent / _NATIVE_RAW_EVENTS_NAME
+    if isinstance(stdout, bytes):
+        raw_bytes = stdout
+    else:
+        raw_bytes = stdout.encode("utf-8")
+    _atomic_write_private_bytes(raw_path, raw_bytes)
+    decoded = raw_bytes.decode("utf-8")
+    events = _codex_events(decoded)
+    _assert_native_tool_policy(events)
+    _assert_native_tool_policy_ledger(tool_policy_ledger, events)
+    return events
+
+
+def _write_native_evidence(
+    stdout,
+    *,
+    launcher,
+    tool_policy_ledger,
+    workdir,
+    model,
+):
     from obench.atif import assert_valid_trajectory, to_dict
     from obench.tools.atif_convert import convert_codex_events
 
-    raw_path = Path(launcher).parent / _NATIVE_RAW_EVENTS_NAME
-    _atomic_write_private(raw_path, stdout)
+    events = _write_and_verify_native_events(
+        stdout,
+        launcher=launcher,
+        tool_policy_ledger=tool_policy_ledger,
+    )
     trajectory = convert_codex_events(
-        _codex_events(stdout),
+        events,
         model=model,
         source_path=_NATIVE_RAW_EVENTS_NAME,
     )
     trajectory = to_dict(trajectory)
+    trajectory["extra"]["tool_policy"] = {
+        "mode": "native_mcp_only",
+        "allowed_mcp_servers": [_NATIVE_ALLOWED_MCP_SERVER],
+        "verified": True,
+    }
     assert_valid_trajectory(trajectory)
     rendered = json.dumps(trajectory, indent=2, ensure_ascii=False) + "\n"
     _atomic_write_private(Path(workdir) / _NATIVE_ATIF_NAME, rendered)
@@ -505,7 +799,12 @@ def run(
         except ValueError as exc:
             return _native_error(str(exc))
 
-    if os.environ.get("BENCH_IN_CONTAINER"):
+    if native:
+        # Disable known builtin tool families and block every remaining model
+        # tool through a deny-by-default PreToolUse hook. Read-only is a second
+        # barrier for the model-catalog-driven patch tool.
+        sandbox = ["-s", "read-only"]
+    elif os.environ.get("BENCH_IN_CONTAINER"):
         # codex's own sandbox (bwrap) needs user namespaces and cannot nest
         # inside the bench container; the disposable container IS the external
         # sandbox, which is the documented intent of this flag.
@@ -520,7 +819,11 @@ def run(
         "-C", workdir,
     ] + sandbox
     if native_launcher:
+        for feature in _NATIVE_DISABLED_TOOL_FEATURES:
+            base += ["--disable", feature]
         base += [
+            "--enable", "hooks",
+            "--dangerously-bypass-hook-trust",
             "-c", f"mcp_servers.computer-use.command={json.dumps(native_launcher)}",
             "-c", "mcp_servers.computer-use.args=[]",
         ]
@@ -570,6 +873,7 @@ def run(
     # rules, memories, sessions, or plugins from the machine owner. Ablation
     # adapters supply their own already-composed CODEX_HOME via env_override.
     isolated_home = None
+    native_tool_policy_ledger = None
     auth_src = None
     auth_copy = None
     auth_lease = None
@@ -603,20 +907,41 @@ def run(
 
     try:
         try:
+            if native_launcher:
+                native_tool_policy_ledger = _install_native_tool_policy(
+                    child_env["CODEX_HOME"],
+                    launcher=native_launcher,
+                )
             proc = subprocess.run(
                 cmd,
                 cwd=workdir,
                 capture_output=True,
-                text=True,
+                text=not native,
                 timeout=timeout_s,
                 stdin=subprocess.DEVNULL,
                 env=child_env,
             )
         except subprocess.TimeoutExpired as e:
             full_output = _err_tail(e, limit=None)
+            native_timeout_evidence_error = None
+            if native_launcher:
+                try:
+                    _write_and_verify_native_events(
+                        e.stdout or b"",
+                        launcher=native_launcher,
+                        tool_policy_ledger=native_tool_policy_ledger,
+                    )
+                except (OSError, TypeError, ValueError) as exc:
+                    native_timeout_evidence_error = str(exc)
+            error = f"timeout after {timeout_s}s"
+            if native_timeout_evidence_error is not None:
+                error += (
+                    "; native evidence verification failed: "
+                    f"{native_timeout_evidence_error}"
+                )
             return {
                 "completed": False,
-                "error": f"timeout after {timeout_s}s",
+                "error": error,
                 "output_tail": full_output[-2000:],
                 "full_output": full_output,
                 "tokens": None,
@@ -634,9 +959,21 @@ def run(
             if isolated_home:
                 shutil.rmtree(isolated_home, ignore_errors=True)
 
-    combined = (proc.stdout or "") + (proc.stderr or "")
+    raw_stdout = proc.stdout or (b"" if native else "")
+    raw_stderr = proc.stderr or (b"" if native else "")
+    stdout_text = (
+        raw_stdout.decode("utf-8", "replace")
+        if isinstance(raw_stdout, bytes)
+        else raw_stdout
+    )
+    stderr_text = (
+        raw_stderr.decode("utf-8", "replace")
+        if isinstance(raw_stderr, bytes)
+        else raw_stderr
+    )
+    combined = stdout_text + stderr_text
     try:
-        tokens, turns, tail, token_usage = _parse_json_with_usage(proc.stdout or "")
+        tokens, turns, tail, token_usage = _parse_json_with_usage(stdout_text)
     except Exception:  # noqa: BLE001 - never let usage parsing break a run
         tokens, turns, tail, token_usage = None, None, "", _empty_token_usage()
     if not tail:
@@ -646,8 +983,9 @@ def run(
     if native_launcher:
         try:
             _write_native_evidence(
-                proc.stdout or "",
+                raw_stdout,
                 launcher=native_launcher,
+                tool_policy_ledger=native_tool_policy_ledger,
                 workdir=workdir,
                 model=model,
             )
