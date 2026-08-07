@@ -184,6 +184,8 @@ class ProxyTests(unittest.TestCase):
         row = self._ledger("tok-sse")[0]
         self.assertEqual(row["usage"]["input_tokens"], 10)
         self.assertEqual(row["usage"]["output_tokens_details"]["reasoning_tokens"], 1)
+        self.assertLessEqual(row["request_unix_ns"], row["response_unix_ns"])
+        self.assertGreaterEqual(row["duration_ms"], 0)
 
     def test_anthropic_json_usage_parsing(self):
         path = "/cell/tok-anthropic/" + "anthropic/deepseek/" + "anthropic/v1/messages"

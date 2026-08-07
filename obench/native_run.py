@@ -68,13 +68,14 @@ from .run import (
     apply_proxy_ledger,
     load_adapter,
     probe_version,
+    proxy_split_from_usage,
     proxy_supported_for_cell,
-    read_proxy_ledger,
 )
 
 
 CONFIG_SCHEMA_VERSION = "openbench.native-run.v0"
 DEFAULT_LEASE_PATH = "~/.openbench/native-macos.lock"
+MCP_COLLECTOR_SEAL_TIMEOUT_S = 15.0
 
 
 class NativeRunError(RuntimeError):
@@ -1951,13 +1952,48 @@ def _managed_proxy(
 
 def _proxy_evidence(
     context: Mapping[str, Any] | None, *, allow_aborted: bool = False
-) -> tuple[list[dict[str, int]], dict[str, Any] | None]:
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     if context is None:
         return [], None
-    rows = read_proxy_ledger(context["ledger_dir"], context["token"])
+    safe_token = re.sub(r"[^A-Za-z0-9_.-]", "_", str(context["token"]))
+    ledger_path = Path(context["ledger_dir"]) / f"{safe_token}.jsonl"
+    try:
+        lines = ledger_path.read_text(encoding="utf-8").splitlines()
+        if any(not line.strip() for line in lines):
+            raise ValueError("blank record")
+        rows = [json.loads(line) for line in lines]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise NativeRunError(
+            f"counting proxy ledger is unreadable: {exc}"
+        ) from exc
     if not rows or rows[-1].get("record_type") != "ledger_seal":
         raise NativeRunError("counting proxy ledger is not durably sealed")
     seal = rows[-1]
+    previous_hash = "0" * 64
+    for sequence, row in enumerate(rows[:-1], 1):
+        if (
+            not isinstance(row, dict)
+            or row.get("record_type") != "request"
+            or row.get("sequence") != sequence
+            or row.get("previous_hash") != previous_hash
+        ):
+            raise NativeRunError("counting proxy request chain is malformed")
+        expected_hash = hashlib.sha256(
+            _canonical_bytes({
+                key: value
+                for key, value in row.items()
+                if key != "record_hash"
+            })
+        ).hexdigest()
+        if row.get("record_hash") != expected_hash:
+            raise NativeRunError("counting proxy request hash is invalid")
+        previous_hash = expected_hash
+    if (
+        seal.get("record_count") != len(rows) - 1
+        or seal.get("last_sequence") != len(rows) - 1
+        or seal.get("root_hash") != previous_hash
+    ):
+        raise NativeRunError("counting proxy terminal seal contradicts its ledger")
     if seal.get("state") != "SEALED":
         if not (
             allow_aborted
@@ -1969,31 +2005,91 @@ def _proxy_evidence(
             raise NativeRunError("counting proxy ledger is incomplete")
     measured: dict[str, Any] = {}
     apply_proxy_ledger(measured, rows[:-1])
-    if measured.get("proxy_capture_truncated") or measured.get("token_basis_proxy") != "proxy_measured":
-        if measured.get("tokens_proxy_calls") == 0:
-            usage = []
-        else:
+    if measured.get("proxy_capture_truncated"):
+        raise NativeRunError("counting proxy evidence is incomplete")
+    requests: list[dict[str, Any]] = []
+    for row in rows[:-1]:
+        if row.get("record_type") != "request":
+            continue
+        split = proxy_split_from_usage(row.get("usage"))
+        usage_available = all(
+            isinstance(split.get(field), int)
+            for field in (
+                "tokens_proxy_input_uncached",
+                "tokens_proxy_cache_read",
+                "tokens_proxy_output",
+            )
+        )
+        request_unix_ns = row.get("request_unix_ns")
+        response_unix_ns = row.get("response_unix_ns")
+        duration_ms = row.get("duration_ms")
+        status = row.get("status")
+        request_sequence = row.get("sequence")
+        if (
+            isinstance(request_sequence, bool)
+            or not isinstance(request_sequence, int)
+            or request_sequence < 1
+            or isinstance(request_unix_ns, bool)
+            or not isinstance(request_unix_ns, int)
+            or request_unix_ns < 0
+            or isinstance(response_unix_ns, bool)
+            or not isinstance(response_unix_ns, int)
+            or response_unix_ns < request_unix_ns
+            or isinstance(duration_ms, bool)
+            or not isinstance(duration_ms, (int, float))
+            or not math.isfinite(float(duration_ms))
+            or duration_ms < 0
+            or isinstance(status, bool)
+            or not isinstance(status, int)
+            or status < 100
+            or status > 599
+        ):
+            raise NativeRunError("counting proxy request timing is incomplete")
+        model = row.get("model")
+        if model is not None and not isinstance(model, str):
+            raise NativeRunError("counting proxy request model is malformed")
+        requests.append({
+            "request_sequence": request_sequence,
+            "request_unix_ns": request_unix_ns,
+            "response_unix_ns": response_unix_ns,
+            "duration_ms": float(duration_ms),
+            "paced_wait_ms": float(row.get("paced_wait_ms") or 0),
+            "status": status,
+            "model": model,
+            "usage_available": usage_available,
+            "input_tokens": (
+                split["tokens_proxy_input_uncached"]
+                + split["tokens_proxy_cache_read"]
+                if usage_available
+                else None
+            ),
+            "cached_tokens": (
+                split["tokens_proxy_cache_read"] if usage_available else None
+            ),
+            "output_tokens": (
+                split["tokens_proxy_output"] if usage_available else None
+            ),
+            "error_present": bool(row.get("error")),
+        })
+    if measured.get("token_basis_proxy") != "proxy_measured":
+        if measured.get("tokens_proxy_calls") != 0:
             raise NativeRunError("counting proxy evidence is incomplete")
-    else:
-        usage = [{
-            "input_tokens": int(measured.get("tokens_proxy_input_uncached") or 0)
-            + int(measured.get("tokens_proxy_cache_read") or 0),
-            "cached_tokens": int(measured.get("tokens_proxy_cache_read") or 0),
-            "output_tokens": int(measured.get("tokens_proxy_output") or 0),
-        }]
     terminal = {
         "state": seal["state"],
         "complete": seal.get("complete", seal["state"] == "SEALED"),
         "incomplete_in_flight_count": seal.get(
             "incomplete_in_flight_count", 0
         ),
+        "source_record_count": len(rows) - 1,
+        "source_root_hash": previous_hash,
+        "source_ledger_sha256": _sha256(ledger_path),
     }
-    return usage, terminal
+    return requests, terminal
 
 
 def _proxy_usage(
     context: Mapping[str, Any] | None, *, allow_aborted: bool = False
-) -> list[dict[str, int]]:
+) -> list[dict[str, Any]]:
     usage, _terminal = _proxy_evidence(
         context,
         allow_aborted=allow_aborted,
@@ -2006,10 +2102,35 @@ def _attempt_record(path: Path, value: Mapping[str, Any]) -> None:
     _replace_json(path, value)
 
 
+def _startup_retry_eligible(
+    adapter_result: Mapping[str, Any],
+    *,
+    mcp_call_count: int,
+    proxy_requests: Sequence[Mapping[str, Any]],
+    proxy_required: bool,
+    attempt: int,
+    max_retries: int,
+) -> bool:
+    no_model_activity = (
+        not proxy_requests
+        if proxy_required
+        else adapter_result.get("tokens") == 0
+    )
+    return (
+        adapter_result.get("startup_failure") is True
+        and mcp_call_count == 0
+        and no_model_activity
+        and attempt <= max_retries
+    )
+
+
 def _verify_mcp_ledger_after_shutdown(
-    path: Path, *, timeout_s: float = 5.0, poll_s: float = 0.05
+    path: Path,
+    *,
+    timeout_s: float = MCP_COLLECTOR_SEAL_TIMEOUT_S,
+    poll_s: float = 0.05,
 ):
-    """Wait briefly for the collector's graceful terminal seal, then verify."""
+    """Wait once for the collector's terminal seal, then fail closed."""
     deadline = time.monotonic() + timeout_s
     while True:
         try:
@@ -2020,7 +2141,12 @@ def _verify_mcp_ledger_after_shutdown(
                     isinstance(terminal, dict)
                     and terminal.get("record_type") == "ledger_seal"
                 ):
-                    return verify_ledger(path)
+                    try:
+                        return verify_ledger(path)
+                    except LedgerIntegrityError as exc:
+                        raise NativeRunError(
+                            f"MCP collector evidence did not seal cleanly: {exc}"
+                        ) from exc
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             pass
         remaining = deadline - time.monotonic()
@@ -2158,7 +2284,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         start_mono = hooks.monotonic()
         setup_s = agent_s = verifier_s = 0.0
         chosen_mcp: Path | None = None
-        proxy_usage: list[dict[str, int]] = []
+        proxy_usage: list[dict[str, Any]] = []
         proxy_terminal: dict[str, Any] | None = None
         focus_events: list[tuple[str, Mapping[str, Any]]] = []
         process_events: list[tuple[str, str, Mapping[str, Any]]] = []
@@ -2449,15 +2575,13 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     else:
                         raise NativeRunError("harness did not launch the configured MCP collector")
                 verified_mcp = _verify_mcp_ledger_after_shutdown(ledger)
-                startup_retry = (
-                    adapter_result.get("startup_failure") is True
-                    and verified_mcp.call_count == 0
-                    and (
-                        sum(sum(item.values()) for item in proxy_usage) == 0
-                        if config.proxy_required
-                        else adapter_result.get("tokens") == 0
-                    )
-                    and attempt <= config.max_retries
+                startup_retry = _startup_retry_eligible(
+                    adapter_result,
+                    mcp_call_count=verified_mcp.call_count,
+                    proxy_requests=proxy_usage,
+                    proxy_required=config.proxy_required,
+                    attempt=attempt,
+                    max_retries=config.max_retries,
                 )
                 _attempt_record(attempt_root / "attempt.json", {
                     "attempt": attempt,
@@ -2730,8 +2854,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         "required counting proxy terminal evidence is absent"
                     )
                 proxy_writer = _LedgerWriter(bundle, "proxy", config.trial_id, lock_sha256)
-                for usage in proxy_usage:
-                    proxy_writer.append("model_usage", usage, finished.isoformat())
+                for request in proxy_usage:
+                    observed_at = datetime.fromtimestamp(
+                        request["response_unix_ns"] / 1_000_000_000,
+                        tz=timezone.utc,
+                    ).isoformat()
+                    proxy_writer.append(
+                        "model_request",
+                        request,
+                        observed_at,
+                    )
                 proxy_writer.append(
                     "proxy_terminal",
                     proxy_terminal,

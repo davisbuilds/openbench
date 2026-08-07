@@ -97,6 +97,34 @@ def _write_ledger(
     )
 
 
+def _proxy_request_payload(
+    *,
+    request_sequence=1,
+    request_unix_ns=1786017602000000000,
+    response_unix_ns=1786017603000000000,
+    duration_ms=1000.0,
+    status=200,
+    usage_available=True,
+    input_tokens=100,
+    cached_tokens=20,
+    output_tokens=30,
+):
+    return {
+        "request_sequence": request_sequence,
+        "request_unix_ns": request_unix_ns,
+        "response_unix_ns": response_unix_ns,
+        "duration_ms": duration_ms,
+        "paced_wait_ms": 0.0,
+        "status": status,
+        "model": "gpt-fixture",
+        "usage_available": usage_available,
+        "input_tokens": input_tokens if usage_available else None,
+        "cached_tokens": cached_tokens if usage_available else None,
+        "output_tokens": output_tokens if usage_available else None,
+        "error_present": status >= 400,
+    }
+
+
 def _focus_payload(
     state,
     frontmost_bundle_id,
@@ -669,12 +697,8 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
             lock_sha256,
             [
                 (
-                    "model_usage",
-                    {
-                        "input_tokens": 100,
-                        "cached_tokens": 20,
-                        "output_tokens": 30,
-                    },
+                    "model_request",
+                    _proxy_request_payload(),
                 ),
                 (
                     "proxy_terminal",
@@ -690,8 +714,15 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
                             if case["status"] == "completed"
                             else 1
                         ),
+                        "source_record_count": 1,
+                        "source_root_hash": HEX_A,
+                        "source_ledger_sha256": HEX_B,
                     },
                 ),
+            ],
+            timestamps=[
+                "2026-08-06T12:00:03+00:00",
+                "2026-08-06T12:00:04+00:00",
             ],
         )
     _reseal_manifest(root)
@@ -1448,15 +1479,20 @@ class NativeTrialTests(unittest.TestCase):
             "native-cub-v0-trial1",
             lock_sha256,
             [
-                ("model_usage", {
-                    "input_tokens": 100,
-                    "cached_tokens": 20,
-                    "output_tokens": 30,
-                }),
+                (
+                    "model_request",
+                    _proxy_request_payload(
+                        request_unix_ns=1786017540000000000,
+                        response_unix_ns=1786017541000000000,
+                    ),
+                ),
                 ("proxy_terminal", {
                     "state": "SEALED",
                     "complete": True,
                     "incomplete_in_flight_count": 0,
+                    "source_record_count": 1,
+                    "source_root_hash": HEX_A,
+                    "source_ledger_sha256": HEX_B,
                 }),
             ],
             timestamps=[
@@ -1467,6 +1503,60 @@ class NativeTrialTests(unittest.TestCase):
         _reseal_manifest(proxy)
         with self.assertRaisesRegex(NativeTrialError, "outside trial timing"):
             load_native_trial(proxy)
+
+    def test_proxy_counts_failed_request_without_inventing_usage(self):
+        proxy = self.bundle("happy")
+        lock_sha256 = _sha256(proxy / "lock.json")
+        _write_ledger(
+            proxy,
+            "proxy",
+            "native-cub-v0-trial1",
+            lock_sha256,
+            [
+                (
+                    "model_request",
+                    _proxy_request_payload(
+                        request_sequence=1,
+                        request_unix_ns=1786017601000000000,
+                        response_unix_ns=1786017601500000000,
+                        duration_ms=500.0,
+                        status=429,
+                        usage_available=False,
+                    ),
+                ),
+                (
+                    "model_request",
+                    _proxy_request_payload(
+                        request_sequence=2,
+                        request_unix_ns=1786017602000000000,
+                        response_unix_ns=1786017603000000000,
+                    ),
+                ),
+                (
+                    "proxy_terminal",
+                    {
+                        "state": "SEALED",
+                        "complete": True,
+                        "incomplete_in_flight_count": 0,
+                        "source_record_count": 2,
+                        "source_root_hash": HEX_A,
+                        "source_ledger_sha256": HEX_B,
+                    },
+                ),
+            ],
+            timestamps=[
+                "2026-08-06T12:00:01.500000+00:00",
+                "2026-08-06T12:00:03+00:00",
+                "2026-08-06T12:00:04+00:00",
+            ],
+        )
+        _reseal_manifest(proxy)
+
+        row = load_native_trial(proxy)
+
+        self.assertEqual(row["tokens_proxy_calls"], 2)
+        self.assertEqual(row["tokens_proxy_input_uncached"], 80)
+        self.assertEqual(row["tokens_proxy_output"], 30)
 
         yielded = self.bundle("happy")
         lock_sha256 = _sha256(yielded / "lock.json")

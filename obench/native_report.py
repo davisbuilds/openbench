@@ -72,6 +72,7 @@ class _Observation:
     bundle_sha256: str
     result_sha256: str
     row_sha256: str
+    proxy_requests: tuple[Mapping[str, Any], ...] | None = None
 
 
 def _number(value: Any) -> float | None:
@@ -319,12 +320,25 @@ def _load_bundle(path: str | Path) -> _Observation:
     calls = tuple(record for record in records if record.get("record_type") == "tool_call")
     if len(calls) != provenance["mcp_event_count"]:
         raise NativeReportError("validated MCP call count does not match native row")
+    proxy_requests: tuple[Mapping[str, Any], ...] | None = None
+    proxy_path = root / "proxy/ledger.jsonl"
+    if proxy_path.is_file():
+        proxy_records = [
+            json.loads(line)
+            for line in proxy_path.read_text(encoding="utf-8").splitlines()
+        ]
+        proxy_requests = tuple(
+            record["payload"]
+            for record in proxy_records
+            if record.get("kind") == "model_request"
+        )
     return _Observation(
         row=row,
         mcp_calls=calls,
         bundle_sha256=provenance["manifest_sha256"],
         result_sha256=provenance["result_sha256"],
         row_sha256=canonical_sha256({field: row[field] for field in ROW_FIELDS}),
+        proxy_requests=proxy_requests,
     )
 
 
@@ -354,7 +368,12 @@ def _merge_observation(
         or previous.row_sha256 != observation.row_sha256
     ):
         raise NativeReportError(f"planned cell {cell_id!r} has conflicting results")
-    if previous.mcp_calls is None and observation.mcp_calls is not None:
+    if (
+        previous.mcp_calls is None
+        and observation.mcp_calls is not None
+        or previous.proxy_requests is None
+        and observation.proxy_requests is not None
+    ):
         return observation
     return previous
 
@@ -462,6 +481,13 @@ def _mcp_categories(
                 if isinstance(value, bool):
                     focus[f"{key}:{str(value).lower()}"] += 1
     all_latencies = [value for values in latencies.values() for value in values]
+    response_bytes = [
+        int(call["response_bytes"])
+        for call in calls
+        if isinstance(call.get("response_bytes"), int)
+        and not isinstance(call["response_bytes"], bool)
+        and call["response_bytes"] >= 0
+    ]
     return (
         {
             "available": True,
@@ -481,10 +507,81 @@ def _mcp_categories(
                 }
                 for tool, values in sorted(latencies.items())
             },
+            "response_bytes": {
+                "total": sum(response_bytes),
+                **_summary(response_bytes, len(calls)),
+            },
             "error_counts": dict(sorted(errors.items())),
             "outcome_counts": dict(sorted(outcomes.items())),
             "delivery_counts": dict(sorted(deliveries.items())),
             "focus_counts": dict(sorted(focus.items())),
+        },
+        [],
+    )
+
+
+def _model_categories(
+    observations: Sequence[_Observation],
+) -> tuple[dict[str, Any], list[str]]:
+    unavailable = [
+        item for item in observations if item.proxy_requests is None
+    ]
+    if unavailable:
+        return (
+            {
+                "available": False,
+                "missing_bundle_n": len(unavailable),
+                "requests_total": None,
+                "latency_ms": None,
+                "status_counts": None,
+                "error_requests": None,
+                "usage_available_requests": None,
+                "input_tokens_per_request": None,
+                "cached_tokens_per_request": None,
+                "output_tokens_per_request": None,
+            },
+            ["model_request_breakdown_requires_validated_proxy_bundles"],
+        )
+    requests = [
+        request
+        for item in observations
+        for request in (item.proxy_requests or ())
+    ]
+    latencies = [request["duration_ms"] for request in requests]
+    usage_requests = [
+        request for request in requests if request["usage_available"]
+    ]
+    return (
+        {
+            "available": True,
+            "missing_bundle_n": 0,
+            "requests_total": len(requests),
+            "latency_ms": {
+                "n": len(latencies),
+                "p50": median(latencies) if latencies else None,
+                "p95": _percentile(latencies, 0.95),
+                "total": sum(latencies),
+            },
+            "status_counts": dict(
+                sorted(Counter(str(request["status"]) for request in requests).items())
+            ),
+            "error_requests": sum(
+                bool(request["error_present"]) or request["status"] >= 400
+                for request in requests
+            ),
+            "usage_available_requests": len(usage_requests),
+            "input_tokens_per_request": _summary(
+                [request["input_tokens"] for request in usage_requests],
+                len(requests),
+            ),
+            "cached_tokens_per_request": _summary(
+                [request["cached_tokens"] for request in usage_requests],
+                len(requests),
+            ),
+            "output_tokens_per_request": _summary(
+                [request["output_tokens"] for request in usage_requests],
+                len(requests),
+            ),
         },
         [],
     )
@@ -527,6 +624,7 @@ def _aggregate_observations(
             cache_share.append(cached / (uncached + cached))
 
     mcp, missing = _mcp_categories(observations)
+    model, model_missing = _model_categories(observations)
     total_fresh = (
         sum(value for value in fresh_tokens if value is not None)
         if all(value is not None for value in fresh_tokens)
@@ -582,7 +680,8 @@ def _aggregate_observations(
             ),
         },
         "mcp": mcp,
-        "unavailable_metrics": missing,
+        "model": model,
+        "unavailable_metrics": [*missing, *model_missing],
     }
 
 

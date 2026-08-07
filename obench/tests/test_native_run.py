@@ -29,6 +29,7 @@ from obench.native_macos import (
 )
 from obench.mcp_stdio_collector import CallLedger
 from obench.native_run import (
+    MCP_COLLECTOR_SEAL_TIMEOUT_S,
     _McpServeOwnerMonitor,
     NativeRunError,
     NativeRunHooks,
@@ -43,6 +44,7 @@ from obench.native_run import (
     _recheck_process_identity,
     _require_setup_app,
     _require_setup_processes,
+    _startup_retry_eligible,
     _verify_mcp_ledger_after_shutdown,
     collector_main,
     load_config,
@@ -56,6 +58,9 @@ PROCESS_START_TOKEN = "Fri Aug 7 12:00:00 2026"
 
 
 class NativeCollectorEntrypointTests(unittest.TestCase):
+    def test_default_collector_seal_grace_is_fifteen_seconds(self):
+        self.assertEqual(MCP_COLLECTOR_SEAL_TIMEOUT_S, 15.0)
+
     def test_collector_uses_canonical_mcp_collector_run_id(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = Path(directory) / "ledger.jsonl"
@@ -130,6 +135,62 @@ class NativeCollectorEntrypointTests(unittest.TestCase):
                 _verify_mcp_ledger_after_shutdown(
                     path, timeout_s=0.0, poll_s=0.01
                 )
+
+    def test_malformed_terminal_seal_fails_immediately_as_native_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ledger.jsonl"
+            ledger = CallLedger(path, "collector-run-1", "trial-1")
+            ledger.seal({
+                "returncode": 0,
+                "integrity_ok": True,
+                "malformed_frames": 0,
+                "partial_frames": 0,
+                "duplicate_request_ids": 0,
+                "missing_responses": 0,
+                "input_incomplete": False,
+            })
+            records = path.read_text(encoding="utf-8").splitlines()
+            terminal = json.loads(records[-1])
+            terminal["summary"]["integrity_ok"] = False
+            records[-1] = json.dumps(terminal)
+            path.write_text("\n".join(records) + "\n", encoding="utf-8")
+
+            with patch("obench.native_run.time.sleep") as sleep:
+                with self.assertRaisesRegex(
+                    NativeRunError, "did not seal cleanly"
+                ):
+                    _verify_mcp_ledger_after_shutdown(path)
+            sleep.assert_not_called()
+
+    def test_startup_retry_requires_no_model_request(self):
+        startup_failure = {
+            "completed": False,
+            "startup_failure": True,
+            "tokens": 0,
+        }
+        self.assertTrue(
+            _startup_retry_eligible(
+                startup_failure,
+                mcp_call_count=0,
+                proxy_requests=[],
+                proxy_required=True,
+                attempt=1,
+                max_retries=1,
+            )
+        )
+        self.assertFalse(
+            _startup_retry_eligible(
+                startup_failure,
+                mcp_call_count=0,
+                proxy_requests=[{
+                    "status": 429,
+                    "usage_available": False,
+                }],
+                proxy_required=True,
+                attempt=1,
+                max_retries=1,
+            )
+        )
 
 
 class FakeFocusMonitor:
@@ -1136,13 +1197,31 @@ media_type = "application/json"
         ledger = directory / "native-1.jsonl"
         request = {
             "record_type": "request",
+            "sequence": 1,
+            "previous_hash": "0" * 64,
+            "request_unix_ns": 100,
+            "response_unix_ns": 200,
+            "duration_ms": 0.1,
+            "paced_wait_ms": 0,
+            "status": 200,
+            "model": "gpt-fixture",
             "usage": {"input_tokens": 10, "output_tokens": 2},
         }
+        request["record_hash"] = hashlib.sha256(
+            json.dumps(
+                request,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
         aborted = {
             "record_type": "ledger_seal",
             "state": "ABORTED",
             "complete": False,
             "incomplete_in_flight_count": 1,
+            "record_count": 1,
+            "last_sequence": 1,
+            "root_hash": request["record_hash"],
         }
         ledger.write_text(
             json.dumps(request) + "\n" + json.dumps(aborted) + "\n",
@@ -1154,7 +1233,20 @@ media_type = "application/json"
             _proxy_usage(context)
         self.assertEqual(
             _proxy_usage(context, allow_aborted=True),
-            [{"input_tokens": 10, "cached_tokens": 0, "output_tokens": 2}],
+            [{
+                "request_sequence": 1,
+                "request_unix_ns": 100,
+                "response_unix_ns": 200,
+                "duration_ms": 0.1,
+                "paced_wait_ms": 0.0,
+                "status": 200,
+                "model": "gpt-fixture",
+                "usage_available": True,
+                "input_tokens": 10,
+                "cached_tokens": 0,
+                "output_tokens": 2,
+                "error_present": False,
+            }],
         )
 
     def test_focus_cleanup_does_not_mask_adapter_exception(self):

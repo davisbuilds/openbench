@@ -428,7 +428,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None: self._proxy()  # noqa: N802,E704
 
     def _proxy(self) -> None:
-        started = time.time()
+        request_unix_ns = time.time_ns()
         started_monotonic = time.monotonic()
         status = 502
         usage = None
@@ -573,6 +573,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             else:
                 self.close_connection = True
         finally:
+            response_unix_ns = time.time_ns()
             if gateway_parser is not None and gateway_metrics is None:
                 try:
                     gateway_metrics = gateway_parser.finalize(time.monotonic())
@@ -591,7 +592,9 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 "model": sampling.get("model") or configured_sampling.get("model"),
                 "sampling_observed": recorded_sampling,
                 "sampling_source": "http_request" if sampling else (meta.get("source") if recorded_sampling else None),
-                "duration_ms": round((time.time() - started) * 1000),
+                "request_unix_ns": request_unix_ns,
+                "response_unix_ns": response_unix_ns,
+                "duration_ms": round((time.monotonic() - started_monotonic) * 1000),
                 "paced_wait_ms": round(locals().get("paced_wait_s", 0.0) * 1000),
             }
             if route is not None:

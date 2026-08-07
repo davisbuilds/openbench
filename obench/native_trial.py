@@ -31,7 +31,7 @@ from .mcp_stdio_collector import (
 from .run import ROW_FIELDS, make_run_id
 
 
-BUNDLE_SCHEMA_VERSION = "openbench.native-macos-trial.v1"
+BUNDLE_SCHEMA_VERSION = "openbench.native-macos-trial.v2"
 TASK_SIDECAR_SCHEMA_VERSION = "openbench.native-task.v1"
 NATIVE_SIDECAR_SCHEMA_VERSION = "openbench.native-sidecar.v1"
 LEDGER_SCHEMA_VERSION = "openbench.native-ledger.v1"
@@ -1896,7 +1896,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             "proxy",
             trial_id=trial_id,
             lock_sha256=lock_sha256,
-            allowed_kinds={"model_usage", "proxy_terminal"},
+            allowed_kinds={"model_request", "proxy_terminal"},
         )
         terminal_records = [
             record
@@ -1911,7 +1911,14 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         terminal_payload = terminal_records[0]["payload"]
         _exact_fields(
             terminal_payload,
-            {"state", "complete", "incomplete_in_flight_count"},
+            {
+                "state",
+                "complete",
+                "incomplete_in_flight_count",
+                "source_record_count",
+                "source_root_hash",
+                "source_ledger_sha256",
+            },
             "proxy/ledger.jsonl.proxy_terminal.payload",
         )
         if terminal_payload["state"] not in {"SEALED", "ABORTED"}:
@@ -1929,11 +1936,28 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             "proxy/ledger.jsonl.proxy_terminal.payload."
             "incomplete_in_flight_count",
         )
+        _integer(
+            terminal_payload["source_record_count"],
+            "proxy/ledger.jsonl.proxy_terminal.payload.source_record_count",
+        )
+        for field in ("source_root_hash", "source_ledger_sha256"):
+            if not _SHA256_RE.fullmatch(str(terminal_payload[field])):
+                raise _fail(
+                    f"proxy/ledger.jsonl.proxy_terminal.payload.{field}",
+                    "expected a lowercase SHA-256 digest",
+                )
         if result["status"] == "completed":
             expected_terminal = {
                 "state": "SEALED",
                 "complete": True,
                 "incomplete_in_flight_count": 0,
+                "source_record_count": terminal_payload[
+                    "source_record_count"
+                ],
+                "source_root_hash": terminal_payload["source_root_hash"],
+                "source_ledger_sha256": terminal_payload[
+                    "source_ledger_sha256"
+                ],
             }
         else:
             expected_terminal = {
@@ -1941,6 +1965,13 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 "complete": False,
                 "incomplete_in_flight_count":
                     proxy_incomplete_in_flight_count,
+                "source_record_count": terminal_payload[
+                    "source_record_count"
+                ],
+                "source_root_hash": terminal_payload["source_root_hash"],
+                "source_ledger_sha256": terminal_payload[
+                    "source_ledger_sha256"
+                ],
             }
         if terminal_payload != expected_terminal:
             raise _fail(
@@ -1950,10 +1981,16 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         proxy_usage_records = [
             record
             for record in proxy_records
-            if record["kind"] == "model_usage"
+            if record["kind"] == "model_request"
         ]
+        if terminal_payload["source_record_count"] != len(proxy_usage_records):
+            raise _fail(
+                "proxy/ledger.jsonl.proxy_terminal.payload.source_record_count",
+                "does not match projected model requests",
+            )
         proxy_totals = {"input_tokens": 0, "cached_tokens": 0, "output_tokens": 0}
         previous_proxy_time: datetime | None = None
+        previous_request_sequence = 0
         for index, record in enumerate(proxy_records):
             observed = _timestamp(
                 record["timestamp"],
@@ -1970,23 +2007,114 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                     "precedes the prior proxy record",
                 )
             previous_proxy_time = observed
-            if record["kind"] != "model_usage":
+            if record["kind"] != "model_request":
                 continue
             payload = record["payload"]
             _exact_fields(
                 payload,
-                {"input_tokens", "cached_tokens", "output_tokens"},
+                {
+                    "request_sequence",
+                    "request_unix_ns",
+                    "response_unix_ns",
+                    "duration_ms",
+                    "paced_wait_ms",
+                    "status",
+                    "model",
+                    "usage_available",
+                    "input_tokens",
+                    "cached_tokens",
+                    "output_tokens",
+                    "error_present",
+                },
                 f"proxy/ledger.jsonl:{index + 1}.payload",
             )
-            for field in proxy_totals:
-                proxy_totals[field] += _integer(
-                    payload[field],
-                    f"proxy/ledger.jsonl:{index + 1}.payload.{field}",
+            request_sequence = _integer(
+                payload["request_sequence"],
+                f"proxy/ledger.jsonl:{index + 1}.payload.request_sequence",
+                minimum=1,
+            )
+            if request_sequence != previous_request_sequence + 1:
+                raise _fail(
+                    f"proxy/ledger.jsonl:{index + 1}.payload.request_sequence",
+                    "must be contiguous and one-based",
                 )
-            if payload["cached_tokens"] > payload["input_tokens"]:
+            previous_request_sequence = request_sequence
+            request_unix_ns = _integer(
+                payload["request_unix_ns"],
+                f"proxy/ledger.jsonl:{index + 1}.payload.request_unix_ns",
+            )
+            response_unix_ns = _integer(
+                payload["response_unix_ns"],
+                f"proxy/ledger.jsonl:{index + 1}.payload.response_unix_ns",
+            )
+            if response_unix_ns < request_unix_ns:
                 raise _fail(
                     f"proxy/ledger.jsonl:{index + 1}.payload",
-                    "cached tokens exceed input tokens",
+                    "response precedes request",
+                )
+            request_time = datetime.fromtimestamp(
+                request_unix_ns / 1_000_000_000,
+                tz=started.tzinfo,
+            )
+            response_time = datetime.fromtimestamp(
+                response_unix_ns / 1_000_000_000,
+                tz=started.tzinfo,
+            )
+            if request_time < started or response_time > finished:
+                raise _fail(
+                    f"proxy/ledger.jsonl:{index + 1}.payload",
+                    "request timing falls outside trial timing",
+                )
+            if abs((observed - response_time).total_seconds()) > 0.000002:
+                raise _fail(
+                    f"proxy/ledger.jsonl:{index + 1}.timestamp",
+                    "does not match response_unix_ns",
+                )
+            _number(
+                payload["duration_ms"],
+                f"proxy/ledger.jsonl:{index + 1}.payload.duration_ms",
+            )
+            _number(
+                payload["paced_wait_ms"],
+                f"proxy/ledger.jsonl:{index + 1}.payload.paced_wait_ms",
+            )
+            _integer(
+                payload["status"],
+                f"proxy/ledger.jsonl:{index + 1}.payload.status",
+                minimum=100,
+            )
+            if payload["status"] > 599:
+                raise _fail(
+                    f"proxy/ledger.jsonl:{index + 1}.payload.status",
+                    "must be <= 599",
+                )
+            _optional_string(
+                payload["model"],
+                f"proxy/ledger.jsonl:{index + 1}.payload.model",
+            )
+            for field in ("usage_available", "error_present"):
+                if not isinstance(payload[field], bool):
+                    raise _fail(
+                        f"proxy/ledger.jsonl:{index + 1}.payload.{field}",
+                        "expected a boolean",
+                    )
+            if payload["usage_available"]:
+                for field in proxy_totals:
+                    proxy_totals[field] += _integer(
+                        payload[field],
+                        f"proxy/ledger.jsonl:{index + 1}.payload.{field}",
+                    )
+                if payload["cached_tokens"] > payload["input_tokens"]:
+                    raise _fail(
+                        f"proxy/ledger.jsonl:{index + 1}.payload",
+                        "cached tokens exceed input tokens",
+                    )
+            elif any(
+                payload[field] is not None for field in proxy_totals
+            ):
+                raise _fail(
+                    f"proxy/ledger.jsonl:{index + 1}.payload",
+                    "usage-unavailable request contains token counts",
                 )
         if usage["input"] is None or proxy_totals != {
             "input_tokens": usage["input"],

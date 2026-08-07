@@ -207,10 +207,27 @@ class NativeReportTests(unittest.TestCase):
         self.assertEqual(observation.row["exec_mode"], "native_macos")
         self.assertEqual(len(observation.mcp_calls), 1)
         self.assertEqual(observation.mcp_calls[0]["tool"], "set_value")
+        self.assertEqual(len(observation.proxy_requests), 1)
+        self.assertEqual(observation.proxy_requests[0]["duration_ms"], 1000.0)
         self.assertEqual(
             observation.bundle_sha256,
             observation.row["candidate_provenance"]["manifest_sha256"],
         )
+
+    def test_validated_bundle_reports_model_and_mcp_cost_centers(self):
+        cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory(prefix="native_report_costs_") as temp:
+            bundle = Path(temp) / "native-cub-v0-trial1"
+            _build_bundle(bundle, cases["happy"])
+            aggregate = _aggregate_observations([_load_bundle(bundle)])
+
+        self.assertEqual(aggregate["model"]["requests_total"], 1)
+        self.assertEqual(aggregate["model"]["latency_ms"]["p50"], 1000.0)
+        self.assertEqual(
+            aggregate["model"]["input_tokens_per_request"]["median"],
+            100,
+        )
+        self.assertEqual(aggregate["mcp"]["response_bytes"]["total"], 80)
 
     def test_incomplete_arm_is_excluded_and_surfaced(self):
         plan = _plan(repetitions=2)
