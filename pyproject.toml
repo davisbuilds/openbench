@@ -45,5 +45,6 @@ obench = [
     "*.md",
     "*.json",
     "*.sh",
+    "*.swift",
     "*.sample.json",
 ]

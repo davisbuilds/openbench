@@ -7,14 +7,16 @@ execution needed by a future native runner.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import hashlib
 import json
 import os
 from pathlib import Path
 import platform
 import signal
+import shutil
 import socket
 import subprocess
 import threading
@@ -404,64 +406,290 @@ class SessionReader(Protocol):
         """Return True/False only when lock state is source-proven."""
 
 
-class MacOSAppInspector:
-    """Read running application identity/version through AppKit."""
+NATIVE_HELPER_PROTOCOL_VERSION = 1
+CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
-    def inspect(self, requirements: Sequence[AppRequirement]) -> Sequence[AppEvidence]:
+
+def _parse_helper_reply(
+    value: str | bytes | Mapping[str, Any],
+    *,
+    expected_kind: str,
+) -> Mapping[str, Any]:
+    if isinstance(value, bytes):
         try:
-            from AppKit import NSWorkspace
-            from Foundation import NSBundle
-        except ImportError as exc:  # pragma: no cover - host dependency
+            value = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise PreflightEvidenceError("native helper output is not UTF-8") from exc
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
             raise PreflightEvidenceError(
-                "PyObjC AppKit/Foundation are required for app preflight"
+                "native helper output is not valid JSON"
+            ) from exc
+    reply = _object(value, "native helper reply")
+    version = reply.get("protocolVersion")
+    if type(version) is not int or version != NATIVE_HELPER_PROTOCOL_VERSION:
+        raise PreflightEvidenceError(
+            f"unsupported native helper protocol version: {version!r}"
+        )
+    if reply.get("kind") != expected_kind:
+        raise PreflightEvidenceError(
+            f"native helper returned kind {reply.get('kind')!r}; "
+            f"expected {expected_kind!r}"
+        )
+    return reply
+
+
+class NativeMacOSHelperResolver:
+    """Resolve or compile the checked-in Swift helper, then probe its protocol."""
+
+    def __init__(
+        self,
+        *,
+        source_path: str | os.PathLike[str] | None = None,
+        cache_dir: str | os.PathLike[str] | None = None,
+        prebuilt_path: str | os.PathLike[str] | None = None,
+        command_runner: CommandRunner = subprocess.run,
+        which: Callable[[str], str | None] = shutil.which,
+        platform_reader: Callable[[], str] = platform.system,
+        machine_reader: Callable[[], str] = platform.machine,
+        build_timeout_s: float = 120.0,
+        probe_timeout_s: float = 5.0,
+    ):
+        self.source_path = Path(
+            source_path or Path(__file__).with_name("native_macos_helper.swift")
+        ).expanduser().resolve()
+        self.cache_dir = Path(
+            cache_dir
+            or Path("~/Library/Caches/OpenBench/native-macos-helper").expanduser()
+        ).expanduser().resolve()
+        self.prebuilt_path = (
+            Path(prebuilt_path).expanduser().resolve()
+            if prebuilt_path is not None
+            else None
+        )
+        self.command_runner = command_runner
+        self.which = which
+        self.platform_reader = platform_reader
+        self.machine_reader = machine_reader
+        self.build_timeout_s = build_timeout_s
+        self.probe_timeout_s = probe_timeout_s
+
+    def _run(self, argv: Sequence[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+        try:
+            return self.command_runner(
+                list(argv),
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise PreflightEvidenceError(
+                f"native helper command failed ({argv[0]}): {exc}"
             ) from exc
 
-        required = {item.bundle_identifier for item in requirements}
+    def _probe(self, path: Path) -> None:
+        if not path.is_file() or not os.access(path, os.X_OK):
+            raise PreflightEvidenceError(
+                f"native macOS helper is missing or not executable: {path}"
+            )
+        completed = self._run([str(path), "protocol"], timeout=self.probe_timeout_s)
+        if completed.returncode != 0:
+            detail = (completed.stderr or "").strip()[-1000:]
+            raise PreflightEvidenceError(
+                f"native macOS helper protocol probe exited "
+                f"{completed.returncode}: {detail}"
+            )
+        _parse_helper_reply(completed.stdout, expected_kind="protocol")
+
+    def resolve(self) -> Path:
+        if self.platform_reader() != "Darwin":
+            raise PreflightEvidenceError(
+                "native macOS helper requires platform.system() == 'Darwin'"
+            )
+        if self.prebuilt_path is not None:
+            self._probe(self.prebuilt_path)
+            return self.prebuilt_path
+        try:
+            source = self.source_path.read_bytes()
+        except OSError as exc:
+            raise PreflightEvidenceError(
+                f"native macOS helper source is unavailable: {self.source_path}"
+            ) from exc
+        digest = hashlib.sha256(
+            source + b"\0" + self.machine_reader().encode("utf-8")
+        ).hexdigest()
+        target_dir = self.cache_dir / digest
+        target = target_dir / "native-macos-helper"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(target_dir, 0o700)
+        with WholeRunLease(target_dir / ".build.lock", blocking=True):
+            if not target.is_file():
+                swiftc = self.which("swiftc")
+                if swiftc is None:
+                    raise PreflightEvidenceError(
+                        "native macOS helper requires swiftc from the Xcode "
+                        "Command Line Tools; no compiler was found on PATH"
+                    )
+                temporary = target_dir / f".native-macos-helper-{uuid.uuid4().hex}"
+                try:
+                    completed = self._run(
+                        [
+                            swiftc,
+                            str(self.source_path),
+                            "-O",
+                            "-o",
+                            str(temporary),
+                        ],
+                        timeout=self.build_timeout_s,
+                    )
+                    if completed.returncode != 0:
+                        detail = (completed.stderr or "").strip()[-4000:]
+                        raise PreflightEvidenceError(
+                            "native macOS helper compilation failed "
+                            f"(swiftc exit {completed.returncode}): {detail}"
+                        )
+                    if not temporary.is_file():
+                        raise PreflightEvidenceError(
+                            "swiftc reported success but produced no native "
+                            f"macOS helper at {temporary}"
+                        )
+                    os.chmod(temporary, 0o755)
+                    os.replace(temporary, target)
+                finally:
+                    try:
+                        temporary.unlink()
+                    except FileNotFoundError:
+                        pass
+        self._probe(target)
+        return target
+
+
+def _run_native_helper(
+    helper_path: Path,
+    command: Sequence[str],
+    *,
+    command_runner: CommandRunner,
+    timeout_s: float,
+    expected_kind: str,
+) -> Mapping[str, Any]:
+    try:
+        completed = command_runner(
+            [str(helper_path), *command],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=timeout_s,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PreflightEvidenceError(
+            f"native helper {command[0]} command failed: {exc}"
+        ) from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or "").strip()[-1000:]
+        raise PreflightEvidenceError(
+            f"native helper {command[0]} exited {completed.returncode}: {detail}"
+        )
+    return _parse_helper_reply(completed.stdout, expected_kind=expected_kind)
+
+
+class MacOSAppInspector:
+    """Read running app identity/version through the native Swift helper."""
+
+    def __init__(
+        self,
+        helper_path: str | os.PathLike[str],
+        *,
+        command_runner: CommandRunner = subprocess.run,
+        timeout_s: float = 5.0,
+    ):
+        self.helper_path = Path(helper_path)
+        self.command_runner = command_runner
+        self.timeout_s = timeout_s
+
+    def inspect(self, requirements: Sequence[AppRequirement]) -> Sequence[AppEvidence]:
+        bundle_ids = sorted({item.bundle_identifier for item in requirements})
+        reply = _run_native_helper(
+            self.helper_path,
+            ["apps", *bundle_ids],
+            command_runner=self.command_runner,
+            timeout_s=self.timeout_s,
+            expected_kind="apps",
+        )
+        raw_apps = reply.get("apps")
+        if not isinstance(raw_apps, list):
+            raise PreflightEvidenceError("native helper apps must be a JSON array")
         evidence = []
-        for app in NSWorkspace.sharedWorkspace().runningApplications():
-            bundle_id = app.bundleIdentifier()
-            if bundle_id not in required:
-                continue
-            bundle_url = app.bundleURL()
-            path = str(bundle_url.path()) if bundle_url is not None else None
-            bundle = NSBundle.bundleWithURL_(bundle_url) if bundle_url is not None else None
-            info = bundle.infoDictionary() if bundle is not None else None
-            version = None
-            if info is not None:
-                version = info.get("CFBundleShortVersionString") or info.get("CFBundleVersion")
-            evidence.append(
-                AppEvidence(
-                    bundle_identifier=str(bundle_id),
-                    version=str(version) if version is not None else None,
-                    running=True,
-                    path=path,
+        for index, raw in enumerate(raw_apps):
+            app = _object(raw, f"native helper apps[{index}]")
+            bundle_identifier = _string(
+                app.get("bundleIdentifier"),
+                f"native helper apps[{index}].bundleIdentifier",
+            )
+            version = _string(
+                app.get("version"),
+                f"native helper apps[{index}].version",
+                optional=True,
+            )
+            path = _string(
+                app.get("path"),
+                f"native helper apps[{index}].path",
+                optional=True,
+            )
+            running = app.get("running")
+            if type(running) is not bool:
+                raise PreflightEvidenceError(
+                    f"native helper apps[{index}].running must be a boolean"
                 )
+            if bundle_identifier not in bundle_ids:
+                raise PreflightEvidenceError(
+                    "native helper returned an undeclared bundle identifier: "
+                    f"{bundle_identifier!r}"
+                )
+            evidence.append(
+                AppEvidence(bundle_identifier, version, running, path)  # type: ignore[arg-type]
             )
         return evidence
 
 
 class MacOSSessionReader:
-    """Read lock state using the same CoreGraphics session dictionary as MCP."""
+    """Read CGSession lock evidence through the native Swift helper."""
 
-    _LOCK_KEY = "CGSSessionScreenIsLocked"
+    def __init__(
+        self,
+        helper_path: str | os.PathLike[str],
+        *,
+        command_runner: CommandRunner = subprocess.run,
+        timeout_s: float = 5.0,
+    ):
+        self.helper_path = Path(helper_path)
+        self.command_runner = command_runner
+        self.timeout_s = timeout_s
 
     def screen_unlocked(self) -> bool | None:
-        try:
-            from Quartz import CGSessionCopyCurrentDictionary
-        except ImportError as exc:  # pragma: no cover - host dependency
+        reply = _run_native_helper(
+            self.helper_path,
+            ["session"],
+            command_runner=self.command_runner,
+            timeout_s=self.timeout_s,
+            expected_kind="session",
+        )
+        if reply.get("status") == "unknown":
+            return None
+        if reply.get("status") != "known":
             raise PreflightEvidenceError(
-                "PyObjC Quartz is required for unlocked-screen evidence"
-            ) from exc
-        session = CGSessionCopyCurrentDictionary()
-        if session is None or not isinstance(session, Mapping):
-            return None
-        locked = session.get(self._LOCK_KEY, False)
-        if type(locked) is not bool:
-            return None
-        return not locked
-
-
-CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+                f"native helper session status is unknown: {reply.get('status')!r}"
+            )
+        unlocked = reply.get("screenUnlocked")
+        if type(unlocked) is not bool:
+            raise PreflightEvidenceError(
+                "native helper known session requires boolean screenUnlocked"
+            )
+        return unlocked
 
 
 def run_preflight(
@@ -471,6 +699,7 @@ def run_preflight(
     command_runner: CommandRunner = subprocess.run,
     app_inspector: AppInspector | None = None,
     session_reader: SessionReader | None = None,
+    helper_resolver: NativeMacOSHelperResolver | None = None,
     platform_reader: Callable[[], str] = platform.system,
     timeout_s: float = 15.0,
 ) -> PreflightResult:
@@ -478,6 +707,23 @@ def run_preflight(
 
     if timeout_s <= 0:
         raise ValueError("preflight timeout must be positive")
+    platform_name = platform_reader()
+    if platform_name != "Darwin":
+        raise PreflightEvidenceError(
+            f"native macOS preflight requires Darwin, observed {platform_name!r}"
+        )
+
+    helper_path = None
+    needs_helper = (
+        (app_inspector is None and bool(spec.required_apps))
+        or (session_reader is None and spec.require_unlocked_screen)
+    )
+    if needs_helper:
+        resolver = helper_resolver or NativeMacOSHelperResolver(
+            command_runner=command_runner,
+            platform_reader=lambda: platform_name,
+        )
+        helper_path = resolver.resolve()
     try:
         completed = command_runner(
             [computer_use_binary, "health_report", "--json", "--probe-capture"],
@@ -495,13 +741,23 @@ def run_preflight(
             f"health report exited {completed.returncode}: {detail}"
         )
     health = parse_health_report_json(completed.stdout)
-    inspector = app_inspector or MacOSAppInspector()
-    reader = session_reader or MacOSSessionReader()
-    apps = inspector.inspect(spec.required_apps)
-    unlocked = reader.screen_unlocked() if spec.require_unlocked_screen else None
+    if spec.required_apps:
+        inspector = app_inspector or MacOSAppInspector(
+            helper_path, command_runner=command_runner  # type: ignore[arg-type]
+        )
+        apps = inspector.inspect(spec.required_apps)
+    else:
+        apps = ()
+    if spec.require_unlocked_screen:
+        reader = session_reader or MacOSSessionReader(
+            helper_path, command_runner=command_runner  # type: ignore[arg-type]
+        )
+        unlocked = reader.screen_unlocked()
+    else:
+        unlocked = None
     return evaluate_preflight(
         spec,
-        platform_name=platform_reader(),
+        platform_name=platform_name,
         health=health,
         apps=apps,
         screen_unlocked=unlocked,
@@ -566,6 +822,16 @@ class MacOSFocusMonitor:
         with self._lock:
             return tuple(self._violations)
 
+    @property
+    def error(self) -> BaseException | None:
+        return getattr(self.event_source, "error", None)
+
+    def require_healthy(self) -> None:
+        if self.error is not None:
+            raise NativeMacOSError(
+                f"native focus monitor failed: {self.error}"
+            ) from self.error
+
     def _observe(self, event: FocusEvent) -> None:
         if event.bundle_identifier in self.allowed_bundle_identifiers:
             return
@@ -598,101 +864,175 @@ class MacOSFocusMonitor:
             return
         self._started = False
         self.event_source.stop()
+        self.require_healthy()
 
     def __enter__(self) -> "MacOSFocusMonitor":
         self.start()
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> bool:
-        self.stop()
+        try:
+            self.stop()
+        except BaseException as monitor_error:
+            if exc is None:
+                raise
+            setattr(exc, "focus_monitor_error", monitor_error)
         return False
 
 
 class NSWorkspaceActivationEventSource:
-    """Real activation source backed by NSWorkspace notifications.
+    """NSWorkspace activation events streamed by the native Swift helper."""
 
-    Delivery relies on the caller's active Cocoa run loop. The source is kept
-    separate so a future runner can select its run-loop ownership explicitly.
-    """
-
-    def __init__(self, *, monotonic: Callable[[], float] = time.monotonic):
+    def __init__(
+        self,
+        *,
+        helper_resolver: NativeMacOSHelperResolver | None = None,
+        popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+        monotonic: Callable[[], float] = time.monotonic,
+        startup_timeout_s: float = 5.0,
+    ):
+        self.helper_resolver = helper_resolver or NativeMacOSHelperResolver()
+        self.popen = popen
         self.monotonic = monotonic
-        self._center = None
-        self._observer = None
+        self.startup_timeout_s = startup_timeout_s
+        self._process: subprocess.Popen[bytes] | None = None
+        self._reader_thread: threading.Thread | None = None
+        self._stderr_capture: _BoundedCapture | None = None
+        self._ready = threading.Event()
+        self._stopping = threading.Event()
+        self._error: BaseException | None = None
+        self._error_lock = threading.Lock()
+
+    @property
+    def error(self) -> BaseException | None:
+        with self._error_lock:
+            return self._error
+
+    def _set_error(self, error: BaseException) -> None:
+        with self._error_lock:
+            if self._error is None:
+                self._error = error
+        self._ready.set()
+
+    def _parse_focus_event(self, line: bytes) -> FocusEvent:
+        reply = _parse_helper_reply(line, expected_kind="focus")
+        bundle_identifier = reply.get("bundleIdentifier")
+        application_name = reply.get("applicationName")
+        pid = reply.get("pid")
+        if bundle_identifier is not None and not isinstance(bundle_identifier, str):
+            raise PreflightEvidenceError(
+                "native helper focus bundleIdentifier must be a string or null"
+            )
+        if application_name is not None and not isinstance(application_name, str):
+            raise PreflightEvidenceError(
+                "native helper focus applicationName must be a string or null"
+            )
+        if pid is not None and (type(pid) is not int or pid <= 0):
+            raise PreflightEvidenceError(
+                "native helper focus pid must be a positive integer or null"
+            )
+        return FocusEvent(
+            bundle_identifier=bundle_identifier,
+            application_name=application_name,
+            pid=pid,
+            observed_at_monotonic=self.monotonic(),
+        )
+
+    def _read_events(self, callback: Callable[[FocusEvent], None]) -> None:
+        process = self._process
+        if process is None or process.stdout is None:
+            self._set_error(NativeMacOSError("native focus helper has no stdout"))
+            return
+        try:
+            while True:
+                line = process.stdout.readline()
+                if not line:
+                    if not self._stopping.is_set():
+                        self._set_error(
+                            NativeMacOSError(
+                                f"native focus helper exited {process.poll()}"
+                            )
+                        )
+                    return
+                callback(self._parse_focus_event(line))
+                self._ready.set()
+        except BaseException as exc:
+            self._set_error(exc)
+            if process.poll() is None:
+                process.terminate()
 
     def start(self, callback: Callable[[FocusEvent], None]) -> None:
-        if self._observer is not None:
+        if self._process is not None:
             raise RuntimeError("activation event source is already started")
+        helper_path = self.helper_resolver.resolve()
+        self._ready.clear()
+        self._stopping.clear()
+        with self._error_lock:
+            self._error = None
         try:
-            from AppKit import (
-                NSWorkspace,
-                NSWorkspaceApplicationKey,
-                NSWorkspaceDidActivateApplicationNotification,
+            process = self.popen(
+                [str(helper_path), "focus"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
             )
-        except ImportError as exc:  # pragma: no cover - host dependency
+        except OSError as exc:
             raise NativeMacOSError(
-                "PyObjC AppKit is required for focus monitoring"
+                f"failed to start native focus helper: {exc}"
             ) from exc
-
-        center = NSWorkspace.sharedWorkspace().notificationCenter()
-
-        def observer(notification):
-            app = notification.userInfo().get(NSWorkspaceApplicationKey)
-            callback(
-                FocusEvent(
-                    bundle_identifier=(
-                        str(app.bundleIdentifier())
-                        if app is not None and app.bundleIdentifier() is not None
-                        else None
-                    ),
-                    application_name=(
-                        str(app.localizedName())
-                        if app is not None and app.localizedName() is not None
-                        else None
-                    ),
-                    pid=(
-                        int(app.processIdentifier())
-                        if app is not None
-                        else None
-                    ),
-                    observed_at_monotonic=self.monotonic(),
+        self._process = process
+        if process.stderr is None:
+            self.stop()
+            raise NativeMacOSError("native focus helper has no stderr")
+        self._stderr_capture = _BoundedCapture(process.stderr, 16 * 1024)
+        self._stderr_capture.start()
+        self._reader_thread = threading.Thread(
+            target=self._read_events,
+            args=(callback,),
+            daemon=True,
+        )
+        self._reader_thread.start()
+        if not self._ready.wait(timeout=self.startup_timeout_s):
+            self._set_error(
+                NativeMacOSError(
+                    "native focus helper produced no baseline activation event "
+                    f"within {self.startup_timeout_s:g}s"
                 )
             )
-
-        token = center.addObserverForName_object_queue_usingBlock_(
-            NSWorkspaceDidActivateApplicationNotification, None, None, observer
-        )
-        self._center = center
-        self._observer = token
-        frontmost = NSWorkspace.sharedWorkspace().frontmostApplication()
-        callback(
-            FocusEvent(
-                bundle_identifier=(
-                    str(frontmost.bundleIdentifier())
-                    if frontmost is not None
-                    and frontmost.bundleIdentifier() is not None
-                    else None
-                ),
-                application_name=(
-                    str(frontmost.localizedName())
-                    if frontmost is not None and frontmost.localizedName() is not None
-                    else None
-                ),
-                pid=(
-                    int(frontmost.processIdentifier())
-                    if frontmost is not None
-                    else None
-                ),
-                observed_at_monotonic=self.monotonic(),
-            )
-        )
+        if self.error is not None:
+            error = self.error
+            self.stop()
+            raise NativeMacOSError(
+                f"native focus helper startup failed: {error}"
+            ) from error
 
     def stop(self) -> None:
-        center, observer = self._center, self._observer
-        self._center = None
-        self._observer = None
-        if center is not None and observer is not None:
-            center.removeObserver_(observer)
+        process, self._process = self._process, None
+        if process is None:
+            return
+        self._stopping.set()
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+        if process.stdout is not None:
+            process.stdout.close()
+        if self._reader_thread is not None:
+            self._reader_thread.join(timeout=1)
+        self._reader_thread = None
+        if self._stderr_capture is not None:
+            self._stderr_capture.finish(1)
+        self._stderr_capture = None
 
 
 class PhaseName(str, Enum):
