@@ -82,6 +82,9 @@ class CodexNativeProfileTests(unittest.TestCase):
             "OPENBENCH_NATIVE_TRIAL_ID": "trial-1",
             "OPENBENCH_NATIVE_MCP_LEDGER": str(self.attempt / "mcp-ledger.jsonl"),
             "OPENBENCH_NATIVE_MCP_ALLOWED_TOOLS": '["click"]',
+            "OPENBENCH_NATIVE_MCP_ARGUMENT_POLICY": (
+                '{"forbid_focus_change":true,"forbid_global_delivery":true}'
+            ),
         }
 
     def test_stock_command_and_artifacts_are_unchanged(self):
@@ -294,20 +297,34 @@ class CodexNativeProfileTests(unittest.TestCase):
             home,
             launcher=self.launcher,
             allowed_tools=("click",),
+            argument_policy={
+                "forbid_focus_change": True,
+                "forbid_global_delivery": True,
+            },
         )
         hooks = json.loads((home / "hooks.json").read_text(encoding="utf-8"))
         command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         cases = (
-            ("mcp__computer_use__click", "allow"),
-            ("mcp__computer_use__open_url", "deny"),
-            ("apply_patch", "deny"),
-            ("mcp__filesystem__write_file", "deny"),
+            ("mcp__computer_use__click", {"secret": "private"}, "allow"),
+            (
+                "mcp__computer_use__click",
+                {"allow_focus_change": True},
+                "deny",
+            ),
+            (
+                "mcp__computer_use__click",
+                {"allow_global_cursor": True},
+                "deny",
+            ),
+            ("mcp__computer_use__open_url", {}, "deny"),
+            ("apply_patch", {}, "deny"),
+            ("mcp__filesystem__write_file", {}, "deny"),
         )
-        for index, (tool_name, expected) in enumerate(cases):
+        for index, (tool_name, tool_input, expected) in enumerate(cases):
             payload = {
                 "tool_name": tool_name,
                 "tool_use_id": f"call-{index}",
-                "tool_input": {"secret": "private"},
+                "tool_input": tool_input,
             }
             proc = subprocess.run(
                 command,
@@ -329,7 +346,7 @@ class CodexNativeProfileTests(unittest.TestCase):
         ]
         self.assertEqual(
             [record["decision"] for record in records],
-            ["allow", "block", "block", "block"],
+            ["allow", "block", "block", "block", "block", "block"],
         )
         self.assertNotIn("secret", ledger.read_text(encoding="utf-8"))
         self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), 0o600)

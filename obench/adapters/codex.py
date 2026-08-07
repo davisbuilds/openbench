@@ -68,6 +68,7 @@ _EXE = "codex"
 _MULTI_AGENT_ENV = "OPENBENCH_CODEX_MULTI_AGENT"
 _NATIVE_MCP_COMMAND_ENV = "CUB_MCP_COMMAND"
 _NATIVE_ALLOWED_TOOLS_ENV = "OPENBENCH_NATIVE_MCP_ALLOWED_TOOLS"
+_NATIVE_ARGUMENT_POLICY_ENV = "OPENBENCH_NATIVE_MCP_ARGUMENT_POLICY"
 _NATIVE_MARKER_ENVS = (
     "OPENBENCH_NATIVE_MCP_SERVER_COMMAND",
     "OPENBENCH_NATIVE_MCP_LEDGER",
@@ -128,6 +129,7 @@ _NATIVE_PROCESS_ENV_ALLOWLIST = frozenset({
 _NATIVE_CONTROL_ENVS = frozenset({
     _NATIVE_MCP_COMMAND_ENV,
     _NATIVE_ALLOWED_TOOLS_ENV,
+    _NATIVE_ARGUMENT_POLICY_ENV,
     *_NATIVE_MARKER_ENVS,
     "OPENBENCH_PROXY",
     "OPENBENCH_PROXY_BASE_URL",
@@ -222,6 +224,29 @@ def _native_allowed_tools(env_override=None):
     return tuple(tools)
 
 
+def _native_argument_policy(env_override=None):
+    raw = _native_value(_NATIVE_ARGUMENT_POLICY_ENV, env_override)
+    if not isinstance(raw, str):
+        raise ValueError(f"{_NATIVE_ARGUMENT_POLICY_ENV} must be a JSON object")
+    try:
+        policy = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"{_NATIVE_ARGUMENT_POLICY_ENV} must be a JSON object: {exc}"
+        ) from exc
+    expected = {"forbid_focus_change", "forbid_global_delivery"}
+    if (
+        not isinstance(policy, dict)
+        or set(policy) != expected
+        or any(not isinstance(policy[field], bool) for field in expected)
+    ):
+        raise ValueError(
+            f"{_NATIVE_ARGUMENT_POLICY_ENV} must contain exactly boolean "
+            "forbid_focus_change and forbid_global_delivery fields"
+        )
+    return policy
+
+
 def _native_child_env(source):
     """Expose only runtime essentials and explicit native benchmark controls."""
     return {
@@ -267,7 +292,9 @@ def _atomic_write_private(path, text):
     _atomic_write_private_bytes(path, text.encode("utf-8"))
 
 
-def _install_native_tool_policy(codex_home, *, launcher, allowed_tools):
+def _install_native_tool_policy(
+    codex_home, *, launcher, allowed_tools, argument_policy
+):
     ledger_path = Path(launcher).parent / _NATIVE_TOOL_POLICY_LEDGER_NAME
     hook_path = Path(codex_home) / _NATIVE_TOOL_POLICY_HOOK_NAME
     _atomic_write_private(ledger_path, "")
@@ -283,16 +310,30 @@ import sys
 
 LEDGER_PATH = {str(ledger_path)!r}
 ALLOWED_TOOLS = frozenset({allowed_hook_tools!r})
+ARGUMENT_POLICY = {dict(argument_policy)!r}
 
 try:
     payload = json.load(sys.stdin)
     tool_name = payload.get("tool_name")
     tool_use_id = payload.get("tool_use_id")
+    tool_input = payload.get("tool_input")
+    safe_arguments = isinstance(tool_input, dict)
+    if safe_arguments and ARGUMENT_POLICY["forbid_focus_change"]:
+        safe_arguments = not (
+            tool_input.get("allow_focus_change") is True
+            or tool_input.get("activate") is True
+        )
+    if safe_arguments and ARGUMENT_POLICY["forbid_global_delivery"]:
+        safe_arguments = not (
+            tool_input.get("allow_global_cursor") is True
+            or tool_input.get("allow_global_keyboard") is True
+        )
     allowed = (
         isinstance(tool_name, str)
         and tool_name in ALLOWED_TOOLS
         and isinstance(tool_use_id, str)
         and bool(tool_use_id)
+        and safe_arguments
     )
     encoded_input = json.dumps(
         payload.get("tool_input"),
@@ -317,7 +358,10 @@ try:
         "permissionDecisionReason": (
             "OpenBench native task tool policy"
             if allowed
-            else "OpenBench native trials permit only task-allowed MCP tools"
+            else (
+                "OpenBench native trials permit only task-allowed MCP tools "
+                "and task-safe focus and delivery arguments"
+            )
         ),
     }})
     print(json.dumps({{
@@ -873,12 +917,14 @@ def run(
     native = _native_requested(env_override)
     native_launcher = None
     native_allowed_tools = ()
+    native_argument_policy = None
     if native:
         if model != _NATIVE_MODEL:
             return _native_error(f"model must be {_NATIVE_MODEL!r}, got {model!r}")
         try:
             native_launcher = _native_launcher(env_override)
             native_allowed_tools = _native_allowed_tools(env_override)
+            native_argument_policy = _native_argument_policy(env_override)
         except ValueError as exc:
             return _native_error(str(exc))
 
@@ -1007,6 +1053,7 @@ def run(
                     child_env["CODEX_HOME"],
                     launcher=native_launcher,
                     allowed_tools=native_allowed_tools,
+                    argument_policy=native_argument_policy,
                 )
             proc = subprocess.run(
                 cmd,

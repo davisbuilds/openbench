@@ -3,6 +3,8 @@
 Use only the provided computer-use tools and TextEdit to create and save one
 file at the run-scoped path provided in `run-context.json` (also available as
 `OPENBENCH_NATIVE_OUTPUT_PATH` when the native runner invokes the verifier).
+Keep the existing foreground app focused. Do not activate TextEdit, permit a
+focus change, or request global cursor or keyboard delivery.
 
 The file must contain exactly these two lines, including the final newline:
 

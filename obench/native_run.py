@@ -2102,6 +2102,17 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         config.mcp_policy["allowed_tools"],
                         separators=(",", ":"),
                     ),
+                    "OPENBENCH_NATIVE_MCP_ARGUMENT_POLICY": json.dumps(
+                        {
+                            "forbid_focus_change": config.focus_policy[
+                                "require_foreground_full_agent_phase"
+                            ],
+                            "forbid_global_delivery": config.focus_policy[
+                                "forbid_global_delivery"
+                            ],
+                        },
+                        separators=(",", ":"),
+                    ),
                     "OPENBENCH_NATIVE_TRIAL_ID": config.trial_id,
                 }
                 token = f"native-{attempt}"
