@@ -1,6 +1,9 @@
 # Set the basic controls
 
-Use only the provided computer-use tools to operate `ComputerUseFixture`.
+Only call tools named `mcp__computer_use__*` to operate
+`ComputerUseFixture`. Never call `apply_patch`, shell, browser, filesystem, or
+other tools. Do not create artifacts manually; OpenBench collects results
+automatically.
 
 1. Turn `toggle-box` on.
 2. Press `honest-button` exactly twice so the counter is `2`.

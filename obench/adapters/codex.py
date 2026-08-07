@@ -516,11 +516,6 @@ def _assert_native_tool_policy_ledger(path, events, allowed_tools):
             allowed.append((tool_name, input_sha256))
         else:
             blocked.append(tool_name)
-    if blocked:
-        raise ValueError(
-            f"native tool policy blocked forbidden tool {blocked[0]!r}"
-        )
-
     trajectory_tools = {}
     trajectory_lifecycle = {}
     for event in events:
@@ -567,6 +562,7 @@ def _assert_native_tool_policy_ledger(path, events, allowed_tools):
         raise ValueError(
             "native tool policy ledger does not match Codex MCP trajectory"
         )
+    return tuple(blocked)
 
 
 def _write_and_verify_native_events(
@@ -581,8 +577,10 @@ def _write_and_verify_native_events(
     decoded = raw_bytes.decode("utf-8")
     events = _codex_events(decoded)
     _assert_native_tool_policy(events, allowed_tools)
-    _assert_native_tool_policy_ledger(tool_policy_ledger, events, allowed_tools)
-    return events
+    blocked_tools = _assert_native_tool_policy_ledger(
+        tool_policy_ledger, events, allowed_tools
+    )
+    return events, blocked_tools
 
 
 def _write_native_evidence(
@@ -597,7 +595,7 @@ def _write_native_evidence(
     from obench.atif import assert_valid_trajectory, to_dict
     from obench.tools.atif_convert import convert_codex_events
 
-    events = _write_and_verify_native_events(
+    events, blocked_tools = _write_and_verify_native_events(
         stdout,
         launcher=launcher,
         tool_policy_ledger=tool_policy_ledger,
@@ -613,6 +611,8 @@ def _write_native_evidence(
         "mode": "native_mcp_only",
         "allowed_mcp_servers": [_NATIVE_ALLOWED_MCP_SERVER],
         "allowed_tools": list(allowed_tools),
+        "blocked_attempt_count": len(blocked_tools),
+        "blocked_tools": list(blocked_tools),
         "verified": True,
     }
     assert_valid_trajectory(trajectory)

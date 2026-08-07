@@ -202,6 +202,8 @@ class CodexNativeProfileTests(unittest.TestCase):
                 "mode": "native_mcp_only",
                 "allowed_mcp_servers": ["computer-use"],
                 "allowed_tools": ["click"],
+                "blocked_attempt_count": 0,
+                "blocked_tools": [],
                 "verified": True,
             },
         )
@@ -214,6 +216,41 @@ class CodexNativeProfileTests(unittest.TestCase):
                 )
             )["tool_name"],
             "mcp__computer_use__click",
+        )
+
+    def test_native_profile_records_blocked_tool_attempt_without_failing(self):
+        def fake_run(_cmd, **_kwargs):
+            ledger = self.attempt / "codex-tool-policy.jsonl"
+            write_fixture_policy_ledger(ledger)
+            with ledger.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps({
+                    "tool_name": "apply_patch",
+                    "tool_use_id": "blocked-apply-patch",
+                    "input_sha256": hashlib.sha256(b"{}").hexdigest(),
+                    "decision": "block",
+                }) + "\n")
+            return FakeProc(stdout=fixture_stdout())
+
+        with mock.patch.dict(os.environ, self.native_env(), clear=True), \
+                mock.patch.object(
+                    self.codex.subprocess,
+                    "run",
+                    side_effect=fake_run,
+                ):
+            result = self.codex.run(
+                "use the app", str(self.workspace), "gpt-5.6-sol", 10
+            )
+
+        self.assertTrue(result["completed"], result)
+        trajectory = json.loads(
+            (self.workspace / "trajectory.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            trajectory["extra"]["tool_policy"]["blocked_attempt_count"], 1
+        )
+        self.assertEqual(
+            trajectory["extra"]["tool_policy"]["blocked_tools"],
+            ["apply_patch"],
         )
 
     def test_stock_profile_keeps_workspace_write_sandbox(self):
