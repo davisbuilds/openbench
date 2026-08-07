@@ -81,7 +81,7 @@ def main(argv=None):
     sub.add_parser("import", help="import tasks from external formats (harbor)", add_help=False)
     sub.add_parser(
         "native",
-        help="experimental native macOS Computer-Use trial runner",
+        help="plan, report, or explicitly run native macOS Computer-Use trials",
         add_help=False,
     )
 

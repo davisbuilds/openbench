@@ -1212,24 +1212,13 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="obench native",
-        description="Experimental native macOS Computer-Use benchmark runner.",
+    from .native_cli import main as native_cli_main
+
+    return native_cli_main(
+        argv,
+        run_native=run_native,
+        run_error=NativeRunError,
     )
-    sub = parser.add_subparsers(dest="command", required=True)
-    run_parser = sub.add_parser("run", help="run and immediately import one sealed native trial")
-    run_parser.add_argument("config", help=f"{CONFIG_SCHEMA_VERSION} TOML config")
-    args = parser.parse_args(argv)
-    try:
-        outcome = run_native(args.config)
-    except (NativeRunError, ValueError, OSError) as exc:
-        parser.exit(2, f"ERROR {exc}\n")
-    print(json.dumps({
-        "bundle": str(outcome.bundle_dir),
-        "results": str(outcome.results_path),
-        "run_id": outcome.row["run_id"],
-    }, sort_keys=True))
-    return 0
 
 
 if __name__ == "__main__":
