@@ -1,10 +1,12 @@
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import tempfile
 import tomllib
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 from obench.native_run import load_config
@@ -35,7 +37,7 @@ class ComputerUseConfigTests(unittest.TestCase):
                 f'run_root = {json.dumps(str(self.run_root))}',
                 f'computer_use_mcp_repo = {json.dumps(str(self.repo))}',
                 f'installed_mcp_app = {json.dumps(str(self.installed))}',
-                'source_signing_identity = "Apple Development: Fixture (TEAMID)"',
+                'source_signing_identity = "Fixture Signing Identity"',
                 'codex_version = "codex-cli 0.146.1"',
                 "",
             ]),
@@ -133,6 +135,65 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertFalse(result["matched_ready"])
         self.assertFalse(self.run_root.exists())
 
+    def test_public_preflight_scrubs_home_paths_and_signing_identity(self):
+        full = {
+            "schema_version": cub.PREFLIGHT_SCHEMA,
+            "read_only": True,
+            "matched_ready": False,
+            "checks": [
+                {
+                    "name": "run_root_safe", "passed": True,
+                    "observed": "/Users/example/.openbench-runs/cub",
+                    "required": "safe",
+                },
+                {
+                    "name": "source_mcp_identity", "passed": True,
+                    "observed": {
+                        "app": "/Users/example/private/Source.app",
+                        "executable": "/Users/example/private/Source.app/Contents/MacOS/server",
+                        "bundle_id": cub.SOURCE_MCP_BUNDLE_ID,
+                        "version": cub.MCP_VERSION,
+                        "build": "1",
+                        "binary_sha256": "a" * 64,
+                        "build_stamp_unix": 123,
+                        "signature_sha256": "b" * 64,
+                        "designated_requirement": "certificate leaf = Alice Example",
+                        "adhoc": False,
+                    },
+                    "required": {"version": cub.MCP_VERSION},
+                },
+                {
+                    "name": "codex_auth", "passed": True,
+                    "observed": "/Users/example/.codex/auth.json",
+                    "required": "existing auth.json",
+                },
+            ],
+            "next": {},
+        }
+        rendered = json.dumps(cub._publication_safe_preflight(full), sort_keys=True)
+        self.assertNotIn("/Users/", rendered)
+        self.assertNotIn("Alice Example", rendered)
+        self.assertIn("$OPENBENCH_CUB_RUN_ROOT", rendered)
+        self.assertIn('"publication_safe": true', rendered)
+
+    def test_checked_in_request_uses_only_portable_environment_placeholders(self):
+        sample = ROOT / "computer-use-tasks/v0/config-request.sample.toml"
+        text = sample.read_text(encoding="utf-8")
+        self.assertNotIn("/Users/", text)
+        self.assertNotIn("Apple Development:", text)
+        with mock.patch.dict(os.environ, {
+            "OPENBENCH_CUB_RUN_ROOT": str(self.run_root),
+            "OPENBENCH_CUB_MCP_REPO": str(self.repo),
+            "OPENBENCH_CUB_INSTALLED_MCP_APP": str(self.installed),
+            "OPENBENCH_CUB_SIGNING_IDENTITY": "Developer ID Application: Fixture",
+        }, clear=False):
+            request = cub._load_request(sample)
+        self.assertEqual(request["run_root"], str(self.run_root))
+        self.assertEqual(
+            request["source_signing_identity"],
+            "Developer ID Application: Fixture",
+        )
+
     def test_matched_configs_parse_lock_native_profile_and_make_no_harbor_claim(self):
         host = {
             "os_version": "15.6", "os_build": "24G84",
@@ -147,7 +208,8 @@ class ComputerUseConfigTests(unittest.TestCase):
             }),
             mock.patch.object(cub, "_host_environment", return_value=host),
         ):
-            self.assertEqual(cub.generate(self.request, "matched", None, None), 0)
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(cub.generate(self.request, "matched", None, None), 0)
 
         configs = sorted((self.run_root / "configs/matched").glob("*/*.toml"))
         self.assertEqual(len(configs), 6)

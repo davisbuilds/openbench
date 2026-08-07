@@ -45,6 +45,7 @@ CONFIG_SCHEMA = "openbench.computer-use-config-request.v1"
 PREFLIGHT_SCHEMA = "openbench.computer-use-preflight.v1"
 PROCESS_SCHEMA = "openbench.computer-use-process-state.v1"
 RUN_CONTEXT_SCHEMA = "openbench.computer-use.run-context.v1"
+ENV_VALUE = re.compile(r"^\$\{([A-Z][A-Z0-9_]*)\}$")
 
 
 class CubError(RuntimeError):
@@ -118,6 +119,18 @@ def _load_request(path: Path) -> dict[str, Any]:
         raise CubError(f"cannot load request {path}: {exc}") from exc
     if value.get("schema_version") != CONFIG_SCHEMA:
         raise CubError(f"request schema_version must be {CONFIG_SCHEMA}")
+    for field, item in tuple(value.items()):
+        if not isinstance(item, str):
+            continue
+        match = ENV_VALUE.fullmatch(item)
+        if match:
+            name = match.group(1)
+            replacement = os.environ.get(name)
+            if not replacement:
+                raise CubError(f"request environment variable is unset: {name}")
+            value[field] = replacement
+        elif "${" in item:
+            raise CubError(f"request {field} contains an unsupported environment expression")
     required = ("run_root", "computer_use_mcp_repo", "installed_mcp_app")
     for field in required:
         if not isinstance(value.get(field), str) or not value[field]:
@@ -269,9 +282,75 @@ def _static_preflight(request: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _publication_safe_preflight(result: Mapping[str, Any]) -> dict[str, Any]:
+    safe_checks = []
+    for check in result["checks"]:
+        name = check["name"]
+        observed = check["observed"]
+        if name == "run_root_safe":
+            observed = "$OPENBENCH_CUB_RUN_ROOT"
+        elif name == "computer_use_mcp_repo":
+            observed = {"configured": True, "exists": check["passed"]}
+        elif name == "codex_native_profile":
+            observed = {
+                "available": bool(observed.get("path")),
+                "version": observed.get("version"),
+            }
+        elif name == "codex_auth":
+            observed = {"present": check["passed"]}
+        elif name in {"installed_mcp_identity", "source_mcp_identity"}:
+            if isinstance(observed, dict):
+                observed = {
+                    field: observed[field]
+                    for field in (
+                        "bundle_id", "version", "build", "binary_sha256",
+                        "build_stamp_unix", "signature_sha256", "adhoc",
+                    )
+                    if field in observed
+                }
+            else:
+                observed = {"available": False}
+        elif name.endswith("_tcc_identity_proof"):
+            if isinstance(observed, dict):
+                observed = {
+                    field: observed[field]
+                    for field in (
+                        "schema_version", "arm", "bundle_id", "binary_sha256",
+                        "accessibility", "screen_recording", "capture_status",
+                    )
+                    if field in observed
+                }
+        safe_checks.append({
+            "name": name,
+            "passed": check["passed"],
+            "observed": observed,
+            "required": check["required"],
+        })
+    return {
+        "schema_version": result["schema_version"],
+        "read_only": True,
+        "publication_safe": True,
+        "matched_ready": result["matched_ready"],
+        "checks": safe_checks,
+        "next": {
+            "build": (
+                "python3 computer-use-tasks/v0/scripts/cub_v0.py "
+                '--request "$OPENBENCH_CUB_REQUEST" build'
+            ),
+            "permission_probes": [
+                (
+                    "python3 computer-use-tasks/v0/scripts/cub_v0.py "
+                    f'--request "$OPENBENCH_CUB_REQUEST" probe-permissions --arm {arm}'
+                )
+                for arm in ARMS
+            ],
+        },
+    }
+
+
 def preflight(request_path: Path) -> int:
     result = _static_preflight(_load_request(request_path))
-    print(json.dumps(result, indent=2, sort_keys=True))
+    print(json.dumps(_publication_safe_preflight(result), indent=2, sort_keys=True))
     return 0 if result["matched_ready"] else 2
 
 
