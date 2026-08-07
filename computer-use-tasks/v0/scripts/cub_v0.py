@@ -26,6 +26,11 @@ import time
 import tomllib
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+# Keep the checked-in standalone command usable before OpenBench is installed.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from obench.native_matrix import build_native_matrix, canonical_bytes
 from obench.native_run import _canonical_digest, _content_bound_command_digest
 

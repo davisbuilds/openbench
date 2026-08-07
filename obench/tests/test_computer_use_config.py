@@ -3,6 +3,8 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -91,6 +93,17 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertEqual(cub.descendant(root, "workspaces/task"), root / "workspaces/task")
         with self.assertRaises(cub.CubError):
             cub.descendant(root, "../escape")
+
+    def test_standalone_script_resolves_openbench_from_outside_repo(self):
+        completed = subprocess.run(
+            [sys.executable, os.fspath(SCRIPT), "--help"],
+            cwd=self.base,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Computer-Use Bench v0", completed.stdout)
 
     def test_owned_process_cleanup_matches_pid_start_and_command(self):
         state = self.run_root / "runtime/processes.json"
