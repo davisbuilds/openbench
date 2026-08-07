@@ -17,7 +17,6 @@ import platform
 import signal
 import socket
 import subprocess
-import tempfile
 import threading
 import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -761,6 +760,43 @@ class NativePhaseRun:
         return next(item for item in self.outcomes if item.name == name)
 
 
+class _BoundedCapture:
+    """Continuously drain one pipe while retaining only a bounded tail."""
+
+    def __init__(self, stream, limit: int):
+        self.stream = stream
+        self.limit = limit
+        self.total = 0
+        self.tail = bytearray()
+        self.thread = threading.Thread(target=self._drain, daemon=True)
+
+    def _drain(self) -> None:
+        try:
+            while True:
+                chunk = self.stream.read(8192)
+                if not chunk:
+                    return
+                self.total += len(chunk)
+                self.tail.extend(chunk)
+                if len(self.tail) > self.limit:
+                    del self.tail[:-self.limit]
+        except (OSError, ValueError):
+            return
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def finish(self, timeout_s: float) -> str:
+        self.thread.join(timeout=max(0.1, timeout_s))
+        if self.thread.is_alive():
+            self.stream.close()
+            self.thread.join(timeout=0.5)
+        else:
+            self.stream.close()
+        prefix = "[output truncated]\n" if self.total > self.limit else ""
+        return prefix + bytes(self.tail).decode("utf-8", "replace")
+
+
 class SubprocessPhaseRunner:
     """Run bounded phases and contain each command in its own process group."""
 
@@ -781,14 +817,6 @@ class SubprocessPhaseRunner:
         self.popen = popen
         self.monotonic = monotonic
 
-    def _tail(self, stream) -> str:
-        stream.seek(0, os.SEEK_END)
-        size = stream.tell()
-        stream.seek(max(0, size - self.output_limit_bytes))
-        data = stream.read()
-        prefix = "[output truncated]\n" if size > self.output_limit_bytes else ""
-        return prefix + data.decode("utf-8", "replace")
-
     @staticmethod
     def _signal_group(proc: subprocess.Popen[bytes], sig: signal.Signals) -> None:
         try:
@@ -798,16 +826,51 @@ class SubprocessPhaseRunner:
         except OSError:
             proc.send_signal(sig)
 
+    @staticmethod
+    def _group_alive(pgid: int) -> bool:
+        try:
+            os.killpg(pgid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    def _cleanup_process_group(self, proc: subprocess.Popen[bytes]) -> str | None:
+        """Terminate remaining group members even if the leader already exited."""
+
+        actions = []
+        if self._group_alive(proc.pid):
+            self._signal_group(proc, signal.SIGTERM)
+            actions.append("SIGTERM")
+            deadline = self.monotonic() + self.terminate_grace_s
+            while self._group_alive(proc.pid) and self.monotonic() < deadline:
+                time.sleep(min(0.01, max(0.0, deadline - self.monotonic())))
+            if self._group_alive(proc.pid):
+                self._signal_group(proc, signal.SIGKILL)
+                actions.append("SIGKILL")
+        if proc.poll() is None:
+            try:
+                proc.wait(timeout=max(0.1, self.terminate_grace_s))
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                if "SIGKILL" not in actions:
+                    actions.append("SIGKILL")
+        return "+".join(actions) or None
+
     def run_phase(self, spec: PhaseSpec) -> PhaseOutcome:
         started_wall = datetime.now(timezone.utc).isoformat()
         started = self.monotonic()
-        stdout_file = tempfile.TemporaryFile(mode="w+b")
-        stderr_file = tempfile.TemporaryFile(mode="w+b")
         proc = None
+        stdout_capture = None
+        stderr_capture = None
         status = PhaseStatus.SPAWN_ERROR
         exit_code = None
         termination = None
         error = None
+        stdout = ""
+        stderr = ""
         try:
             try:
                 proc = self.popen(
@@ -815,13 +878,23 @@ class SubprocessPhaseRunner:
                     cwd=spec.cwd,
                     env=dict(spec.env) if spec.env is not None else None,
                     stdin=subprocess.DEVNULL,
-                    stdout=stdout_file,
-                    stderr=stderr_file,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     start_new_session=True,
                 )
             except OSError as exc:
                 error = f"{type(exc).__name__}: {exc}"
             else:
+                if proc.stdout is None or proc.stderr is None:
+                    raise RuntimeError("phase process did not expose output pipes")
+                stdout_capture = _BoundedCapture(
+                    proc.stdout, self.output_limit_bytes
+                )
+                stderr_capture = _BoundedCapture(
+                    proc.stderr, self.output_limit_bytes
+                )
+                stdout_capture.start()
+                stderr_capture.start()
                 try:
                     exit_code = proc.wait(timeout=spec.timeout_s)
                     status = (
@@ -831,34 +904,27 @@ class SubprocessPhaseRunner:
                     )
                 except subprocess.TimeoutExpired:
                     status = PhaseStatus.TIMED_OUT
-                    termination = "SIGTERM"
-                    self._signal_group(proc, signal.SIGTERM)
-                    try:
-                        proc.wait(timeout=self.terminate_grace_s)
-                    except subprocess.TimeoutExpired:
-                        termination = "SIGTERM+SIGKILL"
-                        self._signal_group(proc, signal.SIGKILL)
-                        proc.wait()
-                    exit_code = proc.returncode
-            return PhaseOutcome(
-                name=spec.name,
-                status=status,
-                argv=spec.argv,
-                timeout_s=spec.timeout_s,
-                started_at=started_wall,
-                duration_s=max(0.0, self.monotonic() - started),
-                exit_code=exit_code,
-                stdout=self._tail(stdout_file),
-                stderr=self._tail(stderr_file),
-                termination=termination,
-                error=error,
-            )
         finally:
-            if proc is not None and proc.poll() is None:
-                self._signal_group(proc, signal.SIGKILL)
-                proc.wait()
-            stdout_file.close()
-            stderr_file.close()
+            if proc is not None:
+                termination = self._cleanup_process_group(proc)
+                exit_code = proc.returncode
+            if stdout_capture is not None:
+                stdout = stdout_capture.finish(self.terminate_grace_s)
+            if stderr_capture is not None:
+                stderr = stderr_capture.finish(self.terminate_grace_s)
+        return PhaseOutcome(
+            name=spec.name,
+            status=status,
+            argv=spec.argv,
+            timeout_s=spec.timeout_s,
+            started_at=started_wall,
+            duration_s=max(0.0, self.monotonic() - started),
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            termination=termination,
+            error=error,
+        )
 
     @staticmethod
     def _skipped(spec: PhaseSpec, reason: str) -> PhaseOutcome:
@@ -895,14 +961,31 @@ class SubprocessPhaseRunner:
                     f"expected {name.value} phase, got {spec.name.value}"
                 )
 
-        outcomes = []
+        outcomes: list[PhaseOutcome] = []
         prior_failed = False
-        for spec in (setup, agent, verifier):
-            if prior_failed:
-                outcomes.append(self._skipped(spec, "prior phase did not pass"))
-                continue
-            outcome = self.run_phase(spec)
-            outcomes.append(outcome)
-            prior_failed = not outcome.passed
-        outcomes.append(self.run_phase(reset))
+        interrupted: BaseException | None = None
+        interrupted_traceback = None
+        try:
+            for spec in (setup, agent, verifier):
+                if prior_failed:
+                    outcomes.append(self._skipped(spec, "prior phase did not pass"))
+                    continue
+                outcome = self.run_phase(spec)
+                outcomes.append(outcome)
+                prior_failed = not outcome.passed
+        except BaseException as exc:
+            interrupted = exc
+            interrupted_traceback = exc.__traceback__
+        try:
+            outcomes.append(self.run_phase(reset))
+        except BaseException as reset_exc:
+            if interrupted is None:
+                interrupted = reset_exc
+                interrupted_traceback = reset_exc.__traceback__
+            else:
+                setattr(interrupted, "reset_error", reset_exc)
+        result = NativePhaseRun(tuple(outcomes))
+        if interrupted is not None:
+            setattr(interrupted, "native_phase_run", result)
+            raise interrupted.with_traceback(interrupted_traceback)
         return NativePhaseRun(tuple(outcomes))

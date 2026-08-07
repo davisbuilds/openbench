@@ -323,7 +323,8 @@ class SubprocessPhaseRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             marker = Path(temp) / "child-survived"
             child_code = (
-                "import pathlib,time,sys;"
+                "import pathlib,signal,time,sys;"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN);"
                 "time.sleep(0.8);"
                 "pathlib.Path(sys.argv[1]).write_text('alive')"
             )
@@ -341,9 +342,69 @@ class SubprocessPhaseRunnerTests(unittest.TestCase):
                 )
             )
             self.assertEqual(outcome.status, PhaseStatus.TIMED_OUT)
-            self.assertIn("SIGTERM", outcome.termination)
+            self.assertEqual(outcome.termination, "SIGTERM+SIGKILL")
             time.sleep(1.0)
             self.assertFalse(marker.exists(), "descendant escaped process-group cleanup")
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "requires Unix process groups")
+    def test_cleanup_reaches_child_after_successful_leader_exit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            marker = Path(temp) / "child-survived"
+            ready = Path(temp) / "child-ready"
+            child_code = (
+                "import pathlib,signal,time,sys;"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN);"
+                "pathlib.Path(sys.argv[2]).write_text('ready');"
+                "time.sleep(0.8);"
+                "pathlib.Path(sys.argv[1]).write_text('alive')"
+            )
+            parent_code = (
+                "import pathlib,subprocess,sys,time;"
+                f"subprocess.Popen([sys.executable,'-c',{child_code!r},sys.argv[1],sys.argv[2]]);"
+                "deadline=time.monotonic()+2;"
+                "ready=pathlib.Path(sys.argv[2]);"
+                "\nwhile not ready.exists() and time.monotonic() < deadline: time.sleep(0.01)"
+            )
+            runner = SubprocessPhaseRunner(terminate_grace_s=0.1)
+            outcome = runner.run_phase(
+                PhaseSpec(
+                    PhaseName.AGENT,
+                    (sys.executable, "-c", parent_code, str(marker), str(ready)),
+                    timeout_s=2,
+                )
+            )
+            self.assertEqual(outcome.status, PhaseStatus.PASSED)
+            self.assertEqual(outcome.termination, "SIGTERM+SIGKILL")
+            time.sleep(1.0)
+            self.assertFalse(marker.exists(), "orphan descendant escaped cleanup")
+
+    def test_interruption_still_runs_reset_and_preserves_partial_outcomes(self):
+        class InterruptingRunner(SubprocessPhaseRunner):
+            def run_phase(inner_self, spec):
+                if spec.name == PhaseName.AGENT:
+                    raise KeyboardInterrupt("cancelled")
+                return super().run_phase(spec)
+
+        with tempfile.TemporaryDirectory() as temp:
+            marker = Path(temp) / "reset-ran"
+            runner = InterruptingRunner()
+            with self.assertRaises(KeyboardInterrupt) as caught:
+                runner.run(
+                    setup=phase(PhaseName.SETUP, "pass"),
+                    agent=phase(PhaseName.AGENT, "pass"),
+                    verifier=phase(PhaseName.VERIFIER, "pass"),
+                    reset=phase(
+                        PhaseName.RESET,
+                        f"from pathlib import Path; Path({str(marker)!r}).write_text('yes')",
+                    ),
+                )
+            self.assertTrue(marker.is_file())
+            partial = caught.exception.native_phase_run
+            self.assertEqual(
+                [item.name for item in partial.outcomes],
+                [PhaseName.SETUP, PhaseName.RESET],
+            )
+            self.assertTrue(partial.outcome(PhaseName.RESET).passed)
 
     def test_spawn_error_is_recorded_not_raised(self):
         runner = SubprocessPhaseRunner()
@@ -355,14 +416,14 @@ class SubprocessPhaseRunnerTests(unittest.TestCase):
         self.assertIn("FileNotFoundError", outcome.error)
 
     def test_output_is_bounded(self):
-        runner = SubprocessPhaseRunner(output_limit_bytes=16)
+        runner = SubprocessPhaseRunner(output_limit_bytes=1024)
         outcome = runner.run_phase(
-            phase(PhaseName.VERIFIER, "print('x' * 100)")
+            phase(PhaseName.VERIFIER, "print('x' * (1024 * 1024))")
         )
         self.assertTrue(outcome.stdout.startswith("[output truncated]\n"))
         self.assertLessEqual(
             len(outcome.stdout.encode("utf-8")),
-            len("[output truncated]\n".encode("utf-8")) + 16,
+            len("[output truncated]\n".encode("utf-8")) + 1024,
         )
 
 
