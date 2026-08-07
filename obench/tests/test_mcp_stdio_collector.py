@@ -269,6 +269,23 @@ class MCPStdioCollectorTests(unittest.TestCase):
         self.assertNotIn(SECRET.encode(), result.ledger_path.read_bytes())
         self.assertEqual(rows[0]["tool"], "<unrecognized>")
 
+    def test_oversized_argument_shape_is_correlated_but_non_clean(self):
+        arguments = {"items": [0] * collector.MAX_ARGUMENT_NODES}
+        with self.assertRaises(collector.ArgumentDigestLimitError):
+            collector.normalized_argument_digest(arguments)
+        request = rpc(
+            "tools/call", 13, {"name": "click", "arguments": arguments}
+        )
+        result, _, _, rows = self.run_fixture(
+            request, name="argument-budget.jsonl"
+        )
+        self.assertEqual(result.call_count, 1)
+        self.assertFalse(result.integrity_ok)
+        self.assertEqual(result.malformed_frames, 1)
+        self.assertEqual(
+            rows[0]["argument_digest"], "<unavailable:complexity-limit>"
+        )
+
     def test_sensitive_meta_is_reduced_to_safe_categories_and_booleans(self):
         request = rpc(
             "tools/call", 6, {"name": "sensitive_meta", "arguments": {}}

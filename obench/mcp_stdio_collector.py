@@ -20,6 +20,8 @@ from typing import Any, BinaryIO, Mapping, Sequence
 
 
 EMPTY_ROOT_HASH = hashlib.sha256(b"").hexdigest()
+MAX_ARGUMENT_NODES = 10_000
+MAX_ARGUMENT_DEPTH = 64
 META_KEYS = {
     "error": "computer-use-mcp/error",
     "outcome": "computer-use-mcp/outcome",
@@ -152,6 +154,10 @@ class LedgerIntegrityError(CollectorError):
     """Raised when a collector ledger is incomplete or fails its hash chain."""
 
 
+class ArgumentDigestLimitError(CollectorError):
+    """Raised when argument normalization exceeds its safe complexity budget."""
+
+
 @dataclass(frozen=True)
 class CollectionResult:
     returncode: int
@@ -204,40 +210,56 @@ def _length_bucket(length: int) -> str:
     return "1025+"
 
 
-def _argument_shape(value: Any) -> Any:
-    """Normalize values into non-reversible type and size information."""
-    if value is None:
-        return {"type": "null"}
-    if isinstance(value, bool):
-        return {"type": "boolean"}
-    if isinstance(value, int):
-        return {"type": "integer"}
-    if isinstance(value, float):
-        return {"type": "number"}
-    if isinstance(value, str):
-        return {"type": "string", "length": _length_bucket(len(value))}
-    if isinstance(value, list):
-        return {
-            "type": "array",
-            "length": _length_bucket(len(value)),
-            "items": [_argument_shape(item) for item in value],
-        }
-    if isinstance(value, dict):
-        return {
-            "type": "object",
-            "fields": {
-                str(key): _argument_shape(item)
-                for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
-            },
-        }
-    return {"type": type(value).__name__}
+def _feed_digest_token(hasher: Any, token: str) -> None:
+    encoded = token.encode("utf-8", "surrogatepass")
+    hasher.update(str(len(encoded)).encode("ascii"))
+    hasher.update(b":")
+    hasher.update(encoded)
 
 
 def normalized_argument_digest(arguments: Any) -> str:
-    """Digest argument structure without retaining scalar argument values."""
-    return "sha256:" + hashlib.sha256(
-        _canonical_bytes(_argument_shape(arguments))
-    ).hexdigest()
+    """Incrementally digest argument shape under a strict complexity budget."""
+    hasher = hashlib.sha256()
+    remaining = [MAX_ARGUMENT_NODES]
+
+    def feed(value: Any, depth: int) -> None:
+        if depth > MAX_ARGUMENT_DEPTH or remaining[0] <= 0:
+            raise ArgumentDigestLimitError(
+                "MCP argument shape exceeds normalization budget"
+            )
+        remaining[0] -= 1
+        if value is None:
+            _feed_digest_token(hasher, "null")
+        elif isinstance(value, bool):
+            _feed_digest_token(hasher, "boolean")
+        elif isinstance(value, int):
+            _feed_digest_token(hasher, "integer")
+        elif isinstance(value, float):
+            _feed_digest_token(hasher, "number")
+        elif isinstance(value, str):
+            _feed_digest_token(hasher, f"string:{_length_bucket(len(value))}")
+        elif isinstance(value, list):
+            if len(value) > remaining[0]:
+                raise ArgumentDigestLimitError(
+                    "MCP argument shape exceeds normalization budget"
+                )
+            _feed_digest_token(hasher, f"array:{_length_bucket(len(value))}")
+            for item in value:
+                feed(item, depth + 1)
+        elif isinstance(value, dict):
+            if len(value) > remaining[0]:
+                raise ArgumentDigestLimitError(
+                    "MCP argument shape exceeds normalization budget"
+                )
+            _feed_digest_token(hasher, f"object:{_length_bucket(len(value))}")
+            for key in sorted(value, key=str):
+                _feed_digest_token(hasher, f"field:{key}")
+                feed(value[key], depth + 1)
+        else:
+            _feed_digest_token(hasher, f"type:{type(value).__name__}")
+
+    feed(arguments, 0)
+    return "sha256:" + hasher.hexdigest()
 
 
 def _known_enum(value: Any, allowed: frozenset[str]) -> str | None:
@@ -581,6 +603,13 @@ class _ProtocolObserver:
             return
         now_unix = time.time_ns()
         now_mono = time.monotonic_ns()
+        try:
+            argument_digest = normalized_argument_digest(
+                params.get("arguments", {})
+            )
+        except ArgumentDigestLimitError:
+            self.malformed_frames += 1
+            argument_digest = "<unavailable:complexity-limit>"
         self._pending[key] = _PendingCall(
             request_id=message["id"],
             tool=(
@@ -588,7 +617,7 @@ class _ProtocolObserver:
                 if params["name"] in COMPUTER_USE_TOOLS
                 else "<unrecognized>"
             ),
-            argument_digest=normalized_argument_digest(params.get("arguments", {})),
+            argument_digest=argument_digest,
             request_bytes=frame_bytes,
             request_unix_ns=now_unix,
             request_monotonic_ns=now_mono,
