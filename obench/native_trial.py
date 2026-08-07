@@ -1929,15 +1929,26 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             for observed, state in focus_timeline
             if observed >= response_time
         ]
+        covered_samples = (
+            ([prior_samples[-1]] if prior_samples else [])
+            + [
+                (observed, state)
+                for observed, state in focus_timeline
+                if call_time < observed < response_time
+            ]
+            + ([following_samples[0]] if following_samples else [])
+        )
         if (
             not prior_samples
             or not following_samples
             or prior_samples[-1][1] != "observed"
             or following_samples[0][1] != "observed"
-            or (
-                following_samples[0][0] - prior_samples[-1][0]
-            ).total_seconds()
-            > MAX_FOCUS_SAMPLE_GAP_S
+            or any(state != "observed" for _, state in covered_samples)
+            or any(
+                (right[0] - left[0]).total_seconds()
+                > MAX_FOCUS_SAMPLE_GAP_S
+                for left, right in zip(covered_samples, covered_samples[1:])
+            )
         ):
             raise _fail(
                 f"mcp/ledger.jsonl:{index}",

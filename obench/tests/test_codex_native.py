@@ -316,6 +316,16 @@ class CodexNativeProfileTests(unittest.TestCase):
                 {"allow_global_cursor": True},
                 "deny",
             ),
+            (
+                "mcp__computer_use__click",
+                {"activate": True},
+                "deny",
+            ),
+            (
+                "mcp__computer_use__click",
+                {"allow_global_keyboard": True},
+                "deny",
+            ),
             ("mcp__computer_use__open_url", {}, "deny"),
             ("apply_patch", {}, "deny"),
             ("mcp__filesystem__write_file", {}, "deny"),
@@ -346,7 +356,16 @@ class CodexNativeProfileTests(unittest.TestCase):
         ]
         self.assertEqual(
             [record["decision"] for record in records],
-            ["allow", "block", "block", "block", "block", "block"],
+            [
+                "allow",
+                "block",
+                "block",
+                "block",
+                "block",
+                "block",
+                "block",
+                "block",
+            ],
         )
         self.assertNotIn("secret", ledger.read_text(encoding="utf-8"))
         self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), 0o600)

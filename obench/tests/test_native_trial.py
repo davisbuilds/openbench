@@ -1463,6 +1463,59 @@ class NativeTrialTests(unittest.TestCase):
         ):
             load_native_trial(concurrent)
 
+    def test_long_mcp_call_accepts_continuous_healthy_focus_heartbeats(self):
+        bundle = self.bundle("happy")
+        mcp_path = bundle / "mcp/ledger.jsonl"
+        mcp_path.unlink()
+        ledger = CallLedger(
+            mcp_path,
+            "native-cub-v0-run",
+            "native-cub-v0-trial1",
+        )
+        ledger.append_call({
+            "tool": "set_value",
+            "status": "completed",
+            "request_id_type": "str",
+            "argument_digest": "sha256:" + HEX_B,
+            "request_bytes": 100,
+            "response_bytes": 80,
+            "request_unix_ns": 1786017601000000000,
+            "response_unix_ns": 1786017607000000000,
+            "duration_ms": 6000.0,
+            "tool_is_error": False,
+            "jsonrpc_error": {"present": False, "code": None},
+            "computer_use_meta": {
+                "error": None,
+                "outcome": {
+                    "classification": "success",
+                    "failure_domain": None,
+                    "web_ax_echo_risk": None,
+                    "verification": {},
+                },
+                "focus": {"focus_changed": False},
+                "delivery": {
+                    "delivery_tier": "tier1-ax-attribute",
+                    "fallback_reasons": [],
+                    "chain_rung": None,
+                },
+            },
+            "process_returncode": None,
+        })
+        ledger.seal({
+            "returncode": 0,
+            "integrity_ok": True,
+            "malformed_frames": 0,
+            "partial_frames": 0,
+            "duplicate_request_ids": 0,
+            "missing_responses": 0,
+            "input_incomplete": False,
+        })
+        _reseal_manifest(bundle)
+
+        row = load_native_trial(bundle)
+
+        self.assertTrue(row["success"])
+
     def test_completed_trial_requires_dense_monitor_and_declared_mcp_policy(self):
         sparse = self.bundle("happy")
         lock_sha256 = _sha256(sparse / "lock.json")
