@@ -12,7 +12,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
+import importlib.util
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -176,6 +178,8 @@ class NativeRunConfig:
     artifacts: tuple[ArtifactConfig, ...]
     proxy_required: bool
     focus_policy: Mapping[str, Any]
+    verifier_oracle_paths: tuple[Path, ...]
+    mcp_policy: Mapping[str, Any]
 
 
 def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
@@ -268,6 +272,30 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
         raise NativeRunError("focus.allowed_delivery_tiers must be a non-empty unique array")
     if required_foreground in forbidden_bundles:
         raise NativeRunError("required foreground bundle cannot also be forbidden")
+    raw_oracles = task.get("verifier_oracle_paths")
+    if (
+        not isinstance(raw_oracles, list)
+        or not raw_oracles
+        or not all(isinstance(value, str) and value for value in raw_oracles)
+    ):
+        raise NativeRunError("task.verifier_oracle_paths must be a non-empty path array")
+    oracle_paths = tuple(resolve(value, "task.verifier_oracle_paths") for value in raw_oracles)
+    if len(oracle_paths) != len(set(oracle_paths)):
+        raise NativeRunError("task.verifier_oracle_paths must be unique")
+    allowed_tools = mcp.get("allowed_tools", [])
+    forbidden_tools = mcp.get("forbidden_tools", [])
+    for field, values in (
+        ("mcp.allowed_tools", allowed_tools),
+        ("mcp.forbidden_tools", forbidden_tools),
+    ):
+        if (
+            not isinstance(values, list)
+            or not all(isinstance(value, str) and value for value in values)
+            or len(values) != len(set(values))
+        ):
+            raise NativeRunError(f"{field} must contain unique tool names")
+    if set(allowed_tools) & set(forbidden_tools):
+        raise NativeRunError("MCP tools cannot be both allowed and forbidden")
     return NativeRunConfig(
         source_path=source,
         trial_id=trial_id,
@@ -308,6 +336,11 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
             ),
             "forbid_global_delivery": bool(focus.get("forbid_global_delivery", True)),
             "allowed_delivery_tiers": list(allowed_tiers),
+        },
+        verifier_oracle_paths=oracle_paths,
+        mcp_policy={
+            "allowed_tools": list(allowed_tools),
+            "forbidden_tools": list(forbidden_tools),
         },
     )
 
@@ -350,6 +383,71 @@ def _server_executable(command: Sequence[str]) -> Path:
     if not resolved or not resolved.is_file():
         raise NativeRunError(f"MCP server executable is not a regular file: {command[0]!r}")
     return resolved.resolve()
+
+
+def _path_inventory(path: Path, *, label: str) -> list[dict[str, Any]]:
+    if path.is_symlink():
+        raise NativeRunError(f"{label} cannot be a symlink: {path}")
+    if path.is_file():
+        files = [path]
+        root = path.parent
+    elif path.is_dir():
+        root = path
+        files = sorted(item for item in path.rglob("*") if item.is_file())
+        if any(item.is_symlink() for item in path.rglob("*")):
+            raise NativeRunError(f"{label} tree cannot contain symlinks: {path}")
+    else:
+        raise NativeRunError(f"{label} is not a regular file or directory: {path}")
+    return [
+        {
+            "path": item.relative_to(root).as_posix(),
+            "size": item.stat().st_size,
+            "sha256": _sha256(item),
+        }
+        for item in files
+    ]
+
+
+def _content_bound_command_digest(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    extra_paths: Sequence[Path] = (),
+) -> str:
+    executable = _server_executable(command)
+    payloads: list[dict[str, Any]] = [
+        {"argument_index": 0, "inventory": _path_inventory(executable, label="command executable")}
+    ]
+    for index, value in enumerate(command[1:], 1):
+        candidate = Path(value).expanduser()
+        candidate = candidate if candidate.is_absolute() else cwd / candidate
+        if candidate.exists():
+            payloads.append({
+                "argument_index": index,
+                "inventory": _path_inventory(candidate.resolve(), label="command payload"),
+            })
+    if len(command) >= 3 and command[1] == "-m":
+        spec = importlib.util.find_spec(command[2])
+        if spec is None:
+            raise NativeRunError(f"cannot resolve interpreted MCP module {command[2]!r}")
+        if spec.submodule_search_locations:
+            module_path = Path(next(iter(spec.submodule_search_locations))).resolve()
+        elif spec.origin and spec.origin not in {"built-in", "frozen"}:
+            module_path = Path(spec.origin).resolve()
+        else:
+            raise NativeRunError(
+                f"interpreted MCP module has no hashable payload: {command[2]!r}"
+            )
+        payloads.append({
+            "module": command[2],
+            "inventory": _path_inventory(module_path, label="interpreted MCP module"),
+        })
+    for index, path in enumerate(extra_paths):
+        payloads.append({
+            "oracle_index": index,
+            "inventory": _path_inventory(path, label="verifier oracle"),
+        })
+    return _canonical_digest({"argv": list(command), "payloads": payloads})
 
 
 def _expand_command(command: Sequence[str], config: NativeRunConfig) -> tuple[str, ...]:
@@ -455,8 +553,46 @@ class _LedgerWriter:
         })
 
 
-def _copy_atif(config: NativeRunConfig, bundle: Path, started: datetime) -> dict[str, Any]:
-    source = config.workspace / config.atif_path
+_STEP_TOKEN_METRICS = ("prompt_tokens", "cached_tokens", "completion_tokens")
+
+
+def _numeric_metric(value: Any, field: str, *, integer: bool) -> int | float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or value < 0
+        or (integer and not isinstance(value, int))
+    ):
+        kind = "non-negative integer" if integer else "non-negative number"
+        raise NativeRunError(f"{field} must be a {kind}")
+    return value
+
+
+def _public_step_metrics(value: Any) -> dict[str, int | float]:
+    if not isinstance(value, dict):
+        return {}
+    projected: dict[str, int | float] = {}
+    for field in _STEP_TOKEN_METRICS:
+        if field in value:
+            projected[field] = _numeric_metric(
+                value[field], f"ATIF metrics.{field}", integer=True
+            )
+    if "cost_usd" in value:
+        projected["cost_usd"] = _numeric_metric(
+            value["cost_usd"], "ATIF metrics.cost_usd", integer=False
+        )
+    return projected
+
+
+def _copy_atif(
+    config: NativeRunConfig,
+    bundle: Path,
+    started: datetime,
+    *,
+    source_root: Path,
+) -> dict[str, Any]:
+    source = source_root / config.atif_path
     try:
         trajectory = json.loads(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -478,25 +614,44 @@ def _copy_atif(config: NativeRunConfig, bundle: Path, started: datetime) -> dict
         }
         if step.get("source") == "agent":
             projected["model_name"] = config.model_name
-            if isinstance(step.get("metrics"), dict):
-                projected["metrics"] = dict(step["metrics"])
+            metrics = _public_step_metrics(step.get("metrics"))
+            if metrics:
+                projected["metrics"] = metrics
         public_steps.append(projected)
+    final_metrics: dict[str, int | float] = {
+        "total_steps": len(public_steps),
+    }
+    for field in _STEP_TOKEN_METRICS:
+        final_name = "total_" + field
+        final_metrics[final_name] = sum(
+            int(step.get("metrics", {}).get(field, 0))
+            for step in public_steps
+        )
+    costs = [
+        float(step["metrics"]["cost_usd"])
+        for step in public_steps
+        if "cost_usd" in step.get("metrics", {})
+    ]
+    if costs:
+        final_metrics["total_cost_usd"] = sum(costs)
     trajectory = {
         "schema_version": ATIF_SCHEMA_VERSION,
         "trajectory_id": config.trial_id,
         "agent": trajectory["agent"],
         "steps": public_steps,
-        "final_metrics": trajectory.get("final_metrics", {}),
+        "final_metrics": final_metrics,
     }
     assert_valid_trajectory(trajectory)
     _write_json(bundle / "agent/trajectory.json", trajectory)
     return trajectory
 
 
-def _copy_artifacts(config: NativeRunConfig, bundle: Path) -> list[dict[str, Any]]:
+def _copy_artifacts(
+    config: NativeRunConfig, bundle: Path, *, source_root: Path
+) -> list[dict[str, Any]]:
     entries = []
     for item in config.artifacts:
-        source = config.workspace / item.source
+        source = source_root / item.source
         if not source.is_file() or source.is_symlink():
             raise NativeRunError(f"required final-state artifact is unavailable: {item.source}")
         destination = bundle / item.path
@@ -510,6 +665,38 @@ def _copy_artifacts(config: NativeRunConfig, bundle: Path) -> list[dict[str, Any
             "classification": "public_evidence",
         })
     return entries
+
+
+def _snapshot_judged_evidence(
+    config: NativeRunConfig, destination: Path
+) -> str:
+    sources = [config.atif_path, config.verdict_path]
+    sources.extend(item.source for item in config.artifacts)
+    for relative in sources:
+        source = config.workspace / relative
+        if not source.is_file() or source.is_symlink():
+            raise NativeRunError(f"judged evidence is unavailable: {relative}")
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    return _canonical_digest(_path_inventory(destination, label="judged evidence snapshot"))
+
+
+def _verify_mcp_policy(path: Path, policy: Mapping[str, Any]) -> None:
+    allowed = set(policy["allowed_tools"])
+    forbidden = set(policy["forbidden_tools"])
+    records = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ][:-1]
+    observed = {record["tool"] for record in records}
+    blocked = observed & forbidden
+    outside = observed - allowed if allowed else set()
+    if blocked or outside:
+        raise NativeRunError(
+            "MCP tool policy violation: "
+            f"forbidden={sorted(blocked)!r}, outside_allowlist={sorted(outside)!r}"
+        )
 
 
 def _final_state_digest(entries: Sequence[Mapping[str, Any]]) -> str:
@@ -652,6 +839,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         setup_spec = _phase(config, PhaseName.SETUP, config.setup)
         verifier_spec = _phase(config, PhaseName.VERIFIER, config.verifier)
         reset_spec = _phase(config, PhaseName.RESET, config.reset)
+        instruction_sha256 = _sha256(config.instruction_path)
+        verifier_content_sha256 = _content_bound_command_digest(
+            verifier_spec.argv,
+            cwd=config.workspace,
+            extra_paths=config.verifier_oracle_paths,
+        )
+        mcp_content_sha256 = _content_bound_command_digest(
+            config.mcp_command,
+            cwd=config.source_path.parent,
+        )
         collector_run_id = f"{config.trial_id}-mcp"
         instruction = config.instruction_path.read_text(encoding="utf-8")
         started = hooks.clock()
@@ -662,6 +859,8 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         focus_events: list[tuple[str, Mapping[str, Any]]] = []
         adapter_result: Mapping[str, Any] | None = None
         verifier_outcome = None
+        judged_snapshot: Path | None = None
+        judged_snapshot_sha256: str | None = None
         completed_attempts = 0
         monitor = hooks.focus_monitor_factory(
             (config.focus_policy["required_foreground_bundle_id"],)
@@ -756,6 +955,10 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 verifier_s += verifier_outcome.duration_s
                 if not verifier_outcome.passed:
                     raise NativeRunError(f"verifier phase {verifier_outcome.status.value}")
+                judged_snapshot = attempt_root / "judged"
+                judged_snapshot_sha256 = _snapshot_judged_evidence(
+                    config, judged_snapshot
+                )
                 break
             else:  # pragma: no cover - bounded loop always exits or breaks
                 raise NativeRunError("retry budget exhausted")
@@ -793,6 +996,35 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
             raise NativeRunError("focus helper produced no observed foreground samples")
         if chosen_mcp is None or verifier_outcome is None:
             raise NativeRunError("native trial did not reach verifier completion")
+        if judged_snapshot is None or judged_snapshot_sha256 is None:
+            raise NativeRunError("native trial has no judged evidence snapshot")
+        if (
+            _canonical_digest(
+                _path_inventory(judged_snapshot, label="judged evidence snapshot")
+            )
+            != judged_snapshot_sha256
+        ):
+            raise NativeRunError("reset mutated the captured judged evidence")
+        if _sha256(config.instruction_path) != instruction_sha256:
+            raise NativeRunError("instruction bytes changed during native execution")
+        if (
+            _content_bound_command_digest(
+                verifier_spec.argv,
+                cwd=config.workspace,
+                extra_paths=config.verifier_oracle_paths,
+            )
+            != verifier_content_sha256
+        ):
+            raise NativeRunError("verifier or oracle bytes changed during native execution")
+        if (
+            _content_bound_command_digest(
+                config.mcp_command,
+                cwd=config.source_path.parent,
+            )
+            != mcp_content_sha256
+        ):
+            raise NativeRunError("MCP command payload changed during native execution")
+        _verify_mcp_policy(chosen_mcp, config.mcp_policy)
 
         finished = hooks.clock()
         total_s = max(0.0, (finished - started).total_seconds())
@@ -806,8 +1038,8 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
             bundle = Path(temp) / config.output_dir.name
             bundle.mkdir()
             task_content = {
-                "instruction": _sha256(config.instruction_path),
-                "verifier": _canonical_digest(list(config.verifier.argv)),
+                "instruction": instruction_sha256,
+                "verifier": verifier_content_sha256,
                 "artifacts": [item.path for item in config.artifacts],
             }
             task_sidecar = {
@@ -859,15 +1091,17 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 "native_sidecar": {"path": "task/native.json", "sha256": _sha256(bundle / "task/native.json")},
                 "harness": {"name": config.harness_name, "version": config.harness_version, "version_source": config.harness_version_source},
                 "model": {"name": config.model_name, "provider": config.model_provider, "revision": config.model_revision},
-                "mcp": {"name": config.mcp_name, "version": config.mcp_version, "transport": "stdio", "server_sha256": _sha256(mcp_executable), "collector_run_id": collector_run_id},
+                "mcp": {"name": config.mcp_name, "version": config.mcp_version, "transport": "stdio", "server_sha256": mcp_content_sha256, "collector_run_id": collector_run_id},
                 "environment": lock_environment,
                 "budget": {"timeout_s": config.timeout_s, "max_retries": config.max_retries},
                 "evidence": {"proxy_required": config.proxy_required},
             }
             _write_json(bundle / "lock.json", lock)
             lock_sha256 = _sha256(bundle / "lock.json")
-            _copy_atif(config, bundle, started)
-            artifact_entries = _copy_artifacts(config, bundle)
+            _copy_atif(config, bundle, started, source_root=judged_snapshot)
+            artifact_entries = _copy_artifacts(
+                config, bundle, source_root=judged_snapshot
+            )
             _write_json(bundle / "artifacts/manifest.json", {
                 "schema_version": BUNDLE_SCHEMA_VERSION,
                 "trial_id": config.trial_id,
@@ -878,7 +1112,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
             })
             final_digest = _final_state_digest(artifact_entries)
             try:
-                verdict = json.loads((config.workspace / config.verdict_path).read_text(encoding="utf-8"))
+                verdict = json.loads((judged_snapshot / config.verdict_path).read_text(encoding="utf-8"))
                 score, checker_exit = verdict["score"], verdict["checker_exit"]
             except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
                 raise NativeRunError(f"verifier verdict is unavailable or malformed: {exc}") from exc
