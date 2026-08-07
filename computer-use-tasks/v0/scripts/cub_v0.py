@@ -1253,10 +1253,14 @@ def generate(
         failed = [item["name"] for item in static["checks"] if not item["passed"]]
         raise CubError(f"matched configs require complete identity/TCC proof; blockers: {failed}")
     if mode == "pilot" and (arm is None or task is None):
-        raise CubError("pilot generation requires exactly one --arm and --task")
+        raise CubError("pilot generation requires --arm and --task")
     if mode == "matched" and (arm is not None or task is not None):
         raise CubError("matched generation covers all arms/tasks; omit --arm and --task")
-    selected_arms = ARMS if mode == "matched" else (arm,)
+    selected_arms = (
+        ARMS
+        if mode == "matched" or arm == "both"
+        else (arm,)
+    )
     selected_tasks = TASKS if mode == "matched" else (task,)
     identities: dict[str, dict[str, Any]] = {}
     if "installed" in selected_arms:
@@ -1395,51 +1399,75 @@ def generate(
                     "run_command": ["obench", "native", "run", str(config_path)],
                 })
     else:
-        selected_arm = str(arm)
         selected_task = str(task)
         app_identity = app_identities[selected_task]
-        trial_id = f"cub-v0-pilot-{selected_arm}-{selected_task}-trial{trial_index}"
-        config_path = (
-            config_root / "cells" / selected_task
-            / f"trial{trial_index}-{selected_arm}.toml"
-        )
-        config_bytes = _config_text(
-            request_path=request_path.resolve(),
-            request=request,
-            arm=selected_arm,
-            task=selected_task,
-            trial_index=trial_index,
-            trial_id=trial_id,
-            mcp=identities[selected_arm],
-            app=app_identity,
-            host=host,
-            mode=mode,
-            matrix=None,
-        ).encode("utf-8")
-        outputs[config_path] = config_bytes
-        output_path, results_path = _result_paths(
-            root, mode, selected_arm, selected_task, trial_index
-        )
-        cells.append({
-            "task": selected_task,
-            "arm_id": selected_arm,
-            "trial_index": trial_index,
-            "trial_id": trial_id,
-            "config": str(config_path),
-            "runnable_config_sha256": _bytes_sha256(config_bytes),
-            "workspace": str(
-                _workspace(root, selected_arm, selected_task, trial_index)
-            ),
-            "evidence": str(
-                _evidence(root, selected_arm, selected_task, trial_index)
-            ),
-            "process_state": str(
-                _state_path(root, selected_arm, selected_task, trial_index)
-            ),
-            "output": str(output_path),
-            "results": str(results_path),
-            "run_command": ["obench", "native", "run", str(config_path)],
-        })
+        for selected_arm in selected_arms:
+            selected_arm = str(selected_arm)
+            trial_id = (
+                f"cub-v0-pilot-{selected_arm}-{selected_task}-"
+                f"trial{trial_index}"
+            )
+            config_path = (
+                config_root / "cells" / selected_task
+                / f"trial{trial_index}-{selected_arm}.toml"
+            )
+            config_bytes = _config_text(
+                request_path=request_path.resolve(),
+                request=request,
+                arm=selected_arm,
+                task=selected_task,
+                trial_index=trial_index,
+                trial_id=trial_id,
+                mcp=identities[selected_arm],
+                app=app_identity,
+                host=host,
+                mode=mode,
+                matrix=None,
+            ).encode("utf-8")
+            outputs[config_path] = config_bytes
+            output_path, results_path = _result_paths(
+                root, mode, selected_arm, selected_task, trial_index
+            )
+            cells.append({
+                "task": selected_task,
+                "arm_id": selected_arm,
+                "trial_index": trial_index,
+                "trial_id": trial_id,
+                "config": str(config_path),
+                "runnable_config_sha256": _bytes_sha256(config_bytes),
+                "workspace": str(
+                    _workspace(
+                        root,
+                        selected_arm,
+                        selected_task,
+                        trial_index,
+                    )
+                ),
+                "evidence": str(
+                    _evidence(
+                        root,
+                        selected_arm,
+                        selected_task,
+                        trial_index,
+                    )
+                ),
+                "process_state": str(
+                    _state_path(
+                        root,
+                        selected_arm,
+                        selected_task,
+                        trial_index,
+                    )
+                ),
+                "output": str(output_path),
+                "results": str(results_path),
+                "run_command": [
+                    "obench",
+                    "native",
+                    "run",
+                    str(config_path),
+                ],
+            })
     manifest = {
         "schema_version": "openbench.computer-use-config-set.v2",
         "mode": mode,
@@ -1466,7 +1494,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     probe.add_argument("--arm", choices=ARMS, required=True)
     generate_parser = sub.add_parser("generate")
     generate_parser.add_argument("--mode", choices=("matched", "pilot"), required=True)
-    generate_parser.add_argument("--arm", choices=ARMS)
+    generate_parser.add_argument("--arm", choices=(*ARMS, "both"))
     generate_parser.add_argument("--task", choices=TASKS)
     generate_parser.add_argument(
         "--repetitions",

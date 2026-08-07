@@ -660,6 +660,48 @@ class ComputerUseConfigTests(unittest.TestCase):
         ):
             self.assertIn("trial3", str(path))
 
+    def test_pilot_can_generate_both_comparison_arms_atomically(self):
+        host = {
+            "os_version": "15.6", "os_build": "24G84",
+            "architecture": "arm64", "hardware": "MacFixture1,1",
+            "display_width": 1512, "display_height": 982,
+            "display_scale": 2.0, "display_color_space": "Color LCD",
+        }
+        with (
+            mock.patch.object(cub, "_bundle_info", side_effect=self.identity),
+            mock.patch.object(cub, "_static_preflight", return_value={
+                "matched_ready": False, "checks": []
+            }),
+            mock.patch.object(cub, "_host_environment", return_value=host),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(
+                cub.generate(
+                    self.request,
+                    "pilot",
+                    "both",
+                    "textedit-exact-file",
+                ),
+                0,
+            )
+
+        manifest = json.loads(
+            (self.run_root / "configs/pilot/manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            [cell["arm_id"] for cell in manifest["cells"]],
+            ["installed", "source"],
+        )
+        self.assertEqual(
+            {
+                Path(cell["config"]).name
+                for cell in manifest["cells"]
+            },
+            {"trial1-installed.toml", "trial1-source.toml"},
+        )
+
     def test_runtime_coordinates_accept_exact_native_env_only(self):
         with mock.patch.dict(
             os.environ,
