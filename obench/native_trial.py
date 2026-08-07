@@ -1956,7 +1956,11 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             frozenset(),
         )
         requires_delivery_tier = (
-            "mutation" in tool_categories or delivery is not None
+            delivery is not None
+            or (
+                "mutation" in tool_categories
+                and not bool(call.get("tool_is_error"))
+            )
         )
         if (
             requires_delivery_tier
@@ -1987,6 +1991,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         observed_categories = {
             category
             for call in mcp_records
+            if not bool(call.get("tool_is_error"))
             for category in MCP_TOOL_CATEGORIES.get(
                 call.get("tool"),
                 frozenset(),

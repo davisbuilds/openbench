@@ -136,9 +136,31 @@ def _write_mcp_ledger(
     tool="set_value",
     delivery_tier="tier1-ax-attribute",
     include_delivery=True,
+    include_failed_mutation=False,
 ):
     path = root / "mcp/ledger.jsonl"
     ledger = CallLedger(path, "native-cub-v0-run", trial_id)
+    if include_failed_mutation:
+        ledger.append_call({
+            "tool": "click_menu_item",
+            "status": "tool_error",
+            "request_id_type": "str",
+            "argument_digest": "sha256:" + HEX_C,
+            "request_bytes": 90,
+            "response_bytes": 70,
+            "request_unix_ns": 1786017601000000000,
+            "response_unix_ns": 1786017601100000000,
+            "duration_ms": 100.0,
+            "tool_is_error": True,
+            "jsonrpc_error": {"present": False, "code": None},
+            "computer_use_meta": {
+                "delivery": None,
+                "error": None,
+                "focus": None,
+                "outcome": None,
+            },
+            "process_returncode": None,
+        })
     if with_call:
         computer_use_meta = {
             "error": None,
@@ -163,7 +185,11 @@ def _write_mcp_ledger(
             "argument_digest": "sha256:" + HEX_B,
             "request_bytes": 100,
             "response_bytes": 80,
-            "request_unix_ns": 1786017601000000000,
+            "request_unix_ns": (
+                1786017601200000000
+                if include_failed_mutation
+                else 1786017601000000000
+            ),
             "response_unix_ns": 1786017602000000000,
             "duration_ms": 1000.0,
             "tool_is_error": False,
@@ -563,7 +589,11 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
                 "failure_class": failure_class,
                 "failure_reason": None if completed else "deadline_exceeded",
             },
-            "mcp_event_count": 0 if preflight_failed else 1,
+            "mcp_event_count": (
+                0
+                if preflight_failed
+                else 1 + int(case.get("include_failed_mutation", False))
+            ),
             "focus_event_count": len(focus_records),
             "process_event_count": len(process_records),
         },
@@ -600,6 +630,7 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
         tool=case.get("mcp_tool", "set_value"),
         delivery_tier=case.get("delivery_tier", "tier1-ax-attribute"),
         include_delivery=case.get("include_delivery", True),
+        include_failed_mutation=case.get("include_failed_mutation", False),
     )
     _write_ledger(
         root,
@@ -1246,6 +1277,15 @@ class NativeTrialTests(unittest.TestCase):
             "delivery tier is absent or forbidden",
         ):
             load_native_trial(forbidden_bundle)
+
+        failed_before_delivery = {
+            **self.cases["happy"],
+            "include_failed_mutation": True,
+        }
+        failed_before_delivery_bundle = self.root / "failed-before-delivery"
+        _build_bundle(failed_before_delivery_bundle, failed_before_delivery)
+        loaded = load_native_trial(failed_before_delivery_bundle)
+        self.assertTrue(loaded["success"])
 
     def test_privacy_leak_is_rejected_even_after_manifest_is_resealed(self):
         bundle = self.bundle("happy")
