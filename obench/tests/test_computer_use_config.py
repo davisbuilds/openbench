@@ -16,7 +16,7 @@ from obench.native_matrix import (
     reconcile_native_state,
     validate_native_matrix,
 )
-from obench.native_run import load_config
+from obench.native_run import NativeRunError, load_config
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -75,6 +75,13 @@ class ComputerUseConfigTests(unittest.TestCase):
             "signature_sha256": "b" * 64,
             "adhoc": is_installed,
         }
+
+    @staticmethod
+    def content_digest(command, *, cwd, extra_paths=()):
+        return cub.hashlib.sha256(canonical_bytes({
+            "command": list(command),
+            "extra_paths": [str(path) for path in extra_paths],
+        })).hexdigest()
 
     def test_path_safety_rejects_user_roots_and_escape(self):
         for path in ("relative", "/", str(Path.home()), str(Path.home() / "Documents")):
@@ -286,6 +293,11 @@ class ComputerUseConfigTests(unittest.TestCase):
                 "matched_ready": True, "checks": []
             }),
             mock.patch.object(cub, "_host_environment", return_value=host),
+            mock.patch.object(
+                cub,
+                "_content_bound_command_digest",
+                side_effect=self.content_digest,
+            ),
         ):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(cub.generate(self.request, "matched", None, None), 0)
@@ -303,6 +315,7 @@ class ComputerUseConfigTests(unittest.TestCase):
         output_paths = set()
         results_paths = set()
         matrix_cell_keys = set()
+        setup_commands = set()
         for plan_entry in manifest["plans"]:
             spec_path = Path(plan_entry["spec"])
             plan_path = Path(plan_entry["plan"])
@@ -356,6 +369,13 @@ class ComputerUseConfigTests(unittest.TestCase):
                 self.assertEqual(
                     parsed["matrix"],
                     {
+                        "manifest": str(
+                            self.run_root / "configs/matched/manifest.json"
+                        ),
+                        "plan": str(
+                            self.run_root
+                            / f"configs/matched/plans/{cell['task']}.plan.json"
+                        ),
                         "plan_sha256": cell["plan_sha256"],
                         "cell_id": cell["cell_id"],
                         "cell_sha256": cell["cell_sha256"],
@@ -376,15 +396,14 @@ class ComputerUseConfigTests(unittest.TestCase):
                 self.assertTrue(parsed["proxy"]["required"])
                 self.assertTrue(parsed["atif_path"].endswith("trajectory.json"))
                 command = parsed["phases"]["setup"]["command"]
-                self.assertEqual(
-                    command[-6:],
-                    [
-                        "--arm", cell["arm_id"], "--task", cell["task"],
-                        "--trial-index", str(cell["trial_index"]),
-                    ],
-                )
+                self.assertEqual(command[-1], "setup")
+                setup_commands.add(tuple(command))
                 loaded = load_config(path)
                 self.assertEqual(loaded.trial_id, cell["trial_id"])
+                self.assertEqual(
+                    loaded.matrix["runnable_config_sha256"],
+                    cell["runnable_config_sha256"],
+                )
                 self.assertEqual(loaded.model_name, "gpt-5.6-sol")
                 self.assertTrue(loaded.proxy_required)
                 self.assertEqual(loaded.mcp_client_command_env, "CUB_MCP_COMMAND")
@@ -405,6 +424,7 @@ class ComputerUseConfigTests(unittest.TestCase):
             matrix_cell_keys,
         ):
             self.assertEqual(len(paths), 30)
+        self.assertEqual(len(setup_commands), 1)
 
         before = {
             path: path.read_bytes()
@@ -417,6 +437,11 @@ class ComputerUseConfigTests(unittest.TestCase):
                 "matched_ready": True, "checks": []
             }),
             mock.patch.object(cub, "_host_environment", return_value=host),
+            mock.patch.object(
+                cub,
+                "_content_bound_command_digest",
+                side_effect=self.content_digest,
+            ),
             redirect_stdout(io.StringIO()),
         ):
             self.assertEqual(cub.generate(self.request, "matched", None, None), 0)
@@ -434,6 +459,11 @@ class ComputerUseConfigTests(unittest.TestCase):
                 "matched_ready": True, "checks": []
             }),
             mock.patch.object(cub, "_host_environment", return_value=host),
+            mock.patch.object(
+                cub,
+                "_content_bound_command_digest",
+                side_effect=self.content_digest,
+            ),
             self.assertRaisesRegex(cub.CubError, "divergent immutable"),
         ):
             cub.generate(
@@ -445,6 +475,13 @@ class ComputerUseConfigTests(unittest.TestCase):
                 for path in (self.run_root / "configs/matched").rglob("*.toml")
             )
         )
+
+        bound_config = Path(manifest["cells"][0]["config"])
+        bound_bytes = bound_config.read_bytes()
+        bound_config.write_bytes(bound_bytes + b"\n")
+        with self.assertRaisesRegex(NativeRunError, "runnable config digest"):
+            load_config(bound_config)
+        bound_config.write_bytes(bound_bytes)
 
         first_plan = json.loads(
             Path(manifest["plans"][0]["plan"]).read_text(encoding="utf-8")
@@ -522,6 +559,26 @@ class ComputerUseConfigTests(unittest.TestCase):
             Path(cell["process_state"]),
         ):
             self.assertIn("trial3", str(path))
+
+    def test_runtime_coordinates_accept_exact_native_env_only(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "OPENBENCH_NATIVE_TRIAL_ID":
+                    "cub-v0-basic-controls-installed-trial4",
+                "OPENBENCH_NATIVE_TASK_ID":
+                    "openbench/computer-use-v0-basic-controls",
+                "OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID":
+                    "cub-v0-installed-mcp",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                cub._runtime_coordinates(None, None, None),
+                ("installed", "basic-controls", 4),
+            )
+        with self.assertRaisesRegex(cub.CubError, "supplied together"):
+            cub._runtime_coordinates("installed", None, 1)
 
     def test_matched_generation_fails_closed_without_tcc_identity_proof(self):
         with mock.patch.object(cub, "_static_preflight", return_value={

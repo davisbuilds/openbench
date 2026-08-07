@@ -27,6 +27,7 @@ import tomllib
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from obench.native_matrix import build_native_matrix, canonical_bytes
+from obench.native_run import _canonical_digest, _content_bound_command_digest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +90,32 @@ def _positive_trial_argument(value: str) -> int:
         return _positive_trial_index(value)
     except CubError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _runtime_coordinates(
+    arm: str | None, task: str | None, trial_index: int | None
+) -> tuple[str, str, int]:
+    supplied = (arm is not None, task is not None, trial_index is not None)
+    if any(supplied) and not all(supplied):
+        raise CubError("runtime arm, task, and trial index must be supplied together")
+    if all(supplied):
+        return str(arm), str(task), _positive_trial_index(trial_index)
+    trial_id = os.environ.get("OPENBENCH_NATIVE_TRIAL_ID", "")
+    task_id = os.environ.get("OPENBENCH_NATIVE_TASK_ID", "")
+    collector_id = os.environ.get("OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID", "")
+    match = re.search(r"(?:^|[-_:])trial([1-9][0-9]*)$", trial_id)
+    task_prefix = "openbench/computer-use-v0-"
+    if (
+        match is None
+        or not task_id.startswith(task_prefix)
+        or collector_id not in {f"cub-v0-{item}-mcp" for item in ARMS}
+    ):
+        raise CubError("runtime coordinates are absent from explicit args/native env")
+    resolved_task = task_id.removeprefix(task_prefix)
+    if resolved_task not in TASKS:
+        raise CubError("native task identity is not a Computer-Use Bench v0 task")
+    resolved_arm = collector_id.removeprefix("cub-v0-").removesuffix("-mcp")
+    return resolved_arm, resolved_task, int(match.group(1))
 
 
 def _run(
@@ -907,49 +934,96 @@ def _oracle_paths(task: str) -> list[Path]:
     return paths
 
 
-def _task_plan_identity(task: str) -> dict[str, Any]:
-    task_dir = ROOT / task
+def _artifact_contract(task: str) -> tuple[str, str, str]:
+    if task == "textedit-exact-file":
+        return (
+            "runner/final-state/output.txt",
+            "output.txt",
+            "text/plain; charset=utf-8",
+        )
+    return (
+        "runner/final-state/state.json",
+        "state.json",
+        "application/json",
+    )
+
+
+def _task_plan_identity(
+    task: str, request_path: Path, request: Mapping[str, Any]
+) -> dict[str, Any]:
+    root, _repo, _installed = _request_paths(request)
+    script = Path(__file__).resolve()
+    verifier_command = [
+        sys.executable,
+        str(script),
+        "--request",
+        str(request_path.resolve()),
+        "verify",
+    ]
     oracles = _oracle_paths(task)
+    verifier_digest = _content_bound_command_digest(
+        verifier_command,
+        cwd=_workspace(root, "installed", task, 1),
+        extra_paths=oracles,
+    )
+    _source, artifact_name, _media = _artifact_contract(task)
+    task_content = {
+        "instruction": _sha256(ROOT / task / "instruction.md"),
+        "verifier": verifier_digest,
+        "artifacts": [f"artifacts/final-state/{artifact_name}"],
+    }
     return {
-        "id": f"openbench/computer-use-v0-{task}",
-        "instruction_sha256": _sha256(task_dir / "instruction.md"),
-        "verifier_oracle_sha256": _bytes_sha256(
-            canonical_bytes(
-                [
-                    {"name": path.name, "sha256": _sha256(path)}
-                    for path in oracles
-                ]
-            )
-        ),
+        "name": f"openbench/computer-use-v0-{task}",
+        "content_sha256": _canonical_digest(task_content),
     }
 
 
-def _mcp_plan_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
+def _mcp_plan_identity(
+    identity: Mapping[str, Any], arm: str, config_dir: Path
+) -> dict[str, Any]:
     return {
         "name": "computer-use-mcp",
         "version": MCP_VERSION,
-        "bundle_id": identity["bundle_id"],
-        "binary_sha256": identity["binary_sha256"],
-        "signature_sha256": identity["signature_sha256"],
-        "source_revision": identity.get("source_revision", "installed-0.4.1"),
-        "build_stamp_unix": identity["build_stamp_unix"],
+        "transport": "stdio",
+        "server_sha256": _content_bound_command_digest(
+            [str(identity["executable"])], cwd=config_dir
+        ),
+        "collector_run_id": f"cub-v0-{arm}-mcp",
     }
 
 
 def _arm_plan_config(
-    app: Mapping[str, Any], host: Mapping[str, Any], task: str
+    app: Mapping[str, Any], host: Mapping[str, Any]
 ) -> dict[str, Any]:
     return {
-        "native_run_schema": "openbench.native-run.v0",
-        "task": task,
-        "app": {
-            "bundle_id": app["bundle_id"],
-            "version": app["version"],
-            "build": app["build"],
-            "binary_sha256": app["binary_sha256"],
-            "signature_sha256": app["signature_sha256"],
+        "environment": {
+            "platform": "macos",
+            "os": {
+                "version": host["os_version"],
+                "build": host["os_build"],
+            },
+            "architecture": host["architecture"],
+            "hardware_model": host["hardware"],
+            "app": {
+                "bundle_id": app["bundle_id"],
+                "version": app["version"],
+                "build": app["build"],
+                "code_signature_sha256": app["signature_sha256"],
+            },
+            "display": {
+                "width_px": host["display_width"],
+                "height_px": host["display_height"],
+                "scale_factor": host["display_scale"],
+                "color_space": host["display_color_space"],
+            },
+            "preflight": {
+                "accessibility": True,
+                "screen_recording": True,
+                "app_installed": True,
+                "display_stable": True,
+                "focus_monitor_ready": True,
+            },
         },
-        "host": dict(host),
     }
 
 
@@ -1001,25 +1075,22 @@ def _config_text(
     task_dir = ROOT / task
     script = Path(__file__).resolve()
     common = [sys.executable, str(script), "--request", str(request_path)]
-    trial_args = ["--arm", arm, "--task", task, "--trial-index", str(trial_index)]
-    setup_cmd = [*common, "setup", *trial_args]
-    reset_cmd = [*common, "reset", *trial_args]
-    verify_cmd = [*common, "verify", *trial_args]
+    setup_cmd = [*common, "setup"]
+    reset_cmd = [*common, "reset"]
+    verify_cmd = [*common, "verify"]
     if task == "basic-controls":
         foreground = FIXTURE_BUNDLES[task]
         forbidden: list[str] = []
         tools = ["list_apps", "get_app_state", "click", "set_value", "type_text", "wait_for"]
-        artifact_source, artifact_name, media = "runner/final-state/state.json", "state.json", "application/json"
     elif task == "background-control":
         foreground = GUARD_BUNDLE_ID
         forbidden = [FIXTURE_BUNDLES[task]]
         tools = ["list_apps", "get_app_state", "find", "set_value", "click", "click_menu_item", "wait_for"]
-        artifact_source, artifact_name, media = "runner/final-state/state.json", "state.json", "application/json"
     else:
         foreground = FIXTURE_BUNDLES[task]
         forbidden = []
         tools = ["list_apps", "get_app_state", "click", "set_value", "type_text", "press_key", "wait_for"]
-        artifact_source, artifact_name, media = "runner/final-state/output.txt", "output.txt", "text/plain; charset=utf-8"
+    artifact_source, artifact_name, media = _artifact_contract(task)
     forbidden_tools = sorted({
         "batch", "delete_skill", "drag", "manage_window", "open_app", "open_url", "page",
         "read_clipboard", "record_skill_start", "record_skill_stop", "run_skill", "save_skill",
@@ -1030,6 +1101,8 @@ def _config_text(
     if matrix is not None:
         matrix_text = f'''
 [matrix]
+manifest = {_toml_string(str(matrix["manifest"]))}
+plan = {_toml_string(str(matrix["plan"]))}
 plan_sha256 = {_toml_string(str(matrix["plan_sha256"]))}
 cell_id = {_toml_string(str(matrix["cell_id"]))}
 cell_sha256 = {_toml_string(str(matrix["cell_sha256"]))}
@@ -1065,6 +1138,7 @@ name = "computer-use-mcp"
 version = "0.4.1"
 command = {_toml_array([str(mcp["executable"])])}
 client_command_env = "CUB_MCP_COMMAND"
+collector_run_id = {_toml_string(f"cub-v0-{arm}-mcp")}
 allowed_tools = {_toml_array(tools)}
 forbidden_tools = {_toml_array(forbidden_tools)}
 source_revision = {_toml_string(str(mcp.get("source_revision", "installed-0.4.1")))}
@@ -1171,6 +1245,7 @@ def generate(
     cells: list[dict[str, Any]] = []
     plans: list[dict[str, Any]] = []
     config_root = descendant(root, f"configs/{mode}")
+    manifest_path = config_root / "manifest.json"
     if mode == "matched":
         harness = {
             "name": "codex",
@@ -1181,21 +1256,26 @@ def generate(
             "name": "gpt-5.6-sol",
             "provider": "openai-codex",
             "revision": "gpt-5.6-sol",
-            "reasoning_effort": "medium",
         }
         for selected_task in selected_tasks:
             app_identity = app_identities[selected_task]
             spec = {
                 "comparison_id": f"cub-v0-{selected_task}",
-                "task": _task_plan_identity(selected_task),
+                "task": _task_plan_identity(
+                    selected_task, request_path, request
+                ),
                 "harness": harness,
                 "model": model,
                 "arms": [
                     {
                         "id": selected_arm,
-                        "mcp": _mcp_plan_identity(identities[selected_arm]),
+                        "mcp": _mcp_plan_identity(
+                            identities[selected_arm],
+                            selected_arm,
+                            config_root,
+                        ),
                         "config": _arm_plan_config(
-                            app_identity, host, selected_task
+                            app_identity, host
                         ),
                     }
                     for selected_arm in selected_arms
@@ -1240,7 +1320,12 @@ def generate(
                     app=app_identity,
                     host=host,
                     mode=mode,
-                    matrix={**cell, "plan_sha256": plan["plan_sha256"]},
+                    matrix={
+                        **cell,
+                        "plan_sha256": plan["plan_sha256"],
+                        "manifest": manifest_path,
+                        "plan": plan_path,
+                    },
                 ).encode("utf-8")
                 outputs[config_path] = config_bytes
                 output_path, results_path = _result_paths(
@@ -1331,7 +1416,6 @@ def generate(
         "source_revision": SOURCE_REVISION,
         "basic_fixture_revision": BASIC_REVISION,
     }
-    manifest_path = descendant(root, f"configs/{mode}/manifest.json")
     outputs[manifest_path] = canonical_bytes(manifest) + b"\n"
     _write_immutable_outputs(outputs)
     print(json.dumps(manifest, indent=2, sort_keys=True))
@@ -1364,12 +1448,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     for name in ("setup", "reset", "verify"):
         item = sub.add_parser(name)
-        item.add_argument("--arm", choices=ARMS, required=True)
-        item.add_argument("--task", choices=TASKS, required=True)
+        item.add_argument("--arm", choices=ARMS)
+        item.add_argument("--task", choices=TASKS)
         item.add_argument(
             "--trial-index",
             type=_positive_trial_argument,
-            required=True,
         )
     args = parser.parse_args(argv)
     try:
@@ -1388,13 +1471,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 repetitions=args.repetitions,
                 trial_index=args.trial_index,
             )
+        arm, task, trial_index = _runtime_coordinates(
+            args.arm, args.task, args.trial_index
+        )
         if args.command == "setup":
-            return setup(args.request, args.arm, args.task, args.trial_index)
+            return setup(args.request, arm, task, trial_index)
         if args.command == "reset":
-            return reset_runtime(
-                args.request, args.arm, args.task, args.trial_index
-            )
-        return verify(args.request, args.arm, args.task, args.trial_index)
+            return reset_runtime(args.request, arm, task, trial_index)
+        return verify(args.request, arm, task, trial_index)
     except CubError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

@@ -44,6 +44,7 @@ from .native_macos import (
     WholeRunLease,
     run_preflight,
 )
+from .native_matrix import NativeMatrixError, validate_native_matrix
 from .native_trial import (
     BUNDLE_SCHEMA_VERSION,
     LEDGER_SCHEMA_VERSION,
@@ -171,6 +172,7 @@ class NativeRunConfig:
     mcp_version: str
     mcp_command: tuple[str, ...]
     mcp_client_command_env: str
+    mcp_collector_run_id: str | None
     environment: Mapping[str, Any]
     timeout_s: float
     max_retries: int
@@ -184,6 +186,7 @@ class NativeRunConfig:
     focus_policy: Mapping[str, Any]
     verifier_oracle_paths: tuple[Path, ...]
     mcp_policy: Mapping[str, Any]
+    matrix: Mapping[str, Any] | None
 
 
 def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
@@ -247,6 +250,89 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
     trial_id = _required_string(data.get("trial_id"), "trial_id")
     if re.search(r"(?:^|[-_:])trial[1-9][0-9]*$", trial_id) is None:
         raise NativeRunError("trial_id must end with an explicit positive trialN index")
+    matrix = data.get("matrix")
+    normalized_matrix = None
+    if matrix is not None:
+        if not isinstance(matrix, dict):
+            raise NativeRunError("[matrix] must be a table")
+        required_matrix = {
+            "manifest",
+            "plan",
+            "plan_sha256",
+            "cell_id",
+            "cell_sha256",
+            "config_sha256",
+        }
+        if set(matrix) != required_matrix:
+            raise NativeRunError(
+                f"[matrix] must contain exactly {sorted(required_matrix)!r}"
+            )
+        manifest_path = resolve(matrix["manifest"], "matrix.manifest")
+        plan_path = resolve(matrix["plan"], "matrix.plan")
+        try:
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            validated_plan = validate_native_matrix(plan)
+        except (
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            NativeMatrixError,
+        ) as exc:
+            raise NativeRunError(f"cannot validate matrix binding: {exc}") from exc
+        for field in ("plan_sha256", "cell_sha256", "config_sha256"):
+            value = matrix[field]
+            if (
+                not isinstance(value, str)
+                or re.fullmatch(r"[0-9a-f]{64}", value) is None
+            ):
+                raise NativeRunError(f"matrix.{field} must be a SHA-256 digest")
+        if matrix["plan_sha256"] != validated_plan["plan_sha256"]:
+            raise NativeRunError("matrix plan digest does not match the canonical plan")
+        matching_cells = [
+            cell
+            for cell in validated_plan["schedule"]
+            if cell["cell_id"] == matrix["cell_id"]
+        ]
+        if len(matching_cells) != 1:
+            raise NativeRunError("matrix.cell_id does not identify one planned cell")
+        cell = matching_cells[0]
+        for field in ("trial_id", "cell_sha256", "config_sha256"):
+            observed = trial_id if field == "trial_id" else matrix[field]
+            if observed != cell[field]:
+                raise NativeRunError(f"matrix binding has conflicting {field}")
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("schema_version")
+            != "openbench.computer-use-config-set.v2"
+            or not isinstance(manifest.get("cells"), list)
+        ):
+            raise NativeRunError("matrix manifest is not a v2 config set")
+        source_digest = _sha256(source)
+        matching_entries = [
+            entry
+            for entry in manifest["cells"]
+            if isinstance(entry, dict)
+            and Path(str(entry.get("config", ""))).expanduser().resolve() == source
+            and entry.get("plan_sha256") == validated_plan["plan_sha256"]
+            and entry.get("cell_id") == cell["cell_id"]
+            and entry.get("trial_id") == trial_id
+        ]
+        if len(matching_entries) != 1:
+            raise NativeRunError("matrix manifest does not map this exact planned cell")
+        if matching_entries[0].get("runnable_config_sha256") != source_digest:
+            raise NativeRunError("matrix runnable config digest does not match the manifest")
+        arm = next(
+            item for item in validated_plan["arms"] if item["id"] == cell["arm_id"]
+        )
+        normalized_matrix = {
+            "plan_sha256": validated_plan["plan_sha256"],
+            "cell_id": cell["cell_id"],
+            "cell_sha256": cell["cell_sha256"],
+            "config_sha256": cell["config_sha256"],
+            "runnable_config_sha256": source_digest,
+            "config_identity": arm["config_identity"],
+        }
     max_retries = budget.get("max_retries", 0)
     if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
         raise NativeRunError("budget.max_retries must be a non-negative integer")
@@ -329,6 +415,11 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
         mcp_version=_required_string(mcp.get("version"), "mcp.version"),
         mcp_command=_command(mcp.get("command"), "mcp.command"),
         mcp_client_command_env=_required_string(mcp.get("client_command_env"), "mcp.client_command_env"),
+        mcp_collector_run_id=(
+            _required_string(mcp.get("collector_run_id"), "mcp.collector_run_id")
+            if mcp.get("collector_run_id") is not None
+            else None
+        ),
         environment=environment,
         timeout_s=_positive_number(budget.get("timeout_s"), "budget.timeout_s"),
         max_retries=max_retries,
@@ -353,6 +444,7 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
             "allowed_tools": list(allowed_tools),
             "forbidden_tools": list(forbidden_tools),
         },
+        matrix=normalized_matrix,
     )
 
 
@@ -513,7 +605,61 @@ def _expand_command(command: Sequence[str], config: NativeRunConfig) -> tuple[st
 
 
 def _phase(config: NativeRunConfig, name: PhaseName, item: CommandConfig) -> PhaseSpec:
-    return PhaseSpec(name, _expand_command(item.argv, config), item.timeout_s, cwd=str(config.workspace))
+    collector_run_id = (
+        config.mcp_collector_run_id or f"{config.trial_id}-mcp"
+    )
+    return PhaseSpec(
+        name,
+        _expand_command(item.argv, config),
+        item.timeout_s,
+        cwd=str(config.workspace),
+        env={
+            **os.environ,
+            "OPENBENCH_NATIVE_TRIAL_ID": config.trial_id,
+            "OPENBENCH_NATIVE_TASK_ID": config.task_id,
+            "OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID": collector_run_id,
+        },
+    )
+
+
+def _locked_environment(config: NativeRunConfig) -> dict[str, Any]:
+    return {
+        "platform": "macos",
+        "os": dict(config.environment["os"]),
+        "architecture": config.environment["architecture"],
+        "hardware_model": config.environment["hardware_model"],
+        "app": {
+            "bundle_id": config.app_bundle_id,
+            "version": config.environment["app"]["version"],
+            "build": config.environment["app"]["build"],
+            "code_signature_sha256": config.environment["app"][
+                "code_signature_sha256"
+            ],
+        },
+        "display": dict(config.environment["display"]),
+        "preflight": {
+            "accessibility": True,
+            "screen_recording": True,
+            "app_installed": True,
+            "display_stable": True,
+            "focus_monitor_ready": True,
+        },
+    }
+
+
+def _matrix_seal(config: NativeRunConfig) -> dict[str, Any] | None:
+    if config.matrix is None:
+        return None
+    return {
+        key: config.matrix[key]
+        for key in (
+            "plan_sha256",
+            "cell_id",
+            "cell_sha256",
+            "config_sha256",
+            "runnable_config_sha256",
+        )
+    }
 
 
 def _empty_mcp_ledger(path: Path, run_id: str, trial_id: str) -> None:
@@ -902,7 +1048,44 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
             config.mcp_command,
             cwd=config.source_path.parent,
         )
-        collector_run_id = f"{config.trial_id}-mcp"
+        collector_run_id = (
+            config.mcp_collector_run_id or f"{config.trial_id}-mcp"
+        )
+        task_content = {
+            "instruction": instruction_sha256,
+            "verifier": verifier_content_sha256,
+            "artifacts": [item.path for item in config.artifacts],
+        }
+        lock_environment = _locked_environment(config)
+        if config.matrix is not None:
+            actual_identity = {
+                "task": {
+                    "name": config.task_id,
+                    "content_sha256": _canonical_digest(task_content),
+                },
+                "harness": {
+                    "name": config.harness_name,
+                    "version": config.harness_version,
+                    "version_source": config.harness_version_source,
+                },
+                "model": {
+                    "name": config.model_name,
+                    "provider": config.model_provider,
+                    "revision": config.model_revision,
+                },
+                "mcp": {
+                    "name": config.mcp_name,
+                    "version": config.mcp_version,
+                    "transport": "stdio",
+                    "server_sha256": mcp_content_sha256,
+                    "collector_run_id": collector_run_id,
+                },
+                "arm_config": {"environment": lock_environment},
+            }
+            if actual_identity != config.matrix["config_identity"]:
+                raise NativeRunError(
+                    "runnable config identity does not match its planned matrix arm"
+                )
         instruction = config.instruction_path.read_text(encoding="utf-8")
         started = hooks.clock()
         start_mono = hooks.monotonic()
@@ -1090,11 +1273,6 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         with tempfile.TemporaryDirectory(prefix="obench_native_bundle_", dir=str(config.output_dir.parent)) as temp:
             bundle = Path(temp) / config.output_dir.name
             bundle.mkdir()
-            task_content = {
-                "instruction": instruction_sha256,
-                "verifier": verifier_content_sha256,
-                "artifacts": [item.path for item in config.artifacts],
-            }
             task_sidecar = {
                 "schema_version": TASK_SIDECAR_SCHEMA_VERSION,
                 "trial_id": config.trial_id,
@@ -1108,34 +1286,20 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 "trial_id": config.trial_id,
                 "task_id": config.task_id,
                 "app_bundle_id": config.app_bundle_id,
-                "reset_contract_sha256": _canonical_digest(list(config.reset.argv)),
+                "reset_contract_sha256": _canonical_digest(
+                    list(config.reset.argv)
+                    if config.matrix is None
+                    else {
+                        "argv": list(config.reset.argv),
+                        "matrix": _matrix_seal(config),
+                    }
+                ),
                 "success_contract_sha256": _canonical_digest({"verdict_path": config.verdict_path, "artifacts": [item.path for item in config.artifacts]}),
                 "final_state_allowlist": [item.path for item in config.artifacts],
                 "focus_policy": dict(config.focus_policy),
             }
             _write_json(bundle / "task/task.json", task_sidecar)
             _write_json(bundle / "task/native.json", native_sidecar)
-            preflight_flags = {
-                "accessibility": True,
-                "screen_recording": True,
-                "app_installed": True,
-                "display_stable": True,
-                "focus_monitor_ready": True,
-            }
-            lock_environment = {
-                "platform": "macos",
-                "os": dict(config.environment["os"]),
-                "architecture": config.environment["architecture"],
-                "hardware_model": config.environment["hardware_model"],
-                "app": {
-                    "bundle_id": config.app_bundle_id,
-                    "version": config.environment["app"]["version"],
-                    "build": config.environment["app"]["build"],
-                    "code_signature_sha256": config.environment["app"]["code_signature_sha256"],
-                },
-                "display": dict(config.environment["display"]),
-                "preflight": preflight_flags,
-            }
             lock = {
                 "schema_version": BUNDLE_SCHEMA_VERSION,
                 "trial_id": config.trial_id,
