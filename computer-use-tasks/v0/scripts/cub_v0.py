@@ -49,6 +49,32 @@ FIXTURE_BUNDLES = {
 GUARD_BUNDLE_ID = "org.openbench.FocusGuard.v0"
 TASKS = tuple(FIXTURE_BUNDLES)
 ARMS = ("installed", "source")
+DELIVERY_TIERS = {
+    "basic-controls": (
+        "tier1-ax-action",
+        "tier1-ax-attribute",
+        "tier2-per-window-nsevent",
+        "tier25-skylight-sleventpostto-pid",
+        "tier3-cgeventpostto-pid",
+        "pasteboard",
+        "launchservices",
+        "ax-window-management",
+    ),
+    "background-control": (
+        "tier1-ax-action",
+        "tier1-ax-attribute",
+    ),
+    "textedit-exact-file": (
+        "tier1-ax-action",
+        "tier1-ax-attribute",
+        "tier2-per-window-nsevent",
+        "tier25-skylight-sleventpostto-pid",
+        "tier3-cgeventpostto-pid",
+        "pasteboard",
+        "launchservices",
+        "ax-window-management",
+    ),
+}
 CONFIG_SCHEMA = "openbench.computer-use-config-request.v1"
 PREFLIGHT_SCHEMA = "openbench.computer-use-preflight.v1"
 PROCESS_SCHEMA = "openbench.computer-use-process-state.v1"
@@ -1182,7 +1208,7 @@ required_foreground_bundle_id = {_toml_string(foreground)}
 forbidden_bundle_ids = {_toml_array(forbidden)}
 require_foreground_full_agent_phase = true
 forbid_global_delivery = true
-allowed_delivery_tiers = ["tier1-ax-action", "tier1-ax-attribute", "tier2-per-window-nsevent", "tier25-skylight-sleventpostto-pid", "tier3-cgeventpostto-pid", "pasteboard", "launchservices", "ax-window-management"]
+allowed_delivery_tiers = {_toml_array(DELIVERY_TIERS[task])}
 
 [proxy]
 required = true

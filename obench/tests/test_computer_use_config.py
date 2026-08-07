@@ -329,6 +329,32 @@ class ComputerUseConfigTests(unittest.TestCase):
         results_paths = set()
         matrix_cell_keys = set()
         setup_commands = set()
+        expected_delivery_tiers = {
+            "background-control": [
+                "tier1-ax-action",
+                "tier1-ax-attribute",
+            ],
+            "basic-controls": [
+                "tier1-ax-action",
+                "tier1-ax-attribute",
+                "tier2-per-window-nsevent",
+                "tier25-skylight-sleventpostto-pid",
+                "tier3-cgeventpostto-pid",
+                "pasteboard",
+                "launchservices",
+                "ax-window-management",
+            ],
+            "textedit-exact-file": [
+                "tier1-ax-action",
+                "tier1-ax-attribute",
+                "tier2-per-window-nsevent",
+                "tier25-skylight-sleventpostto-pid",
+                "tier3-cgeventpostto-pid",
+                "pasteboard",
+                "launchservices",
+                "ax-window-management",
+            ],
+        }
         for plan_entry in manifest["plans"]:
             spec_path = Path(plan_entry["spec"])
             plan_path = Path(plan_entry["plan"])
@@ -407,6 +433,10 @@ class ComputerUseConfigTests(unittest.TestCase):
                 })
                 self.assertEqual(parsed["mcp"]["client_command_env"], "CUB_MCP_COMMAND")
                 self.assertTrue(parsed["proxy"]["required"])
+                self.assertEqual(
+                    parsed["focus"]["allowed_delivery_tiers"],
+                    expected_delivery_tiers[cell["task"]],
+                )
                 self.assertTrue(parsed["atif_path"].endswith("trajectory.json"))
                 command = parsed["phases"]["setup"]["command"]
                 self.assertEqual(command[-1], "setup")
@@ -419,6 +449,10 @@ class ComputerUseConfigTests(unittest.TestCase):
                 )
                 self.assertEqual(loaded.model_name, "gpt-5.6-sol")
                 self.assertTrue(loaded.proxy_required)
+                self.assertEqual(
+                    loaded.focus_policy["allowed_delivery_tiers"],
+                    expected_delivery_tiers[cell["task"]],
+                )
                 self.assertEqual(loaded.mcp_client_command_env, "CUB_MCP_COMMAND")
                 workspaces.add(str(loaded.workspace))
                 output_paths.add(str(loaded.output_dir))
