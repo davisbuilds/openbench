@@ -26,6 +26,8 @@ import time
 import tomllib
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+from obench.native_matrix import build_native_matrix, canonical_bytes
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BASIC_REVISION = "2c5cc162e58f6486505c8c5fe87fd76980d0e6b9"
@@ -64,6 +66,29 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _bytes_sha256(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _positive_trial_index(value: Any) -> int:
+    if isinstance(value, bool):
+        raise CubError("trial index must be a positive integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise CubError("trial index must be a positive integer") from exc
+    if parsed < 1 or str(parsed) != str(value):
+        raise CubError("trial index must be a positive integer")
+    return parsed
+
+
+def _positive_trial_argument(value: str) -> int:
+    try:
+        return _positive_trial_index(value)
+    except CubError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _run(
@@ -614,24 +639,37 @@ def terminate_owned(
     state_path.unlink()
 
 
-def _state_path(root: Path, arm: str, task: str) -> Path:
-    return descendant(root, f"runtime/{arm}/{task}/processes.json")
+def _state_path(root: Path, arm: str, task: str, trial_index: int) -> Path:
+    trial_index = _positive_trial_index(trial_index)
+    return descendant(root, f"runtime/{task}/trial{trial_index}/{arm}/processes.json")
 
 
-def _workspace(root: Path, arm: str, task: str) -> Path:
-    return descendant(root, f"workspaces/{arm}/{task}/trial1")
+def _workspace(root: Path, arm: str, task: str, trial_index: int) -> Path:
+    trial_index = _positive_trial_index(trial_index)
+    return descendant(root, f"workspaces/{task}/trial{trial_index}/{arm}")
 
 
-def _evidence(root: Path, arm: str, task: str) -> Path:
-    return descendant(root, f"runner-evidence/{arm}/{task}/trial1")
+def _evidence(root: Path, arm: str, task: str, trial_index: int) -> Path:
+    trial_index = _positive_trial_index(trial_index)
+    return descendant(root, f"runner-evidence/{task}/trial{trial_index}/{arm}")
 
 
-def _initial_state_ready(root: Path, arm: str, task: str) -> bool:
-    workspace = _workspace(root, arm, task)
+def _result_paths(
+    root: Path, mode: str, arm: str, task: str, trial_index: int
+) -> tuple[Path, Path]:
+    trial_index = _positive_trial_index(trial_index)
+    result_root = descendant(
+        root, f"results/{mode}/{task}/trial{trial_index}/{arm}"
+    )
+    return result_root / "bundle", result_root / "result.jsonl"
+
+
+def _initial_state_ready(root: Path, arm: str, task: str, trial_index: int) -> bool:
+    workspace = _workspace(root, arm, task, trial_index)
     if task == "textedit-exact-file":
         output = workspace / "artifacts/openbench-exact.txt"
         return (workspace / "run-context.json").is_file() and not output.exists()
-    state_path = _evidence(root, arm, task) / "fixture-state.json"
+    state_path = _evidence(root, arm, task, trial_index) / "fixture-state.json"
     expected = {
         "basic-controls": {
             "fixture": "basic-controls", "honest_counter": 0,
@@ -666,13 +704,14 @@ def _launch(executable: Path, args: Sequence[str], env: Mapping[str, str], log: 
     return identity
 
 
-def reset_runtime(request_path: Path, arm: str, task: str) -> int:
+def reset_runtime(request_path: Path, arm: str, task: str, trial_index: int) -> int:
+    trial_index = _positive_trial_index(trial_index)
     request = _load_request(request_path)
     root, _repo, _installed = _request_paths(request)
-    state = _state_path(root, arm, task)
+    state = _state_path(root, arm, task, trial_index)
     terminate_owned(state)
-    workspace = _workspace(root, arm, task)
-    evidence = _evidence(root, arm, task)
+    workspace = _workspace(root, arm, task, trial_index)
+    evidence = _evidence(root, arm, task, trial_index)
     for relative in ("artifacts", "runner", "trajectory.json", "codex-events.jsonl"):
         target = descendant(root, workspace / relative)
         if target.is_dir():
@@ -684,10 +723,11 @@ def reset_runtime(request_path: Path, arm: str, task: str) -> int:
     return 0
 
 
-def setup(request_path: Path, arm: str, task: str) -> int:
+def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
+    trial_index = _positive_trial_index(trial_index)
     request = _load_request(request_path)
     root, _repo, _installed = _request_paths(request)
-    state_path = _state_path(root, arm, task)
+    state_path = _state_path(root, arm, task, trial_index)
     if state_path.is_file():
         try:
             state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -696,14 +736,14 @@ def setup(request_path: Path, arm: str, task: str) -> int:
         records = state.get("processes") if state.get("schema_version") == PROCESS_SCHEMA else None
         if isinstance(records, list) and records and all(
             _process_identity(record.get("pid")) == record for record in records
-        ) and _initial_state_ready(root, arm, task):
+        ) and _initial_state_ready(root, arm, task, trial_index):
             return 0
-    reset_runtime(request_path, arm, task)
-    workspace = _workspace(root, arm, task)
-    evidence = _evidence(root, arm, task)
+    reset_runtime(request_path, arm, task, trial_index)
+    workspace = _workspace(root, arm, task, trial_index)
+    evidence = _evidence(root, arm, task, trial_index)
     workspace.mkdir(parents=True, exist_ok=True)
     evidence.mkdir(parents=True, exist_ok=True)
-    logs = descendant(root, f"runtime/{arm}/{task}/logs")
+    logs = descendant(root, f"runtime/{task}/trial{trial_index}/{arm}/logs")
     apps = root / "apps"
     processes: list[dict[str, Any]] = []
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -764,11 +804,12 @@ def setup(request_path: Path, arm: str, task: str) -> int:
     return 0
 
 
-def verify(request_path: Path, arm: str, task: str) -> int:
+def verify(request_path: Path, arm: str, task: str, trial_index: int) -> int:
+    trial_index = _positive_trial_index(trial_index)
     request = _load_request(request_path)
     root, _repo, _installed = _request_paths(request)
-    workspace = _workspace(root, arm, task)
-    evidence = _evidence(root, arm, task)
+    workspace = _workspace(root, arm, task, trial_index)
+    evidence = _evidence(root, arm, task, trial_index)
     runner = workspace / "runner"
     final = runner / "final-state"
     final.mkdir(parents=True, exist_ok=True)
@@ -817,6 +858,101 @@ def _toml_array(values: Iterable[str]) -> str:
     return "[" + ", ".join(_toml_string(value) for value in values) + "]"
 
 
+def _write_immutable_outputs(outputs: Mapping[Path, bytes]) -> None:
+    for path, payload in outputs.items():
+        if path.is_symlink():
+            raise CubError(f"immutable output cannot be a symlink: {path}")
+        if path.exists():
+            if not path.is_file() or path.read_bytes() != payload:
+                raise CubError(f"refusing to overwrite divergent immutable output: {path}")
+    for path, payload in outputs.items():
+        if path.exists():
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", dir=path.parent
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.link(temporary, path, follow_symlinks=False)
+            except FileExistsError:
+                if path.is_symlink() or not path.is_file() or path.read_bytes() != payload:
+                    raise CubError(
+                        f"refusing to overwrite divergent immutable output: {path}"
+                    ) from None
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def _oracle_paths(task: str) -> list[Path]:
+    task_dir = ROOT / task
+    paths = [
+        Path(__file__).resolve(),
+        task_dir / "checker.sh",
+        task_dir / "checker_data/verify.py",
+    ]
+    expected = task_dir / "checker_data/expected.txt"
+    if expected.is_file():
+        paths.append(expected)
+    return paths
+
+
+def _task_plan_identity(task: str) -> dict[str, Any]:
+    task_dir = ROOT / task
+    oracles = _oracle_paths(task)
+    return {
+        "id": f"openbench/computer-use-v0-{task}",
+        "instruction_sha256": _sha256(task_dir / "instruction.md"),
+        "verifier_oracle_sha256": _bytes_sha256(
+            canonical_bytes(
+                [
+                    {"name": path.name, "sha256": _sha256(path)}
+                    for path in oracles
+                ]
+            )
+        ),
+    }
+
+
+def _mcp_plan_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "name": "computer-use-mcp",
+        "version": MCP_VERSION,
+        "bundle_id": identity["bundle_id"],
+        "binary_sha256": identity["binary_sha256"],
+        "signature_sha256": identity["signature_sha256"],
+        "source_revision": identity.get("source_revision", "installed-0.4.1"),
+        "build_stamp_unix": identity["build_stamp_unix"],
+    }
+
+
+def _arm_plan_config(
+    app: Mapping[str, Any], host: Mapping[str, Any], task: str
+) -> dict[str, Any]:
+    return {
+        "native_run_schema": "openbench.native-run.v0",
+        "task": task,
+        "app": {
+            "bundle_id": app["bundle_id"],
+            "version": app["version"],
+            "build": app["build"],
+            "binary_sha256": app["binary_sha256"],
+            "signature_sha256": app["signature_sha256"],
+        },
+        "host": dict(host),
+    }
+
+
 def _host_environment() -> dict[str, Any]:
     os_version = _run(["sw_vers", "-productVersion"], timeout=10).stdout.strip()
     os_build = _run(["sw_vers", "-buildVersion"], timeout=10).stdout.strip()
@@ -853,21 +989,22 @@ def _host_environment() -> dict[str, Any]:
 
 def _config_text(
     *, request_path: Path, request: Mapping[str, Any], arm: str, task: str,
-    mcp: Mapping[str, Any], app: Mapping[str, Any], pilot: bool,
+    trial_index: int, trial_id: str, mcp: Mapping[str, Any],
+    app: Mapping[str, Any], host: Mapping[str, Any], mode: str,
+    matrix: Mapping[str, Any] | None,
 ) -> str:
+    trial_index = _positive_trial_index(trial_index)
     root, _repo, _installed = _request_paths(request)
-    workspace = _workspace(root, arm, task)
-    config_dir = descendant(root, f"configs/{'pilot' if pilot else 'matched'}/{arm}")
-    output = descendant(root, f"results/{'pilot' if pilot else 'matched'}/{arm}/{task}-trial1")
-    results = descendant(root, f"results/{'pilot' if pilot else 'matched'}/{arm}.jsonl")
+    workspace = _workspace(root, arm, task, trial_index)
+    output, results = _result_paths(root, mode, arm, task, trial_index)
     lease = descendant(root, "runtime/native-macos.lock")
-    host = _host_environment()
     task_dir = ROOT / task
     script = Path(__file__).resolve()
     common = [sys.executable, str(script), "--request", str(request_path)]
-    setup_cmd = [*common, "setup", "--arm", arm, "--task", task]
-    reset_cmd = [*common, "reset", "--arm", arm, "--task", task]
-    verify_cmd = [*common, "verify", "--arm", arm, "--task", task]
+    trial_args = ["--arm", arm, "--task", task, "--trial-index", str(trial_index)]
+    setup_cmd = [*common, "setup", *trial_args]
+    reset_cmd = [*common, "reset", *trial_args]
+    verify_cmd = [*common, "verify", *trial_args]
     if task == "basic-controls":
         foreground = FIXTURE_BUNDLES[task]
         forbidden: list[str] = []
@@ -888,19 +1025,25 @@ def _config_text(
         "read_clipboard", "record_skill_start", "record_skill_stop", "run_skill", "save_skill",
         "write_clipboard",
     } - set(tools))
-    revision_label = "pilot" if pilot else "matched-v0"
-    oracle_paths = [str(script), str(task_dir / "checker.sh"), str(task_dir / "checker_data/verify.py")]
-    expected = task_dir / "checker_data/expected.txt"
-    if expected.is_file():
-        oracle_paths.append(str(expected))
+    oracle_paths = [str(path) for path in _oracle_paths(task)]
+    matrix_text = ""
+    if matrix is not None:
+        matrix_text = f'''
+[matrix]
+plan_sha256 = {_toml_string(str(matrix["plan_sha256"]))}
+cell_id = {_toml_string(str(matrix["cell_id"]))}
+cell_sha256 = {_toml_string(str(matrix["cell_sha256"]))}
+config_sha256 = {_toml_string(str(matrix["config_sha256"]))}
+'''
     return f'''schema_version = "openbench.native-run.v0"
-trial_id = "cub-v0-{revision_label}-{arm}-{task}-trial1"
+trial_id = {_toml_string(trial_id)}
 output_dir = {_toml_string(str(output))}
 results_path = {_toml_string(str(results))}
 lease_path = {_toml_string(str(lease))}
 workspace = {_toml_string(str(workspace))}
 atif_path = "trajectory.json"
 verdict_path = "runner/verdict.json"
+{matrix_text}
 
 [task]
 id = {_toml_string(f"openbench/computer-use-v0-{task}")}
@@ -984,7 +1127,17 @@ media_type = {_toml_string(media)}
 '''
 
 
-def generate(request_path: Path, mode: str, arm: str | None, task: str | None) -> int:
+def generate(
+    request_path: Path,
+    mode: str,
+    arm: str | None,
+    task: str | None,
+    *,
+    repetitions: int = 5,
+    trial_index: int = 1,
+) -> int:
+    repetitions = _positive_trial_index(repetitions)
+    trial_index = _positive_trial_index(trial_index)
     request = _load_request(request_path)
     root, _repo, installed = _request_paths(request)
     static = _static_preflight(request)
@@ -993,6 +1146,8 @@ def generate(request_path: Path, mode: str, arm: str | None, task: str | None) -
         raise CubError(f"matched configs require complete identity/TCC proof; blockers: {failed}")
     if mode == "pilot" and (arm is None or task is None):
         raise CubError("pilot generation requires exactly one --arm and --task")
+    if mode == "matched" and (arm is not None or task is not None):
+        raise CubError("matched generation covers all arms/tasks; omit --arm and --task")
     selected_arms = ARMS if mode == "matched" else (arm,)
     selected_tasks = TASKS if mode == "matched" else (task,)
     identities: dict[str, dict[str, Any]] = {}
@@ -1007,40 +1162,178 @@ def generate(request_path: Path, mode: str, arm: str | None, task: str | None) -
         "background-control": root / "apps/BackgroundControlFixture.app",
         "textedit-exact-file": Path("/System/Applications/TextEdit.app"),
     }
-    written = []
-    for selected_arm in selected_arms:
+    host = _host_environment()
+    app_identities = {
+        selected_task: _bundle_info(app_paths[selected_task])
+        for selected_task in selected_tasks
+    }
+    outputs: dict[Path, bytes] = {}
+    cells: list[dict[str, Any]] = []
+    plans: list[dict[str, Any]] = []
+    config_root = descendant(root, f"configs/{mode}")
+    if mode == "matched":
+        harness = {
+            "name": "codex",
+            "version": str(request.get("codex_version", "codex-cli 0.146.1")),
+            "version_source": "native_cli",
+        }
+        model = {
+            "name": "gpt-5.6-sol",
+            "provider": "openai-codex",
+            "revision": "gpt-5.6-sol",
+            "reasoning_effort": "medium",
+        }
         for selected_task in selected_tasks:
-            app_identity = _bundle_info(app_paths[selected_task])
-            config_dir = descendant(root, f"configs/{mode}/{selected_arm}")
-            config_dir.mkdir(parents=True, exist_ok=True)
-            config_path = config_dir / f"{selected_task}-trial1.toml"
-            config_path.write_text(_config_text(
-                request_path=request_path.resolve(), request=request, arm=selected_arm,
-                task=selected_task, mcp=identities[selected_arm], app=app_identity,
-                pilot=mode == "pilot",
-            ), encoding="utf-8")
-            workspace = _workspace(root, selected_arm, selected_task)
-            workspace.mkdir(parents=True, exist_ok=True)
-            written.append(str(config_path))
+            app_identity = app_identities[selected_task]
+            spec = {
+                "comparison_id": f"cub-v0-{selected_task}",
+                "task": _task_plan_identity(selected_task),
+                "harness": harness,
+                "model": model,
+                "arms": [
+                    {
+                        "id": selected_arm,
+                        "mcp": _mcp_plan_identity(identities[selected_arm]),
+                        "config": _arm_plan_config(
+                            app_identity, host, selected_task
+                        ),
+                    }
+                    for selected_arm in selected_arms
+                ],
+                "repetitions": repetitions,
+            }
+            plan = build_native_matrix(**spec)
+            plan_dir = config_root / "plans"
+            spec_path = plan_dir / f"{selected_task}.spec.json"
+            plan_path = plan_dir / f"{selected_task}.plan.json"
+            spec_bytes = canonical_bytes(spec) + b"\n"
+            plan_bytes = canonical_bytes(plan) + b"\n"
+            outputs[spec_path] = spec_bytes
+            outputs[plan_path] = plan_bytes
+            plans.append({
+                "task": selected_task,
+                "spec": str(spec_path),
+                "spec_sha256": _bytes_sha256(spec_bytes),
+                "plan": str(plan_path),
+                "plan_sha256": plan["plan_sha256"],
+                "plan_file_sha256": _bytes_sha256(plan_bytes),
+                "plan_command": [
+                    "obench", "native", "plan", str(spec_path),
+                    "--output", str(plan_path),
+                ],
+            })
+            for cell in plan["schedule"]:
+                selected_arm = cell["arm_id"]
+                current_trial = int(cell["block"])
+                config_path = (
+                    config_root / "cells" / selected_task
+                    / f"trial{current_trial}-{selected_arm}.toml"
+                )
+                config_bytes = _config_text(
+                    request_path=request_path.resolve(),
+                    request=request,
+                    arm=selected_arm,
+                    task=selected_task,
+                    trial_index=current_trial,
+                    trial_id=cell["trial_id"],
+                    mcp=identities[selected_arm],
+                    app=app_identity,
+                    host=host,
+                    mode=mode,
+                    matrix={**cell, "plan_sha256": plan["plan_sha256"]},
+                ).encode("utf-8")
+                outputs[config_path] = config_bytes
+                output_path, results_path = _result_paths(
+                    root, mode, selected_arm, selected_task, current_trial
+                )
+                cells.append({
+                    "task": selected_task,
+                    **{
+                        key: cell[key]
+                        for key in (
+                            "sequence", "block", "position", "arm_id",
+                            "cell_id", "trial_id", "config_sha256", "cell_sha256",
+                        )
+                    },
+                    "trial_index": current_trial,
+                    "matrix_cell_key": f"{selected_task}/{cell['cell_id']}",
+                    "plan_sha256": plan["plan_sha256"],
+                    "config": str(config_path),
+                    "runnable_config_sha256": _bytes_sha256(config_bytes),
+                    "workspace": str(
+                        _workspace(root, selected_arm, selected_task, current_trial)
+                    ),
+                    "evidence": str(
+                        _evidence(root, selected_arm, selected_task, current_trial)
+                    ),
+                    "process_state": str(
+                        _state_path(
+                            root, selected_arm, selected_task, current_trial
+                        )
+                    ),
+                    "output": str(output_path),
+                    "results": str(results_path),
+                    "run_command": ["obench", "native", "run", str(config_path)],
+                })
+    else:
+        selected_arm = str(arm)
+        selected_task = str(task)
+        app_identity = app_identities[selected_task]
+        trial_id = f"cub-v0-pilot-{selected_arm}-{selected_task}-trial{trial_index}"
+        config_path = (
+            config_root / "cells" / selected_task
+            / f"trial{trial_index}-{selected_arm}.toml"
+        )
+        config_bytes = _config_text(
+            request_path=request_path.resolve(),
+            request=request,
+            arm=selected_arm,
+            task=selected_task,
+            trial_index=trial_index,
+            trial_id=trial_id,
+            mcp=identities[selected_arm],
+            app=app_identity,
+            host=host,
+            mode=mode,
+            matrix=None,
+        ).encode("utf-8")
+        outputs[config_path] = config_bytes
+        output_path, results_path = _result_paths(
+            root, mode, selected_arm, selected_task, trial_index
+        )
+        cells.append({
+            "task": selected_task,
+            "arm_id": selected_arm,
+            "trial_index": trial_index,
+            "trial_id": trial_id,
+            "config": str(config_path),
+            "runnable_config_sha256": _bytes_sha256(config_bytes),
+            "workspace": str(
+                _workspace(root, selected_arm, selected_task, trial_index)
+            ),
+            "evidence": str(
+                _evidence(root, selected_arm, selected_task, trial_index)
+            ),
+            "process_state": str(
+                _state_path(root, selected_arm, selected_task, trial_index)
+            ),
+            "output": str(output_path),
+            "results": str(results_path),
+            "run_command": ["obench", "native", "run", str(config_path)],
+        })
     manifest = {
-        "schema_version": "openbench.computer-use-config-set.v1",
+        "schema_version": "openbench.computer-use-config-set.v2",
         "mode": mode,
         "comparable": mode == "matched",
-        "configs": written,
+        "repetitions": repetitions if mode == "matched" else 1,
+        "plans": plans,
+        "cells": cells,
         "source_revision": SOURCE_REVISION,
         "basic_fixture_revision": BASIC_REVISION,
-        "prime_commands": [
-            [
-                sys.executable, str(Path(__file__).resolve()), "--request",
-                str(request_path.resolve()), "setup", "--arm", selected_arm,
-                "--task", selected_task,
-            ]
-            for selected_arm in selected_arms
-            for selected_task in selected_tasks
-        ],
     }
     manifest_path = descendant(root, f"configs/{mode}/manifest.json")
-    manifest_path.write_text(_canonical(manifest) + "\n", encoding="utf-8")
+    outputs[manifest_path] = canonical_bytes(manifest) + b"\n"
+    _write_immutable_outputs(outputs)
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0
 
@@ -1057,10 +1350,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     generate_parser.add_argument("--mode", choices=("matched", "pilot"), required=True)
     generate_parser.add_argument("--arm", choices=ARMS)
     generate_parser.add_argument("--task", choices=TASKS)
+    generate_parser.add_argument(
+        "--repetitions",
+        type=_positive_trial_argument,
+        default=5,
+        help="matched AB/BA repetition count (default: 5)",
+    )
+    generate_parser.add_argument(
+        "--trial-index",
+        type=_positive_trial_argument,
+        default=1,
+        help="explicit pilot trial index (default: 1)",
+    )
     for name in ("setup", "reset", "verify"):
         item = sub.add_parser(name)
         item.add_argument("--arm", choices=ARMS, required=True)
         item.add_argument("--task", choices=TASKS, required=True)
+        item.add_argument(
+            "--trial-index",
+            type=_positive_trial_argument,
+            required=True,
+        )
     args = parser.parse_args(argv)
     try:
         if args.command == "preflight":
@@ -1070,12 +1380,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "probe-permissions":
             return probe_permissions(args.request, args.arm)
         if args.command == "generate":
-            return generate(args.request, args.mode, args.arm, args.task)
+            return generate(
+                args.request,
+                args.mode,
+                args.arm,
+                args.task,
+                repetitions=args.repetitions,
+                trial_index=args.trial_index,
+            )
         if args.command == "setup":
-            return setup(args.request, args.arm, args.task)
+            return setup(args.request, args.arm, args.task, args.trial_index)
         if args.command == "reset":
-            return reset_runtime(args.request, args.arm, args.task)
-        return verify(args.request, args.arm, args.task)
+            return reset_runtime(
+                args.request, args.arm, args.task, args.trial_index
+            )
+        return verify(args.request, args.arm, args.task, args.trial_index)
     except CubError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
