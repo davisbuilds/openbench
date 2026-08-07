@@ -1969,7 +1969,7 @@ def _proxy_evidence(
     if not rows or rows[-1].get("record_type") != "ledger_seal":
         raise NativeRunError("counting proxy ledger is not durably sealed")
     seal = rows[-1]
-    previous_hash = "0" * 64
+    previous_hash = hashlib.sha256(b"").hexdigest()
     for sequence, row in enumerate(rows[:-1], 1):
         if (
             not isinstance(row, dict)

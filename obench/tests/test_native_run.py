@@ -1198,7 +1198,7 @@ media_type = "application/json"
         request = {
             "record_type": "request",
             "sequence": 1,
-            "previous_hash": "0" * 64,
+            "previous_hash": hashlib.sha256(b"").hexdigest(),
             "request_unix_ns": 100,
             "response_unix_ns": 200,
             "duration_ms": 0.1,
