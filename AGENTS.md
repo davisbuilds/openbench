@@ -125,6 +125,11 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
 
 ## Roadmap (priority order)
 
+- **Execution consolidation. [DECIDED Aug 2026]** Harbor owns canonical coding
+  task execution. OpenBench does not retain a competing generic Docker runner.
+  Host-only benchmark families may use an explicit, evidence-compatible native
+  backend when their platform cannot run inside Harbor, such as macOS computer
+  use. See `docs/ideas.md`.
 - **P0 — Package it. [DONE Jul 2026]** `pyproject.toml`, console entry points,
   PyPI name **`obench`** (`pip install obench`, `obench run ...`). Umbrella CLI
   (`run / report / doctor / validate / gate / compare / init / publish / verify /
