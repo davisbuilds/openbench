@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
+import time
 from datetime import datetime, timezone
 import unittest
 from unittest.mock import patch
@@ -25,6 +27,7 @@ from obench.native_macos import (
     SubprocessPhaseRunner,
     WholeRunLease,
 )
+from obench.mcp_stdio_collector import CallLedger
 from obench.native_run import (
     _McpServeOwnerMonitor,
     NativeRunError,
@@ -40,6 +43,7 @@ from obench.native_run import (
     _recheck_process_identity,
     _require_setup_app,
     _require_setup_processes,
+    _verify_mcp_ledger_after_shutdown,
     collector_main,
     load_config,
     run_native,
@@ -88,6 +92,44 @@ class NativeCollectorEntrypointTests(unittest.TestCase):
                 "CUB_MCP_COMMAND",
                 collect.call_args.kwargs["env"],
             )
+
+    def test_waits_for_graceful_mcp_collector_seal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ledger.jsonl"
+            ledger = CallLedger(path, "collector-run-1", "trial-1")
+
+            def seal_later():
+                time.sleep(0.05)
+                ledger.seal({
+                    "returncode": 0,
+                    "integrity_ok": True,
+                    "malformed_frames": 0,
+                    "partial_frames": 0,
+                    "duplicate_request_ids": 0,
+                    "missing_responses": 0,
+                    "input_incomplete": False,
+                })
+
+            thread = threading.Thread(target=seal_later)
+            thread.start()
+            verified = _verify_mcp_ledger_after_shutdown(
+                path, timeout_s=1.0, poll_s=0.01
+            )
+            thread.join()
+
+            self.assertEqual(verified.call_count, 0)
+
+    def test_missing_mcp_collector_seal_is_native_run_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ledger.jsonl"
+            path.write_text("", encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                NativeRunError, "did not seal cleanly"
+            ):
+                _verify_mcp_ledger_after_shutdown(
+                    path, timeout_s=0.0, poll_s=0.01
+                )
 
 
 class FakeFocusMonitor:

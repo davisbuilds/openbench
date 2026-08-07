@@ -32,6 +32,7 @@ from .atif import SCHEMA_VERSION as ATIF_SCHEMA_VERSION, assert_valid_trajectory
 from .mcp_stdio_collector import (
     COMPUTER_USE_TOOLS,
     CallLedger,
+    LedgerIntegrityError,
     collect_stdio,
     verify_ledger,
 )
@@ -1947,6 +1948,34 @@ def _attempt_record(path: Path, value: Mapping[str, Any]) -> None:
     _replace_json(path, value)
 
 
+def _verify_mcp_ledger_after_shutdown(
+    path: Path, *, timeout_s: float = 5.0, poll_s: float = 0.05
+):
+    """Wait briefly for the collector's graceful terminal seal, then verify."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if lines:
+                terminal = json.loads(lines[-1])
+                if (
+                    isinstance(terminal, dict)
+                    and terminal.get("record_type") == "ledger_seal"
+                ):
+                    return verify_ledger(path)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            try:
+                return verify_ledger(path)
+            except (OSError, LedgerIntegrityError) as exc:
+                raise NativeRunError(
+                    f"MCP collector evidence did not seal cleanly: {exc}"
+                ) from exc
+        time.sleep(min(poll_s, remaining))
+
+
 def _record_focus_monitor_diagnostic(
     path: Path, attempt: int, monitor: Any
 ) -> None:
@@ -2357,7 +2386,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                         _empty_mcp_ledger(ledger, collector_run_id, config.trial_id)
                     else:
                         raise NativeRunError("harness did not launch the configured MCP collector")
-                verified_mcp = verify_ledger(ledger)
+                verified_mcp = _verify_mcp_ledger_after_shutdown(ledger)
                 startup_retry = (
                     adapter_result.get("startup_failure") is True
                     and verified_mcp.call_count == 0
