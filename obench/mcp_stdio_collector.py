@@ -513,6 +513,8 @@ class _ProtocolObserver:
         self._buffers = {"request": bytearray(), "response": bytearray()}
         self._discarding = {"request": False, "response": False}
         self._pending: dict[str, _PendingCall] = {}
+        self._other_pending_ids: set[str] = set()
+        self._ambiguous_ids: set[str] = set()
         self._completed_ids: set[str] = set()
         self._lock = threading.Lock()
         self.malformed_frames = 0
@@ -592,14 +594,30 @@ class _ProtocolObserver:
                 self._observe_response(item, len(frame))
 
     def _observe_request(self, message: Mapping[str, Any], frame_bytes: int) -> None:
-        if message.get("method") != "tools/call" or "id" not in message:
+        if "id" not in message or not isinstance(message.get("method"), str):
+            return
+        key = _id_key(message["id"])
+        if message.get("method") != "tools/call":
+            if (
+                key in self._pending
+                or key in self._other_pending_ids
+                or key in self._completed_ids
+            ):
+                self.duplicate_request_ids += 1
+                self._ambiguous_ids.add(key)
+                self._other_pending_ids.discard(key)
+            else:
+                self._other_pending_ids.add(key)
             return
         params = message.get("params")
         if not isinstance(params, dict) or not isinstance(params.get("name"), str):
             self.malformed_frames += 1
             return
-        key = _id_key(message["id"])
-        if key in self._pending or key in self._completed_ids:
+        if key in self._other_pending_ids:
+            self.duplicate_request_ids += 1
+            self._ambiguous_ids.add(key)
+            self._other_pending_ids.discard(key)
+        elif key in self._pending or key in self._completed_ids:
             self.duplicate_request_ids += 1
             return
         now_unix = time.time_ns()
@@ -628,8 +646,13 @@ class _ProtocolObserver:
         if "id" not in message or ("result" not in message and "error" not in message):
             return
         key = _id_key(message["id"])
+        if key in self._ambiguous_ids:
+            return
         call = self._pending.pop(key, None)
         if call is None:
+            if key in self._other_pending_ids:
+                self._other_pending_ids.remove(key)
+                return
             if key in self._completed_ids:
                 self.malformed_frames += 1
             return

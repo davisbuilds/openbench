@@ -263,6 +263,31 @@ class MCPStdioCollectorTests(unittest.TestCase):
         self.assertFalse(result.integrity_ok)
         self.assertEqual(rows[0]["status"], "completed")
 
+    def test_cross_method_request_id_collision_cannot_complete_tool_call(self):
+        fixture = Path(self.tmp.name) / "cross-method-collision.py"
+        fixture.write_text(
+            "import json\n"
+            "import sys\n"
+            "first = json.loads(sys.stdin.buffer.readline())\n"
+            "second = json.loads(sys.stdin.buffer.readline())\n"
+            "response = {'jsonrpc': '2.0', 'id': second['id'], 'result': {'tools': []}}\n"
+            "sys.stdout.buffer.write(json.dumps(response).encode() + b'\\n')\n"
+            "sys.stdout.buffer.flush()\n",
+            encoding="utf-8",
+        )
+        payload = (
+            rpc("tools/call", 15, {"name": "click", "arguments": {}})
+            + rpc("tools/list", 15)
+        )
+        result, output, _, rows = self.run_fixture(
+            payload, name="cross-method.jsonl", fixture=fixture
+        )
+        self.assertIn(b'"tools": []', output)
+        self.assertEqual(result.call_count, 1)
+        self.assertEqual(rows[0]["status"], "missing_response")
+        self.assertEqual(rows[-1]["summary"]["duplicate_request_ids"], 1)
+        self.assertFalse(result.integrity_ok)
+
     def test_argument_digest_is_stable_but_contains_no_raw_values(self):
         arguments = {
             "text": SECRET,
