@@ -8,6 +8,8 @@ input delivery:
 2. Press `pressableButton` so its status is `pressed`.
 3. Select `Fixture Menu Item` so the menu status is `menu`.
 
-Use only the provided computer-use tools. Do not edit fixture state or
-runner-owned focus evidence. Completion requires exact fixture state plus the
-native runner's sealed focus and delivery ledger.
+Only call tools named `mcp__computer_use__*`. Never call `apply_patch`, shell,
+browser, filesystem, or other tools. Do not create artifacts manually or edit
+fixture state or runner-owned focus evidence. OpenBench collects results
+automatically. Completion requires exact fixture state plus the native
+runner's sealed focus and delivery ledger.
