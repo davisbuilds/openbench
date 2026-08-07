@@ -4,6 +4,64 @@ Computer-Use Bench v0 compares multiple MCP configurations while holding one
 task, harness, and model identity fixed. It is a native macOS comparison lane.
 It does not claim Harbor execution and it does not use an LLM judge.
 
+## CLI
+
+Compile a JSON specification into an immutable canonical plan:
+
+```sh
+obench native plan comparison.json --output plan.json
+```
+
+The specification contains exactly `comparison_id`, `task`, `harness`, `model`,
+`arms`, and optional `repetitions`. These fields map directly to
+`build_native_matrix()`.
+
+Create an initial state, then reconcile completed-cell observations into a new
+state artifact:
+
+```sh
+obench native state plan.json --output state-0.json
+obench native state plan.json \
+  --prior-state state-0.json \
+  --observation block1-baseline.json \
+  --output state-1.json
+```
+
+Each observation contains exactly `cell_id`, `trial_id`, `config_sha256`,
+`cell_sha256`, `result_sha256`, and `bundle_sha256`. State updates write a new
+artifact; they do not replace the prior state.
+
+Build a report from strict imported rows, validated bundles, or both:
+
+```sh
+obench native report plan.json \
+  --results results/native.jsonl \
+  --bundle results/bundles/candidate-trial1 \
+  --output report.json
+```
+
+`--results` and `--bundle` are repeatable. All plan, state, and report outputs
+use canonical JSON and atomic immutable creation. Repeating the same command
+against identical output bytes succeeds as `unchanged`; divergent output and
+symlink destinations fail.
+
+Native CLI exit codes are:
+
+- `0`: complete artifact written or already present identically;
+- `2`: usage, input, I/O, state, runner, or divergent-output error;
+- `3`: incomplete report written with missing planned cells surfaced;
+- `4`: report evidence is unsafe or noncomparable; no report is written.
+
+Planned cells are still executed explicitly:
+
+```sh
+obench native run path/to/cell.toml
+```
+
+There is no automatic plan execution command. The matrix API binds comparison
+identity and order but does not bind each cell to a runnable native TOML file,
+so inferring that mapping would make resume behavior ambiguous.
+
 ## Plan
 
 `obench.native_matrix.build_native_matrix()` creates the immutable comparison
