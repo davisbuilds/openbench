@@ -1203,19 +1203,17 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         )
         for index, record in enumerate(focus_records)
     ]
-    focus_index = 0
-    focus_state: str | None = None
     for index, call in enumerate(mcp_records, 1):
         call_time = datetime.fromtimestamp(
             call["request_unix_ns"] / 1_000_000_000,
             tz=started.tzinfo,
         )
-        while (
-            focus_index < len(focus_timeline)
-            and focus_timeline[focus_index][0] <= call_time
-        ):
-            focus_state = focus_timeline[focus_index][1]
-            focus_index += 1
+        prior_focus = [
+            state
+            for observed, state in focus_timeline
+            if observed <= call_time
+        ]
+        focus_state = prior_focus[-1] if prior_focus else None
         if focus_state != "target_focused":
             raise _fail(
                 f"mcp/ledger.jsonl:{index}.request_unix_ns",
@@ -1231,19 +1229,12 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             response_ns / 1_000_000_000,
             tz=started.tzinfo,
         )
-        replay_index = focus_index
-        replay_state = focus_state
-        while (
-            replay_index < len(focus_timeline)
-            and focus_timeline[replay_index][0] <= response_time
-        ):
-            replay_state = focus_timeline[replay_index][1]
-            if replay_state != "target_focused":
+        for observed, replay_state in focus_timeline:
+            if call_time < observed <= response_time and replay_state != "target_focused":
                 raise _fail(
                     f"mcp/ledger.jsonl:{index}.response_unix_ns",
                     "MCP call overlapped focus yielded to human",
                 )
-            replay_index += 1
 
     outcome = result["outcome"]
     success = result["status"] == "completed" and outcome["checker_exit"] == 0

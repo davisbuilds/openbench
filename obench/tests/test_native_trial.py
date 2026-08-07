@@ -581,6 +581,90 @@ class NativeTrialTests(unittest.TestCase):
         with self.assertRaisesRegex(NativeTrialError, "overlapped focus yielded"):
             load_native_trial(yielded)
 
+        concurrent = self.bundle("happy")
+        mcp_path = concurrent / "mcp/ledger.jsonl"
+        mcp_path.unlink()
+        ledger = CallLedger(
+            mcp_path,
+            "native-cub-v0-run",
+            "native-cub-v0-trial1",
+        )
+        base_call = {
+            "tool": "set_value",
+            "status": "completed",
+            "request_id_type": "str",
+            "argument_digest": "sha256:" + HEX_B,
+            "request_bytes": 100,
+            "response_bytes": 80,
+            "duration_ms": 500.0,
+            "tool_is_error": False,
+            "jsonrpc_error": {"present": False, "code": None},
+            "computer_use_meta": {
+                "error": None,
+                "outcome": None,
+                "focus": None,
+                "delivery": None,
+            },
+            "process_returncode": None,
+        }
+        ledger.append_call({
+            **base_call,
+            "request_unix_ns": 1786017603000000000,
+            "response_unix_ns": 1786017603500000000,
+        })
+        ledger.append_call({
+            **base_call,
+            "request_unix_ns": 1786017601000000000,
+            "response_unix_ns": 1786017604000000000,
+            "duration_ms": 3000.0,
+        })
+        ledger.seal({
+            "returncode": 0,
+            "integrity_ok": True,
+            "malformed_frames": 0,
+            "partial_frames": 0,
+            "duplicate_request_ids": 0,
+            "missing_responses": 0,
+            "input_incomplete": False,
+        })
+        lock_sha256 = _sha256(concurrent / "lock.json")
+        _write_ledger(
+            concurrent,
+            "focus",
+            "native-cub-v0-trial1",
+            lock_sha256,
+            [
+                ("focus_sample", {
+                    "state": "target_focused",
+                    "frontmost_bundle_id": "com.openbench.fixture",
+                    "target_bundle_id": "com.openbench.fixture",
+                }),
+                ("focus_yield", {
+                    "state": "yielded_to_human",
+                    "frontmost_bundle_id": "com.apple.finder",
+                    "target_bundle_id": "com.openbench.fixture",
+                }),
+                ("focus_sample", {
+                    "state": "target_focused",
+                    "frontmost_bundle_id": "com.openbench.fixture",
+                    "target_bundle_id": "com.openbench.fixture",
+                }),
+            ],
+            timestamps=[
+                "2026-08-06T12:00:00+00:00",
+                "2026-08-06T12:00:02+00:00",
+                "2026-08-06T12:00:02.500000+00:00",
+            ],
+        )
+        result_path = concurrent / "result.json"
+        result = json.loads(result_path.read_text())
+        result["mcp_event_count"] = 2
+        result["focus_event_count"] = 3
+        _write_json(result_path, result)
+        _reseal_manifest(concurrent)
+        with self.assertRaisesRegex(NativeTrialError, "overlapped focus yielded"):
+            load_native_trial(concurrent)
+
     def test_trial_index_and_verifier_types_are_unambiguous(self):
         ambiguous = self.root / "ambiguous"
         _build_bundle(
