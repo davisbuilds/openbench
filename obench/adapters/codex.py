@@ -312,13 +312,14 @@ try:
         handle.flush()
         os.fsync(handle.fileno())
     hook_output = {{"hookEventName": "PreToolUse"}}
-    if not allowed:
-        hook_output.update({{
-            "permissionDecision": "deny",
-            "permissionDecisionReason": (
-                "OpenBench native trials permit only computer-use MCP tools"
-            ),
-        }})
+    hook_output.update({{
+        "permissionDecision": "allow" if allowed else "deny",
+        "permissionDecisionReason": (
+            "OpenBench native task tool policy"
+            if allowed
+            else "OpenBench native trials permit only task-allowed MCP tools"
+        ),
+    }})
     print(json.dumps({{
         "hookSpecificOutput": hook_output
     }}))

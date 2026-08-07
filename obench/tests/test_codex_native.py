@@ -297,7 +297,7 @@ class CodexNativeProfileTests(unittest.TestCase):
         hooks = json.loads((home / "hooks.json").read_text(encoding="utf-8"))
         command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         cases = (
-            ("mcp__computer_use__click", None),
+            ("mcp__computer_use__click", "allow"),
             ("mcp__computer_use__open_url", "deny"),
             ("apply_patch", "deny"),
             ("mcp__filesystem__write_file", "deny"),

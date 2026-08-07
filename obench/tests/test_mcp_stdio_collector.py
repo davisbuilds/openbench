@@ -7,6 +7,7 @@ import io
 import json
 import os
 import select
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -228,6 +229,43 @@ class MCPStdioCollectorTests(unittest.TestCase):
             collector._command_sha256(command),
         )
         self.assertEqual(owner_path.stat().st_mode & 0o777, 0o600)
+
+    def test_sigterm_from_mcp_client_gracefully_seals_ledger(self):
+        ledger_path = Path(self.tmp.name) / "signal-ledger.jsonl"
+        owner_path = Path(self.tmp.name) / "signal-owner.json"
+        program = f"""
+import sys
+from obench.mcp_stdio_collector import collect_stdio
+result = collect_stdio(
+    [sys.executable, {str(self.fixture)!r}],
+    ledger_path={str(ledger_path)!r},
+    owner_path={str(owner_path)!r},
+    run_id="run-signal",
+    trial_id="trial-signal",
+    stdin=sys.stdin.buffer,
+    stdout=sys.stdout.buffer,
+    stderr=sys.stderr.buffer,
+)
+raise SystemExit(result.returncode)
+"""
+        process = subprocess.Popen(
+            [sys.executable, "-c", textwrap.dedent(program)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=Path(__file__).parents[2],
+        )
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not owner_path.exists():
+            time.sleep(0.01)
+        self.assertTrue(owner_path.exists())
+
+        process.terminate()
+        _stdout, stderr = process.communicate(timeout=5)
+
+        self.assertEqual(process.returncode, 0, stderr.decode(errors="replace"))
+        verified = collector.verify_ledger(ledger_path)
+        self.assertTrue(verified.integrity_ok)
 
     def test_buffered_live_input_is_forwarded_before_eof(self):
         input_read_fd, input_write_fd = os.pipe()

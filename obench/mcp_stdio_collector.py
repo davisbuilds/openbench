@@ -835,6 +835,7 @@ def collect_stdio(
     failures_lock = threading.Lock()
     input_stopped = threading.Event()
     input_processing_lock = threading.Lock()
+    previous_signal_handlers: dict[int, Any] = {}
 
     def kill_owned_processes() -> None:
         active_process = process
@@ -857,6 +858,24 @@ def collect_stdio(
             failures.append(exc)
         if kill_processes:
             kill_owned_processes()
+
+    def request_graceful_shutdown(signum: int, _frame: Any) -> None:
+        input_stopped.set()
+        try:
+            fileno = stdin.fileno()
+        except (AttributeError, OSError):
+            fileno = None
+        if isinstance(fileno, int) and fileno >= 0:
+            try:
+                os.close(fileno)
+            except OSError:
+                pass
+        active_process = process
+        if active_process is not None and active_process.stdin is not None:
+            try:
+                active_process.stdin.close()
+            except (BrokenPipeError, OSError, ValueError):
+                pass
 
     try:
         if owner_path is not None:
@@ -884,6 +903,10 @@ def collect_stdio(
         assert process.stdin is not None
         assert process.stdout is not None
         assert process.stderr is not None
+        if threading.current_thread() is threading.main_thread():
+            for signum in (signal.SIGTERM, signal.SIGINT):
+                previous_signal_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, request_graceful_shutdown)
 
         def relay_input() -> None:
             try:
@@ -903,7 +926,7 @@ def collect_stdio(
             finally:
                 try:
                     process.stdin.close()
-                except BrokenPipeError:
+                except (BrokenPipeError, OSError, ValueError):
                     pass
 
         def relay_output() -> None:
@@ -985,6 +1008,9 @@ def collect_stdio(
             process.wait()
         ledger.abort()
         raise
+    finally:
+        for signum, handler in previous_signal_handlers.items():
+            signal.signal(signum, handler)
 
 
 def verify_ledger(path: str | os.PathLike[str]) -> LedgerVerification:
