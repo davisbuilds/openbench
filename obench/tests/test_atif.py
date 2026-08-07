@@ -216,6 +216,27 @@ class ATIFTests(unittest.TestCase):
         self.assertEqual(traj["final_metrics"]["total_completion_tokens"], 6)
         self.assertEqual(traj["final_metrics"]["extra"]["reasoning_tokens"], 2)
 
+    def test_codex_native_mcp_events_preserve_identity_and_redact_payloads(self):
+        fixture = Path(__file__).parent / "fixtures" / "codex_native_mcp.jsonl"
+        traj = convert_file(fixture)
+
+        self.assertEqual(validate_trajectory(traj), [])
+        self.assertEqual(traj["agent"]["model_name"], "gpt-5.6-sol")
+        self.assertEqual(traj["extra"]["turn_count"], 2)
+        self.assertEqual(traj["final_metrics"]["total_prompt_tokens"], 20)
+        self.assertEqual(traj["final_metrics"]["total_completion_tokens"], 7)
+        call = traj["steps"][0]["tool_calls"][0]
+        self.assertEqual(call["tool_call_id"], "item_mcp_1")
+        self.assertEqual(call["function_name"], "mcp__computer-use__click")
+        self.assertEqual(call["arguments"], {"redacted": True})
+        self.assertTrue(call["extra"]["arguments_redacted"])
+        observation = traj["steps"][0]["observation"]["results"][0]
+        self.assertEqual(observation["source_call_id"], "item_mcp_1")
+        self.assertEqual(observation["content"], "[MCP result redacted]")
+        serialized = json.dumps(traj)
+        self.assertNotIn("clicked secret target", serialized)
+        self.assertNotIn('"x": 420', serialized)
+
     def test_codex_incomplete_tool_is_not_dropped(self):
         path = self._write("codex_terminal-bench_task_model_trial1.txt", "\n".join([
             "# transcript codex:terminal-bench/task:model:trial1",

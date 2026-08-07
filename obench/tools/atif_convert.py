@@ -193,8 +193,32 @@ def _base(meta: dict[str, Any], name: str, events: list[Any]) -> dict[str, Any]:
     }
 
 
+def convert_codex_events(
+    events: Iterable[Any],
+    *,
+    model: str,
+    source_path: str,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Convert an in-memory Codex JSONL stream without persisting its contents."""
+    event_list = list(events)
+    meta: dict[str, Any] = {
+        "harness": "codex",
+        "model": model,
+        "path": source_path,
+        "stem": Path(source_path).stem,
+    }
+    if session_id:
+        meta["run_id"] = session_id
+    return _convert_codex_events(meta, event_list)
+
+
 def convert_codex(path: Path) -> dict[str, Any]:
     meta, events = _read_transcript(path)
+    return _convert_codex_events(meta, events)
+
+
+def _convert_codex_events(meta: dict[str, Any], events: list[Any]) -> dict[str, Any]:
     traj = _base(meta, "codex", events)
     thread_id = next((e.get("thread_id") for e in events if isinstance(e, dict) and e.get("type") == "thread.started"), None)
     if thread_id:
@@ -203,6 +227,7 @@ def convert_codex(path: Path) -> dict[str, Any]:
     pending_agent_step_indexes: list[int] = []
     started_item_steps: dict[str, int] = {}
     previous_usage: dict[str, Any] | None = None
+    turn_count = 0
 
     def usage_delta(current: dict[str, Any]) -> dict[str, Any]:
         nonlocal previous_usage
@@ -274,17 +299,53 @@ def convert_codex(path: Path) -> dict[str, Any]:
                 ],
                 "observation": {"results": [result]},
             }
+        if typ == "mcp_tool_call":
+            server = str(item.get("server") or item.get("server_name") or "mcp")
+            tool = str(item.get("tool") or item.get("tool_name") or "tool")
+            status = "incomplete" if incomplete else item.get("status") or (
+                "error" if item.get("error") is not None else "completed"
+            )
+            result = {
+                "source_call_id": call_id,
+                "content": "" if incomplete else "[MCP result redacted]",
+                "extra": {
+                    "status": status,
+                    "incomplete": incomplete,
+                    "content_redacted": not incomplete,
+                },
+            }
+            return {
+                "step_id": step_id,
+                "source": "agent",
+                "message": "",
+                "llm_call_count": 1,
+                "model_name": meta.get("model"),
+                "tool_calls": [
+                    {
+                        "tool_call_id": call_id,
+                        "function_name": f"mcp__{server}__{tool}",
+                        "arguments": {"redacted": True},
+                        "extra": {
+                            "server": server,
+                            "tool": tool,
+                            "arguments_redacted": True,
+                        },
+                    }
+                ],
+                "observation": {"results": [result]},
+            }
         raise ValueError(f"unsupported codex tool item type: {typ!r}")
 
-    def append_or_update_codex_tool_step(item: dict[str, Any], *, incomplete: bool) -> None:
+    def append_or_update_codex_tool_step(item: dict[str, Any], *, incomplete: bool) -> int:
         item_id = item.get("id")
         if isinstance(item_id, str) and item_id in started_item_steps:
             index = started_item_steps.pop(item_id)
             steps[index] = build_codex_tool_step(item, incomplete=incomplete, step_id=steps[index]["step_id"])
-            return
+            return index
         steps.append(build_codex_tool_step(item, incomplete=incomplete, step_id=len(steps) + 1))
         if incomplete and isinstance(item_id, str):
             started_item_steps[item_id] = len(steps) - 1
+        return len(steps) - 1
 
     for event in events:
         if not isinstance(event, dict):
@@ -292,10 +353,11 @@ def convert_codex(path: Path) -> dict[str, Any]:
         etype = event.get("type")
         item = event.get("item") if isinstance(event.get("item"), dict) else None
         if etype == "item.started" and item:
-            if item.get("type") in {"command_execution", "file_change"}:
+            if item.get("type") in {"command_execution", "file_change", "mcp_tool_call"}:
                 append_or_update_codex_tool_step(item, incomplete=True)
             continue
         if etype == "turn.completed" and isinstance(event.get("usage"), dict):
+            turn_count += 1
             usage = usage_delta(event["usage"])
             if pending_agent_step_indexes:
                 steps[pending_agent_step_indexes[-1]]["metrics"] = _metric_from_openbench_usage(
@@ -307,15 +369,18 @@ def convert_codex(path: Path) -> dict[str, Any]:
             continue
         typ = item.get("type")
         if typ == "agent_message":
-            step = {"step_id": len(steps) + 1, "source": "agent", "message": item.get("text") or "", "llm_call_count": 1, "extra": {"codex_item_id": item.get("id")}}
+            step = {"step_id": len(steps) + 1, "source": "agent", "message": item.get("text") or "", "llm_call_count": 1, "model_name": meta.get("model"), "extra": {"codex_item_id": item.get("id")}}
             steps.append(step)
             pending_agent_step_indexes.append(len(steps) - 1)
-        elif typ in {"command_execution", "file_change"}:
-            append_or_update_codex_tool_step(item, incomplete=False)
+        elif typ in {"command_execution", "file_change", "mcp_tool_call"}:
+            index = append_or_update_codex_tool_step(item, incomplete=False)
+            if typ == "mcp_tool_call":
+                pending_agent_step_indexes.append(index)
     if not steps:
-        raise ValueError(f"{path}: no recognized codex trajectory events")
+        raise ValueError(f"{meta.get('path')}: no recognized codex trajectory events")
     traj["steps"] = steps
     traj["final_metrics"] = _final_metrics(traj["steps"])
+    traj["extra"]["turn_count"] = turn_count
     return traj
 
 
