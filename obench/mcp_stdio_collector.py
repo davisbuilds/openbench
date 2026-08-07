@@ -93,6 +93,38 @@ CHAIN_RUNGS = frozenset({
     "child-press",
     "ancestor-press",
 })
+COMPUTER_USE_TOOLS = frozenset({
+    "batch",
+    "click",
+    "click_menu_item",
+    "delete_skill",
+    "drag",
+    "find",
+    "get_app_state",
+    "get_skill",
+    "health_report",
+    "list_apps",
+    "list_skills",
+    "list_windows",
+    "manage_window",
+    "open_app",
+    "open_url",
+    "page",
+    "perform_secondary_action",
+    "press_key",
+    "read_clipboard",
+    "read_text",
+    "record_skill_start",
+    "record_skill_stop",
+    "run_skill",
+    "save_skill",
+    "scroll",
+    "select_text",
+    "set_value",
+    "type_text",
+    "wait_for",
+    "write_clipboard",
+})
 OUTCOME_VERIFICATION_FLAGS = frozenset({
     "target_relocated",
     "before_selected",
@@ -515,7 +547,11 @@ class _ProtocolObserver:
         now_mono = time.monotonic_ns()
         self._pending[key] = _PendingCall(
             request_id=message["id"],
-            tool=params["name"],
+            tool=(
+                params["name"]
+                if params["name"] in COMPUTER_USE_TOOLS
+                else "<unrecognized>"
+            ),
             argument_digest=normalized_argument_digest(params.get("arguments", {})),
             request_bytes=frame_bytes,
             request_unix_ns=now_unix,
@@ -629,6 +665,7 @@ def collect_stdio(
     failures: list[BaseException] = []
     failures_lock = threading.Lock()
     input_stopped = threading.Event()
+    input_processing_lock = threading.Lock()
 
     def kill_owned_processes() -> None:
         active_process = process
@@ -670,11 +707,12 @@ def collect_stdio(
         def relay_input() -> None:
             try:
                 while chunk := stdin.read(64 * 1024):
-                    if input_stopped.is_set():
-                        return
-                    payload = bytes(chunk)
-                    observer.feed("request", payload)
-                    _write_all(process.stdin, payload)
+                    with input_processing_lock:
+                        if input_stopped.is_set():
+                            return
+                        payload = bytes(chunk)
+                        observer.feed("request", payload)
+                        _write_all(process.stdin, payload)
             except BrokenPipeError:
                 if not input_stopped.is_set() and process.poll() is None:
                     record_failure(BrokenPipeError("MCP child stdin closed unexpectedly"))
@@ -719,6 +757,8 @@ def collect_stdio(
                 continue
         input_stopped.set()
         kill_owned_processes()
+        with input_processing_lock:
+            pass
         output_thread.join(timeout=1.0)
         stderr_thread.join(timeout=1.0)
         input_thread.join(timeout=0.1)

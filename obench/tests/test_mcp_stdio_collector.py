@@ -246,6 +246,14 @@ class MCPStdioCollectorTests(unittest.TestCase):
             collector.normalized_argument_digest(changed_values),
         )
 
+    def test_unrecognized_tool_name_is_not_persisted(self):
+        request = rpc(
+            "tools/call", 11, {"name": SECRET, "arguments": {}}
+        )
+        result, _, _, rows = self.run_fixture(request, name="safe-tool.jsonl")
+        self.assertNotIn(SECRET.encode(), result.ledger_path.read_bytes())
+        self.assertEqual(rows[0]["tool"], "<unrecognized>")
+
     def test_sensitive_meta_is_reduced_to_safe_categories_and_booleans(self):
         request = rpc(
             "tools/call", 6, {"name": "sensitive_meta", "arguments": {}}
