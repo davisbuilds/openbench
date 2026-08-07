@@ -519,6 +519,30 @@ app.run()
 '''
 
 
+def _build_manifest(source_app: Path, apps: Path) -> dict[str, Any]:
+    return {
+        "schema_version": "openbench.computer-use-build.v1",
+        "basic_fixture_revision": BASIC_REVISION,
+        "source_revision": SOURCE_REVISION,
+        "source_mcp": _bundle_info(source_app),
+        "fixtures": {
+            task: _bundle_info(app)
+            for task, app in (
+                ("basic-controls", apps / "ComputerUseFixture.app"),
+                (
+                    "background-control",
+                    apps / "BackgroundControlFixture.app",
+                ),
+                ("guard", apps / "FocusGuard.app"),
+                (
+                    "textedit-exact-file",
+                    Path("/System/Applications/TextEdit.app"),
+                ),
+            )
+        },
+    }
+
+
 def build(request_path: Path) -> int:
     request = _load_request(request_path)
     root, repo, _installed = _request_paths(request)
@@ -578,20 +602,7 @@ def build(request_path: Path) -> int:
     source_app = apps / "OpenBench Computer Use MCP Source.app"
     if Path(str(build_result.get("installed_bundle"))).resolve() != source_app.resolve():
         raise CubError("source build installed an unexpected app bundle")
-    manifest = {
-        "schema_version": "openbench.computer-use-build.v1",
-        "basic_fixture_revision": BASIC_REVISION,
-        "source_revision": SOURCE_REVISION,
-        "source_mcp": _bundle_info(source_app),
-        "fixtures": {
-            task: _bundle_info(apps / name)
-            for task, name in (
-                ("basic-controls", "ComputerUseFixture.app"),
-                ("background-control", "BackgroundControlFixture.app"),
-                ("guard", "FocusGuard.app"),
-            )
-        },
-    }
+    manifest = _build_manifest(source_app, apps)
     manifest_path = root / "build-manifest.json"
     manifest_path.write_text(_canonical(manifest) + "\n", encoding="utf-8")
     print(json.dumps({"build_manifest": str(manifest_path)}, sort_keys=True))

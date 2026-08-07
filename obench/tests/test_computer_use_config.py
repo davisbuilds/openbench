@@ -215,6 +215,30 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertNotEqual(first["binary_sha256"], second["binary_sha256"])
         self.assertNotEqual(first["signature_sha256"], second["signature_sha256"])
 
+    def test_build_manifest_binds_system_textedit_identity(self):
+        apps = self.run_root / "apps"
+        source = apps / "OpenBench Computer Use MCP Source.app"
+        with mock.patch.object(
+            cub,
+            "_bundle_info",
+            side_effect=lambda app: {"app": str(app)},
+        ):
+            manifest = cub._build_manifest(source, apps)
+
+        self.assertEqual(
+            manifest["fixtures"]["textedit-exact-file"]["app"],
+            "/System/Applications/TextEdit.app",
+        )
+        self.assertEqual(
+            set(manifest["fixtures"]),
+            {
+                "basic-controls",
+                "background-control",
+                "guard",
+                "textedit-exact-file",
+            },
+        )
+
     def test_wrap_app_refuses_stale_executable_with_matching_bundle_metadata(self):
         binary = self.base / "fixture"
         binary.write_bytes(b"new")
