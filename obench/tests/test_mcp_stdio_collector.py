@@ -33,6 +33,9 @@ for raw in sys.stdin.buffer:
         continue
     if message.get("method") == "tools/call":
         name = message["params"]["name"]
+        duplicate_response = (
+            message["params"].get("arguments", {}).get("duplicate_response") is True
+        )
         if name == "crash":
             sys.exit(23)
         if name == "rpc_error":
@@ -100,6 +103,10 @@ for raw in sys.stdin.buffer:
         sys.stdout.buffer.write(
             json.dumps(response, separators=(",", ":")).encode() + b"\n"
         )
+        if duplicate_response:
+            sys.stdout.buffer.write(
+                json.dumps(response, separators=(",", ":")).encode() + b"\n"
+            )
     else:
         sys.stdout.buffer.write(raw)
     sys.stdout.buffer.flush()
@@ -235,6 +242,26 @@ class MCPStdioCollectorTests(unittest.TestCase):
             rows[0]["computer_use_meta"]["error"]["code"], "ELEMENT_NOT_FOUND"
         )
         self.assertEqual(rows[1]["jsonrpc_error"], {"present": True, "code": -32001})
+
+    def test_duplicate_tool_response_is_forwarded_but_non_clean(self):
+        request = rpc(
+            "tools/call",
+            14,
+            {
+                "name": "click",
+                "arguments": {"duplicate_response": True},
+            },
+        )
+        result, output, _, rows = self.run_fixture(
+            request, name="duplicate-response.jsonl"
+        )
+        response_lines = output.splitlines()
+        self.assertEqual(len(response_lines), 2)
+        self.assertEqual(response_lines[0], response_lines[1])
+        self.assertEqual(result.call_count, 1)
+        self.assertEqual(result.malformed_frames, 1)
+        self.assertFalse(result.integrity_ok)
+        self.assertEqual(rows[0]["status"], "completed")
 
     def test_argument_digest_is_stable_but_contains_no_raw_values(self):
         arguments = {

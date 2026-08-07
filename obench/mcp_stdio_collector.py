@@ -513,6 +513,7 @@ class _ProtocolObserver:
         self._buffers = {"request": bytearray(), "response": bytearray()}
         self._discarding = {"request": False, "response": False}
         self._pending: dict[str, _PendingCall] = {}
+        self._completed_ids: set[str] = set()
         self._lock = threading.Lock()
         self.malformed_frames = 0
         self.partial_frames = 0
@@ -598,7 +599,7 @@ class _ProtocolObserver:
             self.malformed_frames += 1
             return
         key = _id_key(message["id"])
-        if key in self._pending:
+        if key in self._pending or key in self._completed_ids:
             self.duplicate_request_ids += 1
             return
         now_unix = time.time_ns()
@@ -626,9 +627,13 @@ class _ProtocolObserver:
     def _observe_response(self, message: Mapping[str, Any], frame_bytes: int) -> None:
         if "id" not in message or ("result" not in message and "error" not in message):
             return
-        call = self._pending.pop(_id_key(message["id"]), None)
+        key = _id_key(message["id"])
+        call = self._pending.pop(key, None)
         if call is None:
+            if key in self._completed_ids:
+                self.malformed_frames += 1
             return
+        self._completed_ids.add(key)
         now_unix = time.time_ns()
         now_mono = time.monotonic_ns()
         if "error" in message:
