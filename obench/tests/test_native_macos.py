@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 import unittest
@@ -18,6 +19,7 @@ from obench.native_macos import (
     MacOSFocusMonitor,
     MacOSSessionReader,
     NSWorkspaceActivationEventSource,
+    NativeMacOSError,
     NativeMacOSHelperResolver,
     PhaseName,
     PhaseSpec,
@@ -379,6 +381,41 @@ class NativeHelperProtocolTests(unittest.TestCase):
             with self.assertRaisesRegex(PreflightEvidenceError, "requires swiftc"):
                 resolver.resolve()
 
+    def test_resolver_rebuilds_invalid_cached_helper(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "helper.swift"
+            source.write_text("// fixture", encoding="utf-8")
+            compile_calls = []
+
+            def command_runner(argv, **kwargs):
+                if argv[0] == "/usr/bin/swiftc":
+                    compile_calls.append(argv)
+                    output = Path(argv[argv.index("-o") + 1])
+                    output.write_text("#!/bin/sh\n", encoding="utf-8")
+                    output.chmod(0o755)
+                    return subprocess.CompletedProcess(argv, 0, "", "")
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    json.dumps({"protocolVersion": 1, "kind": "protocol"}),
+                    "",
+                )
+
+            resolver = NativeMacOSHelperResolver(
+                source_path=source,
+                cache_dir=root / "cache",
+                command_runner=command_runner,
+                which=lambda name: "/usr/bin/swiftc",
+                platform_reader=lambda: "Darwin",
+                machine_reader=lambda: "arm64",
+            )
+            target = resolver.resolve()
+            target.chmod(0o600)
+            self.assertEqual(resolver.resolve(), target)
+            self.assertTrue(os.access(target, os.X_OK))
+            self.assertEqual(len(compile_calls), 2)
+
     def test_resolver_rejects_unknown_prebuilt_protocol(self):
         with tempfile.TemporaryDirectory() as temp:
             helper = Path(temp) / "helper"
@@ -466,6 +503,59 @@ class NativeHelperProtocolTests(unittest.TestCase):
             source.stop()
             self.assertEqual(len(events), 1)
             self.assertEqual(events[0].bundle_identifier, "com.example.Target")
+            self.assertIsNone(source.error)
+
+    def test_focus_source_blocks_restart_until_reader_stops(self):
+        with tempfile.TemporaryDirectory() as temp:
+            helper = Path(temp) / "focus-helper"
+            message = (
+                "{'protocolVersion': 1, 'kind': 'focus', "
+                "'bundleIdentifier': 'com.example.Target', "
+                "'applicationName': 'Target', 'pid': 123}"
+            )
+            helper.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, time\n"
+                f"message = {message}\n"
+                "print(json.dumps(message), flush=True)\n"
+                "time.sleep(0.05)\n"
+                "print(json.dumps(message), flush=True)\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+
+            class Resolver:
+                def resolve(inner_self):
+                    return helper
+
+            entered = threading.Event()
+            release = threading.Event()
+            count = 0
+
+            def callback(event):
+                nonlocal count
+                count += 1
+                if count == 2:
+                    entered.set()
+                    release.wait(timeout=5)
+
+            source = NSWorkspaceActivationEventSource(
+                helper_resolver=Resolver(),
+                startup_timeout_s=2,
+            )
+            source.start(callback)
+            self.assertTrue(entered.wait(timeout=2))
+            with self.assertRaisesRegex(
+                NativeMacOSError, "reader did not stop"
+            ):
+                source.stop()
+            with self.assertRaisesRegex(RuntimeError, "already started"):
+                source.start(callback)
+            release.set()
+            source.stop()
+            source.start(lambda event: None)
+            source.stop()
             self.assertIsNone(source.error)
 
 

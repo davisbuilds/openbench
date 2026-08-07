@@ -527,12 +527,25 @@ class NativeMacOSHelperResolver:
         target_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(target_dir, 0o700)
         with WholeRunLease(target_dir / ".build.lock", blocking=True):
-            if not target.is_file():
+            had_cached_target = target.is_file()
+            rebuild = not had_cached_target
+            if not rebuild:
+                try:
+                    self._probe(target)
+                    return target
+                except PreflightEvidenceError:
+                    rebuild = True
+            if rebuild:
                 swiftc = self.which("swiftc")
                 if swiftc is None:
+                    reason = (
+                        "cached native macOS helper is invalid, and rebuilding"
+                        if had_cached_target
+                        else "building the native macOS helper"
+                    )
                     raise PreflightEvidenceError(
-                        "native macOS helper requires swiftc from the Xcode "
-                        "Command Line Tools; no compiler was found on PATH"
+                        f"{reason} requires swiftc from the Xcode Command Line "
+                        "Tools; no compiler was found on PATH"
                     )
                 temporary = target_dir / f".native-macos-helper-{uuid.uuid4().hex}"
                 try:
@@ -564,7 +577,7 @@ class NativeMacOSHelperResolver:
                         temporary.unlink()
                     except FileNotFoundError:
                         pass
-        self._probe(target)
+            self._probe(target)
         return target
 
 
@@ -862,8 +875,8 @@ class MacOSFocusMonitor:
     def stop(self) -> None:
         if not self._started:
             return
-        self._started = False
         self.event_source.stop()
+        self._started = False
         self.require_healthy()
 
     def __enter__(self) -> "MacOSFocusMonitor":
@@ -957,7 +970,8 @@ class NSWorkspaceActivationEventSource:
                 callback(self._parse_focus_event(line))
                 self._ready.set()
         except BaseException as exc:
-            self._set_error(exc)
+            if not self._stopping.is_set():
+                self._set_error(exc)
             if process.poll() is None:
                 process.terminate()
 
@@ -1008,7 +1022,7 @@ class NSWorkspaceActivationEventSource:
             ) from error
 
     def stop(self) -> None:
-        process, self._process = self._process, None
+        process = self._process
         if process is None:
             return
         self._stopping.set()
@@ -1029,9 +1043,14 @@ class NSWorkspaceActivationEventSource:
             process.stdout.close()
         if self._reader_thread is not None:
             self._reader_thread.join(timeout=1)
-        self._reader_thread = None
+            if self._reader_thread.is_alive():
+                raise NativeMacOSError(
+                    "native focus helper reader did not stop; restart is blocked"
+                )
         if self._stderr_capture is not None:
             self._stderr_capture.finish(1)
+        self._process = None
+        self._reader_thread = None
         self._stderr_capture = None
 
 
