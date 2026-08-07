@@ -169,6 +169,7 @@ class CollectionResult:
     malformed_frames: int
     partial_frames: int
     missing_responses: int
+    relay_failures: int
     input_incomplete: bool
 
 
@@ -357,12 +358,14 @@ def _privacy_safe_meta(metadata: Any) -> dict[str, Any]:
 def _validated_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
     normalized = dict(summary)
     normalized.setdefault("input_incomplete", False)
+    normalized.setdefault("relay_failures", 0)
     integer_fields = (
         "returncode",
         "malformed_frames",
         "partial_frames",
         "duplicate_request_ids",
         "missing_responses",
+        "relay_failures",
     )
     for field in integer_fields:
         value = normalized.get(field)
@@ -380,6 +383,7 @@ def _validated_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
         and normalized["partial_frames"] == 0
         and normalized["duplicate_request_ids"] == 0
         and normalized["missing_responses"] == 0
+        and normalized["relay_failures"] == 0
         and not normalized["input_incomplete"]
     )
     if normalized.get("integrity_ok") is not expected_integrity:
@@ -478,6 +482,7 @@ class CallLedger:
                 malformed_frames=validated_summary["malformed_frames"],
                 partial_frames=validated_summary["partial_frames"],
                 missing_responses=validated_summary["missing_responses"],
+                relay_failures=validated_summary["relay_failures"],
                 input_incomplete=validated_summary["input_incomplete"],
             )
 
@@ -974,18 +979,13 @@ def collect_stdio(
         process.stderr.close()
         observer.finalize_missing(returncode)
 
-        if failures:
-            raise CollectorError(
-                "MCP relay failed: "
-                + "; ".join(f"{type(exc).__name__}: {exc}" for exc in failures)
-            )
-
         integrity_ok = (
             returncode == 0
             and observer.malformed_frames == 0
             and observer.partial_frames == 0
             and observer.duplicate_request_ids == 0
             and observer.missing_responses == 0
+            and len(failures) == 0
             and not input_incomplete
         )
         summary = {
@@ -995,6 +995,7 @@ def collect_stdio(
             "partial_frames": observer.partial_frames,
             "duplicate_request_ids": observer.duplicate_request_ids,
             "missing_responses": observer.missing_responses,
+            "relay_failures": len(failures),
             "input_incomplete": input_incomplete,
         }
         result = ledger.seal(summary)
@@ -1078,6 +1079,7 @@ def verify_ledger(path: str | os.PathLike[str]) -> LedgerVerification:
         "partial_frames": int,
         "duplicate_request_ids": int,
         "missing_responses": int,
+        "relay_failures": int,
     }
     for field, expected_type in expected_summary_fields.items():
         value = summary.get(field)
@@ -1100,6 +1102,7 @@ def verify_ledger(path: str | os.PathLike[str]) -> LedgerVerification:
         and summary["partial_frames"] == 0
         and summary["duplicate_request_ids"] == 0
         and summary["missing_responses"] == 0
+        and summary["relay_failures"] == 0
         and not input_incomplete
     )
     if integrity_ok != expected_integrity:

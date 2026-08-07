@@ -851,6 +851,7 @@ def _verify_mcp_ledger(
     collector_run_id: str,
     started: datetime,
     finished: datetime,
+    allow_incomplete: bool,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], Any]:
     path = root / "mcp/ledger.jsonl"
     _require_regular_file(path, "mcp/ledger.jsonl")
@@ -863,7 +864,7 @@ def _verify_mcp_ledger(
             "mcp/ledger.jsonl",
             "collector run/trial identity does not match immutable lock",
         )
-    if not verified.integrity_ok:
+    if not verified.integrity_ok and not allow_incomplete:
         raise _fail("mcp/ledger.jsonl", "collector terminal seal is not clean")
     records = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -1333,6 +1334,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         collector_run_id=lock["mcp"]["collector_run_id"],
         started=started,
         finished=finished,
+        allow_incomplete=result["status"] in TERMINAL_STATUSES,
     )
     focus_records = _verify_ledger(
         root,
@@ -2206,6 +2208,8 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 "final_state_sha256": final_state_sha256,
                 "mcp_root_hash": mcp_verification.root_hash,
                 "mcp_seal_hash": mcp_seal["seal_hash"],
+                "mcp_integrity_ok": mcp_verification.integrity_ok,
+                "mcp_terminal_summary": dict(mcp_verification.summary),
                 "task_sidecar_sha256": lock["task"]["sidecar_sha256"],
                 "native_sidecar_sha256": lock["native_sidecar"]["sha256"],
                 "task_content_sha256": task_sidecar["task_content_sha256"],

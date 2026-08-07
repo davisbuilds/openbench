@@ -542,7 +542,7 @@ raise SystemExit(result.returncode)
         verified = collector.verify_ledger(ledger_path)
         self.assertTrue(verified.summary["input_incomplete"])
 
-    def test_downstream_failure_kills_chatty_child_and_leaves_unsealed_ledger(self):
+    def test_downstream_failure_kills_child_and_seals_non_cleanly(self):
         fixture = Path(self.tmp.name) / "chatty.py"
         fixture.write_text(
             "import sys\n"
@@ -554,20 +554,25 @@ raise SystemExit(result.returncode)
         )
         ledger_path = Path(self.tmp.name) / "relay-failure.jsonl"
         started = time.monotonic()
-        with self.assertRaises(collector.CollectorError):
-            collector.collect_stdio(
-                [sys.executable, str(fixture)],
-                ledger_path=ledger_path,
-                run_id="run-1",
-                trial_id="relay-failure",
-                stdin=io.BytesIO(rpc("tools/list", 1)),
-                stdout=FailingOutput(),
-                stderr=io.BytesIO(),
-                max_frame_bytes=32,
-            )
+        result = collector.collect_stdio(
+            [sys.executable, str(fixture)],
+            ledger_path=ledger_path,
+            run_id="run-1",
+            trial_id="relay-failure",
+            stdin=io.BytesIO(rpc("tools/list", 1)),
+            stdout=FailingOutput(),
+            stderr=io.BytesIO(),
+            max_frame_bytes=32,
+        )
         self.assertLess(time.monotonic() - started, 2)
-        with self.assertRaises(collector.LedgerIntegrityError):
-            collector.verify_ledger(ledger_path)
+        self.assertFalse(result.integrity_ok)
+        self.assertGreaterEqual(result.relay_failures, 1)
+        verified = collector.verify_ledger(ledger_path)
+        self.assertFalse(verified.integrity_ok)
+        self.assertEqual(
+            verified.summary["relay_failures"],
+            result.relay_failures,
+        )
 
     @unittest.skipUnless(os.name == "posix", "process-group fixture requires POSIX")
     def test_wrapper_descendant_cannot_hold_relay_pipe_open(self):

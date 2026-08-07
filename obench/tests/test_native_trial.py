@@ -137,6 +137,7 @@ def _write_mcp_ledger(
     delivery_tier="tier1-ax-attribute",
     include_delivery=True,
     include_failed_mutation=False,
+    relay_failures=0,
 ):
     path = root / "mcp/ledger.jsonl"
     ledger = CallLedger(path, "native-cub-v0-run", trial_id)
@@ -200,11 +201,12 @@ def _write_mcp_ledger(
     ledger.seal(
         {
             "returncode": 0,
-            "integrity_ok": True,
+            "integrity_ok": relay_failures == 0,
             "malformed_frames": 0,
             "partial_frames": 0,
             "duplicate_request_ids": 0,
             "missing_responses": 0,
+            "relay_failures": relay_failures,
         }
     )
 
@@ -631,6 +633,7 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
         delivery_tier=case.get("delivery_tier", "tier1-ax-attribute"),
         include_delivery=case.get("include_delivery", True),
         include_failed_mutation=case.get("include_failed_mutation", False),
+        relay_failures=case.get("mcp_relay_failures", 0),
     )
     _write_ledger(
         root,
@@ -994,6 +997,37 @@ class NativeTrialTests(unittest.TestCase):
         self.assertEqual(row["candidate_provenance"]["terminal_status"], "timeout")
         self.assertEqual(row["candidate_provenance"]["retry_count"], 1)
         self.assertFalse(row["candidate_provenance"]["proxy_measured"])
+
+    def test_terminal_accepts_sealed_partial_mcp_but_completed_rejects_it(self):
+        terminal_case = {
+            **self.cases["terminal"],
+            "mcp_relay_failures": 1,
+        }
+        terminal = self.root / "terminal-partial-mcp"
+        _build_bundle(terminal, terminal_case)
+
+        row = load_native_trial(terminal)
+
+        self.assertFalse(row["candidate_provenance"]["mcp_integrity_ok"])
+        self.assertEqual(
+            row["candidate_provenance"]["mcp_terminal_summary"][
+                "relay_failures"
+            ],
+            1,
+        )
+
+        completed_case = {
+            **self.cases["happy"],
+            "mcp_relay_failures": 1,
+        }
+        completed = self.root / "completed-partial-mcp"
+        _build_bundle(completed, completed_case)
+
+        with self.assertRaisesRegex(
+            NativeTrialError,
+            "collector terminal seal is not clean",
+        ):
+            load_native_trial(completed)
 
     def test_terminal_proxy_marks_incomplete_usage_as_non_ranking(self):
         row = load_native_trial(self.bundle("terminal_proxy"))
