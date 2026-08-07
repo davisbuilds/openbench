@@ -72,6 +72,7 @@ _NATIVE_MARKER_ENVS = (
     "OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID",
     "OPENBENCH_NATIVE_TRIAL_ID",
 )
+_NATIVE_MCP_ENV_VARS = _NATIVE_MARKER_ENVS
 _NATIVE_MODEL = "gpt-5.6-sol"
 _NATIVE_ATIF_NAME = "trajectory.json"
 _NATIVE_RAW_EVENTS_NAME = "codex-events.jsonl"
@@ -857,6 +858,10 @@ def run(
             "--dangerously-bypass-hook-trust",
             "-c", f"mcp_servers.computer-use.command={json.dumps(native_launcher)}",
             "-c", "mcp_servers.computer-use.args=[]",
+            "-c", (
+                "mcp_servers.computer-use.env_vars="
+                + json.dumps(list(_NATIVE_MCP_ENV_VARS), separators=(",", ":"))
+            ),
             "-c", "mcp_servers.computer-use.enabled=true",
             "-c", "mcp_servers.computer-use.required=true",
         ]

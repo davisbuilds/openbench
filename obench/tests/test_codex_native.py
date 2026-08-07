@@ -145,6 +145,14 @@ class CodexNativeProfileTests(unittest.TestCase):
             overrides,
         )
         self.assertIn("mcp_servers.computer-use.args=[]", overrides)
+        self.assertIn(
+            "mcp_servers.computer-use.env_vars="
+            + json.dumps(
+                list(self.codex._NATIVE_MCP_ENV_VARS),
+                separators=(",", ":"),
+            ),
+            overrides,
+        )
         self.assertIn("mcp_servers.computer-use.enabled=true", overrides)
         self.assertIn("mcp_servers.computer-use.required=true", overrides)
         self.assertIn('model_reasoning_effort="medium"', overrides)
