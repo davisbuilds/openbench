@@ -907,6 +907,7 @@ def run(
         base += [
             "--enable", "hooks",
             "--dangerously-bypass-hook-trust",
+            "-c", 'approval_policy="never"',
             "-c", f"mcp_servers.computer-use.command={json.dumps(native_launcher)}",
             "-c", "mcp_servers.computer-use.args=[]",
             "-c", (

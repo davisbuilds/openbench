@@ -160,6 +160,7 @@ class CodexNativeProfileTests(unittest.TestCase):
         )
         self.assertIn("mcp_servers.computer-use.enabled=true", overrides)
         self.assertIn("mcp_servers.computer-use.required=true", overrides)
+        self.assertIn('approval_policy="never"', overrides)
         self.assertIn('model_reasoning_effort="medium"', overrides)
         self.assertIn('service_tier="default"', overrides)
         self.assertIn("shell_tool", cmd)
