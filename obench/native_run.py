@@ -1771,18 +1771,31 @@ def _copy_artifacts(
     entries = []
     for item in config.artifacts:
         source = source_root / item.source
-        if not source.is_file() or source.is_symlink():
-            raise NativeRunError(f"required final-state artifact is unavailable: {item.source}")
-        destination = bundle / item.path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
-        entries.append({
-            "path": item.path,
-            "sha256": _sha256(destination),
-            "size": destination.stat().st_size,
-            "media_type": item.media_type,
-            "classification": "public_evidence",
-        })
+        if source.is_symlink() or (source.exists() and not source.is_file()):
+            raise NativeRunError(
+                f"final-state artifact is not a regular file: {item.source}"
+            )
+        if source.is_file():
+            destination = bundle / item.path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            entries.append({
+                "path": item.path,
+                "present": True,
+                "sha256": _sha256(destination),
+                "size": destination.stat().st_size,
+                "media_type": item.media_type,
+                "classification": "public_evidence",
+            })
+        else:
+            entries.append({
+                "path": item.path,
+                "present": False,
+                "sha256": None,
+                "size": None,
+                "media_type": item.media_type,
+                "classification": "public_evidence",
+            })
     return entries
 
 
@@ -1795,13 +1808,23 @@ def _snapshot_final_evidence(
     sources = [config.atif_path]
     if include_verdict:
         sources.append(config.verdict_path)
-    sources.extend(item.source for item in config.artifacts)
     for relative in sources:
         source = config.workspace / relative
         if not source.is_file() or source.is_symlink():
             phase = "judged" if include_verdict else "terminal"
             raise NativeRunError(f"{phase} evidence is unavailable: {relative}")
         target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    for item in config.artifacts:
+        source = config.workspace / item.source
+        if source.is_symlink() or (source.exists() and not source.is_file()):
+            raise NativeRunError(
+                f"final-state artifact is not a regular file: {item.source}"
+            )
+        if not source.is_file():
+            continue
+        target = destination / item.source
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
     return _canonical_digest(
@@ -1830,7 +1853,12 @@ def _verify_mcp_policy(path: Path, policy: Mapping[str, Any]) -> None:
 
 def _final_state_digest(entries: Sequence[Mapping[str, Any]]) -> str:
     return _canonical_digest([
-        {"path": item["path"], "sha256": item["sha256"], "size": item["size"]}
+        {
+            "path": item["path"],
+            "present": item["present"],
+            "sha256": item["sha256"],
+            "size": item["size"],
+        }
         for item in entries
     ])
 
@@ -2674,6 +2702,12 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 ):
                     raise NativeRunError(
                         "verifier score and checker exit disagree"
+                    )
+                if checker_exit == 0 and any(
+                    not entry["present"] for entry in artifact_entries
+                ):
+                    raise NativeRunError(
+                        "successful verifier verdict has missing final-state artifacts"
                     )
             (bundle / "mcp").mkdir(parents=True, exist_ok=True)
             shutil.copyfile(chosen_mcp, bundle / "mcp/ledger.jsonl")

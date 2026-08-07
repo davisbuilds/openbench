@@ -238,7 +238,9 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
     task_id = "computer-use-bench-v0-form-entry"
     final_path = "artifacts/final-state/state.json"
     final_value = {"invoice_id": "INV-1042", "saved": True}
-    _write_json(root / final_path, final_value)
+    artifact_missing = case.get("artifact_missing", False)
+    if not artifact_missing:
+        _write_json(root / final_path, final_value)
 
     task_sidecar = {
         "schema_version": TASK_SIDECAR_SCHEMA_VERSION,
@@ -386,8 +388,15 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
     artifact_entries = [
         {
             "path": final_path,
-            "sha256": _sha256(root / final_path),
-            "size": (root / final_path).stat().st_size,
+            "present": not artifact_missing,
+            "sha256": (
+                None if artifact_missing else _sha256(root / final_path)
+            ),
+            "size": (
+                None
+                if artifact_missing
+                else (root / final_path).stat().st_size
+            ),
             "media_type": "application/json",
             "classification": "public_evidence",
         }
@@ -407,6 +416,7 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
         [
             {
                 "path": final_path,
+                "present": not artifact_missing,
                 "sha256": artifact_entries[0]["sha256"],
                 "size": artifact_entries[0]["size"],
             }
@@ -1065,6 +1075,37 @@ class NativeTrialTests(unittest.TestCase):
         with self.assertRaisesRegex(NativeTrialError, "does not match manifest"):
             load_native_trial(bundle)
 
+    def test_missing_final_state_is_evidence_for_wrong_answer_only(self):
+        wrong_case = {
+            **self.cases["happy"],
+            "score": 0.0,
+            "checker_exit": 1,
+            "artifact_missing": True,
+        }
+        wrong = self.root / "wrong-missing-artifact"
+        _build_bundle(wrong, wrong_case)
+
+        row = load_native_trial(wrong)
+
+        self.assertFalse(row["success"])
+        self.assertEqual(row["failure_class"], "wrong_answer")
+        self.assertEqual(
+            row["candidate_provenance"]["missing_final_state_artifacts"],
+            ["artifacts/final-state/state.json"],
+        )
+
+        solved_case = {
+            **self.cases["happy"],
+            "artifact_missing": True,
+        }
+        solved = self.root / "solved-missing-artifact"
+        _build_bundle(solved, solved_case)
+        with self.assertRaisesRegex(
+            NativeTrialError,
+            "successful trial has missing final-state artifacts",
+        ):
+            load_native_trial(solved)
+
     def test_focus_policy_rejects_target_activation_and_global_delivery(self):
         background = {
             **self.cases["happy"],
@@ -1386,6 +1427,7 @@ class NativeTrialTests(unittest.TestCase):
         _write_json(artifact_manifest_path, artifact_manifest)
         aggregate = [{
             "path": "artifacts/final-state/state.json",
+            "present": True,
             "sha256": _sha256(artifact_path),
             "size": artifact_path.stat().st_size,
         }]
@@ -1659,6 +1701,7 @@ class NativeTrialTests(unittest.TestCase):
         _write_json(artifact_manifest_path, artifact_manifest)
         aggregate = [{
             "path": "artifacts/final-state/state.json",
+            "present": True,
             "sha256": _sha256(artifact_path),
             "size": artifact_path.stat().st_size,
         }]

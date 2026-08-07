@@ -971,7 +971,8 @@ def _validate_artifacts(
     trial_id: str,
     lock_sha256: str,
     native_sidecar: dict[str, Any],
-) -> str:
+    require_all_present: bool,
+) -> tuple[str, tuple[str, ...]]:
     manifest = _bound_json(
         root,
         "artifacts/manifest.json",
@@ -985,11 +986,24 @@ def _validate_artifacts(
             "final-state artifacts require reviewed=true and contains_sensitive_data=false",
         )
     declared: list[str] = []
+    present: list[str] = []
+    missing: list[str] = []
     aggregate: list[dict[str, Any]] = []
     for index, raw_entry in enumerate(_array(manifest["artifacts"], "artifacts/manifest.json.artifacts")):
         location = f"artifacts/manifest.json.artifacts[{index}]"
         entry = _object(raw_entry, location)
-        _exact_fields(entry, {"path", "sha256", "size", "media_type", "classification"}, location)
+        _exact_fields(
+            entry,
+            {
+                "path",
+                "present",
+                "sha256",
+                "size",
+                "media_type",
+                "classification",
+            },
+            location,
+        )
         path = _relative_path(entry["path"], f"{location}.path")
         if not path.startswith("artifacts/final-state/"):
             raise _fail(f"{location}.path", "must be below artifacts/final-state/")
@@ -1000,29 +1014,55 @@ def _validate_artifacts(
         if entry["classification"] != "public_evidence":
             raise _fail(f"{location}.classification", "must be 'public_evidence'")
         media_type = _string(entry["media_type"], f"{location}.media_type")
-        expected_digest = _digest(entry["sha256"], f"{location}.sha256")
-        expected_size = _integer(entry["size"], f"{location}.size")
         artifact_path = root / path
-        _require_regular_file(artifact_path, path)
-        if artifact_path.stat().st_size != expected_size or _sha256_file(artifact_path) != expected_digest:
-            raise _fail(path, "artifact bytes do not match artifact manifest")
-        _publishable_artifact_text(
-            artifact_path,
-            media_type=media_type,
-            expected_size=expected_size,
-            location=path,
-        )
+        if not isinstance(entry["present"], bool):
+            raise _fail(f"{location}.present", "expected a boolean")
+        if entry["present"]:
+            expected_digest = _digest(entry["sha256"], f"{location}.sha256")
+            expected_size = _integer(entry["size"], f"{location}.size")
+            _require_regular_file(artifact_path, path)
+            if (
+                artifact_path.stat().st_size != expected_size
+                or _sha256_file(artifact_path) != expected_digest
+            ):
+                raise _fail(path, "artifact bytes do not match artifact manifest")
+            _publishable_artifact_text(
+                artifact_path,
+                media_type=media_type,
+                expected_size=expected_size,
+                location=path,
+            )
+            present.append(path)
+        else:
+            if entry["sha256"] is not None or entry["size"] is not None:
+                raise _fail(
+                    location,
+                    "missing artifact must have null sha256 and size",
+                )
+            if artifact_path.exists() or artifact_path.is_symlink():
+                raise _fail(path, "artifact is marked missing but exists")
+            expected_digest = None
+            expected_size = None
+            missing.append(path)
         declared.append(path)
-        aggregate.append({"path": path, "sha256": expected_digest, "size": expected_size})
+        aggregate.append({
+            "path": path,
+            "present": entry["present"],
+            "sha256": expected_digest,
+            "size": expected_size,
+        })
     if not declared:
-        raise _fail("artifacts/manifest.json.artifacts", "at least one final-state artifact is required")
+        raise _fail(
+            "artifacts/manifest.json.artifacts",
+            "at least one final-state artifact declaration is required",
+        )
     final_root = root / "artifacts/final-state"
     actual_final = {
         path.relative_to(root).as_posix()
         for path in final_root.rglob("*")
         if path.is_file()
     }
-    if set(declared) != actual_final:
+    if set(present) != actual_final:
         raise _fail(
             "artifacts/manifest.json.artifacts",
             "does not inventory every final-state file exactly",
@@ -1032,7 +1072,12 @@ def _validate_artifacts(
             "artifacts/manifest.json.artifacts",
             "paths do not match native sidecar final-state allowlist",
         )
-    return _canonical_digest(aggregate)
+    if require_all_present and missing:
+        raise _fail(
+            "artifacts/manifest.json.artifacts",
+            "successful trial has missing final-state artifacts",
+        )
+    return _canonical_digest(aggregate), tuple(missing)
 
 
 def _validate_result_and_verifier(
@@ -1289,12 +1334,6 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     trajectory, usage, turns = _validate_trajectory(
         root, trial_id=trial_id, lock=lock
     )
-    final_state_sha256 = _validate_artifacts(
-        root,
-        trial_id=trial_id,
-        lock_sha256=lock_sha256,
-        native_sidecar=native_sidecar,
-    )
     result, started, finished, agent_started, agent_finished = (
         _validate_result_and_verifier(
             root,
@@ -1302,6 +1341,16 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             lock_sha256=lock_sha256,
             lock=lock,
         )
+    )
+    final_state_sha256, missing_artifacts = _validate_artifacts(
+        root,
+        trial_id=trial_id,
+        lock_sha256=lock_sha256,
+        native_sidecar=native_sidecar,
+        require_all_present=(
+            result["status"] == "completed"
+            and result["outcome"]["checker_exit"] == 0
+        ),
     )
     if _timestamp(lock["created_at"], "lock.created_at") > started:
         raise _fail("lock.created_at", "immutable lock was created after trial start")
@@ -2206,6 +2255,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 },
                 **evidence_digests,
                 "final_state_sha256": final_state_sha256,
+                "missing_final_state_artifacts": list(missing_artifacts),
                 "mcp_root_hash": mcp_verification.root_hash,
                 "mcp_seal_hash": mcp_seal["seal_hash"],
                 "mcp_integrity_ok": mcp_verification.integrity_ok,

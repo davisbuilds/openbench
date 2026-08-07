@@ -1839,6 +1839,48 @@ media_type = "application/json"
             outcome.row["run_id"],
         )
 
+    def test_wrong_answer_seals_missing_final_state_artifact(self):
+        class MissingArtifactAdapter(FakeAdapter):
+            def run(inner_self, instruction, workdir, model, timeout_s):
+                result = super().run(
+                    instruction,
+                    workdir,
+                    model,
+                    timeout_s,
+                )
+                (Path(workdir) / "state.json").unlink()
+                return result
+
+        (self.workspace / "wrong-answer").touch()
+        hooks, _ = self._hooks(MissingArtifactAdapter())
+
+        outcome = run_native(self.config_path, hooks=hooks)
+
+        self.assertFalse(outcome.row["success"])
+        self.assertEqual(outcome.row["failure_class"], "wrong_answer")
+        self.assertEqual(
+            outcome.row["candidate_provenance"][
+                "missing_final_state_artifacts"
+            ],
+            ["artifacts/final-state/state.json"],
+        )
+        artifact_manifest = json.loads(
+            (outcome.bundle_dir / "artifacts/manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            artifact_manifest["artifacts"],
+            [{
+                "classification": "public_evidence",
+                "media_type": "application/json",
+                "path": "artifacts/final-state/state.json",
+                "present": False,
+                "sha256": None,
+                "size": None,
+            }],
+        )
+
     def test_reset_failure_fails_closed_after_successful_agent_and_verifier(self):
         (self.workspace / "fail-reset").touch()
         hooks, monitor = self._hooks()
