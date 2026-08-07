@@ -30,6 +30,7 @@ BUNDLE_SCHEMA_VERSION = "openbench.native-macos-trial.v1"
 TASK_SIDECAR_SCHEMA_VERSION = "openbench.native-task.v1"
 NATIVE_SIDECAR_SCHEMA_VERSION = "openbench.native-sidecar.v1"
 LEDGER_SCHEMA_VERSION = "openbench.native-ledger.v1"
+MAX_TEXT_ARTIFACT_BYTES = 1024 * 1024
 
 MANIFEST_PATH = "manifest.json"
 REQUIRED_FILES = frozenset(
@@ -566,8 +567,8 @@ def _verify_ledger(
         lines = ledger_path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError) as exc:
         raise _fail(f"{prefix}/ledger.jsonl", f"cannot read ledger: {exc}") from exc
-    if not lines or any(not line.strip() for line in lines):
-        raise _fail(f"{prefix}/ledger.jsonl", "must contain non-empty JSONL records")
+    if any(not line.strip() for line in lines):
+        raise _fail(f"{prefix}/ledger.jsonl", "must not contain blank JSONL records")
     for index, line in enumerate(lines, 1):
         location = f"{prefix}/ledger.jsonl:{index}"
         try:
@@ -807,9 +808,12 @@ def _validate_artifacts(
         _require_regular_file(artifact_path, path)
         if artifact_path.stat().st_size != expected_size or _sha256_file(artifact_path) != expected_digest:
             raise _fail(path, "artifact bytes do not match artifact manifest")
-        if expected_size <= 1024 * 1024 and (
-            entry["media_type"].startswith("text/") or entry["media_type"] == "application/json"
-        ):
+        if entry["media_type"].startswith("text/") or entry["media_type"] == "application/json":
+            if expected_size > MAX_TEXT_ARTIFACT_BYTES:
+                raise _fail(
+                    path,
+                    f"text artifact exceeds privacy scan limit of {MAX_TEXT_ARTIFACT_BYTES} bytes",
+                )
             try:
                 _reject_private_text(artifact_path.read_text(encoding="utf-8"), path)
             except UnicodeDecodeError as exc:
@@ -1036,6 +1040,25 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         lock_sha256=lock_sha256,
         lock=lock,
     )
+    if _timestamp(lock["created_at"], "lock.created_at") > started:
+        raise _fail("lock.created_at", "immutable lock was created after trial start")
+    previous_step_time: datetime | None = None
+    for index, step in enumerate(trajectory["steps"]):
+        observed = _timestamp(
+            step.get("timestamp"),
+            f"agent/trajectory.json.steps[{index}].timestamp",
+        )
+        if observed < started or observed > finished:
+            raise _fail(
+                f"agent/trajectory.json.steps[{index}].timestamp",
+                "falls outside trial timing",
+            )
+        if previous_step_time is not None and observed < previous_step_time:
+            raise _fail(
+                f"agent/trajectory.json.steps[{index}].timestamp",
+                "precedes the prior trajectory step",
+            )
+        previous_step_time = observed
     verifier_evidence = _read_json(root / "verifier/evidence.json", "verifier/evidence.json")
     if verifier_evidence["task_content_sha256"] != task_sidecar["task_content_sha256"]:
         raise _fail("verifier/evidence.json.task_content_sha256", "does not match task sidecar")
@@ -1063,6 +1086,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     _integer(result["mcp_event_count"], "result.mcp_event_count")
     _integer(result["focus_event_count"], "result.focus_event_count")
     for prefix, records in (("focus", focus_records),):
+        previous_observed: datetime | None = None
         for index, record in enumerate(records):
             observed = _timestamp(
                 record["timestamp"], f"{prefix}/ledger.jsonl:{index + 1}.timestamp"
@@ -1072,6 +1096,12 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                     f"{prefix}/ledger.jsonl:{index + 1}.timestamp",
                     "falls outside trial timing",
                 )
+            if previous_observed is not None and observed < previous_observed:
+                raise _fail(
+                    f"{prefix}/ledger.jsonl:{index + 1}.timestamp",
+                    "precedes the prior ledger record",
+                )
+            previous_observed = observed
     target_bundle_id = lock["environment"]["app"]["bundle_id"]
     for index, record in enumerate(focus_records):
         payload = record["payload"]
@@ -1116,6 +1146,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             allowed_kinds={"model_usage"},
         )
         proxy_totals = {"input_tokens": 0, "cached_tokens": 0, "output_tokens": 0}
+        previous_proxy_time: datetime | None = None
         for index, record in enumerate(proxy_records):
             payload = record["payload"]
             _exact_fields(
@@ -1133,12 +1164,53 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                     f"proxy/ledger.jsonl:{index + 1}.payload",
                     "cached tokens exceed input tokens",
                 )
+            observed = _timestamp(
+                record["timestamp"],
+                f"proxy/ledger.jsonl:{index + 1}.timestamp",
+            )
+            if observed < started or observed > finished:
+                raise _fail(
+                    f"proxy/ledger.jsonl:{index + 1}.timestamp",
+                    "falls outside trial timing",
+                )
+            if previous_proxy_time is not None and observed < previous_proxy_time:
+                raise _fail(
+                    f"proxy/ledger.jsonl:{index + 1}.timestamp",
+                    "precedes the prior proxy record",
+                )
+            previous_proxy_time = observed
         if usage["input"] is None or proxy_totals != {
             "input_tokens": usage["input"],
             "cached_tokens": usage["cached"],
             "output_tokens": usage["output"],
         }:
             raise _fail("proxy/ledger.jsonl", "proxy totals do not reconcile with ATIF")
+
+    focus_timeline = [
+        (
+            _timestamp(record["timestamp"], f"focus/ledger.jsonl:{index + 1}.timestamp"),
+            record["payload"]["state"],
+        )
+        for index, record in enumerate(focus_records)
+    ]
+    focus_index = 0
+    focus_state: str | None = None
+    for index, call in enumerate(mcp_records, 1):
+        call_time = datetime.fromtimestamp(
+            call["request_unix_ns"] / 1_000_000_000,
+            tz=started.tzinfo,
+        )
+        while (
+            focus_index < len(focus_timeline)
+            and focus_timeline[focus_index][0] <= call_time
+        ):
+            focus_state = focus_timeline[focus_index][1]
+            focus_index += 1
+        if focus_state != "target_focused":
+            raise _fail(
+                f"mcp/ledger.jsonl:{index}.request_unix_ns",
+                "MCP activity occurred without target focus or while yielded to human",
+            )
 
     outcome = result["outcome"]
     success = result["status"] == "completed" and outcome["checker_exit"] == 0

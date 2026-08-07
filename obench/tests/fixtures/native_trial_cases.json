@@ -14,5 +14,14 @@
     "proxy": false,
     "retry_count": 1,
     "timeout_s": 10.0
+  },
+  "preflight": {
+    "status": "preflight_failed",
+    "score": null,
+    "checker_exit": null,
+    "proxy": false,
+    "retry_count": 0,
+    "timeout_s": 300.0,
+    "preflight_ready": false
   }
 }

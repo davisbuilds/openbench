@@ -54,7 +54,9 @@ def _write_json(path, value):
     )
 
 
-def _write_ledger(root, prefix, trial_id, lock_sha256, records):
+def _write_ledger(
+    root, prefix, trial_id, lock_sha256, records, *, timestamps=None
+):
     ledger_path = root / prefix / "ledger.jsonl"
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     previous_hash = "0" * 64
@@ -66,14 +68,21 @@ def _write_ledger(root, prefix, trial_id, lock_sha256, records):
             "lock_sha256": lock_sha256,
             "sequence": sequence,
             "kind": kind,
-            "timestamp": f"2026-08-06T12:00:0{sequence}+00:00",
+            "timestamp": (
+                timestamps[sequence - 1]
+                if timestamps is not None
+                else f"2026-08-06T12:00:0{sequence}+00:00"
+            ),
             "payload": payload,
             "previous_hash": previous_hash,
         }
         record["record_hash"] = _canonical_digest(record)
         previous_hash = record["record_hash"]
         lines.append(json.dumps(record, separators=(",", ":"), sort_keys=True))
-    ledger_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    ledger_path.write_text(
+        "\n".join(lines) + ("\n" if lines else ""),
+        encoding="utf-8",
+    )
     _write_json(
         root / prefix / "seal.json",
         {
@@ -88,11 +97,11 @@ def _write_ledger(root, prefix, trial_id, lock_sha256, records):
     )
 
 
-def _write_mcp_ledger(root, trial_id):
+def _write_mcp_ledger(root, trial_id, *, with_call=True):
     path = root / "mcp/ledger.jsonl"
     ledger = CallLedger(path, "native-cub-v0-run", trial_id)
-    ledger.append_call(
-        {
+    if with_call:
+        ledger.append_call({
             "tool": "set_value",
             "status": "completed",
             "request_id_type": "str",
@@ -116,8 +125,7 @@ def _write_mcp_ledger(root, trial_id):
                 "delivery": None,
             },
             "process_returncode": None,
-        }
-    )
+        })
     ledger.seal(
         {
             "returncode": 0,
@@ -232,7 +240,7 @@ def _build_bundle(root, case):
                 "screen_recording": True,
                 "app_installed": True,
                 "display_stable": True,
-                "focus_monitor_ready": True,
+                "focus_monitor_ready": case.get("preflight_ready", True),
             },
         },
         "budget": {"timeout_s": case["timeout_s"], "max_retries": 1},
@@ -241,21 +249,17 @@ def _build_bundle(root, case):
     _write_json(root / "lock.json", lock)
     lock_sha256 = _sha256(root / "lock.json")
 
-    trajectory = {
-        "schema_version": "ATIF-v1.7",
-        "trajectory_id": trial_id,
-        "agent": {
-            "name": "codex",
-            "version": "0.200.0",
-            "model_name": "gpt-fixture",
-        },
-        "steps": [
-            {
-                "step_id": 1,
-                "source": "user",
-                "message": "Complete the native task.",
-                "timestamp": "2026-08-06T12:00:00+00:00",
-            },
+    preflight_failed = case["status"] == "preflight_failed"
+    trajectory_steps = [
+        {
+            "step_id": 1,
+            "source": "user",
+            "message": "Complete the native task.",
+            "timestamp": "2026-08-06T12:00:00+00:00",
+        }
+    ]
+    if not preflight_failed:
+        trajectory_steps.append(
             {
                 "step_id": 2,
                 "source": "agent",
@@ -267,13 +271,22 @@ def _build_bundle(root, case):
                     "cached_tokens": 20,
                     "completion_tokens": 30,
                 },
-            },
-        ],
+            }
+        )
+    trajectory = {
+        "schema_version": "ATIF-v1.7",
+        "trajectory_id": trial_id,
+        "agent": {
+            "name": "codex",
+            "version": "0.200.0",
+            "model_name": "gpt-fixture",
+        },
+        "steps": trajectory_steps,
         "final_metrics": {
-            "total_steps": 2,
-            "total_prompt_tokens": 100,
-            "total_cached_tokens": 20,
-            "total_completion_tokens": 30,
+            "total_steps": len(trajectory_steps),
+            "total_prompt_tokens": 0 if preflight_failed else 100,
+            "total_cached_tokens": 0 if preflight_failed else 20,
+            "total_completion_tokens": 0 if preflight_failed else 30,
         },
     }
     _write_json(root / "agent/trajectory.json", trajectory)
@@ -309,7 +322,13 @@ def _build_bundle(root, case):
     )
 
     completed = case["status"] == "completed"
-    error = None if completed else "native trial exceeded its locked timeout"
+    error = (
+        None
+        if completed
+        else "native preflight failed"
+        if preflight_failed
+        else "native trial exceeded its locked timeout"
+    )
     failure_class = (
         "solved"
         if completed and case["checker_exit"] == 0
@@ -330,8 +349,8 @@ def _build_bundle(root, case):
             "started_at": "2026-08-06T12:00:00+00:00",
             "finished_at": "2026-08-06T12:00:10+00:00",
             "timings": {
-                "env_setup_s": 1.0,
-                "agent_s": 7.0,
+                "env_setup_s": 10.0 if preflight_failed else 1.0,
+                "agent_s": 0.0 if preflight_failed else 7.0,
                 "verifier_s": 2.0 if completed else 0.0,
                 "total_s": 10.0,
             },
@@ -343,8 +362,8 @@ def _build_bundle(root, case):
                 "failure_class": failure_class,
                 "failure_reason": None if completed else "deadline_exceeded",
             },
-            "mcp_event_count": 1,
-            "focus_event_count": 1,
+            "mcp_event_count": 0 if preflight_failed else 1,
+            "focus_event_count": 0 if preflight_failed else 1,
         },
     )
     verifier_status = "judged" if completed else "not_run"
@@ -372,13 +391,13 @@ def _build_bundle(root, case):
         },
     )
 
-    _write_mcp_ledger(root, trial_id)
+    _write_mcp_ledger(root, trial_id, with_call=not preflight_failed)
     _write_ledger(
         root,
         "focus",
         trial_id,
         lock_sha256,
-        [
+        [] if preflight_failed else [
             (
                 "focus_sample",
                 {
@@ -454,6 +473,14 @@ class NativeTrialTests(unittest.TestCase):
         self.assertEqual(row["candidate_provenance"]["retry_count"], 1)
         self.assertFalse(row["candidate_provenance"]["proxy_measured"])
 
+    def test_preflight_fixture_accepts_clean_zero_event_focus_seal(self):
+        row = load_native_trial(self.bundle("preflight"))
+
+        self.assertEqual(row["failure_class"], "preflight_failed")
+        self.assertEqual(row["turns"], 0)
+        self.assertEqual(row["candidate_provenance"]["focus_event_count"], 0)
+        self.assertEqual(row["candidate_provenance"]["mcp_event_count"], 0)
+
     def test_tampered_final_state_is_rejected(self):
         bundle = self.bundle("happy")
         (bundle / "artifacts/final-state/state.json").write_text(
@@ -473,6 +500,78 @@ class NativeTrialTests(unittest.TestCase):
 
         with self.assertRaisesRegex(NativeTrialError, "email address"):
             load_native_trial(bundle)
+
+        oversized = self.bundle("happy")
+        artifact_path = oversized / "artifacts/final-state/state.json"
+        artifact_path.write_text("x" * (1024 * 1024) + " operator@example.com")
+        artifact_manifest_path = oversized / "artifacts/manifest.json"
+        artifact_manifest = json.loads(artifact_manifest_path.read_text())
+        artifact_manifest["artifacts"][0]["sha256"] = _sha256(artifact_path)
+        artifact_manifest["artifacts"][0]["size"] = artifact_path.stat().st_size
+        _write_json(artifact_manifest_path, artifact_manifest)
+        aggregate = [{
+            "path": "artifacts/final-state/state.json",
+            "sha256": _sha256(artifact_path),
+            "size": artifact_path.stat().st_size,
+        }]
+        verifier_path = oversized / "verifier/evidence.json"
+        verifier = json.loads(verifier_path.read_text())
+        verifier["final_state_sha256"] = _canonical_digest(aggregate)
+        _write_json(verifier_path, verifier)
+        _reseal_manifest(oversized)
+        with self.assertRaisesRegex(NativeTrialError, "privacy scan limit"):
+            load_native_trial(oversized)
+
+    def test_proxy_and_focus_timelines_are_bound_to_mcp_activity(self):
+        proxy = self.bundle("happy")
+        lock_sha256 = _sha256(proxy / "lock.json")
+        _write_ledger(
+            proxy,
+            "proxy",
+            "native-cub-v0-trial1",
+            lock_sha256,
+            [("model_usage", {
+                "input_tokens": 100,
+                "cached_tokens": 20,
+                "output_tokens": 30,
+            })],
+            timestamps=["2026-08-06T11:59:00+00:00"],
+        )
+        _reseal_manifest(proxy)
+        with self.assertRaisesRegex(NativeTrialError, "outside trial timing"):
+            load_native_trial(proxy)
+
+        yielded = self.bundle("happy")
+        lock_sha256 = _sha256(yielded / "lock.json")
+        _write_ledger(
+            yielded,
+            "focus",
+            "native-cub-v0-trial1",
+            lock_sha256,
+            [
+                ("focus_sample", {
+                    "state": "target_focused",
+                    "frontmost_bundle_id": "com.openbench.fixture",
+                    "target_bundle_id": "com.openbench.fixture",
+                }),
+                ("focus_yield", {
+                    "state": "yielded_to_human",
+                    "frontmost_bundle_id": "com.apple.finder",
+                    "target_bundle_id": "com.openbench.fixture",
+                }),
+            ],
+            timestamps=[
+                "2026-08-06T12:00:00+00:00",
+                "2026-08-06T12:00:00.500000+00:00",
+            ],
+        )
+        result_path = yielded / "result.json"
+        result = json.loads(result_path.read_text())
+        result["focus_event_count"] = 2
+        _write_json(result_path, result)
+        _reseal_manifest(yielded)
+        with self.assertRaisesRegex(NativeTrialError, "while yielded to human"):
+            load_native_trial(yielded)
 
     def test_partial_or_duplicate_evidence_is_rejected(self):
         bundle = self.bundle("happy")
