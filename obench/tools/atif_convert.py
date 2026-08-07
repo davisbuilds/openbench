@@ -318,7 +318,7 @@ def _convert_codex_events(meta: dict[str, Any], events: list[Any]) -> dict[str, 
                 "step_id": step_id,
                 "source": "agent",
                 "message": "",
-                "llm_call_count": 1,
+                "llm_call_count": 0,
                 "model_name": meta.get("model"),
                 "tool_calls": [
                     {
@@ -356,14 +356,17 @@ def _convert_codex_events(meta: dict[str, Any], events: list[Any]) -> dict[str, 
             if item.get("type") in {"command_execution", "file_change", "mcp_tool_call"}:
                 append_or_update_codex_tool_step(item, incomplete=True)
             continue
-        if etype == "turn.completed" and isinstance(event.get("usage"), dict):
+        if etype == "turn.completed":
             turn_count += 1
-            usage = usage_delta(event["usage"])
-            if pending_agent_step_indexes:
-                steps[pending_agent_step_indexes[-1]]["metrics"] = _metric_from_openbench_usage(
-                    usage, prompt_includes_cache=True
-                )
-                pending_agent_step_indexes.clear()
+            if isinstance(event.get("usage"), dict):
+                usage = usage_delta(event["usage"])
+                if pending_agent_step_indexes:
+                    step = steps[pending_agent_step_indexes[-1]]
+                    step["metrics"] = _metric_from_openbench_usage(
+                        usage, prompt_includes_cache=True
+                    )
+                    step["llm_call_count"] = 1
+                    pending_agent_step_indexes.clear()
             continue
         if etype != "item.completed" or not item:
             continue

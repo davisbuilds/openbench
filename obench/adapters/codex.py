@@ -52,6 +52,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+from pathlib import Path
 
 try:
     from obench.auth_persist import auth_file_lease, auth_lease_proves_path
@@ -61,6 +62,16 @@ except ImportError:  # file-path / Docker mount layout
 NAME = "codex"
 _EXE = "codex"
 _MULTI_AGENT_ENV = "OPENBENCH_CODEX_MULTI_AGENT"
+_NATIVE_MCP_COMMAND_ENV = "CUB_MCP_COMMAND"
+_NATIVE_MARKER_ENVS = (
+    "OPENBENCH_NATIVE_MCP_SERVER_COMMAND",
+    "OPENBENCH_NATIVE_MCP_LEDGER",
+    "OPENBENCH_NATIVE_COLLECTOR_RUN_ID",
+    "OPENBENCH_NATIVE_TRIAL_ID",
+)
+_NATIVE_MODEL = "gpt-5.6-sol"
+_NATIVE_ATIF_NAME = "trajectory.json"
+_NATIVE_RAW_EVENTS_NAME = "codex-events.jsonl"
 
 
 def _feature_flags(env_override=None):
@@ -99,6 +110,95 @@ def _legacy_tokens(token_usage):
 
 def _num(value):
     return int(value) if isinstance(value, (int, float)) else None
+
+
+def _native_value(name, env_override=None):
+    if env_override and name in env_override:
+        return env_override[name]
+    return os.environ.get(name)
+
+
+def _native_requested(env_override=None):
+    return bool(
+        _native_value(_NATIVE_MCP_COMMAND_ENV, env_override)
+        or any(_native_value(name, env_override) for name in _NATIVE_MARKER_ENVS)
+    )
+
+
+def _native_launcher(env_override=None):
+    value = _native_value(_NATIVE_MCP_COMMAND_ENV, env_override)
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ValueError(f"{_NATIVE_MCP_COMMAND_ENV} must be an absolute executable file")
+    path = Path(value)
+    if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
+        raise ValueError(f"{_NATIVE_MCP_COMMAND_ENV} must be an absolute executable file")
+    return value
+
+
+def _native_error(message):
+    return {
+        "completed": False,
+        "error": f"native-codex-profile: {message}",
+        "startup_failure": True,
+        "output_tail": "",
+        "tokens": None,
+        "turns": None,
+        "cmd": None,
+        **_empty_token_usage(),
+    }
+
+
+def _atomic_write_private(path, text):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _codex_events(stdout):
+    events = []
+    for line_number, line in enumerate(stdout.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Codex JSONL line {line_number} is malformed: {exc}") from exc
+        if not isinstance(event, dict):
+            raise ValueError(f"Codex JSONL line {line_number} is not an object")
+        events.append(event)
+    if not events:
+        raise ValueError("Codex JSONL contains no events")
+    return events
+
+
+def _write_native_evidence(stdout, *, launcher, workdir, model):
+    from obench.atif import assert_valid_trajectory, to_dict
+    from obench.tools.atif_convert import convert_codex_events
+
+    raw_path = Path(launcher).parent / _NATIVE_RAW_EVENTS_NAME
+    _atomic_write_private(raw_path, stdout)
+    trajectory = convert_codex_events(
+        _codex_events(stdout),
+        model=model,
+        source_path=_NATIVE_RAW_EVENTS_NAME,
+    )
+    trajectory = to_dict(trajectory)
+    assert_valid_trajectory(trajectory)
+    rendered = json.dumps(trajectory, indent=2, ensure_ascii=False) + "\n"
+    _atomic_write_private(Path(workdir) / _NATIVE_ATIF_NAME, rendered)
 
 # canonical model name -> codex `-m` model string
 MODELS = {
@@ -395,6 +495,16 @@ def run(
     env_override=None,
     auth_lease_proofs=(),
 ) -> dict:
+    native = _native_requested(env_override)
+    native_launcher = None
+    if native:
+        if model != _NATIVE_MODEL:
+            return _native_error(f"model must be {_NATIVE_MODEL!r}, got {model!r}")
+        try:
+            native_launcher = _native_launcher(env_override)
+        except ValueError as exc:
+            return _native_error(str(exc))
+
     if os.environ.get("BENCH_IN_CONTAINER"):
         # codex's own sandbox (bwrap) needs user namespaces and cannot nest
         # inside the bench container; the disposable container IS the external
@@ -409,6 +519,11 @@ def run(
         "--skip-git-repo-check",
         "-C", workdir,
     ] + sandbox
+    if native_launcher:
+        base += [
+            "-c", f"mcp_servers.computer-use.command={json.dumps(native_launcher)}",
+            "-c", "mcp_servers.computer-use.args=[]",
+        ]
     if model in MODELS:
         cmd = base + [
             "-m", MODELS[model],
@@ -458,7 +573,7 @@ def run(
     auth_src = None
     auth_copy = None
     auth_lease = None
-    provided_codex_home = (
+    provided_codex_home = None if native else (
         env_override.get("CODEX_HOME") if env_override else None
     )
     if provided_codex_home:
@@ -527,6 +642,18 @@ def run(
     if not tail:
         tail = combined[-2000:]
 
+    native_evidence_error = None
+    if native_launcher:
+        try:
+            _write_native_evidence(
+                proc.stdout or "",
+                launcher=native_launcher,
+                workdir=workdir,
+                model=model,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            native_evidence_error = str(exc)
+
     if model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna") and token_usage.get("token_basis") == "vendor_split":
         raw = token_usage.get("usage_raw") or {}
         if not any(k in raw for k in ("cache_write_tokens", "cache_creation_input_tokens", "cache_creation_tokens")):
@@ -539,8 +666,12 @@ def run(
             token_usage["token_basis"] = "estimated"
 
     return {
-        "completed": proc.returncode == 0,
-        "error": None if proc.returncode == 0 else f"exit {proc.returncode}",
+        "completed": proc.returncode == 0 and native_evidence_error is None,
+        "error": (
+            f"native ATIF conversion failed: {native_evidence_error}"
+            if native_evidence_error is not None
+            else None if proc.returncode == 0 else f"exit {proc.returncode}"
+        ),
         "output_tail": tail,
         # Optional (ADAPTER_SPEC v1): full untruncated stdout+stderr so the
         # runner can persist a complete local transcript. Cheap here (already
