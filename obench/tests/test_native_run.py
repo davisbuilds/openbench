@@ -59,6 +59,7 @@ class FakeAdapter:
                 "completed": False,
                 "error": "transient startup",
                 "startup_failure": True,
+                "tokens": 0,
             }
         workspace = Path(workdir)
         request = {
@@ -108,6 +109,7 @@ class FakeAdapter:
         return {
             "completed": not self.fail,
             "error": "agent failed" if self.fail else None,
+            "tokens": 10,
         }
 
 

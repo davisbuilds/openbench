@@ -468,16 +468,26 @@ def _copy_atif(config: NativeRunConfig, bundle: Path, started: datetime) -> dict
         "version": config.harness_version,
         "model_name": config.model_name,
     }
+    public_steps = []
     for step in trajectory.get("steps", []):
-        step.setdefault("timestamp", started.isoformat())
-        if step.get("source") == "user":
-            step["message"] = (
-                "[instruction omitted; sha256="
-                + _sha256(config.instruction_path)
-                + "]"
-            )
+        projected = {
+            "step_id": len(public_steps) + 1,
+            "source": step.get("source"),
+            "message": "[content omitted from public native evidence]",
+            "timestamp": step.get("timestamp", started.isoformat()),
+        }
         if step.get("source") == "agent":
-            step.setdefault("model_name", config.model_name)
+            projected["model_name"] = config.model_name
+            if isinstance(step.get("metrics"), dict):
+                projected["metrics"] = dict(step["metrics"])
+        public_steps.append(projected)
+    trajectory = {
+        "schema_version": ATIF_SCHEMA_VERSION,
+        "trajectory_id": config.trial_id,
+        "agent": trajectory["agent"],
+        "steps": public_steps,
+        "final_metrics": trajectory.get("final_metrics", {}),
+    }
     assert_valid_trajectory(trajectory)
     _write_json(bundle / "agent/trajectory.json", trajectory)
     return trajectory
@@ -711,6 +721,11 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 startup_retry = (
                     adapter_result.get("startup_failure") is True
                     and verified_mcp.call_count == 0
+                    and (
+                        sum(sum(item.values()) for item in proxy_usage) == 0
+                        if config.proxy_required
+                        else adapter_result.get("tokens") == 0
+                    )
                     and attempt <= config.max_retries
                 )
                 _attempt_record(attempt_root / "attempt.json", {
@@ -726,9 +741,17 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     if not reset_outcome.passed:
                         raise NativeRunError(f"reset phase {reset_outcome.status.value} after retryable startup failure")
                     continue
+                if adapter_result.get("startup_failure") is True and attempt <= config.max_retries:
+                    raise NativeRunError(
+                        "startup retry refused because zero-token evidence is absent"
+                    )
                 if not adapter_result.get("completed"):
                     raise NativeRunError(str(adapter_result.get("error") or "agent phase failed"))
                 chosen_mcp = ledger
+                if monitor.violations:
+                    raise NativeRunError(
+                        "focus policy violation observed during agent phase"
+                    )
                 verifier_outcome = phase_runner.run_phase(verifier_spec)
                 verifier_s += verifier_outcome.duration_s
                 if not verifier_outcome.passed:
