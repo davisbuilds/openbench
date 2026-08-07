@@ -526,6 +526,7 @@ def _validate_sidecars(
             "reset_contract_sha256",
             "success_contract_sha256",
             "final_state_allowlist",
+            "focus_policy",
         },
         "task/native.json",
     )
@@ -545,6 +546,49 @@ def _validate_sidecars(
     ]
     if len(allowlist) != len(set(allowlist)):
         raise _fail("task/native.json.final_state_allowlist", "duplicate path")
+    focus_policy = _object(native["focus_policy"], "task/native.json.focus_policy")
+    _exact_fields(
+        focus_policy,
+        {
+            "required_foreground_bundle_id",
+            "forbidden_bundle_ids",
+            "require_foreground_full_agent_phase",
+            "forbid_global_delivery",
+            "allowed_delivery_tiers",
+        },
+        "task/native.json.focus_policy",
+    )
+    required_foreground = _string(
+        focus_policy["required_foreground_bundle_id"],
+        "task/native.json.focus_policy.required_foreground_bundle_id",
+    )
+    forbidden = [
+        _string(value, f"task/native.json.focus_policy.forbidden_bundle_ids[{index}]")
+        for index, value in enumerate(
+            _array(
+                focus_policy["forbidden_bundle_ids"],
+                "task/native.json.focus_policy.forbidden_bundle_ids",
+            )
+        )
+    ]
+    if len(forbidden) != len(set(forbidden)):
+        raise _fail("task/native.json.focus_policy.forbidden_bundle_ids", "duplicate bundle id")
+    if required_foreground in forbidden:
+        raise _fail("task/native.json.focus_policy", "required foreground is forbidden")
+    for field in ("require_foreground_full_agent_phase", "forbid_global_delivery"):
+        if not isinstance(focus_policy[field], bool):
+            raise _fail(f"task/native.json.focus_policy.{field}", "expected a boolean")
+    tiers = [
+        _string(value, f"task/native.json.focus_policy.allowed_delivery_tiers[{index}]")
+        for index, value in enumerate(
+            _array(
+                focus_policy["allowed_delivery_tiers"],
+                "task/native.json.focus_policy.allowed_delivery_tiers",
+            )
+        )
+    ]
+    if len(tiers) != len(set(tiers)) or not tiers:
+        raise _fail("task/native.json.focus_policy.allowed_delivery_tiers", "must be non-empty and unique")
     if _sha256_file(root / "task/native.json") != lock["native_sidecar"]["sha256"]:
         raise _fail("task/native.json", "digest does not match lock")
     _scan_privacy(task, "task/task.json")
@@ -1113,6 +1157,15 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 )
             previous_observed = observed
     target_bundle_id = lock["environment"]["app"]["bundle_id"]
+    focus_policy = native_sidecar["focus_policy"]
+    required_foreground = focus_policy["required_foreground_bundle_id"]
+    forbidden_bundles = set(focus_policy["forbidden_bundle_ids"])
+    if (
+        result["status"] == "completed"
+        and focus_policy["require_foreground_full_agent_phase"]
+        and not focus_records
+    ):
+        raise _fail("focus/ledger.jsonl", "required foreground has no observed samples")
     for index, record in enumerate(focus_records):
         payload = record["payload"]
         _exact_fields(
@@ -1120,7 +1173,7 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             {"state", "frontmost_bundle_id", "target_bundle_id"},
             f"focus/ledger.jsonl:{index + 1}.payload",
         )
-        if payload["state"] not in {"target_focused", "yielded_to_human"}:
+        if payload["state"] not in {"observed", "yielded_to_human"}:
             raise _fail(
                 f"focus/ledger.jsonl:{index + 1}.payload.state",
                 "focus violation is not importable",
@@ -1130,14 +1183,13 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
                 f"focus/ledger.jsonl:{index + 1}.payload.target_bundle_id",
                 "does not match locked app",
             )
-        if (
-            payload["state"] == "target_focused"
-            and payload["frontmost_bundle_id"] != target_bundle_id
-        ):
+        if payload["state"] == "observed" and payload["frontmost_bundle_id"] != required_foreground:
             raise _fail(
                 f"focus/ledger.jsonl:{index + 1}.payload",
-                "focus state contradicts frontmost app",
+                "frontmost app does not match required focus policy",
             )
+        if payload["frontmost_bundle_id"] in forbidden_bundles:
+            raise _fail(f"focus/ledger.jsonl:{index + 1}.payload", "forbidden app became foreground")
 
     proxy_present = PROXY_FILES <= set(inventory)
     if lock["evidence"]["proxy_required"] != proxy_present:
@@ -1214,10 +1266,10 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             if observed <= call_time
         ]
         focus_state = prior_focus[-1] if prior_focus else None
-        if focus_state != "target_focused":
+        if focus_state != "observed":
             raise _fail(
                 f"mcp/ledger.jsonl:{index}.request_unix_ns",
-                "MCP activity occurred without target focus or while yielded to human",
+                "MCP activity occurred without the required foreground or while yielded to human",
             )
         response_ns = call.get("response_unix_ns")
         if response_ns is None:
@@ -1230,11 +1282,23 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
             tz=started.tzinfo,
         )
         for observed, replay_state in focus_timeline:
-            if call_time < observed <= response_time and replay_state != "target_focused":
+            if call_time < observed <= response_time and replay_state != "observed":
                 raise _fail(
                     f"mcp/ledger.jsonl:{index}.response_unix_ns",
                     "MCP call overlapped focus yielded to human",
                 )
+        delivery = call.get("computer_use_meta", {}).get("delivery")
+        tier = delivery.get("delivery_tier") if isinstance(delivery, dict) else None
+        if tier not in set(focus_policy["allowed_delivery_tiers"]):
+            raise _fail(
+                f"mcp/ledger.jsonl:{index}.computer_use_meta.delivery.delivery_tier",
+                "delivery tier is absent or forbidden by native focus policy",
+            )
+        if focus_policy["forbid_global_delivery"] and isinstance(tier, str) and tier.startswith("tier4-"):
+            raise _fail(
+                f"mcp/ledger.jsonl:{index}.computer_use_meta.delivery.delivery_tier",
+                "global delivery is forbidden",
+            )
 
     outcome = result["outcome"]
     success = result["status"] == "completed" and outcome["checker_exit"] == 0

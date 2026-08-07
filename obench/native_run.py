@@ -175,6 +175,7 @@ class NativeRunConfig:
     verdict_path: str
     artifacts: tuple[ArtifactConfig, ...]
     proxy_required: bool
+    focus_policy: Mapping[str, Any]
 
 
 def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
@@ -245,6 +246,28 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
     if not isinstance(proxy, dict):
         raise NativeRunError("[proxy] must be a table")
     adapter_path = harness.get("candidate")
+    focus = table("focus")
+    required_foreground = _required_string(
+        focus.get("required_foreground_bundle_id"),
+        "focus.required_foreground_bundle_id",
+    )
+    forbidden_bundles = focus.get("forbidden_bundle_ids", [])
+    allowed_tiers = focus.get("allowed_delivery_tiers")
+    if (
+        not isinstance(forbidden_bundles, list)
+        or not all(isinstance(value, str) and value for value in forbidden_bundles)
+        or len(forbidden_bundles) != len(set(forbidden_bundles))
+    ):
+        raise NativeRunError("focus.forbidden_bundle_ids must contain unique bundle ids")
+    if (
+        not isinstance(allowed_tiers, list)
+        or not allowed_tiers
+        or not all(isinstance(value, str) and value for value in allowed_tiers)
+        or len(allowed_tiers) != len(set(allowed_tiers))
+    ):
+        raise NativeRunError("focus.allowed_delivery_tiers must be a non-empty unique array")
+    if required_foreground in forbidden_bundles:
+        raise NativeRunError("required foreground bundle cannot also be forbidden")
     return NativeRunConfig(
         source_path=source,
         trial_id=trial_id,
@@ -277,6 +300,15 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
         verdict_path=_safe_relative(data.get("verdict_path"), "verdict_path"),
         artifacts=tuple(artifacts),
         proxy_required=bool(proxy.get("required", False)),
+        focus_policy={
+            "required_foreground_bundle_id": required_foreground,
+            "forbidden_bundle_ids": list(forbidden_bundles),
+            "require_foreground_full_agent_phase": bool(
+                focus.get("require_foreground_full_agent_phase", True)
+            ),
+            "forbid_global_delivery": bool(focus.get("forbid_global_delivery", True)),
+            "allowed_delivery_tiers": list(allowed_tiers),
+        },
     )
 
 
@@ -621,14 +653,11 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
         adapter_result: Mapping[str, Any] | None = None
         verifier_outcome = None
         completed_attempts = 0
-        monitor = hooks.focus_monitor_factory((config.app_bundle_id,))
+        monitor = hooks.focus_monitor_factory(
+            (config.focus_policy["required_foreground_bundle_id"],)
+        )
         try:
             monitor.start()
-            focus_events.append((started.isoformat(), {
-                "state": "target_focused",
-                "frontmost_bundle_id": config.app_bundle_id,
-                "target_bundle_id": config.app_bundle_id,
-            }))
             for attempt in range(1, config.max_retries + 2):
                 completed_attempts = attempt
                 attempt_root = attempts_dir / f"attempt{attempt}"
@@ -729,6 +758,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     "target_bundle_id": config.app_bundle_id,
                 }))
             raise NativeRunError("focus policy violation observed during native trial")
+        for event in monitor.events:
+            if event.observed_at is None:
+                raise NativeRunError("focus helper event omitted its wall-clock timestamp")
+            focus_events.append((event.observed_at, {
+                "state": "observed",
+                "frontmost_bundle_id": event.bundle_identifier,
+                "target_bundle_id": config.app_bundle_id,
+            }))
+        if not focus_events:
+            raise NativeRunError("focus helper produced no observed foreground samples")
         if chosen_mcp is None or verifier_outcome is None:
             raise NativeRunError("native trial did not reach verifier completion")
 
@@ -764,6 +803,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 "reset_contract_sha256": _canonical_digest(list(config.reset.argv)),
                 "success_contract_sha256": _canonical_digest({"verdict_path": config.verdict_path, "artifacts": [item.path for item in config.artifacts]}),
                 "final_state_allowlist": [item.path for item in config.artifacts],
+                "focus_policy": dict(config.focus_policy),
             }
             _write_json(bundle / "task/task.json", task_sidecar)
             _write_json(bundle / "task/native.json", native_sidecar)
@@ -826,7 +866,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
             mcp_count = verify_ledger(bundle / "mcp/ledger.jsonl").call_count
             focus_writer = _LedgerWriter(bundle, "focus", config.trial_id, lock_sha256)
             for observed, payload in focus_events:
-                focus_writer.append("focus_sample" if payload["state"] == "target_focused" else "focus_yield", payload, observed)
+                focus_writer.append("focus_sample" if payload["state"] == "observed" else "focus_yield", payload, observed)
             focus_writer.seal()
             if config.proxy_required:
                 proxy_writer = _LedgerWriter(bundle, "proxy", config.trial_id, lock_sha256)

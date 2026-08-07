@@ -97,7 +97,9 @@ def _write_ledger(
     )
 
 
-def _write_mcp_ledger(root, trial_id, *, with_call=True):
+def _write_mcp_ledger(
+    root, trial_id, *, with_call=True, delivery_tier="tier1-ax-attribute"
+):
     path = root / "mcp/ledger.jsonl"
     ledger = CallLedger(path, "native-cub-v0-run", trial_id)
     if with_call:
@@ -122,7 +124,11 @@ def _write_mcp_ledger(root, trial_id, *, with_call=True):
                     "verification": {},
                 },
                 "focus": {"focus_changed": False},
-                "delivery": None,
+                "delivery": {
+                    "delivery_tier": delivery_tier,
+                    "fallback_reasons": [],
+                    "chain_rung": None,
+                },
             },
             "process_returncode": None,
         })
@@ -184,6 +190,17 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
         "reset_contract_sha256": HEX_B,
         "success_contract_sha256": HEX_C,
         "final_state_allowlist": [final_path],
+        "focus_policy": {
+            "required_foreground_bundle_id": case.get(
+                "required_foreground_bundle_id", "com.openbench.fixture"
+            ),
+            "forbidden_bundle_ids": case.get("forbidden_bundle_ids", []),
+            "require_foreground_full_agent_phase": True,
+            "forbid_global_delivery": True,
+            "allowed_delivery_tiers": case.get(
+                "allowed_delivery_tiers", ["tier1-ax-attribute"]
+            ),
+        },
     }
     _write_json(root / "task/native.json", native_sidecar)
 
@@ -390,7 +407,12 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
         },
     )
 
-    _write_mcp_ledger(root, trial_id, with_call=not preflight_failed)
+    _write_mcp_ledger(
+        root,
+        trial_id,
+        with_call=not preflight_failed,
+        delivery_tier=case.get("delivery_tier", "tier1-ax-attribute"),
+    )
     _write_ledger(
         root,
         "focus",
@@ -400,8 +422,10 @@ def _build_bundle(root, case, *, trial_id="native-cub-v0-trial1"):
             (
                 "focus_sample",
                 {
-                    "state": "target_focused",
-                    "frontmost_bundle_id": "com.openbench.fixture",
+                    "state": "observed",
+                    "frontmost_bundle_id": case.get(
+                        "observed_foreground_bundle_id", "com.openbench.fixture"
+                    ),
                     "target_bundle_id": "com.openbench.fixture",
                 },
             )
@@ -489,6 +513,31 @@ class NativeTrialTests(unittest.TestCase):
         with self.assertRaisesRegex(NativeTrialError, "does not match manifest"):
             load_native_trial(bundle)
 
+    def test_focus_policy_rejects_target_activation_and_global_delivery(self):
+        background = {
+            **self.cases["happy"],
+            "required_foreground_bundle_id": "org.openbench.FocusGuard",
+            "forbidden_bundle_ids": ["com.openbench.fixture"],
+            "observed_foreground_bundle_id": "com.openbench.fixture",
+        }
+        target_active = self.root / "target-active"
+        _build_bundle(target_active, background)
+        with self.assertRaisesRegex(NativeTrialError, "required focus policy|forbidden app"):
+            load_native_trial(target_active)
+
+        global_delivery = {
+            **self.cases["happy"],
+            "allowed_delivery_tiers": [
+                "tier1-ax-attribute",
+                "tier4-global-session-tap",
+            ],
+            "delivery_tier": "tier4-global-session-tap",
+        }
+        globally_delivered = self.root / "global-delivery"
+        _build_bundle(globally_delivered, global_delivery)
+        with self.assertRaisesRegex(NativeTrialError, "global delivery is forbidden"):
+            load_native_trial(globally_delivered)
+
     def test_privacy_leak_is_rejected_even_after_manifest_is_resealed(self):
         bundle = self.bundle("happy")
         trajectory_path = bundle / "agent/trajectory.json"
@@ -558,7 +607,7 @@ class NativeTrialTests(unittest.TestCase):
             lock_sha256,
             [
                 ("focus_sample", {
-                    "state": "target_focused",
+                    "state": "observed",
                     "frontmost_bundle_id": "com.openbench.fixture",
                     "target_bundle_id": "com.openbench.fixture",
                 }),
@@ -603,7 +652,11 @@ class NativeTrialTests(unittest.TestCase):
                 "error": None,
                 "outcome": None,
                 "focus": None,
-                "delivery": None,
+                "delivery": {
+                    "delivery_tier": "tier1-ax-attribute",
+                    "fallback_reasons": [],
+                    "chain_rung": None,
+                },
             },
             "process_returncode": None,
         }
@@ -635,7 +688,7 @@ class NativeTrialTests(unittest.TestCase):
             lock_sha256,
             [
                 ("focus_sample", {
-                    "state": "target_focused",
+                    "state": "observed",
                     "frontmost_bundle_id": "com.openbench.fixture",
                     "target_bundle_id": "com.openbench.fixture",
                 }),
@@ -645,7 +698,7 @@ class NativeTrialTests(unittest.TestCase):
                     "target_bundle_id": "com.openbench.fixture",
                 }),
                 ("focus_sample", {
-                    "state": "target_focused",
+                    "state": "observed",
                     "frontmost_bundle_id": "com.openbench.fixture",
                     "target_bundle_id": "com.openbench.fixture",
                 }),

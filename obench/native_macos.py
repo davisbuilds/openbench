@@ -783,6 +783,7 @@ class FocusEvent:
     application_name: str | None
     pid: int | None
     observed_at_monotonic: float
+    observed_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -827,6 +828,7 @@ class MacOSFocusMonitor:
         self.event_source = event_source or NSWorkspaceActivationEventSource()
         self.on_violation = on_violation
         self._violations: list[FocusViolation] = []
+        self._events: list[FocusEvent] = []
         self._lock = threading.Lock()
         self._started = False
 
@@ -834,6 +836,11 @@ class MacOSFocusMonitor:
     def violations(self) -> tuple[FocusViolation, ...]:
         with self._lock:
             return tuple(self._violations)
+
+    @property
+    def events(self) -> tuple[FocusEvent, ...]:
+        with self._lock:
+            return tuple(self._events)
 
     @property
     def error(self) -> BaseException | None:
@@ -846,6 +853,8 @@ class MacOSFocusMonitor:
             ) from self.error
 
     def _observe(self, event: FocusEvent) -> None:
+        with self._lock:
+            self._events.append(event)
         if event.bundle_identifier in self.allowed_bundle_identifiers:
             return
         violation = FocusViolation(
@@ -949,6 +958,7 @@ class NSWorkspaceActivationEventSource:
             application_name=application_name,
             pid=pid,
             observed_at_monotonic=self.monotonic(),
+            observed_at=datetime.now(timezone.utc).isoformat(),
         )
 
     def _read_events(self, callback: Callable[[FocusEvent], None]) -> None:

@@ -7,9 +7,11 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+from datetime import datetime, timezone
 import unittest
 
 from obench.native_macos import (
+    FocusEvent,
     LeaseUnavailableError,
     PreflightCheck,
     PreflightResult,
@@ -23,13 +25,22 @@ HEX_A = "a" * 64
 
 
 class FakeFocusMonitor:
-    def __init__(self):
+    def __init__(self, bundle_id="com.openbench.fixture"):
         self.started = False
         self.stopped = False
         self.violations = ()
+        self.bundle_id = bundle_id
+        self.events = ()
 
     def start(self):
         self.started = True
+        self.events = (FocusEvent(
+            self.bundle_id,
+            "Fixture",
+            123,
+            0.0,
+            datetime.now(timezone.utc).isoformat(),
+        ),)
 
     def stop(self):
         self.stopped = True
@@ -144,7 +155,16 @@ class NativeRunTests(unittest.TestCase):
                     response = {
                         "jsonrpc": "2.0",
                         "id": request["id"],
-                        "result": {"content": [], "isError": False},
+                        "result": {
+                            "content": [],
+                            "isError": False,
+                            "_meta": {
+                                "computer-use-mcp/delivery": {
+                                    "delivery_tier": "tier1-ax-attribute",
+                                    "fallback_reasons": [],
+                                }
+                            },
+                        },
                     }
                     print(json.dumps(response), flush=True)
                 """
@@ -214,6 +234,13 @@ color_space = "Display P3"
 [budget]
 timeout_s = 30
 max_retries = 1
+
+[focus]
+required_foreground_bundle_id = "com.openbench.fixture"
+forbidden_bundle_ids = []
+require_foreground_full_agent_phase = true
+forbid_global_delivery = true
+allowed_delivery_tiers = ["tier1-ax-attribute"]
 
 [phases.setup]
 command = {phase.replace('PHASE', 'setup')}
