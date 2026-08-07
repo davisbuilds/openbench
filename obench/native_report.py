@@ -209,18 +209,29 @@ def _strict_native_row(row: Any) -> dict[str, Any]:
     }:
         raise NativeReportError("native row phase timings are invalid")
     timing_pairs = (
-        ("t_env_setup_s", "env_setup_s"),
-        ("t_agent_s", "agent_s"),
-        ("t_checker_s", "verifier_s"),
-        ("wall_time_s", "total_s"),
+        ("t_env_setup_s", "env_setup_s", 0.0),
+        ("t_agent_s", "agent_s", 0.0),
+        ("t_checker_s", "verifier_s", 0.0),
+        # Import permits total_s within 1 ms of elapsed, then rounds row wall
+        # time to 3 decimals. Those tolerances can combine to 1.5 ms.
+        ("wall_time_s", "total_s", 0.001501),
     )
-    for row_field, timing_field in timing_pairs:
+    for row_field, timing_field, tolerance in timing_pairs:
         if (
             _number(normalized.get(row_field)) is None
             or _number(timings.get(timing_field)) is None
-            or abs(float(normalized[row_field]) - float(timings[timing_field])) > 0.001
+            or abs(float(normalized[row_field]) - float(timings[timing_field]))
+            > tolerance
         ):
             raise NativeReportError(f"native row {row_field} disagrees with phase timings")
+    if (
+        sum(
+            float(timings[field])
+            for field in ("env_setup_s", "agent_s", "verifier_s")
+        )
+        > float(timings["total_s"]) + 0.001
+    ):
+        raise NativeReportError("native row phase timings exceed total trial time")
 
     completed = normalized["completed"]
     success = normalized["success"]

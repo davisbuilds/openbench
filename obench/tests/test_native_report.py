@@ -273,6 +273,33 @@ class NativeReportTests(unittest.TestCase):
             _merge_observation(bundle, row_only, cell_id="block1:baseline").mcp_calls
         )
 
+    def test_row_timing_gate_matches_importer_sum_and_rounding_rules(self):
+        plan = _plan(repetitions=1)
+        impossible = _row(
+            plan,
+            "baseline",
+            1,
+            wall_time_s=10.0,
+            t_env_setup_s=10.0,
+            t_agent_s=10.0,
+            t_checker_s=10.0,
+        )
+        with self.assertRaisesRegex(
+            NativeReportError, "phase timings exceed total"
+        ):
+            build_native_report(
+                plan,
+                [impossible, _row(plan, "candidate", 1)],
+            )
+
+        rounded = _row(plan, "baseline", 1)
+        rounded["candidate_provenance"]["phase_timings"]["total_s"] = 10.0013
+        report = build_native_report(
+            plan,
+            [rounded, _row(plan, "candidate", 1)],
+        )
+        self.assertEqual(report["coverage"]["complete_matched_blocks"], 1)
+
     def test_metric_math_wilson_token_splits_and_outlier_summary(self):
         plan = _plan(repetitions=10)
         rows = []
