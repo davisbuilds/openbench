@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import unittest
 
 from obench.native_macos import (
@@ -13,7 +14,11 @@ from obench.native_macos import (
     FocusEvent,
     LeaseOwner,
     LeaseUnavailableError,
+    MacOSAppInspector,
     MacOSFocusMonitor,
+    MacOSSessionReader,
+    NSWorkspaceActivationEventSource,
+    NativeMacOSHelperResolver,
     PhaseName,
     PhaseSpec,
     PhaseStatus,
@@ -213,8 +218,255 @@ class PreflightTests(unittest.TestCase):
         def command_runner(argv, **kwargs):
             return subprocess.CompletedProcess(argv, 4, "", "unavailable")
 
+        class Inspector:
+            def inspect(inner_self, requirements):
+                return self.apps
+
+        class Session:
+            def screen_unlocked(inner_self):
+                return True
+
         with self.assertRaisesRegex(PreflightEvidenceError, "exited 4"):
-            run_preflight(self.spec, command_runner=command_runner)
+            run_preflight(
+                self.spec,
+                command_runner=command_runner,
+                app_inspector=Inspector(),
+                session_reader=Session(),
+                platform_reader=lambda: "Darwin",
+            )
+
+    def test_runner_explicitly_resolves_helper_for_native_evidence(self):
+        calls = []
+
+        class Resolver:
+            resolved = False
+
+            def resolve(inner_self):
+                inner_self.resolved = True
+                return Path("/resolved/native-helper")
+
+        resolver = Resolver()
+
+        def command_runner(argv, **kwargs):
+            calls.append(argv)
+            if argv[0] == "computer-use-mcp":
+                payload = health_report()
+            elif argv[1] == "apps":
+                payload = {
+                    "protocolVersion": 1,
+                    "kind": "apps",
+                    "apps": [
+                        {
+                            "bundleIdentifier": "com.example.Target",
+                            "version": "2.4.1",
+                            "running": True,
+                            "path": "/Applications/Target.app",
+                        }
+                    ],
+                }
+            elif argv[1] == "session":
+                payload = {
+                    "protocolVersion": 1,
+                    "kind": "session",
+                    "status": "known",
+                    "screenUnlocked": True,
+                }
+            else:
+                self.fail(f"unexpected command: {argv}")
+            return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
+
+        result = run_preflight(
+            self.spec,
+            command_runner=command_runner,
+            helper_resolver=resolver,
+            platform_reader=lambda: "Darwin",
+        )
+        self.assertTrue(result.passed)
+        self.assertTrue(resolver.resolved)
+        self.assertEqual(
+            calls,
+            [
+                [
+                    "computer-use-mcp",
+                    "health_report",
+                    "--json",
+                    "--probe-capture",
+                ],
+                [
+                    "/resolved/native-helper",
+                    "apps",
+                    "com.example.Target",
+                ],
+                ["/resolved/native-helper", "session"],
+            ],
+        )
+
+    def test_non_darwin_fails_before_running_commands(self):
+        def command_runner(argv, **kwargs):
+            self.fail("preflight must not run macOS commands off Darwin")
+
+        with self.assertRaisesRegex(PreflightEvidenceError, "requires Darwin"):
+            run_preflight(
+                self.spec,
+                command_runner=command_runner,
+                platform_reader=lambda: "Linux",
+            )
+
+
+class NativeHelperProtocolTests(unittest.TestCase):
+    def test_checked_in_swift_source_is_in_package_data(self):
+        root = Path(__file__).parents[2]
+        config = tomllib.loads(
+            (root / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        package_data = config["tool"]["setuptools"]["package-data"]["obench"]
+        self.assertIn("*.swift", package_data)
+        self.assertTrue((root / "obench/native_macos_helper.swift").is_file())
+
+    def test_resolver_compiles_caches_and_probes_versioned_helper(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "helper.swift"
+            source.write_text("// fixture", encoding="utf-8")
+            calls = []
+
+            def command_runner(argv, **kwargs):
+                calls.append(argv)
+                if argv[0] == "/usr/bin/swiftc":
+                    output = Path(argv[argv.index("-o") + 1])
+                    output.write_text("#!/bin/sh\n", encoding="utf-8")
+                    output.chmod(0o755)
+                    return subprocess.CompletedProcess(argv, 0, "", "")
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    json.dumps({"protocolVersion": 1, "kind": "protocol"}),
+                    "",
+                )
+
+            resolver = NativeMacOSHelperResolver(
+                source_path=source,
+                cache_dir=root / "cache",
+                command_runner=command_runner,
+                which=lambda name: "/usr/bin/swiftc",
+                platform_reader=lambda: "Darwin",
+                machine_reader=lambda: "arm64",
+            )
+            first = resolver.resolve()
+            resolver.which = lambda name: None
+            second = resolver.resolve()
+            self.assertEqual(first, second)
+            self.assertTrue(os.access(first, os.X_OK))
+            compile_calls = [
+                argv for argv in calls if argv[0] == "/usr/bin/swiftc"
+            ]
+            self.assertEqual(len(compile_calls), 1)
+            self.assertEqual(
+                [argv[1] for argv in calls if argv[0] == str(first)],
+                ["protocol", "protocol"],
+            )
+
+    def test_resolver_fails_clearly_without_swift_toolchain(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "helper.swift"
+            source.write_text("// fixture", encoding="utf-8")
+            resolver = NativeMacOSHelperResolver(
+                source_path=source,
+                cache_dir=Path(temp) / "cache",
+                which=lambda name: None,
+                platform_reader=lambda: "Darwin",
+            )
+            with self.assertRaisesRegex(PreflightEvidenceError, "requires swiftc"):
+                resolver.resolve()
+
+    def test_resolver_rejects_unknown_prebuilt_protocol(self):
+        with tempfile.TemporaryDirectory() as temp:
+            helper = Path(temp) / "helper"
+            helper.write_text("#!/bin/sh\n", encoding="utf-8")
+            helper.chmod(0o755)
+
+            def command_runner(argv, **kwargs):
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    json.dumps({"protocolVersion": 2, "kind": "protocol"}),
+                    "",
+                )
+
+            resolver = NativeMacOSHelperResolver(
+                prebuilt_path=helper,
+                command_runner=command_runner,
+                platform_reader=lambda: "Darwin",
+            )
+            with self.assertRaisesRegex(
+                PreflightEvidenceError, "unsupported native helper protocol"
+            ):
+                resolver.resolve()
+
+    def test_app_and_session_adapters_fail_closed_on_unknown_fields(self):
+        def command_runner(argv, **kwargs):
+            if argv[1] == "apps":
+                payload = {
+                    "protocolVersion": 1,
+                    "kind": "apps",
+                    "apps": [
+                        {
+                            "bundleIdentifier": "com.example.Target",
+                            "version": "1.0",
+                            "running": True,
+                            "path": None,
+                        }
+                    ],
+                }
+            else:
+                payload = {
+                    "protocolVersion": 1,
+                    "kind": "session",
+                    "status": "maybe",
+                    "screenUnlocked": True,
+                }
+            return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
+
+        apps = MacOSAppInspector(
+            "/helper", command_runner=command_runner
+        ).inspect([AppRequirement("com.example.Target", "1.0")])
+        self.assertEqual(apps[0].bundle_identifier, "com.example.Target")
+        with self.assertRaisesRegex(
+            PreflightEvidenceError, "session status is unknown"
+        ):
+            MacOSSessionReader(
+                "/helper", command_runner=command_runner
+            ).screen_unlocked()
+
+    def test_focus_source_consumes_helper_jsonl_and_stops_process(self):
+        with tempfile.TemporaryDirectory() as temp:
+            helper = Path(temp) / "focus-helper"
+            helper.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, time\n"
+                "print(json.dumps({"
+                "'protocolVersion': 1, 'kind': 'focus', "
+                "'bundleIdentifier': 'com.example.Target', "
+                "'applicationName': 'Target', 'pid': 123}), flush=True)\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+
+            class Resolver:
+                def resolve(inner_self):
+                    return helper
+
+            events = []
+            source = NSWorkspaceActivationEventSource(
+                helper_resolver=Resolver(),
+                startup_timeout_s=2,
+            )
+            source.start(events.append)
+            source.stop()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].bundle_identifier, "com.example.Target")
+            self.assertIsNone(source.error)
 
 
 class ManualActivationSource:
@@ -237,6 +489,20 @@ class ManualActivationSource:
 
 
 class FocusMonitorTests(unittest.TestCase):
+    def test_stop_fails_closed_when_event_source_died(self):
+        class FailedSource(ManualActivationSource):
+            error = RuntimeError("helper exited")
+
+        monitor = MacOSFocusMonitor(
+            ["com.example.Target"],
+            event_source=FailedSource(),
+        )
+        monitor.start()
+        with self.assertRaisesRegex(
+            Exception, "native focus monitor failed: helper exited"
+        ):
+            monitor.stop()
+
     def test_source_can_report_disallowed_baseline_focus_at_start(self):
         source = ManualActivationSource("com.example.AlreadyFrontmost")
         monitor = MacOSFocusMonitor(
