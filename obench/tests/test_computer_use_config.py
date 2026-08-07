@@ -333,6 +333,7 @@ class ComputerUseConfigTests(unittest.TestCase):
             "background-control": [
                 "tier1-ax-action",
                 "tier1-ax-attribute",
+                "tier2-per-window-nsevent",
             ],
             "basic-controls": [
                 "tier1-ax-action",

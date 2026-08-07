@@ -63,6 +63,7 @@ DELIVERY_TIERS = {
     "background-control": (
         "tier1-ax-action",
         "tier1-ax-attribute",
+        "tier2-per-window-nsevent",
     ),
     "textedit-exact-file": (
         "tier1-ax-action",
