@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -629,15 +630,27 @@ def collect_stdio(
     failures_lock = threading.Lock()
     input_stopped = threading.Event()
 
-    def record_failure(exc: BaseException) -> None:
+    def kill_owned_processes() -> None:
+        active_process = process
+        if active_process is None:
+            return
+        try:
+            if os.name == "posix":
+                os.killpg(active_process.pid, signal.SIGKILL)
+            elif active_process.poll() is None:
+                active_process.kill()
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            record_failure(exc, kill_processes=False)
+
+    def record_failure(
+        exc: BaseException, *, kill_processes: bool = True
+    ) -> None:
         with failures_lock:
             failures.append(exc)
-        active_process = process
-        if active_process is not None and active_process.poll() is None:
-            try:
-                active_process.kill()
-            except OSError:
-                pass
+        if kill_processes:
+            kill_owned_processes()
 
     try:
         process = subprocess.Popen(
@@ -648,6 +661,7 @@ def collect_stdio(
             env=dict(env) if env is not None else None,
             cwd=cwd,
             bufsize=0,
+            start_new_session=(os.name == "posix"),
         )
         assert process.stdin is not None
         assert process.stdout is not None
@@ -692,8 +706,8 @@ def collect_stdio(
                 record_failure(exc)
 
         input_thread = threading.Thread(target=relay_input, daemon=True)
-        output_thread = threading.Thread(target=relay_output)
-        stderr_thread = threading.Thread(target=relay_stderr)
+        output_thread = threading.Thread(target=relay_output, daemon=True)
+        stderr_thread = threading.Thread(target=relay_stderr, daemon=True)
         for thread in (input_thread, output_thread, stderr_thread):
             thread.start()
 
@@ -704,9 +718,12 @@ def collect_stdio(
             except subprocess.TimeoutExpired:
                 continue
         input_stopped.set()
-        output_thread.join()
-        stderr_thread.join()
+        kill_owned_processes()
+        output_thread.join(timeout=1.0)
+        stderr_thread.join(timeout=1.0)
         input_thread.join(timeout=0.1)
+        if output_thread.is_alive() or stderr_thread.is_alive():
+            raise CollectorError("MCP child relay pipes did not close after process exit")
         observer.finish("request")
         process.stdout.close()
         process.stderr.close()
@@ -739,8 +756,8 @@ def collect_stdio(
             raise LedgerIntegrityError("sealed MCP ledger root hash changed after write")
         return result
     except BaseException:
+        kill_owned_processes()
         if process is not None and process.poll() is None:
-            process.kill()
             process.wait()
         ledger.abort()
         raise

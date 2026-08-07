@@ -341,6 +341,34 @@ class MCPStdioCollectorTests(unittest.TestCase):
         with self.assertRaises(collector.LedgerIntegrityError):
             collector.verify_ledger(ledger_path)
 
+    @unittest.skipUnless(os.name == "posix", "process-group fixture requires POSIX")
+    def test_wrapper_descendant_cannot_hold_relay_pipe_open(self):
+        fixture = Path(self.tmp.name) / "wrapper.py"
+        fixture.write_text(
+            "import os\n"
+            "import sys\n"
+            "import time\n"
+            "pid = os.fork()\n"
+            "if pid == 0:\n"
+            "    sys.stdout.buffer.write(b'partial-from-descendant')\n"
+            "    sys.stdout.buffer.flush()\n"
+            "    time.sleep(30)\n"
+            "    os._exit(0)\n"
+            "time.sleep(0.1)\n"
+            "os._exit(0)\n",
+            encoding="utf-8",
+        )
+        started = time.monotonic()
+        result, output, _, _ = self.run_fixture(
+            b"", name="descendant.jsonl", fixture=fixture
+        )
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(output, b"partial-from-descendant")
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(result.integrity_ok)
+        self.assertEqual(result.partial_frames, 1)
+        collector.verify_ledger(result.ledger_path)
+
     def test_oversized_unterminated_frame_uses_bounded_parser_memory(self):
         ledger = collector.CallLedger(
             Path(self.tmp.name) / "bounded.jsonl", "run-1", "bounded"
