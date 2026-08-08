@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from obench.native_matrix import build_native_matrix
+from obench.mcp_stdio_collector import CallLedger
 from obench.native_report import (
     NativeReportError,
     _Observation,
@@ -17,7 +18,11 @@ from obench.native_report import (
 )
 from obench.native_trial import BUNDLE_SCHEMA_VERSION
 from obench.run import ROW_FIELDS, make_run_id
-from obench.tests.test_native_trial import FIXTURE_CASES, _build_bundle
+from obench.tests.test_native_trial import (
+    FIXTURE_CASES,
+    _build_bundle,
+    _reseal_manifest,
+)
 
 
 HARNESS = {
@@ -196,6 +201,53 @@ def _call(tool, latency, *, outcome="success", tier="tier1-ax-action"):
     }
 
 
+def _metric_call(tool, latency, metrics):
+    call = _call(tool, latency)
+    call["computer_use_meta"]["metrics"] = {
+        "schema_version": 1,
+        **metrics,
+    }
+    return call
+
+
+def _replace_bundle_mcp_ledger(bundle, calls):
+    ledger_path = bundle / "mcp/ledger.jsonl"
+    ledger_path.unlink()
+    ledger = CallLedger(
+        ledger_path,
+        "native-cub-v0-run",
+        "native-cub-v0-trial1",
+    )
+    for sequence, call in enumerate(calls, 1):
+        request_unix_ns = 1786017601000000000 + sequence * 1000000000
+        ledger.append_call({
+            **call,
+            "status": "completed",
+            "request_id_type": "str",
+            "argument_digest": "sha256:" + str(sequence) * 64,
+            "request_bytes": 100,
+            "response_bytes": 80,
+            "request_unix_ns": request_unix_ns,
+            "response_unix_ns": request_unix_ns + int(call["duration_ms"] * 1e6),
+            "process_returncode": None,
+        })
+    ledger.seal({
+        "returncode": 0,
+        "integrity_ok": True,
+        "malformed_frames": 0,
+        "partial_frames": 0,
+        "duplicate_request_ids": 0,
+        "missing_responses": 0,
+        "relay_failures": 0,
+        "input_incomplete": False,
+    })
+    result_path = bundle / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["mcp_event_count"] = len(calls)
+    result_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    _reseal_manifest(bundle)
+
+
 class NativeReportTests(unittest.TestCase):
     def test_validated_bundle_supplies_digest_bound_mcp_detail(self):
         cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
@@ -228,6 +280,104 @@ class NativeReportTests(unittest.TestCase):
             100,
         )
         self.assertEqual(aggregate["mcp"]["response_bytes"]["total"], 80)
+
+    def test_validated_bundle_aggregates_sealed_mcp_call_metrics(self):
+        cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
+        operation = {
+            "operation": "click",
+            "tool": "click",
+            "attempted_delivery_strategies": ["ax-action"],
+            "queue_latency_ms": 3,
+            "execution_latency_ms": 17,
+        }
+        perception = {
+            "operation": "get_app_state",
+            "tool": "get_app_state",
+            "elapsed_ms": 41,
+            "elements_visited": 120,
+            "elements_returned": 35,
+            "partial": False,
+            "diff": True,
+            "context_bytes": 4096,
+        }
+        with tempfile.TemporaryDirectory(prefix="native_report_metrics_") as temp:
+            bundle = Path(temp) / "native-cub-v0-trial1"
+            _build_bundle(
+                bundle,
+                {
+                    **cases["happy"],
+                    "allowed_delivery_tiers": ["tier1-ax-action"],
+                },
+            )
+            _replace_bundle_mcp_ledger(
+                bundle,
+                [
+                    _metric_call("click", 20.0, {"operation": operation}),
+                    _metric_call(
+                        "get_app_state", 50.0, {"perception": perception}
+                    ),
+                ],
+            )
+            aggregate = _aggregate_observations([_load_bundle(bundle)])
+
+        mcp = aggregate["mcp"]
+        self.assertEqual(mcp["operation_metrics_calls"], 1)
+        self.assertEqual(mcp["perception_metrics_calls"], 1)
+        self.assertEqual(mcp["queue_latency_ms"]["median"], 3.0)
+        self.assertEqual(mcp["queue_latency_ms"]["missing_n"], 0)
+        self.assertEqual(mcp["execution_latency_ms"]["p95"], 17.0)
+        self.assertEqual(mcp["elapsed_ms"]["median"], 41.0)
+        self.assertEqual(mcp["context_bytes"]["total"], 4096.0)
+        self.assertIsInstance(mcp["context_bytes"]["total"], int)
+        self.assertEqual(mcp["elements_visited"]["total"], 120.0)
+        self.assertEqual(mcp["elements_returned"]["median"], 35.0)
+        self.assertEqual(
+            mcp["partial_rate"],
+            {"n": 1, "missing_n": 0, "true_count": 0, "rate": 0.0},
+        )
+        self.assertEqual(
+            mcp["diff_rate"],
+            {"n": 1, "missing_n": 0, "true_count": 1, "rate": 1.0},
+        )
+
+    def test_validated_bundle_rejects_invalid_sealed_mcp_metrics(self):
+        cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory(prefix="native_report_bad_metrics_") as temp:
+            bundle = Path(temp) / "native-cub-v0-trial1"
+            _build_bundle(
+                bundle,
+                {
+                    **cases["happy"],
+                    "allowed_delivery_tiers": ["tier1-ax-action"],
+                },
+            )
+            _replace_bundle_mcp_ledger(
+                bundle,
+                [
+                    _metric_call(
+                        "set_value",
+                        20.0,
+                        {
+                            "operation": {
+                                "operation": "set_value",
+                                "tool": "set_value",
+                                "attempted_delivery_strategies": ["ax-attribute"],
+                                "queue_latency_ms": 3,
+                                "execution_latency_ms": 17,
+                            }
+                        },
+                    )
+                ],
+            )
+            records = [
+                json.loads(line)
+                for line in (bundle / "mcp/ledger.jsonl").read_text().splitlines()
+            ]
+            records[0]["computer_use_meta"]["metrics"]["schema_version"] = 2
+            _replace_bundle_mcp_ledger(bundle, [records[0]])
+
+            with self.assertRaisesRegex(NativeReportError, "invalid metrics metadata"):
+                _load_bundle(bundle)
 
     def test_incomplete_arm_is_excluded_and_surfaced(self):
         plan = _plan(repetitions=2)

@@ -11,7 +11,11 @@ import re
 from statistics import median
 from typing import Any, Mapping, Sequence
 
-from .mcp_stdio_collector import verify_ledger
+from .mcp_stdio_collector import (
+    MetricsMetadataError,
+    _validated_metrics,
+    verify_ledger,
+)
 from .native_matrix import canonical_sha256, validate_native_matrix
 from .native_trial import BUNDLE_SCHEMA_VERSION, load_native_trial
 from .run import ROW_FIELDS, make_run_id
@@ -102,6 +106,23 @@ def _summary(values: Sequence[Any], expected_n: int) -> dict[str, Any]:
         "missing_n": expected_n - len(measured),
         "median": median(measured) if measured else None,
         "p95": _percentile(measured, 0.95),
+    }
+
+
+def _total_summary(values: Sequence[Any], expected_n: int) -> dict[str, Any]:
+    summary = _summary(values, expected_n)
+    measured = [value for value in values if _number(value) is not None]
+    return {"total": sum(measured), **summary}
+
+
+def _rate_summary(values: Sequence[Any], expected_n: int) -> dict[str, Any]:
+    measured = [value for value in values if isinstance(value, bool)]
+    true_count = sum(measured)
+    return {
+        "n": len(measured),
+        "missing_n": expected_n - len(measured),
+        "true_count": true_count,
+        "rate": true_count / len(measured) if measured else None,
     }
 
 
@@ -320,6 +341,17 @@ def _load_bundle(path: str | Path) -> _Observation:
     calls = tuple(record for record in records if record.get("record_type") == "tool_call")
     if len(calls) != provenance["mcp_event_count"]:
         raise NativeReportError("validated MCP call count does not match native row")
+    for index, call in enumerate(calls, 1):
+        meta = call.get("computer_use_meta")
+        metrics = meta.get("metrics") if isinstance(meta, Mapping) else None
+        if metrics is None:
+            continue
+        try:
+            _validated_metrics(metrics)
+        except MetricsMetadataError as exc:
+            raise NativeReportError(
+                f"validated MCP call {index} has invalid metrics metadata"
+            ) from exc
     proxy_requests: tuple[Mapping[str, Any], ...] | None = None
     proxy_path = root / "proxy/ledger.jsonl"
     if proxy_path.is_file():
@@ -430,6 +462,16 @@ def _mcp_categories(
                 "calls_per_tool": None,
                 "latency_ms": None,
                 "latency_ms_per_tool": None,
+                "operation_metrics_calls": None,
+                "perception_metrics_calls": None,
+                "queue_latency_ms": None,
+                "execution_latency_ms": None,
+                "elapsed_ms": None,
+                "context_bytes": None,
+                "elements_visited": None,
+                "elements_returned": None,
+                "partial_rate": None,
+                "diff_rate": None,
                 "error_counts": None,
                 "outcome_counts": None,
                 "delivery_counts": None,
@@ -445,6 +487,8 @@ def _mcp_categories(
     outcomes: Counter[str] = Counter()
     deliveries: Counter[str] = Counter()
     focus: Counter[str] = Counter()
+    operation_metrics: list[Mapping[str, Any]] = []
+    perception_metrics: list[Mapping[str, Any]] = []
     for call in calls:
         tool = str(call["tool"])
         by_tool[tool] += 1
@@ -480,6 +524,14 @@ def _mcp_categories(
             for key, value in focus_meta.items():
                 if isinstance(value, bool):
                     focus[f"{key}:{str(value).lower()}"] += 1
+        metrics = meta.get("metrics")
+        metrics = metrics if isinstance(metrics, Mapping) else {}
+        operation = metrics.get("operation")
+        if isinstance(operation, Mapping):
+            operation_metrics.append(operation)
+        perception = metrics.get("perception")
+        if isinstance(perception, Mapping):
+            perception_metrics.append(perception)
     all_latencies = [value for values in latencies.values() for value in values]
     response_bytes = [
         int(call["response_bytes"])
@@ -507,6 +559,40 @@ def _mcp_categories(
                 }
                 for tool, values in sorted(latencies.items())
             },
+            "operation_metrics_calls": len(operation_metrics),
+            "perception_metrics_calls": len(perception_metrics),
+            "queue_latency_ms": _summary(
+                [metric.get("queue_latency_ms") for metric in operation_metrics],
+                len(operation_metrics),
+            ),
+            "execution_latency_ms": _summary(
+                [metric.get("execution_latency_ms") for metric in operation_metrics],
+                len(operation_metrics),
+            ),
+            "elapsed_ms": _summary(
+                [metric.get("elapsed_ms") for metric in perception_metrics],
+                len(perception_metrics),
+            ),
+            "context_bytes": _total_summary(
+                [metric.get("context_bytes") for metric in perception_metrics],
+                len(perception_metrics),
+            ),
+            "elements_visited": _total_summary(
+                [metric.get("elements_visited") for metric in perception_metrics],
+                len(perception_metrics),
+            ),
+            "elements_returned": _total_summary(
+                [metric.get("elements_returned") for metric in perception_metrics],
+                len(perception_metrics),
+            ),
+            "partial_rate": _rate_summary(
+                [metric.get("partial") for metric in perception_metrics],
+                len(perception_metrics),
+            ),
+            "diff_rate": _rate_summary(
+                [metric.get("diff") for metric in perception_metrics],
+                len(perception_metrics),
+            ),
             "response_bytes": {
                 "total": sum(response_bytes),
                 **_summary(response_bytes, len(calls)),
