@@ -88,6 +88,31 @@ instead of replacing it.
 - exact normalized rows returned by the strict native importer; or
 - native bundle directories that pass `load_native_trial()`.
 
+## State-response A/B
+
+The dedicated state-response experiment generates matched `auto` and `full`
+source-server arms with one shared instruction file:
+
+```bash
+python3 computer-use-tasks/v0/scripts/cub_v0.py \
+  --request "$OPENBENCH_CUB_REQUEST" generate \
+  --mode state-ab --repetitions 5
+```
+
+Each generated cell binds `mcp.state_response_mode`, the source server digest,
+and the ordered five-call contract into the matrix identity and native lock.
+The collector injects the locked mode into eligible server-bound tool calls;
+it is not included in the agent prompt and a conflicting client-supplied mode
+fails closed. After the collector seals `mcp/ledger.jsonl`,
+OpenBench requires the exact tool order and contract-declared argument subsets.
+Missing, extra, reordered, or mismatched calls make the trial non-comparable.
+
+Validated-bundle reports include per-trial additive timing partitions for
+model API time, provider pacing, MCP duration, and residual agent time. Queue,
+perception, and perception-phase timings are nested MCP detail and are not
+added again. `response_bytes` remains the raw relayed JSON-RPC frame size;
+telemetry-supplied text and PNG sizes are reported separately.
+
 Row inputs are checked for importer-equivalent verdict, timing, token, trial,
 run, and identity invariants, then bound by a canonical normalized-row digest.
 Because their bundle bytes are unavailable, their publication status remains

@@ -13,6 +13,7 @@ from obench.native_report import (
     _aggregate_observations,
     _load_bundle,
     _merge_observation,
+    _matched_deltas,
     assert_public_native_report,
     build_native_report,
 )
@@ -340,6 +341,106 @@ class NativeReportTests(unittest.TestCase):
             {"n": 1, "missing_n": 0, "true_count": 1, "rate": 1.0},
         )
 
+    def test_per_trial_exclusive_attribution_and_matched_deltas(self):
+        plan = _plan(repetitions=1)
+        perception = {
+            "operation": "set_value",
+            "tool": "set_value",
+            "perception_ms": 40,
+            "settle_ms": 2,
+            "screenshot_ms": 0,
+            "snapshot_ms": 25,
+            "verification_ms": 3,
+            "response_construction_ms": 8,
+            "other_ms": 2,
+            "elements_visited": 10,
+            "elements_returned": 8,
+            "partial": False,
+            "response_encoding": "full",
+            "text_bytes": 1000,
+            "screenshot_png_bytes": 0,
+        }
+        operation = {
+            "operation": "set_value",
+            "tool": "set_value",
+            "attempted_delivery_strategies": ["ax-attribute"],
+            "queue_latency_ms": 5,
+            "execution_latency_ms": 15,
+        }
+        call = _metric_call(
+            "set_value", 60.0, {"operation": operation, "perception": perception}
+        )
+        call["computer_use_meta"]["metrics"]["schema_version"] = 2
+        call["response_bytes"] = 1500
+        proxy = ({
+            "duration_ms": 1000.0,
+            "paced_wait_ms": 200.0,
+            "status": 200,
+            "usage_available": True,
+            "input_tokens": 100,
+            "cached_tokens": 20,
+            "output_tokens": 30,
+            "error_present": False,
+        },)
+        baseline = _Observation(
+            row=_row(plan, "baseline", 1),
+            mcp_calls=(call,),
+            proxy_requests=proxy,
+            bundle_sha256="a" * 64,
+            result_sha256="b" * 64,
+            row_sha256="c" * 64,
+        )
+        candidate_call = json.loads(json.dumps(call))
+        candidate_call["duration_ms"] = 50.0
+        candidate_call["response_bytes"] = 1200
+        candidate_call["computer_use_meta"]["metrics"]["perception"]["text_bytes"] = 700
+        candidate = _Observation(
+            row=_row(plan, "candidate", 1),
+            mcp_calls=(candidate_call,),
+            proxy_requests=proxy,
+            bundle_sha256="d" * 64,
+            result_sha256="e" * 64,
+            row_sha256="f" * 64,
+        )
+
+        attribution = _aggregate_observations([baseline])["attribution"]
+        trial = attribution["trial_totals"][0]
+        self.assertEqual(trial["exclusive_time_ms"], {
+            "model_api_time_ms": 800.0,
+            "paced_wait_ms": 200.0,
+            "mcp_time_ms": 60.0,
+            "residual_agent_time_ms": 6940.0,
+        })
+        self.assertEqual(trial["mcp_detail_ms"]["queue_time_ms"], 5.0)
+        self.assertEqual(
+            trial["mcp_detail_ms"]["perception_phase_time_ms"],
+            {
+                "other_ms": 2.0,
+                "response_construction_ms": 8.0,
+                "screenshot_ms": 0.0,
+                "settle_ms": 2.0,
+                "snapshot_ms": 25.0,
+                "verification_ms": 3.0,
+            },
+        )
+        self.assertEqual(trial["bytes"], {
+            "response_bytes": 1500,
+            "text_bytes": 1000,
+            "screenshot_png_bytes": 0,
+        })
+        self.assertEqual(
+            trial["provider_tokens"], {"input": 100, "cached": 20, "output": 30}
+        )
+        deltas = _matched_deltas([baseline], [candidate])[
+            "candidate_minus_reference"
+        ]
+        self.assertEqual(deltas["mcp_time_ms"]["median"], -10.0)
+        self.assertEqual(deltas["response_bytes"]["median"], -300.0)
+        self.assertEqual(deltas["text_bytes"]["median"], -300.0)
+        self.assertEqual(
+            deltas["perception_phase_time_ms.snapshot_ms"]["median"], 0.0
+        )
+
     def test_validated_bundle_rejects_invalid_sealed_mcp_metrics(self):
         cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
         with tempfile.TemporaryDirectory(prefix="native_report_bad_metrics_") as temp:
@@ -373,7 +474,7 @@ class NativeReportTests(unittest.TestCase):
                 json.loads(line)
                 for line in (bundle / "mcp/ledger.jsonl").read_text().splitlines()
             ]
-            records[0]["computer_use_meta"]["metrics"]["schema_version"] = 2
+            records[0]["computer_use_meta"]["metrics"]["schema_version"] = 3
             _replace_bundle_mcp_ledger(bundle, [records[0]])
 
             with self.assertRaisesRegex(NativeReportError, "invalid metrics metadata"):
@@ -591,7 +692,7 @@ class NativeReportTests(unittest.TestCase):
         encoded = json.dumps(report, sort_keys=True).lower()
         self.assertNotIn("harbor", encoded)
         self.assertNotIn("trajectory", encoded)
-        self.assertNotIn("screenshot", encoded)
+        self.assertNotIn('"screenshots"', encoded)
         self.assertEqual(
             report["methodology"]["execution_backend"], "native_macos"
         )

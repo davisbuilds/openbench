@@ -63,6 +63,28 @@ _METRIC_FIELDS = {
     "agent_time_s": "t_agent_s",
     "verifier_time_s": "t_checker_s",
 }
+_ATTRIBUTION_FIELDS = (
+    "model_api_time_ms",
+    "paced_wait_ms",
+    "mcp_time_ms",
+    "mcp_queue_time_ms",
+    "perception_time_ms",
+    "response_bytes",
+    "text_bytes",
+    "screenshot_png_bytes",
+    "provider_input_tokens",
+    "provider_cached_tokens",
+    "provider_output_tokens",
+    "residual_agent_time_ms",
+)
+_PERCEPTION_PHASE_FIELDS = (
+    "settle_ms",
+    "screenshot_ms",
+    "snapshot_ms",
+    "verification_ms",
+    "response_construction_ms",
+    "other_ms",
+)
 
 
 class NativeReportError(ValueError):
@@ -570,7 +592,10 @@ def _mcp_categories(
                 len(operation_metrics),
             ),
             "elapsed_ms": _summary(
-                [metric.get("elapsed_ms") for metric in perception_metrics],
+                [
+                    metric.get("perception_ms", metric.get("elapsed_ms"))
+                    for metric in perception_metrics
+                ],
                 len(perception_metrics),
             ),
             "context_bytes": _total_summary(
@@ -673,6 +698,135 @@ def _model_categories(
     )
 
 
+def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
+    if observation.mcp_calls is None or observation.proxy_requests is None:
+        return None
+    calls = observation.mcp_calls
+    requests = observation.proxy_requests
+    successful_usage = [
+        request
+        for request in requests
+        if request.get("usage_available") is True
+        and type(request.get("status")) is int
+        and 200 <= request["status"] < 400
+    ]
+    model_api_time_ms = 0.0
+    for request in successful_usage:
+        duration = _number(request.get("duration_ms"))
+        paced = _number(request.get("paced_wait_ms"))
+        if duration is None or paced is None or paced > duration:
+            raise NativeReportError("model request timing is malformed")
+        model_api_time_ms += duration - paced
+    paced_wait_values = [_number(request.get("paced_wait_ms")) for request in requests]
+    if any(value is None for value in paced_wait_values):
+        raise NativeReportError("model request paced wait is malformed")
+    call_durations = [_number(call.get("duration_ms")) for call in calls]
+    if any(value is None for value in call_durations):
+        raise NativeReportError("MCP call duration is malformed")
+
+    operation_metrics = []
+    perception_metrics = []
+    for call in calls:
+        meta = call.get("computer_use_meta")
+        metrics = meta.get("metrics") if isinstance(meta, Mapping) else None
+        if not isinstance(metrics, Mapping):
+            continue
+        if isinstance(metrics.get("operation"), Mapping):
+            operation_metrics.append(metrics["operation"])
+        if isinstance(metrics.get("perception"), Mapping):
+            perception_metrics.append(metrics["perception"])
+    queue_values = [_number(metric.get("queue_latency_ms")) for metric in operation_metrics]
+    perception_values = [
+        _number(metric.get("perception_ms", metric.get("elapsed_ms")))
+        for metric in perception_metrics
+    ]
+    if any(value is None for value in (*queue_values, *perception_values)):
+        raise NativeReportError("MCP component timing is malformed")
+    phase_totals: Counter[str] = Counter()
+    encodings: Counter[str] = Counter()
+    for metric in perception_metrics:
+        if "perception_ms" in metric:
+            phases = {field: metric.get(field) for field in _PERCEPTION_PHASE_FIELDS}
+            for name, value in phases.items():
+                measured = _number(value)
+                if measured is None:
+                    raise NativeReportError("perception phase timing is malformed")
+                phase_totals[name] += measured
+        if metric.get("response_encoding") is not None:
+            encodings[str(metric["response_encoding"])] += 1
+
+    def total_metric(field: str) -> int | None:
+        values = [_number(metric.get(field)) for metric in perception_metrics]
+        present = [value for value in values if value is not None]
+        if present and len(present) != len(values):
+            raise NativeReportError(f"perception {field} is only partially measured")
+        return int(sum(present)) if present else None
+
+    response_values = [_number(call.get("response_bytes")) for call in calls]
+    if any(value is None for value in response_values):
+        raise NativeReportError("MCP response wire size is malformed")
+    paced_wait_ms = sum(value for value in paced_wait_values if value is not None)
+    mcp_time_ms = sum(value for value in call_durations if value is not None)
+    agent_time_ms = float(observation.row["t_agent_s"]) * 1000.0
+    residual = agent_time_ms - model_api_time_ms - paced_wait_ms - mcp_time_ms
+    if residual < -1.0:
+        raise NativeReportError(
+            "exclusive timing attribution exceeds agent time; evidence overlaps"
+        )
+    return {
+        "trial": observation.row["trial"],
+        "exclusive_time_ms": {
+            "model_api_time_ms": model_api_time_ms,
+            "paced_wait_ms": paced_wait_ms,
+            "mcp_time_ms": mcp_time_ms,
+            "residual_agent_time_ms": max(0.0, residual),
+        },
+        "mcp_detail_ms": {
+            "queue_time_ms": (
+                sum(value for value in queue_values if value is not None)
+                if queue_values
+                else None
+            ),
+            "perception_time_ms": (
+                sum(value for value in perception_values if value is not None)
+                if perception_values
+                else None
+            ),
+            "perception_phase_time_ms": dict(sorted(phase_totals.items())),
+        },
+        "bytes": {
+            "response_bytes": int(sum(value for value in response_values if value is not None)),
+            "text_bytes": total_metric("text_bytes"),
+            "screenshot_png_bytes": total_metric("screenshot_png_bytes"),
+        },
+        "provider_tokens": {
+            "input": sum(int(request["input_tokens"]) for request in successful_usage),
+            "cached": sum(int(request["cached_tokens"]) for request in successful_usage),
+            "output": sum(int(request["output_tokens"]) for request in successful_usage),
+        },
+        "response_encoding_counts": dict(sorted(encodings.items())),
+    }
+
+
+def _flat_attribution(value: Mapping[str, Any] | None) -> dict[str, float | None]:
+    if value is None:
+        return {field: None for field in _ATTRIBUTION_FIELDS}
+    return {
+        "model_api_time_ms": value["exclusive_time_ms"]["model_api_time_ms"],
+        "paced_wait_ms": value["exclusive_time_ms"]["paced_wait_ms"],
+        "mcp_time_ms": value["exclusive_time_ms"]["mcp_time_ms"],
+        "mcp_queue_time_ms": value["mcp_detail_ms"]["queue_time_ms"],
+        "perception_time_ms": value["mcp_detail_ms"]["perception_time_ms"],
+        "response_bytes": value["bytes"]["response_bytes"],
+        "text_bytes": value["bytes"]["text_bytes"],
+        "screenshot_png_bytes": value["bytes"]["screenshot_png_bytes"],
+        "provider_input_tokens": value["provider_tokens"]["input"],
+        "provider_cached_tokens": value["provider_tokens"]["cached"],
+        "provider_output_tokens": value["provider_tokens"]["output"],
+        "residual_agent_time_ms": value["exclusive_time_ms"]["residual_agent_time_ms"],
+    }
+
+
 def _aggregate_observations(
     observations: Sequence[_Observation],
 ) -> dict[str, Any]:
@@ -711,6 +865,14 @@ def _aggregate_observations(
 
     mcp, missing = _mcp_categories(observations)
     model, model_missing = _model_categories(observations)
+    trial_attribution = [_trial_attribution(item) for item in observations]
+    flat_attribution = [_flat_attribution(value) for value in trial_attribution]
+    phase_names = sorted({
+        name
+        for value in trial_attribution
+        if value is not None
+        for name in value["mcp_detail_ms"]["perception_phase_time_ms"]
+    })
     total_fresh = (
         sum(value for value in fresh_tokens if value is not None)
         if all(value is not None for value in fresh_tokens)
@@ -767,6 +929,33 @@ def _aggregate_observations(
         },
         "mcp": mcp,
         "model": model,
+        "attribution": {
+            "available_n": sum(value is not None for value in trial_attribution),
+            "missing_n": sum(value is None for value in trial_attribution),
+            "trial_totals": [
+                value for value in trial_attribution if value is not None
+            ],
+            "metrics": {
+                field: _summary(
+                    [value[field] for value in flat_attribution], n
+                )
+                for field in _ATTRIBUTION_FIELDS
+            },
+            "perception_phase_time_ms": {
+                name: _summary(
+                    [
+                        (
+                            value["mcp_detail_ms"]["perception_phase_time_ms"].get(name)
+                            if value is not None
+                            else None
+                        )
+                        for value in trial_attribution
+                    ],
+                    n,
+                )
+                for name in phase_names
+            },
+        },
         "unavailable_metrics": [*missing, *model_missing],
     }
 
@@ -775,12 +964,10 @@ def _matched_deltas(
     reference: Sequence[_Observation],
     candidate: Sequence[_Observation],
 ) -> dict[str, Any]:
-    reference_by_trial = {
-        int(item.row["trial"]): item.row for item in reference
-    }
-    candidate_by_trial = {
-        int(item.row["trial"]): item.row for item in candidate
-    }
+    reference_observations = {int(item.row["trial"]): item for item in reference}
+    candidate_observations = {int(item.row["trial"]): item for item in candidate}
+    reference_by_trial = {trial: item.row for trial, item in reference_observations.items()}
+    candidate_by_trial = {trial: item.row for trial, item in candidate_observations.items()}
     trials = sorted(set(reference_by_trial) & set(candidate_by_trial))
     fields = {"success": "success", **_METRIC_FIELDS, "fresh_tokens": "tokens"}
     metrics: dict[str, Any] = {}
@@ -801,6 +988,65 @@ def _matched_deltas(
             else:
                 deltas.append(float(right) - float(left))
         metrics[public_name] = {
+            "n": len(deltas),
+            "missing_n": missing,
+            "mean": sum(deltas) / len(deltas) if deltas else None,
+            "median": median(deltas) if deltas else None,
+            "p95": _percentile(deltas, 0.95),
+        }
+    for field in _ATTRIBUTION_FIELDS:
+        deltas = []
+        missing = 0
+        for trial in trials:
+            left = _flat_attribution(
+                _trial_attribution(reference_observations[trial])
+            )[field]
+            right = _flat_attribution(
+                _trial_attribution(candidate_observations[trial])
+            )[field]
+            if left is None or right is None:
+                missing += 1
+            else:
+                deltas.append(float(right) - float(left))
+        metrics[field] = {
+            "n": len(deltas),
+            "missing_n": missing,
+            "mean": sum(deltas) / len(deltas) if deltas else None,
+            "median": median(deltas) if deltas else None,
+            "p95": _percentile(deltas, 0.95),
+        }
+    phase_names = sorted({
+        name
+        for trial in trials
+        for observation in (
+            reference_observations[trial],
+            candidate_observations[trial],
+        )
+        for attribution in (_trial_attribution(observation),)
+        if attribution is not None
+        for name in attribution["mcp_detail_ms"]["perception_phase_time_ms"]
+    })
+    for name in phase_names:
+        deltas = []
+        missing = 0
+        for trial in trials:
+            left_attribution = _trial_attribution(reference_observations[trial])
+            right_attribution = _trial_attribution(candidate_observations[trial])
+            left = (
+                left_attribution["mcp_detail_ms"]["perception_phase_time_ms"].get(name)
+                if left_attribution is not None
+                else None
+            )
+            right = (
+                right_attribution["mcp_detail_ms"]["perception_phase_time_ms"].get(name)
+                if right_attribution is not None
+                else None
+            )
+            if left is None or right is None:
+                missing += 1
+            else:
+                deltas.append(float(right) - float(left))
+        metrics[f"perception_phase_time_ms.{name}"] = {
             "n": len(deltas),
             "missing_n": missing,
             "mean": sum(deltas) / len(deltas) if deltas else None,
