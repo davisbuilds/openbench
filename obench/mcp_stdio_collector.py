@@ -1,8 +1,9 @@
-"""Transparent MCP stdio relay with a privacy-safe, sealed call ledger.
+"""MCP stdio relay with a privacy-safe, sealed call ledger.
 
-The collector observes newline-delimited JSON-RPC while relaying the original
-bytes unchanged. It is intentionally not a JSON-RPC endpoint: messages outside
-``tools/call`` request/response pairs are never interpreted or rewritten.
+The collector normally relays newline-delimited JSON-RPC bytes unchanged. When
+a state-response mode is locked, it injects that argument into eligible
+``tools/call`` requests before forwarding and observing them. It is not a
+general JSON-RPC endpoint; all other messages remain uninterpreted.
 """
 
 from __future__ import annotations
@@ -31,7 +32,8 @@ META_KEYS = {
     "delivery": "computer-use-mcp/delivery",
     "metrics": "computer-use-mcp/metrics",
 }
-METRICS_SCHEMA_VERSION = 1
+METRICS_SCHEMA_VERSION = 2
+LEGACY_METRICS_SCHEMA_VERSION = 1
 MAX_METRIC_INTEGER = (1 << 63) - 1
 METRIC_DIMENSION_PUNCTUATION = frozenset("._:-")
 ERROR_CODES = frozenset({
@@ -133,6 +135,20 @@ COMPUTER_USE_TOOLS = frozenset({
     "wait_for",
     "write_clipboard",
 })
+STATE_RESPONSE_MODE_TOOLS = frozenset({
+    "batch",
+    "click",
+    "click_menu_item",
+    "drag",
+    "page",
+    "perform_secondary_action",
+    "press_key",
+    "scroll",
+    "select_text",
+    "set_value",
+    "type_text",
+})
+RESPONSE_ENCODINGS = frozenset({"none", "unchanged", "diff", "full"})
 OUTCOME_VERIFICATION_FLAGS = frozenset({
     "target_relocated",
     "before_selected",
@@ -200,6 +216,8 @@ class _PendingCall:
     request_bytes: int
     request_unix_ns: int
     request_monotonic_ns: int
+    contract_sequence: int
+    contract_arguments: Mapping[str, Any] | None
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -273,6 +291,17 @@ def normalized_argument_digest(arguments: Any) -> str:
     return "sha256:" + hasher.hexdigest()
 
 
+def _project_required_arguments(
+    arguments: Any, required: Mapping[str, Any] | None
+) -> dict[str, Any] | None:
+    """Retain only the contract-declared argument subset."""
+    if required is None:
+        return None
+    if not isinstance(arguments, Mapping):
+        return {}
+    return {key: arguments[key] for key in required if key in arguments}
+
+
 def _known_enum(value: Any, allowed: frozenset[str]) -> str | None:
     if not isinstance(value, str):
         return None
@@ -327,11 +356,11 @@ def _validate_metric_payload(
     *,
     path: str,
     required: Mapping[str, str],
-    optional_dimensions: frozenset[str],
+    optional: Mapping[str, str],
 ) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise _metrics_error(path)
-    allowed = set(required) | set(optional_dimensions)
+    allowed = set(required) | set(optional)
     if set(value) - allowed or set(required) - set(value):
         raise _metrics_error(path)
 
@@ -353,16 +382,40 @@ def _validate_metric_payload(
             if not isinstance(raw, bool):
                 raise _metrics_error(field_path)
             validated[field] = raw
+        elif field_type == "integer_map":
+            if not isinstance(raw, dict) or not raw:
+                raise _metrics_error(field_path)
+            validated[field] = {
+                _metric_dimension(key, f"{field_path} key"):
+                    _metric_integer(item, f"{field_path}.{key}")
+                for key, item in raw.items()
+            }
         else:  # pragma: no cover - schema definitions are module constants
             raise AssertionError(f"unknown metric field type: {field_type}")
 
-    for field in optional_dimensions:
+    for field, field_type in optional.items():
         if field not in value:
             continue
         raw = value[field]
-        validated[field] = (
-            None if raw is None else _metric_dimension(raw, f"{path}.{field}")
-        )
+        field_path = f"{path}.{field}"
+        if field_type == "dimension_or_null":
+            validated[field] = (
+                None if raw is None else _metric_dimension(raw, field_path)
+            )
+        elif field_type == "dimension":
+            validated[field] = _metric_dimension(raw, field_path)
+        elif field_type == "integer":
+            validated[field] = _metric_integer(raw, field_path)
+        elif field_type == "integer_map":
+            if not isinstance(raw, dict) or not raw:
+                raise _metrics_error(field_path)
+            validated[field] = {
+                _metric_dimension(key, f"{field_path} key"):
+                    _metric_integer(item, f"{field_path}.{key}")
+                for key, item in raw.items()
+            }
+        else:  # pragma: no cover
+            raise AssertionError(f"unknown optional metric field type: {field_type}")
     return validated
 
 
@@ -376,13 +429,16 @@ def _validated_metrics(value: Any) -> dict[str, Any]:
     if (
         not isinstance(schema_version, int)
         or isinstance(schema_version, bool)
-        or schema_version != METRICS_SCHEMA_VERSION
+        or schema_version not in {
+            LEGACY_METRICS_SCHEMA_VERSION,
+            METRICS_SCHEMA_VERSION,
+        }
     ):
         raise _metrics_error("metrics.schema_version")
     if "operation" not in value and "perception" not in value:
         raise _metrics_error("metrics")
 
-    validated: dict[str, Any] = {"schema_version": METRICS_SCHEMA_VERSION}
+    validated: dict[str, Any] = {"schema_version": schema_version}
     if "operation" in value:
         validated["operation"] = _validate_metric_payload(
             value["operation"],
@@ -394,29 +450,69 @@ def _validated_metrics(value: Any) -> dict[str, Any]:
                 "queue_latency_ms": "integer",
                 "execution_latency_ms": "integer",
             },
-            optional_dimensions=frozenset({
-                "app_bundle_identifier",
-                "ax_role",
-                "final_delivery_strategy",
-                "effect_outcome",
-            }),
+            optional={
+                "app_bundle_identifier": "dimension_or_null",
+                "ax_role": "dimension_or_null",
+                "final_delivery_strategy": "dimension_or_null",
+                "effect_outcome": "dimension_or_null",
+            },
         )
     if "perception" in value:
-        validated["perception"] = _validate_metric_payload(
-            value["perception"],
-            path="metrics.perception",
-            required={
-                "operation": "dimension",
-                "tool": "dimension",
-                "elapsed_ms": "integer",
-                "elements_visited": "integer",
-                "elements_returned": "integer",
-                "partial": "boolean",
-                "diff": "boolean",
-                "context_bytes": "integer",
-            },
-            optional_dimensions=frozenset({"app_bundle_identifier"}),
-        )
+        if schema_version == LEGACY_METRICS_SCHEMA_VERSION:
+            perception = _validate_metric_payload(
+                value["perception"],
+                path="metrics.perception",
+                required={
+                    "operation": "dimension",
+                    "tool": "dimension",
+                    "elapsed_ms": "integer",
+                    "elements_visited": "integer",
+                    "elements_returned": "integer",
+                    "partial": "boolean",
+                    "diff": "boolean",
+                    "context_bytes": "integer",
+                },
+                optional={"app_bundle_identifier": "dimension_or_null"},
+            )
+        else:
+            perception = _validate_metric_payload(
+                value["perception"],
+                path="metrics.perception",
+                required={
+                    "operation": "dimension",
+                    "tool": "dimension",
+                    "perception_ms": "integer",
+                    "settle_ms": "integer",
+                    "screenshot_ms": "integer",
+                    "snapshot_ms": "integer",
+                    "verification_ms": "integer",
+                    "response_construction_ms": "integer",
+                    "other_ms": "integer",
+                    "elements_visited": "integer",
+                    "elements_returned": "integer",
+                    "partial": "boolean",
+                    "response_encoding": "dimension",
+                    "text_bytes": "integer",
+                    "screenshot_png_bytes": "integer",
+                },
+                optional={"app_bundle_identifier": "dimension_or_null"},
+            )
+            if perception["response_encoding"] not in RESPONSE_ENCODINGS:
+                raise _metrics_error("metrics.perception.response_encoding")
+            phase_total = sum(
+                perception[field]
+                for field in (
+                    "settle_ms",
+                    "screenshot_ms",
+                    "snapshot_ms",
+                    "verification_ms",
+                    "response_construction_ms",
+                    "other_ms",
+                )
+            )
+            if phase_total != perception["perception_ms"]:
+                raise _metrics_error("metrics.perception")
+        validated["perception"] = perception
     return validated
 
 
@@ -657,11 +753,18 @@ class CallLedger:
 
 
 class _ProtocolObserver:
-    def __init__(self, ledger: CallLedger, max_frame_bytes: int):
+    def __init__(
+        self,
+        ledger: CallLedger,
+        max_frame_bytes: int,
+        call_contract: Sequence[Mapping[str, Any]] = (),
+    ):
         if max_frame_bytes < 1:
             raise ValueError("max_frame_bytes must be positive")
         self.ledger = ledger
         self.max_frame_bytes = max_frame_bytes
+        self.call_contract = tuple(call_contract)
+        self._tool_call_requests = 0
         self._buffers = {"request": bytearray(), "response": bytearray()}
         self._discarding = {"request": False, "response": False}
         self._pending: dict[str, _PendingCall] = {}
@@ -781,6 +884,17 @@ class _ProtocolObserver:
         except ArgumentDigestLimitError:
             self.malformed_frames += 1
             argument_digest = "<unavailable:complexity-limit>"
+        self._tool_call_requests += 1
+        expected = (
+            self.call_contract[self._tool_call_requests - 1]
+            if self._tool_call_requests <= len(self.call_contract)
+            else None
+        )
+        required_arguments = (
+            expected.get("required_arguments")
+            if isinstance(expected, Mapping)
+            else None
+        )
         self._pending[key] = _PendingCall(
             request_id=message["id"],
             tool=(
@@ -792,6 +906,10 @@ class _ProtocolObserver:
             request_bytes=frame_bytes,
             request_unix_ns=now_unix,
             request_monotonic_ns=now_mono,
+            contract_sequence=self._tool_call_requests,
+            contract_arguments=_project_required_arguments(
+                params.get("arguments", {}), required_arguments
+            ),
         )
 
     def _observe_response(self, message: Mapping[str, Any], frame_bytes: int) -> None:
@@ -874,6 +992,8 @@ class _ProtocolObserver:
             "status": status,
             "request_id_type": type(call.request_id).__name__,
             "argument_digest": call.argument_digest,
+            "contract_sequence": call.contract_sequence,
+            "contract_arguments": call.contract_arguments,
             "request_bytes": call.request_bytes,
             "response_bytes": response_bytes,
             "request_unix_ns": call.request_unix_ns,
@@ -909,6 +1029,36 @@ def _read_relay_chunk(stream: BinaryIO, size: int) -> bytes:
     if callable(read1):
         return read1(size)
     return stream.read(size)
+
+
+def _inject_state_response_mode(frame: bytes, mode: str) -> bytes:
+    """Inject a locked mode into eligible tools/call requests only."""
+    try:
+        decoded = json.loads(frame)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CollectorError(
+            "cannot inject state response mode into malformed JSON-RPC frame"
+        ) from exc
+    messages = decoded if isinstance(decoded, list) else [decoded]
+    changed = False
+    for message in messages:
+        if not isinstance(message, dict) or message.get("method") != "tools/call":
+            continue
+        params = message.get("params")
+        if not isinstance(params, dict) or params.get("name") not in STATE_RESPONSE_MODE_TOOLS:
+            continue
+        arguments = params.get("arguments")
+        if not isinstance(arguments, dict):
+            raise CollectorError("eligible state-response tool call has invalid arguments")
+        existing = arguments.get("state_response_mode")
+        if existing is not None and existing != mode:
+            raise CollectorError("tool call conflicts with locked state response mode")
+        arguments["state_response_mode"] = mode
+        changed = True
+    if not changed:
+        return frame
+    value = messages if isinstance(decoded, list) else messages[0]
+    return _canonical_bytes(value) + b"\n"
 
 
 def _command_sha256(command: Sequence[str]) -> str:
@@ -990,12 +1140,16 @@ def collect_stdio(
     cwd: str | os.PathLike[str] | None = None,
     owner_path: str | os.PathLike[str] | None = None,
     max_frame_bytes: int = 16 * 1024 * 1024,
+    call_contract: Sequence[Mapping[str, Any]] = (),
+    state_response_mode: str | None = None,
 ) -> CollectionResult:
     """Launch and transparently observe one newline-delimited MCP server."""
     if not command or not all(isinstance(part, str) and part for part in command):
         raise ValueError("command must contain at least one non-empty string")
+    if state_response_mode not in {None, "auto", "full"}:
+        raise ValueError("state_response_mode must be 'auto', 'full', or None")
     ledger = CallLedger(ledger_path, run_id, trial_id)
-    observer = _ProtocolObserver(ledger, max_frame_bytes)
+    observer = _ProtocolObserver(ledger, max_frame_bytes, call_contract)
     process: subprocess.Popen[bytes] | None = None
     failures: list[BaseException] = []
     failures_lock = threading.Lock()
@@ -1081,14 +1235,30 @@ def collect_stdio(
             )
 
         def relay_input() -> None:
+            buffered = bytearray()
             try:
                 while chunk := _read_relay_chunk(stdin, 64 * 1024):
                     with input_processing_lock:
                         if input_stopped.is_set():
                             return
-                        payload = bytes(chunk)
-                        observer.feed("request", payload)
-                        _write_all(process.stdin, payload)
+                        if state_response_mode is None:
+                            payload = bytes(chunk)
+                            observer.feed("request", payload)
+                            _write_all(process.stdin, payload)
+                            continue
+                        buffered.extend(chunk)
+                        while (newline := buffered.find(b"\n")) >= 0:
+                            frame = bytes(buffered[: newline + 1])
+                            del buffered[: newline + 1]
+                            payload = _inject_state_response_mode(
+                                frame, state_response_mode
+                            )
+                            observer.feed("request", payload)
+                            _write_all(process.stdin, payload)
+                if buffered:
+                    payload = bytes(buffered)
+                    observer.feed("request", payload)
+                    _write_all(process.stdin, payload)
             except BrokenPipeError:
                 if not input_stopped.is_set() and process.poll() is None:
                     record_failure(BrokenPipeError("MCP child stdin closed unexpectedly"))

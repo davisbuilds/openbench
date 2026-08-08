@@ -511,14 +511,39 @@ def _validate_lock(root: Path, trial_id: str) -> tuple[dict[str, Any], str]:
         _string(model[field], f"lock.model.{field}")
 
     mcp = _object(lock["mcp"], "lock.mcp")
+    mcp_fields = {"name", "version", "transport", "server_sha256", "collector_run_id"}
+    if "state_response_mode" in mcp:
+        mcp_fields.add("state_response_mode")
+    if "call_contract" in mcp:
+        mcp_fields.add("call_contract")
     _exact_fields(
         mcp,
-        {"name", "version", "transport", "server_sha256", "collector_run_id"},
+        mcp_fields,
         "lock.mcp",
     )
     for field in ("name", "version", "transport", "collector_run_id"):
         _string(mcp[field], f"lock.mcp.{field}")
     _digest(mcp["server_sha256"], "lock.mcp.server_sha256")
+    if "state_response_mode" in mcp and mcp["state_response_mode"] not in {"auto", "full"}:
+        raise _fail(
+            "lock.mcp.state_response_mode", "must be 'auto' or 'full'"
+        )
+    if "call_contract" in mcp:
+        contract = _array(mcp["call_contract"], "lock.mcp.call_contract")
+        if not contract:
+            raise _fail("lock.mcp.call_contract", "must not be empty when present")
+        for index, raw in enumerate(contract):
+            location = f"lock.mcp.call_contract[{index}]"
+            item = _object(raw, location)
+            _exact_fields(item, {"tool", "required_arguments"}, location)
+            tool = _string(item["tool"], f"{location}.tool")
+            if tool not in COMPUTER_USE_TOOLS:
+                raise _fail(f"{location}.tool", "must be a known computer-use tool")
+            arguments = _object(
+                item["required_arguments"], f"{location}.required_arguments"
+            )
+            for key in arguments:
+                _string(key, f"{location}.required_arguments key")
 
     environment = _object(lock["environment"], "lock.environment")
     _exact_fields(
@@ -908,6 +933,28 @@ def _verify_mcp_ledger(
                 "collector timestamps fall outside trial timing",
             )
     return calls, seal, verified
+
+
+def _validate_mcp_call_contract(
+    calls: Sequence[Mapping[str, Any]], contract: Sequence[Mapping[str, Any]]
+) -> None:
+    ordered = sorted(calls, key=lambda call: call.get("contract_sequence", -1))
+    if len(ordered) != len(contract):
+        raise _fail(
+            "mcp/ledger.jsonl",
+            "MCP call contract count mismatch makes this trial non-comparable",
+        )
+    for index, (call, expected) in enumerate(zip(ordered, contract), 1):
+        location = f"mcp/ledger.jsonl contract call {index}"
+        if call.get("contract_sequence") != index:
+            raise _fail(location, "request order is not contiguous")
+        if call.get("tool") != expected["tool"]:
+            raise _fail(location, "tool does not match immutable call contract")
+        if call.get("contract_arguments") != expected["required_arguments"]:
+            raise _fail(
+                location,
+                "required argument subset does not match immutable call contract",
+            )
 
 
 def _validate_trajectory(
@@ -1385,6 +1432,8 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         finished=finished,
         allow_incomplete=result["status"] in TERMINAL_STATUSES,
     )
+    if "call_contract" in lock["mcp"]:
+        _validate_mcp_call_contract(mcp_records, lock["mcp"]["call_contract"])
     focus_records = _verify_ledger(
         root,
         "focus",

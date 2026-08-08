@@ -249,11 +249,63 @@ class ComputerUseConfigTests(unittest.TestCase):
             set(manifest["fixtures"]),
             {
                 "basic-controls",
+                "state-response-ab",
                 "background-control",
                 "guard",
                 "textedit-exact-file",
             },
         )
+
+    def test_state_response_ab_configs_bind_mode_contract_and_identical_prompt(self):
+        host = {
+            "os_version": "15.6", "os_build": "24G84",
+            "architecture": "arm64", "hardware": "MacFixture1,1",
+            "display_width": 1512, "display_height": 982,
+            "display_scale": 2.0, "display_color_space": "Color LCD",
+        }
+        with (
+            mock.patch.object(cub, "_bundle_info", side_effect=self.identity),
+            mock.patch.object(cub, "_static_preflight", return_value={
+                "matched_ready": True, "checks": []
+            }),
+            mock.patch.object(cub, "_host_environment", return_value=host),
+            mock.patch.object(
+                cub, "_content_bound_command_digest", side_effect=self.content_digest
+            ),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(
+                cub.generate(self.request, "state-ab", None, None, repetitions=2),
+                0,
+            )
+        manifest = json.loads(
+            (self.run_root / "configs/state-ab/manifest.json").read_text()
+        )
+        self.assertTrue(manifest["comparable"])
+        self.assertEqual(len(manifest["plans"]), 1)
+        self.assertEqual(len(manifest["cells"]), 4)
+        instruction_paths = set()
+        modes = set()
+        for cell in manifest["cells"]:
+            parsed = tomllib.loads(Path(cell["config"]).read_text())
+            instruction_paths.add(parsed["task"]["instruction"])
+            modes.add(parsed["mcp"]["state_response_mode"])
+            self.assertEqual(
+                parsed["mcp"]["call_contract"],
+                cub.state_call_contract(parsed["mcp"]["state_response_mode"]),
+            )
+            loaded = load_config(cell["config"])
+            self.assertEqual(loaded.state_response_mode, parsed["mcp"]["state_response_mode"])
+            self.assertEqual(
+                list(loaded.mcp_call_contract),
+                cub.state_call_contract(loaded.state_response_mode),
+            )
+            self.assertEqual(
+                loaded.matrix["config_identity"]["mcp"]["state_response_mode"],
+                loaded.state_response_mode,
+            )
+        self.assertEqual(modes, {"auto", "full"})
+        self.assertEqual(len(instruction_paths), 1)
 
     def test_wrap_app_refuses_stale_executable_with_matching_bundle_metadata(self):
         binary = self.base / "fixture"

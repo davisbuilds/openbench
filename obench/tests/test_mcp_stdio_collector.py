@@ -173,7 +173,10 @@ class MCPStdioCollectorTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_fixture(self, payload, *, name="ledger.jsonl", fixture=None):
+    def run_fixture(
+        self, payload, *, name="ledger.jsonl", fixture=None, call_contract=(),
+        state_response_mode=None,
+    ):
         stdout = io.BytesIO()
         stderr = io.BytesIO()
         result = collector.collect_stdio(
@@ -185,6 +188,8 @@ class MCPStdioCollectorTests(unittest.TestCase):
             stdout=stdout,
             stderr=stderr,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            call_contract=call_contract,
+            state_response_mode=state_response_mode,
         )
         rows = [
             json.loads(line)
@@ -482,6 +487,94 @@ raise SystemExit(result.returncode)
                 self.assertEqual(rows[0]["computer_use_meta"]["metrics"], metrics)
                 self.assertTrue(collector.verify_ledger(result.ledger_path).integrity_ok)
 
+    def test_retains_new_perception_sizes_encoding_and_phase_timings(self):
+        perception = {
+            "operation": "set_value",
+            "tool": "set_value",
+            "perception_ms": 41,
+            "settle_ms": 3,
+            "screenshot_ms": 0,
+            "snapshot_ms": 25,
+            "verification_ms": 2,
+            "response_construction_ms": 8,
+            "other_ms": 3,
+            "elements_visited": 120,
+            "elements_returned": 35,
+            "partial": False,
+            "response_encoding": "full",
+            "text_bytes": 2048,
+            "screenshot_png_bytes": 0,
+        }
+        metrics = {"schema_version": 2, "perception": perception}
+        request = rpc(
+            "tools/call", 29, {"name": "set_value", "arguments": {"metrics": metrics}}
+        )
+        result, _, _, rows = self.run_fixture(request, name="new-perception.jsonl")
+        self.assertTrue(result.integrity_ok)
+        self.assertEqual(rows[0]["computer_use_meta"]["metrics"], metrics)
+
+    def test_call_contract_records_only_required_argument_projection(self):
+        contract = [{
+            "tool": "click",
+            "required_arguments": {
+                "include_state": True,
+                "include_screenshot": False,
+            },
+        }]
+        request = rpc("tools/call", 28, {
+            "name": "click",
+            "arguments": {
+                "target": "e12@s3",
+                "include_state": True,
+                "include_screenshot": False,
+            },
+        })
+        _, _, _, rows = self.run_fixture(
+            request, name="contract.jsonl", call_contract=contract
+        )
+        self.assertEqual(rows[0]["contract_sequence"], 1)
+        self.assertEqual(
+            rows[0]["contract_arguments"], contract[0]["required_arguments"]
+        )
+        self.assertNotIn("target", json.dumps(rows[0]))
+
+    def test_locked_state_mode_is_injected_before_contract_observation(self):
+        contract = [{
+            "tool": "click",
+            "required_arguments": {
+                "include_state": True,
+                "include_screenshot": False,
+                "state_response_mode": "full",
+            },
+        }]
+        request = rpc("tools/call", 27, {
+            "name": "click",
+            "arguments": {
+                "target": "e12@s3",
+                "include_state": True,
+                "include_screenshot": False,
+            },
+        })
+        result, _, _, rows = self.run_fixture(
+            request,
+            name="mode-injection.jsonl",
+            call_contract=contract,
+            state_response_mode="full",
+        )
+        self.assertTrue(result.integrity_ok)
+        self.assertEqual(rows[0]["contract_arguments"], contract[0]["required_arguments"])
+        conflicting = request.replace(
+            b'"target":"e12@s3"',
+            b'"state_response_mode":"auto","target":"e12@s3"',
+        )
+        failed, _, _, _ = self.run_fixture(
+            conflicting,
+            name="mode-conflict.jsonl",
+            call_contract=contract,
+            state_response_mode="full",
+        )
+        self.assertFalse(failed.integrity_ok)
+
     def test_rejects_malformed_known_metrics_metadata(self):
         valid_operation = {
             "operation": "click",
@@ -491,7 +584,6 @@ raise SystemExit(result.returncode)
             "execution_latency_ms": 8,
         }
         malformed = (
-            {"schema_version": 2, "operation": valid_operation},
             {"schema_version": 1.0, "operation": valid_operation},
             {"schema_version": 1},
             {
@@ -517,6 +609,44 @@ raise SystemExit(result.returncode)
                     "partial": 0,
                     "diff": False,
                     "context_bytes": 128,
+                },
+            },
+            {
+                "schema_version": 2,
+                "perception": {
+                    "operation": "get_app_state",
+                    "tool": "get_app_state",
+                    "perception_ms": 1,
+                    "settle_ms": 1,
+                    "screenshot_ms": 0,
+                    "snapshot_ms": 0,
+                    "verification_ms": 0,
+                    "response_construction_ms": 0,
+                    "other_ms": 0,
+                    "elements_visited": 2,
+                    "elements_returned": 2,
+                    "partial": False,
+                    "response_encoding": "auto",
+                },
+            },
+            {
+                "schema_version": 2,
+                "perception": {
+                    "operation": "get_app_state",
+                    "tool": "get_app_state",
+                    "perception_ms": 1,
+                    "settle_ms": 0,
+                    "screenshot_ms": 0,
+                    "snapshot_ms": 0,
+                    "verification_ms": 0,
+                    "response_construction_ms": 0,
+                    "other_ms": 0,
+                    "elements_visited": 2,
+                    "elements_returned": 2,
+                    "partial": False,
+                    "response_encoding": "auto",
+                    "text_bytes": 10,
+                    "screenshot_png_bytes": 0,
                 },
             },
         )

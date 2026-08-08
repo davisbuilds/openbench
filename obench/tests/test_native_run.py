@@ -46,6 +46,7 @@ from obench.native_run import (
     _require_setup_processes,
     _startup_retry_eligible,
     _verify_mcp_ledger_after_shutdown,
+    _verify_mcp_call_contract,
     collector_main,
     load_config,
     run_native,
@@ -97,6 +98,42 @@ class NativeCollectorEntrypointTests(unittest.TestCase):
                 "CUB_MCP_COMMAND",
                 collect.call_args.kwargs["env"],
             )
+            self.assertIsNone(collect.call_args.kwargs["state_response_mode"])
+
+    def test_sealed_mcp_call_contract_mismatch_fails_comparability(self):
+        contract = [{
+            "tool": "click",
+            "required_arguments": {
+                "include_state": True,
+                "include_screenshot": False,
+            },
+        }]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ledger.jsonl"
+            ledger = CallLedger(path, "collector-run-1", "trial-1")
+            ledger.append_call({
+                "tool": "click",
+                "contract_sequence": 1,
+                "contract_arguments": {
+                    "include_state": False,
+                    "include_screenshot": False,
+                },
+            })
+            ledger.seal({
+                "returncode": 0,
+                "integrity_ok": True,
+                "malformed_frames": 0,
+                "partial_frames": 0,
+                "duplicate_request_ids": 0,
+                "missing_responses": 0,
+                "relay_failures": 0,
+                "input_incomplete": False,
+            })
+            self.assertTrue(_verify_mcp_ledger_after_shutdown(path).integrity_ok)
+            with self.assertRaisesRegex(
+                NativeRunError, "required argument subset disagrees"
+            ):
+                _verify_mcp_call_contract(path, contract)
 
     def test_waits_for_graceful_mcp_collector_seal(self):
         with tempfile.TemporaryDirectory() as directory:

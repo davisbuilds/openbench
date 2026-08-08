@@ -183,6 +183,8 @@ class NativeRunConfig:
     mcp_command: tuple[str, ...]
     mcp_client_command_env: str
     mcp_collector_run_id: str | None
+    state_response_mode: str | None
+    mcp_call_contract: tuple[Mapping[str, Any], ...]
     environment: Mapping[str, Any]
     timeout_s: float
     max_retries: int
@@ -405,6 +407,41 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
         raise NativeRunError(
             f"MCP policy contains unknown tools: {sorted(unknown_policy_tools)!r}"
         )
+    state_response_mode = mcp.get("state_response_mode")
+    if state_response_mode is not None and state_response_mode not in {"auto", "full"}:
+        raise NativeRunError("mcp.state_response_mode must be 'auto' or 'full'")
+    raw_call_contract = mcp.get("call_contract", [])
+    if not isinstance(raw_call_contract, list):
+        raise NativeRunError("mcp.call_contract must be an array of tables")
+    call_contract: list[dict[str, Any]] = []
+    for index, item in enumerate(raw_call_contract):
+        if not isinstance(item, dict) or set(item) != {"tool", "required_arguments"}:
+            raise NativeRunError(
+                f"mcp.call_contract[{index}] must contain exactly tool and required_arguments"
+            )
+        tool = item["tool"]
+        required_arguments = item["required_arguments"]
+        if tool not in COMPUTER_USE_TOOLS or tool not in allowed_tools:
+            raise NativeRunError(
+                f"mcp.call_contract[{index}].tool must be an allowed computer-use tool"
+            )
+        if (
+            not isinstance(required_arguments, dict)
+            or not all(isinstance(key, str) and key for key in required_arguments)
+        ):
+            raise NativeRunError(
+                f"mcp.call_contract[{index}].required_arguments must be an object"
+            )
+        try:
+            _canonical_bytes(required_arguments)
+        except (TypeError, ValueError) as exc:
+            raise NativeRunError(
+                f"mcp.call_contract[{index}].required_arguments must be canonical JSON"
+            ) from exc
+        call_contract.append({
+            "tool": tool,
+            "required_arguments": dict(required_arguments),
+        })
     return NativeRunConfig(
         source_path=source,
         trial_id=trial_id,
@@ -432,6 +469,8 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
             if mcp.get("collector_run_id") is not None
             else None
         ),
+        state_response_mode=state_response_mode,
+        mcp_call_contract=tuple(call_contract),
         environment=environment,
         timeout_s=_positive_number(budget.get("timeout_s"), "budget.timeout_s"),
         max_retries=max_retries,
@@ -1620,6 +1659,12 @@ def collector_main() -> int:
             run_id=os.environ["OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID"],
             trial_id=os.environ["OPENBENCH_NATIVE_TRIAL_ID"],
             owner_path=os.environ["OPENBENCH_NATIVE_MCP_OWNER_PATH"],
+            call_contract=json.loads(
+                os.environ.get("OPENBENCH_NATIVE_MCP_CALL_CONTRACT", "[]")
+            ),
+            state_response_mode=os.environ.get(
+                "OPENBENCH_NATIVE_MCP_STATE_RESPONSE_MODE"
+            ),
             env=server_env,
             stdin=sys.stdin.buffer,
             stdout=sys.stdout.buffer,
@@ -1850,6 +1895,38 @@ def _verify_mcp_policy(path: Path, policy: Mapping[str, Any]) -> None:
             "MCP tool policy violation: "
             f"forbidden={sorted(blocked)!r}, outside_allowlist={sorted(outside)!r}"
         )
+
+
+def _verify_mcp_call_contract(
+    path: Path, contract: Sequence[Mapping[str, Any]]
+) -> None:
+    if not contract:
+        return
+    records = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    calls = [record for record in records if record.get("record_type") == "tool_call"]
+    calls.sort(key=lambda record: record.get("contract_sequence", -1))
+    if len(calls) != len(contract):
+        raise NativeRunError(
+            "MCP call contract mismatch: "
+            f"expected {len(contract)} ordered calls, observed {len(calls)}"
+        )
+    for index, (expected, observed) in enumerate(zip(contract, calls), 1):
+        if observed.get("contract_sequence") != index:
+            raise NativeRunError(
+                f"MCP call contract mismatch at call {index}: request order is not contiguous"
+            )
+        if observed.get("tool") != expected["tool"]:
+            raise NativeRunError(
+                f"MCP call contract mismatch at call {index}: "
+                f"expected tool {expected['tool']!r}, observed {observed.get('tool')!r}"
+            )
+        if observed.get("contract_arguments") != expected["required_arguments"]:
+            raise NativeRunError(
+                f"MCP call contract mismatch at call {index}: required argument subset disagrees"
+            )
 
 
 def _final_state_digest(entries: Sequence[Mapping[str, Any]]) -> str:
@@ -2272,6 +2349,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     "transport": "stdio",
                     "server_sha256": mcp_content_sha256,
                     "collector_run_id": collector_run_id,
+                    **(
+                        {"state_response_mode": config.state_response_mode}
+                        if config.state_response_mode is not None
+                        else {}
+                    ),
+                    **(
+                        {"call_contract": list(config.mcp_call_contract)}
+                        if config.mcp_call_contract
+                        else {}
+                    ),
                 },
                 "arm_config": {"environment": lock_environment},
             }
@@ -2370,6 +2457,17 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                             ],
                         },
                         separators=(",", ":"),
+                    ),
+                    "OPENBENCH_NATIVE_MCP_CALL_CONTRACT": json.dumps(
+                        list(config.mcp_call_contract), separators=(",", ":")
+                    ),
+                    **(
+                        {
+                            "OPENBENCH_NATIVE_MCP_STATE_RESPONSE_MODE":
+                                config.state_response_mode
+                        }
+                        if config.state_response_mode is not None
+                        else {}
                     ),
                     "OPENBENCH_NATIVE_TRIAL_ID": config.trial_id,
                 }
@@ -2608,6 +2706,7 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     if not reset_outcome.passed:
                         raise NativeRunError(f"reset phase {reset_outcome.status.value} after retryable startup failure")
                     continue
+                _verify_mcp_call_contract(ledger, config.mcp_call_contract)
                 if adapter_result.get("startup_failure") is True and attempt <= config.max_retries:
                     raise NativeRunError(
                         "startup retry refused because zero-token evidence is absent"
@@ -2784,7 +2883,23 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 "native_sidecar": {"path": "task/native.json", "sha256": _sha256(bundle / "task/native.json")},
                 "harness": {"name": config.harness_name, "version": config.harness_version, "version_source": config.harness_version_source},
                 "model": {"name": config.model_name, "provider": config.model_provider, "revision": config.model_revision},
-                "mcp": {"name": config.mcp_name, "version": config.mcp_version, "transport": "stdio", "server_sha256": mcp_content_sha256, "collector_run_id": collector_run_id},
+                "mcp": {
+                    "name": config.mcp_name,
+                    "version": config.mcp_version,
+                    "transport": "stdio",
+                    "server_sha256": mcp_content_sha256,
+                    "collector_run_id": collector_run_id,
+                    **(
+                        {"state_response_mode": config.state_response_mode}
+                        if config.state_response_mode is not None
+                        else {}
+                    ),
+                    **(
+                        {"call_contract": list(config.mcp_call_contract)}
+                        if config.mcp_call_contract
+                        else {}
+                    ),
+                },
                 "environment": lock_environment,
                 "budget": {"timeout_s": config.timeout_s, "max_retries": config.max_retries},
                 "evidence": {
