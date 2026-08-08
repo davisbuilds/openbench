@@ -1131,8 +1131,17 @@ def build_native_report(
             for arm_id in arm_ids
             if f"block{block}:{arm_id}" not in observations_by_cell
         ]
-        if missing:
-            incomplete_blocks.append({"block": block, "missing_cell_ids": missing})
+        noncompleted = [
+            f"block{block}:{arm_id}"
+            for arm_id in arm_ids
+            if f"block{block}:{arm_id}" in observations_by_cell
+            and observations_by_cell[f"block{block}:{arm_id}"].row["completed"] is not True
+        ]
+        if missing or noncompleted:
+            incomplete = {"block": block, "missing_cell_ids": missing}
+            if noncompleted:
+                incomplete["noncompleted_cell_ids"] = noncompleted
+            incomplete_blocks.append(incomplete)
         else:
             complete_blocks.append(block)
 
@@ -1163,6 +1172,11 @@ def build_native_report(
     row_only_cells = sum(
         observation.mcp_calls is None for observation in observations_by_cell.values()
     )
+    arm_aggregates = {
+        arm_id: _aggregate_observations(matched[arm_id]) for arm_id in arm_ids
+    }
+    for aggregate in arm_aggregates.values():
+        aggregate["attribution"].pop("trial_totals", None)
     report = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "comparison_id": validated_plan["comparison_id"],
@@ -1205,9 +1219,7 @@ def build_native_report(
                 "publish_recommended_repetitions"
             ],
         },
-        "arms": {
-            arm_id: _aggregate_observations(matched[arm_id]) for arm_id in arm_ids
-        },
+        "arms": arm_aggregates,
         "matched_deltas": {
             arm_id: _matched_deltas(matched[reference_id], matched[arm_id])
             for arm_id in arm_ids[1:]

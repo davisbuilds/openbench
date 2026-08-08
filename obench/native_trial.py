@@ -957,6 +957,34 @@ def _validate_mcp_call_contract(
             )
 
 
+def _validate_state_response_mode(
+    calls: Sequence[Mapping[str, Any]],
+    contract: Sequence[Mapping[str, Any]],
+    mode: str | None,
+) -> None:
+    if mode != "full":
+        return
+    ordered = sorted(calls, key=lambda call: call.get("contract_sequence", -1))
+    for index, (call, expected) in enumerate(zip(ordered, contract), 1):
+        state_bearing = (
+            expected["tool"] == "get_app_state"
+            or expected["required_arguments"].get("include_state") is True
+        )
+        if not state_bearing:
+            continue
+        metadata = call.get("computer_use_meta")
+        metrics = metadata.get("metrics") if isinstance(metadata, Mapping) else None
+        perception = metrics.get("perception") if isinstance(metrics, Mapping) else None
+        if (
+            not isinstance(perception, Mapping)
+            or perception.get("response_encoding") != "full"
+        ):
+            raise _fail(
+                f"mcp/ledger.jsonl contract call {index}",
+                "full state-response arm did not return full perception evidence",
+            )
+
+
 def _validate_trajectory(
     root: Path,
     *,
@@ -1433,7 +1461,13 @@ def load_native_trial(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
         allow_incomplete=result["status"] in TERMINAL_STATUSES,
     )
     if "call_contract" in lock["mcp"]:
-        _validate_mcp_call_contract(mcp_records, lock["mcp"]["call_contract"])
+        call_contract = lock["mcp"]["call_contract"]
+        _validate_mcp_call_contract(mcp_records, call_contract)
+        _validate_state_response_mode(
+            mcp_records,
+            call_contract,
+            lock["mcp"].get("state_response_mode"),
+        )
     focus_records = _verify_ledger(
         root,
         "focus",

@@ -13,6 +13,7 @@ from obench.native_trial import (
     NATIVE_SIDECAR_SCHEMA_VERSION,
     NativeTrialError,
     TASK_SIDECAR_SCHEMA_VERSION,
+    _validate_state_response_mode,
     import_native_trial,
     load_native_trial,
 )
@@ -26,6 +27,47 @@ FIXTURE_CASES = (
 HEX_A = "a" * 64
 HEX_B = "b" * 64
 HEX_C = "c" * 64
+
+
+class StateResponseModeEvidenceTests(unittest.TestCase):
+    def test_full_mode_requires_full_encoding_for_state_bearing_calls(self):
+        contract = [{
+            "tool": "click",
+            "required_arguments": {"include_state": True},
+        }]
+        call = {
+            "contract_sequence": 1,
+            "computer_use_meta": {
+                "metrics": {"perception": {"response_encoding": "diff"}}
+            },
+        }
+        with self.assertRaisesRegex(
+            NativeTrialError, "did not return full perception evidence"
+        ):
+            _validate_state_response_mode([call], contract, "full")
+
+        call["computer_use_meta"]["metrics"]["perception"][
+            "response_encoding"
+        ] = "full"
+        _validate_state_response_mode([call], contract, "full")
+
+    def test_auto_mode_and_non_state_calls_do_not_require_full_encoding(self):
+        diff_call = {
+            "contract_sequence": 1,
+            "computer_use_meta": {
+                "metrics": {"perception": {"response_encoding": "diff"}}
+            },
+        }
+        _validate_state_response_mode(
+            [diff_call],
+            [{"tool": "click", "required_arguments": {"include_state": True}}],
+            "auto",
+        )
+        _validate_state_response_mode(
+            [{"contract_sequence": 1, "computer_use_meta": {}}],
+            [{"tool": "list_apps", "required_arguments": {}}],
+            "full",
+        )
 
 
 def _canonical_bytes(value):

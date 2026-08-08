@@ -557,11 +557,42 @@ class NativeReportTests(unittest.TestCase):
         )
         self.assertEqual(report["arms"]["baseline"]["n"], 1)
         self.assertEqual(report["arms"]["candidate"]["n"], 1)
+        self.assertNotIn("trial_totals", report["arms"]["baseline"]["attribution"])
         self.assertEqual(
             report["matched_deltas"]["candidate"]["success_pairs"],
             {"wins": 0, "ties": 0, "losses": 1},
         )
         self.assertEqual(len(report["evidence_digests"]), 3)
+
+    def test_terminal_cell_does_not_complete_matched_block(self):
+        plan = _plan(repetitions=1)
+        terminal = _row(plan, "candidate", 1)
+        terminal.update({
+            "completed": False,
+            "success": False,
+            "checker_exit": None,
+            "score": None,
+            "error": "agent timed out",
+            "failure_class": "timeout",
+        })
+        terminal["candidate_provenance"]["terminal_status"] = "timeout"
+
+        report = build_native_report(
+            plan,
+            [_row(plan, "baseline", 1), terminal],
+        )
+
+        self.assertEqual(report["coverage"]["complete_matched_blocks"], 0)
+        self.assertEqual(
+            report["coverage"]["incomplete_blocks"],
+            [{
+                "block": 1,
+                "missing_cell_ids": [],
+                "noncompleted_cell_ids": ["block1:candidate"],
+            }],
+        )
+        self.assertEqual(report["arms"]["baseline"]["n"], 0)
+        self.assertEqual(report["arms"]["candidate"]["n"], 0)
 
     def test_duplicate_rows_conflict_and_bundle_enrichment_is_order_independent(self):
         plan = _plan(repetitions=1)
