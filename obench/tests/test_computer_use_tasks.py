@@ -93,6 +93,16 @@ class ComputerUseTasksTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("target activation", result.stdout)
 
+    def test_background_instruction_uses_attached_menu_path(self):
+        instruction = (ROOT / "background-control/instruction.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("`Open Menu > Fixture Menu Item`", instruction)
+        self.assertIn("`mouse_button` set to `right`", instruction)
+        self.assertIn("do not use\n   `click_menu_item`", instruction)
+        self.assertIn("call `click`\n   twice", instruction)
+        self.assertIn("Do not combine them with `click_count`", instruction)
+
     def test_background_rejects_global_delivery_with_resealed_chain(self):
         temporary, root = self.solved_workspace("background-control")
         self.addCleanup(temporary.cleanup)
