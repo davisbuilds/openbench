@@ -406,10 +406,22 @@ def _static_preflight(request: Mapping[str, Any]) -> dict[str, Any]:
             f"{arm}_tcc_identity_proof", permission_ok, permission_observed,
             "health proof bound to this exact app binary",
         )
+    passed_by_name = {item["name"]: item["passed"] for item in checks}
+    state_ab_requirements = {
+        "run_root_safe",
+        "computer_use_mcp_repo",
+        f"source_commit:{BASIC_REVISION}",
+        f"source_commit:{SOURCE_REVISION}",
+        "codex_native_profile",
+        "codex_auth",
+        "source_mcp_identity",
+        "source_tcc_identity_proof",
+    }
     return {
         "schema_version": PREFLIGHT_SCHEMA,
         "read_only": True,
         "matched_ready": all(item["passed"] for item in checks),
+        "state_ab_ready": all(passed_by_name.get(name) is True for name in state_ab_requirements),
         "checks": checks,
         "next": {
             "build": f"{sys.executable} {Path(__file__).resolve()} --request REQUEST.toml build",
@@ -470,6 +482,7 @@ def _publication_safe_preflight(result: Mapping[str, Any]) -> dict[str, Any]:
         "read_only": True,
         "publication_safe": True,
         "matched_ready": result["matched_ready"],
+        "state_ab_ready": result["state_ab_ready"],
         "checks": safe_checks,
         "next": {
             "build": (
@@ -1378,7 +1391,8 @@ def generate(
     request = _load_request(request_path)
     root, _repo, installed = _request_paths(request)
     static = _static_preflight(request)
-    if mode in {"matched", "state-ab"} and not static["matched_ready"]:
+    readiness = static["state_ab_ready"] if mode == "state-ab" else static["matched_ready"]
+    if mode in {"matched", "state-ab"} and not readiness:
         failed = [item["name"] for item in static["checks"] if not item["passed"]]
         raise CubError(f"matched configs require complete identity/TCC proof; blockers: {failed}")
     if mode == "pilot" and (arm is None or task is None):

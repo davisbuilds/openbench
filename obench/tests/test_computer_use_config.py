@@ -288,7 +288,7 @@ class ComputerUseConfigTests(unittest.TestCase):
         with (
             mock.patch.object(cub, "_bundle_info", side_effect=self.identity),
             mock.patch.object(cub, "_static_preflight", return_value={
-                "matched_ready": True, "checks": []
+                "matched_ready": False, "state_ab_ready": True, "checks": []
             }),
             mock.patch.object(cub, "_host_environment", return_value=host),
             mock.patch.object(
@@ -353,6 +353,7 @@ class ComputerUseConfigTests(unittest.TestCase):
             "schema_version": cub.PREFLIGHT_SCHEMA,
             "read_only": True,
             "matched_ready": False,
+            "state_ab_ready": True,
             "checks": [
                 {
                     "name": "run_root_safe", "passed": True,
@@ -388,6 +389,7 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertNotIn("Alice Example", rendered)
         self.assertIn("$OPENBENCH_CUB_RUN_ROOT", rendered)
         self.assertIn('"publication_safe": true', rendered)
+        self.assertIn('"state_ab_ready": true', rendered)
 
     def test_checked_in_request_uses_only_portable_environment_placeholders(self):
         sample = ROOT / "computer-use-tasks/v0/config-request.sample.toml"
