@@ -2490,9 +2490,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     sample["owned_serve_pid"] is not None
                     for sample in owner_monitor.samples
                 ):
+                    adapter_error = None
+                    adapter_tail = None
+                    if isinstance(adapter_result, Mapping):
+                        adapter_error = adapter_result.get("error")
+                        adapter_tail = adapter_result.get("output_tail")
+                    detail = adapter_error or adapter_tail
                     raise NativeRunError(
                         "MCP owner monitor never observed the benchmark-owned "
                         "serve process"
+                        + (f"; adapter failure: {detail}" if detail else "")
                     )
                 if attempt_agent_finished_at < attempt_agent_started_at:
                     raise NativeRunError(
