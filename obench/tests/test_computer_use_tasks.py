@@ -118,8 +118,8 @@ class ComputerUseTasksTests(unittest.TestCase):
         self.assertIn("`Open Menu > Fixture Menu Item`", instruction)
         self.assertIn("`mouse_button` set to `right`", instruction)
         self.assertIn("do not use\n   `click_menu_item`", instruction)
-        self.assertIn("call `click`\n   twice", instruction)
-        self.assertIn("Do not combine them with `click_count`", instruction)
+        self.assertIn("call `click`\n   once", instruction)
+        self.assertNotIn("twice on the returned", instruction)
 
     def test_background_rejects_global_delivery_with_resealed_chain(self):
         temporary, root = self.solved_workspace("background-control")

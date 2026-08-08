@@ -10,8 +10,7 @@ input delivery:
    status is `menu`. This fixture has no app menu bar, so do not use
    `click_menu_item`. Use `click` with `mouse_button` set to `right` on
    `menuButton` to expose the menu through `AXShowMenu`. Then call `click`
-   twice on the returned `Fixture Menu Item` element: the first call selects
-   it and the second activates it. Do not combine them with `click_count`.
+   once on the returned `Fixture Menu Item` element to activate it.
 
 Only call tools named `mcp__computer_use__*`. Never call `apply_patch`, shell,
 browser, filesystem, or other tools. Do not create artifacts manually or edit
