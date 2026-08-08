@@ -13,9 +13,9 @@ Make exactly these five MCP calls in order. Do not make any other MCP calls.
    `include_state=true` and `include_screenshot=false`.
 3. Call `click` on `honest-button` twice, as two separate calls, each with
    `include_state=true` and `include_screenshot=false`.
-4. Call `set_value` on `keystroke-input` with `value="openbench-42"`,
+4. Call `type_text` on `keystroke-input` with `text="openbench-42"`,
    `include_state=true`, and `include_screenshot=false`.
 
-Stop after `set_value`. Do not re-read state. The server controls response
+Stop after `type_text`. Do not re-read state. The server controls response
 encoding; do not request or discuss a response mode. The external checker is
 the sole judge of the final fixture state.

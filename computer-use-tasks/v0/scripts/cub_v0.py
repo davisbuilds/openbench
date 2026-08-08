@@ -65,8 +65,8 @@ CALL_CONTRACT = (
     {"tool": "click", "required_arguments": {
         "include_state": True, "include_screenshot": False,
     }},
-    {"tool": "set_value", "required_arguments": {
-        "value": "openbench-42", "include_state": True,
+    {"tool": "type_text", "required_arguments": {
+        "text": "openbench-42", "include_state": True,
         "include_screenshot": False,
     }},
 )
