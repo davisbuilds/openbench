@@ -37,7 +37,7 @@ from obench.native_run import _canonical_digest, _content_bound_command_digest
 
 ROOT = Path(__file__).resolve().parents[1]
 BASIC_REVISION = "2c5cc162e58f6486505c8c5fe87fd76980d0e6b9"
-SOURCE_REVISION = "3516eca731d86a1e2f1a3fe203709ecb8940c3b3"
+SOURCE_REVISION = "38e517261a1d33b224a948e0a0b7cb94196bb389"
 MCP_VERSION = "0.4.1"
 SOURCE_MCP_BUNDLE_ID = "org.openbench.computer-use-mcp.source.v041"
 INSTALLED_MCP_BUNDLE_ID = "dev.computer-use-mcp.app"
