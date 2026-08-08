@@ -703,6 +703,26 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         return None
     calls = observation.mcp_calls
     requests = observation.proxy_requests
+    intervals: list[tuple[int, int, str]] = []
+    for kind, records in (("model request", requests), ("MCP call", calls)):
+        for index, record in enumerate(records, 1):
+            start = record.get("request_unix_ns")
+            end = record.get("response_unix_ns")
+            if (
+                type(start) is not int
+                or type(end) is not int
+                or start < 0
+                or end < start
+            ):
+                raise NativeReportError(f"{kind} interval is malformed")
+            intervals.append((start, end, f"{kind} {index}"))
+    intervals.sort()
+    for previous, current in zip(intervals, intervals[1:]):
+        if current[0] < previous[1]:
+            raise NativeReportError(
+                "exclusive timing attribution has overlapping sealed intervals: "
+                f"{previous[2]} and {current[2]}"
+            )
     successful_usage = [
         request
         for request in requests
@@ -735,6 +755,12 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
             operation_metrics.append(metrics["operation"])
         if isinstance(metrics.get("perception"), Mapping):
             perception_metrics.append(metrics["perception"])
+    mcp_identity = observation.row["candidate_provenance"]["mcp_identity"]
+    if mcp_identity.get("call_contract") and len(perception_metrics) != len(calls):
+        raise NativeReportError(
+            "contracted MCP call is missing perception telemetry; "
+            "trial attribution is non-comparable"
+        )
     queue_values = [_number(metric.get("queue_latency_ms")) for metric in operation_metrics]
     perception_values = [
         _number(metric.get("perception_ms", metric.get("elapsed_ms")))

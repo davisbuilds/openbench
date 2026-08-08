@@ -94,6 +94,28 @@ class ComputerUseConfigTests(unittest.TestCase):
         with self.assertRaises(cub.CubError):
             cub.descendant(root, "../escape")
 
+    def test_state_response_setup_readiness_uses_basic_fixture_initial_state(self):
+        workspace = cub._workspace(
+            self.run_root, "auto", "state-response-ab", 1
+        )
+        artifacts = workspace / "artifacts"
+        artifacts.mkdir(parents=True)
+        (artifacts / "fixture-state.json").write_text(
+            json.dumps({
+                "fixture": "basic-controls",
+                "honest_counter": 0,
+                "keystroke_echo": "",
+                "schema_version": 1,
+                "toggle_on": False,
+            }),
+            encoding="utf-8",
+        )
+        self.assertTrue(
+            cub._initial_state_ready(
+                self.run_root, "auto", "state-response-ab", 1
+            )
+        )
+
     def test_standalone_script_resolves_openbench_from_outside_repo(self):
         completed = subprocess.run(
             [sys.executable, os.fspath(SCRIPT), "--help"],

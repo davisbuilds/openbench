@@ -220,7 +220,7 @@ def _replace_bundle_mcp_ledger(bundle, calls):
         "native-cub-v0-trial1",
     )
     for sequence, call in enumerate(calls, 1):
-        request_unix_ns = 1786017601000000000 + sequence * 1000000000
+        request_unix_ns = 1786017603000000000 + sequence * 1000000000
         ledger.append_call({
             **call,
             "status": "completed",
@@ -372,7 +372,11 @@ class NativeReportTests(unittest.TestCase):
         )
         call["computer_use_meta"]["metrics"]["schema_version"] = 2
         call["response_bytes"] = 1500
+        call["request_unix_ns"] = 2_000_000_000
+        call["response_unix_ns"] = 2_060_000_000
         proxy = ({
+            "request_unix_ns": 500_000_000,
+            "response_unix_ns": 1_500_000_000,
             "duration_ms": 1000.0,
             "paced_wait_ms": 200.0,
             "status": 200,
@@ -440,6 +444,50 @@ class NativeReportTests(unittest.TestCase):
         self.assertEqual(
             deltas["perception_phase_time_ms.snapshot_ms"]["median"], 0.0
         )
+
+    def test_attribution_rejects_overlapping_or_partial_contracted_evidence(self):
+        plan = _plan(repetitions=1)
+        row = _row(plan, "baseline", 1)
+        row["candidate_provenance"]["mcp_identity"] = {
+            **row["candidate_provenance"]["mcp_identity"],
+            "call_contract": [{
+                "tool": "set_value",
+                "required_arguments": {"include_state": True},
+            }],
+        }
+        call = _call("set_value", 100.0)
+        call.update({
+            "request_unix_ns": 1_000_000_000,
+            "response_unix_ns": 1_100_000_000,
+            "response_bytes": 100,
+        })
+        request = {
+            "request_unix_ns": 900_000_000,
+            "response_unix_ns": 1_050_000_000,
+            "duration_ms": 150.0,
+            "paced_wait_ms": 0.0,
+            "status": 200,
+            "usage_available": True,
+            "input_tokens": 1,
+            "cached_tokens": 0,
+            "output_tokens": 1,
+            "error_present": False,
+        }
+        observation = _Observation(
+            row=row,
+            mcp_calls=(call,),
+            proxy_requests=(request,),
+            bundle_sha256="a" * 64,
+            result_sha256="b" * 64,
+            row_sha256="c" * 64,
+        )
+        with self.assertRaisesRegex(NativeReportError, "overlapping sealed intervals"):
+            _aggregate_observations([observation])
+
+        request["response_unix_ns"] = 950_000_000
+        request["duration_ms"] = 50.0
+        with self.assertRaisesRegex(NativeReportError, "missing perception telemetry"):
+            _aggregate_observations([observation])
 
     def test_validated_bundle_rejects_invalid_sealed_mcp_metrics(self):
         cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))

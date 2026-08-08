@@ -798,6 +798,10 @@ def _initial_state_ready(root: Path, arm: str, task: str, trial_index: int) -> b
             "fixture": "basic-controls", "honest_counter": 0,
             "keystroke_echo": "", "schema_version": 1, "toggle_on": False,
         },
+        "state-response-ab": {
+            "fixture": "basic-controls", "honest_counter": 0,
+            "keystroke_echo": "", "schema_version": 1, "toggle_on": False,
+        },
         "background-control": {
             "button_status": "idle", "fixture": "background-control",
             "menu_status": "idle", "schema_version": 1,
