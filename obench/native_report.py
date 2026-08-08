@@ -703,8 +703,15 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         return None
     calls = observation.mcp_calls
     requests = observation.proxy_requests
+    successful_usage = [
+        request
+        for request in requests
+        if request.get("usage_available") is True
+        and type(request.get("status")) is int
+        and 200 <= request["status"] < 400
+    ]
     intervals: list[tuple[int, int, str]] = []
-    for kind, records in (("model request", requests), ("MCP call", calls)):
+    for kind, records in (("model request", successful_usage), ("MCP call", calls)):
         for index, record in enumerate(records, 1):
             start = record.get("request_unix_ns")
             end = record.get("response_unix_ns")
@@ -723,13 +730,6 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
                 "exclusive timing attribution has overlapping sealed intervals: "
                 f"{previous[2]} and {current[2]}"
             )
-    successful_usage = [
-        request
-        for request in requests
-        if request.get("usage_available") is True
-        and type(request.get("status")) is int
-        and 200 <= request["status"] < 400
-    ]
     model_api_time_ms = 0.0
     for request in successful_usage:
         duration = _number(request.get("duration_ms"))
@@ -737,7 +737,9 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         if duration is None or paced is None or paced > duration:
             raise NativeReportError("model request timing is malformed")
         model_api_time_ms += duration - paced
-    paced_wait_values = [_number(request.get("paced_wait_ms")) for request in requests]
+    paced_wait_values = [
+        _number(request.get("paced_wait_ms")) for request in successful_usage
+    ]
     if any(value is None for value in paced_wait_values):
         raise NativeReportError("model request paced wait is malformed")
     call_durations = [_number(call.get("duration_ms")) for call in calls]
