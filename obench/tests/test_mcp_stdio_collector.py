@@ -47,6 +47,7 @@ for raw in sys.stdin.buffer:
                 "error": {"code": -32001, "message": "fixture failure"},
             }
         else:
+            arguments = message["params"].get("arguments", {})
             if name == "sensitive_meta":
                 meta = {
                     "computer-use-mcp/error": {
@@ -93,6 +94,8 @@ for raw in sys.stdin.buffer:
                     },
                     "unrelated": {"must": "not be collected"},
                 }
+            if "metrics" in arguments:
+                meta["computer-use-mcp/metrics"] = arguments["metrics"]
             response = {
                 "jsonrpc": "2.0",
                 "id": message["id"],
@@ -333,8 +336,139 @@ raise SystemExit(result.returncode)
             call["computer_use_meta"]["outcome"]["classification"], "success"
         )
         self.assertNotIn("unrelated", call["computer_use_meta"])
+        self.assertIsNone(call["computer_use_meta"]["metrics"])
         verified = collector.verify_ledger(result.ledger_path)
         self.assertEqual(verified.root_hash, result.root_hash)
+
+    def test_retains_operation_metrics_in_hash_chained_ledger(self):
+        metrics = {
+            "schema_version": 1,
+            "operation": {
+                "operation": "click",
+                "tool": "click",
+                "app_bundle_identifier": "com.apple.TextEdit",
+                "ax_role": "AXButton",
+                "attempted_delivery_strategies": ["ax-action", "cg-event"],
+                "final_delivery_strategy": "ax-action",
+                "effect_outcome": "verified",
+                "queue_latency_ms": 3,
+                "execution_latency_ms": 17,
+            },
+        }
+        request = rpc(
+            "tools/call", 20, {"name": "click", "arguments": {"metrics": metrics}}
+        )
+        result, output, _, rows = self.run_fixture(
+            request, name="operation-metrics.jsonl"
+        )
+
+        self.assertIn(b'"computer-use-mcp/metrics"', output)
+        self.assertTrue(result.integrity_ok)
+        self.assertEqual(rows[0]["computer_use_meta"]["metrics"], metrics)
+        verified = collector.verify_ledger(result.ledger_path)
+        self.assertEqual(verified.call_count, 1)
+        self.assertEqual(verified.root_hash, result.root_hash)
+
+    def test_retains_perception_only_and_combined_metrics(self):
+        perception = {
+            "operation": "get_app_state",
+            "tool": "get_app_state",
+            "app_bundle_identifier": None,
+            "elapsed_ms": 41,
+            "elements_visited": 120,
+            "elements_returned": 35,
+            "partial": False,
+            "diff": True,
+            "context_bytes": 4096,
+        }
+        operation = {
+            "operation": "click",
+            "tool": "click",
+            "attempted_delivery_strategies": [],
+            "queue_latency_ms": 0,
+            "execution_latency_ms": 8,
+        }
+        envelopes = (
+            {"schema_version": 1, "perception": perception},
+            {
+                "schema_version": 1,
+                "operation": operation,
+                "perception": perception,
+            },
+        )
+        for index, metrics in enumerate(envelopes):
+            with self.subTest(metrics=metrics):
+                request = rpc(
+                    "tools/call",
+                    21 + index,
+                    {"name": "get_app_state", "arguments": {"metrics": metrics}},
+                )
+                result, _, _, rows = self.run_fixture(
+                    request, name=f"perception-metrics-{index}.jsonl"
+                )
+                self.assertTrue(result.integrity_ok)
+                self.assertEqual(rows[0]["computer_use_meta"]["metrics"], metrics)
+                self.assertTrue(collector.verify_ledger(result.ledger_path).integrity_ok)
+
+    def test_rejects_malformed_known_metrics_metadata(self):
+        valid_operation = {
+            "operation": "click",
+            "tool": "click",
+            "attempted_delivery_strategies": [],
+            "queue_latency_ms": 0,
+            "execution_latency_ms": 8,
+        }
+        malformed = (
+            {"schema_version": 2, "operation": valid_operation},
+            {"schema_version": 1.0, "operation": valid_operation},
+            {"schema_version": 1},
+            {
+                "schema_version": 1,
+                "operation": {**valid_operation, "queue_latency_ms": True},
+            },
+            {
+                "schema_version": 1,
+                "operation": {**valid_operation, "unexpected": "field"},
+            },
+            {
+                "schema_version": 1,
+                "operation": {**valid_operation, "operation": "\ud800"},
+            },
+            {
+                "schema_version": 1,
+                "perception": {
+                    "operation": "get_app_state",
+                    "tool": "get_app_state",
+                    "elapsed_ms": 1,
+                    "elements_visited": 2,
+                    "elements_returned": 2,
+                    "partial": 0,
+                    "diff": False,
+                    "context_bytes": 128,
+                },
+            },
+        )
+        for index, metrics in enumerate(malformed):
+            with self.subTest(metrics=metrics):
+                request = rpc(
+                    "tools/call",
+                    30 + index,
+                    {"name": "click", "arguments": {"metrics": metrics}},
+                )
+                result, output, _, rows = self.run_fixture(
+                    request, name=f"malformed-metrics-{index}.jsonl"
+                )
+                self.assertIn(b'"computer-use-mcp/metrics"', output)
+                self.assertFalse(result.integrity_ok)
+                self.assertEqual(result.malformed_frames, 1)
+                self.assertIsNone(rows[0]["computer_use_meta"]["metrics"])
+                self.assertEqual(
+                    rows[0]["computer_use_meta"]["delivery"]["delivery_tier"],
+                    "tier1-ax-action",
+                )
+                self.assertFalse(
+                    collector.verify_ledger(result.ledger_path).integrity_ok
+                )
 
     def test_tool_and_jsonrpc_errors_are_distinct(self):
         payload = (

@@ -28,7 +28,11 @@ META_KEYS = {
     "outcome": "computer-use-mcp/outcome",
     "focus": "computer-use-mcp/focus",
     "delivery": "computer-use-mcp/delivery",
+    "metrics": "computer-use-mcp/metrics",
 }
+METRICS_SCHEMA_VERSION = 1
+MAX_METRIC_INTEGER = (1 << 63) - 1
+METRIC_DIMENSION_PUNCTUATION = frozenset("._:-")
 ERROR_CODES = frozenset({
     "STALE_ELEMENT",
     "AMBIGUOUS_TARGET",
@@ -159,6 +163,10 @@ class ArgumentDigestLimitError(CollectorError):
     """Raised when argument normalization exceeds its safe complexity budget."""
 
 
+class MetricsMetadataError(CollectorError):
+    """Raised when known computer-use metrics metadata violates its schema."""
+
+
 @dataclass(frozen=True)
 class CollectionResult:
     returncode: int
@@ -280,7 +288,140 @@ def _boolean_fields(value: Any, allowed: frozenset[str]) -> dict[str, bool]:
     }
 
 
-def _privacy_safe_meta(metadata: Any) -> dict[str, Any]:
+def _metrics_error(path: str) -> MetricsMetadataError:
+    return MetricsMetadataError(f"invalid computer-use metrics metadata at {path}")
+
+
+def _metric_dimension(value: Any, path: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise _metrics_error(path)
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise _metrics_error(path) from exc
+    if (
+        len(encoded) > 128
+        or not all(
+            character.isalnum() or character in METRIC_DIMENSION_PUNCTUATION
+            for character in value
+        )
+    ):
+        raise _metrics_error(path)
+    return value
+
+
+def _metric_integer(value: Any, path: str) -> int:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value < 0
+        or value > MAX_METRIC_INTEGER
+    ):
+        raise _metrics_error(path)
+    return value
+
+
+def _validate_metric_payload(
+    value: Any,
+    *,
+    path: str,
+    required: Mapping[str, str],
+    optional_dimensions: frozenset[str],
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise _metrics_error(path)
+    allowed = set(required) | set(optional_dimensions)
+    if set(value) - allowed or set(required) - set(value):
+        raise _metrics_error(path)
+
+    validated: dict[str, Any] = {}
+    for field, field_type in required.items():
+        field_path = f"{path}.{field}"
+        raw = value[field]
+        if field_type == "dimension":
+            validated[field] = _metric_dimension(raw, field_path)
+        elif field_type == "dimensions":
+            if not isinstance(raw, list):
+                raise _metrics_error(field_path)
+            validated[field] = [
+                _metric_dimension(item, f"{field_path}[]") for item in raw
+            ]
+        elif field_type == "integer":
+            validated[field] = _metric_integer(raw, field_path)
+        elif field_type == "boolean":
+            if not isinstance(raw, bool):
+                raise _metrics_error(field_path)
+            validated[field] = raw
+        else:  # pragma: no cover - schema definitions are module constants
+            raise AssertionError(f"unknown metric field type: {field_type}")
+
+    for field in optional_dimensions:
+        if field not in value:
+            continue
+        raw = value[field]
+        validated[field] = (
+            None if raw is None else _metric_dimension(raw, f"{path}.{field}")
+        )
+    return validated
+
+
+def _validated_metrics(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise _metrics_error("metrics")
+    allowed = {"schema_version", "operation", "perception"}
+    schema_version = value.get("schema_version")
+    if set(value) - allowed:
+        raise _metrics_error("metrics")
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version != METRICS_SCHEMA_VERSION
+    ):
+        raise _metrics_error("metrics.schema_version")
+    if "operation" not in value and "perception" not in value:
+        raise _metrics_error("metrics")
+
+    validated: dict[str, Any] = {"schema_version": METRICS_SCHEMA_VERSION}
+    if "operation" in value:
+        validated["operation"] = _validate_metric_payload(
+            value["operation"],
+            path="metrics.operation",
+            required={
+                "operation": "dimension",
+                "tool": "dimension",
+                "attempted_delivery_strategies": "dimensions",
+                "queue_latency_ms": "integer",
+                "execution_latency_ms": "integer",
+            },
+            optional_dimensions=frozenset({
+                "app_bundle_identifier",
+                "ax_role",
+                "final_delivery_strategy",
+                "effect_outcome",
+            }),
+        )
+    if "perception" in value:
+        validated["perception"] = _validate_metric_payload(
+            value["perception"],
+            path="metrics.perception",
+            required={
+                "operation": "dimension",
+                "tool": "dimension",
+                "elapsed_ms": "integer",
+                "elements_visited": "integer",
+                "elements_returned": "integer",
+                "partial": "boolean",
+                "diff": "boolean",
+                "context_bytes": "integer",
+            },
+            optional_dimensions=frozenset({"app_bundle_identifier"}),
+        )
+    return validated
+
+
+def _privacy_safe_meta(
+    metadata: Any, *, validate_metrics: bool = True
+) -> dict[str, Any]:
     """Retain only source-defined categorical and boolean MCP telemetry."""
     metadata = metadata if isinstance(metadata, dict) else {}
 
@@ -347,11 +488,15 @@ def _privacy_safe_meta(metadata: Any) -> dict[str, Any]:
                 else None
             ),
         }
+    metrics = None
+    if validate_metrics and META_KEYS["metrics"] in metadata:
+        metrics = _validated_metrics(metadata[META_KEYS["metrics"]])
     return {
         "error": error,
         "outcome": outcome,
         "focus": focus,
         "delivery": delivery,
+        "metrics": metrics,
     }
 
 
@@ -671,8 +816,8 @@ class _ProtocolObserver:
             status = "tool_error"
         else:
             status = "completed"
-        self.ledger.append_call(
-            self._call_record(
+        try:
+            record = self._call_record(
                 call,
                 status=status,
                 response=message,
@@ -681,7 +826,19 @@ class _ProtocolObserver:
                 response_monotonic_ns=now_mono,
                 process_returncode=None,
             )
-        )
+        except MetricsMetadataError:
+            self.malformed_frames += 1
+            record = self._call_record(
+                call,
+                status=status,
+                response=message,
+                response_bytes=frame_bytes,
+                response_unix_ns=now_unix,
+                response_monotonic_ns=now_mono,
+                process_returncode=None,
+                validate_metrics=False,
+            )
+        self.ledger.append_call(record)
 
     @staticmethod
     def _call_record(
@@ -693,6 +850,7 @@ class _ProtocolObserver:
         response_unix_ns: int | None,
         response_monotonic_ns: int | None,
         process_returncode: int | None,
+        validate_metrics: bool = True,
     ) -> dict[str, Any]:
         result = response.get("result") if isinstance(response, dict) else None
         result = result if isinstance(result, dict) else {}
@@ -725,7 +883,9 @@ class _ProtocolObserver:
                 "present": rpc_error is not None,
                 "code": rpc_error_code,
             },
-            "computer_use_meta": _privacy_safe_meta(metadata),
+            "computer_use_meta": _privacy_safe_meta(
+                metadata, validate_metrics=validate_metrics
+            ),
             "process_returncode": process_returncode,
         }
 

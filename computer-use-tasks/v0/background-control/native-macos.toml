@@ -6,7 +6,7 @@ harbor_execution_supported = false
 
 [fixture]
 repository = "computer-use-mcp"
-revision = "1e7988c157c880a4588cdd593e42a5f86443c307"
+revision = "3516eca731d86a1e2f1a3fe203709ecb8940c3b3"
 source = "scripts/fixtures/BackgroundControlFixture.swift"
 process_name = "BackgroundControlFixture"
 state_path_env = "COMPUTER_USE_FIXTURE_STATE_PATH"

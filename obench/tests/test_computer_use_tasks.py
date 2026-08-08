@@ -44,7 +44,7 @@ class ComputerUseTasksTests(unittest.TestCase):
     def test_common_envelopes_and_native_sidecars_are_explicit(self):
         expected_revisions = {
             "basic-controls": "2c5cc162e58f6486505c8c5fe87fd76980d0e6b9",
-            "background-control": "1e7988c157c880a4588cdd593e42a5f86443c307",
+            "background-control": "3516eca731d86a1e2f1a3fe203709ecb8940c3b3",
         }
         for name in ("basic-controls", "background-control", "textedit-exact-file"):
             with self.subTest(task=name):
