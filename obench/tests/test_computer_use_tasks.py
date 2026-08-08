@@ -46,7 +46,12 @@ class ComputerUseTasksTests(unittest.TestCase):
             "basic-controls": "2c5cc162e58f6486505c8c5fe87fd76980d0e6b9",
             "background-control": "3516eca731d86a1e2f1a3fe203709ecb8940c3b3",
         }
-        for name in ("basic-controls", "background-control", "textedit-exact-file"):
+        for name in (
+            "basic-controls",
+            "background-control",
+            "state-response-ab",
+            "textedit-exact-file",
+        ):
             with self.subTest(task=name):
                 task = tomllib.loads((ROOT / name / "task.toml").read_text(encoding="utf-8"))
                 native = tomllib.loads(
@@ -63,7 +68,10 @@ class ComputerUseTasksTests(unittest.TestCase):
     def test_all_primary_tasks_have_offline_polarity(self):
         tasks = discover_tasks([("computer-use-v0", str(ROOT))])
         self.assertEqual([item[1] for item in tasks], [
-            "background-control", "basic-controls", "textedit-exact-file"
+            "background-control",
+            "basic-controls",
+            "state-response-ab",
+            "textedit-exact-file",
         ])
         for _tier, name, task_dir in tasks:
             with self.subTest(task=name):

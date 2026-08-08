@@ -13,10 +13,30 @@ EXPECTED = {
 }
 
 
+def load_object(path):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key: " + key)
+            result[key] = value
+        return result
+
+    return json.loads(
+        pathlib.Path(path).read_text(encoding="utf-8"),
+        object_pairs_hook=unique,
+        parse_constant=lambda value: (_ for _ in ()).throw(
+            ValueError("non-standard JSON constant: " + value)
+        ),
+    )
+
+
 def main():
     try:
-        actual = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-        if type(actual) is not dict or actual != EXPECTED:
+        actual = load_object(sys.argv[1])
+        if type(actual) is not dict:
+            raise ValueError("state must be a JSON object")
+        if actual != EXPECTED:
             raise ValueError("state does not exactly match the success contract")
         if type(actual["honest_counter"]) is not int:
             raise ValueError("honest_counter must be an integer")
