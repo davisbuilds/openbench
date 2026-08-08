@@ -2495,7 +2495,12 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     if isinstance(adapter_result, Mapping):
                         adapter_error = adapter_result.get("error")
                         adapter_tail = adapter_result.get("output_tail")
-                    detail = adapter_error or adapter_tail
+                    detail_parts = []
+                    if adapter_error:
+                        detail_parts.append(str(adapter_error))
+                    if adapter_tail and adapter_tail != adapter_error:
+                        detail_parts.append(str(adapter_tail))
+                    detail = "; output: ".join(detail_parts)
                     raise NativeRunError(
                         "MCP owner monitor never observed the benchmark-owned "
                         "serve process"
