@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -12,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from obench.atif import validate_trajectory
+from obench import mcp_stdio_collector
 
 
 ADAPTER_PATH = Path(__file__).parents[1] / "adapters" / "codex.py"
@@ -583,31 +585,37 @@ class CodexNativeProfileTests(unittest.TestCase):
         )
 
     def test_native_timeout_terminates_process_group_and_seals_collector(self):
-        collector_pid = self.root / "collector.pid"
-        collector_sealed = self.root / "collector.sealed"
-        collector_script = self.root / "collector.py"
-        collector_script.write_text(
-            """import os
-import signal
-import sys
-import time
-from pathlib import Path
-
-pid_path = Path(sys.argv[1])
-sealed_path = Path(sys.argv[2])
-pid_path.write_text(str(os.getpid()), encoding="utf-8")
-
-def shutdown(_signum, _frame):
-    time.sleep(0.2)
-    sealed_path.write_text("sealed", encoding="utf-8")
-    raise SystemExit(0)
-
-signal.signal(signal.SIGTERM, shutdown)
-while True:
-    time.sleep(1)
-""",
+        server_pid_path = self.root / "hung-server.pid"
+        server_script = self.root / "hung-server.py"
+        server_script.write_text(
+            "import os\n"
+            "import sys\n"
+            "import time\n"
+            "from pathlib import Path\n"
+            f"Path({str(server_pid_path)!r}).write_text(str(os.getpid()))\n"
+            "sys.stdin.buffer.read()\n"
+            "while True:\n"
+            "    time.sleep(1)\n",
             encoding="utf-8",
         )
+        package_root = Path(__file__).parents[2]
+        self.launcher.write_text(
+            f"#!{sys.executable}\n"
+            "import sys\n"
+            f"sys.path.insert(0, {str(package_root)!r})\n"
+            "from obench.native_run import collector_main\n"
+            "raise SystemExit(collector_main())\n",
+            encoding="utf-8",
+        )
+        self.launcher.chmod(0o700)
+        owner_path = self.attempt / "mcp-process-owner.json"
+        env = self.native_env() | {
+            "OPENBENCH_NATIVE_MCP_SERVER_COMMAND": json.dumps(
+                [sys.executable, str(server_script)]
+            ),
+            "OPENBENCH_NATIVE_MCP_COLLECTOR_RUN_ID": "collector-timeout",
+            "OPENBENCH_NATIVE_MCP_OWNER_PATH": str(owner_path),
+        }
         expected_policy = self.root / "expected-policy.jsonl"
         write_fixture_policy_ledger(expected_policy)
         parent_script = self.root / "codex-parent.py"
@@ -617,16 +625,16 @@ import sys
 import time
 from pathlib import Path
 
-subprocess.Popen([
-    sys.executable,
-    {str(collector_script)!r},
-    {str(collector_pid)!r},
-    {str(collector_sealed)!r},
-], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-deadline = time.monotonic() + 2
-while not Path({str(collector_pid)!r}).exists():
+subprocess.Popen(
+    [{str(self.launcher)!r}],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+deadline = time.monotonic() + 3
+while not Path({str(owner_path)!r}).exists() or not Path({str(server_pid_path)!r}).exists():
     if time.monotonic() >= deadline:
-        raise RuntimeError("collector did not start")
+        raise RuntimeError("collector topology did not start")
     time.sleep(0.01)
 Path({str(self.attempt / "codex-tool-policy.jsonl")!r}).write_text(
     {expected_policy.read_text(encoding="utf-8")!r},
@@ -644,10 +652,20 @@ time.sleep(60)
 
         def launch_fixture(_cmd, **kwargs):
             popen_calls.append(kwargs)
-            return real_popen([sys.executable, str(parent_script)], **kwargs)
+            fixture_process = real_popen(
+                [sys.executable, str(parent_script)], **kwargs
+            )
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                if owner_path.exists() and server_pid_path.exists():
+                    return fixture_process
+                time.sleep(0.01)
+            os.killpg(fixture_process.pid, signal.SIGKILL)
+            fixture_process.wait()
+            self.fail("collector topology did not start")
 
         with (
-            mock.patch.dict(os.environ, self.native_env(), clear=True),
+            mock.patch.dict(os.environ, env, clear=True),
             mock.patch.object(
                 self.codex.subprocess,
                 "Popen",
@@ -661,18 +679,32 @@ time.sleep(60)
         self.assertFalse(result["completed"])
         self.assertEqual(result["terminal_status"], "timeout")
         self.assertTrue(popen_calls[0]["start_new_session"])
-        self.assertEqual(collector_sealed.read_text(encoding="utf-8"), "sealed")
+        self.assertGreater(
+            self.codex._NATIVE_TERMINATE_GRACE_S,
+            mcp_stdio_collector.CHILD_SHUTDOWN_GRACE_S,
+        )
 
-        pid = int(collector_pid.read_text(encoding="utf-8"))
+        server_pid = int(server_pid_path.read_text(encoding="utf-8"))
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
             try:
-                os.kill(pid, 0)
+                os.kill(server_pid, 0)
             except ProcessLookupError:
                 break
             time.sleep(0.01)
         else:
-            self.fail(f"collector descendant {pid} survived native timeout")
+            self.fail(f"detached MCP server {server_pid} survived native timeout")
+
+        ledger_path = self.attempt / "mcp-ledger.jsonl"
+        verified = mcp_stdio_collector.verify_ledger(ledger_path)
+        self.assertFalse(verified.integrity_ok)
+        self.assertEqual(verified.summary["returncode"], -9)
+        self.assertEqual(verified.summary["relay_failures"], 1)
+        ledger_rows = [
+            json.loads(line)
+            for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(ledger_rows[-1]["record_type"], "ledger_seal")
 
         trajectory = json.loads(
             (self.workspace / "trajectory.json").read_text(encoding="utf-8")

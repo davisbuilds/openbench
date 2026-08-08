@@ -84,7 +84,9 @@ _NATIVE_ATIF_NAME = "trajectory.json"
 _NATIVE_RAW_EVENTS_NAME = "codex-events.jsonl"
 _NATIVE_TOOL_POLICY_LEDGER_NAME = "codex-tool-policy.jsonl"
 _NATIVE_TOOL_POLICY_HOOK_NAME = "native-tool-policy.py"
-_NATIVE_TERMINATE_GRACE_S = 1.0
+# Must exceed mcp_stdio_collector.CHILD_SHUTDOWN_GRACE_S so the collector can
+# force and reap its detached server group, seal, and exit before escalation.
+_NATIVE_TERMINATE_GRACE_S = 2.0
 _NATIVE_ALLOWED_EVENT_TYPES = {
     "thread.started",
     "turn.started",
@@ -297,12 +299,9 @@ def _run_native_command(cmd, **kwargs):
         except subprocess.TimeoutExpired:
             stdout = stderr = None
         else:
-            while time.monotonic() < shutdown_deadline:
-                try:
-                    os.killpg(proc.pid, 0)
-                except ProcessLookupError:
-                    break
-                time.sleep(0.01)
+            remaining_grace = shutdown_deadline - time.monotonic()
+            if remaining_grace > 0:
+                time.sleep(remaining_grace)
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:

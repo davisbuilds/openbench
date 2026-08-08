@@ -23,6 +23,7 @@ from typing import Any, BinaryIO, Mapping, Sequence
 EMPTY_ROOT_HASH = hashlib.sha256(b"").hexdigest()
 MAX_ARGUMENT_NODES = 10_000
 MAX_ARGUMENT_DEPTH = 64
+CHILD_SHUTDOWN_GRACE_S = 1.0
 META_KEYS = {
     "error": "computer-use-mcp/error",
     "outcome": "computer-use-mcp/outcome",
@@ -1001,6 +1002,7 @@ def collect_stdio(
     input_stopped = threading.Event()
     input_processing_lock = threading.Lock()
     previous_signal_handlers: dict[int, Any] = {}
+    shutdown_deadline: float | None = None
 
     def kill_owned_processes() -> None:
         active_process = process
@@ -1025,7 +1027,10 @@ def collect_stdio(
             kill_owned_processes()
 
     def request_graceful_shutdown(signum: int, _frame: Any) -> None:
+        nonlocal shutdown_deadline
         input_stopped.set()
+        if shutdown_deadline is None:
+            shutdown_deadline = time.monotonic() + CHILD_SHUTDOWN_GRACE_S
         try:
             fileno = stdin.fileno()
         except (AttributeError, OSError):
@@ -1049,6 +1054,10 @@ def collect_stdio(
                 command=command,
                 child_pid=None,
             )
+        if threading.current_thread() is threading.main_thread():
+            for signum in (signal.SIGTERM, signal.SIGINT):
+                previous_signal_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, request_graceful_shutdown)
         process = subprocess.Popen(
             list(command),
             stdin=subprocess.PIPE,
@@ -1059,19 +1068,17 @@ def collect_stdio(
             bufsize=0,
             start_new_session=(os.name == "posix"),
         )
+        assert process.stdin is not None
+        assert process.stdout is not None
+        assert process.stderr is not None
+        if input_stopped.is_set():
+            process.stdin.close()
         if owner_path is not None:
             _write_owner_marker(
                 owner_path,
                 command=command,
                 child_pid=process.pid,
             )
-        assert process.stdin is not None
-        assert process.stdout is not None
-        assert process.stderr is not None
-        if threading.current_thread() is threading.main_thread():
-            for signum in (signal.SIGTERM, signal.SIGINT):
-                previous_signal_handlers[signum] = signal.getsignal(signum)
-                signal.signal(signum, request_graceful_shutdown)
 
         def relay_input() -> None:
             try:
@@ -1123,7 +1130,18 @@ def collect_stdio(
                 returncode = process.wait(timeout=0.05)
                 break
             except subprocess.TimeoutExpired:
-                continue
+                if (
+                    shutdown_deadline is None
+                    or time.monotonic() < shutdown_deadline
+                ):
+                    continue
+                with failures_lock:
+                    failures.append(
+                        CollectorError("MCP child exceeded shutdown grace")
+                    )
+                kill_owned_processes()
+                returncode = process.wait()
+                break
         input_stopped.set()
         input_incomplete = input_thread.is_alive()
         kill_owned_processes()

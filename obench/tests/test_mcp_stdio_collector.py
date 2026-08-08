@@ -7,6 +7,7 @@ import io
 import json
 import os
 import select
+import signal
 import subprocess
 import sys
 import tempfile
@@ -269,6 +270,77 @@ raise SystemExit(result.returncode)
         self.assertEqual(process.returncode, 0, stderr.decode(errors="replace"))
         verified = collector.verify_ledger(ledger_path)
         self.assertTrue(verified.integrity_ok)
+        self.assertEqual(verified.summary["returncode"], 0)
+        self.assertEqual(verified.summary["relay_failures"], 0)
+
+    @unittest.skipUnless(os.name == "posix", "process-group fixture requires POSIX")
+    def test_sigterm_forces_hung_child_group_and_seals_non_cleanly(self):
+        ledger_path = Path(self.tmp.name) / "hung-signal-ledger.jsonl"
+        owner_path = Path(self.tmp.name) / "hung-signal-owner.json"
+        child_pid_path = Path(self.tmp.name) / "hung-child.pid"
+        hung_fixture = Path(self.tmp.name) / "hung-after-eof.py"
+        hung_fixture.write_text(
+            "import os\n"
+            "import sys\n"
+            "import time\n"
+            "from pathlib import Path\n"
+            f"Path({str(child_pid_path)!r}).write_text(str(os.getpid()))\n"
+            "sys.stdin.buffer.read()\n"
+            "while True:\n"
+            "    time.sleep(1)\n",
+            encoding="utf-8",
+        )
+        program = f"""
+import sys
+from obench.mcp_stdio_collector import collect_stdio
+result = collect_stdio(
+    [sys.executable, {str(hung_fixture)!r}],
+    ledger_path={str(ledger_path)!r},
+    owner_path={str(owner_path)!r},
+    run_id="run-hung-signal",
+    trial_id="trial-hung-signal",
+    stdin=sys.stdin.buffer,
+    stdout=sys.stdout.buffer,
+    stderr=sys.stderr.buffer,
+)
+raise SystemExit(result.returncode)
+"""
+        process = subprocess.Popen(
+            [sys.executable, "-c", textwrap.dedent(program)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=Path(__file__).parents[2],
+        )
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if owner_path.exists() and child_pid_path.exists():
+                break
+            time.sleep(0.01)
+        self.assertTrue(owner_path.exists())
+        self.assertTrue(child_pid_path.exists())
+
+        process.terminate()
+        _stdout, stderr = process.communicate(timeout=5)
+
+        self.assertNotEqual(process.returncode, 0, stderr.decode(errors="replace"))
+        verified = collector.verify_ledger(ledger_path)
+        self.assertFalse(verified.integrity_ok)
+        self.assertEqual(verified.summary["returncode"], -signal.SIGKILL)
+        self.assertEqual(verified.summary["relay_failures"], 1)
+        rows = [
+            json.loads(line)
+            for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(rows[-1]["record_type"], "ledger_seal")
+
+        child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            json.loads(owner_path.read_text(encoding="utf-8"))["child_pid"],
+            child_pid,
+        )
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child_pid, 0)
 
     def test_buffered_live_input_is_forwarded_before_eof(self):
         input_read_fd, input_write_fd = os.pipe()
