@@ -96,6 +96,10 @@ publication surface.
 
 Bundle inputs add per-tool MCP counts, p50/p95 call latency, and categorical
 error, outcome, delivery, and focus counts from the sealed privacy-safe ledger.
+When the MCP supplies validated per-call metrics, bundle reports also include
+operation queue and execution latency, perception latency, total and summarized
+context bytes, elements visited and returned, and partial-tree and diff rates.
+Each metric keeps its own measured denominator; missing values stay missing.
 Row-only input cannot recover those details, so the report marks them
 unavailable rather than deriving them from the total call count.
 
