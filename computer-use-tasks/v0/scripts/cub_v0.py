@@ -774,6 +774,33 @@ def _launch(executable: Path, args: Sequence[str], env: Mapping[str, str], log: 
     return identity
 
 
+def _frontmost_bundle_id() -> str | None:
+    asn = _run(["lsappinfo", "front"], timeout=5).stdout.strip()
+    if not asn:
+        return None
+    info = _run(["lsappinfo", "info", "-only", "bundleID", asn], timeout=5).stdout
+    match = re.search(r'"CFBundleIdentifier"="([^"]+)"', info)
+    return match.group(1) if match else None
+
+
+def _wait_for_frontmost(
+    expected: str,
+    *,
+    timeout_s: float = 5.0,
+    probe: Callable[[], str | None] = _frontmost_bundle_id,
+) -> None:
+    deadline = time.monotonic() + timeout_s
+    observed = probe()
+    while observed != expected and time.monotonic() < deadline:
+        time.sleep(0.05)
+        observed = probe()
+    if observed != expected:
+        raise CubError(
+            f"setup did not establish required foreground app {expected!r}; "
+            f"observed {observed!r}"
+        )
+
+
 def reset_runtime(request_path: Path, arm: str, task: str, trial_index: int) -> int:
     trial_index = _positive_trial_index(trial_index)
     request = _load_request(request_path)
@@ -834,6 +861,7 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
         })
         executable = apps / "ComputerUseFixture.app/Contents/MacOS/ComputerUseFixture"
         remember(_launch(executable, (), env, logs / "fixture.log"))
+        foreground_bundle_id = FIXTURE_BUNDLES[task]
     elif task == "background-control":
         state = artifacts / "fixture-state.json"
         env["COMPUTER_USE_FIXTURE_STATE_PATH"] = str(state)
@@ -841,6 +869,7 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
         guard = apps / "FocusGuard.app/Contents/MacOS/FocusGuard"
         remember(_launch(fixture, (), env, logs / "fixture.log"))
         remember(_launch(guard, (), os.environ.copy(), logs / "guard.log"))
+        foreground_bundle_id = GUARD_BUNDLE_ID
     else:
         relative = "artifacts/openbench-exact.txt"
         (workspace / "run-context.json").write_text(
@@ -869,6 +898,8 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
         if identity is None:
             raise CubError("new TextEdit process disappeared")
         remember(identity)
+        foreground_bundle_id = FIXTURE_BUNDLES[task]
+    _wait_for_frontmost(foreground_bundle_id)
     return 0
 
 

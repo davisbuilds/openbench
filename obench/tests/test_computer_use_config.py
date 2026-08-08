@@ -177,6 +177,22 @@ class ComputerUseConfigTests(unittest.TestCase):
                     self.run_root, "installed", "basic-controls", value
                 )
 
+    def test_setup_waits_for_exact_foreground_bundle(self):
+        observed = iter(("com.openai.codex", cub.FIXTURE_BUNDLES["basic-controls"]))
+        cub._wait_for_frontmost(
+            cub.FIXTURE_BUNDLES["basic-controls"],
+            timeout_s=1,
+            probe=lambda: next(observed),
+        )
+
+    def test_setup_fails_when_foreground_bundle_never_matches(self):
+        with self.assertRaisesRegex(cub.CubError, "did not establish required foreground"):
+            cub._wait_for_frontmost(
+                cub.FIXTURE_BUNDLES["basic-controls"],
+                timeout_s=0,
+                probe=lambda: "com.openai.codex",
+            )
+
     def test_static_preflight_does_not_create_run_root(self):
         request = cub._load_request(self.request)
         with (
