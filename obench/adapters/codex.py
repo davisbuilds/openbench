@@ -49,12 +49,14 @@ import hashlib
 import json
 import os
 import re
+import signal
 import shlex
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -82,6 +84,7 @@ _NATIVE_ATIF_NAME = "trajectory.json"
 _NATIVE_RAW_EVENTS_NAME = "codex-events.jsonl"
 _NATIVE_TOOL_POLICY_LEDGER_NAME = "codex-tool-policy.jsonl"
 _NATIVE_TOOL_POLICY_HOOK_NAME = "native-tool-policy.py"
+_NATIVE_TERMINATE_GRACE_S = 1.0
 _NATIVE_ALLOWED_EVENT_TYPES = {
     "thread.started",
     "turn.started",
@@ -267,6 +270,52 @@ def _native_error(message):
         "cmd": None,
         **_empty_token_usage(),
     }
+
+
+def _run_native_command(cmd, **kwargs):
+    """Run Codex in its own process group so timeout cleanup reaches MCPs."""
+    timeout = kwargs.pop("timeout")
+    kwargs.pop("capture_output")
+    kwargs.pop("text")
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        **kwargs,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        shutdown_deadline = time.monotonic() + _NATIVE_TERMINATE_GRACE_S
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = proc.communicate(timeout=_NATIVE_TERMINATE_GRACE_S)
+        except subprocess.TimeoutExpired:
+            stdout = stderr = None
+        else:
+            while time.monotonic() < shutdown_deadline:
+                try:
+                    os.killpg(proc.pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.01)
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if stdout is None:
+            stdout, stderr = proc.communicate()
+        raise subprocess.TimeoutExpired(
+            cmd,
+            timeout,
+            output=stdout,
+            stderr=stderr,
+        )
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 def _atomic_write_private_bytes(path, content):
@@ -1055,7 +1104,8 @@ def run(
                     allowed_tools=native_allowed_tools,
                     argument_policy=native_argument_policy,
                 )
-            proc = subprocess.run(
+            run_command = _run_native_command if native else subprocess.run
+            proc = run_command(
                 cmd,
                 cwd=workdir,
                 capture_output=True,

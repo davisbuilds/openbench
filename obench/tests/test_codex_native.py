@@ -4,7 +4,9 @@ import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -99,7 +101,8 @@ class CodexNativeProfileTests(unittest.TestCase):
             result = self.codex.run("do it", str(self.workspace), "gpt-5.6-sol", 10)
 
         self.assertTrue(result["completed"])
-        cmd, _kwargs = calls[0]
+        cmd, kwargs = calls[0]
+        self.assertNotIn("start_new_session", kwargs)
         self.assertFalse(any("mcp_servers.computer-use" in arg for arg in cmd))
         self.assertFalse((self.workspace / "trajectory.json").exists())
         self.assertFalse((self.attempt / "codex-events.jsonl").exists())
@@ -131,7 +134,7 @@ class CodexNativeProfileTests(unittest.TestCase):
                 },
                 clear=True,
             ),
-            mock.patch.object(self.codex.subprocess, "run", side_effect=fake_run),
+            mock.patch.object(self.codex, "_run_native_command", side_effect=fake_run),
         ):
             result = self.codex.run(
                 "use the app", str(self.workspace), "gpt-5.6-sol", 10,
@@ -233,8 +236,8 @@ class CodexNativeProfileTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     side_effect=fake_run,
                 ):
             result = self.codex.run(
@@ -286,8 +289,8 @@ class CodexNativeProfileTests(unittest.TestCase):
                 )
                 with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                         mock.patch.object(
-                            self.codex.subprocess,
-                            "run",
+                            self.codex,
+                            "_run_native_command",
                             return_value=FakeProc(stdout=stdout),
                         ):
                     result = self.codex.run(
@@ -314,8 +317,8 @@ class CodexNativeProfileTests(unittest.TestCase):
         )
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     return_value=FakeProc(stdout=stdout),
                 ):
             result = self.codex.run(
@@ -419,8 +422,8 @@ class CodexNativeProfileTests(unittest.TestCase):
         )
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     return_value=FakeProc(stdout=stdout),
                 ):
             result = self.codex.run(
@@ -448,8 +451,8 @@ class CodexNativeProfileTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     side_effect=fake_run,
                 ):
             result = self.codex.run(
@@ -479,8 +482,8 @@ class CodexNativeProfileTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     side_effect=fake_run,
                 ):
             result = self.codex.run(
@@ -498,8 +501,8 @@ class CodexNativeProfileTests(unittest.TestCase):
         )
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     return_value=FakeProc(stdout=stdout),
                 ):
             result = self.codex.run(
@@ -526,8 +529,8 @@ class CodexNativeProfileTests(unittest.TestCase):
         )
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     side_effect=timeout,
                 ):
             result = self.codex.run(
@@ -560,8 +563,8 @@ class CodexNativeProfileTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     side_effect=time_out,
                 ):
             result = self.codex.run(
@@ -579,6 +582,104 @@ class CodexNativeProfileTests(unittest.TestCase):
             7,
         )
 
+    def test_native_timeout_terminates_process_group_and_seals_collector(self):
+        collector_pid = self.root / "collector.pid"
+        collector_sealed = self.root / "collector.sealed"
+        collector_script = self.root / "collector.py"
+        collector_script.write_text(
+            """import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+pid_path = Path(sys.argv[1])
+sealed_path = Path(sys.argv[2])
+pid_path.write_text(str(os.getpid()), encoding="utf-8")
+
+def shutdown(_signum, _frame):
+    time.sleep(0.2)
+    sealed_path.write_text("sealed", encoding="utf-8")
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, shutdown)
+while True:
+    time.sleep(1)
+""",
+            encoding="utf-8",
+        )
+        expected_policy = self.root / "expected-policy.jsonl"
+        write_fixture_policy_ledger(expected_policy)
+        parent_script = self.root / "codex-parent.py"
+        parent_script.write_text(
+            f"""import subprocess
+import sys
+import time
+from pathlib import Path
+
+subprocess.Popen([
+    sys.executable,
+    {str(collector_script)!r},
+    {str(collector_pid)!r},
+    {str(collector_sealed)!r},
+], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+deadline = time.monotonic() + 2
+while not Path({str(collector_pid)!r}).exists():
+    if time.monotonic() >= deadline:
+        raise RuntimeError("collector did not start")
+    time.sleep(0.01)
+Path({str(self.attempt / "codex-tool-policy.jsonl")!r}).write_text(
+    {expected_policy.read_text(encoding="utf-8")!r},
+    encoding="utf-8",
+)
+sys.stdout.buffer.write({fixture_stdout().encode("utf-8")!r})
+sys.stdout.buffer.flush()
+time.sleep(60)
+""",
+            encoding="utf-8",
+        )
+
+        real_popen = subprocess.Popen
+        popen_calls = []
+
+        def launch_fixture(_cmd, **kwargs):
+            popen_calls.append(kwargs)
+            return real_popen([sys.executable, str(parent_script)], **kwargs)
+
+        with (
+            mock.patch.dict(os.environ, self.native_env(), clear=True),
+            mock.patch.object(
+                self.codex.subprocess,
+                "Popen",
+                side_effect=launch_fixture,
+            ),
+        ):
+            result = self.codex.run(
+                "use the app", str(self.workspace), "gpt-5.6-sol", 0.2
+            )
+
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["terminal_status"], "timeout")
+        self.assertTrue(popen_calls[0]["start_new_session"])
+        self.assertEqual(collector_sealed.read_text(encoding="utf-8"), "sealed")
+
+        pid = int(collector_pid.read_text(encoding="utf-8"))
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.01)
+        else:
+            self.fail(f"collector descendant {pid} survived native timeout")
+
+        trajectory = json.loads(
+            (self.workspace / "trajectory.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(validate_trajectory(trajectory), [])
+        self.assertNotIn("native evidence verification failed", result["error"])
+
     def test_native_timeout_retains_non_utf8_partial_bytes_exactly(self):
         stdout = b'{"type":"thread.started","thread_id":"thread-1"}\n\xe2'
         timeout = subprocess.TimeoutExpired(
@@ -589,8 +690,8 @@ class CodexNativeProfileTests(unittest.TestCase):
         )
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     side_effect=timeout,
                 ):
             result = self.codex.run(
@@ -608,8 +709,8 @@ class CodexNativeProfileTests(unittest.TestCase):
         stdout = b'{"type":"thread.started","thread_id":"thread-1"}\n\xe2'
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     return_value=FakeProc(stdout=stdout, stderr=b""),
                 ):
             result = self.codex.run(
@@ -625,7 +726,7 @@ class CodexNativeProfileTests(unittest.TestCase):
 
     def test_native_profile_requires_fixed_model(self):
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
-                mock.patch.object(self.codex.subprocess, "run") as run:
+                mock.patch.object(self.codex, "_run_native_command") as run:
             result = self.codex.run("do it", str(self.workspace), "gpt-5.5-medium", 10)
         self.assertFalse(result["completed"])
         self.assertTrue(result["startup_failure"])
@@ -636,8 +737,8 @@ class CodexNativeProfileTests(unittest.TestCase):
         stdout = '{"type":"thread.started","thread_id":"thread-1"}\nnot-json\n'
         with mock.patch.dict(os.environ, self.native_env(), clear=True), \
                 mock.patch.object(
-                    self.codex.subprocess,
-                    "run",
+                    self.codex,
+                    "_run_native_command",
                     return_value=FakeProc(stdout=stdout),
                 ):
             result = self.codex.run("do it", str(self.workspace), "gpt-5.6-sol", 10)
@@ -661,7 +762,7 @@ class CodexNativeProfileTests(unittest.TestCase):
         )
         for env in cases:
             with self.subTest(env=env), mock.patch.dict(os.environ, env, clear=True), \
-                    mock.patch.object(self.codex.subprocess, "run") as run:
+                    mock.patch.object(self.codex, "_run_native_command") as run:
                 result = self.codex.run("do it", str(self.workspace), "gpt-5.6-sol", 10)
             self.assertFalse(result["completed"])
             self.assertTrue(result["startup_failure"])
