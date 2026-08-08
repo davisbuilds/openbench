@@ -82,6 +82,24 @@ class ComputerUseTasksTests(unittest.TestCase):
         result = self.run_verifier("basic-controls", root)
         self.assertNotEqual(result.returncode, 0, result.stdout)
 
+    def test_basic_controls_instruction_is_context_efficient(self):
+        instruction = (ROOT / "basic-controls/instruction.md").read_text(
+            encoding="utf-8"
+        )
+        for requirement in (
+            "Inspect state once",
+            "reuse the returned element IDs",
+            "`include_state=false`",
+            "`include_screenshot=false`",
+            "do not re-read the full tree",
+            "external deterministic checker",
+            "Turn `toggle-box` on.",
+            "Press `honest-button` exactly twice so the counter is `2`.",
+            "Enter the exact text `openbench-42` in `keystroke-input`.",
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, instruction)
+
     def test_background_rejects_target_activation_even_with_valid_seal(self):
         temporary, root = self.solved_workspace("background-control")
         self.addCleanup(temporary.cleanup)

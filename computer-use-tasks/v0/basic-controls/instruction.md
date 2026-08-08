@@ -5,9 +5,13 @@ Only call tools named `mcp__computer_use__*` to operate
 other tools. Do not create artifacts manually; OpenBench collects results
 automatically.
 
+Inspect state once, then reuse the returned element IDs. On every mutating MCP
+call, set `include_state=false` and `include_screenshot=false`.
+
 1. Turn `toggle-box` on.
 2. Press `honest-button` exactly twice so the counter is `2`.
 3. Enter the exact text `openbench-42` in `keystroke-input`.
 
-Do not edit the fixture state export directly. Completion is judged from the
-fixture-owned JSON export, not from tool self-reports or screenshots.
+Stop after the mutations; do not re-read the full tree. Do not edit the fixture
+state export directly. Rely on the external deterministic checker, which judges
+the fixture-owned JSON export rather than tool self-reports or screenshots.
