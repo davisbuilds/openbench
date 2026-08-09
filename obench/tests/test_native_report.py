@@ -211,6 +211,31 @@ def _metric_call(tool, latency, metrics):
     return call
 
 
+def _timed_request(start, end, *, usage_available=True):
+    return {
+        "request_unix_ns": start,
+        "response_unix_ns": end,
+        "duration_ms": (end - start) / 1_000_000,
+        "paced_wait_ms": 0.0,
+        "status": 200,
+        "usage_available": usage_available,
+        "input_tokens": 1 if usage_available else 0,
+        "cached_tokens": 0,
+        "output_tokens": 1 if usage_available else 0,
+        "error_present": False,
+    }
+
+
+def _timed_call(start, end):
+    call = _call("set_value", (end - start) / 1_000_000)
+    call.update({
+        "request_unix_ns": start,
+        "response_unix_ns": end,
+        "response_bytes": 100,
+    })
+    return call
+
+
 def _replace_bundle_mcp_ledger(bundle, calls):
     ledger_path = bundle / "mcp/ledger.jsonl"
     ledger_path.unlink()
@@ -341,7 +366,7 @@ class NativeReportTests(unittest.TestCase):
             {"n": 1, "missing_n": 0, "true_count": 1, "rate": 1.0},
         )
 
-    def test_per_trial_exclusive_attribution_and_matched_deltas(self):
+    def test_per_trial_v2_attribution_and_matched_deltas(self):
         plan = _plan(repetitions=1)
         perception = {
             "operation": "set_value",
@@ -407,6 +432,8 @@ class NativeReportTests(unittest.TestCase):
         )
         candidate_call = json.loads(json.dumps(call))
         candidate_call["duration_ms"] = 50.0
+        candidate_call["request_unix_ns"] = 1_490_000_000
+        candidate_call["response_unix_ns"] = 1_540_000_000
         candidate_call["response_bytes"] = 1200
         candidate_call["computer_use_meta"]["metrics"]["perception"]["text_bytes"] = 700
         candidate = _Observation(
@@ -420,11 +447,21 @@ class NativeReportTests(unittest.TestCase):
 
         attribution = _aggregate_observations([baseline])["attribution"]
         trial = attribution["trial_totals"][0]
-        self.assertEqual(trial["exclusive_time_ms"], {
-            "model_api_time_ms": 800.0,
+        self.assertEqual(trial["observed_time_ms"], {
+            "model_request_ms": 1000.0,
+            "model_api_ms": 800.0,
             "paced_wait_ms": 200.0,
-            "mcp_time_ms": 60.0,
+            "mcp_call_ms": 60.0,
+        })
+        self.assertEqual(trial["model_mcp_overlap"], {
+            "total_ms": 0.0,
+            "interval_pair_count": 0,
+            "max_pair_ms": 0.0,
+        })
+        self.assertEqual(trial["exclusive_partition"], {
+            "available": True,
             "residual_agent_time_ms": 6940.0,
+            "unavailable_reason": None,
         })
         self.assertEqual(trial["mcp_detail_ms"]["queue_time_ms"], 5.0)
         self.assertEqual(
@@ -450,22 +487,18 @@ class NativeReportTests(unittest.TestCase):
             "candidate_minus_reference"
         ]
         self.assertEqual(deltas["mcp_time_ms"]["median"], -10.0)
+        self.assertEqual(deltas["model_mcp_overlap_ms"]["median"], 10.0)
+        self.assertEqual(deltas["residual_agent_time_ms"]["n"], 0)
+        self.assertEqual(deltas["residual_agent_time_ms"]["missing_n"], 1)
         self.assertEqual(deltas["response_bytes"]["median"], -300.0)
         self.assertEqual(deltas["text_bytes"]["median"], -300.0)
         self.assertEqual(
             deltas["perception_phase_time_ms.snapshot_ms"]["median"], 0.0
         )
 
-    def test_attribution_rejects_overlapping_or_partial_contracted_evidence(self):
+    def test_attribution_reports_cross_source_overlap_without_residual(self):
         plan = _plan(repetitions=1)
         row = _row(plan, "baseline", 1)
-        row["candidate_provenance"]["mcp_identity"] = {
-            **row["candidate_provenance"]["mcp_identity"],
-            "call_contract": [{
-                "tool": "set_value",
-                "required_arguments": {"include_state": True},
-            }],
-        }
         call = _call("set_value", 100.0)
         call.update({
             "request_unix_ns": 1_000_000_000,
@@ -492,13 +525,165 @@ class NativeReportTests(unittest.TestCase):
             result_sha256="b" * 64,
             row_sha256="c" * 64,
         )
-        with self.assertRaisesRegex(NativeReportError, "overlapping sealed intervals"):
-            _aggregate_observations([observation])
 
-        request["response_unix_ns"] = 950_000_000
-        request["duration_ms"] = 50.0
+        attribution = _aggregate_observations([observation])["attribution"]
+        trial = attribution["trial_totals"][0]
+        self.assertEqual(trial["observed_time_ms"], {
+            "model_request_ms": 150.0,
+            "model_api_ms": 150.0,
+            "paced_wait_ms": 0.0,
+            "mcp_call_ms": 100.0,
+        })
+        self.assertEqual(trial["model_mcp_overlap"], {
+            "total_ms": 50.0,
+            "interval_pair_count": 1,
+            "max_pair_ms": 50.0,
+        })
+        self.assertEqual(trial["exclusive_partition"], {
+            "available": False,
+            "residual_agent_time_ms": None,
+            "unavailable_reason": "model_mcp_interval_overlap",
+        })
+        self.assertEqual(
+            attribution["metrics"]["model_mcp_overlap_ms"]["median"], 50.0
+        )
+        self.assertEqual(
+            attribution["metrics"]["residual_agent_time_ms"]["missing_n"], 1
+        )
+
+    def test_attribution_rejects_partial_contracted_evidence(self):
+        plan = _plan(repetitions=1)
+        row = _row(plan, "baseline", 1)
+        row["candidate_provenance"]["mcp_identity"] = {
+            **row["candidate_provenance"]["mcp_identity"],
+            "call_contract": [{
+                "tool": "set_value",
+                "required_arguments": {"include_state": True},
+            }],
+        }
+        call = _call("set_value", 100.0)
+        call.update({
+            "request_unix_ns": 1_000_000_000,
+            "response_unix_ns": 1_100_000_000,
+            "response_bytes": 100,
+        })
+        request = {
+            "request_unix_ns": 900_000_000,
+            "response_unix_ns": 950_000_000,
+            "duration_ms": 50.0,
+            "paced_wait_ms": 0.0,
+            "status": 200,
+            "usage_available": True,
+            "input_tokens": 1,
+            "cached_tokens": 0,
+            "output_tokens": 1,
+            "error_present": False,
+        }
+        observation = _Observation(
+            row=row,
+            mcp_calls=(call,),
+            proxy_requests=(request,),
+            bundle_sha256="a" * 64,
+            result_sha256="b" * 64,
+            row_sha256="c" * 64,
+        )
+
         with self.assertRaisesRegex(NativeReportError, "missing perception telemetry"):
             _aggregate_observations([observation])
+
+    def test_attribution_rejects_same_source_overlap(self):
+        plan = _plan(repetitions=1)
+        row = _row(plan, "baseline", 1)
+        with self.subTest(kind="model"):
+            observation = _Observation(
+                row=row,
+                mcp_calls=(_timed_call(200_000_000, 250_000_000),),
+                proxy_requests=(
+                    _timed_request(0, 100_000_000),
+                    _timed_request(50_000_000, 150_000_000),
+                ),
+                bundle_sha256="a" * 64,
+                result_sha256="b" * 64,
+                row_sha256="c" * 64,
+            )
+            with self.assertRaisesRegex(
+                NativeReportError, "sealed model request intervals overlap"
+            ):
+                _aggregate_observations([observation])
+
+        with self.subTest(kind="mcp"):
+            observation = _Observation(
+                row=row,
+                mcp_calls=(
+                    _timed_call(100_000_000, 200_000_000),
+                    _timed_call(150_000_000, 250_000_000),
+                ),
+                proxy_requests=(_timed_request(0, 50_000_000),),
+                bundle_sha256="a" * 64,
+                result_sha256="b" * 64,
+                row_sha256="c" * 64,
+            )
+            with self.assertRaisesRegex(
+                NativeReportError, "sealed MCP call intervals overlap"
+            ):
+                _aggregate_observations([observation])
+
+    def test_attribution_sums_distinct_cross_source_intersections(self):
+        plan = _plan(repetitions=1)
+        observation = _Observation(
+            row=_row(plan, "baseline", 1),
+            mcp_calls=(
+                _timed_call(50_000_000, 150_000_000),
+                _timed_call(200_000_000, 250_000_000),
+            ),
+            proxy_requests=(
+                _timed_request(0, 100_000_000),
+                _timed_request(100_000_000, 200_000_000),
+            ),
+            bundle_sha256="a" * 64,
+            result_sha256="b" * 64,
+            row_sha256="c" * 64,
+        )
+
+        overlap = _aggregate_observations([observation])["attribution"][
+            "trial_totals"
+        ][0]["model_mcp_overlap"]
+        self.assertEqual(overlap, {
+            "total_ms": 100.0,
+            "interval_pair_count": 2,
+            "max_pair_ms": 50.0,
+        })
+
+    def test_attribution_rejects_malformed_intervals(self):
+        plan = _plan(repetitions=1)
+        row = _row(plan, "baseline", 1)
+        malformed_model = _timed_request(100_000_000, 50_000_000)
+        malformed_mcp = _timed_call(100_000_000, 50_000_000)
+
+        cases = (
+            (
+                "model request interval is malformed",
+                (_timed_call(200_000_000, 250_000_000),),
+                (malformed_model,),
+            ),
+            (
+                "MCP call interval is malformed",
+                (malformed_mcp,),
+                (_timed_request(0, 50_000_000),),
+            ),
+        )
+        for message, calls, requests in cases:
+            with self.subTest(message=message):
+                observation = _Observation(
+                    row=row,
+                    mcp_calls=calls,
+                    proxy_requests=requests,
+                    bundle_sha256="a" * 64,
+                    result_sha256="b" * 64,
+                    row_sha256="c" * 64,
+                )
+                with self.assertRaisesRegex(NativeReportError, message):
+                    _aggregate_observations([observation])
 
     def test_validated_bundle_rejects_invalid_sealed_mcp_metrics(self):
         cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
@@ -550,6 +735,7 @@ class NativeReportTests(unittest.TestCase):
             ],
         )
 
+        self.assertEqual(report["schema_version"], "openbench.native-report.v2")
         self.assertEqual(report["coverage"]["complete_matched_blocks"], 1)
         self.assertEqual(
             report["coverage"]["incomplete_blocks"],

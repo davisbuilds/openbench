@@ -22,7 +22,7 @@ from .run import ROW_FIELDS, make_run_id
 from .stats import wilson_ci
 
 
-REPORT_SCHEMA_VERSION = "openbench.native-report.v1"
+REPORT_SCHEMA_VERSION = "openbench.native-report.v2"
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _SECRET_RE = re.compile(
@@ -75,6 +75,7 @@ _ATTRIBUTION_FIELDS = (
     "provider_input_tokens",
     "provider_cached_tokens",
     "provider_output_tokens",
+    "model_mcp_overlap_ms",
     "residual_agent_time_ms",
 )
 _PERCEPTION_PHASE_FIELDS = (
@@ -710,8 +711,9 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         and type(request.get("status")) is int
         and 200 <= request["status"] < 400
     ]
-    intervals: list[tuple[int, int, str]] = []
+    intervals_by_kind: dict[str, list[tuple[int, int, str]]] = {}
     for kind, records in (("model request", successful_usage), ("MCP call", calls)):
+        intervals: list[tuple[int, int, str]] = []
         for index, record in enumerate(records, 1):
             start = record.get("request_unix_ns")
             end = record.get("response_unix_ns")
@@ -723,19 +725,42 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
             ):
                 raise NativeReportError(f"{kind} interval is malformed")
             intervals.append((start, end, f"{kind} {index}"))
-    intervals.sort()
-    for previous, current in zip(intervals, intervals[1:]):
-        if current[0] < previous[1]:
-            raise NativeReportError(
-                "exclusive timing attribution has overlapping sealed intervals: "
-                f"{previous[2]} and {current[2]}"
-            )
+        intervals.sort()
+        for previous, current in zip(intervals, intervals[1:]):
+            if current[0] < previous[1]:
+                raise NativeReportError(
+                    f"sealed {kind} intervals overlap: "
+                    f"{previous[2]} and {current[2]}"
+                )
+        intervals_by_kind[kind] = intervals
+
+    model_intervals = intervals_by_kind["model request"]
+    mcp_intervals = intervals_by_kind["MCP call"]
+    overlap_total_ns = 0
+    overlap_pair_count = 0
+    max_pair_overlap_ns = 0
+    model_index = 0
+    mcp_index = 0
+    while model_index < len(model_intervals) and mcp_index < len(mcp_intervals):
+        model_start, model_end, _ = model_intervals[model_index]
+        mcp_start, mcp_end, _ = mcp_intervals[mcp_index]
+        overlap_ns = max(0, min(model_end, mcp_end) - max(model_start, mcp_start))
+        if overlap_ns:
+            overlap_total_ns += overlap_ns
+            overlap_pair_count += 1
+            max_pair_overlap_ns = max(max_pair_overlap_ns, overlap_ns)
+        if model_end <= mcp_end:
+            model_index += 1
+        else:
+            mcp_index += 1
+    model_request_time_ms = 0.0
     model_api_time_ms = 0.0
     for request in successful_usage:
         duration = _number(request.get("duration_ms"))
         paced = _number(request.get("paced_wait_ms"))
         if duration is None or paced is None or paced > duration:
             raise NativeReportError("model request timing is malformed")
+        model_request_time_ms += duration
         model_api_time_ms += duration - paced
     paced_wait_values = [
         _number(request.get("paced_wait_ms")) for request in successful_usage
@@ -796,18 +821,37 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
     paced_wait_ms = sum(value for value in paced_wait_values if value is not None)
     mcp_time_ms = sum(value for value in call_durations if value is not None)
     agent_time_ms = float(observation.row["t_agent_s"]) * 1000.0
-    residual = agent_time_ms - model_api_time_ms - paced_wait_ms - mcp_time_ms
-    if residual < -1.0:
-        raise NativeReportError(
-            "exclusive timing attribution exceeds agent time; evidence overlaps"
-        )
+    overlap_total_ms = overlap_total_ns / 1_000_000
+    max_pair_overlap_ms = max_pair_overlap_ns / 1_000_000
+    residual: float | None = None
+    unavailable_reason: str | None = None
+    if overlap_total_ns:
+        unavailable_reason = "model_mcp_interval_overlap"
+    else:
+        residual = agent_time_ms - model_request_time_ms - mcp_time_ms
+        if residual < -1.0:
+            raise NativeReportError(
+                "exclusive timing attribution exceeds agent time"
+            )
     return {
         "trial": observation.row["trial"],
-        "exclusive_time_ms": {
-            "model_api_time_ms": model_api_time_ms,
+        "observed_time_ms": {
+            "model_request_ms": model_request_time_ms,
+            "model_api_ms": model_api_time_ms,
             "paced_wait_ms": paced_wait_ms,
-            "mcp_time_ms": mcp_time_ms,
-            "residual_agent_time_ms": max(0.0, residual),
+            "mcp_call_ms": mcp_time_ms,
+        },
+        "model_mcp_overlap": {
+            "total_ms": overlap_total_ms,
+            "interval_pair_count": overlap_pair_count,
+            "max_pair_ms": max_pair_overlap_ms,
+        },
+        "exclusive_partition": {
+            "available": residual is not None,
+            "residual_agent_time_ms": (
+                max(0.0, residual) if residual is not None else None
+            ),
+            "unavailable_reason": unavailable_reason,
         },
         "mcp_detail_ms": {
             "queue_time_ms": (
@@ -840,9 +884,9 @@ def _flat_attribution(value: Mapping[str, Any] | None) -> dict[str, float | None
     if value is None:
         return {field: None for field in _ATTRIBUTION_FIELDS}
     return {
-        "model_api_time_ms": value["exclusive_time_ms"]["model_api_time_ms"],
-        "paced_wait_ms": value["exclusive_time_ms"]["paced_wait_ms"],
-        "mcp_time_ms": value["exclusive_time_ms"]["mcp_time_ms"],
+        "model_api_time_ms": value["observed_time_ms"]["model_api_ms"],
+        "paced_wait_ms": value["observed_time_ms"]["paced_wait_ms"],
+        "mcp_time_ms": value["observed_time_ms"]["mcp_call_ms"],
         "mcp_queue_time_ms": value["mcp_detail_ms"]["queue_time_ms"],
         "perception_time_ms": value["mcp_detail_ms"]["perception_time_ms"],
         "response_bytes": value["bytes"]["response_bytes"],
@@ -851,7 +895,8 @@ def _flat_attribution(value: Mapping[str, Any] | None) -> dict[str, float | None
         "provider_input_tokens": value["provider_tokens"]["input"],
         "provider_cached_tokens": value["provider_tokens"]["cached"],
         "provider_output_tokens": value["provider_tokens"]["output"],
-        "residual_agent_time_ms": value["exclusive_time_ms"]["residual_agent_time_ms"],
+        "model_mcp_overlap_ms": value["model_mcp_overlap"]["total_ms"],
+        "residual_agent_time_ms": value["exclusive_partition"]["residual_agent_time_ms"],
     }
 
 
