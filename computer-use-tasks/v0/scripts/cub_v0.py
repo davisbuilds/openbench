@@ -54,7 +54,7 @@ ARMS = ("installed", "source")
 STATE_RESPONSE_ARMS = ("auto", "full")
 CALL_CONTRACT = (
     {"tool": "get_app_state", "required_arguments": {
-        "app": "ComputerUseFixture", "include_screenshot": False,
+        "app": "org.openbench.ComputerUseFixture.v0", "include_screenshot": False,
     }},
     {"tool": "click", "required_arguments": {
         "include_state": True, "include_screenshot": False,

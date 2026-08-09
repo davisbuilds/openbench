@@ -1,13 +1,13 @@
 # Set the state-response A/B fixture
 
 Only call tools named `mcp__computer_use__*` to operate
-`ComputerUseFixture`. Never call `apply_patch`, shell, browser, filesystem, or
+`org.openbench.ComputerUseFixture.v0`. Never call `apply_patch`, shell, browser, filesystem, or
 other tools. Do not create artifacts manually; OpenBench collects results
 automatically.
 
 Make exactly these five MCP calls in order. Do not make any other MCP calls.
 
-1. Call `get_app_state` once with `app="ComputerUseFixture"` and
+1. Call `get_app_state` once with `app="org.openbench.ComputerUseFixture.v0"` and
    `include_screenshot=false`.
 2. Reuse returned element IDs and call `click` on `toggle-box` with
    `include_state=true` and `include_screenshot=false`.

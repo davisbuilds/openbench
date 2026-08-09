@@ -279,6 +279,10 @@ class ComputerUseConfigTests(unittest.TestCase):
         )
 
     def test_state_response_ab_configs_bind_mode_contract_and_identical_prompt(self):
+        self.assertEqual(
+            cub.CALL_CONTRACT[0]["required_arguments"]["app"],
+            cub.FIXTURE_BUNDLES["state-response-ab"],
+        )
         self.assertEqual(cub.CALL_CONTRACT[-1]["tool"], "type_text")
         self.assertEqual(
             cub.CALL_CONTRACT[-1]["required_arguments"]["text"],
