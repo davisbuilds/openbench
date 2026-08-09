@@ -1,0 +1,23 @@
+schema_version = "1.4"
+
+[task]
+name = "openbench/computer-use-v0-post-action-state-ab"
+description = "Compare enabled and disabled post-action state recapture"
+authors = [{ name = "OpenBench" }]
+keywords = ["computer-use", "native-macos", "mcp", "post-action-state", "ab"]
+
+[metadata]
+origin = "openbench"
+execution_backend = "native-macos-only"
+native_sidecar = "native-macos.toml"
+harbor_execution_supported = false
+
+[verifier]
+timeout_sec = 30.0
+
+[agent]
+timeout_sec = 300.0
+
+[environment]
+os = "macos"
+network_mode = "none"

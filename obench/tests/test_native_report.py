@@ -275,6 +275,50 @@ def _replace_bundle_mcp_ledger(bundle, calls):
 
 
 class NativeReportTests(unittest.TestCase):
+    def test_report_preserves_post_action_state_arm_identity(self):
+        plan = build_native_matrix(
+            comparison_id="cub-v0-post-action-state-ab",
+            task=TASK,
+            harness=HARNESS,
+            model=MODEL,
+            arms=[
+                {
+                    "id": "state",
+                    "mcp": {
+                        **MCP_A,
+                        "state_response_mode": "auto",
+                        "call_contract": [{
+                            "tool": "click",
+                            "required_arguments": {"include_state": True},
+                        }],
+                    },
+                },
+                {
+                    "id": "no-state",
+                    "mcp": {
+                        **MCP_A,
+                        "state_response_mode": "auto",
+                        "call_contract": [{
+                            "tool": "click",
+                            "required_arguments": {"include_state": False},
+                        }],
+                    },
+                },
+            ],
+            repetitions=1,
+        )
+        report = build_native_report(plan, [
+            _row(plan, "state", 1),
+            _row(plan, "no-state", 1),
+        ])
+
+        self.assertEqual(set(report["arms"]), {"state", "no-state"})
+        self.assertEqual(set(report["matched_deltas"]), {"no-state"})
+        self.assertEqual(
+            set(report["identities"]["arm_config_sha256"]),
+            {"state", "no-state"},
+        )
+
     def test_validated_bundle_supplies_digest_bound_mcp_detail(self):
         cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
         with tempfile.TemporaryDirectory(prefix="native_report_bundle_") as temp:
@@ -589,6 +633,69 @@ class NativeReportTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(NativeReportError, "missing perception telemetry"):
+            _aggregate_observations([observation])
+
+    def test_attribution_accepts_no_state_calls_without_perception(self):
+        plan = _plan(repetitions=1)
+        row = _row(plan, "baseline", 1)
+        row["candidate_provenance"]["mcp_identity"] = {
+            **row["candidate_provenance"]["mcp_identity"],
+            "call_contract": [
+                {
+                    "tool": "get_app_state",
+                    "required_arguments": {"include_screenshot": False},
+                },
+                {
+                    "tool": "click",
+                    "required_arguments": {
+                        "include_state": False,
+                        "include_screenshot": False,
+                    },
+                },
+            ],
+        }
+        get_state = _call("get_app_state", 100.0)
+        get_state.update({
+            "request_unix_ns": 1_000_000_000,
+            "response_unix_ns": 1_100_000_000,
+            "response_bytes": 100,
+        })
+        get_state["computer_use_meta"]["metrics"] = {
+            "perception": {"elapsed_ms": 90, "response_encoding": "full"},
+        }
+        click = _call("click", 50.0)
+        click.update({
+            "request_unix_ns": 1_200_000_000,
+            "response_unix_ns": 1_250_000_000,
+            "response_bytes": 40,
+        })
+        click["computer_use_meta"]["metrics"] = {
+            "operation": {"queue_latency_ms": 5},
+        }
+        observation = _Observation(
+            row=row,
+            mcp_calls=(get_state, click),
+            proxy_requests=(),
+            bundle_sha256="a" * 64,
+            result_sha256="b" * 64,
+            row_sha256="c" * 64,
+        )
+
+        trial = _aggregate_observations([observation])["attribution"][
+            "trial_totals"
+        ][0]
+        self.assertEqual(trial["mcp_detail_ms"]["perception_time_ms"], 90.0)
+        self.assertEqual(trial["mcp_detail_ms"]["queue_time_ms"], 5.0)
+        self.assertEqual(trial["response_encoding_counts"], {"full": 1})
+
+        get_state["computer_use_meta"].pop("metrics")
+        click["computer_use_meta"]["metrics"]["perception"] = {
+            "elapsed_ms": 90,
+            "response_encoding": "full",
+        }
+        with self.assertRaisesRegex(
+            NativeReportError, "call 1 has missing perception telemetry"
+        ):
             _aggregate_observations([observation])
 
     def test_attribution_rejects_same_source_overlap(self):

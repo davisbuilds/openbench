@@ -435,6 +435,113 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertEqual(modes, {"auto", "full"})
         self.assertEqual(len(instruction_paths), 1)
 
+    def test_post_action_state_ab_materializes_locked_distinct_arms(self):
+        state_contract = cub.post_action_state_call_contract("state")
+        no_state_contract = cub.post_action_state_call_contract("no-state")
+        self.assertEqual(state_contract[0], no_state_contract[0])
+        self.assertTrue(all(
+            item["required_arguments"]["include_state"] is True
+            for item in state_contract[1:]
+        ))
+        self.assertTrue(all(
+            item["required_arguments"]["include_state"] is False
+            for item in no_state_contract[1:]
+        ))
+        self.assertTrue(all(
+            item["required_arguments"]["include_screenshot"] is False
+            for item in (*state_contract, *no_state_contract)
+        ))
+        for invalid in ("auto", "full", "", "STATE", None):
+            with self.subTest(invalid=invalid), self.assertRaises(cub.CubError):
+                cub.post_action_state_call_contract(invalid)
+
+        host = {
+            "os_version": "15.6", "os_build": "24G84",
+            "architecture": "arm64", "hardware": "MacFixture1,1",
+            "display_width": 1512, "display_height": 982,
+            "display_scale": 2.0, "display_color_space": "Color LCD",
+        }
+        with (
+            mock.patch.object(cub, "_bundle_info", side_effect=self.identity),
+            mock.patch.object(cub, "_static_preflight", return_value={
+                "matched_ready": False, "state_ab_ready": True, "checks": []
+            }),
+            mock.patch.object(cub, "_host_environment", return_value=host),
+            mock.patch.object(
+                cub, "_content_bound_command_digest", side_effect=self.content_digest
+            ),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(
+                cub.generate(
+                    self.request, "post-action-state-ab", None, None,
+                    repetitions=2,
+                ),
+                0,
+            )
+
+        config_root = self.run_root / "configs/post-action-state-ab"
+        manifest = json.loads((config_root / "manifest.json").read_text())
+        plan = json.loads(
+            (config_root / "plans/post-action-state-ab.plan.json").read_text()
+        )
+        self.assertTrue(manifest["comparable"])
+        self.assertEqual({cell["arm_id"] for cell in manifest["cells"]}, {
+            "state", "no-state",
+        })
+        self.assertEqual([arm["id"] for arm in plan["arms"]], [
+            "state", "no-state",
+        ])
+        instruction_paths = set()
+        for cell in manifest["cells"]:
+            parsed = tomllib.loads(Path(cell["config"]).read_text())
+            instruction_paths.add(parsed["task"]["instruction"])
+            self.assertEqual(parsed["mcp"]["state_response_mode"], "auto")
+            self.assertEqual(
+                parsed["mcp"]["call_contract"],
+                cub.post_action_state_call_contract(cell["arm_id"]),
+            )
+            loaded = load_config(cell["config"])
+            self.assertEqual(loaded.state_response_mode, "auto")
+            self.assertEqual(
+                list(loaded.mcp_call_contract),
+                cub.post_action_state_call_contract(cell["arm_id"]),
+            )
+            planned = next(
+                arm for arm in plan["arms"] if arm["id"] == cell["arm_id"]
+            )
+            self.assertEqual(
+                planned["config_identity"]["mcp"]["call_contract"],
+                parsed["mcp"]["call_contract"],
+            )
+        self.assertEqual(len(instruction_paths), 1)
+
+    def test_post_action_state_ab_rejects_external_arm_or_task(self):
+        with mock.patch.object(cub, "_static_preflight", return_value={
+            "matched_ready": False, "state_ab_ready": True, "checks": []
+        }):
+            for arm, task in (("state", None), (None, "basic-controls")):
+                with self.subTest(arm=arm, task=task), self.assertRaisesRegex(
+                    cub.CubError, "fixed state/no-state arms and task"
+                ):
+                    cub.generate(
+                        self.request, "post-action-state-ab", arm, task,
+                        repetitions=1,
+                    )
+
+    def test_experiment_tasks_are_not_generic_pilots(self):
+        with mock.patch.object(cub, "_static_preflight", return_value={
+            "matched_ready": True, "state_ab_ready": True, "checks": []
+        }):
+            for task in cub.EXPERIMENT_TASKS:
+                with self.subTest(task=task), self.assertRaisesRegex(
+                    cub.CubError, "dedicated A/B mode"
+                ):
+                    cub.generate(
+                        self.request, "pilot", "source", task,
+                        trial_index=1,
+                    )
+
     def test_wrap_app_refuses_stale_executable_with_matching_bundle_metadata(self):
         binary = self.base / "fixture"
         binary.write_bytes(b"new")

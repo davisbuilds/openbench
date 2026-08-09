@@ -45,10 +45,12 @@ class ComputerUseTasksTests(unittest.TestCase):
         expected_revisions = {
             "basic-controls": "d2b345eeb96ad5d27f8200f4e6c40cba5d2010de",
             "background-control": "3516eca731d86a1e2f1a3fe203709ecb8940c3b3",
+            "post-action-state-ab": "d2b345eeb96ad5d27f8200f4e6c40cba5d2010de",
         }
         for name in (
             "basic-controls",
             "background-control",
+            "post-action-state-ab",
             "state-response-ab",
             "textedit-exact-file",
         ):
@@ -70,6 +72,7 @@ class ComputerUseTasksTests(unittest.TestCase):
         self.assertEqual([item[1] for item in tasks], [
             "background-control",
             "basic-controls",
+            "post-action-state-ab",
             "state-response-ab",
             "textedit-exact-file",
         ])
@@ -79,6 +82,12 @@ class ComputerUseTasksTests(unittest.TestCase):
                 solved, solved_output, _ = run_checker(task_dir, True)
                 self.assertNotEqual(bare, 0, bare_output)
                 self.assertEqual(solved, 0, solved_output)
+
+    def test_post_action_state_ab_reuses_basic_controls_checker(self):
+        self.assertEqual(
+            (ROOT / "post-action-state-ab/checker_data/verify.py").read_bytes(),
+            (ROOT / "basic-controls/checker_data/verify.py").read_bytes(),
+        )
 
     def test_basic_controls_rejects_extra_schema_fields(self):
         temporary, root = self.solved_workspace("basic-controls")

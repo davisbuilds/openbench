@@ -783,11 +783,30 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         if isinstance(metrics.get("perception"), Mapping):
             perception_metrics.append(metrics["perception"])
     mcp_identity = observation.row["candidate_provenance"]["mcp_identity"]
-    if mcp_identity.get("call_contract") and len(perception_metrics) != len(calls):
-        raise NativeReportError(
-            "contracted MCP call is missing perception telemetry; "
-            "trial attribution is non-comparable"
+    call_contract = mcp_identity.get("call_contract")
+    if call_contract:
+        ordered_calls = sorted(
+            calls, key=lambda item: item.get("contract_sequence", -1)
         )
+        for index, (expected, call) in enumerate(
+            zip(call_contract, ordered_calls), 1
+        ):
+            meta = call.get("computer_use_meta")
+            metrics = meta.get("metrics") if isinstance(meta, Mapping) else None
+            has_perception = (
+                isinstance(metrics, Mapping)
+                and isinstance(metrics.get("perception"), Mapping)
+            )
+            expects_perception = (
+                expected.get("tool") == "get_app_state"
+                or expected.get("required_arguments", {}).get("include_state") is True
+            )
+            if has_perception != expects_perception:
+                status = "missing" if expects_perception else "unexpected"
+                raise NativeReportError(
+                    f"contracted MCP call {index} has {status} perception telemetry; "
+                    "trial attribution is non-comparable"
+                )
     queue_values = [_number(metric.get("queue_latency_ms")) for metric in operation_metrics]
     perception_values = [
         _number(metric.get("perception_ms", metric.get("elapsed_ms")))

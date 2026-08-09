@@ -43,14 +43,17 @@ SOURCE_MCP_BUNDLE_ID = "org.openbench.computer-use-mcp.source.v041"
 INSTALLED_MCP_BUNDLE_ID = "dev.computer-use-mcp.app"
 FIXTURE_BUNDLES = {
     "basic-controls": "org.openbench.ComputerUseFixture.v0",
+    "post-action-state-ab": "org.openbench.ComputerUseFixture.v0",
     "state-response-ab": "org.openbench.ComputerUseFixture.v0",
     "background-control": "org.openbench.BackgroundControlFixture.v0",
     "textedit-exact-file": "com.apple.TextEdit",
 }
 GUARD_BUNDLE_ID = "org.openbench.FocusGuard.v0"
 TASKS = tuple(FIXTURE_BUNDLES)
-MATCHED_TASKS = tuple(task for task in TASKS if task != "state-response-ab")
+EXPERIMENT_TASKS = ("post-action-state-ab", "state-response-ab")
+MATCHED_TASKS = tuple(task for task in TASKS if task not in EXPERIMENT_TASKS)
 ARMS = ("installed", "source")
+POST_ACTION_STATE_ARMS = ("state", "no-state")
 STATE_RESPONSE_ARMS = ("auto", "full")
 CALL_CONTRACT = (
     {"tool": "get_app_state", "required_arguments": {
@@ -97,6 +100,26 @@ def state_call_contract(mode: str) -> list[dict[str, Any]]:
         }
         for item in CALL_CONTRACT
     ]
+
+
+def post_action_state_call_contract(arm: str) -> list[dict[str, Any]]:
+    if arm not in POST_ACTION_STATE_ARMS:
+        raise CubError("post-action state arm must be state or no-state")
+    include_state = arm == "state"
+    return [
+        {
+            "tool": item["tool"],
+            "required_arguments": {
+                **item["required_arguments"],
+                **(
+                    {"include_state": include_state}
+                    if item["tool"] != "get_app_state"
+                    else {}
+                ),
+            },
+        }
+        for item in CALL_CONTRACT
+    ]
 DELIVERY_TIERS = {
     "basic-controls": (
         "tier1-ax-action",
@@ -109,6 +132,16 @@ DELIVERY_TIERS = {
         "ax-window-management",
     ),
     "state-response-ab": (
+        "tier1-ax-action",
+        "tier1-ax-attribute",
+        "tier2-per-window-nsevent",
+        "tier25-skylight-sleventpostto-pid",
+        "tier3-cgeventpostto-pid",
+        "pasteboard",
+        "launchservices",
+        "ax-window-management",
+    ),
+    "post-action-state-ab": (
         "tier1-ax-action",
         "tier1-ax-attribute",
         "tier2-per-window-nsevent",
@@ -199,7 +232,8 @@ def _runtime_coordinates(
         match is None
         or not task_id.startswith(task_prefix)
         or collector_id not in {
-            f"cub-v0-{item}-mcp" for item in (*ARMS, *STATE_RESPONSE_ARMS)
+            f"cub-v0-{item}-mcp"
+            for item in (*ARMS, *POST_ACTION_STATE_ARMS, *STATE_RESPONSE_ARMS)
         }
     ):
         raise CubError("runtime coordinates are absent from explicit args/native env")
@@ -838,7 +872,7 @@ def _evidence(root: Path, arm: str, task: str, trial_index: int) -> Path:
 
 def _launch_profile(task: str) -> dict[str, Any]:
     return {
-        "fixture_small_tree": task == "state-response-ab",
+        "fixture_small_tree": task in EXPERIMENT_TASKS,
         "task": task,
     }
 
@@ -865,6 +899,10 @@ def _initial_state_ready(root: Path, arm: str, task: str, trial_index: int) -> b
             "keystroke_echo": "", "schema_version": 1, "toggle_on": False,
         },
         "state-response-ab": {
+            "fixture": "basic-controls", "honest_counter": 0,
+            "keystroke_echo": "", "schema_version": 1, "toggle_on": False,
+        },
+        "post-action-state-ab": {
             "fixture": "basic-controls", "honest_counter": 0,
             "keystroke_echo": "", "schema_version": 1, "toggle_on": False,
         },
@@ -947,7 +985,7 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
     trial_index = _positive_trial_index(trial_index)
     request = _load_request(request_path)
     root, _repo, _installed = _request_paths(request)
-    if task == "state-response-ab":
+    if task in EXPERIMENT_TASKS:
         _require_state_response_fixture(root)
     state_path = _state_path(root, arm, task, trial_index)
     launch_profile = _launch_profile(task)
@@ -984,14 +1022,14 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
 
     env = os.environ.copy()
     env.pop("COMPUTER_USE_FIXTURE_SMALL_TREE", None)
-    if task in {"basic-controls", "state-response-ab"}:
+    if task in {"basic-controls", *EXPERIMENT_TASKS}:
         state = artifacts / "fixture-state.json"
         env.update({
             "COMPUTER_USE_FIXTURE_STATE_PATH": str(state),
             "COMPUTER_USE_FIXTURE_FOREGROUND": "1",
             **(
                 {"COMPUTER_USE_FIXTURE_SMALL_TREE": "1"}
-                if task == "state-response-ab"
+                if task in EXPERIMENT_TASKS
                 else {}
             ),
         })
@@ -1052,7 +1090,7 @@ def verify(request_path: Path, arm: str, task: str, trial_index: int) -> int:
         command = ["bash", str(ROOT / task / "checker.sh")]
     else:
         state = workspace / "artifacts/fixture-state.json"
-        if task in {"basic-controls", "state-response-ab"}:
+        if task in {"basic-controls", *EXPERIMENT_TASKS}:
             env["OPENBENCH_FIXTURE_STATE_PATH"] = str(state)
             command = ["bash", str(ROOT / task / "checker.sh")]
         else:
@@ -1195,6 +1233,7 @@ def _task_plan_identity(
 def _mcp_plan_identity(
     identity: Mapping[str, Any], arm: str, config_dir: Path,
     *, state_response_mode: str | None = None,
+    call_contract: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "name": "computer-use-mcp",
@@ -1205,11 +1244,13 @@ def _mcp_plan_identity(
         ),
         "collector_run_id": f"cub-v0-{arm}-mcp",
         **(
-            {
-                "state_response_mode": state_response_mode,
-                "call_contract": state_call_contract(state_response_mode),
-            }
+            {"state_response_mode": state_response_mode}
             if state_response_mode is not None
+            else {}
+        ),
+        **(
+            {"call_contract": list(call_contract)}
+            if call_contract is not None
             else {}
         ),
     }
@@ -1301,7 +1342,7 @@ def _config_text(
     setup_cmd = [*common, "setup"]
     reset_cmd = [*common, "reset"]
     verify_cmd = [*common, "verify"]
-    if task in {"basic-controls", "state-response-ab"}:
+    if task in {"basic-controls", *EXPERIMENT_TASKS}:
         foreground = FIXTURE_BUNDLES[task]
         forbidden: list[str] = []
         tools = ["list_apps", "get_app_state", "click", "set_value", "type_text", "wait_for"]
@@ -1320,15 +1361,24 @@ def _config_text(
         "write_clipboard",
     } - set(tools))
     oracle_paths = [str(path) for path in _oracle_paths(task)]
-    state_response_mode = arm if mode == "state-ab" else None
+    state_response_mode = (
+        arm if mode == "state-ab"
+        else "auto" if mode == "post-action-state-ab"
+        else None
+    )
     state_response_text = (
         f"state_response_mode = {_toml_string(state_response_mode)}\n"
         if state_response_mode is not None
         else ""
     )
     call_contract_text = ""
-    if state_response_mode is not None:
-        effective_contract = state_call_contract(state_response_mode)
+    if mode == "state-ab":
+        effective_contract = state_call_contract(arm)
+    elif mode == "post-action-state-ab":
+        effective_contract = post_action_state_call_contract(arm)
+    else:
+        effective_contract = []
+    if effective_contract:
         call_contract_text = "\n".join(
             "\n".join((
                 "[[mcp.call_contract]]",
@@ -1457,19 +1507,28 @@ def generate(
     request = _load_request(request_path)
     root, _repo, installed = _request_paths(request)
     static = _static_preflight(request)
-    readiness = static["state_ab_ready"] if mode == "state-ab" else static["matched_ready"]
-    if mode in {"matched", "state-ab"} and not readiness:
+    experiment_mode = mode in {"state-ab", "post-action-state-ab"}
+    readiness = static["state_ab_ready"] if experiment_mode else static["matched_ready"]
+    if (mode == "matched" or experiment_mode) and not readiness:
         failed = [item["name"] for item in static["checks"] if not item["passed"]]
         raise CubError(f"matched configs require complete identity/TCC proof; blockers: {failed}")
     if mode == "pilot" and (arm is None or task is None):
         raise CubError("pilot generation requires --arm and --task")
+    if mode == "pilot" and task in EXPERIMENT_TASKS:
+        raise CubError("experiment tasks require their dedicated A/B mode")
     if mode == "matched" and (arm is not None or task is not None):
         raise CubError("matched generation covers all arms/tasks; omit --arm and --task")
     if mode == "state-ab" and (arm is not None or task is not None):
         raise CubError("state-ab generation uses fixed auto/full arms and task")
+    if mode == "post-action-state-ab" and (arm is not None or task is not None):
+        raise CubError(
+            "post-action-state-ab generation uses fixed state/no-state arms and task"
+        )
     selected_arms = (
         STATE_RESPONSE_ARMS
         if mode == "state-ab"
+        else POST_ACTION_STATE_ARMS
+        if mode == "post-action-state-ab"
         else ARMS
         if mode == "matched" or arm == "both"
         else (arm,)
@@ -1477,6 +1536,8 @@ def generate(
     selected_tasks = (
         ("state-response-ab",)
         if mode == "state-ab"
+        else ("post-action-state-ab",)
+        if mode == "post-action-state-ab"
         else MATCHED_TASKS
         if mode == "matched"
         else (task,)
@@ -1488,12 +1549,13 @@ def generate(
         source_identity = _bundle_info(root / "apps/OpenBench Computer Use MCP Source.app")
         source_identity["source_revision"] = SOURCE_REVISION
         identities["source"] = source_identity
-    if mode == "state-ab":
+    if experiment_mode:
         source_identity = _bundle_info(root / "apps/OpenBench Computer Use MCP Source.app")
         source_identity["source_revision"] = SOURCE_REVISION
-        identities.update({arm_id: source_identity for arm_id in STATE_RESPONSE_ARMS})
+        identities.update({arm_id: source_identity for arm_id in selected_arms})
     app_paths = {
         "basic-controls": root / "apps/ComputerUseFixture.app",
+        "post-action-state-ab": root / "apps/ComputerUseFixture.app",
         "state-response-ab": root / "apps/ComputerUseFixture.app",
         "background-control": root / "apps/BackgroundControlFixture.app",
         "textedit-exact-file": Path("/System/Applications/TextEdit.app"),
@@ -1508,7 +1570,7 @@ def generate(
     plans: list[dict[str, Any]] = []
     config_root = descendant(root, f"configs/{mode}")
     manifest_path = config_root / "manifest.json"
-    if mode in {"matched", "state-ab"}:
+    if mode == "matched" or experiment_mode:
         harness = {
             "name": "codex",
             "version": str(request.get("codex_version", "codex-cli 0.146.1")),
@@ -1536,7 +1598,16 @@ def generate(
                             selected_arm,
                             config_root,
                             state_response_mode=(
-                                selected_arm if mode == "state-ab" else None
+                                selected_arm if mode == "state-ab"
+                                else "auto" if mode == "post-action-state-ab"
+                                else None
+                            ),
+                            call_contract=(
+                                state_call_contract(selected_arm)
+                                if mode == "state-ab"
+                                else post_action_state_call_contract(selected_arm)
+                                if mode == "post-action-state-ab"
+                                else None
                             ),
                         ),
                         "config": _arm_plan_config(
@@ -1698,8 +1769,8 @@ def generate(
     manifest = {
         "schema_version": "openbench.computer-use-config-set.v2",
         "mode": mode,
-        "comparable": mode in {"matched", "state-ab"},
-        "repetitions": repetitions if mode in {"matched", "state-ab"} else 1,
+        "comparable": mode == "matched" or experiment_mode,
+        "repetitions": repetitions if mode == "matched" or experiment_mode else 1,
         "plans": plans,
         "cells": cells,
         "source_revision": SOURCE_REVISION,
@@ -1721,7 +1792,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     probe.add_argument("--arm", choices=ARMS, required=True)
     generate_parser = sub.add_parser("generate")
     generate_parser.add_argument(
-        "--mode", choices=("matched", "pilot", "state-ab"), required=True
+        "--mode",
+        choices=("matched", "pilot", "state-ab", "post-action-state-ab"),
+        required=True,
     )
     generate_parser.add_argument("--arm", choices=(*ARMS, "both"))
     generate_parser.add_argument("--task", choices=TASKS)

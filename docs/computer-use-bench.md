@@ -113,6 +113,25 @@ perception, and perception-phase timings are nested MCP detail and are not
 added again. `response_bytes` remains the raw relayed JSON-RPC frame size;
 telemetry-supplied text and PNG sizes are reported separately.
 
+## Post-action state A/B
+
+The post-action state experiment uses the same pinned source server, automatic
+state-response mode, ComputerUseFixture initial state read, five-call mutation
+sequence, screenshots disabled, and deterministic checker in both arms:
+
+```bash
+python3 computer-use-tasks/v0/scripts/cub_v0.py \
+  --request "$OPENBENCH_CUB_REQUEST" generate \
+  --mode post-action-state-ab --repetitions 5
+```
+
+The `state` arm locks `include_state=true` on every mutation; `no-state` locks
+`include_state=false`. Both arm IDs and their exact ordered call contracts are
+part of the native matrix identity and sealed evidence. Attribution requires
+perception telemetry only for state-bearing calls, so the intentionally absent
+post-action recaptures in `no-state` remain reportable without weakening the
+`state` arm's telemetry requirement.
+
 Row inputs are checked for importer-equivalent verdict, timing, token, trial,
 run, and identity invariants, then bound by a canonical normalized-row digest.
 Because their bundle bytes are unavailable, their publication status remains
