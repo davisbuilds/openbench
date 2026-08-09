@@ -20,6 +20,10 @@ Make exactly these five MCP calls in order. Do not make any other MCP calls.
    `type_text` with `text="openbench-42"`,
    `include_state=true`, and `include_screenshot=false`.
 
+Every element ID must exactly match `e<number>@s<number>` from the returned
+tree. It begins with the literal letter `e`; never include indentation,
+whitespace, or an extra prefix such as `t`.
+
 Stop after `type_text`. Do not re-read state. The server controls response
 encoding; do not request or discuss a response mode. The external checker is
 the sole judge of the final fixture state.
