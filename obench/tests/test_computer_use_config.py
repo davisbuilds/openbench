@@ -224,6 +224,7 @@ class ComputerUseConfigTests(unittest.TestCase):
 
         with (
             mock.patch.dict(os.environ, {"COMPUTER_USE_FIXTURE_SMALL_TREE": "1"}),
+            mock.patch.object(cub, "_require_state_response_fixture"),
             mock.patch.object(cub, "_launch", side_effect=launch),
             mock.patch.object(cub, "_wait_for_frontmost"),
         ):
@@ -267,6 +268,7 @@ class ComputerUseConfigTests(unittest.TestCase):
             state_path.unlink()
 
         with (
+            mock.patch.object(cub, "_require_state_response_fixture"),
             mock.patch.object(cub, "_process_identity", return_value=process),
             mock.patch.object(cub, "reset_runtime", side_effect=reset) as reset_mock,
             mock.patch.object(cub, "_launch", return_value=process),
@@ -277,6 +279,27 @@ class ComputerUseConfigTests(unittest.TestCase):
         reset_mock.assert_called_once()
         saved = json.loads(state_path.read_text(encoding="utf-8"))
         self.assertEqual(saved["launch_profile"], cub._launch_profile(task))
+
+    def test_state_response_fixture_requires_current_revision_and_binary(self):
+        app = self.run_root / "apps/ComputerUseFixture.app"
+        identity = self.identity(app)
+        manifest = {
+            "basic_fixture_revision": cub.BASIC_REVISION,
+            "fixtures": {"state-response-ab": identity},
+            "schema_version": "openbench.computer-use-build.v1",
+        }
+        self.run_root.mkdir(parents=True)
+        manifest_path = self.run_root / "build-manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        with mock.patch.object(cub, "_bundle_info", return_value=identity):
+            self.assertEqual(
+                cub._require_state_response_fixture(self.run_root), identity
+            )
+            manifest["basic_fixture_revision"] = "0" * 40
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(cub.CubError, "required source revision"):
+                cub._require_state_response_fixture(self.run_root)
 
     def test_static_preflight_does_not_create_run_root(self):
         request = cub._load_request(self.request)

@@ -326,6 +326,29 @@ def _bundle_info(app: Path) -> dict[str, Any]:
     }
 
 
+def _require_state_response_fixture(root: Path) -> dict[str, Any]:
+    manifest_path = root / "build-manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        expected = manifest["fixtures"]["state-response-ab"]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise CubError(f"invalid state-response build manifest: {exc}") from exc
+    if (
+        manifest.get("schema_version") != "openbench.computer-use-build.v1"
+        or manifest.get("basic_fixture_revision") != BASIC_REVISION
+        or not isinstance(expected, dict)
+    ):
+        raise CubError("state-response fixture is not pinned to the required source revision")
+    observed = _bundle_info(root / "apps/ComputerUseFixture.app")
+    identity_fields = (
+        "adhoc", "binary_sha256", "build", "bundle_id", "designated_requirement",
+        "executable", "signature_sha256", "version",
+    )
+    if any(observed.get(field) != expected.get(field) for field in identity_fields):
+        raise CubError("state-response fixture does not match the exact build manifest identity")
+    return observed
+
+
 def _static_preflight(request: Mapping[str, Any]) -> dict[str, Any]:
     root, repo, installed = _request_paths(request)
     checks: list[dict[str, Any]] = []
@@ -381,6 +404,18 @@ def _static_preflight(request: Mapping[str, Any]) -> dict[str, Any]:
             source_identity,
             {"bundle_id": SOURCE_MCP_BUNDLE_ID, "version": MCP_VERSION, "adhoc": False},
         )
+    try:
+        fixture_identity = _require_state_response_fixture(root)
+    except (CubError, OSError, KeyError, plistlib.InvalidFileException) as exc:
+        add(
+            "state_response_fixture_identity", False, str(exc),
+            {"basic_fixture_revision": BASIC_REVISION, "bundle_id": FIXTURE_BUNDLES["state-response-ab"]},
+        )
+    else:
+        add(
+            "state_response_fixture_identity", True, fixture_identity,
+            {"basic_fixture_revision": BASIC_REVISION, "bundle_id": FIXTURE_BUNDLES["state-response-ab"]},
+        )
     for arm, identity, bundle_id in (
         ("installed", installed_identity, INSTALLED_MCP_BUNDLE_ID),
         ("source", source_identity, SOURCE_MCP_BUNDLE_ID),
@@ -416,6 +451,7 @@ def _static_preflight(request: Mapping[str, Any]) -> dict[str, Any]:
         "codex_auth",
         "source_mcp_identity",
         "source_tcc_identity_proof",
+        "state_response_fixture_identity",
     }
     return {
         "schema_version": PREFLIGHT_SCHEMA,
@@ -449,7 +485,10 @@ def _publication_safe_preflight(result: Mapping[str, Any]) -> dict[str, Any]:
             }
         elif name == "codex_auth":
             observed = {"present": check["passed"]}
-        elif name in {"installed_mcp_identity", "source_mcp_identity"}:
+        elif name in {
+            "installed_mcp_identity", "source_mcp_identity",
+            "state_response_fixture_identity",
+        }:
             if isinstance(observed, dict):
                 observed = {
                     field: observed[field]
@@ -901,6 +940,8 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
     trial_index = _positive_trial_index(trial_index)
     request = _load_request(request_path)
     root, _repo, _installed = _request_paths(request)
+    if task == "state-response-ab":
+        _require_state_response_fixture(root)
     state_path = _state_path(root, arm, task, trial_index)
     launch_profile = _launch_profile(task)
     if state_path.is_file():
