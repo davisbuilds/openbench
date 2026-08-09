@@ -37,7 +37,7 @@ from obench.native_run import _canonical_digest, _content_bound_command_digest
 
 ROOT = Path(__file__).resolve().parents[1]
 BASIC_REVISION = "2c5cc162e58f6486505c8c5fe87fd76980d0e6b9"
-SOURCE_REVISION = "2d980ba39057d0a800f01dbdfdef35dd60221d61"
+SOURCE_REVISION = "d2b345eeb96ad5d27f8200f4e6c40cba5d2010de"
 MCP_VERSION = "0.4.1"
 SOURCE_MCP_BUNDLE_ID = "org.openbench.computer-use-mcp.source.v041"
 INSTALLED_MCP_BUNDLE_ID = "dev.computer-use-mcp.app"
@@ -928,6 +928,11 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
         env.update({
             "COMPUTER_USE_FIXTURE_STATE_PATH": str(state),
             "COMPUTER_USE_FIXTURE_FOREGROUND": "1",
+            **(
+                {"COMPUTER_USE_FIXTURE_SMALL_TREE": "1"}
+                if task == "state-response-ab"
+                else {}
+            ),
         })
         executable = apps / "ComputerUseFixture.app/Contents/MacOS/ComputerUseFixture"
         remember(_launch(executable, (), env, logs / "fixture.log"))
