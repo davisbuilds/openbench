@@ -11,7 +11,8 @@ The final component of the current workspace path is the experiment arm: use
 `include_state=false` on every mutating call for `no-state`. Always use
 `include_screenshot=false`.
 
-1. Call `get_app_state` once with `app="org.openbench.ComputerUseFixture.v0"`.
+1. Call `get_app_state` once with `app="org.openbench.ComputerUseFixture.v0"`
+   and `include_screenshot=false`.
 2. Confirm the returned tree contains `e7@s1 AXCheckBox "toggle-box"`, then
    call `click` on element ID `e7@s1`.
 3. Confirm the initial tree contains `e6@s1 AXButton "honest-button"`, then

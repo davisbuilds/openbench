@@ -89,6 +89,17 @@ class ComputerUseTasksTests(unittest.TestCase):
             (ROOT / "basic-controls/checker_data/verify.py").read_bytes(),
         )
 
+    def test_post_action_state_initial_call_disables_screenshot_explicitly(self):
+        instruction = (ROOT / "post-action-state-ab/instruction.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            '1. Call `get_app_state` once with '
+            '`app="org.openbench.ComputerUseFixture.v0"`\n'
+            '   and `include_screenshot=false`.',
+            instruction,
+        )
+
     def test_basic_controls_rejects_extra_schema_fields(self):
         temporary, root = self.solved_workspace("basic-controls")
         self.addCleanup(temporary.cleanup)
