@@ -330,7 +330,7 @@ def _require_state_response_fixture(root: Path) -> dict[str, Any]:
     manifest_path = root / "build-manifest.json"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        expected = manifest["fixtures"]["state-response-ab"]
+        expected = manifest["fixtures"]["basic-controls"]
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise CubError(f"invalid state-response build manifest: {exc}") from exc
     if (
@@ -633,7 +633,6 @@ def _build_manifest(source_app: Path, apps: Path) -> dict[str, Any]:
             task: _bundle_info(app)
             for task, app in (
                 ("basic-controls", apps / "ComputerUseFixture.app"),
-                ("state-response-ab", apps / "ComputerUseFixture.app"),
                 (
                     "background-control",
                     apps / "BackgroundControlFixture.app",

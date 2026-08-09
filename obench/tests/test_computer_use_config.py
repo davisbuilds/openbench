@@ -285,7 +285,7 @@ class ComputerUseConfigTests(unittest.TestCase):
         identity = self.identity(app)
         manifest = {
             "basic_fixture_revision": cub.BASIC_REVISION,
-            "fixtures": {"state-response-ab": identity},
+            "fixtures": {"basic-controls": identity},
             "schema_version": "openbench.computer-use-build.v1",
         }
         self.run_root.mkdir(parents=True)
@@ -357,7 +357,6 @@ class ComputerUseConfigTests(unittest.TestCase):
             set(manifest["fixtures"]),
             {
                 "basic-controls",
-                "state-response-ab",
                 "background-control",
                 "guard",
                 "textedit-exact-file",
