@@ -25,6 +25,7 @@ from typing import Any, Mapping
 
 from .atif import SCHEMA_VERSION as ATIF_SCHEMA_VERSION, validate_trajectory
 from .mcp_stdio_collector import (
+    COMPUTER_USE_TOOLS,
     LedgerIntegrityError as MCPCollectorIntegrityError,
     verify_ledger as verify_mcp_collector_ledger,
 )

@@ -786,6 +786,12 @@ class NativeTrialTests(unittest.TestCase):
         _build_bundle(path, self.cases[name])
         return path
 
+    def test_lock_validator_uses_collector_tool_catalog(self):
+        from obench.native_trial import COMPUTER_USE_TOOLS
+
+        self.assertIn("get_app_state", COMPUTER_USE_TOOLS)
+        self.assertIn("type_text", COMPUTER_USE_TOOLS)
+
     def test_happy_fixture_normalizes_row_and_cross_bound_evidence(self):
         row = load_native_trial(self.bundle("happy"))
 
