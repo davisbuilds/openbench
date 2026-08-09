@@ -9,20 +9,15 @@ Make exactly these five MCP calls in order. Do not make any other MCP calls.
 
 1. Call `get_app_state` once with `app="org.openbench.ComputerUseFixture.v0"` and
    `include_screenshot=false`.
-2. In the returned tree, find the line whose label is `toggle-box`. Reuse the
-   opaque element ID at the start of that line (for example, `e7@s1`), not the
-   label text `toggle-box`, and call `click` with
+2. Confirm the returned tree contains `e7@s1 AXCheckBox "toggle-box"`, then
+   call `click` on element ID `e7@s1` with
    `include_state=true` and `include_screenshot=false`.
-3. Likewise, use the opaque element ID from the `honest-button` line and call
-   `click` twice, as two separate calls, each with
+3. Confirm the tree contains `e6@s1 AXButton "honest-button"`, then call
+   `click` on element ID `e6@s1` twice, as two separate calls, each with
    `include_state=true` and `include_screenshot=false`.
-4. Use the opaque element ID from the `keystroke-input` line and call
-   `type_text` with `text="openbench-42"`,
+4. Confirm the tree contains `e11@s1 AXTextArea "keystroke-input"`, then call
+   `type_text` on element ID `e11@s1` with `text="openbench-42"`,
    `include_state=true`, and `include_screenshot=false`.
-
-Every element ID must exactly match `e<number>@s<number>` from the returned
-tree. It begins with the literal letter `e`; never include indentation,
-whitespace, or an extra prefix such as `t`.
 
 Stop after `type_text`. Do not re-read state. The server controls response
 encoding; do not request or discuss a response mode. The external checker is

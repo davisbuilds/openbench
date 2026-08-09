@@ -57,15 +57,23 @@ CALL_CONTRACT = (
         "app": "org.openbench.ComputerUseFixture.v0", "include_screenshot": False,
     }},
     {"tool": "click", "required_arguments": {
+        "app": "org.openbench.ComputerUseFixture.v0",
+        "element_id": "e7@s1",
         "include_state": True, "include_screenshot": False,
     }},
     {"tool": "click", "required_arguments": {
+        "app": "org.openbench.ComputerUseFixture.v0",
+        "element_id": "e6@s1",
         "include_state": True, "include_screenshot": False,
     }},
     {"tool": "click", "required_arguments": {
+        "app": "org.openbench.ComputerUseFixture.v0",
+        "element_id": "e6@s1",
         "include_state": True, "include_screenshot": False,
     }},
     {"tool": "type_text", "required_arguments": {
+        "app": "org.openbench.ComputerUseFixture.v0",
+        "element_id": "e11@s1",
         "text": "openbench-42", "include_state": True,
         "include_screenshot": False,
     }},

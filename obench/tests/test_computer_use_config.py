@@ -370,6 +370,18 @@ class ComputerUseConfigTests(unittest.TestCase):
         )
         self.assertEqual(cub.CALL_CONTRACT[-1]["tool"], "type_text")
         self.assertEqual(
+            [
+                item["required_arguments"].get("element_id")
+                for item in cub.CALL_CONTRACT[1:]
+            ],
+            ["e7@s1", "e6@s1", "e6@s1", "e11@s1"],
+        )
+        self.assertTrue(all(
+            item["required_arguments"].get("app")
+            == cub.FIXTURE_BUNDLES["state-response-ab"]
+            for item in cub.CALL_CONTRACT
+        ))
+        self.assertEqual(
             cub.CALL_CONTRACT[-1]["required_arguments"]["text"],
             "openbench-42",
         )
