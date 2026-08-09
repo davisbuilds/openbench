@@ -215,6 +215,24 @@ class ComputerUseConfigTests(unittest.TestCase):
                 probe=lambda: "com.openai.codex",
             )
 
+    def test_setup_isolates_small_tree_profile_to_state_response_task(self):
+        environments = []
+
+        def launch(_executable, _args, environment, _log):
+            environments.append(dict(environment))
+            return {"pid": 4321, "start_token": "fixture", "command": "fixture"}
+
+        with (
+            mock.patch.dict(os.environ, {"COMPUTER_USE_FIXTURE_SMALL_TREE": "1"}),
+            mock.patch.object(cub, "_launch", side_effect=launch),
+            mock.patch.object(cub, "_wait_for_frontmost"),
+        ):
+            cub.setup(self.request, "source", "basic-controls", 1)
+            cub.setup(self.request, "auto", "state-response-ab", 1)
+
+        self.assertNotIn("COMPUTER_USE_FIXTURE_SMALL_TREE", environments[0])
+        self.assertEqual(environments[1]["COMPUTER_USE_FIXTURE_SMALL_TREE"], "1")
+
     def test_static_preflight_does_not_create_run_root(self):
         request = cub._load_request(self.request)
         with (

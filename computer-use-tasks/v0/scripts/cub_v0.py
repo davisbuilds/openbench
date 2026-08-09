@@ -923,6 +923,7 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
         )
 
     env = os.environ.copy()
+    env.pop("COMPUTER_USE_FIXTURE_SMALL_TREE", None)
     if task in {"basic-controls", "state-response-ab"}:
         state = artifacts / "fixture-state.json"
         env.update({
