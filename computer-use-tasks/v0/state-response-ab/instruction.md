@@ -9,11 +9,15 @@ Make exactly these five MCP calls in order. Do not make any other MCP calls.
 
 1. Call `get_app_state` once with `app="org.openbench.ComputerUseFixture.v0"` and
    `include_screenshot=false`.
-2. Reuse returned element IDs and call `click` on `toggle-box` with
+2. In the returned tree, find the line whose label is `toggle-box`. Reuse the
+   opaque element ID at the start of that line (for example, `e7@s1`), not the
+   label text `toggle-box`, and call `click` with
    `include_state=true` and `include_screenshot=false`.
-3. Call `click` on `honest-button` twice, as two separate calls, each with
+3. Likewise, use the opaque element ID from the `honest-button` line and call
+   `click` twice, as two separate calls, each with
    `include_state=true` and `include_screenshot=false`.
-4. Call `type_text` on `keystroke-input` with `text="openbench-42"`,
+4. Use the opaque element ID from the `keystroke-input` line and call
+   `type_text` with `text="openbench-42"`,
    `include_state=true`, and `include_screenshot=false`.
 
 Stop after `type_text`. Do not re-read state. The server controls response

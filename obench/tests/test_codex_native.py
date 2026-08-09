@@ -89,6 +89,10 @@ class CodexNativeProfileTests(unittest.TestCase):
             "OPENBENCH_NATIVE_MCP_ARGUMENT_POLICY": (
                 '{"forbid_focus_change":true,"forbid_global_delivery":true}'
             ),
+            "OPENBENCH_NATIVE_MCP_CALL_CONTRACT": (
+                '[{"tool":"click","required_arguments":{"include_state":true}}]'
+            ),
+            "OPENBENCH_NATIVE_MCP_STATE_RESPONSE_MODE": "auto",
         }
 
     def test_stock_command_and_artifacts_are_unchanged(self):
@@ -185,6 +189,14 @@ class CodexNativeProfileTests(unittest.TestCase):
         self.assertEqual(
             kwargs["env"]["OPENBENCH_NATIVE_TRIAL_ID"],
             "trial-1",
+        )
+        self.assertEqual(
+            kwargs["env"]["OPENBENCH_NATIVE_MCP_STATE_RESPONSE_MODE"],
+            "auto",
+        )
+        self.assertIn(
+            "required_arguments",
+            kwargs["env"]["OPENBENCH_NATIVE_MCP_CALL_CONTRACT"],
         )
         self.assertFalse(kwargs["text"])
         self.assertEqual(
