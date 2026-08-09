@@ -454,6 +454,10 @@ class ComputerUseConfigTests(unittest.TestCase):
         for invalid in ("auto", "full", "", "STATE", None):
             with self.subTest(invalid=invalid), self.assertRaises(cub.CubError):
                 cub.post_action_state_call_contract(invalid)
+            with self.subTest(invalid_mode=invalid), self.assertRaises(cub.CubError):
+                cub.post_action_state_response_mode(invalid)
+        self.assertEqual(cub.post_action_state_response_mode("state"), "auto")
+        self.assertIsNone(cub.post_action_state_response_mode("no-state"))
 
         host = {
             "os_version": "15.6", "os_build": "24G84",
@@ -496,13 +500,18 @@ class ComputerUseConfigTests(unittest.TestCase):
         for cell in manifest["cells"]:
             parsed = tomllib.loads(Path(cell["config"]).read_text())
             instruction_paths.add(parsed["task"]["instruction"])
-            self.assertEqual(parsed["mcp"]["state_response_mode"], "auto")
+            expected_mode = cub.post_action_state_response_mode(cell["arm_id"])
+            self.assertEqual(parsed["mcp"].get("state_response_mode"), expected_mode)
+            self.assertEqual(
+                "state_response_mode" in parsed["mcp"],
+                expected_mode is not None,
+            )
             self.assertEqual(
                 parsed["mcp"]["call_contract"],
                 cub.post_action_state_call_contract(cell["arm_id"]),
             )
             loaded = load_config(cell["config"])
-            self.assertEqual(loaded.state_response_mode, "auto")
+            self.assertEqual(loaded.state_response_mode, expected_mode)
             self.assertEqual(
                 list(loaded.mcp_call_contract),
                 cub.post_action_state_call_contract(cell["arm_id"]),
@@ -513,6 +522,14 @@ class ComputerUseConfigTests(unittest.TestCase):
             self.assertEqual(
                 planned["config_identity"]["mcp"]["call_contract"],
                 parsed["mcp"]["call_contract"],
+            )
+            self.assertEqual(
+                planned["config_identity"]["mcp"].get("state_response_mode"),
+                expected_mode,
+            )
+            self.assertEqual(
+                "state_response_mode" in planned["config_identity"]["mcp"],
+                expected_mode is not None,
             )
         self.assertEqual(len(instruction_paths), 1)
 

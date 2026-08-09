@@ -297,7 +297,6 @@ class NativeReportTests(unittest.TestCase):
                     "id": "no-state",
                     "mcp": {
                         **MCP_A,
-                        "state_response_mode": "auto",
                         "call_contract": [{
                             "tool": "click",
                             "required_arguments": {"include_state": False},
@@ -306,6 +305,15 @@ class NativeReportTests(unittest.TestCase):
                 },
             ],
             repetitions=1,
+        )
+        arms = {arm["id"]: arm for arm in plan["arms"]}
+        self.assertEqual(
+            arms["state"]["config_identity"]["mcp"]["state_response_mode"],
+            "auto",
+        )
+        self.assertNotIn(
+            "state_response_mode",
+            arms["no-state"]["config_identity"]["mcp"],
         )
         report = build_native_report(plan, [
             _row(plan, "state", 1),

@@ -120,6 +120,14 @@ def post_action_state_call_contract(arm: str) -> list[dict[str, Any]]:
         }
         for item in CALL_CONTRACT
     ]
+
+
+def post_action_state_response_mode(arm: str) -> str | None:
+    if arm not in POST_ACTION_STATE_ARMS:
+        raise CubError("post-action state arm must be state or no-state")
+    return "auto" if arm == "state" else None
+
+
 DELIVERY_TIERS = {
     "basic-controls": (
         "tier1-ax-action",
@@ -1363,7 +1371,8 @@ def _config_text(
     oracle_paths = [str(path) for path in _oracle_paths(task)]
     state_response_mode = (
         arm if mode == "state-ab"
-        else "auto" if mode == "post-action-state-ab"
+        else post_action_state_response_mode(arm)
+        if mode == "post-action-state-ab"
         else None
     )
     state_response_text = (
@@ -1599,7 +1608,8 @@ def generate(
                             config_root,
                             state_response_mode=(
                                 selected_arm if mode == "state-ab"
-                                else "auto" if mode == "post-action-state-ab"
+                                else post_action_state_response_mode(selected_arm)
+                                if mode == "post-action-state-ab"
                                 else None
                             ),
                             call_contract=(
