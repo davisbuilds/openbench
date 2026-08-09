@@ -43,7 +43,7 @@ class ComputerUseTasksTests(unittest.TestCase):
 
     def test_common_envelopes_and_native_sidecars_are_explicit(self):
         expected_revisions = {
-            "basic-controls": "2c5cc162e58f6486505c8c5fe87fd76980d0e6b9",
+            "basic-controls": "d2b345eeb96ad5d27f8200f4e6c40cba5d2010de",
             "background-control": "3516eca731d86a1e2f1a3fe203709ecb8940c3b3",
         }
         for name in (

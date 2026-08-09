@@ -6,7 +6,7 @@ harbor_execution_supported = false
 
 [fixture]
 repository = "computer-use-mcp"
-revision = "2c5cc162e58f6486505c8c5fe87fd76980d0e6b9"
+revision = "d2b345eeb96ad5d27f8200f4e6c40cba5d2010de"
 source = "Sources/ComputerUseFixture"
 process_name = "ComputerUseFixture"
 state_path_env = "COMPUTER_USE_FIXTURE_STATE_PATH"

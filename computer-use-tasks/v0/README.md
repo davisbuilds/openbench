@@ -13,7 +13,7 @@ judgment or screenshot is authoritative.
 
 Fixture contracts are pinned to `computer-use-mcp` commits:
 
-- `2c5cc162e58f6486505c8c5fe87fd76980d0e6b9` for basic controls.
+- `d2b345eeb96ad5d27f8200f4e6c40cba5d2010de` for basic controls.
 - `3516eca731d86a1e2f1a3fe203709ecb8940c3b3` for background controls.
 
 Run offline polarity validation with:
