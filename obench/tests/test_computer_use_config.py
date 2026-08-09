@@ -233,6 +233,51 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertNotIn("COMPUTER_USE_FIXTURE_SMALL_TREE", environments[0])
         self.assertEqual(environments[1]["COMPUTER_USE_FIXTURE_SMALL_TREE"], "1")
 
+    def test_setup_restarts_fixture_when_launch_profile_does_not_match(self):
+        arm = "auto"
+        task = "state-response-ab"
+        trial = 1
+        workspace = cub._workspace(self.run_root, arm, task, trial)
+        artifacts = workspace / "artifacts"
+        artifacts.mkdir(parents=True)
+        (artifacts / "fixture-state.json").write_text(
+            json.dumps({
+                "fixture": "basic-controls",
+                "honest_counter": 0,
+                "keystroke_echo": "",
+                "schema_version": 1,
+                "toggle_on": False,
+            }),
+            encoding="utf-8",
+        )
+        process = {"pid": 4321, "start_token": "fixture", "command": "fixture"}
+        state_path = cub._state_path(self.run_root, arm, task, trial)
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(
+            json.dumps({
+                "launch_profile": {"fixture_small_tree": False, "task": task},
+                "processes": [process],
+                "schema_version": cub.PROCESS_SCHEMA,
+            }),
+            encoding="utf-8",
+        )
+
+        def reset(*_args):
+            cub.shutil.rmtree(workspace)
+            state_path.unlink()
+
+        with (
+            mock.patch.object(cub, "_process_identity", return_value=process),
+            mock.patch.object(cub, "reset_runtime", side_effect=reset) as reset_mock,
+            mock.patch.object(cub, "_launch", return_value=process),
+            mock.patch.object(cub, "_wait_for_frontmost"),
+        ):
+            cub.setup(self.request, arm, task, trial)
+
+        reset_mock.assert_called_once()
+        saved = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["launch_profile"], cub._launch_profile(task))
+
     def test_static_preflight_does_not_create_run_root(self):
         request = cub._load_request(self.request)
         with (

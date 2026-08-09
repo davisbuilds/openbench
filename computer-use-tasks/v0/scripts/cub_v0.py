@@ -790,6 +790,13 @@ def _evidence(root: Path, arm: str, task: str, trial_index: int) -> Path:
     return descendant(root, f"runner-evidence/{task}/trial{trial_index}/{arm}")
 
 
+def _launch_profile(task: str) -> dict[str, Any]:
+    return {
+        "fixture_small_tree": task == "state-response-ab",
+        "task": task,
+    }
+
+
 def _result_paths(
     root: Path, mode: str, arm: str, task: str, trial_index: int
 ) -> tuple[Path, Path]:
@@ -895,13 +902,14 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
     request = _load_request(request_path)
     root, _repo, _installed = _request_paths(request)
     state_path = _state_path(root, arm, task, trial_index)
+    launch_profile = _launch_profile(task)
     if state_path.is_file():
         try:
             state = json.loads(state_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             state = {}
         records = state.get("processes") if state.get("schema_version") == PROCESS_SCHEMA else None
-        if isinstance(records, list) and records and all(
+        if state.get("launch_profile") == launch_profile and isinstance(records, list) and records and all(
             _process_identity(record.get("pid")) == record for record in records
         ) and _initial_state_ready(root, arm, task, trial_index):
             return 0
@@ -918,7 +926,11 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
     def remember(record: dict[str, Any]) -> None:
         processes.append(record)
         state_path.write_text(
-            _canonical({"schema_version": PROCESS_SCHEMA, "processes": processes}) + "\n",
+            _canonical({
+                "launch_profile": launch_profile,
+                "processes": processes,
+                "schema_version": PROCESS_SCHEMA,
+            }) + "\n",
             encoding="utf-8",
         )
 
