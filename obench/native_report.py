@@ -113,6 +113,26 @@ def _number(value: Any) -> float | None:
     return None
 
 
+def _is_perception_capture(metric: Mapping[str, Any]) -> bool:
+    """Distinguish a real capture from the MCP's explicit no-state sentinel."""
+    if metric.get("response_encoding") != "none":
+        return True
+    zero_fields = (
+        "elements_returned",
+        "elements_visited",
+        "perception_ms",
+        "screenshot_png_bytes",
+        *_PERCEPTION_PHASE_FIELDS,
+    )
+    if (
+        metric.get("tool") != "state_result"
+        or metric.get("partial") is not False
+        or any(_number(metric.get(field)) != 0 for field in zero_fields)
+    ):
+        raise NativeReportError("no-state perception sentinel is malformed")
+    return False
+
+
 def _percentile(values: Sequence[float], percentile: float) -> float | None:
     """Nearest-rank percentile, preserving observed tail values."""
     ordered = sorted(float(value) for value in values)
@@ -772,6 +792,7 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         raise NativeReportError("MCP call duration is malformed")
 
     operation_metrics = []
+    response_metrics = []
     perception_metrics = []
     for call in calls:
         meta = call.get("computer_use_meta")
@@ -781,7 +802,10 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         if isinstance(metrics.get("operation"), Mapping):
             operation_metrics.append(metrics["operation"])
         if isinstance(metrics.get("perception"), Mapping):
-            perception_metrics.append(metrics["perception"])
+            response_metric = metrics["perception"]
+            response_metrics.append(response_metric)
+            if _is_perception_capture(response_metric):
+                perception_metrics.append(response_metric)
     mcp_identity = observation.row["candidate_provenance"]["mcp_identity"]
     call_contract = mcp_identity.get("call_contract")
     if call_contract:
@@ -793,9 +817,10 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         ):
             meta = call.get("computer_use_meta")
             metrics = meta.get("metrics") if isinstance(meta, Mapping) else None
+            perception = metrics.get("perception") if isinstance(metrics, Mapping) else None
             has_perception = (
-                isinstance(metrics, Mapping)
-                and isinstance(metrics.get("perception"), Mapping)
+                isinstance(perception, Mapping)
+                and _is_perception_capture(perception)
             )
             expects_perception = (
                 expected.get("tool") == "get_app_state"
@@ -828,7 +853,7 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
             encodings[str(metric["response_encoding"])] += 1
 
     def total_metric(field: str) -> int | None:
-        values = [_number(metric.get(field)) for metric in perception_metrics]
+        values = [_number(metric.get(field)) for metric in response_metrics]
         present = [value for value in values if value is not None]
         if present and len(present) != len(values):
             raise NativeReportError(f"perception {field} is only partially measured")

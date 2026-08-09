@@ -669,7 +669,12 @@ class NativeReportTests(unittest.TestCase):
             "response_bytes": 100,
         })
         get_state["computer_use_meta"]["metrics"] = {
-            "perception": {"elapsed_ms": 90, "response_encoding": "full"},
+            "perception": {
+                "elapsed_ms": 90,
+                "response_encoding": "full",
+                "screenshot_png_bytes": 0,
+                "text_bytes": 60,
+            },
         }
         click = _call("click", 50.0)
         click.update({
@@ -694,6 +699,29 @@ class NativeReportTests(unittest.TestCase):
         ][0]
         self.assertEqual(trial["mcp_detail_ms"]["perception_time_ms"], 90.0)
         self.assertEqual(trial["mcp_detail_ms"]["queue_time_ms"], 5.0)
+        self.assertEqual(trial["response_encoding_counts"], {"full": 1})
+
+        click["computer_use_meta"]["metrics"]["perception"] = {
+            "tool": "state_result",
+            "partial": False,
+            "response_encoding": "none",
+            "elements_returned": 0,
+            "elements_visited": 0,
+            "perception_ms": 0,
+            "screenshot_png_bytes": 0,
+            "settle_ms": 0,
+            "screenshot_ms": 0,
+            "snapshot_ms": 0,
+            "verification_ms": 0,
+            "response_construction_ms": 0,
+            "other_ms": 0,
+            "text_bytes": 40,
+        }
+        trial = _aggregate_observations([observation])["attribution"][
+            "trial_totals"
+        ][0]
+        self.assertEqual(trial["mcp_detail_ms"]["perception_time_ms"], 90.0)
+        self.assertEqual(trial["bytes"]["text_bytes"], 100)
         self.assertEqual(trial["response_encoding_counts"], {"full": 1})
 
         get_state["computer_use_meta"].pop("metrics")
