@@ -66,15 +66,26 @@ def _require_stable_bundle(app: Path) -> dict[str, Any]:
     return identity
 
 
-def _install(source: Path, destination: Path) -> None:
-    if destination.exists():
-        shutil.rmtree(destination)
+def _copy_bundle(source: Path, destination: Path) -> None:
     subprocess.run(
         ["ditto", str(source), str(destination)],
         stdin=subprocess.DEVNULL,
         check=True,
         timeout=60,
     )
+
+
+def _install(source: Path, destination: Path) -> None:
+    if not destination.is_dir() or destination.is_symlink():
+        raise ExperimentError(
+            f"authorized runtime app must remain an existing directory: {destination}"
+        )
+    for child in destination.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    _copy_bundle(source, destination)
 
 
 def _daemon_lock_owners() -> list[int]:
@@ -666,9 +677,8 @@ def _restore_runtime_app(
     except BaseException as exc:
         cleanup_error = exc
     try:
-        if runtime_app.exists():
-            shutil.rmtree(runtime_app)
-        os.replace(backup, runtime_app)
+        _install(backup, runtime_app)
+        shutil.rmtree(backup)
     except BaseException as restore_error:
         if cleanup_error is not None:
             restore_error.add_note(f"daemon cleanup also failed: {cleanup_error}")
@@ -749,7 +759,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not runtime_app.is_dir():
         raise ExperimentError(f"runtime app is unavailable: {runtime_app}")
     _stop_daemon()
-    os.replace(runtime_app, backup)
+    _copy_bundle(runtime_app, backup)
     primary_error: BaseException | None = None
     try:
         plan, plan_path, _manifest_path, cells = _generate(

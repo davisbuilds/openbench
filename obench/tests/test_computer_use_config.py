@@ -250,6 +250,24 @@ class ComputerUseConfigTests(unittest.TestCase):
         )
         self.assertFalse(backup.exists())
 
+    def test_scoped_agent_ab_installs_in_place_without_replacing_authorized_app(self):
+        source = self.base / "source.app"
+        runtime_app = self.base / "runtime.app"
+        (source / "Contents").mkdir(parents=True)
+        (source / "Contents/new").write_text("new", encoding="utf-8")
+        (runtime_app / "Contents").mkdir(parents=True)
+        (runtime_app / "Contents/stale").write_text("stale", encoding="utf-8")
+        inode = runtime_app.stat().st_ino
+
+        scoped._install(source, runtime_app)
+
+        self.assertEqual(runtime_app.stat().st_ino, inode)
+        self.assertEqual(
+            (runtime_app / "Contents/new").read_text(encoding="utf-8"),
+            "new",
+        )
+        self.assertFalse((runtime_app / "Contents/stale").exists())
+
     def test_owned_process_cleanup_matches_pid_start_and_command(self):
         state = self.run_root / "runtime/processes.json"
         state.parent.mkdir(parents=True)
