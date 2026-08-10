@@ -513,6 +513,34 @@ raise SystemExit(result.returncode)
         self.assertTrue(result.integrity_ok)
         self.assertEqual(rows[0]["computer_use_meta"]["metrics"], metrics)
 
+    def test_accepts_scoped_outcome_response_encoding(self):
+        perception = {
+            "operation": "click",
+            "tool": "click",
+            "perception_ms": 41,
+            "settle_ms": 3,
+            "screenshot_ms": 0,
+            "snapshot_ms": 25,
+            "verification_ms": 2,
+            "response_construction_ms": 8,
+            "other_ms": 3,
+            "elements_visited": 120,
+            "elements_returned": 0,
+            "partial": False,
+            "response_encoding": "outcome",
+            "text_bytes": 384,
+            "screenshot_png_bytes": 0,
+        }
+        metrics = {"schema_version": 2, "perception": perception}
+        request = rpc(
+            "tools/call", 30, {"name": "click", "arguments": {"metrics": metrics}}
+        )
+        result, _, _, rows = self.run_fixture(
+            request, name="outcome-perception.jsonl"
+        )
+        self.assertTrue(result.integrity_ok)
+        self.assertEqual(rows[0]["computer_use_meta"]["metrics"], metrics)
+
     def test_call_contract_records_only_required_argument_projection(self):
         contract = [{
             "tool": "click",

@@ -148,7 +148,7 @@ STATE_RESPONSE_MODE_TOOLS = frozenset({
     "set_value",
     "type_text",
 })
-RESPONSE_ENCODINGS = frozenset({"none", "unchanged", "diff", "full"})
+RESPONSE_ENCODINGS = frozenset({"none", "unchanged", "diff", "full", "outcome"})
 OUTCOME_VERIFICATION_FLAGS = frozenset({
     "target_relocated",
     "before_selected",
