@@ -58,7 +58,7 @@ def _task_identity(request_path: Path, request: Mapping[str, Any]) -> dict[str, 
         ],
     }
     return {
-        "name": "openbench/computer-use-v0-diff-full-agent-ab",
+        "name": f"openbench/computer-use-v0-{TASK}",
         "content_sha256": _canonical_digest(task_content),
     }
 

@@ -245,6 +245,9 @@ class ComputerUseConfigTests(unittest.TestCase):
                 experiment_id="diff-full-test",
             )
         self.assertEqual(len(cells), 4)
+        self.assertEqual({
+            arm["config_identity"]["task"]["name"] for arm in plan["arms"]
+        }, {"openbench/computer-use-v0-state-response-ab"})
         self.assertEqual({cell["arm_id"] for cell in cells}, {"auto", "full"})
         self.assertEqual({cell["binary_sha256"] for cell in cells}, {"a" * 64})
         self.assertEqual(len({cell["source_revision"] for cell in cells}), 1)
