@@ -202,7 +202,7 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertNotIn("exactly these", prompt)
         self.assertNotIn("state_response_mode", prompt)
         diff_full._validate_arm_encodings("auto", {"full": 1, "diff": 3})
-        diff_full._validate_arm_encodings("full", {"full": 4})
+        diff_full._validate_arm_encodings("full", {"full": 4, "unchanged": 1})
         with self.assertRaisesRegex(diff_full.ExperimentError, "never exercised"):
             diff_full._validate_arm_encodings("auto", {"full": 4})
         with self.assertRaisesRegex(diff_full.ExperimentError, "non-full"):

@@ -76,7 +76,7 @@ def _validate_arm_encodings(arm: str, counts: Mapping[str, int]) -> None:
         unexpected = {
             encoding: count
             for encoding, count in counts.items()
-            if encoding not in {"full", "none"} and count
+            if encoding not in {"full", "none", "unchanged"} and count
         }
         if unexpected:
             raise ExperimentError(
