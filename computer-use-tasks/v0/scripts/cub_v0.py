@@ -1359,9 +1359,14 @@ def _config_text(
     instruction_path = instruction_path or task_dir / "instruction.md"
     script = Path(__file__).resolve()
     common = [sys.executable, str(script), "--request", str(request_path)]
-    setup_cmd = [*common, "setup"]
-    reset_cmd = [*common, "reset"]
-    verify_cmd = [*common, "verify"]
+    coordinates = [
+        "--arm", arm,
+        "--task", task,
+        "--trial-index", str(trial_index),
+    ]
+    setup_cmd = [*common, "setup", *coordinates]
+    reset_cmd = [*common, "reset", *coordinates]
+    verify_cmd = [*common, "verify", *coordinates]
     if task in {"basic-controls", *EXPERIMENT_TASKS}:
         foreground = FIXTURE_BUNDLES[task]
         forbidden: list[str] = []

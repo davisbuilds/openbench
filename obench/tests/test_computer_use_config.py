@@ -810,7 +810,15 @@ class ComputerUseConfigTests(unittest.TestCase):
                     expected_artifact_source,
                 )
                 command = parsed["phases"]["setup"]["command"]
-                self.assertEqual(command[-1], "setup")
+                self.assertEqual(
+                    command[-7:],
+                    [
+                        "setup",
+                        "--arm", cell["arm_id"],
+                        "--task", cell["task"],
+                        "--trial-index", str(cell["trial_index"]),
+                    ],
+                )
                 setup_commands.add(tuple(command))
                 loaded = load_config(path)
                 self.assertEqual(loaded.trial_id, cell["trial_id"])
@@ -846,7 +854,7 @@ class ComputerUseConfigTests(unittest.TestCase):
             matrix_cell_keys,
         ):
             self.assertEqual(len(paths), 30)
-        self.assertEqual(len(setup_commands), 1)
+        self.assertEqual(len(setup_commands), 30)
 
         before = {
             path: path.read_bytes()
