@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import select
 import signal
 import shutil
 import socket
@@ -174,6 +175,95 @@ class ComputerUseHealth:
     accessibility: PermissionEvidence
     screen_recording: PermissionEvidence
     capture_status: str
+
+
+_DAEMON_READY_SUMMARY = (
+    "Health report is ready: permissions and capture health are verified."
+)
+
+
+def _daemon_health_ready(
+    computer_use_binary: str,
+    *,
+    timeout_s: float,
+) -> bool:
+    """Ask an existing app-context daemon for its effective TCC health."""
+
+    socket_path = Path.home() / "Library/Caches/computer-use-mcp/daemon.sock"
+    if not socket_path.exists() or socket_path.is_symlink():
+        return False
+    process: subprocess.Popen[str] | None = None
+    try:
+        process = subprocess.Popen(
+            [computer_use_binary, "serve"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        if process.stdin is None or process.stdout is None:
+            return False
+
+        def exchange(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+            process.stdin.write(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+            )
+            process.stdin.flush()
+            readable, _, _ = select.select([process.stdout], [], [], timeout_s)
+            if not readable:
+                return None
+            value = json.loads(process.stdout.readline())
+            return value if isinstance(value, dict) else None
+
+        initialized = exchange({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "openbench-preflight", "version": "1"},
+            },
+        })
+        if not initialized or initialized.get("id") != 1:
+            return False
+        process.stdin.write(
+            '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n'
+        )
+        process.stdin.flush()
+        response = exchange({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "health_report",
+                "arguments": {"probe_capture_service": True},
+            },
+        })
+        if not response or response.get("id") != 2:
+            return False
+        result = response.get("result")
+        if not isinstance(result, dict) or result.get("isError") is True:
+            return False
+        content = result.get("content")
+        return (
+            isinstance(content, list)
+            and len(content) == 1
+            and isinstance(content[0], dict)
+            and content[0].get("type") == "text"
+            and content[0].get("text") == _DAEMON_READY_SUMMARY
+        )
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError):
+        return False
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=1)
 
 
 def _object(value: Any, field_name: str) -> Mapping[str, Any]:
@@ -744,6 +834,7 @@ def run_preflight(
     session_reader: SessionReader | None = None,
     helper_resolver: NativeMacOSHelperResolver | None = None,
     platform_reader: Callable[[], str] = platform.system,
+    daemon_health_probe: Callable[[str, float], bool] | None = None,
     timeout_s: float = 15.0,
 ) -> PreflightResult:
     """Collect and evaluate non-mutating native macOS preflight evidence."""
@@ -784,6 +875,23 @@ def run_preflight(
             f"health report exited {completed.returncode}: {detail}"
         )
     health = parse_health_report_json(completed.stdout)
+    probe_daemon = daemon_health_probe or (
+        lambda binary, timeout: _daemon_health_ready(binary, timeout_s=timeout)
+    )
+    if (
+        not health.accessibility.granted
+        or not health.screen_recording.granted
+        or health.capture_status != "responsive"
+    ) and probe_daemon(computer_use_binary, timeout_s):
+        health = ComputerUseHealth(
+            report_version=health.report_version,
+            version=health.version,
+            executable_path=health.executable_path,
+            bundle_identifier=health.bundle_identifier,
+            accessibility=PermissionEvidence(granted=True, status="granted"),
+            screen_recording=PermissionEvidence(granted=True, status="granted"),
+            capture_status="responsive",
+        )
     if spec.required_apps:
         inspector = app_inspector or MacOSAppInspector(
             helper_path, command_runner=command_runner  # type: ignore[arg-type]

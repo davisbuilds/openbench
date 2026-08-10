@@ -236,39 +236,38 @@ def _validate_daemon_identity(
     }
 
 
-def _start_exact_daemon(identity: Mapping[str, Any]) -> tuple[subprocess.Popen[bytes], dict[str, Any]]:
+def _start_exact_daemon(identity: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
     if _daemon_lock_owners() or DAEMON_SOCKET.exists():
         raise ExperimentError("cannot start an exact daemon while another daemon is present")
     executable = Path(str(identity["executable"]))
-    process = subprocess.Popen(
-        [str(executable), "daemon"],
+    app = executable.parents[2]
+    opened = subprocess.run(
+        ["open", "-na", str(app), "--args", "daemon"],
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=DAEMON_TIMEOUT_SECONDS,
     )
+    if opened.returncode != 0:
+        raise ExperimentError(
+            f"LaunchServices could not start the exact daemon: {opened.stderr.strip()}"
+        )
     deadline = time.monotonic() + DAEMON_TIMEOUT_SECONDS
-    try:
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise ExperimentError("exact daemon exited during startup")
-            if DAEMON_SOCKET.exists():
-                observed = _daemon_hello()
-                return process, _validate_daemon_identity(
-                    observed,
-                    executable=executable,
-                    binary_sha256=str(identity["binary_sha256"]),
-                    pid=process.pid,
-                )
-            time.sleep(0.05)
-    except Exception:
-        if process.poll() is None:
-            process.terminate()
-            process.wait(timeout=5)
-        raise
-    process.terminate()
-    process.wait(timeout=5)
-    raise ExperimentError("exact daemon did not become ready")
+    while time.monotonic() < deadline:
+        owners = _daemon_lock_owners()
+        if DAEMON_SOCKET.exists() and len(owners) == 1:
+            pid = owners[0]
+            observed = _daemon_hello()
+            return pid, _validate_daemon_identity(
+                observed,
+                executable=executable,
+                binary_sha256=str(identity["binary_sha256"]),
+                pid=pid,
+            )
+        time.sleep(0.05)
+    _stop_daemon()
+    raise ExperimentError("exact app-context daemon did not become ready")
 
 
 def _response_encodings(bundle: Path) -> dict[str, int]:
@@ -627,7 +626,7 @@ def _run_cells(
         runtime_identity = cub._bundle_info(runtime_app)
         if runtime_identity["binary_sha256"] != cell["binary_sha256"]:
             raise ExperimentError(f"runtime binary mismatch before {cell['trial_id']}")
-        daemon_process, daemon_identity = _start_exact_daemon(runtime_identity)
+        _daemon_pid, daemon_identity = _start_exact_daemon(runtime_identity)
         print(f"RUN {cell['sequence']}: {arm} block={cell['block']}", flush=True)
         try:
             daemon_evidence = Path(str(cell["daemon_evidence"]))
@@ -659,7 +658,6 @@ def _run_cells(
         finally:
             try:
                 _stop_daemon()
-                daemon_process.wait(timeout=DAEMON_TIMEOUT_SECONDS)
             finally:
                 Path(str(cell["daemon_evidence"])).unlink(missing_ok=True)
     return bundles

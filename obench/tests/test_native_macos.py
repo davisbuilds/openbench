@@ -216,6 +216,37 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(kwargs["timeout"], 7)
         self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
 
+    def test_runner_uses_app_context_daemon_when_ssh_tcc_is_denied(self):
+        direct = health_report(
+            permissions={
+                "accessibility": {"granted": False, "status": "not_granted"},
+                "screenRecording": {"granted": False, "status": "not_granted"},
+            },
+            captureService={"status": "skipped"},
+        )
+        probes = []
+
+        def command_runner(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, json.dumps(direct), "")
+
+        result = run_preflight(
+            PreflightSpec(
+                computer_use_version="0.3.0",
+                computer_use_bundle_identifier="com.example.computer-use",
+                require_unlocked_screen=False,
+            ),
+            command_runner=command_runner,
+            platform_reader=lambda: "Darwin",
+            daemon_health_probe=lambda binary, timeout: (
+                probes.append((binary, timeout)) or True
+            ),
+            timeout_s=7,
+        )
+
+        self.assertTrue(result.passed)
+        self.assertEqual(probes, [("computer-use-mcp", 7)])
+        self.assertEqual(result.health.executable_path, "/opt/bin/computer-use-mcp")
+
     def test_runner_raises_on_command_failure(self):
         def command_runner(argv, **kwargs):
             return subprocess.CompletedProcess(argv, 4, "", "unavailable")

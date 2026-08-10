@@ -202,6 +202,44 @@ class ComputerUseConfigTests(unittest.TestCase):
                 pid=4321,
             )
 
+    def test_scoped_agent_ab_starts_exact_daemon_through_launchservices(self):
+        app = self.base / "OpenBench Computer Use MCP Source.app"
+        executable = app / "Contents/MacOS/computer-use-mcp"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"exact daemon")
+        daemon_socket = self.base / "daemon.sock"
+        observed = {
+            "authenticated": True,
+            "buildStamp": executable.stat().st_mtime,
+            "daemonIncarnationID": "incarnation-1",
+            "version": cub.MCP_VERSION,
+        }
+        launched = subprocess.CompletedProcess([], 0, "", "")
+
+        def launch(*args, **kwargs):
+            daemon_socket.touch()
+            return launched
+
+        with (
+            mock.patch.object(scoped, "DAEMON_SOCKET", daemon_socket),
+            mock.patch.object(
+                scoped, "_daemon_lock_owners", side_effect=[[], [4321], [4321]]
+            ),
+            mock.patch.object(scoped, "_daemon_hello", return_value=observed),
+            mock.patch.object(scoped.subprocess, "run", side_effect=launch) as run,
+        ):
+            pid, identity = scoped._start_exact_daemon({
+                "executable": str(executable),
+                "binary_sha256": scoped._sha256(executable),
+            })
+
+        self.assertEqual(pid, 4321)
+        self.assertEqual(identity["incarnation_id"], "incarnation-1")
+        self.assertEqual(
+            run.call_args.args[0],
+            ["open", "-na", str(app), "--args", "daemon"],
+        )
+
     def test_scoped_agent_ab_removes_only_an_unowned_unix_socket(self):
         daemon_socket = self.base / "daemon.sock"
         listener = scoped.socket.socket(scoped.socket.AF_UNIX, scoped.socket.SOCK_STREAM)
