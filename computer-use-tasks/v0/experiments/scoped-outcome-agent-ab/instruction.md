@@ -13,3 +13,5 @@ Finish with this visible application state:
 Choose the computer-use tools and arguments yourself. Stop when you believe
 the requested state is complete. An external checker judges the fixture-owned
 state; tool self-reports and screenshots are not authoritative.
+
+Use each tool's default response behavior; do not set `state_response_mode`.
