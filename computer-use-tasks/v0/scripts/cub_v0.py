@@ -55,6 +55,8 @@ MATCHED_TASKS = tuple(task for task in TASKS if task not in EXPERIMENT_TASKS)
 ARMS = ("installed", "source")
 POST_ACTION_STATE_ARMS = ("state", "no-state")
 STATE_RESPONSE_ARMS = ("auto", "full")
+SCOPED_AGENT_ARMS = ("baseline", "scoped")
+RUNTIME_ARMS = (*ARMS, *POST_ACTION_STATE_ARMS, *STATE_RESPONSE_ARMS, *SCOPED_AGENT_ARMS)
 CALL_CONTRACT = (
     {"tool": "get_app_state", "required_arguments": {
         "app": "org.openbench.ComputerUseFixture.v0", "include_screenshot": False,
@@ -241,7 +243,7 @@ def _runtime_coordinates(
         or not task_id.startswith(task_prefix)
         or collector_id not in {
             f"cub-v0-{item}-mcp"
-            for item in (*ARMS, *POST_ACTION_STATE_ARMS, *STATE_RESPONSE_ARMS)
+            for item in RUNTIME_ARMS
         }
     ):
         raise CubError("runtime coordinates are absent from explicit args/native env")
@@ -1845,7 +1847,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     for name in ("setup", "reset", "verify"):
         item = sub.add_parser(name)
-        item.add_argument("--arm", choices=ARMS)
+        item.add_argument("--arm", choices=RUNTIME_ARMS)
         item.add_argument("--task", choices=TASKS)
         item.add_argument(
             "--trial-index",
