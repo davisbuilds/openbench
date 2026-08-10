@@ -734,7 +734,7 @@ class NativeReportTests(unittest.TestCase):
         ):
             _aggregate_observations([observation])
 
-    def test_attribution_rejects_same_source_overlap(self):
+    def test_attribution_uses_interval_unions_for_same_source_overlap(self):
         plan = _plan(repetitions=1)
         row = _row(plan, "baseline", 1)
         with self.subTest(kind="model"):
@@ -749,10 +749,13 @@ class NativeReportTests(unittest.TestCase):
                 result_sha256="b" * 64,
                 row_sha256="c" * 64,
             )
-            with self.assertRaisesRegex(
-                NativeReportError, "sealed model request intervals overlap"
-            ):
-                _aggregate_observations([observation])
+            trial = _aggregate_observations([observation])["attribution"][
+                "trial_totals"
+            ][0]
+            self.assertEqual(trial["observed_time_ms"]["model_request_ms"], 150.0)
+            self.assertEqual(
+                trial["same_source_overlap"]["model_request_ms"], 50.0
+            )
 
         with self.subTest(kind="mcp"):
             observation = _Observation(
@@ -766,10 +769,11 @@ class NativeReportTests(unittest.TestCase):
                 result_sha256="b" * 64,
                 row_sha256="c" * 64,
             )
-            with self.assertRaisesRegex(
-                NativeReportError, "sealed MCP call intervals overlap"
-            ):
-                _aggregate_observations([observation])
+            trial = _aggregate_observations([observation])["attribution"][
+                "trial_totals"
+            ][0]
+            self.assertEqual(trial["observed_time_ms"]["mcp_call_ms"], 150.0)
+            self.assertEqual(trial["same_source_overlap"]["mcp_call_ms"], 50.0)
 
     def test_attribution_sums_distinct_cross_source_intersections(self):
         plan = _plan(repetitions=1)

@@ -719,6 +719,21 @@ def _model_categories(
     )
 
 
+def _merge_intervals(
+    intervals: Sequence[tuple[int, int, str]],
+) -> tuple[list[tuple[int, int, str]], int]:
+    merged: list[tuple[int, int, str]] = []
+    overlap_ns = 0
+    for start, end, label in sorted(intervals):
+        if not merged or start >= merged[-1][1]:
+            merged.append((start, end, label))
+            continue
+        prior_start, prior_end, prior_label = merged[-1]
+        overlap_ns += max(0, min(prior_end, end) - start)
+        merged[-1] = (prior_start, max(prior_end, end), f"{prior_label}+{label}")
+    return merged, overlap_ns
+
+
 def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
     if observation.mcp_calls is None or observation.proxy_requests is None:
         return None
@@ -732,6 +747,7 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         and 200 <= request["status"] < 400
     ]
     intervals_by_kind: dict[str, list[tuple[int, int, str]]] = {}
+    same_source_overlap_ns: dict[str, int] = {}
     for kind, records in (("model request", successful_usage), ("MCP call", calls)):
         intervals: list[tuple[int, int, str]] = []
         for index, record in enumerate(records, 1):
@@ -745,14 +761,9 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
             ):
                 raise NativeReportError(f"{kind} interval is malformed")
             intervals.append((start, end, f"{kind} {index}"))
-        intervals.sort()
-        for previous, current in zip(intervals, intervals[1:]):
-            if current[0] < previous[1]:
-                raise NativeReportError(
-                    f"sealed {kind} intervals overlap: "
-                    f"{previous[2]} and {current[2]}"
-                )
-        intervals_by_kind[kind] = intervals
+        merged, overlap_ns = _merge_intervals(intervals)
+        intervals_by_kind[kind] = merged
+        same_source_overlap_ns[kind] = overlap_ns
 
     model_intervals = intervals_by_kind["model request"]
     mcp_intervals = intervals_by_kind["MCP call"]
@@ -782,6 +793,13 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
             raise NativeReportError("model request timing is malformed")
         model_request_time_ms += duration
         model_api_time_ms += duration - paced
+    model_same_source_overlap_ms = (
+        same_source_overlap_ns["model request"] / 1_000_000
+    )
+    model_request_time_ms = max(
+        0.0, model_request_time_ms - model_same_source_overlap_ms
+    )
+    model_api_time_ms = max(0.0, model_api_time_ms - model_same_source_overlap_ms)
     paced_wait_values = [
         _number(request.get("paced_wait_ms")) for request in successful_usage
     ]
@@ -863,7 +881,12 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
     if any(value is None for value in response_values):
         raise NativeReportError("MCP response wire size is malformed")
     paced_wait_ms = sum(value for value in paced_wait_values if value is not None)
-    mcp_time_ms = sum(value for value in call_durations if value is not None)
+    mcp_same_source_overlap_ms = same_source_overlap_ns["MCP call"] / 1_000_000
+    mcp_time_ms = max(
+        0.0,
+        sum(value for value in call_durations if value is not None)
+        - mcp_same_source_overlap_ms,
+    )
     agent_time_ms = float(observation.row["t_agent_s"]) * 1000.0
     overlap_total_ms = overlap_total_ns / 1_000_000
     max_pair_overlap_ms = max_pair_overlap_ns / 1_000_000
@@ -889,6 +912,10 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
             "total_ms": overlap_total_ms,
             "interval_pair_count": overlap_pair_count,
             "max_pair_ms": max_pair_overlap_ms,
+        },
+        "same_source_overlap": {
+            "model_request_ms": model_same_source_overlap_ms,
+            "mcp_call_ms": mcp_same_source_overlap_ms,
         },
         "exclusive_partition": {
             "available": residual is not None,
