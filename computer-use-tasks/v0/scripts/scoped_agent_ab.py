@@ -53,6 +53,115 @@ def _install(source: Path, destination: Path) -> None:
     )
 
 
+def _archive_sha256(repo: Path, revision: str) -> str:
+    completed = subprocess.run(
+        ["git", "archive", "--format=tar", revision],
+        cwd=repo,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode(errors="replace").strip()
+        raise ExperimentError(f"cannot archive source commit {revision}: {detail}")
+    return hashlib.sha256(completed.stdout).hexdigest()
+
+
+def _build_exact_app(
+    *,
+    root: Path,
+    repo: Path,
+    arm: str,
+    revision: str,
+    signing_identity: str,
+) -> tuple[Path, dict[str, Any]]:
+    resolved = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{revision}^{{commit}}"],
+        cwd=repo,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if resolved.returncode != 0:
+        raise ExperimentError(f"cannot resolve {arm} source revision {revision}")
+    source_revision = resolved.stdout.strip()
+    if source_revision != revision or len(source_revision) != 40:
+        raise ExperimentError(f"{arm} revision must be one exact full Git commit SHA")
+
+    build_root = cub.descendant(root, f"experiment-builds/scoped-agent-ab/{source_revision}")
+    source_tree = build_root / "source"
+    apps = build_root / "apps"
+    app = apps / "OpenBench Computer Use MCP Source.app"
+    provenance_path = build_root / "provenance.json"
+    archive_sha256 = _archive_sha256(repo, source_revision)
+
+    if provenance_path.is_file():
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        if not app.is_dir():
+            raise ExperimentError(f"{arm} cached build is missing its app bundle")
+        identity = cub._bundle_info(app)
+        expected = {
+            "arm": arm,
+            "source_revision": source_revision,
+            "source_archive_sha256": archive_sha256,
+            "binary_sha256": identity["binary_sha256"],
+            "bundle_id": cub.SOURCE_MCP_BUNDLE_ID,
+        }
+        if any(provenance.get(key) != value for key, value in expected.items()):
+            raise ExperimentError(f"{arm} cached build provenance does not match")
+        return app, provenance
+
+    cub._extract_revision(repo, source_revision, source_tree)
+    apps.mkdir(parents=True, exist_ok=True)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(source_tree / "scripts/build_app_bundle.py"),
+            "--app-name",
+            "OpenBench Computer Use MCP Source",
+            "--bundle-id",
+            cub.SOURCE_MCP_BUNDLE_ID,
+            "--configuration",
+            "release",
+            "--identity",
+            signing_identity,
+            "--install",
+            str(apps),
+        ],
+        cwd=source_tree,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=1800,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise ExperimentError(f"failed to build {arm} revision {source_revision}: {detail}")
+    try:
+        build_result = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise ExperimentError(f"{arm} build did not return JSON provenance") from exc
+    if Path(str(build_result.get("installed_bundle"))).resolve() != app.resolve():
+        raise ExperimentError(f"{arm} build installed an unexpected app bundle")
+
+    identity = cub._bundle_info(app)
+    provenance = {
+        "schema_version": "openbench.computer-use-exact-build.v1",
+        "arm": arm,
+        "source_revision": source_revision,
+        "source_archive_sha256": archive_sha256,
+        "binary_sha256": identity["binary_sha256"],
+        "bundle_id": identity["bundle_id"],
+        "designated_requirement": identity["designated_requirement"],
+    }
+    cub._write_immutable_outputs(
+        {provenance_path: canonical_bytes(provenance) + b"\n"}
+    )
+    return app, provenance
+
+
 def _task_identity(request_path: Path, request: Mapping[str, Any]) -> dict[str, Any]:
     root, _repo, _installed = cub._request_paths(request)
     verifier_command = [
@@ -91,6 +200,7 @@ def _generate(
     runtime_app: Path,
     repetitions: int,
     experiment_id: str,
+    build_provenance: Mapping[str, Mapping[str, Any]],
 ) -> tuple[dict[str, Any], Path, Path, list[dict[str, Any]]]:
     root, _repo, _installed = cub._request_paths(request)
     config_root = cub.descendant(root, f"configs/{experiment_id}")
@@ -106,7 +216,7 @@ def _generate(
         identity["source_revision"] = revisions[arm]
         runtime_identities[arm] = identity
         mcp_plan_identities[arm] = cub._mcp_plan_identity(
-            identity, arm, config_root
+            identity, arm, config_root, state_response_mode="auto"
         )
 
     host = cub._host_environment()
@@ -170,6 +280,7 @@ def _generate(
                 "plan": plan_path,
             },
             instruction_path=PROMPT,
+            locked_state_response_mode="auto",
         ).encode("utf-8")
         outputs[config_path] = config_bytes
         output_path, results_path = cub._result_paths(
@@ -213,6 +324,9 @@ def _generate(
         "arms": {
             arm: {
                 "source_revision": revisions[arm],
+                "source_archive_sha256": build_provenance[arm][
+                    "source_archive_sha256"
+                ],
                 "binary_sha256": runtime_identities[arm]["binary_sha256"],
             }
             for arm in ARMS
@@ -250,8 +364,6 @@ def _run_cells(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request", required=True, type=Path)
-    parser.add_argument("--baseline-app", required=True, type=Path)
-    parser.add_argument("--scoped-app", required=True, type=Path)
     parser.add_argument("--runtime-app", required=True, type=Path)
     parser.add_argument(
         "--baseline-revision",
@@ -274,16 +386,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             "experiment-id must contain only lowercase letters, numbers, and hyphens"
         )
     request = cub._load_request(args.request)
-    root, _repo, _installed = cub._request_paths(request)
+    root, repo, _installed = cub._request_paths(request)
     runtime_app = args.runtime_app.expanduser().resolve()
     cub.descendant(root, runtime_app)
-    staged_apps = {
-        "baseline": args.baseline_app.expanduser().resolve(),
-        "scoped": args.scoped_app.expanduser().resolve(),
+    signing_identity = request.get("source_signing_identity")
+    if not isinstance(signing_identity, str) or not signing_identity or signing_identity == "-":
+        raise ExperimentError("source_signing_identity must be a stable signing identity")
+    revisions = {
+        "baseline": args.baseline_revision,
+        "scoped": args.scoped_revision,
     }
-    for arm, app in staged_apps.items():
-        if not app.is_dir():
-            raise ExperimentError(f"{arm} app is unavailable: {app}")
+    staged_apps: dict[str, Path] = {}
+    build_provenance: dict[str, dict[str, Any]] = {}
+    for arm in ARMS:
+        app, provenance = _build_exact_app(
+            root=root,
+            repo=repo,
+            arm=arm,
+            revision=revisions[arm],
+            signing_identity=signing_identity,
+        )
+        staged_apps[arm] = app
+        build_provenance[arm] = provenance
     backup = runtime_app.with_name(runtime_app.name + ".scoped-agent-ab-backup")
     if backup.exists():
         raise ExperimentError(f"stale runtime backup requires inspection: {backup}")
@@ -295,13 +419,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             request_path=args.request,
             request=request,
             staged_apps=staged_apps,
-            revisions={
-                "baseline": args.baseline_revision,
-                "scoped": args.scoped_revision,
-            },
+            revisions=revisions,
             runtime_app=runtime_app,
             repetitions=args.repetitions,
             experiment_id=args.experiment_id,
+            build_provenance=build_provenance,
         )
         bundles = _run_cells(
             cells=cells,

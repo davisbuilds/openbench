@@ -1351,6 +1351,7 @@ def _config_text(
     app: Mapping[str, Any], host: Mapping[str, Any], mode: str,
     matrix: Mapping[str, Any] | None,
     instruction_path: Path | None = None,
+    locked_state_response_mode: str | None = None,
 ) -> str:
     trial_index = _positive_trial_index(trial_index)
     root, _repo, _installed = _request_paths(request)
@@ -1384,7 +1385,9 @@ def _config_text(
     } - set(tools))
     oracle_paths = [str(path) for path in _oracle_paths(task)]
     state_response_mode = (
-        arm if mode == "state-ab"
+        locked_state_response_mode
+        if locked_state_response_mode is not None
+        else arm if mode == "state-ab"
         else post_action_state_response_mode(arm)
         if mode == "post-action-state-ab"
         else None

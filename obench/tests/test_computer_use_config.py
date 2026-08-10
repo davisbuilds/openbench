@@ -23,6 +23,9 @@ from obench.native_run import NativeRunError, load_config
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "computer-use-tasks/v0/scripts/cub_v0.py"
+SCOPED_AGENT_AB_SCRIPT = (
+    ROOT / "computer-use-tasks/v0/scripts/scoped_agent_ab.py"
+)
 SPEC = importlib.util.spec_from_file_location("cub_v0", SCRIPT)
 cub = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -126,6 +129,30 @@ class ComputerUseConfigTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("Computer-Use Bench v0", completed.stdout)
+
+    def test_scoped_agent_ab_builds_revisions_instead_of_accepting_apps(self):
+        completed = subprocess.run(
+            [sys.executable, os.fspath(SCOPED_AGENT_AB_SCRIPT), "--help"],
+            cwd=self.base,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("--baseline-revision", completed.stdout)
+        self.assertIn("--scoped-revision", completed.stdout)
+        self.assertNotIn("--baseline-app", completed.stdout)
+        self.assertNotIn("--scoped-app", completed.stdout)
+        source = SCOPED_AGENT_AB_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('["git", "archive", "--format=tar", revision]', source)
+        self.assertIn("cub._extract_revision(repo, source_revision, source_tree)", source)
+        self.assertIn('locked_state_response_mode="auto"', source)
+        prompt = (
+            ROOT
+            / "computer-use-tasks/v0/experiments/scoped-outcome-agent-ab/instruction.md"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("toggle-box", prompt)
+        self.assertNotIn("state_response_mode", prompt)
 
     def test_owned_process_cleanup_matches_pid_start_and_command(self):
         state = self.run_root / "runtime/processes.json"
