@@ -157,6 +157,8 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertIn("_require_stable_bundle(app)", source)
         self.assertIn('build_result.get("signed")', source)
         self.assertIn('locked_state_response_mode="auto"', source)
+        self.assertIn("DAEMON_BUNDLE_PATH", source)
+        self.assertIn('source = {cub._toml_string(str(daemon_evidence))}', source)
         prompt = (
             ROOT
             / "computer-use-tasks/v0/experiments/scoped-outcome-agent-ab/instruction.md"
@@ -221,6 +223,32 @@ class ComputerUseConfigTests(unittest.TestCase):
         ):
             scoped._stop_daemon()
         self.assertTrue(regular_file.exists())
+
+    def test_scoped_agent_ab_restores_runtime_app_after_daemon_cleanup_failure(self):
+        runtime_app = self.base / "runtime.app"
+        backup = self.base / "runtime.app.scoped-agent-ab-backup"
+        runtime_app.mkdir()
+        (runtime_app / "arm").write_text("experiment", encoding="utf-8")
+        backup.mkdir()
+        (backup / "arm").write_text("original", encoding="utf-8")
+        with (
+            mock.patch.object(
+                scoped,
+                "_stop_daemon",
+                side_effect=scoped.ExperimentError("shutdown failed"),
+            ),
+            self.assertRaisesRegex(scoped.ExperimentError, "shutdown failed"),
+        ):
+            scoped._restore_runtime_app(
+                runtime_app,
+                backup,
+                primary_error=None,
+            )
+        self.assertEqual(
+            (runtime_app / "arm").read_text(encoding="utf-8"),
+            "original",
+        )
+        self.assertFalse(backup.exists())
 
     def test_owned_process_cleanup_matches_pid_start_and_command(self):
         state = self.run_root / "runtime/processes.json"

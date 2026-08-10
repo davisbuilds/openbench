@@ -43,6 +43,7 @@ DAEMON_SOCKET = DAEMON_RUNTIME / "daemon.sock"
 DAEMON_LOCK = DAEMON_RUNTIME / "daemon.lock"
 DAEMON_SECRET = DAEMON_RUNTIME / "daemon.secret"
 DAEMON_TIMEOUT_SECONDS = 10.0
+DAEMON_BUNDLE_PATH = "artifacts/final-state/daemon-evidence.json"
 
 
 def _sha256(path: Path) -> str:
@@ -413,7 +414,10 @@ def _task_identity(request_path: Path, request: Mapping[str, Any]) -> dict[str, 
     task_content = {
         "instruction": _sha256(PROMPT),
         "verifier": verifier_digest,
-        "artifacts": ["artifacts/final-state/state.json"],
+        "artifacts": [
+            "artifacts/final-state/state.json",
+            DAEMON_BUNDLE_PATH,
+        ],
     }
     return {
         "name": f"openbench/computer-use-v0-{TASK}",
@@ -496,7 +500,10 @@ def _generate(
         config_path = (
             config_root / "cells" / TASK / f"trial{trial_index}-{arm}.toml"
         )
-        config_bytes = cub._config_text(
+        daemon_evidence = config_path.with_name(
+            config_path.stem + ".daemon.json"
+        )
+        config_text = cub._config_text(
             request_path=request_path.resolve(),
             request=request,
             arm=arm,
@@ -515,7 +522,13 @@ def _generate(
             },
             instruction_path=PROMPT,
             locked_state_response_mode="auto",
-        ).encode("utf-8")
+        )
+        config_text += f'''\n[[artifacts]]
+source = {cub._toml_string(str(daemon_evidence))}
+path = {cub._toml_string(DAEMON_BUNDLE_PATH)}
+media_type = "application/json"
+'''
+        config_bytes = config_text.encode("utf-8")
         outputs[config_path] = config_bytes
         output_path, results_path = cub._result_paths(
             root, experiment_id, arm, TASK, trial_index
@@ -536,9 +549,7 @@ def _generate(
             "runnable_config_sha256": hashlib.sha256(config_bytes).hexdigest(),
             "output": str(output_path),
             "results": str(results_path),
-            "daemon_evidence": str(
-                config_path.with_name(config_path.stem + ".daemon.json")
-            ),
+            "daemon_evidence": str(daemon_evidence),
             "binary_sha256": runtime_identities[arm]["binary_sha256"],
             "source_revision": revisions[arm],
         })
@@ -592,6 +603,15 @@ def _run_cells(
         daemon_process, daemon_identity = _start_exact_daemon(runtime_identity)
         print(f"RUN {cell['sequence']}: {arm} block={cell['block']}", flush=True)
         try:
+            daemon_evidence = Path(str(cell["daemon_evidence"]))
+            daemon_evidence_bytes = canonical_bytes({
+                "schema_version": "openbench.computer-use-daemon-evidence.v1",
+                "trial_id": cell["trial_id"],
+                "arm": arm,
+                "source_revision": cell["source_revision"],
+                "daemon": daemon_identity,
+            }) + b"\n"
+            _write_outputs({daemon_evidence: daemon_evidence_bytes})
             subprocess.run(
                 [sys.executable, "-m", "obench", "native", "run", str(cell["config"])],
                 stdin=subprocess.DEVNULL,
@@ -600,21 +620,48 @@ def _run_cells(
             bundle = Path(str(cell["output"]))
             encodings = _response_encodings(bundle)
             _validate_arm_encodings(arm, encodings)
-            _write_outputs({
-                Path(str(cell["daemon_evidence"])): canonical_bytes({
-                    "schema_version": "openbench.computer-use-daemon-evidence.v1",
-                    "trial_id": cell["trial_id"],
-                    "arm": arm,
-                    "source_revision": cell["source_revision"],
-                    "daemon": daemon_identity,
-                    "response_encoding_counts": encodings,
-                }) + b"\n"
-            })
+            sealed_daemon_evidence = bundle / DAEMON_BUNDLE_PATH
+            if (
+                not sealed_daemon_evidence.is_file()
+                or sealed_daemon_evidence.read_bytes() != daemon_evidence_bytes
+            ):
+                raise ExperimentError(
+                    f"sealed daemon evidence mismatch for {cell['trial_id']}"
+                )
             bundles.append(bundle)
         finally:
             _stop_daemon()
             daemon_process.wait(timeout=DAEMON_TIMEOUT_SECONDS)
     return bundles
+
+
+def _restore_runtime_app(
+    runtime_app: Path,
+    backup: Path,
+    *,
+    primary_error: BaseException | None,
+) -> None:
+    cleanup_error: BaseException | None = None
+    try:
+        _stop_daemon()
+    except BaseException as exc:
+        cleanup_error = exc
+    try:
+        if runtime_app.exists():
+            shutil.rmtree(runtime_app)
+        os.replace(backup, runtime_app)
+    except BaseException as restore_error:
+        if cleanup_error is not None:
+            restore_error.add_note(f"daemon cleanup also failed: {cleanup_error}")
+        if primary_error is not None:
+            primary_error.add_note(f"runtime app restoration failed: {restore_error}")
+            return
+        raise
+    if cleanup_error is not None:
+        if primary_error is not None:
+            primary_error.add_note(f"daemon cleanup failed: {cleanup_error}")
+            return
+        raise cleanup_error
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -684,6 +731,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ExperimentError(f"runtime app is unavailable: {runtime_app}")
     _stop_daemon()
     os.replace(runtime_app, backup)
+    primary_error: BaseException | None = None
     try:
         plan, plan_path, _manifest_path, cells = _generate(
             request_path=args.request,
@@ -714,11 +762,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "report": str(report),
             "bundles": [str(path) for path in bundles],
         }, indent=2, sort_keys=True))
+    except BaseException as exc:
+        primary_error = exc
+        raise
     finally:
-        _stop_daemon()
-        if runtime_app.exists():
-            shutil.rmtree(runtime_app)
-        os.replace(backup, runtime_app)
+        _restore_runtime_app(runtime_app, backup, primary_error=primary_error)
     return 0
 
 
