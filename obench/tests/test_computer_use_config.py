@@ -30,6 +30,13 @@ SPEC = importlib.util.spec_from_file_location("cub_v0", SCRIPT)
 cub = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(cub)
+SCOPED_SPEC = importlib.util.spec_from_file_location(
+    "scoped_agent_ab", SCOPED_AGENT_AB_SCRIPT
+)
+scoped = importlib.util.module_from_spec(SCOPED_SPEC)
+assert SCOPED_SPEC.loader is not None
+with mock.patch.dict(sys.modules, {"cub_v0": cub}):
+    SCOPED_SPEC.loader.exec_module(scoped)
 
 
 class ComputerUseConfigTests(unittest.TestCase):
@@ -156,6 +163,42 @@ class ComputerUseConfigTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("toggle-box", prompt)
         self.assertNotIn("state_response_mode", prompt)
+
+    def test_scoped_agent_ab_rejects_cross_arm_daemon_contamination(self):
+        with self.assertRaisesRegex(scoped.ExperimentError, "baseline emitted"):
+            scoped._validate_arm_encodings("baseline", {"full": 2, "outcome": 1})
+        with self.assertRaisesRegex(scoped.ExperimentError, "never exercised"):
+            scoped._validate_arm_encodings("scoped", {"full": 2})
+        scoped._validate_arm_encodings("baseline", {"full": 2})
+        scoped._validate_arm_encodings("scoped", {"full": 2, "outcome": 1})
+
+    def test_scoped_agent_ab_requires_spawned_daemon_identity(self):
+        executable = self.base / "computer-use-mcp-bin"
+        executable.write_bytes(b"exact daemon")
+        observed = {
+            "authenticated": True,
+            "buildStamp": executable.stat().st_mtime,
+            "daemonIncarnationID": "incarnation-1",
+            "version": cub.MCP_VERSION,
+        }
+        with mock.patch.object(scoped, "_daemon_lock_owners", return_value=[4321]):
+            identity = scoped._validate_daemon_identity(
+                observed,
+                executable=executable,
+                binary_sha256=scoped._sha256(executable),
+                pid=4321,
+            )
+        self.assertEqual(identity["incarnation_id"], "incarnation-1")
+        with (
+            mock.patch.object(scoped, "_daemon_lock_owners", return_value=[9999]),
+            self.assertRaisesRegex(scoped.ExperimentError, "exclusively own"),
+        ):
+            scoped._validate_daemon_identity(
+                observed,
+                executable=executable,
+                binary_sha256=scoped._sha256(executable),
+                pid=4321,
+            )
 
     def test_owned_process_cleanup_matches_pid_start_and_command(self):
         state = self.run_root / "runtime/processes.json"

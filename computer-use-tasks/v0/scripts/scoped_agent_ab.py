@@ -11,11 +11,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
+import time
 from typing import Any, Mapping, Sequence
 
 import cub_v0 as cub
@@ -32,6 +35,13 @@ PROMPT = cub.ROOT / "experiments/scoped-outcome-agent-ab/instruction.md"
 
 class ExperimentError(RuntimeError):
     pass
+
+
+DAEMON_RUNTIME = Path.home() / "Library/Caches/computer-use-mcp"
+DAEMON_SOCKET = DAEMON_RUNTIME / "daemon.sock"
+DAEMON_LOCK = DAEMON_RUNTIME / "daemon.lock"
+DAEMON_SECRET = DAEMON_RUNTIME / "daemon.secret"
+DAEMON_TIMEOUT_SECONDS = 10.0
 
 
 def _sha256(path: Path) -> str:
@@ -63,6 +73,209 @@ def _install(source: Path, destination: Path) -> None:
         check=True,
         timeout=60,
     )
+
+
+def _daemon_lock_owners() -> list[int]:
+    lsof = shutil.which("lsof")
+    if lsof is None:
+        raise ExperimentError("lsof is required to prove daemon process ownership")
+    completed = subprocess.run(
+        [lsof, "-t", "--", str(DAEMON_LOCK)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if completed.returncode not in (0, 1):
+        raise ExperimentError(f"cannot inspect daemon lock owner: {completed.stderr.strip()}")
+    try:
+        return sorted({int(line) for line in completed.stdout.splitlines() if line.strip()})
+    except ValueError as exc:
+        raise ExperimentError("lsof returned a non-numeric daemon lock owner") from exc
+
+
+def _daemon_secret() -> str:
+    if not DAEMON_SECRET.is_file() or DAEMON_SECRET.is_symlink():
+        raise ExperimentError("daemon authentication secret is unavailable")
+    mode = DAEMON_SECRET.stat().st_mode & 0o777
+    if mode & 0o077:
+        raise ExperimentError("daemon authentication secret permissions are too broad")
+    secret = DAEMON_SECRET.read_text(encoding="utf-8").strip()
+    if not secret:
+        raise ExperimentError("daemon authentication secret is empty")
+    return secret
+
+
+def _daemon_exchange(requests: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    responses: list[dict[str, Any]] = []
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(DAEMON_TIMEOUT_SECONDS)
+    try:
+        client.connect(str(DAEMON_SOCKET))
+        buffer = b""
+        for request in requests:
+            client.sendall(canonical_bytes(request) + b"\n")
+            while b"\n" not in buffer:
+                chunk = client.recv(65536)
+                if not chunk:
+                    raise ExperimentError("daemon closed before returning a response")
+                buffer += chunk
+            line, buffer = buffer.split(b"\n", 1)
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ExperimentError("daemon returned malformed JSON") from exc
+            if not isinstance(response, dict) or response.get("id") != request.get("id"):
+                raise ExperimentError("daemon returned a mismatched response")
+            responses.append(response)
+    except OSError as exc:
+        raise ExperimentError(f"cannot communicate with engine daemon: {exc}") from exc
+    finally:
+        client.close()
+    return responses
+
+
+def _daemon_hello() -> dict[str, Any]:
+    secret = _daemon_secret()
+    response = _daemon_exchange([{
+        "id": 1,
+        "method": "hello",
+        "version": cub.MCP_VERSION,
+        "authToken": secret,
+        "buildStamp": 0,
+    }])[0]
+    if response.get("isError") is True or response.get("authenticated") is not True:
+        raise ExperimentError("daemon handshake was not authenticated")
+    if not isinstance(response.get("daemonIncarnationID"), str):
+        raise ExperimentError("daemon handshake omitted its incarnation identity")
+    if not isinstance(response.get("buildStamp"), (int, float)):
+        raise ExperimentError("daemon handshake omitted its executable build stamp")
+    return response
+
+
+def _stop_daemon() -> dict[str, Any] | None:
+    owners = _daemon_lock_owners()
+    if not owners and not DAEMON_SOCKET.exists():
+        return None
+    if len(owners) != 1 or not DAEMON_SOCKET.exists():
+        raise ExperimentError(
+            f"daemon runtime is inconsistent: lock_owners={owners}, socket={DAEMON_SOCKET.exists()}"
+        )
+    secret = _daemon_secret()
+    hello, shutdown = _daemon_exchange([
+        {
+            "id": 1,
+            "method": "hello",
+            "version": cub.MCP_VERSION,
+            "authToken": secret,
+            "buildStamp": 0,
+        },
+        {
+            "id": 2,
+            "method": "shutdown",
+            "authToken": secret,
+            "buildStamp": float("1.7976931348623157e308"),
+        },
+    ])
+    if hello.get("authenticated") is not True or shutdown.get("isError") is True:
+        raise ExperimentError("daemon refused the benchmark-owned graceful shutdown")
+    deadline = time.monotonic() + DAEMON_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if not _daemon_lock_owners() and not DAEMON_SOCKET.exists():
+            return {
+                "pid": owners[0],
+                "incarnation_id": hello.get("daemonIncarnationID"),
+                "version": hello.get("version"),
+                "build_stamp": hello.get("buildStamp"),
+            }
+        time.sleep(0.05)
+    raise ExperimentError("engine daemon did not exit after graceful shutdown")
+
+
+def _validate_daemon_identity(
+    observed: Mapping[str, Any], *, executable: Path, binary_sha256: str, pid: int
+) -> dict[str, Any]:
+    owners = _daemon_lock_owners()
+    if owners != [pid]:
+        raise ExperimentError(f"spawned daemon does not exclusively own its lock: {owners}")
+    expected_stamp = executable.stat().st_mtime
+    observed_stamp = observed.get("buildStamp")
+    if (
+        observed.get("version") != cub.MCP_VERSION
+        or observed.get("authenticated") is not True
+        or not isinstance(observed_stamp, (int, float))
+        or not math.isclose(float(observed_stamp), expected_stamp, abs_tol=0.001)
+        or _sha256(executable) != binary_sha256
+    ):
+        raise ExperimentError("daemon identity does not match the installed experiment arm")
+    return {
+        "pid": pid,
+        "incarnation_id": observed["daemonIncarnationID"],
+        "version": observed["version"],
+        "build_stamp": observed_stamp,
+        "executable": str(executable),
+        "binary_sha256": binary_sha256,
+    }
+
+
+def _start_exact_daemon(identity: Mapping[str, Any]) -> tuple[subprocess.Popen[bytes], dict[str, Any]]:
+    if _daemon_lock_owners() or DAEMON_SOCKET.exists():
+        raise ExperimentError("cannot start an exact daemon while another daemon is present")
+    executable = Path(str(identity["executable"]))
+    process = subprocess.Popen(
+        [str(executable), "daemon"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + DAEMON_TIMEOUT_SECONDS
+    try:
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise ExperimentError("exact daemon exited during startup")
+            if DAEMON_SOCKET.exists():
+                observed = _daemon_hello()
+                return process, _validate_daemon_identity(
+                    observed,
+                    executable=executable,
+                    binary_sha256=str(identity["binary_sha256"]),
+                    pid=process.pid,
+                )
+            time.sleep(0.05)
+    except Exception:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)
+        raise
+    process.terminate()
+    process.wait(timeout=5)
+    raise ExperimentError("exact daemon did not become ready")
+
+
+def _response_encodings(bundle: Path) -> dict[str, int]:
+    ledger = bundle / "mcp/ledger.jsonl"
+    counts: dict[str, int] = {}
+    for raw in ledger.read_text(encoding="utf-8").splitlines():
+        row = json.loads(raw)
+        if row.get("record_type") != "tool_call":
+            continue
+        perception = (
+            row.get("computer_use_meta", {}).get("metrics") or {}
+        ).get("perception")
+        if isinstance(perception, dict) and isinstance(perception.get("response_encoding"), str):
+            encoding = perception["response_encoding"]
+            counts[encoding] = counts.get(encoding, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _validate_arm_encodings(arm: str, counts: Mapping[str, int]) -> None:
+    outcomes = counts.get("outcome", 0)
+    if arm == "baseline" and outcomes:
+        raise ExperimentError("baseline emitted scoped-only outcome responses")
+    if arm == "scoped" and outcomes == 0:
+        raise ExperimentError("scoped arm never exercised its outcome response")
 
 
 def _archive_sha256(repo: Path, revision: str) -> str:
@@ -318,6 +531,9 @@ def _generate(
             "runnable_config_sha256": hashlib.sha256(config_bytes).hexdigest(),
             "output": str(output_path),
             "results": str(results_path),
+            "daemon_evidence": str(
+                config_path.with_name(config_path.stem + ".daemon.json")
+            ),
             "binary_sha256": runtime_identities[arm]["binary_sha256"],
             "source_revision": revisions[arm],
         })
@@ -363,17 +579,36 @@ def _run_cells(
     bundles: list[Path] = []
     for cell in sorted(cells, key=lambda item: int(item["sequence"])):
         arm = str(cell["arm_id"])
+        _stop_daemon()
         _install(staged_apps[arm], runtime_app)
-        observed = cub._bundle_info(runtime_app)["binary_sha256"]
-        if observed != cell["binary_sha256"]:
+        runtime_identity = cub._bundle_info(runtime_app)
+        if runtime_identity["binary_sha256"] != cell["binary_sha256"]:
             raise ExperimentError(f"runtime binary mismatch before {cell['trial_id']}")
+        daemon_process, daemon_identity = _start_exact_daemon(runtime_identity)
         print(f"RUN {cell['sequence']}: {arm} block={cell['block']}", flush=True)
-        subprocess.run(
-            [sys.executable, "-m", "obench", "native", "run", str(cell["config"])],
-            stdin=subprocess.DEVNULL,
-            check=True,
-        )
-        bundles.append(Path(str(cell["output"])))
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "obench", "native", "run", str(cell["config"])],
+                stdin=subprocess.DEVNULL,
+                check=True,
+            )
+            bundle = Path(str(cell["output"]))
+            encodings = _response_encodings(bundle)
+            _validate_arm_encodings(arm, encodings)
+            _write_outputs({
+                Path(str(cell["daemon_evidence"])): canonical_bytes({
+                    "schema_version": "openbench.computer-use-daemon-evidence.v1",
+                    "trial_id": cell["trial_id"],
+                    "arm": arm,
+                    "source_revision": cell["source_revision"],
+                    "daemon": daemon_identity,
+                    "response_encoding_counts": encodings,
+                }) + b"\n"
+            })
+            bundles.append(bundle)
+        finally:
+            _stop_daemon()
+            daemon_process.wait(timeout=DAEMON_TIMEOUT_SECONDS)
     return bundles
 
 
@@ -442,6 +677,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ExperimentError(f"stale runtime backup requires inspection: {backup}")
     if not runtime_app.is_dir():
         raise ExperimentError(f"runtime app is unavailable: {runtime_app}")
+    _stop_daemon()
     os.replace(runtime_app, backup)
     try:
         plan, plan_path, _manifest_path, cells = _generate(
@@ -474,6 +710,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "bundles": [str(path) for path in bundles],
         }, indent=2, sort_keys=True))
     finally:
+        _stop_daemon()
         if runtime_app.exists():
             shutil.rmtree(runtime_app)
         os.replace(backup, runtime_app)
