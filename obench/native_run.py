@@ -199,6 +199,8 @@ class NativeRunConfig:
     verifier_oracle_paths: tuple[Path, ...]
     mcp_policy: Mapping[str, Any]
     matrix: Mapping[str, Any] | None
+    mcp_source_revision: str | None = None
+    mcp_binary_sha256: str | None = None
 
 
 def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
@@ -442,6 +444,17 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
             "tool": tool,
             "required_arguments": dict(required_arguments),
         })
+    mcp_source_revision = mcp.get("source_revision")
+    if mcp_source_revision is not None:
+        mcp_source_revision = _required_string(
+            mcp_source_revision, "mcp.source_revision"
+        )
+    mcp_binary_sha256 = mcp.get("binary_sha256")
+    if mcp_binary_sha256 is not None and (
+        not isinstance(mcp_binary_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", mcp_binary_sha256) is None
+    ):
+        raise NativeRunError("mcp.binary_sha256 must be a SHA-256 digest")
     return NativeRunConfig(
         source_path=source,
         trial_id=trial_id,
@@ -471,6 +484,8 @@ def load_config(path: str | os.PathLike[str]) -> NativeRunConfig:
         ),
         state_response_mode=state_response_mode,
         mcp_call_contract=tuple(call_contract),
+        mcp_source_revision=mcp_source_revision,
+        mcp_binary_sha256=mcp_binary_sha256,
         environment=environment,
         timeout_s=_positive_number(budget.get("timeout_s"), "budget.timeout_s"),
         max_retries=max_retries,
@@ -2284,6 +2299,14 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                 f"harness version mismatch: expected {config.harness_version!r}, observed {observed_version!r}"
             )
         mcp_executable = _server_executable(config.mcp_command)
+        observed_mcp_binary_sha256 = _sha256(mcp_executable)
+        if (
+            config.mcp_binary_sha256 is not None
+            and observed_mcp_binary_sha256 != config.mcp_binary_sha256
+        ):
+            raise NativeRunError(
+                "configured MCP binary digest does not match the executable"
+            )
         serve_owners = tuple(hooks.mcp_owner_probe(config.mcp_command))
         if serve_owners:
             owner_pids = sorted(
@@ -2349,6 +2372,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     "transport": "stdio",
                     "server_sha256": mcp_content_sha256,
                     "collector_run_id": collector_run_id,
+                    **(
+                        {"source_revision": config.mcp_source_revision}
+                        if config.mcp_source_revision is not None
+                        else {}
+                    ),
+                    **(
+                        {"binary_sha256": observed_mcp_binary_sha256}
+                        if config.mcp_binary_sha256 is not None
+                        else {}
+                    ),
                     **(
                         {"state_response_mode": config.state_response_mode}
                         if config.state_response_mode is not None
@@ -2889,6 +2922,16 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     "transport": "stdio",
                     "server_sha256": mcp_content_sha256,
                     "collector_run_id": collector_run_id,
+                    **(
+                        {"source_revision": config.mcp_source_revision}
+                        if config.mcp_source_revision is not None
+                        else {}
+                    ),
+                    **(
+                        {"binary_sha256": observed_mcp_binary_sha256}
+                        if config.mcp_binary_sha256 is not None
+                        else {}
+                    ),
                     **(
                         {"state_response_mode": config.state_response_mode}
                         if config.state_response_mode is not None

@@ -517,6 +517,10 @@ def _validate_lock(root: Path, trial_id: str) -> tuple[dict[str, Any], str]:
         mcp_fields.add("state_response_mode")
     if "call_contract" in mcp:
         mcp_fields.add("call_contract")
+    if "source_revision" in mcp:
+        mcp_fields.add("source_revision")
+    if "binary_sha256" in mcp:
+        mcp_fields.add("binary_sha256")
     _exact_fields(
         mcp,
         mcp_fields,
@@ -525,6 +529,10 @@ def _validate_lock(root: Path, trial_id: str) -> tuple[dict[str, Any], str]:
     for field in ("name", "version", "transport", "collector_run_id"):
         _string(mcp[field], f"lock.mcp.{field}")
     _digest(mcp["server_sha256"], "lock.mcp.server_sha256")
+    if "source_revision" in mcp:
+        _string(mcp["source_revision"], "lock.mcp.source_revision")
+    if "binary_sha256" in mcp:
+        _digest(mcp["binary_sha256"], "lock.mcp.binary_sha256")
     if "state_response_mode" in mcp and mcp["state_response_mode"] not in {"auto", "full"}:
         raise _fail(
             "lock.mcp.state_response_mode", "must be 'auto' or 'full'"

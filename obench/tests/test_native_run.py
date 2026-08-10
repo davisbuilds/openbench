@@ -1763,6 +1763,38 @@ media_type = "application/json"
         )
         self.assertNotIn("do-not-publish", json.dumps(trajectory))
 
+    def test_seals_declared_mcp_source_and_binary_identity(self):
+        binary_sha256 = hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest()
+        config = self.config_path.read_text(encoding="utf-8").replace(
+            'forbidden_tools = ["delete_skill"]',
+            'forbidden_tools = ["delete_skill"]\n'
+            'source_revision = "097a704b87c27d0bb4182a4e2855d891483fb769"\n'
+            f'binary_sha256 = "{binary_sha256}"',
+        )
+        self.config_path.write_text(config, encoding="utf-8")
+
+        outcome = run_native(self.config_path, hooks=self._hooks()[0])
+        lock = json.loads((outcome.bundle_dir / "lock.json").read_text())
+
+        self.assertEqual(
+            lock["mcp"]["source_revision"],
+            "097a704b87c27d0bb4182a4e2855d891483fb769",
+        )
+        self.assertEqual(lock["mcp"]["binary_sha256"], binary_sha256)
+
+    def test_rejects_declared_mcp_binary_digest_mismatch(self):
+        config = self.config_path.read_text(encoding="utf-8").replace(
+            'forbidden_tools = ["delete_skill"]',
+            'forbidden_tools = ["delete_skill"]\n'
+            f'binary_sha256 = "{"0" * 64}"',
+        )
+        self.config_path.write_text(config, encoding="utf-8")
+
+        with self.assertRaisesRegex(
+            NativeRunError, "configured MCP binary digest does not match"
+        ):
+            run_native(self.config_path, hooks=self._hooks()[0])
+
     def test_judged_snapshot_survives_destructive_reset(self):
         (self.workspace / "destructive-reset").touch()
         hooks, _ = self._hooks()

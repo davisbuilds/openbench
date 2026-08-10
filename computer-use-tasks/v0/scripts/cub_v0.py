@@ -1252,6 +1252,16 @@ def _mcp_plan_identity(
         ),
         "collector_run_id": f"cub-v0-{arm}-mcp",
         **(
+            {"source_revision": identity["source_revision"]}
+            if identity.get("source_revision") is not None
+            else {}
+        ),
+        **(
+            {"binary_sha256": identity["binary_sha256"]}
+            if identity.get("binary_sha256") is not None
+            else {}
+        ),
+        **(
             {"state_response_mode": state_response_mode}
             if state_response_mode is not None
             else {}
@@ -1338,6 +1348,7 @@ def _config_text(
     trial_index: int, trial_id: str, mcp: Mapping[str, Any],
     app: Mapping[str, Any], host: Mapping[str, Any], mode: str,
     matrix: Mapping[str, Any] | None,
+    instruction_path: Path | None = None,
 ) -> str:
     trial_index = _positive_trial_index(trial_index)
     root, _repo, _installed = _request_paths(request)
@@ -1345,6 +1356,7 @@ def _config_text(
     output, results = _result_paths(root, mode, arm, task, trial_index)
     lease = descendant(root, "runtime/native-macos.lock")
     task_dir = ROOT / task
+    instruction_path = instruction_path or task_dir / "instruction.md"
     script = Path(__file__).resolve()
     common = [sys.executable, str(script), "--request", str(request_path)]
     setup_cmd = [*common, "setup"]
@@ -1420,7 +1432,7 @@ verdict_path = "runner/verdict.json"
 
 [task]
 id = {_toml_string(f"openbench/computer-use-v0-{task}")}
-instruction = {_toml_string(str(task_dir / "instruction.md"))}
+instruction = {_toml_string(str(instruction_path))}
 verifier_oracle_paths = {_toml_array(oracle_paths)}
 
 [harness]
