@@ -61,12 +61,6 @@ def _task_identity(request_path: Path, request: Mapping[str, Any]) -> dict[str, 
         "--request",
         str(request_path.resolve()),
         "verify",
-        "--arm",
-        ARMS[0],
-        "--task",
-        TASK,
-        "--trial-index",
-        "1",
     ]
     verifier_digest = _content_bound_command_digest(
         verifier_command,

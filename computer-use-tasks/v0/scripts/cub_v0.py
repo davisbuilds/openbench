@@ -1221,12 +1221,6 @@ def _task_plan_identity(
         "--request",
         str(request_path.resolve()),
         "verify",
-        "--arm",
-        "installed",
-        "--task",
-        task,
-        "--trial-index",
-        "1",
     ]
     oracles = _oracle_paths(task)
     verifier_digest = _content_bound_command_digest(
@@ -1367,14 +1361,9 @@ def _config_text(
     instruction_path = instruction_path or task_dir / "instruction.md"
     script = Path(__file__).resolve()
     common = [sys.executable, str(script), "--request", str(request_path)]
-    coordinates = [
-        "--arm", arm,
-        "--task", task,
-        "--trial-index", str(trial_index),
-    ]
-    setup_cmd = [*common, "setup", *coordinates]
-    reset_cmd = [*common, "reset", *coordinates]
-    verify_cmd = [*common, "verify", *coordinates]
+    setup_cmd = [*common, "setup"]
+    reset_cmd = [*common, "reset"]
+    verify_cmd = [*common, "verify"]
     if task in {"basic-controls", *EXPERIMENT_TASKS}:
         foreground = FIXTURE_BUNDLES[task]
         forbidden: list[str] = []
