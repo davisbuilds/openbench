@@ -211,12 +211,12 @@ def _metric_call(tool, latency, metrics):
     return call
 
 
-def _timed_request(start, end, *, usage_available=True):
+def _timed_request(start, end, *, usage_available=True, paced_wait_ms=0.0):
     return {
         "request_unix_ns": start,
         "response_unix_ns": end,
         "duration_ms": (end - start) / 1_000_000,
-        "paced_wait_ms": 0.0,
+        "paced_wait_ms": paced_wait_ms,
         "status": 200,
         "usage_available": usage_available,
         "input_tokens": 1 if usage_available else 0,
@@ -756,6 +756,27 @@ class NativeReportTests(unittest.TestCase):
             self.assertEqual(
                 trial["same_source_overlap"]["model_request_ms"], 50.0
             )
+
+        with self.subTest(kind="paced model API"):
+            observation = _Observation(
+                row=row,
+                mcp_calls=(_timed_call(300_000_000, 350_000_000),),
+                proxy_requests=(
+                    _timed_request(0, 200_000_000, paced_wait_ms=100.0),
+                    _timed_request(
+                        50_000_000, 250_000_000, paced_wait_ms=100.0
+                    ),
+                ),
+                bundle_sha256="a" * 64,
+                result_sha256="b" * 64,
+                row_sha256="c" * 64,
+            )
+            trial = _aggregate_observations([observation])["attribution"][
+                "trial_totals"
+            ][0]
+            self.assertEqual(trial["observed_time_ms"]["model_request_ms"], 250.0)
+            self.assertEqual(trial["observed_time_ms"]["model_api_ms"], 150.0)
+            self.assertEqual(trial["same_source_overlap"]["model_api_ms"], 50.0)
 
         with self.subTest(kind="mcp"):
             observation = _Observation(

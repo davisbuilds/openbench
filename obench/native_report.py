@@ -785,21 +785,30 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         else:
             mcp_index += 1
     model_request_time_ms = 0.0
-    model_api_time_ms = 0.0
-    for request in successful_usage:
+    model_api_intervals: list[tuple[int, int, str]] = []
+    for index, request in enumerate(successful_usage, 1):
         duration = _number(request.get("duration_ms"))
         paced = _number(request.get("paced_wait_ms"))
         if duration is None or paced is None or paced > duration:
             raise NativeReportError("model request timing is malformed")
         model_request_time_ms += duration
-        model_api_time_ms += duration - paced
+        start = request["request_unix_ns"] + round(paced * 1_000_000)
+        end = request["response_unix_ns"]
+        if start > end:
+            raise NativeReportError("model request timing is malformed")
+        model_api_intervals.append((start, end, f"model API {index}"))
     model_same_source_overlap_ms = (
         same_source_overlap_ns["model request"] / 1_000_000
     )
     model_request_time_ms = max(
         0.0, model_request_time_ms - model_same_source_overlap_ms
     )
-    model_api_time_ms = max(0.0, model_api_time_ms - model_same_source_overlap_ms)
+    merged_api_intervals, model_api_overlap_ns = _merge_intervals(
+        model_api_intervals
+    )
+    model_api_time_ms = sum(
+        end - start for start, end, _label in merged_api_intervals
+    ) / 1_000_000
     paced_wait_values = [
         _number(request.get("paced_wait_ms")) for request in successful_usage
     ]
@@ -915,6 +924,7 @@ def _trial_attribution(observation: _Observation) -> dict[str, Any] | None:
         },
         "same_source_overlap": {
             "model_request_ms": model_same_source_overlap_ms,
+            "model_api_ms": model_api_overlap_ns / 1_000_000,
             "mcp_call_ms": mcp_same_source_overlap_ms,
         },
         "exclusive_partition": {
