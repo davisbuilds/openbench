@@ -26,6 +26,9 @@ SCRIPT = ROOT / "computer-use-tasks/v0/scripts/cub_v0.py"
 SCOPED_AGENT_AB_SCRIPT = (
     ROOT / "computer-use-tasks/v0/scripts/scoped_agent_ab.py"
 )
+DIFF_FULL_AGENT_AB_SCRIPT = (
+    ROOT / "computer-use-tasks/v0/scripts/diff_full_agent_ab.py"
+)
 SPEC = importlib.util.spec_from_file_location("cub_v0", SCRIPT)
 cub = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -37,6 +40,15 @@ scoped = importlib.util.module_from_spec(SCOPED_SPEC)
 assert SCOPED_SPEC.loader is not None
 with mock.patch.dict(sys.modules, {"cub_v0": cub}):
     SCOPED_SPEC.loader.exec_module(scoped)
+DIFF_FULL_SPEC = importlib.util.spec_from_file_location(
+    "diff_full_agent_ab", DIFF_FULL_AGENT_AB_SCRIPT
+)
+diff_full = importlib.util.module_from_spec(DIFF_FULL_SPEC)
+assert DIFF_FULL_SPEC.loader is not None
+with mock.patch.dict(
+    sys.modules, {"cub_v0": cub, "scoped_agent_ab": scoped}
+):
+    DIFF_FULL_SPEC.loader.exec_module(diff_full)
 
 
 class ComputerUseConfigTests(unittest.TestCase):
@@ -173,6 +185,81 @@ class ComputerUseConfigTests(unittest.TestCase):
             scoped._validate_arm_encodings("scoped", {"full": 2})
         scoped._validate_arm_encodings("baseline", {"full": 2})
         scoped._validate_arm_encodings("scoped", {"full": 2, "outcome": 1})
+
+    def test_diff_full_agent_ab_is_autonomous_and_encoding_strict(self):
+        completed = subprocess.run(
+            [sys.executable, os.fspath(DIFF_FULL_AGENT_AB_SCRIPT), "--help"],
+            cwd=self.base,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("--source-revision", completed.stdout)
+        self.assertIn("--prepare-only", completed.stdout)
+        prompt = diff_full.PROMPT.read_text(encoding="utf-8")
+        self.assertNotIn("e7@s1", prompt)
+        self.assertNotIn("exactly these", prompt)
+        self.assertNotIn("state_response_mode", prompt)
+        diff_full._validate_arm_encodings("auto", {"full": 1, "diff": 3})
+        diff_full._validate_arm_encodings("full", {"full": 4})
+        with self.assertRaisesRegex(diff_full.ExperimentError, "never exercised"):
+            diff_full._validate_arm_encodings("auto", {"full": 4})
+        with self.assertRaisesRegex(diff_full.ExperimentError, "non-full"):
+            diff_full._validate_arm_encodings("full", {"full": 3, "diff": 1})
+        with self.assertRaisesRegex(diff_full.ExperimentError, "scoped-outcome"):
+            diff_full._validate_arm_encodings("auto", {"diff": 2, "outcome": 1})
+
+    def test_diff_full_agent_ab_changes_only_locked_response_policy(self):
+        runtime_app = self.run_root / "apps/OpenBench Computer Use MCP Source.app"
+        runtime_app.mkdir(parents=True)
+        runtime_identity = self.identity(runtime_app)
+        runtime_identity["source_revision"] = "7" * 40
+        host = {
+            "os_version": "15.6", "os_build": "24G84",
+            "architecture": "arm64", "hardware": "MacFixture1,1",
+            "display_width": 1512, "display_height": 982,
+            "display_scale": 2.0, "display_color_space": "Color LCD",
+        }
+        with (
+            mock.patch.object(cub, "_bundle_info", side_effect=self.identity),
+            mock.patch.object(cub, "_host_environment", return_value=host),
+            mock.patch.object(
+                cub,
+                "_content_bound_command_digest",
+                side_effect=self.content_digest,
+            ),
+            mock.patch.object(
+                diff_full,
+                "_content_bound_command_digest",
+                side_effect=self.content_digest,
+            ),
+        ):
+            plan, _plan_path, cells = diff_full._generate(
+                request_path=self.request,
+                request=cub._load_request(self.request),
+                runtime_identity=runtime_identity,
+                source_revision="7" * 40,
+                build_provenance={"source_archive_sha256": "8" * 64},
+                repetitions=2,
+                experiment_id="diff-full-test",
+            )
+        self.assertEqual(len(cells), 4)
+        self.assertEqual({cell["arm_id"] for cell in cells}, {"auto", "full"})
+        self.assertEqual({cell["binary_sha256"] for cell in cells}, {"a" * 64})
+        self.assertEqual(len({cell["source_revision"] for cell in cells}), 1)
+        for cell in cells:
+            parsed = tomllib.loads(Path(cell["config"]).read_text())
+            self.assertEqual(parsed["mcp"]["state_response_mode"], cell["arm_id"])
+            self.assertNotIn("call_contract", parsed["mcp"])
+            self.assertEqual(parsed["task"]["instruction"], str(diff_full.PROMPT))
+        self.assertEqual(
+            [
+                arm["config_identity"]["mcp"]["binary_sha256"]
+                for arm in plan["arms"]
+            ],
+            ["a" * 64, "a" * 64],
+        )
 
     def test_scoped_agent_ab_requires_spawned_daemon_identity(self):
         executable = self.base / "computer-use-mcp-bin"
