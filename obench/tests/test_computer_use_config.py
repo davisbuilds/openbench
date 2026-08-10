@@ -191,6 +191,8 @@ class ComputerUseConfigTests(unittest.TestCase):
                 pid=4321,
             )
         self.assertEqual(identity["incarnation_id"], "incarnation-1")
+        self.assertNotIn("executable", identity)
+        self.assertEqual(identity["binary_sha256"], scoped._sha256(executable))
         with (
             mock.patch.object(scoped, "_daemon_lock_owners", return_value=[9999]),
             self.assertRaisesRegex(scoped.ExperimentError, "exclusively own"),

@@ -231,7 +231,6 @@ def _validate_daemon_identity(
         "incarnation_id": observed["daemonIncarnationID"],
         "version": observed["version"],
         "build_stamp": observed_stamp,
-        "executable": str(executable),
         "binary_sha256": binary_sha256,
     }
 
