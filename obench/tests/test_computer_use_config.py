@@ -141,11 +141,14 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("--baseline-revision", completed.stdout)
         self.assertIn("--scoped-revision", completed.stdout)
+        self.assertIn("--prepare-only", completed.stdout)
         self.assertNotIn("--baseline-app", completed.stdout)
         self.assertNotIn("--scoped-app", completed.stdout)
         source = SCOPED_AGENT_AB_SCRIPT.read_text(encoding="utf-8")
         self.assertIn('["git", "archive", "--format=tar", revision]', source)
         self.assertIn("cub._extract_revision(repo, source_revision, source_tree)", source)
+        self.assertIn("_require_stable_bundle(app)", source)
+        self.assertIn('build_result.get("signed")', source)
         self.assertIn('locked_state_response_mode="auto"', source)
         prompt = (
             ROOT

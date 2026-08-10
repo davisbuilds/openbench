@@ -42,6 +42,18 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _require_stable_bundle(app: Path) -> dict[str, Any]:
+    identity = cub._bundle_info(app)
+    requirement = str(identity.get("designated_requirement", ""))
+    if identity.get("adhoc") or requirement.startswith("cdhash "):
+        raise ExperimentError(
+            f"app bundle lacks a stable code-signing requirement: {app}"
+        )
+    if identity.get("bundle_id") != cub.SOURCE_MCP_BUNDLE_ID:
+        raise ExperimentError(f"app bundle has an unexpected bundle identifier: {app}")
+    return identity
+
+
 def _install(source: Path, destination: Path) -> None:
     if destination.exists():
         shutil.rmtree(destination)
@@ -100,13 +112,14 @@ def _build_exact_app(
         provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
         if not app.is_dir():
             raise ExperimentError(f"{arm} cached build is missing its app bundle")
-        identity = cub._bundle_info(app)
+        identity = _require_stable_bundle(app)
         expected = {
             "arm": arm,
             "source_revision": source_revision,
             "source_archive_sha256": archive_sha256,
             "binary_sha256": identity["binary_sha256"],
             "bundle_id": cub.SOURCE_MCP_BUNDLE_ID,
+            "designated_requirement": identity["designated_requirement"],
         }
         if any(provenance.get(key) != value for key, value in expected.items()):
             raise ExperimentError(f"{arm} cached build provenance does not match")
@@ -143,10 +156,13 @@ def _build_exact_app(
         build_result = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise ExperimentError(f"{arm} build did not return JSON provenance") from exc
+    if not build_result.get("signed") or build_result.get("signing_error"):
+        detail = str(build_result.get("signing_error") or "signing did not succeed")
+        raise ExperimentError(f"failed to sign {arm} revision: {detail}")
     if Path(str(build_result.get("installed_bundle"))).resolve() != app.resolve():
         raise ExperimentError(f"{arm} build installed an unexpected app bundle")
 
-    identity = cub._bundle_info(app)
+    identity = _require_stable_bundle(app)
     provenance = {
         "schema_version": "openbench.computer-use-exact-build.v1",
         "arm": arm,
@@ -364,7 +380,12 @@ def _run_cells(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request", required=True, type=Path)
-    parser.add_argument("--runtime-app", required=True, type=Path)
+    parser.add_argument("--runtime-app", type=Path)
+    parser.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="build and verify both exact signed revisions without running trials",
+    )
     parser.add_argument(
         "--baseline-revision",
         default="748733fdf090c72d25e9a504d30e160eb34e778c",
@@ -387,8 +408,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     request = cub._load_request(args.request)
     root, repo, _installed = cub._request_paths(request)
-    runtime_app = args.runtime_app.expanduser().resolve()
-    cub.descendant(root, runtime_app)
     signing_identity = request.get("source_signing_identity")
     if not isinstance(signing_identity, str) or not signing_identity or signing_identity == "-":
         raise ExperimentError("source_signing_identity must be a stable signing identity")
@@ -408,6 +427,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         staged_apps[arm] = app
         build_provenance[arm] = provenance
+    if args.prepare_only:
+        print(json.dumps({
+            "status": "prepared",
+            "builds": build_provenance,
+        }, indent=2, sort_keys=True))
+        return 0
+    if args.runtime_app is None:
+        raise ExperimentError("--runtime-app is required unless --prepare-only is used")
+    runtime_app = args.runtime_app.expanduser().resolve()
+    cub.descendant(root, runtime_app)
     backup = runtime_app.with_name(runtime_app.name + ".scoped-agent-ab-backup")
     if backup.exists():
         raise ExperimentError(f"stale runtime backup requires inspection: {backup}")
