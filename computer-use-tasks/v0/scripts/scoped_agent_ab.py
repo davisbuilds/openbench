@@ -429,6 +429,21 @@ def _write_outputs(outputs: Mapping[Path, bytes]) -> None:
     cub._write_immutable_outputs(dict(outputs))
 
 
+def _replace_trial_evidence(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        raise ExperimentError(f"trial evidence path is a symlink: {path}")
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _generate(
     *,
     request_path: Path,
@@ -500,8 +515,9 @@ def _generate(
         config_path = (
             config_root / "cells" / TASK / f"trial{trial_index}-{arm}.toml"
         )
-        daemon_evidence = config_path.with_name(
-            config_path.stem + ".daemon.json"
+        daemon_evidence = (
+            cub._workspace(root, arm, TASK, trial_index)
+            / "daemon-evidence.json"
         )
         config_text = cub._config_text(
             request_path=request_path.resolve(),
@@ -524,7 +540,7 @@ def _generate(
             locked_state_response_mode="auto",
         )
         config_text += f'''\n[[artifacts]]
-source = {cub._toml_string(str(daemon_evidence))}
+source = "daemon-evidence.json"
 path = {cub._toml_string(DAEMON_BUNDLE_PATH)}
 media_type = "application/json"
 '''
@@ -611,7 +627,7 @@ def _run_cells(
                 "source_revision": cell["source_revision"],
                 "daemon": daemon_identity,
             }) + b"\n"
-            _write_outputs({daemon_evidence: daemon_evidence_bytes})
+            _replace_trial_evidence(daemon_evidence, daemon_evidence_bytes)
             subprocess.run(
                 [sys.executable, "-m", "obench", "native", "run", str(cell["config"])],
                 stdin=subprocess.DEVNULL,
@@ -630,8 +646,11 @@ def _run_cells(
                 )
             bundles.append(bundle)
         finally:
-            _stop_daemon()
-            daemon_process.wait(timeout=DAEMON_TIMEOUT_SECONDS)
+            try:
+                _stop_daemon()
+                daemon_process.wait(timeout=DAEMON_TIMEOUT_SECONDS)
+            finally:
+                Path(str(cell["daemon_evidence"])).unlink(missing_ok=True)
     return bundles
 
 

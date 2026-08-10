@@ -158,7 +158,7 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertIn('build_result.get("signed")', source)
         self.assertIn('locked_state_response_mode="auto"', source)
         self.assertIn("DAEMON_BUNDLE_PATH", source)
-        self.assertIn('source = {cub._toml_string(str(daemon_evidence))}', source)
+        self.assertIn('source = "daemon-evidence.json"', source)
         prompt = (
             ROOT
             / "computer-use-tasks/v0/experiments/scoped-outcome-agent-ab/instruction.md"
