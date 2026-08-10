@@ -1050,9 +1050,6 @@ def _inject_state_response_mode(frame: bytes, mode: str) -> bytes:
         arguments = params.get("arguments")
         if not isinstance(arguments, dict):
             raise CollectorError("eligible state-response tool call has invalid arguments")
-        existing = arguments.get("state_response_mode")
-        if existing is not None and existing != mode:
-            raise CollectorError("tool call conflicts with locked state response mode")
         arguments["state_response_mode"] = mode
         changed = True
     if not changed:

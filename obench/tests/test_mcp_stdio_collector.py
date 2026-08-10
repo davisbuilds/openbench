@@ -595,13 +595,14 @@ raise SystemExit(result.returncode)
             b'"target":"e12@s3"',
             b'"state_response_mode":"auto","target":"e12@s3"',
         )
-        failed, _, _, _ = self.run_fixture(
+        overridden, _, _, rows = self.run_fixture(
             conflicting,
             name="mode-conflict.jsonl",
             call_contract=contract,
             state_response_mode="full",
         )
-        self.assertFalse(failed.integrity_ok)
+        self.assertTrue(overridden.integrity_ok)
+        self.assertEqual(rows[0]["contract_arguments"], contract[0]["required_arguments"])
 
     def test_rejects_malformed_known_metrics_metadata(self):
         valid_operation = {
