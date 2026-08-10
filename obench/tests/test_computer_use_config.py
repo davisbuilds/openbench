@@ -200,6 +200,28 @@ class ComputerUseConfigTests(unittest.TestCase):
                 pid=4321,
             )
 
+    def test_scoped_agent_ab_removes_only_an_unowned_unix_socket(self):
+        daemon_socket = self.base / "daemon.sock"
+        listener = scoped.socket.socket(scoped.socket.AF_UNIX, scoped.socket.SOCK_STREAM)
+        listener.bind(str(daemon_socket))
+        self.addCleanup(listener.close)
+        with (
+            mock.patch.object(scoped, "DAEMON_SOCKET", daemon_socket),
+            mock.patch.object(scoped, "_daemon_lock_owners", return_value=[]),
+        ):
+            self.assertIsNone(scoped._stop_daemon())
+        self.assertFalse(daemon_socket.exists())
+
+        regular_file = self.base / "not-a-socket"
+        regular_file.write_text("keep", encoding="utf-8")
+        with (
+            mock.patch.object(scoped, "DAEMON_SOCKET", regular_file),
+            mock.patch.object(scoped, "_daemon_lock_owners", return_value=[]),
+            self.assertRaisesRegex(scoped.ExperimentError, "not a Unix socket"),
+        ):
+            scoped._stop_daemon()
+        self.assertTrue(regular_file.exists())
+
     def test_owned_process_cleanup_matches_pid_start_and_command(self):
         state = self.run_root / "runtime/processes.json"
         state.parent.mkdir(parents=True)

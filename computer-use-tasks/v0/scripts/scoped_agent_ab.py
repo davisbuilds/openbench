@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -156,7 +157,11 @@ def _daemon_hello() -> dict[str, Any]:
 
 def _stop_daemon() -> dict[str, Any] | None:
     owners = _daemon_lock_owners()
-    if not owners and not DAEMON_SOCKET.exists():
+    if not owners:
+        if DAEMON_SOCKET.exists():
+            if DAEMON_SOCKET.is_symlink() or not stat.S_ISSOCK(DAEMON_SOCKET.stat().st_mode):
+                raise ExperimentError("unowned daemon socket path is not a Unix socket")
+            DAEMON_SOCKET.unlink()
         return None
     if len(owners) != 1 or not DAEMON_SOCKET.exists():
         raise ExperimentError(
