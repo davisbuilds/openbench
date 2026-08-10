@@ -1219,6 +1219,12 @@ def _task_plan_identity(
         "--request",
         str(request_path.resolve()),
         "verify",
+        "--arm",
+        "installed",
+        "--task",
+        task,
+        "--trial-index",
+        "1",
     ]
     oracles = _oracle_paths(task)
     verifier_digest = _content_bound_command_digest(
