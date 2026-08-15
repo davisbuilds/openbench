@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -2769,7 +2769,14 @@ def run_native(config_or_path: NativeRunConfig | str | os.PathLike[str], *, hook
                     raise NativeRunError(
                         "focus policy violation observed during agent phase"
                     )
-                verifier_outcome = phase_runner.run_phase(verifier_spec)
+                verifier_events_path = attempt_root / "codex-events.jsonl"
+                verifier_outcome = phase_runner.run_phase(replace(
+                    verifier_spec,
+                    env={
+                        **(verifier_spec.env or {}),
+                        "OPENBENCH_CODEX_EVENTS_PATH": str(verifier_events_path),
+                    },
+                ))
                 verifier_s += verifier_outcome.duration_s
                 if verifier_outcome.status not in {
                     PhaseStatus.PASSED,

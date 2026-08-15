@@ -355,6 +355,7 @@ class CodexNativeProfileTests(unittest.TestCase):
                 "forbid_focus_change": True,
                 "forbid_global_delivery": True,
             },
+            call_contract=(),
         )
         hooks = json.loads((home / "hooks.json").read_text(encoding="utf-8"))
         command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
@@ -427,6 +428,127 @@ class CodexNativeProfileTests(unittest.TestCase):
             "timeout",
             hooks["hooks"]["PreToolUse"][0]["hooks"][0],
         )
+
+    def test_native_hook_enforces_call_contract_without_advancing_on_blocks(self):
+        home = self.root / "contract-hook-home"
+        home.mkdir()
+        contract = (
+            {
+                "tool": "click",
+                "required_arguments": {
+                    "app": "org.openbench.fixture",
+                    "element_id": "e1@s1",
+                    "include_state": False,
+                },
+            },
+            {
+                "tool": "get_app_state",
+                "required_arguments": {
+                    "app": "org.openbench.fixture",
+                    "include_screenshot": False,
+                },
+            },
+        )
+        ledger = self.codex._install_native_tool_policy(
+            home,
+            launcher=self.launcher,
+            allowed_tools=("click", "get_app_state"),
+            argument_policy={
+                "forbid_focus_change": True,
+                "forbid_global_delivery": True,
+            },
+            call_contract=contract,
+        )
+        hooks = json.loads((home / "hooks.json").read_text(encoding="utf-8"))
+        command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        cases = (
+            (
+                "wrong-tool-before-first",
+                "mcp__computer_use__get_app_state",
+                {"app": "org.openbench.fixture", "include_screenshot": False},
+                "deny",
+            ),
+            (
+                "wrong-args-before-first",
+                "mcp__computer_use__click",
+                {
+                    "app": "org.openbench.fixture",
+                    "element_id": "wrong",
+                    "include_state": False,
+                },
+                "deny",
+            ),
+            (
+                "extra-args-before-first",
+                "mcp__computer_use__click",
+                {
+                    **contract[0]["required_arguments"],
+                    "mouse_button": "right",
+                },
+                "deny",
+            ),
+            (
+                "exact-first-after-blocks",
+                "mcp__computer_use__click",
+                contract[0]["required_arguments"],
+                "allow",
+            ),
+            (
+                "wrong-args-before-second",
+                "mcp__computer_use__get_app_state",
+                {"app": "wrong", "include_screenshot": False},
+                "deny",
+            ),
+            (
+                "exact-second-after-block",
+                "mcp__computer_use__get_app_state",
+                contract[1]["required_arguments"],
+                "allow",
+            ),
+            (
+                "extra-after-contract",
+                "mcp__computer_use__get_app_state",
+                contract[1]["required_arguments"],
+                "deny",
+            ),
+        )
+        for use_id, tool_name, tool_input, expected in cases:
+            proc = subprocess.run(
+                command,
+                shell=True,
+                input=json.dumps({
+                    "tool_name": tool_name,
+                    "tool_use_id": use_id,
+                    "tool_input": tool_input,
+                }),
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            output = json.loads(proc.stdout)
+            self.assertEqual(
+                output["hookSpecificOutput"]["permissionDecision"],
+                expected,
+                use_id,
+            )
+
+        records = [
+            json.loads(line)
+            for line in ledger.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(
+            [record["decision"] for record in records],
+            ["block", "block", "block", "allow", "block", "allow", "block"],
+        )
+        self.assertEqual(
+            [
+                record["tool_use_id"]
+                for record in records
+                if record["decision"] == "allow"
+            ],
+            ["exact-first-after-blocks", "exact-second-after-block"],
+        )
+        self.assertEqual(ledger.stat().st_mode & 0o777, 0o600)
 
     def test_native_profile_rejects_dropped_event_warning(self):
         stdout = (

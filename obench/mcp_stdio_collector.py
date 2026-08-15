@@ -294,12 +294,12 @@ def normalized_argument_digest(arguments: Any) -> str:
 def _project_required_arguments(
     arguments: Any, required: Mapping[str, Any] | None
 ) -> dict[str, Any] | None:
-    """Retain only the contract-declared argument subset."""
+    """Retain a contract only when the complete argument object matches."""
     if required is None:
         return None
-    if not isinstance(arguments, Mapping):
-        return {}
-    return {key: arguments[key] for key in required if key in arguments}
+    if not isinstance(arguments, Mapping) or arguments != required:
+        return None
+    return dict(required)
 
 
 def _known_enum(value: Any, allowed: frozenset[str]) -> str | None:

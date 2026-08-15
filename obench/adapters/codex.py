@@ -256,6 +256,32 @@ def _native_argument_policy(env_override=None):
     return policy
 
 
+def _native_call_contract(env_override=None):
+    raw = _native_value(_NATIVE_CALL_CONTRACT_ENV, env_override)
+    if not isinstance(raw, str):
+        raise ValueError(f"{_NATIVE_CALL_CONTRACT_ENV} must be a JSON array")
+    try:
+        contract = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"{_NATIVE_CALL_CONTRACT_ENV} must be a JSON array: {exc}"
+        ) from exc
+    if not isinstance(contract, list):
+        raise ValueError(f"{_NATIVE_CALL_CONTRACT_ENV} must be a JSON array")
+    for index, item in enumerate(contract):
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"tool", "required_arguments"}
+            or not isinstance(item["tool"], str)
+            or not isinstance(item["required_arguments"], dict)
+        ):
+            raise ValueError(
+                f"{_NATIVE_CALL_CONTRACT_ENV}[{index}] must contain a tool "
+                "and required_arguments object"
+            )
+    return tuple(contract)
+
+
 def _native_child_env(source):
     """Expose only runtime essentials and explicit native benchmark controls."""
     return {
@@ -345,7 +371,7 @@ def _atomic_write_private(path, text):
 
 
 def _install_native_tool_policy(
-    codex_home, *, launcher, allowed_tools, argument_policy
+    codex_home, *, launcher, allowed_tools, argument_policy, call_contract
 ):
     ledger_path = Path(launcher).parent / _NATIVE_TOOL_POLICY_LEDGER_NAME
     hook_path = Path(codex_home) / _NATIVE_TOOL_POLICY_HOOK_NAME
@@ -355,6 +381,7 @@ def _install_native_tool_policy(
         for tool in allowed_tools
     )
     script = f"""#!{sys.executable}
+import fcntl
 import hashlib
 import json
 import os
@@ -363,6 +390,7 @@ import sys
 LEDGER_PATH = {str(ledger_path)!r}
 ALLOWED_TOOLS = frozenset({allowed_hook_tools!r})
 ARGUMENT_POLICY = {dict(argument_policy)!r}
+CALL_CONTRACT = {tuple(call_contract)!r}
 
 try:
     payload = json.load(sys.stdin)
@@ -380,27 +408,46 @@ try:
             tool_input.get("allow_global_cursor") is True
             or tool_input.get("allow_global_keyboard") is True
         )
-    allowed = (
-        isinstance(tool_name, str)
-        and tool_name in ALLOWED_TOOLS
-        and isinstance(tool_use_id, str)
-        and bool(tool_use_id)
-        and safe_arguments
-    )
-    encoded_input = json.dumps(
-        payload.get("tool_input"),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-    record = {{
-        "tool_name": tool_name,
-        "tool_use_id": tool_use_id,
-        "input_sha256": hashlib.sha256(encoded_input).hexdigest(),
-        "decision": "allow" if allowed else "block",
-    }}
-    fd = os.open(LEDGER_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    with os.fdopen(fd, "a", encoding="utf-8") as handle:
+    fd = os.open(LEDGER_PATH, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "a+", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.seek(0)
+        allowed_count = sum(
+            1
+            for line in handle
+            if line.strip() and json.loads(line).get("decision") == "allow"
+        )
+        expected = (
+            CALL_CONTRACT[allowed_count]
+            if CALL_CONTRACT and allowed_count < len(CALL_CONTRACT)
+            else None
+        )
+        contract_ok = not CALL_CONTRACT or (
+            expected is not None
+            and tool_name == "mcp__computer_use__" + expected["tool"]
+            and tool_input == expected["required_arguments"]
+        )
+        allowed = (
+            isinstance(tool_name, str)
+            and tool_name in ALLOWED_TOOLS
+            and isinstance(tool_use_id, str)
+            and bool(tool_use_id)
+            and safe_arguments
+            and contract_ok
+        )
+        encoded_input = json.dumps(
+            payload.get("tool_input"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        record = {{
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "input_sha256": hashlib.sha256(encoded_input).hexdigest(),
+            "decision": "allow" if allowed else "block",
+        }}
+        handle.seek(0, os.SEEK_END)
         handle.write(json.dumps(record, sort_keys=True) + "\\n")
         handle.flush()
         os.fsync(handle.fileno())
@@ -411,8 +458,8 @@ try:
             "OpenBench native task tool policy"
             if allowed
             else (
-                "OpenBench native trials permit only task-allowed MCP tools "
-                "and task-safe focus and delivery arguments"
+                "OpenBench native trials permit only the next task-safe "
+                "contracted MCP call"
             )
         ),
     }})
@@ -970,6 +1017,7 @@ def run(
     native_launcher = None
     native_allowed_tools = ()
     native_argument_policy = None
+    native_call_contract = ()
     if native:
         if model != _NATIVE_MODEL:
             return _native_error(f"model must be {_NATIVE_MODEL!r}, got {model!r}")
@@ -977,6 +1025,7 @@ def run(
             native_launcher = _native_launcher(env_override)
             native_allowed_tools = _native_allowed_tools(env_override)
             native_argument_policy = _native_argument_policy(env_override)
+            native_call_contract = _native_call_contract(env_override)
         except ValueError as exc:
             return _native_error(str(exc))
 
@@ -1106,6 +1155,7 @@ def run(
                     launcher=native_launcher,
                     allowed_tools=native_allowed_tools,
                     argument_policy=native_argument_policy,
+                    call_contract=native_call_contract,
                 )
             run_command = _run_native_command if native else subprocess.run
             proc = run_command(

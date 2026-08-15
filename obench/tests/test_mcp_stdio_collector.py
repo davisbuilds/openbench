@@ -541,7 +541,7 @@ raise SystemExit(result.returncode)
         self.assertTrue(result.integrity_ok)
         self.assertEqual(rows[0]["computer_use_meta"]["metrics"], metrics)
 
-    def test_call_contract_records_only_required_argument_projection(self):
+    def test_call_contract_requires_the_complete_argument_object(self):
         contract = [{
             "tool": "click",
             "required_arguments": {
@@ -561,15 +561,14 @@ raise SystemExit(result.returncode)
             request, name="contract.jsonl", call_contract=contract
         )
         self.assertEqual(rows[0]["contract_sequence"], 1)
-        self.assertEqual(
-            rows[0]["contract_arguments"], contract[0]["required_arguments"]
-        )
+        self.assertIsNone(rows[0]["contract_arguments"])
         self.assertNotIn("target", json.dumps(rows[0]))
 
     def test_locked_state_mode_is_injected_before_contract_observation(self):
         contract = [{
             "tool": "click",
             "required_arguments": {
+                "target": "e12@s3",
                 "include_state": True,
                 "include_screenshot": False,
                 "state_response_mode": "full",

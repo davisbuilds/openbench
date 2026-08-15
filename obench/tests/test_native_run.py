@@ -1083,6 +1083,14 @@ media_type = "application/json"
         class RecordingRunner:
             def run_phase(inner_self, spec):
                 activity.append(f"{spec.name.value}:start")
+                if spec.name.value == "verifier":
+                    self.assertEqual(
+                        Path(spec.env["OPENBENCH_CODEX_EVENTS_PATH"]).resolve(),
+                        (
+                            self.root
+                            / "bundle.attempts/attempt1/codex-events.jsonl"
+                        ).resolve(),
+                    )
                 outcome = runner.run_phase(spec)
                 activity.append(f"{spec.name.value}:end")
                 return outcome
