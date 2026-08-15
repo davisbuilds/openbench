@@ -1,6 +1,6 @@
 # Computer-Use Bench v0
 
-This task root defines three deterministic native macOS computer-use tasks.
+This task root defines deterministic native macOS computer-use tasks.
 Each task keeps the familiar OpenBench envelope (`task.toml`,
 `instruction.md`, `workspace/`, `solution/`, and `checker.sh`) and adds an
 `openbench.native-task.v1` sidecar for host-only requirements.
@@ -24,5 +24,10 @@ python3 -m unittest obench.tests.test_computer_use_tasks -v
 ```
 
 The `diagnostics/v1/` fixtures lock controlled negative classifications. They
-are diagnostic examples and never contribute to the three primary pass
-criteria.
+are diagnostic examples and never contribute to primary pass criteria.
+
+`system-settings-discovery/` is a local-only, read-only pilot against the real
+System Settings app. It requires operator-supplied SHA-256 oracles for the
+visible wallpaper and Apple Account name, verifies that both answers appeared
+in raw `get_app_state` evidence, and retains no plaintext account name in its
+result artifact. It is intentionally excluded from the default matched matrix.

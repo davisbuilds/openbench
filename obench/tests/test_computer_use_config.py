@@ -630,8 +630,127 @@ class ComputerUseConfigTests(unittest.TestCase):
                 "basic-controls",
                 "background-control",
                 "guard",
+                "system-settings-discovery",
                 "textedit-exact-file",
             },
+        )
+
+    def test_system_settings_config_generation_requires_hashes(self):
+        host = {
+            "os_version": "15.6", "os_build": "24G84",
+            "architecture": "arm64", "hardware": "MacFixture1,1",
+            "display_width": 1512, "display_height": 982,
+            "display_scale": 2.0, "display_color_space": "Color LCD",
+        }
+        with (
+            mock.patch.object(cub, "_bundle_info", side_effect=self.identity),
+            mock.patch.object(cub, "_static_preflight", return_value={
+                "matched_ready": False, "checks": []
+            }),
+            mock.patch.object(cub, "_host_environment", return_value=host),
+            redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(cub.CubError, "requires lowercase SHA-256"),
+        ):
+            cub.generate(
+                self.request,
+                "pilot",
+                "source",
+                "system-settings-discovery",
+            )
+        self.assertFalse((self.run_root / "configs/pilot").exists())
+
+    def test_system_settings_config_binds_hash_oracle_and_read_only_tools(self):
+        apple_hash = "c" * 64
+        wallpaper_hash = "d" * 64
+        self.request.write_text(
+            self.request.read_text(encoding="utf-8")
+            + 'system_settings_apple_name_sha256 = "${TEST_APPLE_NAME_SHA256}"\n'
+            + 'system_settings_wallpaper_sha256 = "${TEST_WALLPAPER_SHA256}"\n',
+            encoding="utf-8",
+        )
+        host = {
+            "os_version": "15.6", "os_build": "24G84",
+            "architecture": "arm64", "hardware": "MacFixture1,1",
+            "display_width": 1512, "display_height": 982,
+            "display_scale": 2.0, "display_color_space": "Color LCD",
+        }
+        with (
+            mock.patch.object(cub, "_bundle_info", side_effect=self.identity),
+            mock.patch.object(cub, "_static_preflight", return_value={
+                "matched_ready": False, "checks": []
+            }),
+            mock.patch.object(cub, "_host_environment", return_value=host),
+            mock.patch.dict(os.environ, {
+                "TEST_APPLE_NAME_SHA256": apple_hash,
+                "TEST_WALLPAPER_SHA256": wallpaper_hash,
+            }),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(
+                cub.generate(
+                    self.request,
+                    "pilot",
+                    "source",
+                    "system-settings-discovery",
+                ),
+                0,
+            )
+
+        manifest = json.loads(
+            (self.run_root / "configs/pilot/manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(len(manifest["cells"]), 1)
+        parsed = tomllib.loads(
+            Path(manifest["cells"][0]["config"]).read_text(encoding="utf-8")
+        )
+        self.assertEqual(parsed["mcp"]["allowed_tools"], [
+            "get_app_state", "press_key", "type_text",
+        ])
+        self.assertNotIn("click", parsed["mcp"]["allowed_tools"])
+        self.assertEqual(
+            parsed["mcp"]["call_contract"],
+            list(cub.SYSTEM_SETTINGS_CALL_CONTRACT),
+        )
+        self.assertEqual(len(parsed["mcp"]["call_contract"]), 9)
+        self.assertEqual(
+            parsed["artifacts"],
+            [{
+                "source": "artifacts/discovery-result.json",
+                "path": "artifacts/final-state/result.json",
+                "media_type": "application/json",
+            }],
+        )
+        oracle = (
+            self.run_root
+            / "configs/pilot/private/system-settings-discovery-hashes.json"
+        )
+        self.assertEqual(
+            json.loads(oracle.read_text(encoding="utf-8")),
+            {
+                "apple_account_name_sha256": apple_hash,
+                "wallpaper_sha256": wallpaper_hash,
+            },
+        )
+        self.assertEqual(oracle.stat().st_mode & 0o777, 0o600)
+        self.assertIn(str(oracle), parsed["task"]["verifier_oracle_paths"])
+        self.assertNotIn(
+            str(self.request.resolve()), parsed["task"]["verifier_oracle_paths"]
+        )
+        self.assertIn("${TEST_APPLE_NAME_SHA256}", self.request.read_text())
+        self.assertNotIn("TEST_APPLE_NAME_SHA256", oracle.read_text())
+        verify_command = parsed["phases"]["verifier"]["command"]
+        self.assertEqual(
+            verify_command[-2:], ["--hash-oracle", str(oracle)]
+        )
+        self.assertIn(
+            str(
+                ROOT
+                / "computer-use-tasks/v0/system-settings-discovery"
+                / "checker_data/expected-hashes.json"
+            ),
+            parsed["task"]["verifier_oracle_paths"],
         )
 
     def test_state_response_ab_configs_bind_mode_contract_and_identical_prompt(self):

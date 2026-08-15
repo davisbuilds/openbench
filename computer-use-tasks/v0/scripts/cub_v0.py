@@ -47,11 +47,15 @@ FIXTURE_BUNDLES = {
     "state-response-ab": "org.openbench.ComputerUseFixture.v0",
     "background-control": "org.openbench.BackgroundControlFixture.v0",
     "textedit-exact-file": "com.apple.TextEdit",
+    "system-settings-discovery": "com.apple.systempreferences",
 }
 GUARD_BUNDLE_ID = "org.openbench.FocusGuard.v0"
 TASKS = tuple(FIXTURE_BUNDLES)
 EXPERIMENT_TASKS = ("post-action-state-ab", "state-response-ab")
-MATCHED_TASKS = tuple(task for task in TASKS if task not in EXPERIMENT_TASKS)
+PILOT_ONLY_TASKS = ("system-settings-discovery",)
+MATCHED_TASKS = tuple(
+    task for task in TASKS if task not in {*EXPERIMENT_TASKS, *PILOT_ONLY_TASKS}
+)
 ARMS = ("installed", "source")
 POST_ACTION_STATE_ARMS = ("state", "no-state")
 STATE_RESPONSE_ARMS = ("auto", "full")
@@ -81,6 +85,42 @@ CALL_CONTRACT = (
         "element_id": "e11@s1",
         "text": "openbench-42", "include_state": True,
         "include_screenshot": False,
+    }},
+)
+
+SYSTEM_SETTINGS_CALL_CONTRACT = (
+    {"tool": "get_app_state", "required_arguments": {
+        "app": "com.apple.systempreferences", "include_screenshot": False,
+    }},
+    {"tool": "press_key", "required_arguments": {
+        "app": "com.apple.systempreferences", "key": "super+f",
+        "include_state": False, "include_screenshot": False,
+    }},
+    {"tool": "type_text", "required_arguments": {
+        "app": "com.apple.systempreferences", "text": "Wallpaper",
+        "include_state": False, "include_screenshot": False,
+    }},
+    {"tool": "press_key", "required_arguments": {
+        "app": "com.apple.systempreferences", "key": "Return",
+        "include_state": False, "include_screenshot": False,
+    }},
+    {"tool": "get_app_state", "required_arguments": {
+        "app": "com.apple.systempreferences", "include_screenshot": False,
+    }},
+    {"tool": "press_key", "required_arguments": {
+        "app": "com.apple.systempreferences", "key": "super+f",
+        "include_state": False, "include_screenshot": False,
+    }},
+    {"tool": "type_text", "required_arguments": {
+        "app": "com.apple.systempreferences", "text": "Personal Information",
+        "include_state": False, "include_screenshot": False,
+    }},
+    {"tool": "press_key", "required_arguments": {
+        "app": "com.apple.systempreferences", "key": "Return",
+        "include_state": False, "include_screenshot": False,
+    }},
+    {"tool": "get_app_state", "required_arguments": {
+        "app": "com.apple.systempreferences", "include_screenshot": False,
     }},
 )
 
@@ -175,6 +215,11 @@ DELIVERY_TIERS = {
         "pasteboard",
         "launchservices",
         "ax-window-management",
+    ),
+    "system-settings-discovery": (
+        "tier1-ax-action",
+        "tier1-ax-attribute",
+        "tier2-per-window-nsevent",
     ),
 }
 CONFIG_SCHEMA = "openbench.computer-use-config-request.v1"
@@ -331,6 +376,37 @@ def _request_paths(request: Mapping[str, Any]) -> tuple[Path, Path, Path]:
     repo = Path(request["computer_use_mcp_repo"]).expanduser().resolve()
     installed = Path(request["installed_mcp_app"]).expanduser().resolve()
     return root, repo, installed
+
+
+def _system_settings_hashes(request: Mapping[str, Any]) -> dict[str, str]:
+    fields = {
+        "apple_account_name_sha256": "system_settings_apple_name_sha256",
+        "wallpaper_sha256": "system_settings_wallpaper_sha256",
+    }
+    result = {name: request.get(source) for name, source in fields.items()}
+    if any(
+        type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None
+        for value in result.values()
+    ):
+        raise CubError(
+            "System Settings discovery requires lowercase SHA-256 values in "
+            "system_settings_apple_name_sha256 and system_settings_wallpaper_sha256"
+        )
+    return result
+
+
+def _load_system_settings_hash_oracle(path: Path) -> dict[str, str]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CubError(f"cannot load System Settings hash oracle {path}: {exc}") from exc
+    expected = {"apple_account_name_sha256", "wallpaper_sha256"}
+    if type(value) is not dict or set(value) != expected or any(
+        type(item) is not str or re.fullmatch(r"[0-9a-f]{64}", item) is None
+        for item in value.values()
+    ):
+        raise CubError("System Settings hash oracle is malformed")
+    return value
 
 
 def _git_has_commit(repo: Path, revision: str) -> bool:
@@ -694,6 +770,10 @@ def _build_manifest(source_app: Path, apps: Path) -> dict[str, Any]:
                     "textedit-exact-file",
                     Path("/System/Applications/TextEdit.app"),
                 ),
+                (
+                    "system-settings-discovery",
+                    Path("/System/Applications/System Settings.app"),
+                ),
             )
         },
     }
@@ -902,6 +982,20 @@ def _initial_state_ready(root: Path, arm: str, task: str, trial_index: int) -> b
     if task == "textedit-exact-file":
         output = workspace / "artifacts/openbench-exact.txt"
         return (workspace / "run-context.json").is_file() and not output.exists()
+    if task == "system-settings-discovery":
+        before = workspace / "runner/system-settings-before.json"
+        output = workspace / "artifacts/discovery-result.json"
+        try:
+            value = json.loads(before.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        return (
+            value.get("schema_version")
+            == "openbench.system-settings-before.v1"
+            and isinstance(value.get("files"), list)
+            and len(value["files"]) == 2
+            and not output.exists()
+        )
     state_path = workspace / "artifacts/fixture-state.json"
     expected = {
         "basic-controls": {
@@ -1054,7 +1148,7 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
         remember(_launch(fixture, (), env, logs / "fixture.log"))
         remember(_launch(guard, (), os.environ.copy(), logs / "guard.log"))
         foreground_bundle_id = GUARD_BUNDLE_ID
-    else:
+    elif task == "textedit-exact-file":
         relative = "artifacts/openbench-exact.txt"
         (workspace / "run-context.json").write_text(
             _canonical({"schema_version": RUN_CONTEXT_SCHEMA, "output_path": relative}) + "\n",
@@ -1083,11 +1177,76 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
             raise CubError("new TextEdit process disappeared")
         remember(identity)
         foreground_bundle_id = FIXTURE_BUNDLES[task]
+    else:
+        runner = workspace / "runner"
+        runner.mkdir()
+        protected = (
+            Path.home() / "Library/Application Support/com.apple.wallpaper/Store/Index.plist",
+            Path.home() / "Library/Preferences/MobileMeAccounts.plist",
+        )
+        if any(not path.is_file() or path.is_symlink() for path in protected):
+            raise CubError("required System Settings state files are unavailable")
+        (runner / "system-settings-before.json").write_text(
+            _canonical({
+                "schema_version": "openbench.system-settings-before.v1",
+                "files": [
+                    {"path": str(path), "sha256": _sha256(path)} for path in protected
+                ],
+            }) + "\n",
+            encoding="utf-8",
+        )
+        probe = subprocess.run(
+            ["pgrep", "-x", "System Settings"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        before = (
+            {int(item) for item in probe.stdout.split()}
+            if probe.returncode == 0
+            else set()
+        )
+        if before:
+            raise CubError(
+                "System Settings must be closed before this owned-process trial"
+            )
+        _run([
+            "open", "-n", "-a", "System Settings", "--args",
+            "-ApplePersistenceIgnoreState", "YES",
+        ], timeout=30)
+        deadline = time.monotonic() + 10
+        new: set[int] = set()
+        while time.monotonic() < deadline:
+            probe = subprocess.run(
+                ["pgrep", "-x", "System Settings"], capture_output=True, text=True
+            )
+            current = (
+                {int(item) for item in probe.stdout.split()}
+                if probe.returncode == 0
+                else set()
+            )
+            new = current - before
+            if len(new) == 1:
+                break
+            time.sleep(0.1)
+        if len(new) != 1:
+            raise CubError("could not prove one newly launched System Settings process")
+        identity = _process_identity(new.pop())
+        if identity is None:
+            raise CubError("new System Settings process disappeared")
+        remember(identity)
+        foreground_bundle_id = FIXTURE_BUNDLES[task]
     _wait_for_frontmost(foreground_bundle_id)
     return 0
 
 
-def verify(request_path: Path, arm: str, task: str, trial_index: int) -> int:
+def verify(
+    request_path: Path,
+    arm: str,
+    task: str,
+    trial_index: int,
+    hash_oracle_path: Path | None = None,
+) -> int:
     trial_index = _positive_trial_index(trial_index)
     request = _load_request(request_path)
     root, _repo, _installed = _request_paths(request)
@@ -1097,6 +1256,18 @@ def verify(request_path: Path, arm: str, task: str, trial_index: int) -> int:
     env["TASK_DIR"] = str(ROOT / task)
     if task == "textedit-exact-file":
         env["OPENBENCH_NATIVE_OUTPUT_PATH"] = str(workspace / "artifacts/openbench-exact.txt")
+        command = ["bash", str(ROOT / task / "checker.sh")]
+    elif task == "system-settings-discovery":
+        if hash_oracle_path is None:
+            raise CubError("System Settings verification requires --hash-oracle")
+        hashes = _load_system_settings_hash_oracle(hash_oracle_path.resolve())
+        env["OPENBENCH_EXPECTED_APPLE_NAME_SHA256"] = hashes[
+            "apple_account_name_sha256"
+        ]
+        env["OPENBENCH_EXPECTED_WALLPAPER_SHA256"] = hashes["wallpaper_sha256"]
+        env["OPENBENCH_SYSTEM_SETTINGS_BEFORE_PATH"] = str(
+            workspace / "runner/system-settings-before.json"
+        )
         command = ["bash", str(ROOT / task / "checker.sh")]
     else:
         state = workspace / "artifacts/fixture-state.json"
@@ -1183,7 +1354,10 @@ def _write_immutable_outputs(outputs: Mapping[Path, bytes]) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def _oracle_paths(task: str) -> list[Path]:
+def _oracle_paths(
+    task: str,
+    system_settings_hash_oracle: Path | None = None,
+) -> list[Path]:
     task_dir = ROOT / task
     paths = [
         Path(__file__).resolve(),
@@ -1193,6 +1367,13 @@ def _oracle_paths(task: str) -> list[Path]:
     expected = task_dir / "checker_data/expected.txt"
     if expected.is_file():
         paths.append(expected)
+    hashes = task_dir / "checker_data/expected-hashes.json"
+    if hashes.is_file():
+        paths.append(hashes)
+    if task == "system-settings-discovery":
+        if system_settings_hash_oracle is None:
+            raise CubError("System Settings verifier identity requires a sealed hash oracle")
+        paths.append(system_settings_hash_oracle.resolve())
     return paths
 
 
@@ -1202,6 +1383,12 @@ def _artifact_contract(task: str) -> tuple[str, str, str]:
             "artifacts/openbench-exact.txt",
             "output.txt",
             "text/plain; charset=utf-8",
+        )
+    if task == "system-settings-discovery":
+        return (
+            "artifacts/discovery-result.json",
+            "result.json",
+            "application/json",
         )
     return (
         "artifacts/fixture-state.json",
@@ -1357,6 +1544,7 @@ def _config_text(
     root, _repo, _installed = _request_paths(request)
     workspace = _workspace(root, arm, task, trial_index)
     output, results = _result_paths(root, mode, arm, task, trial_index)
+    config_root = descendant(root, f"configs/{mode}")
     lease = descendant(root, "runtime/native-macos.lock")
     task_dir = ROOT / task
     instruction_path = instruction_path or task_dir / "instruction.md"
@@ -1364,7 +1552,14 @@ def _config_text(
     common = [sys.executable, str(script), "--request", str(request_path)]
     setup_cmd = [*common, "setup"]
     reset_cmd = [*common, "reset"]
-    verify_cmd = [*common, "verify"]
+    hash_oracle = (
+        config_root / "private/system-settings-discovery-hashes.json"
+        if task == "system-settings-discovery"
+        else None
+    )
+    verify_cmd = [*common, "verify"] + (
+        ["--hash-oracle", str(hash_oracle)] if hash_oracle is not None else []
+    )
     if task in {"basic-controls", *EXPERIMENT_TASKS}:
         foreground = FIXTURE_BUNDLES[task]
         forbidden: list[str] = []
@@ -1373,6 +1568,10 @@ def _config_text(
         foreground = GUARD_BUNDLE_ID
         forbidden = [FIXTURE_BUNDLES[task]]
         tools = ["list_apps", "get_app_state", "find", "set_value", "click", "click_menu_item", "wait_for"]
+    elif task == "system-settings-discovery":
+        foreground = FIXTURE_BUNDLES[task]
+        forbidden = []
+        tools = ["get_app_state", "press_key", "type_text"]
     else:
         foreground = FIXTURE_BUNDLES[task]
         forbidden = []
@@ -1383,7 +1582,9 @@ def _config_text(
         "read_clipboard", "record_skill_start", "record_skill_stop", "run_skill", "save_skill",
         "write_clipboard",
     } - set(tools))
-    oracle_paths = [str(path) for path in _oracle_paths(task)]
+    oracle_paths = [
+        str(path) for path in _oracle_paths(task, hash_oracle)
+    ]
     state_response_mode = (
         locked_state_response_mode
         if locked_state_response_mode is not None
@@ -1402,6 +1603,8 @@ def _config_text(
         effective_contract = state_call_contract(arm)
     elif mode == "post-action-state-ab":
         effective_contract = post_action_state_call_contract(arm)
+    elif task == "system-settings-discovery":
+        effective_contract = list(SYSTEM_SETTINGS_CALL_CONTRACT)
     else:
         effective_contract = []
     if effective_contract:
@@ -1531,6 +1734,8 @@ def generate(
     repetitions = _positive_trial_index(repetitions)
     trial_index = _positive_trial_index(trial_index)
     request = _load_request(request_path)
+    if task == "system-settings-discovery":
+        _system_settings_hashes(request)
     root, _repo, installed = _request_paths(request)
     static = _static_preflight(request)
     experiment_mode = mode in {"state-ab", "post-action-state-ab"}
@@ -1585,6 +1790,9 @@ def generate(
         "state-response-ab": root / "apps/ComputerUseFixture.app",
         "background-control": root / "apps/BackgroundControlFixture.app",
         "textedit-exact-file": Path("/System/Applications/TextEdit.app"),
+        "system-settings-discovery": Path(
+            "/System/Applications/System Settings.app"
+        ),
     }
     host = _host_environment()
     app_identities = {
@@ -1596,6 +1804,14 @@ def generate(
     plans: list[dict[str, Any]] = []
     config_root = descendant(root, f"configs/{mode}")
     manifest_path = config_root / "manifest.json"
+    private_hash_oracle = None
+    if task == "system-settings-discovery":
+        private_hash_oracle = (
+            config_root / "private/system-settings-discovery-hashes.json"
+        )
+        outputs[private_hash_oracle] = (
+            canonical_bytes(_system_settings_hashes(request)) + b"\n"
+        )
     if mode == "matched" or experiment_mode:
         harness = {
             "name": "codex",
@@ -1805,6 +2021,8 @@ def generate(
     }
     outputs[manifest_path] = canonical_bytes(manifest) + b"\n"
     _write_immutable_outputs(outputs)
+    if private_hash_oracle is not None:
+        private_hash_oracle.chmod(0o600)
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0
 
@@ -1845,6 +2063,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--trial-index",
             type=_positive_trial_argument,
         )
+        if name == "verify":
+            item.add_argument("--hash-oracle", type=Path)
     args = parser.parse_args(argv)
     try:
         if args.command == "preflight":
@@ -1869,7 +2089,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             return setup(args.request, arm, task, trial_index)
         if args.command == "reset":
             return reset_runtime(args.request, arm, task, trial_index)
-        return verify(args.request, arm, task, trial_index)
+        return verify(
+            args.request,
+            arm,
+            task,
+            trial_index,
+            args.hash_oracle,
+        )
     except CubError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

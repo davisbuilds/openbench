@@ -1,0 +1,20 @@
+schema_version = "openbench.native-task.v1"
+task_id = "openbench/computer-use-v0-system-settings-discovery"
+platform = "macos"
+execution_backend = "openbench-native"
+harbor_execution_supported = false
+
+[application]
+name = "System Settings"
+bundle_id = "com.apple.systempreferences"
+
+[artifacts.result]
+authority = "deterministic-checker"
+media_type = "application/json"
+contains_plaintext_apple_account_name = false
+
+[verification]
+command = ["bash", "checker.sh"]
+authoritative_judge = "deterministic-checker"
+requires_observed_mcp_evidence = true
+screenshots_authoritative = false

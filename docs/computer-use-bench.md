@@ -158,6 +158,27 @@ bundle-backed MCP detail is retained independent of input order.
 The first declared arm is the matched-delta reference. Deltas are candidate
 minus reference within the same repetition.
 
+## System Settings discovery pilot
+
+The local-only pilot exercises autonomous, read-only navigation in the real
+macOS System Settings app. It asks the agent to identify the visible selected
+wallpaper and Apple Account personal name, then checks the exact final JSON
+against operator-supplied SHA-256 oracles and completed `get_app_state` events.
+It also hashes the wallpaper and account preference files before the trial and
+fails if either changes.
+
+Set the two private oracle hashes in the request file, then generate one source
+cell:
+
+```bash
+python3 computer-use-tasks/v0/scripts/cub_v0.py \
+  --request "$OPENBENCH_CUB_REQUEST" generate \
+  --mode pilot --arm source --task system-settings-discovery
+```
+
+The retained result includes the wallpaper label and both hashes, but never the
+plaintext Apple Account name. Raw Codex events and ATIF remain local evidence.
+
 ## Metrics
 
 Binary success uses the deterministic verifier verdict and a Wilson 95%

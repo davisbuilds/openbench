@@ -4,3 +4,9 @@ computer_use_mcp_repo = "${OPENBENCH_CUB_MCP_REPO}"
 installed_mcp_app = "${OPENBENCH_CUB_INSTALLED_MCP_APP}"
 source_signing_identity = "${OPENBENCH_CUB_SIGNING_IDENTITY}"
 codex_version = "codex-cli 0.146.1"
+
+# Required only for the local-only System Settings discovery pilot. Supply
+# normalized lowercase SHA-256 values through the environment; never commit the
+# plaintext Apple Account name.
+# system_settings_apple_name_sha256 = "${OPENBENCH_SYSTEM_SETTINGS_APPLE_NAME_SHA256}"
+# system_settings_wallpaper_sha256 = "${OPENBENCH_SYSTEM_SETTINGS_WALLPAPER_SHA256}"

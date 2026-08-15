@@ -52,6 +52,7 @@ class ComputerUseTasksTests(unittest.TestCase):
             "background-control",
             "post-action-state-ab",
             "state-response-ab",
+            "system-settings-discovery",
             "textedit-exact-file",
         ):
             with self.subTest(task=name):
@@ -74,6 +75,7 @@ class ComputerUseTasksTests(unittest.TestCase):
             "basic-controls",
             "post-action-state-ab",
             "state-response-ab",
+            "system-settings-discovery",
             "textedit-exact-file",
         ])
         for _tier, name, task_dir in tasks:
@@ -82,6 +84,102 @@ class ComputerUseTasksTests(unittest.TestCase):
                 solved, solved_output, _ = run_checker(task_dir, True)
                 self.assertNotEqual(bare, 0, bare_output)
                 self.assertEqual(solved, 0, solved_output)
+
+    def test_system_settings_result_is_hash_bound_observed_and_sanitized(self):
+        task_name = "system-settings-discovery"
+        apple_name = "OpenBench Test User"
+        expected_name_hash = hashlib.sha256(apple_name.encode("utf-8")).hexdigest()
+
+        temporary, root = self.solved_workspace(task_name)
+        self.addCleanup(temporary.cleanup)
+        result = self.run_verifier(task_name, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        artifact_path = root / "artifacts/discovery-result.json"
+        artifact_text = artifact_path.read_text(encoding="utf-8")
+        artifact = json.loads(artifact_text)
+        self.assertEqual(set(artifact), {
+            "apple_account_name_sha256",
+            "schema_version",
+            "wallpaper",
+            "wallpaper_sha256",
+        })
+        self.assertEqual(artifact["apple_account_name_sha256"], expected_name_hash)
+        self.assertNotIn(apple_name, artifact_text)
+
+        for mutation, expected_error in (
+            ("raw-evidence", "get_app_state"),
+            ("oracle-hash", "local oracle"),
+            ("final-schema", "exact two-field JSON object"),
+        ):
+            with self.subTest(mutation=mutation):
+                case, case_root = self.solved_workspace(task_name)
+                try:
+                    trajectory_path = case_root / "trajectory.json"
+                    events_path = case_root / "codex-events.jsonl"
+                    if mutation == "raw-evidence":
+                        events_path.write_text(
+                            events_path.read_text(encoding="utf-8").replace(
+                                '"tool":"get_app_state"', '"tool":"click"'
+                            ),
+                            encoding="utf-8",
+                        )
+                    elif mutation == "oracle-hash":
+                        for path in (trajectory_path, events_path):
+                            path.write_text(
+                                path.read_text(encoding="utf-8").replace(
+                                    apple_name, "Changed Test User"
+                                ),
+                                encoding="utf-8",
+                            )
+                    else:
+                        trajectory = json.loads(
+                            trajectory_path.read_text(encoding="utf-8")
+                        )
+                        answer = json.loads(trajectory["steps"][-1]["message"])
+                        answer["email"] = "must-not-be-accepted@example.invalid"
+                        trajectory["steps"][-1]["message"] = json.dumps(answer)
+                        trajectory_path.write_text(
+                            json.dumps(trajectory), encoding="utf-8"
+                        )
+                    rejected = self.run_verifier(task_name, case_root)
+                    self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                    self.assertIn(expected_error, rejected.stdout)
+                finally:
+                    case.cleanup()
+
+    def test_system_settings_rejects_protected_state_mutation(self):
+        temporary, root = self.solved_workspace("system-settings-discovery")
+        self.addCleanup(temporary.cleanup)
+        protected = root / "protected-settings.plist"
+        unchanged = root / "unchanged-settings.plist"
+        protected.write_bytes(b"before")
+        unchanged.write_bytes(b"unchanged")
+        before = root / "system-settings-before.json"
+        before.write_text(
+            json.dumps({
+                "schema_version": "openbench.system-settings-before.v1",
+                "files": [
+                    {
+                        "path": str(protected),
+                        "sha256": hashlib.sha256(b"before").hexdigest(),
+                    },
+                    {
+                        "path": str(unchanged),
+                        "sha256": hashlib.sha256(b"unchanged").hexdigest(),
+                    },
+                ],
+            }),
+            encoding="utf-8",
+        )
+        protected.write_bytes(b"after")
+
+        result = self.run_verifier(
+            "system-settings-discovery",
+            root,
+            {"OPENBENCH_SYSTEM_SETTINGS_BEFORE_PATH": str(before)},
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("changed", result.stdout.lower())
 
     def test_post_action_state_ab_reuses_basic_controls_checker(self):
         self.assertEqual(
