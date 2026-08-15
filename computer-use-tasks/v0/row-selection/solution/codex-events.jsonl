@@ -1,0 +1,2 @@
+{"type":"item.completed","item":{"type":"mcp_tool_call","tool":"get_app_state","result":{"content":[{"type":"text","text":"e20@s1 AXTable \"row-list\"\n\te21@s1 AXRow\n\t\te22@s1 AXCell \"Row 001\""}]}}}
+{"type":"item.completed","item":{"type":"mcp_tool_call","tool":"click","result":{"content":[{"type":"text","text":"Selected e27@s1 (AXRow) via accessibility [tier1-ax-attribute].\n\ne20@s2 AXTable \"row-list\"\n\te27@s2 AXRow selected\n\t\te28@s2 AXCell \"Row 003\"\n\t\t\te29@s2 AXStaticText \"Row 003\" value=\"Row 003\""}]}}}

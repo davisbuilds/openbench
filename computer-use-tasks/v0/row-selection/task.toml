@@ -1,0 +1,24 @@
+schema_version = "1.4"
+
+[task]
+name = "openbench/computer-use-v0-row-selection"
+description = "Select one accessible row in a virtualized native list"
+authors = [{ name = "OpenBench" }]
+keywords = ["computer-use", "native-macos", "accessibility", "row-selection"]
+
+[metadata]
+origin = "openbench"
+execution_backend = "native-macos-only"
+native_sidecar = "native-macos.toml"
+harbor_execution_supported = false
+privacy = "local-only"
+
+[verifier]
+timeout_sec = 30.0
+
+[agent]
+timeout_sec = 300.0
+
+[environment]
+os = "macos"
+network_mode = "none"

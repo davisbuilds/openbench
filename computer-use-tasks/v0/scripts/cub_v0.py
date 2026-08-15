@@ -43,6 +43,7 @@ SOURCE_MCP_BUNDLE_ID = "org.openbench.computer-use-mcp.source.v041"
 INSTALLED_MCP_BUNDLE_ID = "dev.computer-use-mcp.app"
 FIXTURE_BUNDLES = {
     "basic-controls": "org.openbench.ComputerUseFixture.v0",
+    "row-selection": "org.openbench.ComputerUseFixture.v0",
     "post-action-state-ab": "org.openbench.ComputerUseFixture.v0",
     "state-response-ab": "org.openbench.ComputerUseFixture.v0",
     "background-control": "org.openbench.BackgroundControlFixture.v0",
@@ -52,7 +53,7 @@ FIXTURE_BUNDLES = {
 GUARD_BUNDLE_ID = "org.openbench.FocusGuard.v0"
 TASKS = tuple(FIXTURE_BUNDLES)
 EXPERIMENT_TASKS = ("post-action-state-ab", "state-response-ab")
-PILOT_ONLY_TASKS = ("system-settings-discovery",)
+PILOT_ONLY_TASKS = ("row-selection", "system-settings-discovery")
 MATCHED_TASKS = tuple(
     task for task in TASKS if task not in {*EXPERIMENT_TASKS, *PILOT_ONLY_TASKS}
 )
@@ -143,6 +144,13 @@ DELIVERY_TIERS = {
         "pasteboard",
         "launchservices",
         "ax-window-management",
+    ),
+    "row-selection": (
+        "tier1-ax-action",
+        "tier1-ax-attribute",
+        "tier2-per-window-nsevent",
+        "tier25-skylight-sleventpostto-pid",
+        "tier3-cgeventpostto-pid",
     ),
     "state-response-ab": (
         "tier1-ax-action",
@@ -966,6 +974,10 @@ def _initial_state_ready(root: Path, arm: str, task: str, trial_index: int) -> b
             "fixture": "basic-controls", "honest_counter": 0,
             "keystroke_echo": "", "schema_version": 1, "toggle_on": False,
         },
+        "row-selection": {
+            "fixture": "basic-controls", "honest_counter": 0,
+            "keystroke_echo": "", "schema_version": 1, "toggle_on": False,
+        },
         "state-response-ab": {
             "fixture": "basic-controls", "honest_counter": 0,
             "keystroke_echo": "", "schema_version": 1, "toggle_on": False,
@@ -1090,7 +1102,7 @@ def setup(request_path: Path, arm: str, task: str, trial_index: int) -> int:
 
     env = os.environ.copy()
     env.pop("COMPUTER_USE_FIXTURE_SMALL_TREE", None)
-    if task in {"basic-controls", *EXPERIMENT_TASKS}:
+    if task in {"basic-controls", "row-selection", *EXPERIMENT_TASKS}:
         state = artifacts / "fixture-state.json"
         env.update({
             "COMPUTER_USE_FIXTURE_STATE_PATH": str(state),
@@ -1233,6 +1245,11 @@ def verify(
             workspace / "runner/system-settings-before.json"
         )
         command = ["bash", str(ROOT / task / "checker.sh")]
+    elif task == "row-selection":
+        env["OPENBENCH_ROW_SELECTION_RESULT_PATH"] = str(
+            workspace / "artifacts/row-selection-result.json"
+        )
+        command = ["bash", str(ROOT / task / "checker.sh")]
     else:
         state = workspace / "artifacts/fixture-state.json"
         if task in {"basic-controls", *EXPERIMENT_TASKS}:
@@ -1347,6 +1364,12 @@ def _artifact_contract(task: str) -> tuple[str, str, str]:
             "artifacts/openbench-exact.txt",
             "output.txt",
             "text/plain; charset=utf-8",
+        )
+    if task == "row-selection":
+        return (
+            "artifacts/row-selection-result.json",
+            "result.json",
+            "application/json",
         )
     if task == "system-settings-discovery":
         return (
@@ -1524,7 +1547,7 @@ def _config_text(
     verify_cmd = [*common, "verify"] + (
         ["--hash-oracle", str(hash_oracle)] if hash_oracle is not None else []
     )
-    if task in {"basic-controls", *EXPERIMENT_TASKS}:
+    if task in {"basic-controls", "row-selection", *EXPERIMENT_TASKS}:
         foreground = FIXTURE_BUNDLES[task]
         forbidden: list[str] = []
         tools = ["list_apps", "get_app_state", "click", "set_value", "type_text", "wait_for"]

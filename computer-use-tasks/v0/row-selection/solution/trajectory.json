@@ -1,0 +1,13 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "session_id": "offline-solution",
+  "agent": {"name": "codex", "version": "test", "model_name": "test"},
+  "steps": [
+    {
+      "step_id": 1,
+      "source": "agent",
+      "message": "{\"selected_row\":\"Row 003\"}"
+    }
+  ],
+  "final_metrics": {"total_steps": 1}
+}

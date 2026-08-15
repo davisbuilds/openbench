@@ -30,8 +30,8 @@ from obench.native_run import _canonical_digest, _content_bound_command_digest
 
 ARMS = ("baseline", "scoped")
 DEFAULT_EXPERIMENT_ID = "scoped-agent-ab"
-TASK = "basic-controls"
-PROMPT = cub.ROOT / "experiments/scoped-outcome-agent-ab/instruction.md"
+DEFAULT_TASK = "basic-controls"
+DEFAULT_PROMPT = cub.ROOT / "experiments/scoped-outcome-agent-ab/instruction.md"
 
 
 class ExperimentError(RuntimeError):
@@ -412,7 +412,13 @@ def _build_exact_app(
     return app, provenance
 
 
-def _task_identity(request_path: Path, request: Mapping[str, Any]) -> dict[str, Any]:
+def _task_identity(
+    request_path: Path,
+    request: Mapping[str, Any],
+    *,
+    task: str,
+    prompt: Path,
+) -> dict[str, Any]:
     root, _repo, _installed = cub._request_paths(request)
     verifier_command = [
         sys.executable,
@@ -423,19 +429,20 @@ def _task_identity(request_path: Path, request: Mapping[str, Any]) -> dict[str, 
     ]
     verifier_digest = _content_bound_command_digest(
         verifier_command,
-        cwd=cub._workspace(root, ARMS[0], TASK, 1),
-        extra_paths=cub._oracle_paths(TASK),
+        cwd=cub._workspace(root, ARMS[0], task, 1),
+        extra_paths=cub._oracle_paths(task),
     )
+    _source, artifact_name, _media = cub._artifact_contract(task)
     task_content = {
-        "instruction": _sha256(PROMPT),
+        "instruction": _sha256(prompt),
         "verifier": verifier_digest,
         "artifacts": [
-            "artifacts/final-state/state.json",
+            f"artifacts/final-state/{artifact_name}",
             DAEMON_BUNDLE_PATH,
         ],
     }
     return {
-        "name": f"openbench/computer-use-v0-{TASK}",
+        "name": f"openbench/computer-use-v0-{task}",
         "content_sha256": _canonical_digest(task_content),
     }
 
@@ -469,6 +476,8 @@ def _generate(
     repetitions: int,
     experiment_id: str,
     build_provenance: Mapping[str, Mapping[str, Any]],
+    task: str,
+    prompt: Path,
     response_contract: str = "scoped-outcome",
 ) -> tuple[dict[str, Any], Path, Path, list[dict[str, Any]]]:
     root, _repo, _installed = cub._request_paths(request)
@@ -502,7 +511,9 @@ def _generate(
     }
     spec = {
         "comparison_id": f"cub-v0-{experiment_id}",
-        "task": _task_identity(request_path, request),
+        "task": _task_identity(
+            request_path, request, task=task, prompt=prompt
+        ),
         "harness": harness,
         "model": model,
         "arms": [
@@ -517,8 +528,8 @@ def _generate(
     }
     plan = build_native_matrix(**spec)
     plan_dir = config_root / "plans"
-    spec_path = plan_dir / f"{TASK}.spec.json"
-    plan_path = plan_dir / f"{TASK}.plan.json"
+    spec_path = plan_dir / f"{task}.spec.json"
+    plan_path = plan_dir / f"{task}.plan.json"
     manifest_path = config_root / "manifest.json"
     outputs: dict[Path, bytes] = {
         spec_path: canonical_bytes(spec) + b"\n",
@@ -529,17 +540,17 @@ def _generate(
         arm = cell["arm_id"]
         trial_index = int(cell["block"])
         config_path = (
-            config_root / "cells" / TASK / f"trial{trial_index}-{arm}.toml"
+            config_root / "cells" / task / f"trial{trial_index}-{arm}.toml"
         )
         daemon_evidence = (
-            cub._workspace(root, arm, TASK, trial_index)
+            cub._workspace(root, arm, task, trial_index)
             / "daemon-evidence.json"
         )
         config_text = cub._config_text(
             request_path=request_path.resolve(),
             request=request,
             arm=arm,
-            task=TASK,
+            task=task,
             trial_index=trial_index,
             trial_id=cell["trial_id"],
             mcp=runtime_identities[arm],
@@ -552,7 +563,7 @@ def _generate(
                 "manifest": manifest_path,
                 "plan": plan_path,
             },
-            instruction_path=PROMPT,
+            instruction_path=prompt,
             locked_state_response_mode="auto",
         )
         config_text += f'''\n[[artifacts]]
@@ -563,10 +574,10 @@ media_type = "application/json"
         config_bytes = config_text.encode("utf-8")
         outputs[config_path] = config_bytes
         output_path, results_path = cub._result_paths(
-            root, experiment_id, arm, TASK, trial_index
+            root, experiment_id, arm, task, trial_index
         )
         cells.append({
-            "task": TASK,
+            "task": task,
             **{
                 key: cell[key]
                 for key in (
@@ -575,7 +586,7 @@ media_type = "application/json"
                 )
             },
             "trial_index": trial_index,
-            "matrix_cell_key": f"{TASK}/{cell['cell_id']}",
+            "matrix_cell_key": f"{task}/{cell['cell_id']}",
             "plan_sha256": plan["plan_sha256"],
             "config": str(config_path),
             "runnable_config_sha256": hashlib.sha256(config_bytes).hexdigest(),
@@ -591,7 +602,7 @@ media_type = "application/json"
         "comparable": True,
         "repetitions": repetitions,
         "plans": [{
-            "task": TASK,
+            "task": task,
             "spec": str(spec_path),
             "spec_sha256": hashlib.sha256(outputs[spec_path]).hexdigest(),
             "plan": str(plan_path),
@@ -599,8 +610,8 @@ media_type = "application/json"
             "plan_file_sha256": hashlib.sha256(outputs[plan_path]).hexdigest(),
         }],
         "cells": cells,
-        "prompt": str(PROMPT),
-        "prompt_sha256": _sha256(PROMPT),
+        "prompt": str(prompt),
+        "prompt_sha256": _sha256(prompt),
         "response_contract": response_contract,
         "arms": {
             arm: {
@@ -719,6 +730,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
     parser.add_argument(
+        "--task",
+        default=DEFAULT_TASK,
+        help="native computer-use task to run",
+    )
+    parser.add_argument(
+        "--instruction",
+        type=Path,
+        help="instruction override; defaults to the task instruction",
+    )
+    parser.add_argument(
         "--response-contract",
         choices=("scoped-outcome", "none"),
         default="scoped-outcome",
@@ -739,6 +760,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     request = cub._load_request(args.request)
     root, repo, _installed = cub._request_paths(request)
+    if args.task not in cub.FIXTURE_BUNDLES:
+        raise ExperimentError(f"unknown computer-use task: {args.task}")
+    prompt = (
+        args.instruction.expanduser().resolve()
+        if args.instruction is not None
+        else (
+            DEFAULT_PROMPT
+            if args.task == DEFAULT_TASK
+            else (cub.ROOT / args.task / "instruction.md")
+        ).resolve()
+    )
+    if not prompt.is_file():
+        raise ExperimentError(f"instruction is unavailable: {prompt}")
     signing_identity = request.get("source_signing_identity")
     if not isinstance(signing_identity, str) or not signing_identity or signing_identity == "-":
         raise ExperimentError("source_signing_identity must be a stable signing identity")
@@ -786,6 +820,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             repetitions=args.repetitions,
             experiment_id=args.experiment_id,
             build_provenance=build_provenance,
+            task=args.task,
+            prompt=prompt,
             response_contract=args.response_contract,
         )
         bundles = _run_cells(

@@ -1,0 +1,6 @@
+schema_version = "openbench.native-macos-task.v1"
+platform = "macos"
+app_bundle_id = "org.openbench.ComputerUseFixture.v0"
+requires_accessibility = true
+requires_screen_recording = true
+requires_foreground = true
