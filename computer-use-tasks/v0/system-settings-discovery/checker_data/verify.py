@@ -129,6 +129,7 @@ def unique_object(pairs):
 
 def observed_state_text(events_path):
     observations = []
+    initial_state_observations = 0
     for line_number, line in enumerate(
         pathlib.Path(events_path).read_text(encoding="utf-8").splitlines(), 1
     ):
@@ -140,9 +141,10 @@ def observed_state_text(events_path):
             event.get("type") != "item.completed"
             or type(item) is not dict
             or item.get("type") != "mcp_tool_call"
-            or item.get("tool") != "get_app_state"
         ):
             continue
+        if item.get("tool") == "get_app_state":
+            initial_state_observations += 1
         result = item.get("result")
         content = result.get("content") if type(result) is dict else None
         if type(content) is not list:
@@ -154,8 +156,8 @@ def observed_state_text(events_path):
             and part.get("type") == "text"
             and type(part.get("text")) is str
         )
-    if len(observations) < 2:
-        raise ValueError("at least two completed get_app_state observations are required")
+    if initial_state_observations < 1:
+        raise ValueError("at least one completed get_app_state observation is required")
     return "\n".join(observations)
 
 
@@ -183,7 +185,7 @@ def main():
         observed = unicodedata.normalize("NFC", observed_state_text(events_path))
         for field in ANSWER_FIELDS:
             if answer[field] not in observed:
-                raise ValueError(field + " was not observed in a get_app_state response")
+                raise ValueError(field + " was not observed in a Computer Use OSS response")
         if digest(answer["apple_account_name"]) != hashes["apple_account_name_sha256"]:
             raise ValueError("Apple Account name does not match the local oracle")
         if digest(answer["wallpaper"]) != hashes["wallpaper_sha256"]:

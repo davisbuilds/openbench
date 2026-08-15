@@ -1,2 +1,2 @@
-{"type":"item.completed","item":{"type":"mcp_tool_call","tool":"get_app_state","result":{"content":[{"type":"text","text":"Wallpaper selected: OpenBench Test Wallpaper"}]}}}
 {"type":"item.completed","item":{"type":"mcp_tool_call","tool":"get_app_state","result":{"content":[{"type":"text","text":"Personal Information Name: OpenBench Test User"}]}}}
+{"type":"item.completed","item":{"type":"mcp_tool_call","tool":"press_key","result":{"content":[{"type":"text","text":"Wallpaper selected: OpenBench Test Wallpaper"}]}}}

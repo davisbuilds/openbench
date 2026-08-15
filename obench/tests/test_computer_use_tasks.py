@@ -107,7 +107,7 @@ class ComputerUseTasksTests(unittest.TestCase):
         self.assertNotIn(apple_name, artifact_text)
 
         for mutation, expected_error in (
-            ("raw-evidence", "get_app_state"),
+            ("raw-evidence", "completed get_app_state"),
             ("oracle-hash", "local oracle"),
             ("final-schema", "exact two-field JSON object"),
         ):
