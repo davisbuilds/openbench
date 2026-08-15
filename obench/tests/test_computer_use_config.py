@@ -708,6 +708,13 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertEqual(parsed["mcp"]["allowed_tools"], [
             "get_app_state", "press_key", "type_text",
         ])
+        self.assertEqual(parsed["focus"]["allowed_delivery_tiers"], [
+            "tier1-ax-action",
+            "tier1-ax-attribute",
+            "tier2-per-window-nsevent",
+            "tier3-cgeventpostto-pid",
+        ])
+        self.assertTrue(parsed["focus"]["forbid_global_delivery"])
         self.assertNotIn("click", parsed["mcp"]["allowed_tools"])
         self.assertNotIn("call_contract", parsed["mcp"])
         self.assertEqual(

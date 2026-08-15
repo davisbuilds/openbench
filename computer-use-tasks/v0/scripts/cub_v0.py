@@ -183,6 +183,7 @@ DELIVERY_TIERS = {
         "tier1-ax-action",
         "tier1-ax-attribute",
         "tier2-per-window-nsevent",
+        "tier3-cgeventpostto-pid",
     ),
 }
 CONFIG_SCHEMA = "openbench.computer-use-config-request.v1"
