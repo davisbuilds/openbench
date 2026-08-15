@@ -709,11 +709,7 @@ class ComputerUseConfigTests(unittest.TestCase):
             "get_app_state", "press_key", "type_text",
         ])
         self.assertNotIn("click", parsed["mcp"]["allowed_tools"])
-        self.assertEqual(
-            parsed["mcp"]["call_contract"],
-            list(cub.SYSTEM_SETTINGS_CALL_CONTRACT),
-        )
-        self.assertEqual(len(parsed["mcp"]["call_contract"]), 9)
+        self.assertNotIn("call_contract", parsed["mcp"])
         self.assertEqual(
             parsed["artifacts"],
             [{

@@ -88,43 +88,6 @@ CALL_CONTRACT = (
     }},
 )
 
-SYSTEM_SETTINGS_CALL_CONTRACT = (
-    {"tool": "get_app_state", "required_arguments": {
-        "app": "com.apple.systempreferences", "include_screenshot": False,
-    }},
-    {"tool": "press_key", "required_arguments": {
-        "app": "com.apple.systempreferences", "key": "super+f",
-        "include_state": False, "include_screenshot": False,
-    }},
-    {"tool": "type_text", "required_arguments": {
-        "app": "com.apple.systempreferences", "text": "Wallpaper",
-        "include_state": False, "include_screenshot": False,
-    }},
-    {"tool": "press_key", "required_arguments": {
-        "app": "com.apple.systempreferences", "key": "Return",
-        "include_state": False, "include_screenshot": False,
-    }},
-    {"tool": "get_app_state", "required_arguments": {
-        "app": "com.apple.systempreferences", "include_screenshot": False,
-    }},
-    {"tool": "press_key", "required_arguments": {
-        "app": "com.apple.systempreferences", "key": "super+f",
-        "include_state": False, "include_screenshot": False,
-    }},
-    {"tool": "type_text", "required_arguments": {
-        "app": "com.apple.systempreferences", "text": "Personal Information",
-        "include_state": False, "include_screenshot": False,
-    }},
-    {"tool": "press_key", "required_arguments": {
-        "app": "com.apple.systempreferences", "key": "Return",
-        "include_state": False, "include_screenshot": False,
-    }},
-    {"tool": "get_app_state", "required_arguments": {
-        "app": "com.apple.systempreferences", "include_screenshot": False,
-    }},
-)
-
-
 def state_call_contract(mode: str) -> list[dict[str, Any]]:
     if mode not in STATE_RESPONSE_ARMS:
         raise CubError("state response mode must be auto or full")
@@ -1603,8 +1566,6 @@ def _config_text(
         effective_contract = state_call_contract(arm)
     elif mode == "post-action-state-ab":
         effective_contract = post_action_state_call_contract(arm)
-    elif task == "system-settings-discovery":
-        effective_contract = list(SYSTEM_SETTINGS_CALL_CONTRACT)
     else:
         effective_contract = []
     if effective_contract:
