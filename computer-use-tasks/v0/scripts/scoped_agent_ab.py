@@ -285,7 +285,13 @@ def _response_encodings(bundle: Path) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def _validate_arm_encodings(arm: str, counts: Mapping[str, int]) -> None:
+def _validate_arm_encodings(
+    arm: str, counts: Mapping[str, int], *, contract: str = "scoped-outcome"
+) -> None:
+    if contract == "none":
+        return
+    if contract != "scoped-outcome":
+        raise ExperimentError(f"unknown response encoding contract: {contract}")
     outcomes = counts.get("outcome", 0)
     if arm == "baseline" and outcomes:
         raise ExperimentError("baseline emitted scoped-only outcome responses")
@@ -463,6 +469,7 @@ def _generate(
     repetitions: int,
     experiment_id: str,
     build_provenance: Mapping[str, Mapping[str, Any]],
+    response_contract: str = "scoped-outcome",
 ) -> tuple[dict[str, Any], Path, Path, list[dict[str, Any]]]:
     root, _repo, _installed = cub._request_paths(request)
     config_root = cub.descendant(root, f"configs/{experiment_id}")
@@ -594,6 +601,7 @@ media_type = "application/json"
         "cells": cells,
         "prompt": str(PROMPT),
         "prompt_sha256": _sha256(PROMPT),
+        "response_contract": response_contract,
         "arms": {
             arm: {
                 "source_revision": revisions[arm],
@@ -616,6 +624,7 @@ def _run_cells(
     cells: Sequence[Mapping[str, Any]],
     staged_apps: Mapping[str, Path],
     runtime_app: Path,
+    response_contract: str = "scoped-outcome",
 ) -> list[Path]:
     bundles: list[Path] = []
     for cell in sorted(cells, key=lambda item: int(item["sequence"])):
@@ -644,7 +653,7 @@ def _run_cells(
             )
             bundle = Path(str(cell["output"]))
             encodings = _response_encodings(bundle)
-            _validate_arm_encodings(arm, encodings)
+            _validate_arm_encodings(arm, encodings, contract=response_contract)
             sealed_daemon_evidence = bundle / DAEMON_BUNDLE_PATH
             if (
                 not sealed_daemon_evidence.is_file()
@@ -709,6 +718,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
+    parser.add_argument(
+        "--response-contract",
+        choices=("scoped-outcome", "none"),
+        default="scoped-outcome",
+        help=(
+            "arm-specific response assertion; use none when only exact source "
+            "revisions differ"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.repetitions < 1:
         raise ExperimentError("repetitions must be positive")
@@ -768,11 +786,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             repetitions=args.repetitions,
             experiment_id=args.experiment_id,
             build_provenance=build_provenance,
+            response_contract=args.response_contract,
         )
         bundles = _run_cells(
             cells=cells,
             staged_apps=staged_apps,
             runtime_app=runtime_app,
+            response_contract=args.response_contract,
         )
         report = cub.descendant(root, f"results/{args.experiment_id}/report.json")
         command = [

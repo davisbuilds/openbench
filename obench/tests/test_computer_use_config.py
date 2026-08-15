@@ -178,6 +178,13 @@ class ComputerUseConfigTests(unittest.TestCase):
         self.assertNotIn("toggle-box", prompt)
         self.assertNotIn("state_response_mode", prompt)
 
+    def test_scoped_agent_ab_can_bind_an_exact_revision_only_contract(self):
+        scoped._validate_arm_encodings("scoped", {}, contract="none")
+        with self.assertRaisesRegex(
+            scoped.ExperimentError, "unknown response encoding contract"
+        ):
+            scoped._validate_arm_encodings("baseline", {}, contract="unexpected")
+
     def test_scoped_agent_ab_rejects_cross_arm_daemon_contamination(self):
         with self.assertRaisesRegex(scoped.ExperimentError, "baseline emitted"):
             scoped._validate_arm_encodings("baseline", {"full": 2, "outcome": 1})
