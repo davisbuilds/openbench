@@ -428,6 +428,10 @@ def _task_identity(
         str(request_path.resolve()),
         "verify",
     ]
+    if system_settings_hash_oracle is not None:
+        verifier_command.extend(
+            ("--hash-oracle", str(system_settings_hash_oracle.resolve()))
+        )
     verifier_digest = _content_bound_command_digest(
         verifier_command,
         cwd=cub._workspace(root, ARMS[0], task, 1),

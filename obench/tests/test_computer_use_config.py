@@ -209,6 +209,21 @@ class ComputerUseConfigTests(unittest.TestCase):
             "apple_account_name_sha256": apple_hash,
             "wallpaper_sha256": wallpaper_hash,
         })
+        with mock.patch.object(
+            scoped, "_content_bound_command_digest", wraps=self.content_digest
+        ) as digest:
+            scoped._task_identity(
+                self.request,
+                request,
+                task="system-settings-discovery",
+                prompt=ROOT / "computer-use-tasks/v0/system-settings-discovery/instruction.md",
+                system_settings_hash_oracle=oracle,
+            )
+        verifier_command = digest.call_args.args[0]
+        self.assertEqual(
+            verifier_command[-2:], ["--hash-oracle", str(oracle.resolve())]
+        )
+        self.assertEqual(digest.call_args.kwargs["extra_paths"][-1], oracle.resolve())
         self.assertIsNone(
             scoped._seal_system_settings_hash_oracle(
                 config_root, request, "basic-controls"
