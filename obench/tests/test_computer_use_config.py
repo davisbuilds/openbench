@@ -185,6 +185,36 @@ class ComputerUseConfigTests(unittest.TestCase):
         ):
             scoped._validate_arm_encodings("baseline", {}, contract="unexpected")
 
+    def test_scoped_agent_ab_seals_system_settings_hash_oracle(self):
+        apple_hash = "c" * 64
+        wallpaper_hash = "d" * 64
+        request = cub._load_request(self.request)
+        request.update({
+            "system_settings_apple_name_sha256": apple_hash,
+            "system_settings_wallpaper_sha256": wallpaper_hash,
+        })
+        config_root = self.run_root / "configs/system-settings-revision-ab"
+        oracle = scoped._seal_system_settings_hash_oracle(
+            config_root, request, "system-settings-discovery"
+        )
+
+        self.assertIsNotNone(oracle)
+        assert oracle is not None
+        self.assertEqual(
+            cub._oracle_paths("system-settings-discovery", oracle)[-1],
+            oracle.resolve(),
+        )
+        self.assertEqual(oracle.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(json.loads(oracle.read_text(encoding="utf-8")), {
+            "apple_account_name_sha256": apple_hash,
+            "wallpaper_sha256": wallpaper_hash,
+        })
+        self.assertIsNone(
+            scoped._seal_system_settings_hash_oracle(
+                config_root, request, "basic-controls"
+            )
+        )
+
     def test_scoped_agent_ab_rejects_cross_arm_daemon_contamination(self):
         with self.assertRaisesRegex(scoped.ExperimentError, "baseline emitted"):
             scoped._validate_arm_encodings("baseline", {"full": 2, "outcome": 1})

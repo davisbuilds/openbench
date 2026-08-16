@@ -418,6 +418,7 @@ def _task_identity(
     *,
     task: str,
     prompt: Path,
+    system_settings_hash_oracle: Path | None = None,
 ) -> dict[str, Any]:
     root, _repo, _installed = cub._request_paths(request)
     verifier_command = [
@@ -430,7 +431,7 @@ def _task_identity(
     verifier_digest = _content_bound_command_digest(
         verifier_command,
         cwd=cub._workspace(root, ARMS[0], task, 1),
-        extra_paths=cub._oracle_paths(task),
+        extra_paths=cub._oracle_paths(task, system_settings_hash_oracle),
     )
     _source, artifact_name, _media = cub._artifact_contract(task)
     task_content = {
@@ -449,6 +450,21 @@ def _task_identity(
 
 def _write_outputs(outputs: Mapping[Path, bytes]) -> None:
     cub._write_immutable_outputs(dict(outputs))
+
+
+def _seal_system_settings_hash_oracle(
+    config_root: Path,
+    request: Mapping[str, Any],
+    task: str,
+) -> Path | None:
+    if task != "system-settings-discovery":
+        return None
+    oracle = config_root / "private/system-settings-discovery-hashes.json"
+    _write_outputs({
+        oracle: canonical_bytes(cub._system_settings_hashes(request)) + b"\n",
+    })
+    oracle.chmod(0o600)
+    return oracle
 
 
 def _replace_trial_evidence(path: Path, data: bytes) -> None:
@@ -483,6 +499,9 @@ def _generate(
     root, _repo, _installed = cub._request_paths(request)
     config_root = cub.descendant(root, f"configs/{experiment_id}")
     config_root.mkdir(parents=True, exist_ok=True)
+    system_settings_hash_oracle = _seal_system_settings_hash_oracle(
+        config_root, request, task
+    )
     runtime_identities: dict[str, dict[str, Any]] = {}
     mcp_plan_identities: dict[str, dict[str, Any]] = {}
     for arm in ARMS:
@@ -512,7 +531,11 @@ def _generate(
     spec = {
         "comparison_id": f"cub-v0-{experiment_id}",
         "task": _task_identity(
-            request_path, request, task=task, prompt=prompt
+            request_path,
+            request,
+            task=task,
+            prompt=prompt,
+            system_settings_hash_oracle=system_settings_hash_oracle,
         ),
         "harness": harness,
         "model": model,
