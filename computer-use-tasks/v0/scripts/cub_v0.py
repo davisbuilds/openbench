@@ -1384,6 +1384,18 @@ def _artifact_contract(task: str) -> tuple[str, str, str]:
     )
 
 
+def _task_app_path(root: Path, task: str) -> Path:
+    if task in {"basic-controls", "row-selection", *EXPERIMENT_TASKS}:
+        return root / "apps/ComputerUseFixture.app"
+    if task == "background-control":
+        return root / "apps/BackgroundControlFixture.app"
+    if task == "textedit-exact-file":
+        return Path("/System/Applications/TextEdit.app")
+    if task == "system-settings-discovery":
+        return Path("/System/Applications/System Settings.app")
+    raise CubError(f"unknown computer-use task: {task}")
+
+
 def _task_plan_identity(
     task: str, request_path: Path, request: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -1769,19 +1781,9 @@ def generate(
         source_identity = _bundle_info(root / "apps/OpenBench Computer Use MCP Source.app")
         source_identity["source_revision"] = SOURCE_REVISION
         identities.update({arm_id: source_identity for arm_id in selected_arms})
-    app_paths = {
-        "basic-controls": root / "apps/ComputerUseFixture.app",
-        "post-action-state-ab": root / "apps/ComputerUseFixture.app",
-        "state-response-ab": root / "apps/ComputerUseFixture.app",
-        "background-control": root / "apps/BackgroundControlFixture.app",
-        "textedit-exact-file": Path("/System/Applications/TextEdit.app"),
-        "system-settings-discovery": Path(
-            "/System/Applications/System Settings.app"
-        ),
-    }
     host = _host_environment()
     app_identities = {
-        selected_task: _bundle_info(app_paths[selected_task])
+        selected_task: _bundle_info(_task_app_path(root, selected_task))
         for selected_task in selected_tasks
     }
     outputs: dict[Path, bytes] = {}

@@ -215,6 +215,18 @@ class ComputerUseConfigTests(unittest.TestCase):
             )
         )
 
+    def test_task_app_path_resolves_system_and_fixture_apps(self):
+        self.assertEqual(
+            cub._task_app_path(self.run_root, "basic-controls"),
+            self.run_root / "apps/ComputerUseFixture.app",
+        )
+        self.assertEqual(
+            cub._task_app_path(self.run_root, "system-settings-discovery"),
+            Path("/System/Applications/System Settings.app"),
+        )
+        with self.assertRaisesRegex(cub.CubError, "unknown computer-use task"):
+            cub._task_app_path(self.run_root, "unknown")
+
     def test_scoped_agent_ab_rejects_cross_arm_daemon_contamination(self):
         with self.assertRaisesRegex(scoped.ExperimentError, "baseline emitted"):
             scoped._validate_arm_encodings("baseline", {"full": 2, "outcome": 1})

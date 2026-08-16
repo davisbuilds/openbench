@@ -517,7 +517,7 @@ def _generate(
         )
 
     host = cub._host_environment()
-    fixture_identity = cub._bundle_info(root / "apps/ComputerUseFixture.app")
+    task_app_identity = cub._bundle_info(cub._task_app_path(root, task))
     harness = {
         "name": "codex",
         "version": str(request.get("codex_version", "codex-cli 0.146.1")),
@@ -543,7 +543,7 @@ def _generate(
             {
                 "id": arm,
                 "mcp": mcp_plan_identities[arm],
-                "config": cub._arm_plan_config(fixture_identity, host),
+                "config": cub._arm_plan_config(task_app_identity, host),
             }
             for arm in ARMS
         ],
@@ -577,7 +577,7 @@ def _generate(
             trial_index=trial_index,
             trial_id=cell["trial_id"],
             mcp=runtime_identities[arm],
-            app=fixture_identity,
+            app=task_app_identity,
             host=host,
             mode=experiment_id,
             matrix={
