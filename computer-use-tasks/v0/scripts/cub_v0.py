@@ -61,7 +61,14 @@ ARMS = ("installed", "source")
 POST_ACTION_STATE_ARMS = ("state", "no-state")
 STATE_RESPONSE_ARMS = ("auto", "full")
 SCOPED_AGENT_ARMS = ("baseline", "scoped")
-RUNTIME_ARMS = (*ARMS, *POST_ACTION_STATE_ARMS, *STATE_RESPONSE_ARMS, *SCOPED_AGENT_ARMS)
+OFFICIAL_CODEX_ARM = "official-codex"
+RUNTIME_ARMS = (
+    *ARMS,
+    *POST_ACTION_STATE_ARMS,
+    *STATE_RESPONSE_ARMS,
+    *SCOPED_AGENT_ARMS,
+    OFFICIAL_CODEX_ARM,
+)
 CALL_CONTRACT = (
     {"tool": "get_app_state", "required_arguments": {
         "app": "org.openbench.ComputerUseFixture.v0", "include_screenshot": False,

@@ -56,6 +56,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -69,6 +70,12 @@ NAME = "codex"
 _EXE = "codex"
 _MULTI_AGENT_ENV = "OPENBENCH_CODEX_MULTI_AGENT"
 _NATIVE_MCP_COMMAND_ENV = "CUB_MCP_COMMAND"
+_NATIVE_PROFILE_ENV = "OPENBENCH_NATIVE_COMPUTER_USE_PROFILE"
+_OFFICIAL_PROFILE = "official_codex"
+_OFFICIAL_NODE_REPL_COMMAND_ENV = "OPENBENCH_NATIVE_CODEX_NODE_REPL_COMMAND"
+_OFFICIAL_NODE_MODULE_DIRS_ENV = "OPENBENCH_NATIVE_CODEX_NODE_MODULE_DIRS"
+_OFFICIAL_SKILL_PATH_ENV = "OPENBENCH_NATIVE_CODEX_SKILL_PATH"
+_OFFICIAL_EVIDENCE_DIR_ENV = "OPENBENCH_NATIVE_EVIDENCE_DIR"
 _NATIVE_ALLOWED_TOOLS_ENV = "OPENBENCH_NATIVE_MCP_ALLOWED_TOOLS"
 _NATIVE_ARGUMENT_POLICY_ENV = "OPENBENCH_NATIVE_MCP_ARGUMENT_POLICY"
 _NATIVE_CALL_CONTRACT_ENV = "OPENBENCH_NATIVE_MCP_CALL_CONTRACT"
@@ -88,6 +95,9 @@ _NATIVE_ATIF_NAME = "trajectory.json"
 _NATIVE_RAW_EVENTS_NAME = "codex-events.jsonl"
 _NATIVE_TOOL_POLICY_LEDGER_NAME = "codex-tool-policy.jsonl"
 _NATIVE_TOOL_POLICY_HOOK_NAME = "native-tool-policy.py"
+_OFFICIAL_ALLOWED_HOOK_TOOL = "mcp__node_repl__js"
+_OFFICIAL_MCP_SERVER = "node_repl"
+_OFFICIAL_MCP_TOOL = "js"
 # Must exceed mcp_stdio_collector.CHILD_SHUTDOWN_GRACE_S so the collector can
 # force and reap its detached server group, seal, and exit before escalation.
 _NATIVE_TERMINATE_GRACE_S = 2.0
@@ -195,6 +205,77 @@ def _native_requested(env_override=None):
         _native_value(_NATIVE_MCP_COMMAND_ENV, env_override)
         or any(_native_value(name, env_override) for name in _NATIVE_MARKER_ENVS)
     )
+
+
+def _official_requested(env_override=None):
+    return _native_value(_NATIVE_PROFILE_ENV, env_override) is not None
+
+
+def _absolute_path(name, env_override, *, kind, executable=False):
+    value = _native_value(name, env_override)
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ValueError(f"{name} must be an absolute {kind}")
+    path = Path(value)
+    valid = path.is_absolute()
+    if kind == "directory":
+        valid = valid and path.is_dir()
+    else:
+        valid = valid and path.is_file()
+    if executable:
+        valid = valid and os.access(path, os.X_OK)
+    if not valid:
+        suffix = " executable file" if executable else f" {kind}"
+        raise ValueError(f"{name} must be an absolute{suffix}")
+    return path
+
+
+def _official_config(env_override=None):
+    profile = _native_value(_NATIVE_PROFILE_ENV, env_override)
+    if profile != _OFFICIAL_PROFILE:
+        raise ValueError(
+            f"{_NATIVE_PROFILE_ENV} must be {_OFFICIAL_PROFILE!r}, got {profile!r}"
+        )
+    if _native_value(_NATIVE_MCP_COMMAND_ENV, env_override):
+        raise ValueError(
+            f"{_NATIVE_PROFILE_ENV}={_OFFICIAL_PROFILE!r} cannot be combined "
+            f"with {_NATIVE_MCP_COMMAND_ENV}"
+        )
+    command = _absolute_path(
+        _OFFICIAL_NODE_REPL_COMMAND_ENV,
+        env_override,
+        kind="file",
+        executable=True,
+    )
+    module_dirs = _absolute_path(
+        _OFFICIAL_NODE_MODULE_DIRS_ENV,
+        env_override,
+        kind="directory",
+    )
+    skill_path = _absolute_path(
+        _OFFICIAL_SKILL_PATH_ENV,
+        env_override,
+        kind="file",
+    )
+    if skill_path.name != "SKILL.md":
+        raise ValueError(f"{_OFFICIAL_SKILL_PATH_ENV} must point to SKILL.md")
+    evidence_dir = _absolute_path(
+        _OFFICIAL_EVIDENCE_DIR_ENV,
+        env_override,
+        kind="directory",
+    )
+    try:
+        skill = skill_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{_OFFICIAL_SKILL_PATH_ENV} must be UTF-8") from exc
+    if not skill.strip():
+        raise ValueError(f"{_OFFICIAL_SKILL_PATH_ENV} must not be empty")
+    return {
+        "command": command,
+        "module_dirs": module_dirs,
+        "skill_path": skill_path,
+        "skill": skill,
+        "evidence_dir": evidence_dir,
+    }
 
 
 def _native_launcher(env_override=None):
@@ -347,6 +428,118 @@ def _run_native_command(cmd, **kwargs):
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
+def _official_timing_from_line(line, response_unix_ns):
+    try:
+        event = json.loads(line)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(event, dict):
+        return None
+    item = event.get("item")
+    if (
+        event.get("type") != "item.completed"
+        or not isinstance(item, dict)
+        or item.get("type") != "mcp_tool_call"
+        or item.get("server") != _OFFICIAL_MCP_SERVER
+        or item.get("tool") != _OFFICIAL_MCP_TOOL
+        or not isinstance(item.get("id"), str)
+    ):
+        return None
+    result = item.get("result")
+    meta = result.get("_meta") if isinstance(result, dict) else None
+    duration_ms = (
+        meta.get("codex/nodeReplExecutionDurationMs")
+        if isinstance(meta, dict)
+        else None
+    )
+    timing = {
+        "item_id": item["id"],
+        "response_unix_ns": response_unix_ns,
+    }
+    if (
+        isinstance(duration_ms, (int, float))
+        and not isinstance(duration_ms, bool)
+        and duration_ms >= 0
+    ):
+        timing["request_unix_ns"] = response_unix_ns - int(duration_ms * 1_000_000)
+    return timing
+
+
+def _run_official_native_command(cmd, **kwargs):
+    """Capture response arrival time while preserving Codex stdout bytes."""
+    timeout = kwargs.pop("timeout")
+    kwargs.pop("capture_output")
+    kwargs.pop("text")
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        **kwargs,
+    )
+    stdout_parts = []
+    stderr_parts = []
+    timings = []
+
+    def read_stdout():
+        for line in iter(proc.stdout.readline, b""):
+            response_unix_ns = time.time_ns()
+            stdout_parts.append(line)
+            timing = _official_timing_from_line(line, response_unix_ns)
+            if timing is not None:
+                timings.append(timing)
+
+    def read_stderr():
+        for chunk in iter(lambda: proc.stderr.read(65536), b""):
+            stderr_parts.append(chunk)
+
+    readers = (
+        threading.Thread(target=read_stdout, daemon=True),
+        threading.Thread(target=read_stderr, daemon=True),
+    )
+    for reader in readers:
+        reader.start()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=_NATIVE_TERMINATE_GRACE_S)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
+        for reader in readers:
+            reader.join()
+        proc.stdout.close()
+        proc.stderr.close()
+        exc = subprocess.TimeoutExpired(
+            cmd,
+            timeout,
+            output=b"".join(stdout_parts),
+            stderr=b"".join(stderr_parts),
+        )
+        exc.computer_use_event_timings = list(timings)
+        raise exc
+    for reader in readers:
+        reader.join()
+    proc.stdout.close()
+    proc.stderr.close()
+    completed = subprocess.CompletedProcess(
+        cmd,
+        proc.returncode,
+        b"".join(stdout_parts),
+        b"".join(stderr_parts),
+    )
+    completed.computer_use_event_timings = list(timings)
+    return completed
+
+
 def _atomic_write_private_bytes(path, content):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -482,6 +675,85 @@ except BaseException:
                         f"{shlex.quote(sys.executable)} {shlex.quote(str(hook_path))}"
                     ),
                     "statusMessage": "enforcing native tool policy",
+                }],
+            }],
+        },
+    }
+    _atomic_write_private(
+        Path(codex_home) / "hooks.json",
+        json.dumps(hooks, sort_keys=True) + "\n",
+    )
+    return ledger_path
+
+
+def _install_official_tool_policy(codex_home, evidence_dir):
+    ledger_path = Path(evidence_dir) / _NATIVE_TOOL_POLICY_LEDGER_NAME
+    hook_path = Path(codex_home) / _NATIVE_TOOL_POLICY_HOOK_NAME
+    _atomic_write_private(ledger_path, "")
+    script = f"""#!{sys.executable}
+import fcntl
+import hashlib
+import json
+import os
+import sys
+
+LEDGER_PATH = {str(ledger_path)!r}
+ALLOWED_TOOL = {_OFFICIAL_ALLOWED_HOOK_TOOL!r}
+
+try:
+    payload = json.load(sys.stdin)
+    tool_name = payload.get("tool_name")
+    tool_use_id = payload.get("tool_use_id")
+    tool_input = payload.get("tool_input")
+    allowed = (
+        tool_name == ALLOWED_TOOL
+        and isinstance(tool_use_id, str)
+        and bool(tool_use_id)
+        and isinstance(tool_input, dict)
+    )
+    encoded_input = json.dumps(
+        tool_input,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    record = {{
+        "tool_name": tool_name,
+        "tool_use_id": tool_use_id,
+        "input_sha256": hashlib.sha256(encoded_input).hexdigest(),
+        "decision": "allow" if allowed else "block",
+    }}
+    fd = os.open(LEDGER_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.write(json.dumps(record, sort_keys=True) + "\\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    print(json.dumps({{"hookSpecificOutput": {{
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow" if allowed else "deny",
+        "permissionDecisionReason": (
+            "OpenBench official Computer Use node_repl policy"
+            if allowed
+            else "OpenBench official trials permit only mcp__node_repl__js"
+        ),
+    }}}}))
+except BaseException:
+    print("OpenBench official Computer Use policy hook failed closed", file=sys.stderr)
+    raise SystemExit(2)
+"""
+    _atomic_write_private(hook_path, script)
+    hook_path.chmod(0o700)
+    hooks = {
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{
+                    "type": "command",
+                    "command": (
+                        f"{shlex.quote(sys.executable)} {shlex.quote(str(hook_path))}"
+                    ),
+                    "statusMessage": "enforcing official Computer Use policy",
                 }],
             }],
         },
@@ -710,6 +982,185 @@ def _write_native_evidence(
         "mode": "native_mcp_only",
         "allowed_mcp_servers": [_NATIVE_ALLOWED_MCP_SERVER],
         "allowed_tools": list(allowed_tools),
+        "blocked_attempt_count": len(blocked_tools),
+        "blocked_tools": list(blocked_tools),
+        "verified": True,
+    }
+    assert_valid_trajectory(trajectory)
+    rendered = json.dumps(trajectory, indent=2, ensure_ascii=False) + "\n"
+    _atomic_write_private(Path(workdir) / _NATIVE_ATIF_NAME, rendered)
+
+
+def _assert_official_tool_policy(events):
+    """Require every completed node_repl call to prove Computer Use metadata."""
+    calls = {}
+    for index, event in enumerate(events, start=1):
+        event_type = event.get("type")
+        if event_type not in _NATIVE_ALLOWED_EVENT_TYPES:
+            raise ValueError(
+                f"official tool policy rejected unknown event type {event_type!r} "
+                f"at event {index}"
+            )
+        if not event_type.startswith("item."):
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"official tool policy requires an item object at event {index}"
+            )
+        item_type = item.get("type")
+        if item_type in _NATIVE_NON_TOOL_ITEM_TYPES:
+            message = item.get("message")
+            if (
+                item_type == "error"
+                and isinstance(message, str)
+                and "dropped" in message.lower()
+                and "event" in message.lower()
+            ):
+                raise ValueError(
+                    f"official tool policy rejected incomplete event stream at event {index}"
+                )
+            continue
+        if item_type != "mcp_tool_call":
+            raise ValueError(
+                f"official tool policy rejected Codex item type {item_type!r} "
+                f"at event {index}"
+            )
+        if (
+            item.get("server") != _OFFICIAL_MCP_SERVER
+            or item.get("tool") != _OFFICIAL_MCP_TOOL
+        ):
+            raise ValueError(
+                "official tool policy rejected MCP tool "
+                f"{item.get('server')!r}/{item.get('tool')!r} at event {index}"
+            )
+        item_id = item.get("id")
+        if not isinstance(item_id, str) or not item_id:
+            raise ValueError(
+                f"official tool policy requires an item id at event {index}"
+            )
+        lifecycle = calls.setdefault(
+            item_id,
+            {"identity": None, "item.started": 0, "item.completed": 0},
+        )
+        encoded_arguments = json.dumps(
+            item.get("arguments"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        identity = hashlib.sha256(encoded_arguments).hexdigest()
+        if lifecycle["identity"] is None:
+            lifecycle["identity"] = identity
+        elif lifecycle["identity"] != identity:
+            raise ValueError(
+                f"official node_repl trajectory item {item_id!r} changed identity"
+            )
+        if event_type not in {"item.started", "item.completed"}:
+            raise ValueError(
+                f"official node_repl trajectory item {item_id!r} has unexpected "
+                f"lifecycle event {event_type!r}"
+            )
+        lifecycle[event_type] += 1
+        if event_type == "item.completed":
+            result = item.get("result")
+            meta = result.get("_meta") if isinstance(result, dict) else None
+            surface = (
+                meta.get("codex/toolSurface")
+                if isinstance(meta, dict)
+                else None
+            )
+            if not isinstance(surface, dict) or surface.get("kind") != "computerUse":
+                raise ValueError(
+                    f"official node_repl call {item_id!r} did not prove "
+                    "result._meta['codex/toolSurface'].kind == 'computerUse'"
+                )
+    for item_id, lifecycle in calls.items():
+        if (
+            lifecycle["item.started"] != 1
+            or lifecycle["item.completed"] != 1
+        ):
+            raise ValueError(
+                f"official node_repl trajectory item {item_id!r} has incomplete lifecycle"
+            )
+    return calls
+
+
+def _assert_official_tool_policy_ledger(path, calls):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("official tool policy ledger is missing or invalid")
+    allowed = []
+    blocked = []
+    seen_ids = set()
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"official tool policy ledger line {line_number} is malformed: {exc}"
+            ) from exc
+        if (
+            not isinstance(record, dict)
+            or set(record) != {
+                "tool_name", "tool_use_id", "input_sha256", "decision"
+            }
+            or not isinstance(record.get("tool_name"), str)
+            or not isinstance(record.get("tool_use_id"), str)
+            or not record["tool_use_id"]
+            or not isinstance(record.get("input_sha256"), str)
+            or len(record["input_sha256"]) != 64
+            or any(char not in "0123456789abcdef" for char in record["input_sha256"])
+            or record.get("decision") not in {"allow", "block"}
+            or record["tool_use_id"] in seen_ids
+        ):
+            raise ValueError(
+                f"official tool policy ledger line {line_number} has invalid fields"
+            )
+        seen_ids.add(record["tool_use_id"])
+        if record["decision"] == "allow":
+            if record["tool_name"] != _OFFICIAL_ALLOWED_HOOK_TOOL:
+                raise ValueError(
+                    "official tool policy ledger allowed forbidden tool "
+                    f"{record['tool_name']!r}"
+                )
+            allowed.append((record["tool_use_id"], record["input_sha256"]))
+        else:
+            blocked.append(record["tool_name"])
+    expected = Counter(
+        (item_id, lifecycle["identity"])
+        for item_id, lifecycle in calls.items()
+    )
+    if Counter(allowed) != expected:
+        raise ValueError(
+            "official tool policy ledger does not match Codex node_repl trajectory"
+        )
+    return tuple(blocked)
+
+
+def _write_official_evidence(
+    stdout, *, evidence_dir, tool_policy_ledger, workdir, model
+):
+    from obench.atif import assert_valid_trajectory, to_dict
+    from obench.tools.atif_convert import convert_codex_events
+
+    raw_path = Path(evidence_dir) / _NATIVE_RAW_EVENTS_NAME
+    raw_bytes = stdout if isinstance(stdout, bytes) else stdout.encode("utf-8")
+    _atomic_write_private_bytes(raw_path, raw_bytes)
+    events = _codex_events(raw_bytes.decode("utf-8"))
+    calls = _assert_official_tool_policy(events)
+    blocked_tools = _assert_official_tool_policy_ledger(tool_policy_ledger, calls)
+    trajectory = to_dict(convert_codex_events(
+        events,
+        model=model,
+        source_path=_NATIVE_RAW_EVENTS_NAME,
+    ))
+    trajectory["extra"]["tool_policy"] = {
+        "mode": "official_codex_node_repl_only",
+        "allowed_mcp_servers": [_OFFICIAL_MCP_SERVER],
+        "allowed_tools": [_OFFICIAL_MCP_TOOL],
+        "tool_surface": _OFFICIAL_ALLOWED_HOOK_TOOL,
+        "required_result_metadata": "codex/toolSurface.kind=computerUse",
         "blocked_attempt_count": len(blocked_tools),
         "blocked_tools": list(blocked_tools),
         "verified": True,
@@ -1013,19 +1464,24 @@ def run(
     env_override=None,
     auth_lease_proofs=(),
 ) -> dict:
-    native = _native_requested(env_override)
+    official = _official_requested(env_override)
+    native = official or _native_requested(env_override)
     native_launcher = None
     native_allowed_tools = ()
     native_argument_policy = None
     native_call_contract = ()
+    official_config = None
     if native:
         if model != _NATIVE_MODEL:
             return _native_error(f"model must be {_NATIVE_MODEL!r}, got {model!r}")
         try:
-            native_launcher = _native_launcher(env_override)
-            native_allowed_tools = _native_allowed_tools(env_override)
-            native_argument_policy = _native_argument_policy(env_override)
-            native_call_contract = _native_call_contract(env_override)
+            if official:
+                official_config = _official_config(env_override)
+            else:
+                native_launcher = _native_launcher(env_override)
+                native_allowed_tools = _native_allowed_tools(env_override)
+                native_argument_policy = _native_argument_policy(env_override)
+                native_call_contract = _native_call_contract(env_override)
         except ValueError as exc:
             return _native_error(str(exc))
 
@@ -1067,6 +1523,36 @@ def run(
             "-c", "mcp_servers.computer-use.enabled=true",
             "-c", "mcp_servers.computer-use.required=true",
         ]
+    elif official_config:
+        for feature in _NATIVE_DISABLED_TOOL_FEATURES:
+            base += ["--disable", feature]
+        base += [
+            "--enable", "hooks",
+            "--dangerously-bypass-hook-trust",
+            "-c", (
+                "mcp_servers.node_repl.command="
+                + json.dumps(str(official_config["command"]))
+            ),
+            "-c", "mcp_servers.node_repl.args=[]",
+            "-c", (
+                "mcp_servers.node_repl.env.NODE_REPL_NODE_MODULE_DIRS="
+                + json.dumps(str(official_config["module_dirs"]))
+            ),
+            "-c", (
+                "mcp_servers.node_repl.env.NODE_REPL_TRUSTED_CODE_PATHS="
+                + json.dumps(str(official_config["module_dirs"]))
+            ),
+            "-c", 'mcp_servers.node_repl.enabled_tools=["js"]',
+            "-c", "mcp_servers.node_repl.enabled=true",
+            "-c", "mcp_servers.node_repl.required=true",
+        ]
+        instruction = (
+            "Use the following official Computer Use skill for this task. "
+            "Every node_repl call must perform Computer Use; bootstrap/import "
+            "must be combined with the Computer Use operation in the same call.\n\n"
+            f"<computer_use_skill>\n{official_config['skill']}\n"
+            f"</computer_use_skill>\n\n<task>\n{instruction}\n</task>"
+        )
     if model in MODELS:
         cmd = base + [
             "-m", MODELS[model],
@@ -1116,6 +1602,7 @@ def run(
     # adapters supply their own already-composed CODEX_HOME via env_override.
     isolated_home = None
     native_tool_policy_ledger = None
+    computer_use_event_timings = []
     auth_src = None
     auth_copy = None
     auth_lease = None
@@ -1157,7 +1644,16 @@ def run(
                     argument_policy=native_argument_policy,
                     call_contract=native_call_contract,
                 )
-            run_command = _run_native_command if native else subprocess.run
+            elif official_config:
+                native_tool_policy_ledger = _install_official_tool_policy(
+                    child_env["CODEX_HOME"],
+                    official_config["evidence_dir"],
+                )
+            run_command = (
+                _run_official_native_command
+                if official
+                else _run_native_command if native else subprocess.run
+            )
             proc = run_command(
                 cmd,
                 cwd=workdir,
@@ -1168,18 +1664,30 @@ def run(
                 env=child_env,
             )
         except subprocess.TimeoutExpired as e:
+            computer_use_event_timings = list(
+                getattr(e, "computer_use_event_timings", ())
+            )
             full_output = _err_tail(e, limit=None)
             native_timeout_evidence_error = None
-            if native_launcher:
+            if native_launcher or official_config:
                 try:
-                    _write_native_evidence(
-                        e.stdout or b"",
-                        launcher=native_launcher,
-                        tool_policy_ledger=native_tool_policy_ledger,
-                        allowed_tools=native_allowed_tools,
-                        workdir=workdir,
-                        model=model,
-                    )
+                    if official_config:
+                        _write_official_evidence(
+                            e.stdout or b"",
+                            evidence_dir=official_config["evidence_dir"],
+                            tool_policy_ledger=native_tool_policy_ledger,
+                            workdir=workdir,
+                            model=model,
+                        )
+                    else:
+                        _write_native_evidence(
+                            e.stdout or b"",
+                            launcher=native_launcher,
+                            tool_policy_ledger=native_tool_policy_ledger,
+                            allowed_tools=native_allowed_tools,
+                            workdir=workdir,
+                            model=model,
+                        )
                 except (OSError, TypeError, ValueError) as exc:
                     native_timeout_evidence_error = str(exc)
             error = f"timeout after {timeout_s}s"
@@ -1197,6 +1705,10 @@ def run(
                 "tokens": None,
                 "turns": None,
                 "cmd": cmd,
+                **(
+                    {"computer_use_event_timings": computer_use_event_timings}
+                    if official else {}
+                ),
                 **_empty_token_usage(),
             }
     finally:
@@ -1230,16 +1742,29 @@ def run(
         tail = combined[-2000:]
 
     native_evidence_error = None
-    if native_launcher:
+    if official:
+        computer_use_event_timings = list(
+            getattr(proc, "computer_use_event_timings", ())
+        )
+    if native_launcher or official_config:
         try:
-            _write_native_evidence(
-                raw_stdout,
-                launcher=native_launcher,
-                tool_policy_ledger=native_tool_policy_ledger,
-                allowed_tools=native_allowed_tools,
-                workdir=workdir,
-                model=model,
-            )
+            if official_config:
+                _write_official_evidence(
+                    raw_stdout,
+                    evidence_dir=official_config["evidence_dir"],
+                    tool_policy_ledger=native_tool_policy_ledger,
+                    workdir=workdir,
+                    model=model,
+                )
+            else:
+                _write_native_evidence(
+                    raw_stdout,
+                    launcher=native_launcher,
+                    tool_policy_ledger=native_tool_policy_ledger,
+                    allowed_tools=native_allowed_tools,
+                    workdir=workdir,
+                    model=model,
+                )
         except (OSError, TypeError, ValueError) as exc:
             native_evidence_error = str(exc)
 
@@ -1262,6 +1787,10 @@ def run(
             else None if proc.returncode == 0 else f"exit {proc.returncode}"
         ),
         "output_tail": tail,
+        **(
+            {"computer_use_event_timings": computer_use_event_timings}
+            if official else {}
+        ),
         # Optional (ADAPTER_SPEC v1): full untruncated stdout+stderr so the
         # runner can persist a complete local transcript. Cheap here (already
         # concatenated). LOCAL-ONLY: transcripts are never published unscrubbed.

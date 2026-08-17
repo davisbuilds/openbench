@@ -59,6 +59,67 @@ def write_fixture_policy_ledger(path):
     )
 
 
+def official_stdout(*, surface_kind="computerUse", include_surface=True):
+    meta = {"codex/nodeReplExecutionDurationMs": 12.5}
+    if include_surface:
+        meta["codex/toolSurface"] = {"kind": surface_kind}
+    events = (
+        {"type": "thread.started", "thread_id": "thread-official"},
+        {
+            "type": "item.started",
+            "item": {
+                "id": "node-call-1",
+                "type": "mcp_tool_call",
+                "server": "node_repl",
+                "tool": "js",
+                "arguments": {"code": "await sky.get_app_state({app: 'Fixture'})"},
+                "status": "in_progress",
+            },
+        },
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "node-call-1",
+                "type": "mcp_tool_call",
+                "server": "node_repl",
+                "tool": "js",
+                "arguments": {"code": "await sky.get_app_state({app: 'Fixture'})"},
+                "result": {"content": [{"type": "text", "text": "state"}], "_meta": meta},
+                "status": "completed",
+            },
+        },
+        {
+            "type": "turn.completed",
+            "usage": {
+                "input_tokens": 10,
+                "cached_input_tokens": 2,
+                "output_tokens": 4,
+                "reasoning_output_tokens": 1,
+            },
+        },
+    )
+    return "".join(json.dumps(event) + "\n" for event in events)
+
+
+def write_official_policy_ledger(path):
+    arguments = {"code": "await sky.get_app_state({app: 'Fixture'})"}
+    encoded = json.dumps(
+        arguments,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    path.write_text(
+        json.dumps({
+            "tool_name": "mcp__node_repl__js",
+            "tool_use_id": "node-call-1",
+            "input_sha256": hashlib.sha256(encoded).hexdigest(),
+            "decision": "allow",
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+
 class CodexNativeProfileTests(unittest.TestCase):
     def setUp(self):
         self.codex = load_codex()
@@ -75,6 +136,18 @@ class CodexNativeProfileTests(unittest.TestCase):
         self.auth_home.mkdir()
         (self.auth_home / "auth.json").write_text('{"tokens":"fixture"}', encoding="utf-8")
         (self.auth_home / "config.toml").write_text("untrusted = true\n", encoding="utf-8")
+        self.node_repl = self.root / "Codex.app" / "node_repl"
+        self.node_repl.parent.mkdir()
+        self.node_repl.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        self.node_repl.chmod(0o700)
+        self.node_modules = self.root / "Codex.app" / "node_modules"
+        self.node_modules.mkdir()
+        self.skill_path = self.root / "computer-use" / "SKILL.md"
+        self.skill_path.parent.mkdir()
+        self.skill_path.write_text(
+            "# Computer Use\nUse `@oai/sky` through node_repl.\n",
+            encoding="utf-8",
+        )
 
     def tearDown(self):
         self.temp.cleanup()
@@ -93,6 +166,16 @@ class CodexNativeProfileTests(unittest.TestCase):
                 '[{"tool":"click","required_arguments":{"include_state":true}}]'
             ),
             "OPENBENCH_NATIVE_MCP_STATE_RESPONSE_MODE": "auto",
+        }
+
+    def official_env(self):
+        return {
+            "CODEX_HOME": str(self.auth_home),
+            "OPENBENCH_NATIVE_COMPUTER_USE_PROFILE": "official_codex",
+            "OPENBENCH_NATIVE_CODEX_NODE_REPL_COMMAND": str(self.node_repl),
+            "OPENBENCH_NATIVE_CODEX_NODE_MODULE_DIRS": str(self.node_modules),
+            "OPENBENCH_NATIVE_CODEX_SKILL_PATH": str(self.skill_path),
+            "OPENBENCH_NATIVE_EVIDENCE_DIR": str(self.attempt),
         }
 
     def test_stock_command_and_artifacts_are_unchanged(self):
@@ -933,6 +1016,240 @@ time.sleep(60)
             self.assertFalse(result["completed"])
             self.assertTrue(result["startup_failure"])
             self.assertIn("absolute executable file", result["error"])
+            run.assert_not_called()
+
+    def test_official_profile_configures_only_node_repl_and_writes_evidence(self):
+        calls = []
+        stdout = official_stdout()
+
+        def fake_run(cmd, **kwargs):
+            home = Path(kwargs["env"]["CODEX_HOME"])
+            calls.append((cmd, kwargs, tuple(sorted(path.name for path in home.iterdir()))))
+            write_official_policy_ledger(
+                self.attempt / "codex-tool-policy.jsonl"
+            )
+            proc = FakeProc(stdout=stdout.encode("utf-8"), stderr=b"")
+            proc.computer_use_event_timings = [{
+                "item_id": "node-call-1",
+                "request_unix_ns": 100,
+                "response_unix_ns": 200,
+            }]
+            return proc
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "CODEX_HOME": str(self.auth_home),
+                    "HOME": str(self.root),
+                    "PATH": os.environ.get("PATH", ""),
+                },
+                clear=True,
+            ),
+            mock.patch.object(
+                self.codex,
+                "_run_official_native_command",
+                side_effect=fake_run,
+            ),
+        ):
+            result = self.codex.run(
+                "inspect the fixture",
+                str(self.workspace),
+                "gpt-5.6-sol",
+                10,
+                env_override=self.official_env(),
+            )
+
+        self.assertTrue(result["completed"], result)
+        self.assertEqual(
+            result["computer_use_event_timings"],
+            [{
+                "item_id": "node-call-1",
+                "request_unix_ns": 100,
+                "response_unix_ns": 200,
+            }],
+        )
+        cmd, kwargs, isolated_files = calls[0]
+        overrides = [cmd[index + 1] for index, arg in enumerate(cmd[:-1]) if arg == "-c"]
+        self.assertIn(
+            "mcp_servers.node_repl.command=" + json.dumps(str(self.node_repl)),
+            overrides,
+        )
+        self.assertIn("mcp_servers.node_repl.args=[]", overrides)
+        self.assertIn(
+            "mcp_servers.node_repl.env.NODE_REPL_NODE_MODULE_DIRS="
+            + json.dumps(str(self.node_modules)),
+            overrides,
+        )
+        self.assertIn(
+            "mcp_servers.node_repl.env.NODE_REPL_TRUSTED_CODE_PATHS="
+            + json.dumps(str(self.node_modules)),
+            overrides,
+        )
+        self.assertIn('mcp_servers.node_repl.enabled_tools=["js"]', overrides)
+        self.assertIn("mcp_servers.node_repl.enabled=true", overrides)
+        self.assertIn("mcp_servers.node_repl.required=true", overrides)
+        self.assertFalse(any("mcp_servers.computer-use" in value for value in overrides))
+        self.assertFalse(any("CUB_MCP_COMMAND" in value for value in overrides))
+        self.assertNotIn("OPENBENCH_NATIVE_CODEX_NODE_REPL_COMMAND", kwargs["env"])
+        self.assertNotIn("OPENBENCH_NATIVE_EVIDENCE_DIR", kwargs["env"])
+        self.assertEqual(
+            isolated_files,
+            ("auth.json", "hooks.json", "native-tool-policy.py"),
+        )
+        self.assertIn("@oai/sky", cmd[-1])
+        self.assertIn("inspect the fixture", cmd[-1])
+        self.assertIn("combined with the Computer Use operation", cmd[-1])
+        self.assertEqual(
+            (self.attempt / "codex-events.jsonl").read_text(encoding="utf-8"),
+            stdout,
+        )
+        trajectory = json.loads(
+            (self.workspace / "trajectory.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(validate_trajectory(trajectory), [])
+        self.assertEqual(
+            trajectory["extra"]["tool_policy"],
+            {
+                "mode": "official_codex_node_repl_only",
+                "allowed_mcp_servers": ["node_repl"],
+                "allowed_tools": ["js"],
+                "tool_surface": "mcp__node_repl__js",
+                "required_result_metadata": "codex/toolSurface.kind=computerUse",
+                "blocked_attempt_count": 0,
+                "blocked_tools": [],
+                "verified": True,
+            },
+        )
+
+    def test_official_hook_allows_only_node_repl_js(self):
+        home = self.root / "official-hook-home"
+        home.mkdir()
+        ledger = self.codex._install_official_tool_policy(home, self.attempt)
+        hooks = json.loads((home / "hooks.json").read_text(encoding="utf-8"))
+        command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        cases = (
+            ("mcp__node_repl__js", {"code": "await sky.click({})"}, "allow"),
+            ("mcp__node_repl__reset", {}, "deny"),
+            ("mcp__computer_use__click", {}, "deny"),
+            ("apply_patch", {}, "deny"),
+        )
+        for index, (tool_name, tool_input, expected) in enumerate(cases):
+            proc = subprocess.run(
+                command,
+                shell=True,
+                input=json.dumps({
+                    "tool_name": tool_name,
+                    "tool_use_id": f"official-{index}",
+                    "tool_input": tool_input,
+                }),
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            output = json.loads(proc.stdout)
+            self.assertEqual(
+                output["hookSpecificOutput"]["permissionDecision"],
+                expected,
+            )
+        records = [json.loads(line) for line in ledger.read_text().splitlines()]
+        self.assertEqual(
+            [record["decision"] for record in records],
+            ["allow", "block", "block", "block"],
+        )
+        self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), 0o600)
+
+    def test_official_profile_fails_closed_without_computer_use_result_metadata(self):
+        for include_surface, surface_kind in ((False, "computerUse"), (True, "browserUse")):
+            with self.subTest(
+                include_surface=include_surface,
+                surface_kind=surface_kind,
+            ):
+                stdout = official_stdout(
+                    include_surface=include_surface,
+                    surface_kind=surface_kind,
+                )
+
+                def fake_run(_cmd, **_kwargs):
+                    write_official_policy_ledger(
+                        self.attempt / "codex-tool-policy.jsonl"
+                    )
+                    return FakeProc(stdout=stdout.encode("utf-8"), stderr=b"")
+
+                with (
+                    mock.patch.dict(os.environ, self.official_env(), clear=True),
+                    mock.patch.object(
+                        self.codex,
+                        "_run_official_native_command",
+                        side_effect=fake_run,
+                    ),
+                ):
+                    result = self.codex.run(
+                        "use the app",
+                        str(self.workspace),
+                        "gpt-5.6-sol",
+                        10,
+                    )
+
+                self.assertFalse(result["completed"])
+                self.assertIn("did not prove", result["error"])
+                self.assertTrue((self.attempt / "codex-events.jsonl").exists())
+                self.assertFalse((self.workspace / "trajectory.json").exists())
+
+    def test_official_streaming_runner_captures_response_timing_without_rewriting(self):
+        event = next(
+            line for line in official_stdout().splitlines()
+            if json.loads(line).get("type") == "item.completed"
+        )
+        emitter = self.root / "emit-official-event.py"
+        emitter.write_text(
+            "import sys\n"
+            f"sys.stdout.buffer.write({(event + chr(10)).encode('utf-8')!r})\n"
+            "sys.stdout.buffer.flush()\n",
+            encoding="utf-8",
+        )
+        completed = self.codex._run_official_native_command(
+            [sys.executable, str(emitter)],
+            cwd=self.workspace,
+            capture_output=True,
+            text=False,
+            timeout=10,
+            stdin=subprocess.DEVNULL,
+            env=os.environ.copy(),
+        )
+        self.assertEqual(completed.stdout, (event + "\n").encode("utf-8"))
+        self.assertEqual(len(completed.computer_use_event_timings), 1)
+        timing = completed.computer_use_event_timings[0]
+        self.assertEqual(timing["item_id"], "node-call-1")
+        self.assertEqual(
+            timing["response_unix_ns"] - timing["request_unix_ns"],
+            12_500_000,
+        )
+
+    def test_official_profile_rejects_mixed_or_incomplete_configuration(self):
+        cases = (
+            self.official_env() | {"CUB_MCP_COMMAND": str(self.launcher)},
+            self.official_env() | {
+                "OPENBENCH_NATIVE_CODEX_NODE_REPL_COMMAND": "relative"
+            },
+            self.official_env() | {
+                "OPENBENCH_NATIVE_CODEX_SKILL_PATH": str(self.root / "missing")
+            },
+            self.official_env() | {
+                "OPENBENCH_NATIVE_COMPUTER_USE_PROFILE": "unknown"
+            },
+        )
+        for env in cases:
+            with (
+                self.subTest(env=env),
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(self.codex, "_run_official_native_command") as run,
+            ):
+                result = self.codex.run(
+                    "use the app", str(self.workspace), "gpt-5.6-sol", 10
+                )
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["startup_failure"])
             run.assert_not_called()
 
 
