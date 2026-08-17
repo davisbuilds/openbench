@@ -1127,11 +1127,11 @@ def _assert_official_tool_policy_ledger(path, calls):
             allowed.append((record["tool_use_id"], record["input_sha256"]))
         else:
             blocked.append(record["tool_name"])
-    expected = Counter(
-        (item_id, lifecycle["identity"])
-        for item_id, lifecycle in calls.items()
-    )
-    if Counter(allowed) != expected:
+    # Hook tool_use_id values (``exec-*``) and JSON event ids (``item_*``)
+    # are separate Codex namespaces. The canonical input digest is the stable
+    # identity present in both streams; Counter preserves duplicate calls.
+    expected = Counter(lifecycle["identity"] for lifecycle in calls.values())
+    if Counter(input_sha256 for _tool_use_id, input_sha256 in allowed) != expected:
         raise ValueError(
             "official tool policy ledger does not match Codex node_repl trajectory"
         )

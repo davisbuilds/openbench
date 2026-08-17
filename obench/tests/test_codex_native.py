@@ -112,7 +112,7 @@ def write_official_policy_ledger(path):
     path.write_text(
         json.dumps({
             "tool_name": "mcp__node_repl__js",
-            "tool_use_id": "node-call-1",
+            "tool_use_id": "exec-hook-1",
             "input_sha256": hashlib.sha256(encoded).hexdigest(),
             "decision": "allow",
         }) + "\n",
