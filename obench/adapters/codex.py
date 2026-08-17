@@ -713,6 +713,7 @@ def _install_official_tool_policy(codex_home, evidence_dir, app_path):
     hook_path = Path(codex_home) / _NATIVE_TOOL_POLICY_HOOK_NAME
     _atomic_write_private(ledger_path, "")
     script = f"""#!{sys.executable}
+import ast
 import fcntl
 import hashlib
 import json
@@ -725,33 +726,88 @@ ALLOWED_TOOL = {_OFFICIAL_ALLOWED_HOOK_TOOL!r}
 APP_PATH = {str(app_path)!r}
 
 ALLOWED_OPERATIONS = {_OFFICIAL_ALLOWED_OPERATIONS!r}
-bootstrap = re.compile(
+BOOTSTRAP = re.compile(
     r"globalThis\\s*\\.\\s*sky\\s*=\\s*\\(\\s*await\\s+"
-    r'import\\(\\s*(?:"|\\\')@oai/sky(?:"|\\\')\\s*\\)\\s*\\)\\s*\\.\\s*sky\\s*;?'
+    r'import\\(\\s*(?:"|\\\')@oai/sky(?:"|\\\')\\s*\\)\\s*\\)\\s*\\.\\s*sky'
 )
-operation = re.compile(r"\\bsky\\s*\\.\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\(")
-forbidden = re.compile(
-    r"\\b(?:require|process|Deno|Bun|fetch|WebSocket|eval|Function|constructor|"
-    r"__proto__|child_process|osascript|globalThis|Reflect)\\b|"
-    r"\\bnode:(?:fs|os|child_process)\\b"
+DIRECT = re.compile(
+    r"(?:(?:(?:var|let|const)\\s+)?[A-Za-z_$][A-Za-z0-9_$]*\\s*=\\s*)?"
+    r"await\\s+sky\\.([A-Za-z_][A-Za-z0-9_]*)\\(\\s*(\\{{.*\\}})\\s*\\)"
 )
+WRITE_VARIABLE = re.compile(
+    r"nodeRepl\\.write\\(\\s*[A-Za-z_$][A-Za-z0-9_$]*\\.text\\s*\\)"
+)
+WRITE_STATE = re.compile(
+    r"nodeRepl\\.write\\(\\s*\\(\\s*await\\s+sky\\.get_app_state"
+    r"\\(\\s*(\\{{.*\\}})\\s*\\)\\s*\\)\\.text\\s*\\)"
+)
+
+
+def arguments(value, operation_name):
+    normalized = re.sub(
+        r"([\\{{,]\\s*)([A-Za-z_][A-Za-z0-9_]*)\\s*:",
+        r'\\1"\\2":',
+        value,
+    )
+    normalized = re.sub(r"\\btrue\\b", "True", normalized)
+    normalized = re.sub(r"\\bfalse\\b", "False", normalized)
+    try:
+        parsed = ast.literal_eval(normalized)
+    except (SyntaxError, ValueError):
+        return False
+    required = {{
+        "get_app_state": {{"app"}},
+        "click": {{"app", "element_index"}},
+        "set_value": {{"app", "element_index", "value"}},
+        "type_text": {{"app", "text"}},
+    }}[operation_name]
+    allowed = required | ({{"disableDiff"}} if operation_name == "get_app_state" else set())
+    return (
+        isinstance(parsed, dict)
+        and set(parsed) >= required
+        and set(parsed) <= allowed
+        and parsed.get("app") == APP_PATH
+        and (
+            operation_name not in {{"click", "set_value"}}
+            or type(parsed.get("element_index")) is int
+        )
+        and (
+            operation_name not in {{"set_value", "type_text"}}
+            or isinstance(parsed.get("value", parsed.get("text")), str)
+        )
+        and (
+            "disableDiff" not in parsed or type(parsed["disableDiff"]) is bool
+        )
+    )
 
 
 def allowed_code(value):
     if not isinstance(value, str) or not value.strip() or "\\x00" in value:
         return False
-    if APP_PATH not in value:
+    saw_operation = False
+    for statement in (item.strip() for item in value.split(";")):
+        if not statement:
+            continue
+        if BOOTSTRAP.fullmatch(statement) or WRITE_VARIABLE.fullmatch(statement):
+            continue
+        state = WRITE_STATE.fullmatch(statement)
+        if state:
+            saw_operation = True
+            if not arguments(state.group(1), "get_app_state"):
+                return False
+            continue
+        direct = DIRECT.fullmatch(statement)
+        if direct:
+            operation_name, raw_arguments = direct.groups()
+            saw_operation = True
+            if (
+                operation_name not in ALLOWED_OPERATIONS
+                or not arguments(raw_arguments, operation_name)
+            ):
+                return False
+            continue
         return False
-    remainder = bootstrap.sub("", value)
-    if re.search(r"\\bimport\\s*\\(", remainder) or forbidden.search(remainder):
-        return False
-    operations = operation.findall(remainder)
-    unaccounted = operation.sub("", remainder)
-    return (
-        bool(operations)
-        and all(item in ALLOWED_OPERATIONS for item in operations)
-        and re.search(r"\\bsky\\b", unaccounted) is None
-    )
+    return saw_operation
 
 try:
     payload = json.load(sys.stdin)

@@ -1187,6 +1187,19 @@ time.sleep(60)
             (
                 "mcp__node_repl__js",
                 {
+                    "title": "Inspect with agent-selected variable",
+                    "code": (
+                        "globalThis.sky = (await import('@oai/sky')).sky; "
+                        "let observed = await sky.get_app_state({disableDiff: true, app: "
+                        + json.dumps(str(self.fixture_app))
+                        + "}); nodeRepl.write(observed.text);"
+                    ),
+                },
+                "allow",
+            ),
+            (
+                "mcp__node_repl__js",
+                {
                     "title": "Unsupported operation",
                     "code": (
                         "await sky.press_key({app: "
@@ -1247,7 +1260,7 @@ time.sleep(60)
         self.assertEqual(
             [record["decision"] for record in records],
             [
-                "allow", "allow", "allow", "block", "block", "block",
+                "allow", "allow", "allow", "allow", "block", "block", "block",
                 "block", "block", "block",
             ],
         )

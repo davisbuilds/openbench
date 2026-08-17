@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -87,6 +88,13 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _canonical_digest(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _read_last_jsonl(path: Path) -> dict[str, Any]:
@@ -247,15 +255,32 @@ def _run_oss(
     identity = cub._bundle_info(runtime_app)
     if identity["binary_sha256"] != expected_binary:
         raise ComparisonError(f"OSS runtime binary mismatch before block {block}")
-    scoped._start_exact_daemon(identity)
+    daemon_pid, daemon_start = scoped._start_exact_daemon(identity)
+    daemon_end: dict[str, Any] | None = None
+    daemon_shutdown: dict[str, Any] | None = None
     try:
         completed = subprocess.run(
             [sys.executable, "-m", "obench", "native", "run", str(config)],
             stdin=subprocess.DEVNULL,
             check=False,
         )
+        daemon_end = scoped._validate_daemon_identity(
+            scoped._daemon_hello(),
+            executable=Path(str(identity["executable"])),
+            binary_sha256=expected_binary,
+            pid=daemon_pid,
+        )
+        if daemon_end != daemon_start:
+            raise ComparisonError(f"OSS daemon identity changed during block {block}")
     finally:
-        scoped._stop_daemon()
+        daemon_shutdown = scoped._stop_daemon()
+    if (
+        daemon_end is None
+        or daemon_shutdown is None
+        or daemon_shutdown.get("pid") != daemon_start["pid"]
+        or daemon_shutdown.get("incarnation_id") != daemon_start["incarnation_id"]
+    ):
+        raise ComparisonError(f"OSS daemon lifecycle was not continuous in block {block}")
     if not results.is_file():
         raise ComparisonError(f"Computer Use OSS trial {block} produced no result row")
     result = _read_last_jsonl(results)
@@ -271,6 +296,8 @@ def _run_oss(
         "model_visible_tool_measurement_count": mcp["context_measurement_count"],
         "tool_response_bytes": mcp["response_bytes"],
         "model_visible_tool_bytes_basis": "daemon_reported_context_bytes",
+        "oss_daemon_identity": daemon_start,
+        "oss_daemon_identity_sha256": _canonical_digest(daemon_start),
     })
     return row
 
