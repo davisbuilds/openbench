@@ -511,6 +511,7 @@ def _run_official_native_command(cmd, **kwargs):
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
+        shutdown_deadline = time.monotonic() + _NATIVE_TERMINATE_GRACE_S
         try:
             os.killpg(proc.pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -518,11 +519,16 @@ def _run_official_native_command(cmd, **kwargs):
         try:
             proc.wait(timeout=_NATIVE_TERMINATE_GRACE_S)
         except subprocess.TimeoutExpired:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            proc.wait()
+            pass
+        else:
+            remaining_grace = shutdown_deadline - time.monotonic()
+            if remaining_grace > 0:
+                time.sleep(remaining_grace)
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
         for reader in readers:
             reader.join()
         proc.stdout.close()

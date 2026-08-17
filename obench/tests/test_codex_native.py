@@ -1255,6 +1255,45 @@ time.sleep(60)
             12_500_000,
         )
 
+    def test_official_streaming_timeout_kills_group_after_parent_exits(self):
+        proc = mock.Mock()
+        proc.pid = 1234
+        proc.returncode = -signal.SIGTERM
+        proc.stdout.readline.return_value = b""
+        proc.stderr.read.return_value = b""
+        proc.wait.side_effect = [
+            subprocess.TimeoutExpired(["codex"], 1),
+            0,
+            0,
+        ]
+
+        with (
+            mock.patch.object(self.codex.subprocess, "Popen", return_value=proc),
+            mock.patch.object(self.codex.os, "killpg") as killpg,
+            mock.patch.object(self.codex.time, "sleep"),
+        ):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                self.codex._run_official_native_command(
+                    ["codex"],
+                    cwd=self.workspace,
+                    capture_output=True,
+                    text=False,
+                    timeout=1,
+                    stdin=subprocess.DEVNULL,
+                    env=os.environ.copy(),
+                )
+
+        self.assertEqual(
+            killpg.call_args_list,
+            [
+                mock.call(proc.pid, signal.SIGTERM),
+                mock.call(proc.pid, signal.SIGKILL),
+            ],
+        )
+        self.assertEqual(proc.wait.call_count, 3)
+        proc.stdout.close.assert_called_once_with()
+        proc.stderr.close.assert_called_once_with()
+
     def test_official_profile_rejects_mixed_or_incomplete_configuration(self):
         cases = (
             self.official_env() | {"CUB_MCP_COMMAND": str(self.launcher)},
