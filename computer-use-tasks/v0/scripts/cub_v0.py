@@ -1548,8 +1548,10 @@ def _config_text(
     instruction_path: Path | None = None,
     locked_state_response_mode: str | None = None,
     require_foreground_full_agent_phase: bool = True,
+    timeout_s: int = 300,
 ) -> str:
     trial_index = _positive_trial_index(trial_index)
+    timeout_s = _positive_trial_index(timeout_s)
     root, _repo, _installed = _request_paths(request)
     workspace = _workspace(root, arm, task, trial_index)
     output, results = _result_paths(root, mode, arm, task, trial_index)
@@ -1701,7 +1703,7 @@ scale_factor = {float(host["display_scale"])}
 color_space = {_toml_string(str(host["display_color_space"]))}
 
 [budget]
-timeout_s = 300
+timeout_s = {timeout_s}
 max_retries = 0
 
 [focus]

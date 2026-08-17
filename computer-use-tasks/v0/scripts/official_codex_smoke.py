@@ -70,6 +70,54 @@ def _tree_sha256(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _evidence_files(root: Path) -> list[dict[str, Any]]:
+    files = []
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix()
+        if relative == "manifest.json" or path.is_dir():
+            continue
+        if path.is_symlink() or not path.is_file():
+            raise SmokeError(f"evidence contains an unsupported entry: {relative}")
+        files.append({
+            "path": relative,
+            "sha256": _sha256(path),
+            "size": path.stat().st_size,
+        })
+    return files
+
+
+def seal_evidence_bundle(root: Path) -> str:
+    manifest_path = root / "manifest.json"
+    if manifest_path.exists():
+        raise SmokeError("official evidence manifest already exists")
+    manifest = {
+        "schema_version": "openbench.official-codex-evidence-manifest.v1",
+        "files": _evidence_files(root),
+    }
+    encoded = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    manifest_path.write_bytes(encoded)
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def verify_evidence_bundle(root: Path) -> str:
+    manifest_path = root / "manifest.json"
+    try:
+        encoded = manifest_path.read_bytes()
+        manifest = json.loads(encoded)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SmokeError(f"official evidence manifest is unavailable: {exc}") from exc
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"schema_version", "files"}
+        or manifest.get("schema_version")
+        != "openbench.official-codex-evidence-manifest.v1"
+        or not isinstance(manifest.get("files"), list)
+        or manifest["files"] != _evidence_files(root)
+    ):
+        raise SmokeError("official evidence bundle does not match its manifest")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _load_adapter():
     spec = importlib.util.spec_from_file_location("official_codex_smoke_adapter", ADAPTER)
     if spec is None or spec.loader is None:
@@ -271,39 +319,11 @@ def _start_service(service_app: Path, socket: Path) -> dict[str, Any]:
         executable=True,
     )
     if socket.exists() and not socket.is_symlink():
-        try:
-            return _service_runtime_identity(socket, executable)
-        except SmokeError:
-            pass
-
-    stale = subprocess.run(
-        ["pkill", "-x", "SkyComputerUseService"],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=5,
-        check=False,
-    )
-    if stale.returncode not in (0, 1):
-        raise SmokeError("cannot stop stale official Computer Use service")
-    stop_deadline = time.monotonic() + 5
-    while time.monotonic() < stop_deadline:
-        running = subprocess.run(
-            ["pgrep", "-x", "SkyComputerUseService"],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        if running.returncode == 1:
-            socket.unlink(missing_ok=True)
-            break
-        if running.returncode not in (0, 1):
-            raise SmokeError("cannot inspect official Computer Use service state")
-        time.sleep(0.1)
-    else:
-        raise SmokeError("stale official Computer Use service did not stop")
+        identity = _service_runtime_identity(socket, executable)
+        identity["started_by_benchmark"] = False
+        return identity
+    if socket.is_symlink():
+        raise SmokeError(f"official Computer Use service socket is a symlink: {socket}")
 
     completed = subprocess.run(
         ["open", "-n", str(service_app)],
@@ -327,7 +347,9 @@ def _start_service(service_app: Path, socket: Path) -> dict[str, Any]:
             and stat.S_ISSOCK(socket.stat().st_mode)
         ):
             try:
-                return _service_runtime_identity(socket, executable)
+                identity = _service_runtime_identity(socket, executable)
+                identity["started_by_benchmark"] = True
+                return identity
             except SmokeError as exc:
                 identity_error = exc
         time.sleep(0.1)
@@ -560,6 +582,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     if stage.exists() and not output.exists():
                         os.replace(stage, output)
                 raise
+        seal_evidence_bundle(stage)
         os.replace(stage, output)
         return result
 

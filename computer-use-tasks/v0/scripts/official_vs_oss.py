@@ -14,6 +14,7 @@ import sys
 from typing import Any, Mapping, Sequence
 
 import cub_v0 as cub
+import official_codex_smoke as official
 import scoped_agent_ab as scoped
 from obench.native_report import summarize_native_mcp_bundle
 
@@ -59,7 +60,7 @@ def _require_oss_terminal(
     if (
         result.get("completed") is not True
         or isinstance(checker_exit, bool)
-        or not isinstance(checker_exit, int)
+        or checker_exit not in (0, 1)
     ):
         raise ComparisonError(
             f"Computer Use OSS trial {block} has no terminal checker verdict"
@@ -225,8 +226,10 @@ def _run_official(args: argparse.Namespace, block: int, output: Path) -> dict[st
     if not result_path.is_file():
         raise ComparisonError(f"official Codex trial {block} failed: {output}")
     result = json.loads(result_path.read_text(encoding="utf-8"))
+    manifest_sha256 = official.verify_evidence_bundle(output)
     _require_official_terminal(result, completed.returncode, block)
     row = _official_row(result, block, result_path)
+    row["official_bundle_manifest_sha256"] = manifest_sha256
     return row
 
 
@@ -280,6 +283,7 @@ def _configs(
     revision: str,
     repetitions: int,
     experiment_id: str,
+    timeout_s: int,
 ) -> tuple[list[tuple[Path, Path]], dict[str, Any]]:
     root, repo, _installed = cub._request_paths(request)
     signing_identity = request.get("source_signing_identity")
@@ -317,6 +321,7 @@ def _configs(
             instruction_path=cub.ROOT / TASK / "instruction.md",
             locked_state_response_mode=None,
             require_foreground_full_agent_phase=False,
+            timeout_s=timeout_s,
         )
         outputs[config] = text.encode("utf-8")
         _output, results = cub._result_paths(root, experiment_id, OSS_ARM, TASK, block)
@@ -364,6 +369,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             revision=args.oss_revision,
             repetitions=args.repetitions,
             experiment_id=args.experiment_id,
+            timeout_s=args.timeout,
         )
         staged_app = Path(oss["staged_app"])
         for block, (config, results) in enumerate(configs, start=1):
@@ -412,6 +418,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "task": "openbench/computer-use-v0-basic-controls",
             "model": args.model,
             "repetitions": args.repetitions,
+            "timeout_s": args.timeout,
             "prompts": {
                 "computer-use-oss": {
                     "path": str(cub.ROOT / TASK / "instruction.md"),

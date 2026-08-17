@@ -140,6 +140,19 @@ class CodexComputerUseTelemetryTests(unittest.TestCase):
         (root / "index.js").rename(root / "main.js")
         self.assertNotEqual(smoke._tree_sha256(root), changed)
 
+    def test_official_evidence_bundle_is_sealed_and_tamper_evident(self):
+        root = Path(self.temporary.name) / "evidence"
+        (root / "agent").mkdir(parents=True)
+        (root / "result.json").write_text("{}\n", encoding="utf-8")
+        (root / "agent/events.jsonl").write_text("{}\n", encoding="utf-8")
+
+        digest = smoke.seal_evidence_bundle(root)
+        self.assertEqual(smoke.verify_evidence_bundle(root), digest)
+
+        (root / "agent/events.jsonl").write_text('{"changed":true}\n', encoding="utf-8")
+        with self.assertRaisesRegex(smoke.SmokeError, "does not match"):
+            smoke.verify_evidence_bundle(root)
+
     def test_service_runtime_identity_binds_socket_owner_to_executable(self):
         executable = Path(self.temporary.name) / "service"
         executable.write_bytes(b"service")
@@ -197,11 +210,17 @@ class ComputerUseComparisonContractTests(unittest.TestCase):
 
     def test_oss_wrong_answer_requires_completed_row_and_checker_verdict(self):
         comparison._require_oss_terminal(
-            {"completed": True, "checker_exit": 17, "score": 0.0}, 0, 1
+            {"completed": True, "checker_exit": 1, "score": 0.0}, 0, 1
         )
         with self.assertRaisesRegex(comparison.ComparisonError, "terminal checker"):
             comparison._require_oss_terminal(
                 {"completed": False, "checker_exit": None}, 0, 1
+            )
+
+    def test_oss_nonstandard_checker_exit_is_infrastructure_invalid(self):
+        with self.assertRaisesRegex(comparison.ComparisonError, "terminal checker"):
+            comparison._require_oss_terminal(
+                {"completed": True, "checker_exit": 17, "score": 0.0}, 0, 1
             )
 
     def test_oss_nonzero_runner_exit_is_infrastructure_invalid(self):
