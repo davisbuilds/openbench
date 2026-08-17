@@ -62,11 +62,13 @@ POST_ACTION_STATE_ARMS = ("state", "no-state")
 STATE_RESPONSE_ARMS = ("auto", "full")
 SCOPED_AGENT_ARMS = ("baseline", "scoped")
 OFFICIAL_CODEX_ARM = "official-codex"
+COMPUTER_USE_OSS_ARM = "computer-use-oss"
 RUNTIME_ARMS = (
     *ARMS,
     *POST_ACTION_STATE_ARMS,
     *STATE_RESPONSE_ARMS,
     *SCOPED_AGENT_ARMS,
+    COMPUTER_USE_OSS_ARM,
     OFFICIAL_CODEX_ARM,
 )
 CALL_CONTRACT = (
