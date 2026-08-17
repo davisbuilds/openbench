@@ -1199,6 +1199,18 @@ time.sleep(60)
             (
                 "mcp__node_repl__js",
                 {
+                    "title": "Computed operation bypass",
+                    "code": (
+                        "await sky.get_app_state({app: "
+                        + json.dumps(str(self.fixture_app))
+                        + "}); await sky['press_key']({key: 'A'});"
+                    ),
+                },
+                "deny",
+            ),
+            (
+                "mcp__node_repl__js",
+                {
                     "title": "Bypass",
                     "code": (
                         'await import("node:fs/promises"); '
@@ -1236,7 +1248,7 @@ time.sleep(60)
             [record["decision"] for record in records],
             [
                 "allow", "allow", "allow", "block", "block", "block",
-                "block", "block",
+                "block", "block", "block",
             ],
         )
         self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), 0o600)

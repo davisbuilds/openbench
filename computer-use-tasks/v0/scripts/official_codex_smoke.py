@@ -298,11 +298,8 @@ def _monitor_service(
     def sample() -> None:
         while not stopped.wait(0.25):
             try:
-                identity = _service_runtime_identity(
-                    socket, executable, allow_missing=True
-                )
-                if identity is not None:
-                    observed.append(identity)
+                identity = _service_runtime_identity(socket, executable)
+                observed.append(identity)
             except SmokeError as exc:
                 errors.append(exc)
                 return
@@ -463,12 +460,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 raise SmokeError("Computer Use service was not observed during the trial")
             expected_runtime = {
                 key: service_runtime[key]
-                for key in ("executable_path", "executable_sha256")
+                for key in ("pid", "executable_path", "executable_sha256")
             }
             if any(
                 {
                     key: identity[key]
-                    for key in ("executable_path", "executable_sha256")
+                    for key in ("pid", "executable_path", "executable_sha256")
                 } != expected_runtime
                 for identity in service_observations
             ):
@@ -480,7 +477,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             telemetry = summarize_events(events)
             if adapter_result.get("completed") is True:
                 verifier_exit = _run_cub(request_path, "verify", args.trial_index)
-            measured_finished = time.time()
             verdict = workspace / "runner/verdict.json"
             if verdict.is_file():
                 shutil.copyfile(verdict, stage / "verdict.json")
@@ -499,7 +495,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "passed": bool(adapter_result.get("completed")) and verifier_exit == 0,
                 "agent_completed": adapter_result.get("completed") is True,
                 "verifier_exit": verifier_exit,
-                "wall_time_s": measured_finished - started,
+                "wall_time_s": None,
                 "model": args.model,
                 "tokens": adapter_result.get("tokens"),
                 "turns": adapter_result.get("turns"),
@@ -532,10 +528,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 },
                 "telemetry": telemetry,
             }
-            (stage / "result.json").write_text(
-                json.dumps(result, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
         except Exception as exc:
             if stage.exists() and not output.exists():
                 (stage / "failure.json").write_text(
@@ -582,6 +574,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     if stage.exists() and not output.exists():
                         os.replace(stage, output)
                 raise
+        result["wall_time_s"] = time.time() - started
+        (stage / "result.json").write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         seal_evidence_bundle(stage)
         os.replace(stage, output)
         return result

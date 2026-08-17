@@ -284,6 +284,7 @@ def _configs(
     repetitions: int,
     experiment_id: str,
     timeout_s: int,
+    model_name: str,
 ) -> tuple[list[tuple[Path, Path]], dict[str, Any]]:
     root, repo, _installed = cub._request_paths(request)
     signing_identity = request.get("source_signing_identity")
@@ -322,6 +323,7 @@ def _configs(
             locked_state_response_mode=None,
             require_foreground_full_agent_phase=False,
             timeout_s=timeout_s,
+            model_name=model_name,
         )
         outputs[config] = text.encode("utf-8")
         _output, results = cub._result_paths(root, experiment_id, OSS_ARM, TASK, block)
@@ -370,6 +372,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             repetitions=args.repetitions,
             experiment_id=args.experiment_id,
             timeout_s=args.timeout,
+            model_name=args.model,
         )
         staged_app = Path(oss["staged_app"])
         for block, (config, results) in enumerate(configs, start=1):
@@ -484,8 +487,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.codex_app = args.codex_app.expanduser().resolve()
     args.service_app = args.service_app.expanduser().resolve()
     args.service_socket = args.service_socket.expanduser().resolve()
-    if args.repetitions < 1 or args.timeout < 1:
-        parser.error("repetitions and timeout must be positive")
+    if args.repetitions < 2 or args.repetitions % 2:
+        parser.error("repetitions must be a positive even number")
+    if args.timeout < 1:
+        parser.error("timeout must be positive")
     if len(args.oss_revision) != 40 or any(c not in "0123456789abcdef" for c in args.oss_revision):
         parser.error("oss-revision must be one full lowercase commit SHA")
     try:

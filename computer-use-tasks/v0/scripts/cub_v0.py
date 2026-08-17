@@ -1549,9 +1549,12 @@ def _config_text(
     locked_state_response_mode: str | None = None,
     require_foreground_full_agent_phase: bool = True,
     timeout_s: int = 300,
+    model_name: str = "gpt-5.6-sol",
 ) -> str:
     trial_index = _positive_trial_index(trial_index)
     timeout_s = _positive_trial_index(timeout_s)
+    if not isinstance(model_name, str) or not model_name:
+        raise CubError("model_name must be non-empty")
     root, _repo, _installed = _request_paths(request)
     workspace = _workspace(root, arm, task, trial_index)
     output, results = _result_paths(root, mode, arm, task, trial_index)
@@ -1662,9 +1665,9 @@ version = {_toml_string(str(request.get("codex_version", "codex-cli 0.146.1")))}
 version_source = "native_cli"
 
 [model]
-name = "gpt-5.6-sol"
+name = {_toml_string(model_name)}
 provider = "openai-codex"
-revision = "gpt-5.6-sol"
+revision = {_toml_string(model_name)}
 
 [mcp]
 name = "computer-use-mcp"

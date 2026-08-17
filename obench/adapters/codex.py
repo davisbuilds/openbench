@@ -732,7 +732,8 @@ bootstrap = re.compile(
 operation = re.compile(r"\\bsky\\s*\\.\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\(")
 forbidden = re.compile(
     r"\\b(?:require|process|Deno|Bun|fetch|WebSocket|eval|Function|constructor|"
-    r"__proto__|child_process|osascript)\\b|\\bnode:(?:fs|os|child_process)\\b"
+    r"__proto__|child_process|osascript|globalThis|Reflect)\\b|"
+    r"\\bnode:(?:fs|os|child_process)\\b"
 )
 
 
@@ -745,7 +746,12 @@ def allowed_code(value):
     if re.search(r"\\bimport\\s*\\(", remainder) or forbidden.search(remainder):
         return False
     operations = operation.findall(remainder)
-    return bool(operations) and all(item in ALLOWED_OPERATIONS for item in operations)
+    unaccounted = operation.sub("", remainder)
+    return (
+        bool(operations)
+        and all(item in ALLOWED_OPERATIONS for item in operations)
+        and re.search(r"\\bsky\\b", unaccounted) is None
+    )
 
 try:
     payload = json.load(sys.stdin)
@@ -1062,8 +1068,23 @@ def _official_operation_names(arguments):
     code = arguments.get("code")
     if not isinstance(code, str):
         raise ValueError("official node_repl call has no code")
-    operations = re.findall(r"\bsky\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(", code)
-    if not operations or any(item not in _OFFICIAL_ALLOWED_OPERATIONS for item in operations):
+    normalized = re.sub(
+        r"globalThis\s*\.\s*sky\s*=\s*\(\s*await\s+import\(\s*"
+        r"(['\"])@oai/sky\1\s*\)\s*\)\s*\.\s*sky\s*;?",
+        "",
+        code,
+    )
+    operations = re.findall(
+        r"\bsky\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(", normalized
+    )
+    unaccounted = re.sub(
+        r"\bsky\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*\(", "", normalized
+    )
+    if (
+        not operations
+        or any(item not in _OFFICIAL_ALLOWED_OPERATIONS for item in operations)
+        or re.search(r"\bsky\b", unaccounted)
+    ):
         raise ValueError("official node_repl call used an unsupported Computer Use operation")
     return tuple(operations)
 
