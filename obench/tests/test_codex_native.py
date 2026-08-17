@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import plistlib
 import signal
 import stat
 import subprocess
@@ -59,10 +60,16 @@ def write_fixture_policy_ledger(path):
     )
 
 
-def official_stdout(*, surface_kind="computerUse", include_surface=True):
+def official_stdout(
+    *, surface_kind="computerUse", include_surface=True,
+    app_id="org.openbench.ComputerUseFixture.v0",
+):
     meta = {"codex/nodeReplExecutionDurationMs": 12.5}
     if include_surface:
-        meta["codex/toolSurface"] = {"kind": surface_kind}
+        meta["codex/toolSurface"] = {
+            "kind": surface_kind,
+            "app": {"kind": "appId", "appId": app_id},
+        }
     events = (
         {"type": "thread.started", "thread_id": "thread-official"},
         {
@@ -149,7 +156,12 @@ class CodexNativeProfileTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.fixture_app = self.root / "Fixture.app"
-        self.fixture_app.mkdir()
+        (self.fixture_app / "Contents").mkdir(parents=True)
+        with (self.fixture_app / "Contents/Info.plist").open("wb") as handle:
+            plistlib.dump(
+                {"CFBundleIdentifier": "org.openbench.ComputerUseFixture.v0"},
+                handle,
+            )
 
     def tearDown(self):
         self.temp.cleanup()
@@ -1118,7 +1130,9 @@ time.sleep(60)
                 "allowed_mcp_servers": ["node_repl"],
                 "allowed_tools": ["js"],
                 "tool_surface": "mcp__node_repl__js",
-                "required_result_metadata": "codex/toolSurface.kind=computerUse",
+                "required_result_metadata": (
+                    "codex/toolSurface.kind=computerUse and exact benchmark appId"
+                ),
                 "blocked_attempt_count": 0,
                 "blocked_tools": [],
                 "verified": True,
@@ -1137,11 +1151,11 @@ time.sleep(60)
             (
                 "mcp__node_repl__js",
                 {
-                    "title": "Click arbitrary benchmark element",
+                    "title": "Use agent-selected syntax",
                     "code": (
-                        "await sky.click({ app: "
+                        "const chosen = await sky.click({ element_index: 99, app: "
                         + json.dumps(str(self.fixture_app))
-                        + ", element_index: 99 });"
+                        + " }); nodeRepl.write(chosen.text);"
                     ),
                 },
                 "allow",
@@ -1169,6 +1183,18 @@ time.sleep(60)
                     ),
                 },
                 "allow",
+            ),
+            (
+                "mcp__node_repl__js",
+                {
+                    "title": "Unsupported operation",
+                    "code": (
+                        "await sky.press_key({app: "
+                        + json.dumps(str(self.fixture_app))
+                        + ", key: 'A'});"
+                    ),
+                },
+                "deny",
             ),
             (
                 "mcp__node_repl__js",
@@ -1208,7 +1234,10 @@ time.sleep(60)
         records = [json.loads(line) for line in ledger.read_text().splitlines()]
         self.assertEqual(
             [record["decision"] for record in records],
-            ["allow", "allow", "allow", "block", "block", "block", "block"],
+            [
+                "allow", "allow", "allow", "block", "block", "block",
+                "block", "block",
+            ],
         )
         self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), 0o600)
 

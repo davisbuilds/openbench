@@ -48,6 +48,7 @@ models to cross-check against.
 import hashlib
 import json
 import os
+import plistlib
 import re
 import signal
 import shlex
@@ -97,6 +98,12 @@ _NATIVE_RAW_EVENTS_NAME = "codex-events.jsonl"
 _NATIVE_TOOL_POLICY_LEDGER_NAME = "codex-tool-policy.jsonl"
 _NATIVE_TOOL_POLICY_HOOK_NAME = "native-tool-policy.py"
 _OFFICIAL_ALLOWED_HOOK_TOOL = "mcp__node_repl__js"
+_OFFICIAL_ALLOWED_OPERATIONS = frozenset({
+    "get_app_state",
+    "click",
+    "set_value",
+    "type_text",
+})
 _OFFICIAL_MCP_SERVER = "node_repl"
 _OFFICIAL_MCP_TOOL = "js"
 # Must exceed mcp_stdio_collector.CHILD_SHUTDOWN_GRACE_S so the collector can
@@ -717,58 +724,28 @@ LEDGER_PATH = {str(ledger_path)!r}
 ALLOWED_TOOL = {_OFFICIAL_ALLOWED_HOOK_TOOL!r}
 APP_PATH = {str(app_path)!r}
 
-quoted_path = re.escape(json.dumps(APP_PATH))
-space = r"\\s*"
-patterns = (
-    re.compile(
-        r"globalThis\\.sky" + space + r"=" + space
-        + r'\\(await' + space + r'import\\("@oai/sky"\\)\\)\\.sky'
-    ),
-    re.compile(
-        r"(?:var|let|const)?" + space + r"(?:fixtureState|state)" + space + r"=" + space
-        + r"await" + space + r"sky\\.get_app_state\\(\\{{" + space
-        + r"app" + space + r":" + space + quoted_path
-        + r"(?:" + space + r"," + space + r"disableDiff" + space + r":"
-        + space + r"true)?" + space + r"\\}}\\)"
-    ),
-    re.compile(
-        r"await" + space + r"sky\\.click\\(\\{{" + space
-        + r"app" + space + r":" + space + quoted_path + space + r","
-        + space + r"element_index" + space + r":" + space + r"[0-9]+"
-        + space + r"\\}}\\)"
-    ),
-    re.compile(
-        r"await" + space + r"sky\\.type_text\\(\\{{" + space
-        + r"app" + space + r":" + space + quoted_path + space + r","
-        + space + r"text" + space + r":" + space
-        + r'"(?:[^"\\\\]|\\\\.)*"'
-        + space + r"\\}}\\)"
-    ),
-    re.compile(
-        r"await" + space + r"sky\\.set_value\\(\\{{" + space
-        + r"app" + space + r":" + space + quoted_path + space + r","
-        + space + r"element_index" + space + r":" + space + r"[0-9]+"
-        + space + r"," + space + r"value" + space + r":" + space
-        + r'"(?:[^"\\\\]|\\\\.)*"'
-        + space + r"\\}}\\)"
-    ),
-    re.compile(r"nodeRepl\\.write\\((?:fixtureState|state)\\.text\\)"),
-    re.compile(
-        r"nodeRepl\\.write\\(\\(await" + space
-        + r"sky\\.get_app_state\\(\\{{" + space
-        + r"app" + space + r":" + space + quoted_path + space
-        + r"\\}}\\)\\)\\.text\\)"
-    ),
+ALLOWED_OPERATIONS = {_OFFICIAL_ALLOWED_OPERATIONS!r}
+bootstrap = re.compile(
+    r"globalThis\\s*\\.\\s*sky\\s*=\\s*\\(\\s*await\\s+"
+    r'import\\(\\s*(?:"|\\\')@oai/sky(?:"|\\\')\\s*\\)\\s*\\)\\s*\\.\\s*sky\\s*;?'
+)
+operation = re.compile(r"\\bsky\\s*\\.\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\(")
+forbidden = re.compile(
+    r"\\b(?:require|process|Deno|Bun|fetch|WebSocket|eval|Function|constructor|"
+    r"__proto__|child_process|osascript)\\b|\\bnode:(?:fs|os|child_process)\\b"
 )
 
 
 def allowed_code(value):
     if not isinstance(value, str) or not value.strip() or "\\x00" in value:
         return False
-    statements = [item.strip() for item in value.split(";") if item.strip()]
-    if not statements or not any("sky." in item for item in statements):
+    if APP_PATH not in value:
         return False
-    return all(any(pattern.fullmatch(item) for pattern in patterns) for item in statements)
+    remainder = bootstrap.sub("", value)
+    if re.search(r"\\bimport\\s*\\(", remainder) or forbidden.search(remainder):
+        return False
+    operations = operation.findall(remainder)
+    return bool(operations) and all(item in ALLOWED_OPERATIONS for item in operations)
 
 try:
     payload = json.load(sys.stdin)
@@ -1067,7 +1044,31 @@ def _write_native_evidence(
     _atomic_write_private(Path(workdir) / _NATIVE_ATIF_NAME, rendered)
 
 
-def _assert_official_tool_policy(events):
+def _official_app_id(app_path):
+    plist_path = Path(app_path) / "Contents/Info.plist"
+    try:
+        with plist_path.open("rb") as handle:
+            value = plistlib.load(handle).get("CFBundleIdentifier")
+    except (OSError, plistlib.InvalidFileException) as exc:
+        raise ValueError(f"cannot read official benchmark app identity: {exc}") from exc
+    if not isinstance(value, str) or not value:
+        raise ValueError("official benchmark app has no bundle identifier")
+    return value
+
+
+def _official_operation_names(arguments):
+    if not isinstance(arguments, dict):
+        raise ValueError("official node_repl call has invalid arguments")
+    code = arguments.get("code")
+    if not isinstance(code, str):
+        raise ValueError("official node_repl call has no code")
+    operations = re.findall(r"\bsky\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(", code)
+    if not operations or any(item not in _OFFICIAL_ALLOWED_OPERATIONS for item in operations):
+        raise ValueError("official node_repl call used an unsupported Computer Use operation")
+    return tuple(operations)
+
+
+def _assert_official_tool_policy(events, expected_app_id):
     """Require every completed node_repl call to prove Computer Use metadata."""
     calls = {}
     for index, event in enumerate(events, start=1):
@@ -1110,6 +1111,7 @@ def _assert_official_tool_policy(events):
                 "official tool policy rejected MCP tool "
                 f"{item.get('server')!r}/{item.get('tool')!r} at event {index}"
             )
+        _official_operation_names(item.get("arguments"))
         item_id = item.get("id")
         if not isinstance(item_id, str) or not item_id:
             raise ValueError(
@@ -1150,6 +1152,11 @@ def _assert_official_tool_policy(events):
                 raise ValueError(
                     f"official node_repl call {item_id!r} did not prove "
                     "result._meta['codex/toolSurface'].kind == 'computerUse'"
+                )
+            if surface.get("app") != {"kind": "appId", "appId": expected_app_id}:
+                raise ValueError(
+                    f"official node_repl call {item_id!r} did not prove the exact "
+                    "benchmark app identity"
                 )
     for item_id, lifecycle in calls.items():
         if (
@@ -1215,7 +1222,7 @@ def _assert_official_tool_policy_ledger(path, calls):
 
 
 def _write_official_evidence(
-    stdout, *, evidence_dir, tool_policy_ledger, workdir, model
+    stdout, *, evidence_dir, tool_policy_ledger, workdir, model, app_path
 ):
     from obench.atif import assert_valid_trajectory, to_dict
     from obench.tools.atif_convert import convert_codex_events
@@ -1224,7 +1231,8 @@ def _write_official_evidence(
     raw_bytes = stdout if isinstance(stdout, bytes) else stdout.encode("utf-8")
     _atomic_write_private_bytes(raw_path, raw_bytes)
     events = _codex_events(raw_bytes.decode("utf-8"))
-    calls = _assert_official_tool_policy(events)
+    expected_app_id = _official_app_id(app_path)
+    calls = _assert_official_tool_policy(events, expected_app_id)
     blocked_tools = _assert_official_tool_policy_ledger(tool_policy_ledger, calls)
     trajectory = to_dict(convert_codex_events(
         events,
@@ -1236,7 +1244,9 @@ def _write_official_evidence(
         "allowed_mcp_servers": [_OFFICIAL_MCP_SERVER],
         "allowed_tools": [_OFFICIAL_MCP_TOOL],
         "tool_surface": _OFFICIAL_ALLOWED_HOOK_TOOL,
-        "required_result_metadata": "codex/toolSurface.kind=computerUse",
+        "required_result_metadata": (
+            "codex/toolSurface.kind=computerUse and exact benchmark appId"
+        ),
         "blocked_attempt_count": len(blocked_tools),
         "blocked_tools": list(blocked_tools),
         "verified": True,
@@ -1755,6 +1765,7 @@ def run(
                             tool_policy_ledger=native_tool_policy_ledger,
                             workdir=workdir,
                             model=model,
+                            app_path=official_config["app_path"],
                         )
                     else:
                         _write_native_evidence(
@@ -1832,6 +1843,7 @@ def run(
                     tool_policy_ledger=native_tool_policy_ledger,
                     workdir=workdir,
                     model=model,
+                    app_path=official_config["app_path"],
                 )
             else:
                 _write_native_evidence(
