@@ -719,7 +719,7 @@ patterns = (
         + r'\\(await' + space + r'import\\("@oai/sky"\\)\\)\\.sky'
     ),
     re.compile(
-        r"(?:var|let|const)?" + space + r"fixtureState" + space + r"=" + space
+        r"(?:var|let|const)?" + space + r"(?:fixtureState|state)" + space + r"=" + space
         + r"await" + space + r"sky\\.get_app_state\\(\\{{" + space
         + r"app" + space + r":" + space + quoted_path
         + r"(?:" + space + r"," + space + r"disableDiff" + space + r":"
@@ -737,7 +737,13 @@ patterns = (
         + space + r"text" + space + r":" + space + r'"openbench-42"'
         + space + r"\\}}\\)"
     ),
-    re.compile(r"nodeRepl\\.write\\(fixtureState\\.text\\)"),
+    re.compile(r"nodeRepl\\.write\\((?:fixtureState|state)\\.text\\)"),
+    re.compile(
+        r"nodeRepl\\.write\\(\\(await" + space
+        + r"sky\\.get_app_state\\(\\{{" + space
+        + r"app" + space + r":" + space + quoted_path + space
+        + r"\\}}\\)\\)\\.text\\)"
+    ),
 )
 
 
@@ -787,7 +793,10 @@ try:
         "permissionDecisionReason": (
             "OpenBench official Computer Use node_repl policy"
             if allowed
-            else "OpenBench official trials permit only mcp__node_repl__js"
+            else (
+                "OpenBench permits only get_app_state, click, and type_text "
+                "against the exact benchmark app path"
+            )
         ),
     }}}}))
 except BaseException:
