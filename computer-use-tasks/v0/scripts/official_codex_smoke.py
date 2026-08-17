@@ -91,6 +91,42 @@ def _run_cub(request: Path, command: str, trial_index: int) -> None:
         raise SmokeError(f"fixture {command} failed: {detail}")
 
 
+def _owned_fixture_pid(run_root: Path, trial_index: int) -> int:
+    state_path = (
+        run_root
+        / f"runtime/{TASK}/trial{trial_index}/{ARM}/processes.json"
+    )
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        processes = state["processes"]
+        pid = processes[0]["pid"]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+        raise SmokeError("fixture process identity is unavailable") from exc
+    if len(processes) != 1 or isinstance(pid, bool) or not isinstance(pid, int):
+        raise SmokeError("fixture process identity is invalid")
+    return pid
+
+
+def _assert_single_fixture_process(expected_pid: int) -> None:
+    completed = subprocess.run(
+        ["pgrep", "-x", "ComputerUseFixture"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    try:
+        observed = [int(value) for value in completed.stdout.split()]
+    except ValueError as exc:
+        raise SmokeError("fixture process inventory is malformed") from exc
+    if completed.returncode != 0 or observed != [expected_pid]:
+        raise SmokeError(
+            f"fixture process isolation failed: expected [{expected_pid}], "
+            f"observed {observed}"
+        )
+
+
 def _require_file(path: Path, label: str, *, executable: bool = False) -> Path:
     resolved = path.expanduser().resolve()
     if resolved.is_symlink() or not resolved.is_file():
@@ -149,6 +185,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         try:
             _run_cub(request_path, "reset", args.trial_index)
             _run_cub(request_path, "setup", args.trial_index)
+            fixture_pid = _owned_fixture_pid(run_root, args.trial_index)
+            _assert_single_fixture_process(fixture_pid)
             adapter = _load_adapter()
             instruction = (
                 TASK_ROOT / TASK / "instruction-official-codex.md"
@@ -171,6 +209,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     ),
                 },
             )
+            _assert_single_fixture_process(fixture_pid)
             events = attempt / "codex-events.jsonl"
             if not events.is_file():
                 raise SmokeError("Codex adapter did not retain its event transcript")
