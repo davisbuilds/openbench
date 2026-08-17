@@ -15,6 +15,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 from typing import Any
@@ -189,7 +190,12 @@ def _bundle_identity(app: Path, label: str) -> dict[str, Any]:
     }
 
 
-def _service_runtime_identity(socket: Path, expected_executable: Path) -> dict[str, Any]:
+def _service_runtime_identity(
+    socket: Path,
+    expected_executable: Path,
+    *,
+    allow_missing: bool = False,
+) -> dict[str, Any] | None:
     owners = subprocess.run(
         ["lsof", "-t", "--", str(socket)],
         stdin=subprocess.DEVNULL,
@@ -202,6 +208,8 @@ def _service_runtime_identity(socket: Path, expected_executable: Path) -> dict[s
         pids = sorted({int(value) for value in owners.stdout.split()})
     except ValueError as exc:
         raise SmokeError("official Computer Use socket owner is malformed") from exc
+    if allow_missing and owners.returncode == 1 and not pids:
+        return None
     if owners.returncode != 0 or len(pids) != 1:
         raise SmokeError(
             f"official Computer Use socket must have one owner, observed {pids}"
@@ -228,6 +236,32 @@ def _service_runtime_identity(socket: Path, expected_executable: Path) -> dict[s
         "executable_path": str(observed),
         "executable_sha256": _sha256(observed),
     }
+
+
+def _monitor_service(
+    socket: Path,
+    executable: Path,
+    initial: dict[str, Any],
+) -> tuple[threading.Event, threading.Thread, list[dict[str, Any]], list[SmokeError]]:
+    stopped = threading.Event()
+    observed = [initial]
+    errors: list[SmokeError] = []
+
+    def sample() -> None:
+        while not stopped.wait(0.25):
+            try:
+                identity = _service_runtime_identity(
+                    socket, executable, allow_missing=True
+                )
+                if identity is not None:
+                    observed.append(identity)
+            except SmokeError as exc:
+                errors.append(exc)
+                return
+
+    thread = threading.Thread(target=sample, name="computer-use-service-monitor")
+    thread.start()
+    return stopped, thread, observed, errors
 
 
 def _start_service(service_app: Path, socket: Path) -> dict[str, Any]:
@@ -374,23 +408,49 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             instruction = instruction.replace("{app_path}", str(fixture_app))
             attempt = stage / "agent"
             attempt.mkdir()
-            adapter_result = adapter.run(
-                instruction,
-                str(workspace),
-                args.model,
-                args.timeout,
-                env_override={
-                    "OPENBENCH_NATIVE_COMPUTER_USE_PROFILE": "official_codex",
-                    "OPENBENCH_NATIVE_CODEX_NODE_REPL_COMMAND": str(node_repl),
-                    "OPENBENCH_NATIVE_CODEX_NODE_MODULE_DIRS": str(node_modules),
-                    "OPENBENCH_NATIVE_CODEX_SKILL_PATH": str(skill),
-                    "OPENBENCH_NATIVE_EVIDENCE_DIR": str(attempt),
-                    "OPENBENCH_NATIVE_CODEX_APP_PATH": str(fixture_app),
-                    "OPENBENCH_NATIVE_TRIAL_ID": (
-                        f"cub-v0-official-codex-{TASK}-trial{args.trial_index}"
-                    ),
-                },
+            service_executable = service_app / "Contents/MacOS/SkyComputerUseService"
+            stopped, monitor, service_observations, monitor_errors = _monitor_service(
+                socket, service_executable, service_runtime
             )
+            try:
+                adapter_result = adapter.run(
+                    instruction,
+                    str(workspace),
+                    args.model,
+                    args.timeout,
+                    env_override={
+                        "OPENBENCH_NATIVE_COMPUTER_USE_PROFILE": "official_codex",
+                        "OPENBENCH_NATIVE_CODEX_NODE_REPL_COMMAND": str(node_repl),
+                        "OPENBENCH_NATIVE_CODEX_NODE_MODULE_DIRS": str(node_modules),
+                        "OPENBENCH_NATIVE_CODEX_SKILL_PATH": str(skill),
+                        "OPENBENCH_NATIVE_EVIDENCE_DIR": str(attempt),
+                        "OPENBENCH_NATIVE_CODEX_APP_PATH": str(fixture_app),
+                        "OPENBENCH_NATIVE_TRIAL_ID": (
+                            f"cub-v0-official-codex-{TASK}-trial{args.trial_index}"
+                        ),
+                    },
+                )
+            finally:
+                stopped.set()
+                monitor.join(timeout=5)
+            if monitor.is_alive():
+                raise SmokeError("Computer Use service monitor did not stop")
+            if monitor_errors:
+                raise monitor_errors[0]
+            if len(service_observations) < 2:
+                raise SmokeError("Computer Use service was not observed during the trial")
+            expected_runtime = {
+                key: service_runtime[key]
+                for key in ("executable_path", "executable_sha256")
+            }
+            if any(
+                {
+                    key: identity[key]
+                    for key in ("executable_path", "executable_sha256")
+                } != expected_runtime
+                for identity in service_observations
+            ):
+                raise SmokeError("Computer Use service implementation changed during the trial")
             _assert_single_fixture_process(fixture_pid)
             events = attempt / "codex-events.jsonl"
             if not events.is_file():
@@ -398,6 +458,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             telemetry = summarize_events(events)
             if adapter_result.get("completed") is True:
                 verifier_exit = _run_cub(request_path, "verify", args.trial_index)
+            measured_finished = time.time()
             verdict = workspace / "runner/verdict.json"
             if verdict.is_file():
                 shutil.copyfile(verdict, stage / "verdict.json")
@@ -407,12 +468,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             trajectory = workspace / "trajectory.json"
             if trajectory.is_file():
                 shutil.copyfile(trajectory, stage / "trajectory.json")
-            final_service_runtime = _service_runtime_identity(
-                socket,
-                service_app / "Contents/MacOS/SkyComputerUseService",
-            )
-            if final_service_runtime != service_runtime:
-                raise SmokeError("Computer Use service identity changed during the trial")
             if _tree_sha256(node_modules) != node_modules_sha256:
                 raise SmokeError("official Codex node modules changed during the trial")
             result = {
@@ -422,7 +477,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "passed": bool(adapter_result.get("completed")) and verifier_exit == 0,
                 "agent_completed": adapter_result.get("completed") is True,
                 "verifier_exit": verifier_exit,
-                "wall_time_s": time.time() - started,
+                "wall_time_s": measured_finished - started,
                 "model": args.model,
                 "tokens": adapter_result.get("tokens"),
                 "turns": adapter_result.get("turns"),
@@ -449,6 +504,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "codex_app": codex_identity,
                 "computer_use_service": service_identity,
                 "computer_use_service_runtime": service_runtime,
+                "computer_use_service_observations": {
+                    "samples": len(service_observations),
+                    "pids": sorted({identity["pid"] for identity in service_observations}),
+                },
                 "telemetry": telemetry,
             }
             (stage / "result.json").write_text(
