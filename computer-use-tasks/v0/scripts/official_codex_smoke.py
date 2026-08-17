@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -139,6 +140,29 @@ def _require_file(path: Path, label: str, *, executable: bool = False) -> Path:
     return resolved
 
 
+def _bundle_identity(app: Path, label: str) -> dict[str, Any]:
+    plist_path = _require_file(app / "Contents/Info.plist", f"{label} Info.plist")
+    try:
+        with plist_path.open("rb") as handle:
+            info = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException) as exc:
+        raise SmokeError(f"cannot read {label} identity: {exc}") from exc
+    executable_name = info.get("CFBundleExecutable")
+    if not isinstance(executable_name, str) or not executable_name:
+        raise SmokeError(f"{label} has no executable identity")
+    executable = _require_file(
+        app / "Contents/MacOS" / executable_name,
+        f"{label} executable",
+        executable=True,
+    )
+    return {
+        "bundle_id": info.get("CFBundleIdentifier"),
+        "version": info.get("CFBundleShortVersionString"),
+        "build": info.get("CFBundleVersion"),
+        "executable_sha256": _sha256(executable),
+    }
+
+
 def _start_service(service_app: Path, socket: Path) -> None:
     executable = _require_file(
         service_app / "Contents/MacOS/SkyComputerUseService",
@@ -205,6 +229,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     service_app = args.service_app.expanduser().resolve()
     if service_app.is_symlink() or not service_app.is_dir():
         raise SmokeError(f"Computer Use service app is unavailable: {service_app}")
+    codex_identity = _bundle_identity(codex_app, "Codex app")
+    service_identity = _bundle_identity(service_app, "Computer Use service app")
     _start_service(service_app, socket)
 
     started = time.time()
@@ -298,6 +324,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     "skill_sha256": _sha256(skill),
                 },
                 "node_repl_sha256": _sha256(node_repl),
+                "codex_app": codex_identity,
+                "computer_use_service": service_identity,
                 "telemetry": telemetry,
             }
             (stage / "result.json").write_text(

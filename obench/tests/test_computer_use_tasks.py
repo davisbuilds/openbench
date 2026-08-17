@@ -1,4 +1,5 @@
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import shutil
@@ -231,6 +232,62 @@ class ComputerUseTasksTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, instruction)
+
+    def test_backend_comparison_oss_surface_matches_official_semantics(self):
+        script = ROOT / "scripts/cub_v0.py"
+        spec = importlib.util.spec_from_file_location("comparison_cub_v0", script)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        cub = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cub)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "run-root"
+            request = {
+                "run_root": str(root),
+                "computer_use_mcp_repo": str(Path(temporary) / "source"),
+                "installed_mcp_app": str(Path(temporary) / "mcp.app"),
+            }
+            config = cub._config_text(
+                request_path=Path(temporary) / "request.toml",
+                request=request,
+                arm=cub.COMPUTER_USE_OSS_ARM,
+                task="basic-controls",
+                trial_index=1,
+                trial_id="comparison-surface",
+                mcp={
+                    "executable": Path(temporary) / "mcp",
+                    "binary_sha256": "a" * 64,
+                    "app": Path(temporary) / "mcp.app",
+                    "build_stamp_unix": 1,
+                    "designated_requirement": "signed",
+                    "bundle_id": cub.SOURCE_MCP_BUNDLE_ID,
+                },
+                app={
+                    "bundle_id": cub.FIXTURE_BUNDLES["basic-controls"],
+                    "version": "1",
+                    "build": "1",
+                    "signature_sha256": "b" * 64,
+                },
+                host={
+                    "architecture": "arm64",
+                    "hardware": "Mac",
+                    "os_version": "26.0",
+                    "os_build": "A",
+                    "display_width": 1920,
+                    "display_height": 1080,
+                    "display_scale": 2.0,
+                    "display_color_space": "Display",
+                },
+                mode="comparison-surface",
+                matrix=None,
+                require_foreground_full_agent_phase=False,
+            )
+        parsed = tomllib.loads(config)
+        self.assertEqual(
+            parsed["mcp"]["allowed_tools"],
+            ["get_app_state", "click", "set_value", "type_text"],
+        )
+        self.assertFalse(parsed["focus"]["require_foreground_full_agent_phase"])
 
     def test_background_rejects_target_activation_even_with_valid_seal(self):
         temporary, root = self.solved_workspace("background-control")

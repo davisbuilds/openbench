@@ -1547,6 +1547,7 @@ def _config_text(
     matrix: Mapping[str, Any] | None,
     instruction_path: Path | None = None,
     locked_state_response_mode: str | None = None,
+    require_foreground_full_agent_phase: bool = True,
 ) -> str:
     trial_index = _positive_trial_index(trial_index)
     root, _repo, _installed = _request_paths(request)
@@ -1571,7 +1572,11 @@ def _config_text(
     if task in {"basic-controls", "row-selection", *EXPERIMENT_TASKS}:
         foreground = FIXTURE_BUNDLES[task]
         forbidden: list[str] = []
-        tools = ["list_apps", "get_app_state", "click", "set_value", "type_text", "wait_for"]
+        tools = (
+            ["get_app_state", "click", "set_value", "type_text"]
+            if arm == COMPUTER_USE_OSS_ARM and task == "basic-controls"
+            else ["list_apps", "get_app_state", "click", "set_value", "type_text", "wait_for"]
+        )
     elif task == "background-control":
         foreground = GUARD_BUNDLE_ID
         forbidden = [FIXTURE_BUNDLES[task]]
@@ -1702,7 +1707,7 @@ max_retries = 0
 [focus]
 required_foreground_bundle_id = {_toml_string(foreground)}
 forbidden_bundle_ids = {_toml_array(forbidden)}
-require_foreground_full_agent_phase = true
+require_foreground_full_agent_phase = {str(require_foreground_full_agent_phase).lower()}
 forbid_global_delivery = true
 allowed_delivery_tiers = {_toml_array(DELIVERY_TIERS[task])}
 

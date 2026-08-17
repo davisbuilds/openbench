@@ -744,6 +744,14 @@ patterns = (
         + r'"(?:[^"\\\\]|\\\\.)*"'
         + space + r"\\}}\\)"
     ),
+    re.compile(
+        r"await" + space + r"sky\\.set_value\\(\\{{" + space
+        + r"app" + space + r":" + space + quoted_path + space + r","
+        + space + r"element_index" + space + r":" + space + r"[0-9]+"
+        + space + r"," + space + r"value" + space + r":" + space
+        + r'"(?:[^"\\\\]|\\\\.)*"'
+        + space + r"\\}}\\)"
+    ),
     re.compile(r"nodeRepl\\.write\\((?:fixtureState|state)\\.text\\)"),
     re.compile(
         r"nodeRepl\\.write\\(\\(await" + space
@@ -801,7 +809,7 @@ try:
             "OpenBench official Computer Use node_repl policy"
             if allowed
             else (
-                "OpenBench permits only get_app_state, click, and type_text "
+                "OpenBench permits only get_app_state, click, set_value, and type_text "
                 "against the exact benchmark app path"
             )
         ),

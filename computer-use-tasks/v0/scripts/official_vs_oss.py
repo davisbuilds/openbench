@@ -125,6 +125,12 @@ def _official_row(result: Mapping[str, Any], block: int, result_path: Path) -> d
     usage = result.get("token_usage")
     if not isinstance(usage, dict):
         usage = {}
+    official_identity = {
+        "plugin": result.get("plugin"),
+        "node_repl_sha256": result.get("node_repl_sha256"),
+        "codex_app": result.get("codex_app"),
+        "computer_use_service": result.get("computer_use_service"),
+    }
     return {
         "arm": "codex-computer-use",
         "block": block,
@@ -140,6 +146,7 @@ def _official_row(result: Mapping[str, Any], block: int, result_path: Path) -> d
         "computer_use_execution_ms": telemetry.get("total_execution_ms"),
         "model_visible_tool_bytes": telemetry.get("total_model_visible_text_bytes"),
         "tool_response_bytes": telemetry.get("total_response_bytes"),
+        "official_identity": official_identity,
         "result_path": str(result_path),
     }
 
@@ -160,12 +167,12 @@ def _run_official(args: argparse.Namespace, block: int, output: Path) -> dict[st
     ]
     completed = subprocess.run(command, stdin=subprocess.DEVNULL, check=False)
     result_path = output / "result.json"
-    if completed.returncode != 0 or not result_path.is_file():
+    if not result_path.is_file():
         raise ComparisonError(f"official Codex trial {block} failed: {output}")
     result = json.loads(result_path.read_text(encoding="utf-8"))
     row = _official_row(result, block, result_path)
-    if not row["success"]:
-        raise ComparisonError(f"official Codex trial {block} did not pass")
+    if completed.returncode not in (0, 1):
+        raise ComparisonError(f"official Codex trial {block} was infrastructure-invalid")
     return row
 
 
@@ -192,13 +199,11 @@ def _run_oss(
         )
     finally:
         scoped._stop_daemon()
-    if completed.returncode != 0:
-        raise ComparisonError(f"Computer Use OSS trial {block} failed")
+    if not results.is_file():
+        raise ComparisonError(f"Computer Use OSS trial {block} produced no result row")
     result = _read_last_jsonl(results)
     result["_result_path"] = str(results)
     row = _oss_row(result, block)
-    if not row["success"]:
-        raise ComparisonError(f"Computer Use OSS trial {block} did not pass")
     return row
 
 
@@ -246,6 +251,7 @@ def _configs(
             matrix=None,
             instruction_path=cub.ROOT / TASK / "instruction.md",
             locked_state_response_mode=None,
+            require_foreground_full_agent_phase=False,
         )
         outputs[config] = text.encode("utf-8")
         _output, results = cub._result_paths(root, experiment_id, OSS_ARM, TASK, block)
@@ -327,6 +333,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             arm: [row for row in rows if row["arm"] == arm]
             for arm in ("computer-use-oss", "codex-computer-use")
         }
+        official_identities = {
+            json.dumps(row.get("official_identity"), sort_keys=True, separators=(",", ":"))
+            for row in by_arm["codex-computer-use"]
+        }
+        if len(official_identities) != 1:
+            raise ComparisonError("official Codex identity changed across comparison cells")
+        official_identity = json.loads(next(iter(official_identities)))
         report = {
             "schema_version": "openbench.computer-use-backend-comparison.v1",
             "experiment_id": args.experiment_id,
@@ -348,9 +361,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             },
             "oss_revision": args.oss_revision,
             "oss_binary_sha256": oss["binary_sha256"],
+            "official_identity": official_identity,
             "notes": [
                 "Pass/fail, wall time, and final state share one checker and fixture.",
-                "Prompts share the same natural goal; only app identity differs by backend.",
+                "Both arms receive the same natural task goal and no task-specific tool strategy.",
+                "Each backend retains its native tool schema or generic interface skill.",
+                "Both arms expose get_app_state, click, set_value, and type_text for this task.",
                 "OSS usage is proxy-reconciled; official Codex usage is agent-reported.",
                 "Official node_repl transport calls may batch multiple semantic operations.",
             ],
