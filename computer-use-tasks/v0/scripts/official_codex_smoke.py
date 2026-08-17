@@ -240,6 +240,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     "OPENBENCH_NATIVE_CODEX_NODE_MODULE_DIRS": str(node_modules),
                     "OPENBENCH_NATIVE_CODEX_SKILL_PATH": str(skill),
                     "OPENBENCH_NATIVE_EVIDENCE_DIR": str(attempt),
+                    "OPENBENCH_NATIVE_CODEX_APP_PATH": str(fixture_app),
                     "OPENBENCH_NATIVE_TRIAL_ID": (
                         f"cub-v0-official-codex-{TASK}-trial{args.trial_index}"
                     ),
@@ -300,8 +301,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 json.dumps(result, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
-            os.replace(stage, output)
-            return result
         except Exception as exc:
             if stage.exists() and not output.exists():
                 (stage / "failure.json").write_text(
@@ -324,9 +323,28 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         finally:
             try:
                 _run_cub(request_path, "reset", args.trial_index)
-            except SmokeError:
-                if adapter_result is None:
-                    raise
+            except SmokeError as exc:
+                failure_root = stage if stage.exists() else output
+                if failure_root.exists():
+                    (failure_root / "cleanup-failure.json").write_text(
+                        json.dumps(
+                            {
+                                "error": str(exc),
+                                "schema_version": (
+                                    "openbench.official-codex-cleanup-failure.v1"
+                                ),
+                            },
+                            indent=2,
+                            sort_keys=True,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    if stage.exists() and not output.exists():
+                        os.replace(stage, output)
+                raise
+        os.replace(stage, output)
+        return result
 
 
 def main(argv: list[str] | None = None) -> int:

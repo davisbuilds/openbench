@@ -76,6 +76,7 @@ _OFFICIAL_NODE_REPL_COMMAND_ENV = "OPENBENCH_NATIVE_CODEX_NODE_REPL_COMMAND"
 _OFFICIAL_NODE_MODULE_DIRS_ENV = "OPENBENCH_NATIVE_CODEX_NODE_MODULE_DIRS"
 _OFFICIAL_SKILL_PATH_ENV = "OPENBENCH_NATIVE_CODEX_SKILL_PATH"
 _OFFICIAL_EVIDENCE_DIR_ENV = "OPENBENCH_NATIVE_EVIDENCE_DIR"
+_OFFICIAL_APP_PATH_ENV = "OPENBENCH_NATIVE_CODEX_APP_PATH"
 _NATIVE_ALLOWED_TOOLS_ENV = "OPENBENCH_NATIVE_MCP_ALLOWED_TOOLS"
 _NATIVE_ARGUMENT_POLICY_ENV = "OPENBENCH_NATIVE_MCP_ARGUMENT_POLICY"
 _NATIVE_CALL_CONTRACT_ENV = "OPENBENCH_NATIVE_MCP_CALL_CONTRACT"
@@ -263,6 +264,13 @@ def _official_config(env_override=None):
         env_override,
         kind="directory",
     )
+    app_path = _absolute_path(
+        _OFFICIAL_APP_PATH_ENV,
+        env_override,
+        kind="directory",
+    )
+    if app_path.suffix != ".app":
+        raise ValueError(f"{_OFFICIAL_APP_PATH_ENV} must point to an app bundle")
     try:
         skill = skill_path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
@@ -275,6 +283,7 @@ def _official_config(env_override=None):
         "skill_path": skill_path,
         "skill": skill,
         "evidence_dir": evidence_dir,
+        "app_path": app_path,
     }
 
 
@@ -686,7 +695,7 @@ except BaseException:
     return ledger_path
 
 
-def _install_official_tool_policy(codex_home, evidence_dir):
+def _install_official_tool_policy(codex_home, evidence_dir, app_path):
     ledger_path = Path(evidence_dir) / _NATIVE_TOOL_POLICY_LEDGER_NAME
     hook_path = Path(codex_home) / _NATIVE_TOOL_POLICY_HOOK_NAME
     _atomic_write_private(ledger_path, "")
@@ -695,10 +704,50 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import sys
 
 LEDGER_PATH = {str(ledger_path)!r}
 ALLOWED_TOOL = {_OFFICIAL_ALLOWED_HOOK_TOOL!r}
+APP_PATH = {str(app_path)!r}
+
+quoted_path = re.escape(json.dumps(APP_PATH))
+space = r"\\s*"
+patterns = (
+    re.compile(
+        r"globalThis\\.sky" + space + r"=" + space
+        + r'\\(await' + space + r'import\\("@oai/sky"\\)\\)\\.sky'
+    ),
+    re.compile(
+        r"(?:var|let|const)?" + space + r"fixtureState" + space + r"=" + space
+        + r"await" + space + r"sky\\.get_app_state\\(\\{{" + space
+        + r"app" + space + r":" + space + quoted_path
+        + r"(?:" + space + r"," + space + r"disableDiff" + space + r":"
+        + space + r"true)?" + space + r"\\}}\\)"
+    ),
+    re.compile(
+        r"await" + space + r"sky\\.click\\(\\{{" + space
+        + r"app" + space + r":" + space + quoted_path + space + r","
+        + space + r"element_index" + space + r":" + space + r"(?:3|4|6)"
+        + space + r"\\}}\\)"
+    ),
+    re.compile(
+        r"await" + space + r"sky\\.type_text\\(\\{{" + space
+        + r"app" + space + r":" + space + quoted_path + space + r","
+        + space + r"text" + space + r":" + space + r'"openbench-42"'
+        + space + r"\\}}\\)"
+    ),
+    re.compile(r"nodeRepl\\.write\\(fixtureState\\.text\\)"),
+)
+
+
+def allowed_code(value):
+    if not isinstance(value, str) or not value.strip() or "\\x00" in value:
+        return False
+    statements = [item.strip() for item in value.split(";") if item.strip()]
+    if not statements or not any("sky." in item for item in statements):
+        return False
+    return all(any(pattern.fullmatch(item) for pattern in patterns) for item in statements)
 
 try:
     payload = json.load(sys.stdin)
@@ -710,6 +759,9 @@ try:
         and isinstance(tool_use_id, str)
         and bool(tool_use_id)
         and isinstance(tool_input, dict)
+        and set(tool_input).issubset({{"code", "title"}})
+        and isinstance(tool_input.get("title"), str)
+        and allowed_code(tool_input.get("code"))
     )
     encoded_input = json.dumps(
         tool_input,
@@ -1648,6 +1700,7 @@ def run(
                 native_tool_policy_ledger = _install_official_tool_policy(
                     child_env["CODEX_HOME"],
                     official_config["evidence_dir"],
+                    official_config["app_path"],
                 )
             run_command = (
                 _run_official_native_command

@@ -148,6 +148,8 @@ class CodexNativeProfileTests(unittest.TestCase):
             "# Computer Use\nUse `@oai/sky` through node_repl.\n",
             encoding="utf-8",
         )
+        self.fixture_app = self.root / "Fixture.app"
+        self.fixture_app.mkdir()
 
     def tearDown(self):
         self.temp.cleanup()
@@ -176,6 +178,7 @@ class CodexNativeProfileTests(unittest.TestCase):
             "OPENBENCH_NATIVE_CODEX_NODE_MODULE_DIRS": str(self.node_modules),
             "OPENBENCH_NATIVE_CODEX_SKILL_PATH": str(self.skill_path),
             "OPENBENCH_NATIVE_EVIDENCE_DIR": str(self.attempt),
+            "OPENBENCH_NATIVE_CODEX_APP_PATH": str(self.fixture_app),
         }
 
     def test_stock_command_and_artifacts_are_unchanged(self):
@@ -1125,11 +1128,37 @@ time.sleep(60)
     def test_official_hook_allows_only_node_repl_js(self):
         home = self.root / "official-hook-home"
         home.mkdir()
-        ledger = self.codex._install_official_tool_policy(home, self.attempt)
+        ledger = self.codex._install_official_tool_policy(
+            home, self.attempt, self.fixture_app
+        )
         hooks = json.loads((home / "hooks.json").read_text(encoding="utf-8"))
         command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         cases = (
-            ("mcp__node_repl__js", {"code": "await sky.click({})"}, "allow"),
+            (
+                "mcp__node_repl__js",
+                {
+                    "title": "Set toggle",
+                    "code": (
+                        "await sky.click({ app: "
+                        + json.dumps(str(self.fixture_app))
+                        + ", element_index: 4 });"
+                    ),
+                },
+                "allow",
+            ),
+            (
+                "mcp__node_repl__js",
+                {
+                    "title": "Bypass",
+                    "code": (
+                        'await import("node:fs/promises"); '
+                        "await sky.click({ app: "
+                        + json.dumps(str(self.fixture_app))
+                        + ", element_index: 4 });"
+                    ),
+                },
+                "deny",
+            ),
             ("mcp__node_repl__reset", {}, "deny"),
             ("mcp__computer_use__click", {}, "deny"),
             ("apply_patch", {}, "deny"),
@@ -1155,7 +1184,7 @@ time.sleep(60)
         records = [json.loads(line) for line in ledger.read_text().splitlines()]
         self.assertEqual(
             [record["decision"] for record in records],
-            ["allow", "block", "block", "block"],
+            ["allow", "block", "block", "block", "block"],
         )
         self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), 0o600)
 
