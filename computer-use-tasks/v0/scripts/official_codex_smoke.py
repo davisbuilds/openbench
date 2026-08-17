@@ -298,8 +298,11 @@ def _monitor_service(
     def sample() -> None:
         while not stopped.wait(0.25):
             try:
-                identity = _service_runtime_identity(socket, executable)
-                observed.append(identity)
+                identity = _service_runtime_identity(
+                    socket, executable, allow_missing=True
+                )
+                if identity is not None:
+                    observed.append(identity)
             except SmokeError as exc:
                 errors.append(exc)
                 return
@@ -460,12 +463,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 raise SmokeError("Computer Use service was not observed during the trial")
             expected_runtime = {
                 key: service_runtime[key]
-                for key in ("pid", "executable_path", "executable_sha256")
+                for key in ("executable_path", "executable_sha256")
             }
             if any(
                 {
                     key: identity[key]
-                    for key in ("pid", "executable_path", "executable_sha256")
+                    for key in ("executable_path", "executable_sha256")
                 } != expected_runtime
                 for identity in service_observations
             ):

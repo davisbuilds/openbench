@@ -784,22 +784,23 @@ def arguments(value, operation_name):
 def allowed_code(value):
     if not isinstance(value, str) or not value.strip() or "\\x00" in value:
         return False
-    saw_operation = False
+    saw_allowed_statement = False
     for statement in (item.strip() for item in value.split(";")):
         if not statement:
             continue
         if BOOTSTRAP.fullmatch(statement) or WRITE_VARIABLE.fullmatch(statement):
+            saw_allowed_statement = True
             continue
         state = WRITE_STATE.fullmatch(statement)
         if state:
-            saw_operation = True
+            saw_allowed_statement = True
             if not arguments(state.group(1), "get_app_state"):
                 return False
             continue
         direct = DIRECT.fullmatch(statement)
         if direct:
             operation_name, raw_arguments = direct.groups()
-            saw_operation = True
+            saw_allowed_statement = True
             if (
                 operation_name not in ALLOWED_OPERATIONS
                 or not arguments(raw_arguments, operation_name)
@@ -807,7 +808,7 @@ def allowed_code(value):
                 return False
             continue
         return False
-    return saw_operation
+    return saw_allowed_statement
 
 try:
     payload = json.load(sys.stdin)

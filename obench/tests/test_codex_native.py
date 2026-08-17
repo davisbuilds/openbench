@@ -1151,6 +1151,14 @@ time.sleep(60)
             (
                 "mcp__node_repl__js",
                 {
+                    "title": "Load Computer Use",
+                    "code": "globalThis.sky = (await import('@oai/sky')).sky;",
+                },
+                "allow",
+            ),
+            (
+                "mcp__node_repl__js",
+                {
                     "title": "Use agent-selected syntax",
                     "code": (
                         "const chosen = await sky.click({ element_index: 99, app: "
@@ -1260,8 +1268,8 @@ time.sleep(60)
         self.assertEqual(
             [record["decision"] for record in records],
             [
-                "allow", "allow", "allow", "allow", "block", "block", "block",
-                "block", "block", "block",
+                "allow", "allow", "allow", "allow", "allow", "block", "block",
+                "block", "block", "block", "block",
             ],
         )
         self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), 0o600)
