@@ -431,6 +431,47 @@ def _load_observation(value: Mapping[str, Any] | str | Path) -> _Observation:
     )
 
 
+def summarize_native_mcp_bundle(path: str | Path) -> dict[str, int | float]:
+    """Return exact per-trial MCP totals from one validated native bundle."""
+    observation = _load_bundle(path)
+    calls = observation.mcp_calls or ()
+    durations: list[float] = []
+    response_bytes: list[int] = []
+    context_bytes: list[int] = []
+    for call in calls:
+        duration = _number(call.get("duration_ms"))
+        response_size = call.get("response_bytes")
+        if duration is None:
+            raise NativeReportError("validated MCP call duration is malformed")
+        if (
+            isinstance(response_size, bool)
+            or not isinstance(response_size, int)
+            or response_size < 0
+        ):
+            raise NativeReportError("validated MCP response size is malformed")
+        durations.append(duration)
+        response_bytes.append(response_size)
+        meta = call.get("computer_use_meta")
+        metrics = meta.get("metrics") if isinstance(meta, Mapping) else None
+        perception = metrics.get("perception") if isinstance(metrics, Mapping) else None
+        if isinstance(perception, Mapping) and perception.get("context_bytes") is not None:
+            context_size = perception["context_bytes"]
+            if (
+                isinstance(context_size, bool)
+                or not isinstance(context_size, int)
+                or context_size < 0
+            ):
+                raise NativeReportError("validated MCP context size is malformed")
+            context_bytes.append(context_size)
+    return {
+        "call_count": len(calls),
+        "call_duration_ms": sum(durations),
+        "response_bytes": sum(response_bytes),
+        "context_bytes": sum(context_bytes),
+        "context_measurement_count": len(context_bytes),
+    }
+
+
 def _merge_observation(
     previous: _Observation,
     observation: _Observation,

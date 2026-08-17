@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 
 import cub_v0 as cub
 import scoped_agent_ab as scoped
+from obench.native_report import summarize_native_mcp_bundle
 
 
 TASK = "basic-controls"
@@ -197,6 +198,8 @@ def _official_row(result: Mapping[str, Any], block: int, result_path: Path) -> d
         "computer_use_transport_calls": telemetry.get("call_count"),
         "computer_use_execution_ms": telemetry.get("total_execution_ms"),
         "model_visible_tool_bytes": telemetry.get("total_model_visible_text_bytes"),
+        "model_visible_tool_bytes_basis": "direct_text_content_bytes",
+        "model_visible_tool_measurement_count": telemetry.get("call_count"),
         "tool_response_bytes": telemetry.get("total_response_bytes"),
         "official_identity": official_identity,
         "result_path": str(result_path),
@@ -256,6 +259,16 @@ def _run_oss(
     _require_oss_terminal(result, completed.returncode, block)
     result["_result_path"] = str(results)
     row = _oss_row(result, block)
+    mcp = summarize_native_mcp_bundle(results.parent / "bundle")
+    if mcp["call_count"] != row["computer_use_calls"]:
+        raise ComparisonError(f"Computer Use OSS trial {block} MCP count mismatch")
+    row.update({
+        "computer_use_execution_ms": mcp["call_duration_ms"],
+        "model_visible_tool_bytes": mcp["context_bytes"],
+        "model_visible_tool_measurement_count": mcp["context_measurement_count"],
+        "tool_response_bytes": mcp["response_bytes"],
+        "model_visible_tool_bytes_basis": "daemon_reported_context_bytes",
+    })
     return row
 
 
@@ -421,6 +434,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "Both arms expose get_app_state, click, set_value, and type_text for this task.",
                 "OSS usage is proxy-reconciled; official Codex usage is agent-reported.",
                 "Official node_repl transport calls may batch multiple semantic operations.",
+                "OSS model-visible bytes are daemon-reported context bytes; official bytes are directly counted text content.",
             ],
             "arms": {arm: _summary(arm_rows) for arm, arm_rows in by_arm.items()},
             "rows": rows,

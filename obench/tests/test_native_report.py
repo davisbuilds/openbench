@@ -16,6 +16,7 @@ from obench.native_report import (
     _matched_deltas,
     assert_public_native_report,
     build_native_report,
+    summarize_native_mcp_bundle,
 )
 from obench.native_trial import BUNDLE_SCHEMA_VERSION
 from obench.run import ROW_FIELDS, make_run_id
@@ -343,6 +344,17 @@ class NativeReportTests(unittest.TestCase):
             observation.bundle_sha256,
             observation.row["candidate_provenance"]["manifest_sha256"],
         )
+
+    def test_validated_bundle_supplies_exact_mcp_totals(self):
+        cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory(prefix="native_report_totals_") as temp:
+            bundle = Path(temp) / "native-cub-v0-trial1"
+            _build_bundle(bundle, cases["happy"])
+            totals = summarize_native_mcp_bundle(bundle)
+
+        self.assertEqual(totals["call_count"], 1)
+        self.assertEqual(totals["call_duration_ms"], 1000.0)
+        self.assertEqual(totals["response_bytes"], 80)
 
     def test_validated_bundle_reports_model_and_mcp_cost_centers(self):
         cases = json.loads(FIXTURE_CASES.read_text(encoding="utf-8"))
