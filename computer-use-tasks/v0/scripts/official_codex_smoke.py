@@ -236,8 +236,43 @@ def _start_service(service_app: Path, socket: Path) -> dict[str, Any]:
         "official Computer Use service",
         executable=True,
     )
+    if socket.exists() and not socket.is_symlink():
+        try:
+            return _service_runtime_identity(socket, executable)
+        except SmokeError:
+            pass
+
+    stale = subprocess.run(
+        ["pkill", "-x", "SkyComputerUseService"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    if stale.returncode not in (0, 1):
+        raise SmokeError("cannot stop stale official Computer Use service")
+    stop_deadline = time.monotonic() + 5
+    while time.monotonic() < stop_deadline:
+        running = subprocess.run(
+            ["pgrep", "-x", "SkyComputerUseService"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if running.returncode == 1:
+            socket.unlink(missing_ok=True)
+            break
+        if running.returncode not in (0, 1):
+            raise SmokeError("cannot inspect official Computer Use service state")
+        time.sleep(0.1)
+    else:
+        raise SmokeError("stale official Computer Use service did not stop")
+
     completed = subprocess.run(
-        ["open", str(service_app)],
+        ["open", "-n", str(service_app)],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
