@@ -100,8 +100,7 @@ def summarize_events(event_path: str | Path) -> dict[str, Any]:
             or isinstance(duration_ms, bool)
             or not isinstance(duration_ms, (int, float))
             or duration_ms < 0
-            or item.get("status") != "completed"
-            or item.get("error") is not None
+            or item.get("status") not in {"completed", "failed"}
         ):
             raise CodexComputerUseEvidenceError(
                 f"official Computer Use item {item.get('id')!r} lacks successful surface evidence"
@@ -116,6 +115,7 @@ def summarize_events(event_path: str | Path) -> dict[str, Any]:
         calls.append({
             "tool": tool,
             "semantic_tools": list(semantic_tools),
+            "status": item["status"],
             "duration_ms": float(duration_ms),
             "request_bytes": len(_canonical_bytes(arguments)),
             "response_bytes": len(_canonical_bytes(result)),
@@ -128,6 +128,7 @@ def summarize_events(event_path: str | Path) -> dict[str, Any]:
     return {
         "schema_version": "openbench.codex-computer-use-telemetry.v1",
         "call_count": len(calls),
+        "failed_call_count": sum(call["status"] != "completed" for call in calls),
         "total_execution_ms": sum(call["duration_ms"] for call in calls),
         "total_request_bytes": sum(call["request_bytes"] for call in calls),
         "total_response_bytes": sum(call["response_bytes"] for call in calls),

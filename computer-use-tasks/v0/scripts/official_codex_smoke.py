@@ -191,6 +191,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             instruction = (
                 TASK_ROOT / TASK / "instruction-official-codex.md"
             ).read_text(encoding="utf-8")
+            if instruction.count("{app_path}") != 1:
+                raise SmokeError("official instruction must contain one app path marker")
+            fixture_app = run_root / "apps/ComputerUseFixture.app"
+            instruction = instruction.replace("{app_path}", str(fixture_app))
             attempt = stage / "agent"
             attempt.mkdir()
             adapter_result = adapter.run(
@@ -266,6 +270,25 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             )
             os.replace(stage, output)
             return result
+        except Exception as exc:
+            if stage.exists() and not output.exists():
+                (stage / "failure.json").write_text(
+                    json.dumps(
+                        {
+                            "error": str(exc),
+                            "error_type": type(exc).__name__,
+                            "schema_version": (
+                                "openbench.official-codex-computer-use-smoke-failure.v1"
+                            ),
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                os.replace(stage, output)
+            raise
         finally:
             try:
                 _run_cub(request_path, "reset", args.trial_index)

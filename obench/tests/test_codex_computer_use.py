@@ -52,9 +52,11 @@ class CodexComputerUseTelemetryTests(unittest.TestCase):
         summary = summarize_events(self.events)
 
         self.assertEqual(summary["call_count"], 1)
+        self.assertEqual(summary["failed_call_count"], 0)
         self.assertEqual(summary["total_execution_ms"], 12.5)
         self.assertEqual(summary["total_model_visible_text_bytes"], 7)
         self.assertEqual(summary["calls"][0]["tool"], "click")
+        self.assertEqual(summary["calls"][0]["status"], "completed")
         self.assertEqual(summary["calls"][0]["semantic_tools"], ["click"])
 
     def test_rejects_calls_without_computer_use_surface_evidence(self):
