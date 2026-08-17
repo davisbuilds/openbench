@@ -26,6 +26,53 @@ class ComparisonError(RuntimeError):
     pass
 
 
+def _require_official_terminal(
+    result: Mapping[str, Any], returncode: int, block: int
+) -> None:
+    verifier_exit = result.get("verifier_exit")
+    passed = result.get("passed")
+    if (
+        result.get("agent_completed") is not True
+        or isinstance(verifier_exit, bool)
+        or verifier_exit not in (0, 1)
+    ):
+        raise ComparisonError(
+            f"official Codex trial {block} has no terminal verifier verdict"
+        )
+    if not isinstance(passed, bool) or passed != (verifier_exit == 0):
+        raise ComparisonError(
+            f"official Codex trial {block} has inconsistent verifier evidence"
+        )
+    expected_returncode = 0 if verifier_exit == 0 else 1
+    if returncode != expected_returncode:
+        raise ComparisonError(f"official Codex trial {block} was infrastructure-invalid")
+
+
+def _require_oss_terminal(
+    result: Mapping[str, Any], returncode: int, block: int
+) -> None:
+    checker_exit = result.get("checker_exit")
+    score = result.get("score")
+    if returncode != 0:
+        raise ComparisonError(f"Computer Use OSS trial {block} was infrastructure-invalid")
+    if (
+        result.get("completed") is not True
+        or isinstance(checker_exit, bool)
+        or not isinstance(checker_exit, int)
+    ):
+        raise ComparisonError(
+            f"Computer Use OSS trial {block} has no terminal checker verdict"
+        )
+    if (
+        isinstance(score, bool)
+        or not isinstance(score, (int, float))
+        or ((checker_exit == 0) != (float(score) == 1.0))
+    ):
+        raise ComparisonError(
+            f"Computer Use OSS trial {block} has inconsistent checker evidence"
+        )
+
+
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -128,8 +175,13 @@ def _official_row(result: Mapping[str, Any], block: int, result_path: Path) -> d
     official_identity = {
         "plugin": result.get("plugin"),
         "node_repl_sha256": result.get("node_repl_sha256"),
+        "node_modules_sha256": result.get("node_modules_sha256"),
         "codex_app": result.get("codex_app"),
         "computer_use_service": result.get("computer_use_service"),
+        "computer_use_service_runtime": {
+            key: result.get("computer_use_service_runtime", {}).get(key)
+            for key in ("executable_path", "executable_sha256")
+        } if isinstance(result.get("computer_use_service_runtime"), dict) else None,
     }
     return {
         "arm": "codex-computer-use",
@@ -170,9 +222,8 @@ def _run_official(args: argparse.Namespace, block: int, output: Path) -> dict[st
     if not result_path.is_file():
         raise ComparisonError(f"official Codex trial {block} failed: {output}")
     result = json.loads(result_path.read_text(encoding="utf-8"))
+    _require_official_terminal(result, completed.returncode, block)
     row = _official_row(result, block, result_path)
-    if completed.returncode not in (0, 1):
-        raise ComparisonError(f"official Codex trial {block} was infrastructure-invalid")
     return row
 
 
@@ -202,6 +253,7 @@ def _run_oss(
     if not results.is_file():
         raise ComparisonError(f"Computer Use OSS trial {block} produced no result row")
     result = _read_last_jsonl(results)
+    _require_oss_terminal(result, completed.returncode, block)
     result["_result_path"] = str(results)
     row = _oss_row(result, block)
     return row

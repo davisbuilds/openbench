@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import plistlib
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,29 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _tree_sha256(root: Path) -> str:
+    """Hash one code tree without following links or depending on mtimes."""
+    root = root.expanduser()
+    if root.is_symlink() or not root.is_dir():
+        raise SmokeError(f"code tree is unavailable: {root}")
+    root = root.resolve()
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        if path.is_symlink():
+            target = os.readlink(path).encode("utf-8")
+            if not path.resolve().is_relative_to(root):
+                raise SmokeError(f"code tree link escapes its root: {path}")
+            digest.update(b"L\0" + relative + b"\0" + target + b"\0")
+            continue
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise SmokeError(f"code tree contains an unsupported entry: {path}")
+        digest.update(b"F\0" + relative + b"\0" + bytes.fromhex(_sha256(path)))
+    return digest.hexdigest()
+
+
 def _load_adapter():
     spec = importlib.util.spec_from_file_location("official_codex_smoke_adapter", ADAPTER)
     if spec is None or spec.loader is None:
@@ -66,7 +90,7 @@ def _request(path: Path) -> dict[str, Any]:
     return value
 
 
-def _run_cub(request: Path, command: str, trial_index: int) -> None:
+def _run_cub(request: Path, command: str, trial_index: int) -> int:
     try:
         completed = subprocess.run(
             [
@@ -90,9 +114,11 @@ def _run_cub(request: Path, command: str, trial_index: int) -> None:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise SmokeError(f"fixture {command} failed: {exc}") from exc
-    if completed.returncode != 0:
+    allowed = (0, 1) if command == "verify" else (0,)
+    if completed.returncode not in allowed:
         detail = (completed.stderr or completed.stdout).strip()[-2000:]
         raise SmokeError(f"fixture {command} failed: {detail}")
+    return completed.returncode
 
 
 def _owned_fixture_pid(run_root: Path, trial_index: int) -> int:
@@ -163,7 +189,48 @@ def _bundle_identity(app: Path, label: str) -> dict[str, Any]:
     }
 
 
-def _start_service(service_app: Path, socket: Path) -> None:
+def _service_runtime_identity(socket: Path, expected_executable: Path) -> dict[str, Any]:
+    owners = subprocess.run(
+        ["lsof", "-t", "--", str(socket)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    try:
+        pids = sorted({int(value) for value in owners.stdout.split()})
+    except ValueError as exc:
+        raise SmokeError("official Computer Use socket owner is malformed") from exc
+    if owners.returncode != 0 or len(pids) != 1:
+        raise SmokeError(
+            f"official Computer Use socket must have one owner, observed {pids}"
+        )
+
+    pid = pids[0]
+    process = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "comm="],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    observed_text = process.stdout.strip()
+    observed = Path(observed_text).resolve() if observed_text else None
+    expected = expected_executable.resolve()
+    if process.returncode != 0 or observed != expected:
+        raise SmokeError(
+            f"socket owner {pid} is not running the expected service executable"
+        )
+    return {
+        "pid": pid,
+        "executable_path": str(observed),
+        "executable_sha256": _sha256(observed),
+    }
+
+
+def _start_service(service_app: Path, socket: Path) -> dict[str, Any]:
     executable = _require_file(
         service_app / "Contents/MacOS/SkyComputerUseService",
         "official Computer Use service",
@@ -183,10 +250,20 @@ def _start_service(service_app: Path, socket: Path) -> None:
             + (completed.stderr or completed.stdout).strip()[-1000:]
         )
     deadline = time.monotonic() + 10
+    identity_error: SmokeError | None = None
     while time.monotonic() < deadline:
-        if socket.exists() and not socket.is_symlink():
-            return
+        if (
+            socket.exists()
+            and not socket.is_symlink()
+            and stat.S_ISSOCK(socket.stat().st_mode)
+        ):
+            try:
+                return _service_runtime_identity(socket, executable)
+            except SmokeError as exc:
+                identity_error = exc
         time.sleep(0.1)
+    if identity_error is not None:
+        raise identity_error
     raise SmokeError(
         f"official Computer Use service did not create its socket: {socket} "
         f"({executable})"
@@ -231,7 +308,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise SmokeError(f"Computer Use service app is unavailable: {service_app}")
     codex_identity = _bundle_identity(codex_app, "Codex app")
     service_identity = _bundle_identity(service_app, "Computer Use service app")
-    _start_service(service_app, socket)
+    _require_file(node_modules / "@oai/sky/package.json", "@oai/sky package")
+    node_modules_sha256 = _tree_sha256(node_modules)
+    service_runtime = _start_service(service_app, socket)
+    if service_runtime["executable_sha256"] != service_identity["executable_sha256"]:
+        raise SmokeError("live Computer Use service binary does not match its bundle")
 
     started = time.time()
     adapter_result: dict[str, Any] | None = None
@@ -281,11 +362,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 raise SmokeError("Codex adapter did not retain its event transcript")
             telemetry = summarize_events(events)
             if adapter_result.get("completed") is True:
-                try:
-                    _run_cub(request_path, "verify", args.trial_index)
-                    verifier_exit = 0
-                except SmokeError:
-                    verifier_exit = 1
+                verifier_exit = _run_cub(request_path, "verify", args.trial_index)
             verdict = workspace / "runner/verdict.json"
             if verdict.is_file():
                 shutil.copyfile(verdict, stage / "verdict.json")
@@ -295,11 +372,20 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             trajectory = workspace / "trajectory.json"
             if trajectory.is_file():
                 shutil.copyfile(trajectory, stage / "trajectory.json")
+            final_service_runtime = _service_runtime_identity(
+                socket,
+                service_app / "Contents/MacOS/SkyComputerUseService",
+            )
+            if final_service_runtime != service_runtime:
+                raise SmokeError("Computer Use service identity changed during the trial")
+            if _tree_sha256(node_modules) != node_modules_sha256:
+                raise SmokeError("official Codex node modules changed during the trial")
             result = {
                 "schema_version": "openbench.official-codex-computer-use-smoke.v1",
                 "task": TASK,
                 "trial_index": args.trial_index,
                 "passed": bool(adapter_result.get("completed")) and verifier_exit == 0,
+                "agent_completed": adapter_result.get("completed") is True,
                 "verifier_exit": verifier_exit,
                 "wall_time_s": time.time() - started,
                 "model": args.model,
@@ -324,8 +410,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     "skill_sha256": _sha256(skill),
                 },
                 "node_repl_sha256": _sha256(node_repl),
+                "node_modules_sha256": node_modules_sha256,
                 "codex_app": codex_identity,
                 "computer_use_service": service_identity,
+                "computer_use_service_runtime": service_runtime,
                 "telemetry": telemetry,
             }
             (stage / "result.json").write_text(
