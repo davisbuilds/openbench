@@ -273,6 +273,9 @@ def _service_runtime_identity(
         check=False,
     )
     observed_text = process.stdout.strip()
+    if allow_missing and process.returncode == 1 and not observed_text:
+        # The service is ephemeral and may exit between the lsof and ps probes.
+        return None
     observed = Path(observed_text).resolve() if observed_text else None
     expected = expected_executable.resolve()
     if process.returncode != 0 or observed != expected:

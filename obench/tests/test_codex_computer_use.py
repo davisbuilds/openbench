@@ -185,6 +185,22 @@ class CodexComputerUseTelemetryTests(unittest.TestCase):
                     Path(self.temporary.name) / "service.sock", executable
                 )
 
+    def test_service_runtime_identity_accepts_exit_between_probes(self):
+        executable = Path(self.temporary.name) / "service"
+        executable.write_bytes(b"service")
+        owner = subprocess.CompletedProcess(
+            ["lsof"], 0, stdout="123\n", stderr=""
+        )
+        exited = subprocess.CompletedProcess(
+            ["ps"], 1, stdout="", stderr=""
+        )
+        with mock.patch.object(smoke.subprocess, "run", side_effect=[owner, exited]):
+            self.assertIsNone(smoke._service_runtime_identity(
+                Path(self.temporary.name) / "service.sock",
+                executable,
+                allow_missing=True,
+            ))
+
 
 class ComputerUseComparisonContractTests(unittest.TestCase):
     def test_official_wrong_answer_requires_completed_agent_and_verdict(self):
