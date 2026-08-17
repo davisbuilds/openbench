@@ -1,12 +1,23 @@
+import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from obench.codex_computer_use import (
     CodexComputerUseEvidenceError,
     summarize_events,
 )
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SMOKE_SCRIPT = ROOT / "computer-use-tasks/v0/scripts/official_codex_smoke.py"
+SMOKE_SPEC = importlib.util.spec_from_file_location("official_codex_smoke", SMOKE_SCRIPT)
+smoke = importlib.util.module_from_spec(SMOKE_SPEC)
+assert SMOKE_SPEC.loader is not None
+SMOKE_SPEC.loader.exec_module(smoke)
 
 
 class CodexComputerUseTelemetryTests(unittest.TestCase):
@@ -80,6 +91,15 @@ class CodexComputerUseTelemetryTests(unittest.TestCase):
             CodexComputerUseEvidenceError, "lacks successful surface evidence"
         ):
             summarize_events(self.events)
+
+    def test_fixture_timeout_is_normalized_for_fail_closed_cleanup(self):
+        with mock.patch.object(
+            smoke.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["cub_v0.py", "reset"], 60),
+        ):
+            with self.assertRaisesRegex(smoke.SmokeError, "fixture reset failed"):
+                smoke._run_cub(Path("request.toml"), "reset", 1)
 
 
 if __name__ == "__main__":

@@ -66,26 +66,29 @@ def _request(path: Path) -> dict[str, Any]:
 
 
 def _run_cub(request: Path, command: str, trial_index: int) -> None:
-    completed = subprocess.run(
-        [
-            sys.executable,
-            str(CUB),
-            "--request",
-            str(request),
-            command,
-            "--arm",
-            ARM,
-            "--task",
-            TASK,
-            "--trial-index",
-            str(trial_index),
-        ],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(CUB),
+                "--request",
+                str(request),
+                command,
+                "--arm",
+                ARM,
+                "--task",
+                TASK,
+                "--trial-index",
+                str(trial_index),
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SmokeError(f"fixture {command} failed: {exc}") from exc
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout).strip()[-2000:]
         raise SmokeError(f"fixture {command} failed: {detail}")
