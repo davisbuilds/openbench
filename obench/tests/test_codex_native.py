@@ -1137,11 +1137,23 @@ time.sleep(60)
             (
                 "mcp__node_repl__js",
                 {
-                    "title": "Set toggle",
+                    "title": "Click arbitrary benchmark element",
                     "code": (
                         "await sky.click({ app: "
                         + json.dumps(str(self.fixture_app))
-                        + ", element_index: 4 });"
+                        + ", element_index: 99 });"
+                    ),
+                },
+                "allow",
+            ),
+            (
+                "mcp__node_repl__js",
+                {
+                    "title": "Type agent-selected text",
+                    "code": (
+                        "await sky.type_text({ app: "
+                        + json.dumps(str(self.fixture_app))
+                        + ", text: \"agent selected\" });"
                     ),
                 },
                 "allow",
@@ -1184,7 +1196,7 @@ time.sleep(60)
         records = [json.loads(line) for line in ledger.read_text().splitlines()]
         self.assertEqual(
             [record["decision"] for record in records],
-            ["allow", "block", "block", "block", "block"],
+            ["allow", "allow", "block", "block", "block", "block"],
         )
         self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), 0o600)
 

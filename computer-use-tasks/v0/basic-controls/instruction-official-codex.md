@@ -1,15 +1,13 @@
 # Set the basic controls
 
-Use the installed Codex Computer Use capability to operate only the already
-running, frontmost app at `{app_path}`. Use that exact full path as the `app`
-selector; do not launch or select another copy by application name or bundle
-identifier. Do not use shell, filesystem, browser, or code-editing tools to
-complete the task.
+Use the provided computer-use capability to operate only the already running,
+frontmost application at `{app_path}`.
 
 1. Turn `toggle-box` on.
 2. Press `honest-button` exactly twice so the counter is `2`.
 3. Enter the exact text `openbench-42` in `keystroke-input`.
 
-Stop after the requested state is reached. Do not edit the fixture state export
-directly. An external deterministic checker judges the fixture-owned JSON
-export rather than the agent's final answer.
+Choose the tools and arguments yourself. Stop when you believe the requested
+state is complete. Do not access or edit the fixture state export directly. An
+external deterministic checker judges the fixture-owned state; tool
+self-reports and screenshots are not authoritative.

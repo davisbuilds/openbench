@@ -734,13 +734,14 @@ patterns = (
     re.compile(
         r"await" + space + r"sky\\.click\\(\\{{" + space
         + r"app" + space + r":" + space + quoted_path + space + r","
-        + space + r"element_index" + space + r":" + space + r"(?:3|4|6)"
+        + space + r"element_index" + space + r":" + space + r"[0-9]+"
         + space + r"\\}}\\)"
     ),
     re.compile(
         r"await" + space + r"sky\\.type_text\\(\\{{" + space
         + r"app" + space + r":" + space + quoted_path + space + r","
-        + space + r"text" + space + r":" + space + r'"openbench-42"'
+        + space + r"text" + space + r":" + space
+        + r'"(?:[^"\\\\]|\\\\.)*"'
         + space + r"\\}}\\)"
     ),
     re.compile(r"nodeRepl\\.write\\((?:fixtureState|state)\\.text\\)"),

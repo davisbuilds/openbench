@@ -1,17 +1,13 @@
 # Set the basic controls
 
-Only call tools named `mcp__computer_use__*` to operate
-`ComputerUseFixture`. Never call `apply_patch`, shell, browser, filesystem, or
-other tools. Do not create artifacts manually; OpenBench collects results
-automatically.
-
-Inspect state once, then reuse the returned element IDs. On every mutating MCP
-call, set `include_state=false` and `include_screenshot=false`.
+Use the provided computer-use capability to operate the already running
+`ComputerUseFixture` application.
 
 1. Turn `toggle-box` on.
 2. Press `honest-button` exactly twice so the counter is `2`.
 3. Enter the exact text `openbench-42` in `keystroke-input`.
 
-Stop after the mutations; do not re-read the full tree. Do not edit the fixture
-state export directly. Rely on the external deterministic checker, which judges
-the fixture-owned JSON export rather than tool self-reports or screenshots.
+Choose the tools and arguments yourself. Stop when you believe the requested
+state is complete. Do not access or edit the fixture state export directly. An
+external deterministic checker judges the fixture-owned state; tool
+self-reports and screenshots are not authoritative.
