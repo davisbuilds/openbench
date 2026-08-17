@@ -136,6 +136,36 @@ def _require_file(path: Path, label: str, *, executable: bool = False) -> Path:
     return resolved
 
 
+def _start_service(service_app: Path, socket: Path) -> None:
+    executable = _require_file(
+        service_app / "Contents/MacOS/SkyComputerUseService",
+        "official Computer Use service",
+        executable=True,
+    )
+    completed = subprocess.run(
+        ["open", str(service_app)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise SmokeError(
+            "cannot launch official Computer Use service: "
+            + (completed.stderr or completed.stdout).strip()[-1000:]
+        )
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if socket.exists() and not socket.is_symlink():
+            return
+        time.sleep(0.1)
+    raise SmokeError(
+        f"official Computer Use service did not create its socket: {socket} "
+        f"({executable})"
+    )
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     request_path = args.request.expanduser().resolve()
     request = _request(request_path)
@@ -169,8 +199,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if plugin.get("name") != "computer-use" or not isinstance(plugin.get("version"), str):
         raise SmokeError("Computer Use plugin manifest identity is invalid")
     socket = args.service_socket.expanduser().resolve()
-    if socket.is_symlink() or not socket.exists():
-        raise SmokeError(f"Computer Use service socket is unavailable: {socket}")
+    service_app = args.service_app.expanduser().resolve()
+    if service_app.is_symlink() or not service_app.is_dir():
+        raise SmokeError(f"Computer Use service app is unavailable: {service_app}")
+    _start_service(service_app, socket)
 
     started = time.time()
     adapter_result: dict[str, Any] | None = None
@@ -309,6 +341,11 @@ def main(argv: list[str] | None = None) -> int:
         default=Path(
             "~/Library/Group Containers/2DC432GLL2.com.openai.sky.CUAService/IPC/computeruse.sock"
         ),
+    )
+    parser.add_argument(
+        "--service-app",
+        type=Path,
+        default=Path("~/.codex/computer-use/Codex Computer Use.app"),
     )
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--timeout", type=int, default=300)
