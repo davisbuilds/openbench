@@ -326,12 +326,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             except SmokeError as exc:
                 failure_root = stage if stage.exists() else output
                 if failure_root.exists():
-                    (failure_root / "cleanup-failure.json").write_text(
+                    result_path = failure_root / "result.json"
+                    if result_path.exists():
+                        result_path.unlink()
+                    (failure_root / "failure.json").write_text(
                         json.dumps(
                             {
                                 "error": str(exc),
+                                "error_type": "cleanup_failure",
                                 "schema_version": (
-                                    "openbench.official-codex-cleanup-failure.v1"
+                                    "openbench.official-codex-computer-use-smoke-failure.v1"
                                 ),
                             },
                             indent=2,
