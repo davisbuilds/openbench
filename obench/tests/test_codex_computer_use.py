@@ -192,7 +192,7 @@ class CodexComputerUseTelemetryTests(unittest.TestCase):
             ["lsof"], 0, stdout="123\n", stderr=""
         )
         exited = subprocess.CompletedProcess(
-            ["ps"], 1, stdout="", stderr=""
+            ["ps"], 0, stdout="", stderr=""
         )
         with mock.patch.object(smoke.subprocess, "run", side_effect=[owner, exited]):
             self.assertIsNone(smoke._service_runtime_identity(
