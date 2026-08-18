@@ -594,6 +594,8 @@ def _parse_arm(
     allow_private_endpoint: bool,
     private_hosts: tuple[str, ...],
     private_cidrs: tuple[str, ...],
+    *,
+    allow_responses_inference: bool,
 ) -> Arm:
     path = f"arms[{index}]"
     table = _table(value, path, _ARM_FIELDS)
@@ -630,6 +632,10 @@ def _parse_arm(
         if protocol == "openai_responses" and inference.thinking is not None:
             raise GatewaySpecError(
                 f"{path}.inference.thinking is supported only for openai_chat"
+            )
+        if protocol == "openai_responses" and not allow_responses_inference:
+            raise GatewaySpecError(
+                f"{path}.inference for openai_responses is supported only by Gateway Probe"
             )
     arm = Arm(
         arm_id=_string(_required(table, "arm_id", path), f"{path}.arm_id", _ID_RE),
@@ -801,6 +807,7 @@ def parse_route_arm(
         allow_private_endpoint,
         private_host_allowlist,
         private_cidr_allowlist,
+        allow_responses_inference=True,
     )
 
 
@@ -844,8 +851,17 @@ def parse_experiment(data: Mapping[str, Any]) -> GatewayExperiment:
     raw_arms = _required(table, "arms", "experiment")
     if not isinstance(raw_arms, list) or len(raw_arms) < 2:
         raise GatewaySpecError("arms must contain at least two arm tables")
-    arms = tuple(_parse_arm(raw, index, allow_private_endpoint, hosts, cidrs)
-                 for index, raw in enumerate(raw_arms))
+    arms = tuple(
+        _parse_arm(
+            raw,
+            index,
+            allow_private_endpoint,
+            hosts,
+            cidrs,
+            allow_responses_inference=False,
+        )
+        for index, raw in enumerate(raw_arms)
+    )
     _validate_gateway_controls(arms)
     if any(
         arm.sampling.temperature is None
@@ -978,7 +994,14 @@ def compile_fixed_route_plans(
     ):
         raise GatewaySpecError("arms must be a non-empty tuple of Arm values")
     validated_arms = tuple(
-        _parse_arm(arm.to_dict(), index, allow_private_endpoint, hosts, cidrs)
+        _parse_arm(
+            arm.to_dict(),
+            index,
+            allow_private_endpoint,
+            hosts,
+            cidrs,
+            allow_responses_inference=track == "request_probe",
+        )
         for index, arm in enumerate(arms)
     )
     _validate_gateway_controls(validated_arms)
