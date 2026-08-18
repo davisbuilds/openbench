@@ -26,7 +26,8 @@ from .gateway_probe_models import GatewayProbeRunError, ProbeBlock
 
 
 PUBLIC_SCHEMA_VERSION = 3
-PUBLIC_EXPERIMENT_SCHEMA_VERSION = 2
+PUBLIC_EXPERIMENT_SCHEMA_VERSION = 3
+_SUPPORTED_PUBLIC_EXPERIMENT_SCHEMA_VERSIONS = frozenset({2, 3})
 PUBLIC_BUNDLE_KIND = "gateway_probe_public"
 PUBLIC_FILES = (
     "experiment.json",
@@ -247,6 +248,33 @@ def _validate_source_manifest(run_dir: Path) -> dict[str, Any]:
     return manifest
 
 
+def _project_arm(arm: gateway_spec.Arm) -> dict[str, Any]:
+    projected = {
+        "arm_id": arm.arm_id,
+        "route_kind": arm.route_kind,
+        "protocol": arm.protocol,
+        "baseline": arm.baseline,
+        "canonical_model": arm.canonical_model,
+        "requested_model": arm.requested_model,
+        "requested_provider": arm.requested_provider,
+        "allowed_models": list(arm.allowed_models),
+        "allowed_providers": list(arm.allowed_providers),
+        "fallback_enabled": arm.fallback_enabled,
+        "retry_count": arm.retry_count,
+        "cache_enabled": arm.cache_enabled,
+        "sampling": arm.sampling.to_dict(),
+        "direct_control_arm_id": arm.direct_control_arm_id,
+        "gateway": arm.gateway,
+        **(
+            {"inference": arm.inference.to_dict()}
+            if arm.inference is not None
+            else {}
+        ),
+    }
+    projected["arm_digest"] = gateway_spec.canonical_digest(projected)
+    return projected
+
+
 def _project_experiment(
     experiment: gateway_probe_spec.GatewayProbeExperiment,
 ) -> dict[str, Any]:
@@ -276,32 +304,7 @@ def _project_experiment(
             }
             for case in experiment.cases
         ],
-        "arms": [
-            {
-                "arm_id": arm.arm_id,
-                "arm_digest": arm.digest,
-                "route_kind": arm.route_kind,
-                "protocol": arm.protocol,
-                "baseline": arm.baseline,
-                "canonical_model": arm.canonical_model,
-                "requested_model": arm.requested_model,
-                "requested_provider": arm.requested_provider,
-                "allowed_models": list(arm.allowed_models),
-                "allowed_providers": list(arm.allowed_providers),
-                "fallback_enabled": arm.fallback_enabled,
-                "retry_count": arm.retry_count,
-                "cache_enabled": arm.cache_enabled,
-                "sampling": arm.sampling.to_dict(),
-                "direct_control_arm_id": arm.direct_control_arm_id,
-                "gateway": arm.gateway,
-                **(
-                    {"inference": arm.inference.to_dict()}
-                    if arm.inference is not None
-                    else {}
-                ),
-            }
-            for arm in experiment.arms
-        ],
+        "arms": [_project_arm(arm) for arm in experiment.arms],
     }
     return _validate_public_experiment(projected)
 
@@ -358,7 +361,8 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
     if (
         not isinstance(value, dict)
         or set(value) != expected
-        or value.get("schema_version") != PUBLIC_EXPERIMENT_SCHEMA_VERSION
+        or value.get("schema_version")
+        not in _SUPPORTED_PUBLIC_EXPERIMENT_SCHEMA_VERSIONS
         or value.get("benchmark") != gateway_probe_results.BENCHMARK
         or value.get("source_schema_version") != gateway_probe_spec.SCHEMA_VERSION
         or not isinstance(value.get("experiment_id"), str)
@@ -527,6 +531,16 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
                 "public experiment arms do not match schema"
             )
         _sha256_value(arm.get("arm_digest"), "public experiment arm_digest")
+        if value["schema_version"] >= 3:
+            digest_input = {
+                name: item
+                for name, item in arm.items()
+                if name != "arm_digest"
+            }
+            if arm["arm_digest"] != gateway_spec.canonical_digest(digest_input):
+                raise GatewayProbeRunError(
+                    "public experiment arm_digest does not bind arm controls"
+                )
         arm_ids.add(arm["arm_id"])
         baselines += int(arm["baseline"])
     if baselines != 1:
@@ -787,12 +801,23 @@ def _validate_public_experiment_bindings(
             )
 
 
-def _project_result_row(row: Mapping[str, Any]) -> dict[str, Any]:
+def _project_result_row(
+    row: Mapping[str, Any],
+    public_arm_digests: Mapping[str, str],
+) -> dict[str, Any]:
     gateway_probe_results.validate_row_shape(row)
     projected = {
         name: copy.deepcopy(row[name])
         for name in _PUBLIC_RESULT_FIELDS
     }
+    arm = projected["identity"]["arm"]
+    public_digest = public_arm_digests.get(arm["id"])
+    if public_digest is None:
+        raise GatewayProbeRunError(
+            "source result arm is missing from public experiment"
+        )
+    arm["digest"] = public_digest
+    projected["cell_id"] = gateway_probe_results.cell_id(projected["identity"])
     _scrub_public_operational_evidence(projected)
     gateway_probe_results.validate_row_shape(projected)
     _assert_public_safe(projected)
@@ -1221,7 +1246,14 @@ def publish_bundle(
         raise GatewayProbeRunError(
             "source schedule does not match results schedule_digest"
         )
-    projected_rows = [_project_result_row(row) for row in rows]
+    public_arm_digests = {
+        arm["arm_id"]: arm["arm_digest"]
+        for arm in projected_experiment["arms"]
+    }
+    projected_rows = [
+        _project_result_row(row, public_arm_digests)
+        for row in rows
+    ]
     projected_report = gateway_probe_report.aggregate(projected_rows)
     if projected_report != recomputed:
         raise GatewayProbeRunError("public projection changes report aggregation")

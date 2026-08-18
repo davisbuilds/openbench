@@ -296,6 +296,13 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
             arm["inference"] == {"reasoning_effort": "medium"}
             for arm in projected["arms"]
         ))
+        tampered = json.loads(json.dumps(projected))
+        tampered["arms"][0]["inference"]["reasoning_effort"] = "low"
+        with self.assertRaisesRegex(
+            GatewayProbeRunError,
+            "arm_digest does not bind arm controls",
+        ):
+            gateway_probe_publish._validate_public_experiment(tampered)
 
     def test_detected_verifier_commit_rejects_dirty_verifier_source(self):
         dirty = CompletedProcess(
@@ -646,6 +653,19 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 GatewayProbeRunError,
                 "artifact digest mismatch: experiment.json",
+            ):
+                gateway_probe_publish.verify_bundle(bundle)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            experiment_path = bundle / "experiment.json"
+            experiment = json.loads(experiment_path.read_text())
+            experiment["arms"][0]["sampling"]["temperature"] = 0.5
+            experiment_path.write_text(_json(experiment), encoding="ascii")
+            _rewrite_manifest_hash(bundle, "experiment.json")
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "arm_digest does not bind arm controls",
             ):
                 gateway_probe_publish.verify_bundle(bundle)
 
