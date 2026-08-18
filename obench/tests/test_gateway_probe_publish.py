@@ -283,6 +283,20 @@ def build_private_run(
 
 
 class GatewayProbePublishP0SecurityTests(unittest.TestCase):
+    def test_projects_provider_default_sampling_and_responses_reasoning(self):
+        examples = Path(__file__).parents[1] / "examples"
+        experiment = gateway_probe_spec.load_experiment(
+            examples / "gateway-probe-gpt-5.6-sol-five-way-responses.toml"
+        )
+
+        projected = gateway_probe_publish._project_experiment(experiment)
+
+        self.assertTrue(all(arm["sampling"] == {} for arm in projected["arms"]))
+        self.assertTrue(all(
+            arm["inference"] == {"reasoning_effort": "medium"}
+            for arm in projected["arms"]
+        ))
+
     def test_detected_verifier_commit_rejects_dirty_verifier_source(self):
         dirty = CompletedProcess(
             args=["git"],

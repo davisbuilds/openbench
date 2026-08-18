@@ -323,6 +323,22 @@ def _is_string_list(value: Any) -> bool:
     )
 
 
+def _is_public_sampling(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if not value:
+        return True
+    return (
+        set(value) == {"temperature", "top_p", "seed"}
+        and all(
+            not isinstance(value.get(name), bool)
+            and isinstance(value.get(name), (int, float))
+            for name in ("temperature", "top_p")
+        )
+        and _is_integer(value.get("seed"))
+    )
+
+
 def _validate_public_experiment(value: Any) -> dict[str, Any]:
     expected = {
         "schema_version",
@@ -471,22 +487,25 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
             or not isinstance(arm.get("fallback_enabled"), bool)
             or not _is_integer(arm.get("retry_count"))
             or not isinstance(arm.get("cache_enabled"), bool)
-            or not isinstance(sampling, dict)
-            or set(sampling) != {"temperature", "top_p", "seed"}
-            or any(
-                isinstance(sampling.get(name), bool)
-                or not isinstance(sampling.get(name), (int, float))
-                for name in ("temperature", "top_p")
-            )
-            or not _is_integer(sampling.get("seed"))
+            or not _is_public_sampling(sampling)
             or (
                 inference is not None
                 and (
                     not isinstance(inference, dict)
-                    or set(inference) != {"thinking", "reasoning_effort"}
-                    or inference.get("thinking") != "enabled"
-                    or inference.get("reasoning_effort") not in {"low", "high", "max"}
-                    or arm.get("protocol") != "openai_chat"
+                    or set(inference) not in (
+                        {"reasoning_effort"},
+                        {"thinking", "reasoning_effort"},
+                    )
+                    or inference.get("reasoning_effort") not in {
+                        "none", "low", "medium", "high", "xhigh", "max",
+                    }
+                    or (
+                        "thinking" in inference
+                        and (
+                            inference.get("thinking") != "enabled"
+                            or arm.get("protocol") != "openai_chat"
+                        )
+                    )
                 )
             )
             or (

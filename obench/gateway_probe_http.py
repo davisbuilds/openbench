@@ -214,8 +214,9 @@ def request_body(
             "stream": True,
             "stream_options": {"include_usage": True},
             "max_completion_tokens": max_output_tokens,
-            "seed": plan.sampling.seed,
         }
+        if plan.sampling.seed is not None:
+            payload["seed"] = plan.sampling.seed
     else:
         payload = {
             "input": content,
@@ -223,14 +224,20 @@ def request_body(
             "store": False,
             "max_output_tokens": max_output_tokens,
         }
-    payload.update({
-        "model": plan.requested_model,
-        "temperature": plan.sampling.temperature,
-        "top_p": plan.sampling.top_p,
-    })
+    payload["model"] = plan.requested_model
+    if plan.sampling.temperature is not None:
+        payload["temperature"] = plan.sampling.temperature
+    if plan.sampling.top_p is not None:
+        payload["top_p"] = plan.sampling.top_p
     if plan.inference is not None:
-        payload["thinking"] = {"type": plan.inference.thinking}
-        payload["reasoning_effort"] = plan.inference.reasoning_effort
+        if plan.inference.thinking is not None:
+            payload["thinking"] = {"type": plan.inference.thinking}
+        if plan.protocol == "openai_responses":
+            payload["reasoning"] = {
+                "effort": plan.inference.reasoning_effort,
+            }
+        else:
+            payload["reasoning_effort"] = plan.inference.reasoning_effort
     gateway_profiles.shape_provider_body(
         payload,
         requested_provider=plan.requested_provider,

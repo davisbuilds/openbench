@@ -103,6 +103,15 @@ DeepSeek provider, and seals thinking mode with `reasoning_effort = "high"` in
 the experiment and public evidence. Chat Completions is used because all five
 managed routes support that common protocol for this model.
 
+For a production-like GPT-5.6 Sol comparison, use
+[`gateway-probe-gpt-5.6-sol-five-way-responses.toml`](../obench/examples/gateway-probe-gpt-5.6-sol-five-way-responses.toml).
+It uses the Responses API, fixes `reasoning.effort` to `medium`, and leaves the
+sampling table empty so no temperature, top-p, or model seed is sent through
+routes that do not share those controls. The deterministic `schedule_seed`
+still balances and reproduces experiment ordering. The file schedules 50 cold
+and 50 warm requests per route; use `--max-blocks 2` for the initial route
+compatibility smoke, then resume the same output directory.
+
 ```bash
 export OPENAI_API_KEY=...
 export OPENROUTER_API_KEY=...

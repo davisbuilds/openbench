@@ -110,21 +110,28 @@ class Budget:
 
 @dataclass(frozen=True, slots=True)
 class Sampling:
-    temperature: float
-    top_p: float
-    seed: int
+    temperature: float | None
+    top_p: float | None
+    seed: int | None
 
     def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
+        return {
+            name: value
+            for name, value in dataclasses.asdict(self).items()
+            if value is not None
+        }
 
 
 @dataclass(frozen=True, slots=True)
 class InferenceControls:
-    thinking: str
     reasoning_effort: str
+    thinking: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
+        result = {"reasoning_effort": self.reasoning_effort}
+        if self.thinking is not None:
+            result["thinking"] = self.thinking
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -481,6 +488,12 @@ def _number(value: Any, path: str, minimum: float, maximum: float) -> float:
 
 def _parse_sampling(value: Any, path: str) -> Sampling:
     table = _table(value, path, _SAMPLING_FIELDS)
+    if not table:
+        return Sampling(temperature=None, top_p=None, seed=None)
+    if set(table) != _SAMPLING_FIELDS:
+        raise GatewaySpecError(
+            f"{path} must be empty or contain temperature, top_p, and seed"
+        )
     return Sampling(
         temperature=_number(_required(table, "temperature", path),
                             f"{path}.temperature", 0.0, 2.0),
@@ -492,18 +505,22 @@ def _parse_sampling(value: Any, path: str) -> Sampling:
 
 def _parse_inference(value: Any, path: str) -> InferenceControls:
     table = _table(value, path, _INFERENCE_FIELDS)
-    thinking = _string(_required(table, "thinking", path), f"{path}.thinking")
-    if thinking != "enabled":
-        raise GatewaySpecError(f"{path}.thinking must be 'enabled'")
+    thinking = table.get("thinking")
+    if thinking is not None:
+        thinking = _string(thinking, f"{path}.thinking")
+        if thinking != "enabled":
+            raise GatewaySpecError(f"{path}.thinking must be 'enabled'")
     effort = _string(
         _required(table, "reasoning_effort", path),
         f"{path}.reasoning_effort",
     )
-    if effort not in {"low", "high", "max"}:
+    efforts = {"none", "low", "medium", "high", "xhigh", "max"}
+    if effort not in efforts:
         raise GatewaySpecError(
-            f"{path}.reasoning_effort must be one of: low, high, max"
+            f"{path}.reasoning_effort must be one of: "
+            + ", ".join(sorted(efforts))
         )
-    return InferenceControls(thinking=thinking, reasoning_effort=effort)
+    return InferenceControls(reasoning_effort=effort, thinking=thinking)
 
 
 def _validate_endpoint(
@@ -609,11 +626,11 @@ def _parse_arm(
         gateway_id = _string(gateway_id, f"{path}.gateway_id", _ID_RE)
     inference = table.get("inference")
     if inference is not None:
-        if protocol != "openai_chat":
-            raise GatewaySpecError(
-                f"{path}.inference is supported only for openai_chat"
-            )
         inference = _parse_inference(inference, f"{path}.inference")
+        if protocol == "openai_responses" and inference.thinking is not None:
+            raise GatewaySpecError(
+                f"{path}.inference.thinking is supported only for openai_chat"
+            )
     arm = Arm(
         arm_id=_string(_required(table, "arm_id", path), f"{path}.arm_id", _ID_RE),
         route_kind=route_kind,
@@ -830,6 +847,15 @@ def parse_experiment(data: Mapping[str, Any]) -> GatewayExperiment:
     arms = tuple(_parse_arm(raw, index, allow_private_endpoint, hosts, cidrs)
                  for index, raw in enumerate(raw_arms))
     _validate_gateway_controls(arms)
+    if any(
+        arm.sampling.temperature is None
+        or arm.sampling.top_p is None
+        or arm.sampling.seed is None
+        for arm in arms
+    ):
+        raise GatewaySpecError(
+            "gateway_bench arms must configure temperature, top_p, and seed"
+        )
     if provider_prompt_mode == "isolated_per_call_v1" and any(
         arm.protocol != "openai_responses" for arm in arms
     ):
