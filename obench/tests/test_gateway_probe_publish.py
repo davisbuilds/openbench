@@ -303,6 +303,13 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
             "arm_digest does not bind arm controls",
         ):
             gateway_probe_publish._validate_public_experiment(tampered)
+        downgraded = json.loads(json.dumps(projected))
+        downgraded["schema_version"] = 2
+        with self.assertRaisesRegex(
+            GatewayProbeRunError,
+            "public experiment arm_digest",
+        ):
+            gateway_probe_publish._validate_public_experiment(downgraded)
 
     def test_detected_verifier_commit_rejects_dirty_verifier_source(self):
         dirty = CompletedProcess(

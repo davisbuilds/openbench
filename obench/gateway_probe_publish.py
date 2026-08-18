@@ -58,6 +58,7 @@ VERIFIER_SOURCE_FILES = (
     "obench/stats.py",
 )
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_PUBLIC_ARM_DIGEST_PREFIX = "gateway-probe-public-arm-v3-"
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _ACCOUNT_ID_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])", re.I)
 _EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
@@ -271,7 +272,10 @@ def _project_arm(arm: gateway_spec.Arm) -> dict[str, Any]:
             else {}
         ),
     }
-    projected["arm_digest"] = gateway_spec.canonical_digest(projected)
+    projected["arm_digest"] = (
+        _PUBLIC_ARM_DIGEST_PREFIX
+        + gateway_spec.canonical_digest(projected)
+    )
     return projected
 
 
@@ -530,14 +534,22 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
             raise GatewayProbeRunError(
                 "public experiment arms do not match schema"
             )
-        _sha256_value(arm.get("arm_digest"), "public experiment arm_digest")
-        if value["schema_version"] >= 3:
+        if value["schema_version"] == 2:
+            _sha256_value(
+                arm.get("arm_digest"),
+                "public experiment arm_digest",
+            )
+        else:
             digest_input = {
                 name: item
                 for name, item in arm.items()
                 if name != "arm_digest"
             }
-            if arm["arm_digest"] != gateway_spec.canonical_digest(digest_input):
+            expected_digest = (
+                _PUBLIC_ARM_DIGEST_PREFIX
+                + gateway_spec.canonical_digest(digest_input)
+            )
+            if arm["arm_digest"] != expected_digest:
                 raise GatewayProbeRunError(
                     "public experiment arm_digest does not bind arm controls"
                 )
