@@ -1,0 +1,128 @@
+{
+  "allow_private_endpoint": false,
+  "arms": [
+    {
+      "allowed_models": [
+        "gpt-5.6-sol"
+      ],
+      "allowed_providers": [
+        "openai"
+      ],
+      "arm_digest": "gateway-probe-public-arm-v3-c8b42c1897eae3cbe447a5491839deb175e44a0d305a20fdf682cb444f4a1662",
+      "arm_id": "direct-openai",
+      "baseline": true,
+      "cache_enabled": false,
+      "canonical_model": "openai/gpt-5.6-sol",
+      "direct_control_arm_id": null,
+      "fallback_enabled": false,
+      "gateway": null,
+      "inference": {
+        "reasoning_effort": "medium"
+      },
+      "protocol": "openai_responses",
+      "requested_model": "gpt-5.6-sol",
+      "requested_provider": "openai",
+      "retry_count": 0,
+      "route_kind": "direct",
+      "sampling": {}
+    },
+    {
+      "allowed_models": [
+        "openai/gpt-5.6-sol"
+      ],
+      "allowed_providers": [
+        "openai"
+      ],
+      "arm_digest": "gateway-probe-public-arm-v3-44da49de3139aa34d022838aefb118c447c9e8c37e441181acdbc44bc4b04053",
+      "arm_id": "openrouter-openai",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "openai/gpt-5.6-sol",
+      "direct_control_arm_id": "direct-openai",
+      "fallback_enabled": false,
+      "gateway": "openrouter",
+      "inference": {
+        "reasoning_effort": "medium"
+      },
+      "protocol": "openai_responses",
+      "requested_model": "openai/gpt-5.6-sol",
+      "requested_provider": "openai",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {}
+    },
+    {
+      "allowed_models": [
+        "openai/gpt-5.6-sol"
+      ],
+      "allowed_providers": [
+        "openai"
+      ],
+      "arm_digest": "gateway-probe-public-arm-v3-8d67307dfdb19b66af42732ea623ee32a18903cd6bc53e50032631829d02f066",
+      "arm_id": "vercel-openai",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "openai/gpt-5.6-sol",
+      "direct_control_arm_id": "direct-openai",
+      "fallback_enabled": false,
+      "gateway": "vercel",
+      "inference": {
+        "reasoning_effort": "medium"
+      },
+      "protocol": "openai_responses",
+      "requested_model": "openai/gpt-5.6-sol",
+      "requested_provider": "openai",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {}
+    },
+    {
+      "allowed_models": [
+        "openai/gpt-5.6-sol"
+      ],
+      "allowed_providers": [
+        "openai"
+      ],
+      "arm_digest": "gateway-probe-public-arm-v3-1efd6c53fc989890ebc7519a98d883d5a734d3b0b61ca59dca5396a242829fd4",
+      "arm_id": "concentrate-openai",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "openai/gpt-5.6-sol",
+      "direct_control_arm_id": "direct-openai",
+      "fallback_enabled": false,
+      "gateway": "concentrate",
+      "inference": {
+        "reasoning_effort": "medium"
+      },
+      "protocol": "openai_responses",
+      "requested_model": "openai/gpt-5.6-sol",
+      "requested_provider": "openai",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {}
+    }
+  ],
+  "benchmark": "gateway_probe",
+  "budget": {
+    "max_input_tokens": 512,
+    "max_output_tokens": 256,
+    "max_total_attempts": 3,
+    "retry_deadline_s": 480,
+    "timeout_s": 180,
+    "usd_cap": "3.0"
+  },
+  "cases": [
+    {
+      "case_id": "production-analysis",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2"
+    }
+  ],
+  "experiment_digest": "ed4761070d62cc234ed529d8d906d46f4a07f386776fb88eb3ee09d77c57ed07",
+  "experiment_id": "gpt-5.6-sol-four-route-responses-probe-20260818",
+  "model_match": "rolling_alias",
+  "repetitions": 50,
+  "schedule_seed": 20260821,
+  "schema_version": 3,
+  "source_schema_version": 1,
+  "track": "request_probe"
+}
