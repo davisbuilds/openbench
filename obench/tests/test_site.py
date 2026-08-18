@@ -193,17 +193,23 @@ class GatewayFamilyTests(_SiteFixture):
 
 
 class GatewayProbeFamilyTests(_SiteFixture):
-    def test_checked_in_models_publish_kimi_first_with_deepseek_and_gpt4o(self):
+    def test_checked_in_models_publish_gpt56_first_with_prior_models(self):
         repo_docs = str(Path(__file__).resolve().parents[2] / "docs")
 
         doc = site.build_board(repo_docs)
         bundles = doc["gateway"]["bundles"]
 
         self.assertEqual(
-            [bundle["model"] for bundle in bundles[:3]],
-            ["Kimi K3", "DeepSeek V4 Flash", "GPT-4o mini"],
+            [bundle["model"] for bundle in bundles[:4]],
+            [
+                "GPT-5.6 Sol",
+                "DeepSeek V4 Flash",
+                "Kimi K3",
+                "GPT-4o mini",
+            ],
         )
         by_model = {bundle["model"]: bundle for bundle in bundles}
+        self.assertEqual(by_model["GPT-5.6 Sol"]["result_schema_version"], 4)
         self.assertEqual(by_model["Kimi K3"]["result_schema_version"], 4)
         self.assertEqual(
             by_model["DeepSeek V4 Flash"]["result_schema_version"], 4
@@ -216,9 +222,15 @@ class GatewayProbeFamilyTests(_SiteFixture):
         )
         page = site.render_board_html(doc)
         self.assertIn(
+            'id="gateway-model-tab-2026-08-18-gpt56-sol-managed-100" '
+            'aria-controls="gateway-model-panel-2026-08-18-gpt56-sol-managed-100" '
+            'aria-selected="true"',
+            page,
+        )
+        self.assertIn(
             'id="gateway-model-tab-2026-07-28-kimi-k3-managed-100" '
             'aria-controls="gateway-model-panel-2026-07-28-kimi-k3-managed-100" '
-            'aria-selected="true"',
+            'aria-selected="false"',
             page,
         )
         self.assertIn(

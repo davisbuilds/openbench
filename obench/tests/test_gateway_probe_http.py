@@ -867,6 +867,58 @@ class GatewayProbeHttpTests(unittest.TestCase):
             {arm.sampling.top_p for arm in gateway_bench.arms}, {0.95}
         )
 
+    def test_gpt_5_6_sol_example_uses_common_responses_controls(self):
+        examples = Path(__file__).parents[1] / "examples"
+        experiment = gateway_probe_spec.load_experiment(
+            examples / "gateway-probe-gpt-5.6-sol-five-way-responses.toml"
+        )
+        auth_envs = {arm.auth_env for arm in experiment.arms}
+        plans, _ = gateway_probe_spec.compile_route_plans(
+            experiment,
+            environ={name: "secret" for name in auth_envs},
+            admitted_auth_envs=auth_envs,
+        )
+        bodies = {
+            plan.arm_id: json.loads(
+                gateway_probe_http.request_body(
+                    "probe", "nonce", plan, experiment.budget.max_output_tokens
+                )
+            )
+            for plan in plans
+        }
+
+        self.assertEqual(experiment.repetitions, 50)
+        self.assertEqual(len(plans), 5)
+        self.assertEqual({plan.protocol for plan in plans}, {"openai_responses"})
+        self.assertTrue(all(plan.sampling.to_dict() == {} for plan in plans))
+        self.assertTrue(all(
+            body["reasoning"] == {"effort": "medium"}
+            for body in bodies.values()
+        ))
+        self.assertTrue(all(
+            all(name not in body for name in (
+                "temperature", "top_p", "seed", "thinking", "reasoning_effort",
+            ))
+            for body in bodies.values()
+        ))
+        self.assertTrue(all(body["store"] is False for body in bodies.values()))
+        self.assertTrue(all(
+            body["max_output_tokens"] == 256 for body in bodies.values()
+        ))
+        self.assertEqual(
+            bodies["openrouter-openai"]["provider"],
+            {"only": ["openai"], "allow_fallbacks": False},
+        )
+        self.assertEqual(
+            bodies["vercel-openai"]["providerOptions"],
+            {"gateway": {"only": ["openai"]}},
+        )
+        self.assertEqual(
+            bodies["concentrate-openai"]["routing"],
+            {"providers": ["openai"], "models": []},
+        )
+        self.assertNotIn("provider", bodies["cloudflare-openai"])
+
     def test_route_reason_taxonomy_is_explicit_and_fail_closed(self):
         expected = {
             "missing_stream_metrics": "unverifiable",

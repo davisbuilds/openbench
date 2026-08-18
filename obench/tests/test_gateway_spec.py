@@ -217,6 +217,24 @@ class GatewayExperimentTests(unittest.TestCase):
                 )
             )
 
+    def test_gateway_bench_rejects_unforwarded_responses_inference(self):
+        responses = (
+            manifest(
+                direct_extra='[arms.inference]\nreasoning_effort = "medium"',
+                gateway_extra=(
+                    'gateway = "openrouter"\n'
+                    'direct_control_arm_id = "direct-openai"\n'
+                    '[arms.inference]\n'
+                    'reasoning_effort = "medium"'
+                ),
+            )
+            .replace("/chat/completions", "/responses")
+            .replace('protocol = "openai_chat"', 'protocol = "openai_responses"')
+        )
+
+        with self.assertRaisesRegex(GatewaySpecError, "only by Gateway Probe"):
+            parse_experiment_toml(responses)
+
     def test_rejects_router_track_and_auto_only_fields(self):
         with self.assertRaisesRegex(GatewaySpecError, "track must be"):
             parse_experiment_toml(

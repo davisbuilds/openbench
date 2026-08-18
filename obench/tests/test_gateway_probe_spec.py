@@ -164,6 +164,14 @@ class GatewayProbeSpecTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             gateway_probe_spec.GatewayProbeSpecError,
+            "thinking is required for openai_chat",
+        ):
+            gateway_probe_spec.parse_experiment_toml(
+                configured.replace('thinking = "enabled"\n', "")
+            )
+
+        with self.assertRaisesRegex(
+            gateway_probe_spec.GatewayProbeSpecError,
             "inference",
         ):
             gateway_probe_spec.parse_experiment_toml(
@@ -173,6 +181,34 @@ class GatewayProbeSpecTests(unittest.TestCase):
                     1,
                 )
             )
+
+    def test_responses_provider_default_sampling_and_medium_reasoning(self):
+        configured = manifest().replace(
+            '[arms.sampling]\ntemperature = 0.0\n'
+            'top_p = 1.0\nseed = 17',
+            '[arms.sampling]\n[arms.inference]\n'
+            'reasoning_effort = "medium"',
+        )
+        experiment = gateway_probe_spec.parse_experiment_toml(configured)
+
+        self.assertEqual(
+            {tuple(arm.sampling.to_dict()) for arm in experiment.arms},
+            {()},
+        )
+        self.assertEqual(
+            {arm.inference.reasoning_effort for arm in experiment.arms},
+            {"medium"},
+        )
+        self.assertTrue(
+            all(arm.inference.thinking is None for arm in experiment.arms)
+        )
+
+        partial = manifest().replace("top_p = 1.0\n", "")
+        with self.assertRaisesRegex(
+            gateway_probe_spec.GatewayProbeSpecError,
+            "must be empty or contain",
+        ):
+            gateway_probe_spec.parse_experiment_toml(partial)
 
     def test_rejects_agent_fields_and_route_policy_drift(self):
         with self.assertRaisesRegex(

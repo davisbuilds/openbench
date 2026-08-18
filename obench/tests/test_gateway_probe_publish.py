@@ -283,6 +283,80 @@ def build_private_run(
 
 
 class GatewayProbePublishP0SecurityTests(unittest.TestCase):
+    def test_projects_provider_default_sampling_and_responses_reasoning(self):
+        examples = Path(__file__).parents[1] / "examples"
+        experiment = gateway_probe_spec.load_experiment(
+            examples / "gateway-probe-gpt-5.6-sol-five-way-responses.toml"
+        )
+
+        projected = gateway_probe_publish._project_experiment(experiment)
+
+        self.assertTrue(all(arm["sampling"] == {} for arm in projected["arms"]))
+        self.assertTrue(all(
+            arm["inference"] == {"reasoning_effort": "medium"}
+            for arm in projected["arms"]
+        ))
+        tampered = json.loads(json.dumps(projected))
+        tampered["arms"][0]["inference"]["reasoning_effort"] = "low"
+        with self.assertRaisesRegex(
+            GatewayProbeRunError,
+            "arm_digest does not bind arm controls",
+        ):
+            gateway_probe_publish._validate_public_experiment(tampered)
+        downgraded = json.loads(json.dumps(projected))
+        downgraded["schema_version"] = 2
+        for arm in downgraded["arms"]:
+            arm["arm_digest"] = arm["arm_digest"].removeprefix(
+                gateway_probe_publish._PUBLIC_ARM_DIGEST_PREFIX
+            )
+        with self.assertRaisesRegex(
+            GatewayProbeRunError,
+            "public experiment arms",
+        ):
+            gateway_probe_publish._validate_public_experiment(downgraded)
+
+        legacy_shape = json.loads(json.dumps(projected))
+        legacy_shape["schema_version"] = 2
+        for arm in legacy_shape["arms"]:
+            arm["sampling"] = {
+                "temperature": 0.0,
+                "top_p": 1.0,
+                "seed": 17,
+            }
+            arm["inference"] = None
+            arm["arm_digest"] = "a" * 64
+        validated = gateway_probe_publish._validate_public_experiment(
+            legacy_shape
+        )
+        with self.assertRaisesRegex(
+            GatewayProbeRunError,
+            "restricted to exact legacy bundles",
+        ):
+            gateway_probe_publish._validate_experiment_schema_for_manifest(
+                validated,
+                "b" * 64,
+            )
+
+        unfair = json.loads(json.dumps(projected))
+        gateway_arm = next(
+            arm for arm in unfair["arms"]
+            if arm["route_kind"] == "gateway"
+        )
+        gateway_arm["inference"]["reasoning_effort"] = "low"
+        digest_input = {
+            name: item for name, item in gateway_arm.items()
+            if name != "arm_digest"
+        }
+        gateway_arm["arm_digest"] = (
+            gateway_probe_publish._PUBLIC_ARM_DIGEST_PREFIX
+            + gateway_spec.canonical_digest(digest_input)
+        )
+        with self.assertRaisesRegex(
+            GatewayProbeRunError,
+            "inference must match direct control",
+        ):
+            gateway_probe_publish._validate_public_experiment(unfair)
+
     def test_detected_verifier_commit_rejects_dirty_verifier_source(self):
         dirty = CompletedProcess(
             args=["git"],
@@ -608,6 +682,29 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
             ):
                 gateway_probe_publish.verify_bundle(bundle)
 
+    def test_rejects_result_role_drift_from_public_arm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            experiment = gateway_probe_publish._validate_public_experiment(
+                json.loads((bundle / "experiment.json").read_text())
+            )
+            schedule = gateway_probe_publish._validate_public_schedule(
+                json.loads((bundle / "schedule.json").read_text())
+            )
+            rows = gateway_probe_results.load_results(bundle / "results.jsonl")
+            report = gateway_probe_report.aggregate(rows)
+            rows[0]["baseline"] = not rows[0]["baseline"]
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "public results do not match public experiment",
+            ):
+                gateway_probe_publish._validate_public_experiment_bindings(
+                    experiment,
+                    schedule,
+                    rows,
+                    report,
+                )
+
     def test_rejects_rehashed_schedule_coordinate_substitution(self):
         with tempfile.TemporaryDirectory() as tmp:
             bundle = self._bundle(tmp)
@@ -632,6 +729,19 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 GatewayProbeRunError,
                 "artifact digest mismatch: experiment.json",
+            ):
+                gateway_probe_publish.verify_bundle(bundle)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            experiment_path = bundle / "experiment.json"
+            experiment = json.loads(experiment_path.read_text())
+            experiment["arms"][0]["sampling"]["temperature"] = 0.5
+            experiment_path.write_text(_json(experiment), encoding="ascii")
+            _rewrite_manifest_hash(bundle, "experiment.json")
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "arm_digest does not bind arm controls",
             ):
                 gateway_probe_publish.verify_bundle(bundle)
 
