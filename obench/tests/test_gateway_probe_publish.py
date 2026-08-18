@@ -315,6 +315,28 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
         ):
             gateway_probe_publish._validate_public_experiment(downgraded)
 
+        legacy_shape = json.loads(json.dumps(projected))
+        legacy_shape["schema_version"] = 2
+        for arm in legacy_shape["arms"]:
+            arm["sampling"] = {
+                "temperature": 0.0,
+                "top_p": 1.0,
+                "seed": 17,
+            }
+            arm["inference"] = None
+            arm["arm_digest"] = "a" * 64
+        validated = gateway_probe_publish._validate_public_experiment(
+            legacy_shape
+        )
+        with self.assertRaisesRegex(
+            GatewayProbeRunError,
+            "restricted to exact legacy bundles",
+        ):
+            gateway_probe_publish._validate_experiment_schema_for_manifest(
+                validated,
+                "b" * 64,
+            )
+
     def test_detected_verifier_commit_rejects_dirty_verifier_source(self):
         dirty = CompletedProcess(
             args=["git"],

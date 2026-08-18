@@ -28,6 +28,13 @@ from .gateway_probe_models import GatewayProbeRunError, ProbeBlock
 PUBLIC_SCHEMA_VERSION = 3
 PUBLIC_EXPERIMENT_SCHEMA_VERSION = 3
 _SUPPORTED_PUBLIC_EXPERIMENT_SCHEMA_VERSIONS = frozenset({2, 3})
+_LEGACY_SCHEMA_2_MANIFEST_SHA256 = frozenset({
+    # These are the only schema-2 public bundles published before arm controls
+    # became independently recomputable. Exact manifest hashes also bind every
+    # artifact hash, so mutable new bundles cannot opt into the legacy rules.
+    "ae88648902d51f0686ea838f388de579d9d9bedc4b87765563de6a195a3b9613",
+    "d74b8ac396a6226f6542a6285b0c70bef798a4add6074c8effe5e052546b346d",
+})
 PUBLIC_BUNDLE_KIND = "gateway_probe_public"
 PUBLIC_FILES = (
     "experiment.json",
@@ -601,6 +608,19 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
 
     _assert_public_safe(value)
     return value
+
+
+def _validate_experiment_schema_for_manifest(
+    experiment: Mapping[str, Any],
+    manifest_sha256: str,
+) -> None:
+    if (
+        experiment.get("schema_version") == 2
+        and manifest_sha256 not in _LEGACY_SCHEMA_2_MANIFEST_SHA256
+    ):
+        raise GatewayProbeRunError(
+            "public experiment schema 2 is restricted to exact legacy bundles"
+        )
 
 
 def _project_prices(value: Any) -> dict[str, Any]:
@@ -1367,6 +1387,10 @@ def verify_bundle(bundle_dir: str | os.PathLike[str]) -> dict[str, Any]:
     experiment_path = directory / "experiment.json"
     experiment = _validate_public_experiment(
         _load_json(experiment_path, "public experiment")
+    )
+    _validate_experiment_schema_for_manifest(
+        experiment,
+        _sha256(directory / "manifest.json"),
     )
     if experiment_path.read_text(encoding="ascii") != _canonical_json(experiment):
         raise GatewayProbeRunError("public experiment is not canonical JSON")
