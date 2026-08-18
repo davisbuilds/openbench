@@ -330,11 +330,9 @@ def _is_string_list(value: Any) -> bool:
     )
 
 
-def _is_public_sampling(value: Any) -> bool:
+def _is_explicit_public_sampling(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
-    if not value:
-        return True
     return (
         set(value) == {"temperature", "top_p", "seed"}
         and all(
@@ -343,6 +341,47 @@ def _is_public_sampling(value: Any) -> bool:
             for name in ("temperature", "top_p")
         )
         and _is_integer(value.get("seed"))
+    )
+
+
+def _is_public_sampling(value: Any, schema_version: int) -> bool:
+    if schema_version == 2:
+        return _is_explicit_public_sampling(value)
+    return value == {} or _is_explicit_public_sampling(value)
+
+
+def _is_public_inference(
+    value: Any,
+    *,
+    protocol: str,
+    schema_version: int,
+) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, dict):
+        return False
+    if schema_version == 2:
+        return (
+            set(value) == {"thinking", "reasoning_effort"}
+            and value.get("thinking") == "enabled"
+            and value.get("reasoning_effort") in {"low", "high", "max"}
+            and protocol == "openai_chat"
+        )
+    return (
+        set(value) in (
+            {"reasoning_effort"},
+            {"thinking", "reasoning_effort"},
+        )
+        and value.get("reasoning_effort") in {
+            "none", "low", "medium", "high", "xhigh", "max",
+        }
+        and (
+            "thinking" not in value
+            or (
+                value.get("thinking") == "enabled"
+                and protocol == "openai_chat"
+            )
+        )
     )
 
 
@@ -495,26 +534,14 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
             or not isinstance(arm.get("fallback_enabled"), bool)
             or not _is_integer(arm.get("retry_count"))
             or not isinstance(arm.get("cache_enabled"), bool)
-            or not _is_public_sampling(sampling)
-            or (
-                inference is not None
-                and (
-                    not isinstance(inference, dict)
-                    or set(inference) not in (
-                        {"reasoning_effort"},
-                        {"thinking", "reasoning_effort"},
-                    )
-                    or inference.get("reasoning_effort") not in {
-                        "none", "low", "medium", "high", "xhigh", "max",
-                    }
-                    or (
-                        "thinking" in inference
-                        and (
-                            inference.get("thinking") != "enabled"
-                            or arm.get("protocol") != "openai_chat"
-                        )
-                    )
-                )
+            or not _is_public_sampling(
+                sampling,
+                value["schema_version"],
+            )
+            or not _is_public_inference(
+                inference,
+                protocol=arm.get("protocol"),
+                schema_version=value["schema_version"],
             )
             or (
                 arm.get("direct_control_arm_id") is not None

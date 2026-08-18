@@ -305,9 +305,13 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
             gateway_probe_publish._validate_public_experiment(tampered)
         downgraded = json.loads(json.dumps(projected))
         downgraded["schema_version"] = 2
+        for arm in downgraded["arms"]:
+            arm["arm_digest"] = arm["arm_digest"].removeprefix(
+                gateway_probe_publish._PUBLIC_ARM_DIGEST_PREFIX
+            )
         with self.assertRaisesRegex(
             GatewayProbeRunError,
-            "public experiment arm_digest",
+            "public experiment arms",
         ):
             gateway_probe_publish._validate_public_experiment(downgraded)
 
