@@ -164,6 +164,14 @@ class GatewayProbeSpecTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             gateway_probe_spec.GatewayProbeSpecError,
+            "thinking is required for openai_chat",
+        ):
+            gateway_probe_spec.parse_experiment_toml(
+                configured.replace('thinking = "enabled"\n', "")
+            )
+
+        with self.assertRaisesRegex(
+            gateway_probe_spec.GatewayProbeSpecError,
             "inference",
         ):
             gateway_probe_spec.parse_experiment_toml(

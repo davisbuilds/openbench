@@ -383,7 +383,10 @@ def _is_public_inference(
             "none", "low", "medium", "high", "xhigh", "max",
         }
         and (
-            "thinking" not in value
+            (
+                set(value) == {"reasoning_effort"}
+                and protocol == "openai_responses"
+            )
             or (
                 value.get("thinking") == "enabled"
                 and protocol == "openai_chat"

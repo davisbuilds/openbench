@@ -633,6 +633,10 @@ def _parse_arm(
             raise GatewaySpecError(
                 f"{path}.inference.thinking is supported only for openai_chat"
             )
+        if protocol == "openai_chat" and inference.thinking is None:
+            raise GatewaySpecError(
+                f"{path}.inference.thinking is required for openai_chat"
+            )
         if protocol == "openai_responses" and not allow_responses_inference:
             raise GatewaySpecError(
                 f"{path}.inference for openai_responses is supported only by Gateway Probe"
