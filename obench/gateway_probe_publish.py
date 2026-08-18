@@ -596,18 +596,49 @@ def _validate_public_experiment(value: Any) -> dict[str, Any]:
         raise GatewayProbeRunError(
             "public experiment must contain exactly one baseline arm"
         )
+    by_id = {arm["arm_id"]: arm for arm in arms}
+    baseline = next(arm for arm in arms if arm["baseline"])
+    if baseline["route_kind"] != "direct" or any(
+        arm["route_kind"] == "direct" and not arm["baseline"]
+        for arm in arms
+    ):
+        raise GatewayProbeRunError(
+            "public experiment baseline and route roles do not match"
+        )
+    if not any(arm["route_kind"] == "gateway" for arm in arms):
+        raise GatewayProbeRunError(
+            "public experiment must contain at least one gateway arm"
+        )
     for arm in arms:
         control = arm["direct_control_arm_id"]
         if (
             (arm["route_kind"] == "direct" and control is not None)
             or (
                 arm["route_kind"] == "gateway"
-                and (control not in arm_ids or control == arm["arm_id"])
+                and (
+                    control not in arm_ids
+                    or control == arm["arm_id"]
+                    or by_id[control]["route_kind"] != "direct"
+                )
             )
         ):
             raise GatewayProbeRunError(
                 "public experiment direct controls do not match arms"
             )
+        if arm["route_kind"] != "gateway":
+            continue
+        for field in (
+            "protocol",
+            "canonical_model",
+            "requested_provider",
+            "allowed_providers",
+            "sampling",
+            "inference",
+        ):
+            if arm.get(field) != by_id[control].get(field):
+                raise GatewayProbeRunError(
+                    f"public experiment arm {field} must match direct control"
+                )
 
     _assert_public_safe(value)
     return value
@@ -829,8 +860,8 @@ def _validate_public_experiment_bindings(
             "public report count does not match public experiment controls"
         )
 
-    arm_digests = {
-        arm["arm_id"]: arm["arm_digest"]
+    arm_controls = {
+        arm["arm_id"]: arm
         for arm in experiment["arms"]
     }
     case_digests = {
@@ -841,13 +872,17 @@ def _validate_public_experiment_bindings(
     for row in rows:
         identity = row["identity"]
         arm = identity["arm"]
+        experiment_arm = arm_controls.get(arm["id"])
         case = identity["case"]
         row_experiment = identity["experiment"]
         if (
             row_experiment["id"] != experiment["experiment_id"]
             or row_experiment["digest"] != experiment["experiment_digest"]
             or row["model_match"] != experiment["model_match"]
-            or arm_digests.get(arm["id"]) != arm["digest"]
+            or experiment_arm is None
+            or experiment_arm["arm_digest"] != arm["digest"]
+            or row["arm_role"] != experiment_arm["route_kind"]
+            or row["baseline"] is not experiment_arm["baseline"]
             or case_digests.get(case["id"]) != case["prompt_digest"]
             or row["retry_evidence"]["max_total_attempts"]
             != budget["max_total_attempts"]

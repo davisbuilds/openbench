@@ -337,6 +337,26 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
                 "b" * 64,
             )
 
+        unfair = json.loads(json.dumps(projected))
+        gateway_arm = next(
+            arm for arm in unfair["arms"]
+            if arm["route_kind"] == "gateway"
+        )
+        gateway_arm["inference"]["reasoning_effort"] = "low"
+        digest_input = {
+            name: item for name, item in gateway_arm.items()
+            if name != "arm_digest"
+        }
+        gateway_arm["arm_digest"] = (
+            gateway_probe_publish._PUBLIC_ARM_DIGEST_PREFIX
+            + gateway_spec.canonical_digest(digest_input)
+        )
+        with self.assertRaisesRegex(
+            GatewayProbeRunError,
+            "inference must match direct control",
+        ):
+            gateway_probe_publish._validate_public_experiment(unfair)
+
     def test_detected_verifier_commit_rejects_dirty_verifier_source(self):
         dirty = CompletedProcess(
             args=["git"],
@@ -661,6 +681,29 @@ class GatewayProbePublishP1IntegrityTests(unittest.TestCase):
                 "charged cost|recomputed report",
             ):
                 gateway_probe_publish.verify_bundle(bundle)
+
+    def test_rejects_result_role_drift_from_public_arm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self._bundle(tmp)
+            experiment = gateway_probe_publish._validate_public_experiment(
+                json.loads((bundle / "experiment.json").read_text())
+            )
+            schedule = gateway_probe_publish._validate_public_schedule(
+                json.loads((bundle / "schedule.json").read_text())
+            )
+            rows = gateway_probe_results.load_results(bundle / "results.jsonl")
+            report = gateway_probe_report.aggregate(rows)
+            rows[0]["baseline"] = not rows[0]["baseline"]
+            with self.assertRaisesRegex(
+                GatewayProbeRunError,
+                "public results do not match public experiment",
+            ):
+                gateway_probe_publish._validate_public_experiment_bindings(
+                    experiment,
+                    schedule,
+                    rows,
+                    report,
+                )
 
     def test_rejects_rehashed_schedule_coordinate_substitution(self):
         with tempfile.TemporaryDirectory() as tmp:
