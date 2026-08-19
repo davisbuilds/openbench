@@ -100,6 +100,31 @@
       "retry_count": 0,
       "route_kind": "gateway",
       "sampling": {}
+    },
+    {
+      "allowed_models": [
+        "openai/gpt-5.6-sol"
+      ],
+      "allowed_providers": [
+        "openai"
+      ],
+      "arm_digest": "gateway-probe-public-arm-v3-d8652423f83c2fcae6f114e657a6d1499f3eafb67f6c799da746e9a75c895125",
+      "arm_id": "cloudflare-openai",
+      "baseline": false,
+      "cache_enabled": false,
+      "canonical_model": "openai/gpt-5.6-sol",
+      "direct_control_arm_id": "direct-openai",
+      "fallback_enabled": false,
+      "gateway": "cloudflare",
+      "inference": {
+        "reasoning_effort": "medium"
+      },
+      "protocol": "openai_responses",
+      "requested_model": "openai/gpt-5.6-sol",
+      "requested_provider": "openai",
+      "retry_count": 0,
+      "route_kind": "gateway",
+      "sampling": {}
     }
   ],
   "benchmark": "gateway_probe",
@@ -109,7 +134,7 @@
     "max_total_attempts": 3,
     "retry_deadline_s": 480,
     "timeout_s": 180,
-    "usd_cap": "3.0"
+    "usd_cap": "10.0"
   },
   "cases": [
     {
@@ -117,11 +142,11 @@
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2"
     }
   ],
-  "experiment_digest": "ed4761070d62cc234ed529d8d906d46f4a07f386776fb88eb3ee09d77c57ed07",
-  "experiment_id": "gpt-5.6-sol-four-route-responses-probe-20260818",
+  "experiment_digest": "960f93e76135d177f74363ec9e4001378b92f5ef2f08b3561c377f3ee21a3e03",
+  "experiment_id": "gpt-5.6-sol-five-way-responses-probe-credit-rerun",
   "model_match": "rolling_alias",
   "repetitions": 50,
-  "schedule_seed": 20260821,
+  "schedule_seed": 2026081802,
   "schema_version": 3,
   "source_schema_version": 1,
   "track": "request_probe"
