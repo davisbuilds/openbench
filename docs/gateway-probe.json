@@ -29,7 +29,7 @@
     "model": "GPT-5.6 Sol",
     "date": "2026-08-18",
     "default": true,
-    "run_note": "Four routes, each with 50 cold and 50 warm measured requests. Warm measurements include a separate primer. All routes use GPT-5.6 Sol with medium reasoning; temperature and top_p are omitted so provider defaults apply. Gateway routes lock to OpenAI with fallbacks and response caching disabled. Cloudflare is not included in this predeclared run.",
+    "run_note": "Five routes, each with 50 cold and 50 warm measured requests. Warm measurements include a separate primer. All routes use GPT-5.6 Sol with medium reasoning; temperature and top_p are omitted so provider defaults apply. Gateway routes lock to OpenAI with fallbacks and response caching disabled. Cloudflare returned HTTP 402 for 25 of 100 measured requests; availability is included in its composite score.",
     "submitter": "OpenBench"
   }
 ]

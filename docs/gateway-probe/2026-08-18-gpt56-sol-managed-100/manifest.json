@@ -5,31 +5,31 @@
     "cold": 50,
     "warm": 50
   },
-  "experiment_digest": "ed4761070d62cc234ed529d8d906d46f4a07f386776fb88eb3ee09d77c57ed07",
-  "experiment_id": "gpt-5.6-sol-four-route-responses-probe-20260818",
+  "experiment_digest": "960f93e76135d177f74363ec9e4001378b92f5ef2f08b3561c377f3ee21a3e03",
+  "experiment_id": "gpt-5.6-sol-five-way-responses-probe-credit-rerun",
   "files": {
     "experiment.json": {
-      "sha256": "9b051d829d8aceb691da4b8289d87311a7add81bdd2c9dfa2f90cb780023c886"
+      "sha256": "86c948441591c3525943b771be6d1536a59020611f07565ba5d55fe49d0f9e7c"
     },
     "prices.json": {
       "sha256": "d003df1c4ebc41f38f31ef391d1880a35045c55d66301c8e8290fbad098e53b0"
     },
     "report.json": {
-      "sha256": "a35152e3a415b50fc40dcf6fa13bb98e9267ff500f61b549f1267e037671fdc6"
+      "sha256": "316bce52a36eea937eaf7d3591cbc6f3a0f3d4d4663797a7a9b18ab34d88058d"
     },
     "report.md": {
-      "sha256": "dc1bf08f60e479497efa64f8dc78c45ac5551d6be7a57877a681fd454447873d"
+      "sha256": "a4c2ed4aa2cba9a96e85a84c2e294934758eb35ebfffb66b8aad0408fdf093f4"
     },
     "results.jsonl": {
-      "sha256": "5b01e5124c3089c952ba51ea48ff959097423f315569636a2327a999db2f9375"
+      "sha256": "efe000337e8c58e35970397434bdc2366632e9483d4e739c23587517673ffb96"
     },
     "schedule.json": {
-      "sha256": "5cbafd353db02a270c65bc7199a4f920d33d6a2b395ef2bfe65752303525f64d"
+      "sha256": "cba1f06330748cd0f5fa947fb2238fb64075ebcc030be18d8e47159e3659215f"
     }
   },
   "price_digest": "ca00621f612b706ed9540e10d0e108b95bb60a5386cc0c0629a456cd8dbdb094",
   "report_schema_version": 4,
-  "result_count": 400,
+  "result_count": 500,
   "result_schema_version": 4,
   "run_provenance": {
     "completed_at": "unknown",
@@ -43,7 +43,7 @@
     "paths_accounts_secrets": "rejected",
     "receipt_values": "removed"
   },
-  "schedule_digest": "75d16cabc546e67a55c2a66e02a6edd77303ae22989e8f865bc7f37dcd432d34",
+  "schedule_digest": "2ca5f7b04e8860429aafe14365ee02f230c9cf96dc81644f1860c9dd47ec1463",
   "scheduled_blocks_per_condition": 50,
   "schema_version": 3,
   "verification": {

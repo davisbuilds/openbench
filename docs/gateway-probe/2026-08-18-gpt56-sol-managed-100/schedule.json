@@ -6,31 +6,60 @@
         "direct-openai",
         "openrouter-openai",
         "vercel-openai",
-        "concentrate-openai"
+        "concentrate-openai",
+        "cloudflare-openai"
       ],
       "case_id": "production-analysis",
       "condition": "warm",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 25
+      "repetition": 30
     },
     {
       "arm_ids": [
         "openrouter-openai",
         "vercel-openai",
         "concentrate-openai",
+        "cloudflare-openai",
         "direct-openai"
       ],
       "case_id": "production-analysis",
       "condition": "cold",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 5
+      "repetition": 33
     },
     {
       "arm_ids": [
         "vercel-openai",
         "concentrate-openai",
+        "cloudflare-openai",
         "direct-openai",
         "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 23
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 10
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai"
       ],
       "case_id": "production-analysis",
       "condition": "warm",
@@ -39,58 +68,63 @@
     },
     {
       "arm_ids": [
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 29
-    },
-    {
-      "arm_ids": [
+        "cloudflare-openai",
         "concentrate-openai",
         "vercel-openai",
         "openrouter-openai",
         "direct-openai"
       ],
       "case_id": "production-analysis",
-      "condition": "warm",
+      "condition": "cold",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 26
+      "repetition": 36
     },
     {
       "arm_ids": [
         "direct-openai",
+        "cloudflare-openai",
         "concentrate-openai",
         "vercel-openai",
         "openrouter-openai"
       ],
       "case_id": "production-analysis",
-      "condition": "cold",
+      "condition": "warm",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 18
+      "repetition": 6
     },
     {
       "arm_ids": [
         "openrouter-openai",
         "direct-openai",
+        "cloudflare-openai",
         "concentrate-openai",
         "vercel-openai"
       ],
       "case_id": "production-analysis",
-      "condition": "warm",
+      "condition": "cold",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 32
+      "repetition": 46
     },
     {
       "arm_ids": [
         "vercel-openai",
         "openrouter-openai",
         "direct-openai",
+        "cloudflare-openai",
         "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 45
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai"
       ],
       "case_id": "production-analysis",
       "condition": "cold",
@@ -102,31 +136,8 @@
         "direct-openai",
         "openrouter-openai",
         "vercel-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 18
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "vercel-openai",
         "concentrate-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 36
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai"
+        "cloudflare-openai"
       ],
       "case_id": "production-analysis",
       "condition": "warm",
@@ -135,7 +146,164 @@
     },
     {
       "arm_ids": [
+        "openrouter-openai",
+        "vercel-openai",
         "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 32
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 31
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 6
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 13
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 7
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 21
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 41
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 26
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 25
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 14
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 27
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 12
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "cloudflare-openai",
         "direct-openai",
         "openrouter-openai",
         "vercel-openai"
@@ -147,246 +315,7 @@
     },
     {
       "arm_ids": [
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 2
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 17
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 38
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 43
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 17
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 12
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 34
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 48
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 44
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 27
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 36
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 22
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 8
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 42
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 46
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 7
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 5
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 32
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 50
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 23
-    },
-    {
-      "arm_ids": [
+        "cloudflare-openai",
         "direct-openai",
         "openrouter-openai",
         "vercel-openai",
@@ -399,346 +328,11 @@
     },
     {
       "arm_ids": [
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 28
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 23
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 8
-    },
-    {
-      "arm_ids": [
+        "cloudflare-openai",
         "concentrate-openai",
         "vercel-openai",
         "openrouter-openai",
         "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 16
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 31
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 7
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 45
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 35
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 40
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 21
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 25
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 22
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 11
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 27
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 19
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 20
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 50
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 29
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 15
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 43
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 41
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 15
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 46
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 19
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 26
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 49
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 13
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 14
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai"
       ],
       "case_id": "production-analysis",
       "condition": "cold",
@@ -747,289 +341,14 @@
     },
     {
       "arm_ids": [
-        "openrouter-openai",
         "direct-openai",
-        "concentrate-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 37
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 3
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 1
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 2
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 31
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 9
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 24
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
+        "cloudflare-openai",
         "concentrate-openai",
         "vercel-openai",
         "openrouter-openai"
       ],
       "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 1
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
       "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 39
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 6
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 41
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 34
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 13
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 16
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 3
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 24
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 12
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 30
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 10
-    },
-    {
-      "arm_ids": [
-        "openrouter-openai",
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 35
-    },
-    {
-      "arm_ids": [
-        "vercel-openai",
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 6
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "direct-openai",
-        "openrouter-openai",
-        "vercel-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 39
-    },
-    {
-      "arm_ids": [
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai",
-        "direct-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "warm",
-      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 33
-    },
-    {
-      "arm_ids": [
-        "direct-openai",
-        "concentrate-openai",
-        "vercel-openai",
-        "openrouter-openai"
-      ],
-      "case_id": "production-analysis",
-      "condition": "cold",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
       "repetition": 38
     },
@@ -1037,43 +356,60 @@
       "arm_ids": [
         "openrouter-openai",
         "direct-openai",
+        "cloudflare-openai",
         "concentrate-openai",
         "vercel-openai"
       ],
       "case_id": "production-analysis",
-      "condition": "warm",
+      "condition": "cold",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 48
+      "repetition": 24
     },
     {
       "arm_ids": [
         "vercel-openai",
         "openrouter-openai",
         "direct-openai",
+        "cloudflare-openai",
         "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 25
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai"
       ],
       "case_id": "production-analysis",
       "condition": "cold",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 21
+      "repetition": 43
     },
     {
       "arm_ids": [
         "direct-openai",
         "openrouter-openai",
         "vercel-openai",
-        "concentrate-openai"
+        "concentrate-openai",
+        "cloudflare-openai"
       ],
       "case_id": "production-analysis",
       "condition": "warm",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 30
+      "repetition": 7
     },
     {
       "arm_ids": [
         "openrouter-openai",
         "vercel-openai",
         "concentrate-openai",
+        "cloudflare-openai",
         "direct-openai"
       ],
       "case_id": "production-analysis",
@@ -1085,17 +421,19 @@
       "arm_ids": [
         "vercel-openai",
         "concentrate-openai",
+        "cloudflare-openai",
         "direct-openai",
         "openrouter-openai"
       ],
       "case_id": "production-analysis",
       "condition": "warm",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 11
+      "repetition": 48
     },
     {
       "arm_ids": [
         "concentrate-openai",
+        "cloudflare-openai",
         "direct-openai",
         "openrouter-openai",
         "vercel-openai"
@@ -1103,50 +441,236 @@
       "case_id": "production-analysis",
       "condition": "cold",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 33
+      "repetition": 15
     },
     {
       "arm_ids": [
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 5
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
         "concentrate-openai",
         "vercel-openai",
         "openrouter-openai",
         "direct-openai"
       ],
       "case_id": "production-analysis",
-      "condition": "warm",
+      "condition": "cold",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 40
+      "repetition": 28
     },
     {
       "arm_ids": [
         "direct-openai",
+        "cloudflare-openai",
         "concentrate-openai",
         "vercel-openai",
         "openrouter-openai"
       ],
       "case_id": "production-analysis",
-      "condition": "cold",
+      "condition": "warm",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 10
+      "repetition": 20
     },
     {
       "arm_ids": [
         "openrouter-openai",
         "direct-openai",
+        "cloudflare-openai",
         "concentrate-openai",
         "vercel-openai"
       ],
       "case_id": "production-analysis",
-      "condition": "warm",
+      "condition": "cold",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 45
+      "repetition": 9
     },
     {
       "arm_ids": [
         "vercel-openai",
         "openrouter-openai",
         "direct-openai",
+        "cloudflare-openai",
         "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 49
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 16
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 3
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 34
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 44
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 2
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 17
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 26
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 43
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 1
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 28
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 5
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 41
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai"
       ],
       "case_id": "production-analysis",
       "condition": "cold",
@@ -1155,10 +679,193 @@
     },
     {
       "arm_ids": [
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 24
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 21
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
         "direct-openai",
         "openrouter-openai",
         "vercel-openai",
         "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 15
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 13
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 8
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 38
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 33
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 31
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 46
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 3
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 35
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 23
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 16
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 35
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai"
       ],
       "case_id": "production-analysis",
       "condition": "warm",
@@ -1168,8 +875,61 @@
     {
       "arm_ids": [
         "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 22
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 39
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 47
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "openrouter-openai",
         "vercel-openai",
         "concentrate-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 34
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
         "direct-openai"
       ],
       "case_id": "production-analysis",
@@ -1181,17 +941,19 @@
       "arm_ids": [
         "vercel-openai",
         "concentrate-openai",
+        "cloudflare-openai",
         "direct-openai",
         "openrouter-openai"
       ],
       "case_id": "production-analysis",
       "condition": "warm",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 28
+      "repetition": 50
     },
     {
       "arm_ids": [
         "concentrate-openai",
+        "cloudflare-openai",
         "direct-openai",
         "openrouter-openai",
         "vercel-openai"
@@ -1199,7 +961,345 @@
       "case_id": "production-analysis",
       "condition": "cold",
       "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
-      "repetition": 47
+      "repetition": 48
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 37
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 30
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 10
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 8
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 22
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 50
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 40
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 12
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 2
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 18
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 1
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 40
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 19
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 17
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 11
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 45
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 18
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 11
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 36
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 42
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "direct-openai",
+        "openrouter-openai",
+        "vercel-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 27
+    },
+    {
+      "arm_ids": [
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 19
+    },
+    {
+      "arm_ids": [
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 32
+    },
+    {
+      "arm_ids": [
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai",
+        "vercel-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 29
+    },
+    {
+      "arm_ids": [
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai",
+        "concentrate-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "warm",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 29
+    },
+    {
+      "arm_ids": [
+        "concentrate-openai",
+        "vercel-openai",
+        "openrouter-openai",
+        "direct-openai",
+        "cloudflare-openai"
+      ],
+      "case_id": "production-analysis",
+      "condition": "cold",
+      "prompt_digest": "f8edf92270d8bff8a6f6fcc0daf025f72fe953ee3390d56d49323f02df896ad2",
+      "repetition": 39
     }
   ],
   "schema_version": 1
