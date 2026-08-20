@@ -193,6 +193,58 @@ class GatewayFamilyTests(_SiteFixture):
 
 
 class GatewayProbeFamilyTests(_SiteFixture):
+    def test_supplemental_arm_overlays_target_with_separate_provenance(self):
+        target = {
+            "id": "base", "result_count": 500,
+            "run_note": "Original run.",
+            "arms": [{"arm_id": "direct", "baseline": True}],
+            "contrasts": [],
+            "completion_integrity": {"arms": {"direct": {}}},
+            "output_token_limit_equalities": {"arms": {"direct": {}}},
+        }
+        supplement = {
+            "id": "ramp", "supplement_to": "base",
+            "supplement_arms": ["ramp-openai"], "result_count": 200,
+            "baseline_arm_id": "direct",
+            "date": "2026-08-20", "verified_with_commit": "a" * 40,
+            "experiment_digest": "b" * 64,
+            "experiment_path": "gateway-probe/ramp/experiment.json",
+            "results_path": "gateway-probe/ramp/results.jsonl",
+            "run_note": "Later run.",
+            "arms": [
+                {"arm_id": "direct", "baseline": True},
+                {"arm_id": "ramp-openai", "baseline": False},
+            ],
+            "contrasts": [{"arm_id": "ramp-openai"}],
+            "completion_integrity": {"arms": {"ramp-openai": {"cold": {}}}},
+            "output_token_limit_equalities": {"arms": {"ramp-openai": {}}},
+        }
+
+        merged = site._merge_gateway_probe_supplements([target, supplement])
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["result_count"], 700)
+        self.assertEqual(merged[0]["date"], "2026-08-20")
+        self.assertEqual(
+            [arm["arm_id"] for arm in merged[0]["arms"]],
+            ["direct", "ramp-openai"],
+        )
+        self.assertEqual(merged[0]["contrasts"], [{"arm_id": "ramp-openai"}])
+        self.assertEqual(merged[0]["supplemental_runs"][0]["id"], "ramp")
+        self.assertEqual(
+            merged[0]["supplemental_runs"][0]["results_path"],
+            "gateway-probe/ramp/results.jsonl",
+        )
+        self.assertEqual(
+            merged[0]["arms"][1]["score_baseline_arm"]["arm_id"],
+            "direct",
+        )
+        self.assertEqual(merged[0]["run_note"], "Original run.")
+        self.assertIsNone(merged[0]["retry_summary"])
+        self.assertEqual(
+            merged[0]["supplemental_runs"][0]["run_note"], "Later run."
+        )
+
     def test_checked_in_models_publish_gpt56_first_with_prior_models(self):
         repo_docs = str(Path(__file__).resolve().parents[2] / "docs")
 

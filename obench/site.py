@@ -878,6 +878,12 @@ def aggregate_gateway_probe_bundle(
             leaderboard._rel_under(site_dir, results_path)
             if site_dir else results_path
         ),
+        "experiment_path": (
+            leaderboard._rel_under(
+                site_dir, os.path.join(bundle_dir, "experiment.json")
+            )
+            if site_dir else os.path.join(bundle_dir, "experiment.json")
+        ),
         "track": track,
         "model_match": first_row.get("model_match"),
         "experiment_id": report.get("experiment_id"),
@@ -897,10 +903,97 @@ def aggregate_gateway_probe_bundle(
         "arms": arms,
         "contrasts": contrasts,
     }
+    supplement_to = entry.get("supplement_to")
+    supplement_arms = entry.get("supplement_arms")
+    if isinstance(supplement_to, str) and supplement_to.strip():
+        bundle["supplement_to"] = supplement_to.strip()
+    if (
+        isinstance(supplement_arms, list)
+        and supplement_arms
+        and all(isinstance(item, str) and item.strip() for item in supplement_arms)
+    ):
+        bundle["supplement_arms"] = list(dict.fromkeys(
+            item.strip() for item in supplement_arms
+        ))
     run_note = _gateway_run_note(entry.get("run_note"))
     if run_note:
         bundle["run_note"] = run_note
     return bundle
+
+
+def _merge_gateway_probe_supplements(bundles):
+    """Overlay explicitly declared later arms without rewriting sealed bundles."""
+    by_id = {bundle.get("id"): bundle for bundle in bundles}
+    supplemental_ids = set()
+    for supplement in bundles:
+        target_id = supplement.get("supplement_to")
+        selected_ids = supplement.get("supplement_arms")
+        if not target_id or not selected_ids:
+            continue
+        target = by_id.get(target_id)
+        if target is None:
+            continue
+        selected = set(selected_ids)
+        existing = {arm.get("arm_id") for arm in target.get("arms") or []}
+        additions = [
+            arm for arm in supplement.get("arms") or []
+            if arm.get("arm_id") in selected and arm.get("arm_id") not in existing
+        ]
+        if len(additions) != len(selected):
+            continue
+        supplement_baseline = next(
+            (
+                arm for arm in supplement.get("arms") or []
+                if arm.get("arm_id") == supplement.get("baseline_arm_id")
+            ),
+            None,
+        )
+        if supplement_baseline is None:
+            continue
+        for arm in additions:
+            arm["score_baseline_arm"] = supplement_baseline
+        target["arms"].extend(additions)
+        target["arms"].sort(key=lambda arm: (
+            0 if arm.get("baseline") else 1,
+            arm.get("arm_id") or "",
+        ))
+        target.setdefault("contrasts", []).extend(
+            contrast for contrast in supplement.get("contrasts") or []
+            if contrast.get("arm_id") in selected
+        )
+        for field in ("completion_integrity", "output_token_limit_equalities"):
+            source = supplement.get(field)
+            destination = target.get(field)
+            source_arms = source.get("arms") if isinstance(source, dict) else None
+            destination_arms = (
+                destination.get("arms") if isinstance(destination, dict) else None
+            )
+            if isinstance(source_arms, dict) and isinstance(destination_arms, dict):
+                for arm_id in selected:
+                    if arm_id in source_arms:
+                        destination_arms[arm_id] = source_arms[arm_id]
+        if isinstance(supplement.get("result_count"), int):
+            target["result_count"] = (
+                int(target.get("result_count") or 0)
+                + supplement["result_count"]
+            )
+        if (supplement.get("date") or "") > (target.get("date") or ""):
+            target["date"] = supplement["date"]
+        # A combined board does not have one truthful aggregate retry summary:
+        # its selected arms come from separately scheduled runs.
+        target["retry_summary"] = None
+        target.setdefault("supplemental_runs", []).append({
+            "id": supplement.get("id"),
+            "date": supplement.get("date"),
+            "verified_with_commit": supplement.get("verified_with_commit"),
+            "experiment_digest": supplement.get("experiment_digest"),
+            "experiment_path": supplement.get("experiment_path"),
+            "results_path": supplement.get("results_path"),
+            "run_note": supplement.get("run_note"),
+            "arm_ids": sorted(selected),
+        })
+        supplemental_ids.add(supplement.get("id"))
+    return [bundle for bundle in bundles if bundle.get("id") not in supplemental_ids]
 
 
 def build_gateway_probe_family(site_dir, gateway_probe_dirs=None):
@@ -957,6 +1050,7 @@ def build_gateway_probe_family(site_dir, gateway_probe_dirs=None):
                 continue
             bundles.append(aggregated)
 
+    bundles = _merge_gateway_probe_supplements(bundles)
     bundles.sort(
         key=lambda bundle: (
             not bundle.get("default"),
@@ -2782,6 +2876,7 @@ def _gateway_probe_composite_scores(bundle):
 
     rows = []
     for arm in arms.values():
+        score_baseline = arm.get("score_baseline_arm") or baseline
         weighted_score = 0.0
         complete = True
         for (condition, percentile), weight in _GATEWAY_COMPOSITE_WEIGHTS.items():
@@ -2790,7 +2885,7 @@ def _gateway_probe_composite_scores(bundle):
                 arm, condition, metric_name, percentile
             )
             reference = metric(
-                baseline, condition, metric_name, percentile
+                score_baseline, condition, metric_name, percentile
             )
             subscore = score_ratio(
                 value, reference, higher_is_better=False
@@ -2798,7 +2893,7 @@ def _gateway_probe_composite_scores(bundle):
             if (
                 subscore is None
                 or not metric_complete(arm, condition, metric_name)
-                or not metric_complete(baseline, condition, metric_name)
+                or not metric_complete(score_baseline, condition, metric_name)
             ):
                 complete = False
                 break
@@ -2808,7 +2903,7 @@ def _gateway_probe_composite_scores(bundle):
             arm, "warm", "throughput_tokens_per_s", "p50"
         )
         reference_throughput = metric(
-            baseline, "warm", "throughput_tokens_per_s", "p50"
+            score_baseline, "warm", "throughput_tokens_per_s", "p50"
         )
         throughput_score = score_ratio(
             throughput, reference_throughput, higher_is_better=True
@@ -2821,7 +2916,7 @@ def _gateway_probe_composite_scores(bundle):
                 arm, "warm", "throughput_tokens_per_s"
             )
             or not metric_complete(
-                baseline, "warm", "throughput_tokens_per_s"
+                score_baseline, "warm", "throughput_tokens_per_s"
             )
             or route_availability is None
         ):
@@ -2957,6 +3052,45 @@ def _gateway_probe_board(bundle):
                 _tag("b", {}, "Run note: ") + _esc(run_note),
             )
             if run_note else ""
+        )
+        + "".join(
+            _tag(
+                "p",
+                {"class": "sub"},
+                (
+                    _tag("b", {}, "Supplemental run note: ")
+                    + _esc(run["run_note"])
+                    + " "
+                    if run.get("run_note") else ""
+                )
+                +
+                "Supplemental evidence ("
+                + _esc(run.get("date") or "later run")
+                + "): "
+                + (
+                    _link(run["results_path"], "results.jsonl")
+                    if run.get("results_path") else "results unavailable"
+                )
+                + (
+                    "; verified commit "
+                    + _link(
+                        "https://github.com/minghinmatthewlam/openbench/commit/"
+                        + run["verified_with_commit"],
+                        _esc(run["verified_with_commit"][:12]),
+                    )
+                    if run.get("verified_with_commit") else ""
+                )
+                + (
+                    "; experiment "
+                    + _link(
+                        run["experiment_path"],
+                        _esc(run["experiment_digest"][:12]),
+                    )
+                    if run.get("experiment_digest")
+                    and run.get("experiment_path") else ""
+                ),
+            )
+            for run in bundle.get("supplemental_runs") or []
         ),
     )
 

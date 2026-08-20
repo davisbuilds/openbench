@@ -31,5 +31,15 @@
     "default": true,
     "run_note": "Five routes, each with 50 cold and 50 warm measured requests. Warm measurements include a separate primer. All routes use GPT-5.6 Sol with medium reasoning; temperature and top_p are omitted so provider defaults apply. Gateway routes lock to OpenAI with fallbacks and response caching disabled. Cloudflare returned HTTP 402 for 25 of 100 measured requests; availability is included in its composite score.",
     "submitter": "OpenBench"
+  },
+  {
+    "id": "2026-08-20-gpt56-ramp-supplemental-100",
+    "title": "GPT-5.6 Sol Ramp Router supplemental run",
+    "model": "GPT-5.6 Sol",
+    "date": "2026-08-20",
+    "supplement_to": "2026-08-18-gpt56-sol-managed-100",
+    "supplement_arms": ["ramp-openai"],
+    "run_note": "Ramp Router adds 50 cold and 50 warm measured requests collected on 2026-08-20. Its direct-relative deltas use the fresh direct OpenAI control from the same supplemental run, not the 2026-08-18 control. Ramp returns the served GPT-5.6 Sol model ID but not an upstream-provider field; OpenBench derives OpenAI ownership from the admitted model identity.",
+    "submitter": "OpenBench"
   }
 ]

@@ -1489,6 +1489,746 @@
             "role": "gateway"
           },
           {
+            "arm_id": "ramp-openai",
+            "baseline": false,
+            "conditions": {
+              "cold": {
+                "availability": {
+                  "attempted": 50,
+                  "rate": 1.0,
+                  "successes": 50,
+                  "wilson95": {
+                    "confidence": 0.95,
+                    "high": 1.0,
+                    "low": 0.9286499658256813
+                  }
+                },
+                "denominators": {
+                  "attempted": 50,
+                  "request_failed": 0,
+                  "route_failed": 0,
+                  "route_unverifiable": 0,
+                  "route_verified": 50,
+                  "scheduled": 50,
+                  "success": 50
+                },
+                "metrics": {
+                  "budget_debit_usd": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.0014275,
+                    "p95": 0.0017832500000000001
+                  },
+                  "cache_write_input_tokens": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.0,
+                    "p95": 0.0
+                  },
+                  "cached_input_tokens": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.0,
+                    "p95": 0.0
+                  },
+                  "cold_end_to_end_first_body_byte_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 1.3313687711488456,
+                    "p95": 6.457146087475118
+                  },
+                  "cold_end_to_end_response_headers_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 1.331201208056882,
+                    "p95": 6.4569749329239094
+                  },
+                  "cold_end_to_end_semantic_ttft_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 1.3324487290810794,
+                    "p95": 6.458289426867847
+                  },
+                  "cold_end_to_end_stream_total_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 2.802893521031365,
+                    "p95": 7.075026627141049
+                  },
+                  "input_tokens": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 42.0,
+                    "p95": 45.0
+                  },
+                  "measured_cost_usd": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.0014275,
+                    "p95": 0.0017832500000000001
+                  },
+                  "observed_cost_usd": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.0014275,
+                    "p95": 0.0017832500000000001
+                  },
+                  "output_tokens": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 41.0,
+                    "p95": 52.55
+                  },
+                  "request_stream_total_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 2.7550697296392173,
+                    "p95": 7.026515026972627
+                  },
+                  "request_to_first_body_byte_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 1.2677294376771897,
+                    "p95": 6.408634487306696
+                  },
+                  "request_to_response_headers_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 1.2675618745852262,
+                    "p95": 6.408463332755487
+                  },
+                  "request_to_semantic_ttft_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 1.2688093956094235,
+                    "p95": 6.4097778266994245
+                  },
+                  "setup_dns_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.002150937682017684,
+                    "p95": 0.0025158205535262823
+                  },
+                  "setup_tcp_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.019747458631172776,
+                    "p95": 0.036674370756372796
+                  },
+                  "setup_tls_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.02810522820800543,
+                    "p95": 0.04262407114729285
+                  },
+                  "throughput_tokens_per_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 37.51646969557622,
+                    "p95": 67.13183119545906
+                  },
+                  "total_tokens": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 83.5,
+                    "p95": 94.1
+                  }
+                },
+                "retry_diagnostics": {
+                  "attempt_count_distribution": {
+                    "1": 50
+                  },
+                  "eventual_successes": 50,
+                  "first_attempt_successes": 50,
+                  "logical_cells": 50,
+                  "retry_rescues": 0,
+                  "unknown_cost_attempts": 0
+                }
+              },
+              "warm": {
+                "availability": {
+                  "attempted": 50,
+                  "rate": 1.0,
+                  "successes": 50,
+                  "wilson95": {
+                    "confidence": 0.95,
+                    "high": 1.0,
+                    "low": 0.9286499658256813
+                  }
+                },
+                "denominators": {
+                  "attempted": 50,
+                  "request_failed": 0,
+                  "route_failed": 0,
+                  "route_unverifiable": 0,
+                  "route_verified": 50,
+                  "scheduled": 50,
+                  "success": 50
+                },
+                "metrics": {
+                  "budget_debit_usd": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.0029375,
+                    "p95": 0.00329375
+                  },
+                  "cache_write_input_tokens": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.0,
+                    "p95": 0.0
+                  },
+                  "cached_input_tokens": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.0,
+                    "p95": 0.0
+                  },
+                  "input_tokens": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 42.0,
+                    "p95": 45.0
+                  },
+                  "measured_cost_usd": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.001425,
+                    "p95": 0.0017564999999999998
+                  },
+                  "observed_cost_usd": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 0.0029375,
+                    "p95": 0.00329375
+                  },
+                  "output_tokens": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 40.5,
+                    "p95": 51.099999999999994
+                  },
+                  "request_stream_total_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 2.9465111666359007,
+                    "p95": 6.790144020807929
+                  },
+                  "request_to_first_body_byte_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 1.6926622295286506,
+                    "p95": 6.2328684916021295
+                  },
+                  "request_to_response_headers_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 1.6924891041126102,
+                    "p95": 6.232687968807294
+                  },
+                  "request_to_semantic_ttft_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 1.6926622295286506,
+                    "p95": 6.233270089607684
+                  },
+                  "throughput_tokens_per_s": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 40.11674218758847,
+                    "p95": 85.64563351396319
+                  },
+                  "total_tokens": {
+                    "coverage": {
+                      "covered": 50,
+                      "ratio": 1.0,
+                      "total": 50
+                    },
+                    "p50": 83.0,
+                    "p95": 94.0
+                  }
+                },
+                "retry_diagnostics": {
+                  "attempt_count_distribution": {
+                    "1": 50
+                  },
+                  "eventual_successes": 50,
+                  "first_attempt_successes": 50,
+                  "logical_cells": 50,
+                  "retry_rescues": 0,
+                  "unknown_cost_attempts": 0
+                }
+              }
+            },
+            "role": "gateway",
+            "score_baseline_arm": {
+              "arm_id": "direct-openai",
+              "baseline": true,
+              "conditions": {
+                "cold": {
+                  "availability": {
+                    "attempted": 50,
+                    "rate": 1.0,
+                    "successes": 50,
+                    "wilson95": {
+                      "confidence": 0.95,
+                      "high": 1.0,
+                      "low": 0.9286499658256813
+                    }
+                  },
+                  "denominators": {
+                    "attempted": 50,
+                    "request_failed": 0,
+                    "route_failed": 0,
+                    "route_unverifiable": 0,
+                    "route_verified": 50,
+                    "scheduled": 50,
+                    "success": 50
+                  },
+                  "metrics": {
+                    "budget_debit_usd": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.0014550000000000001,
+                      "p95": 0.0017737499999999997
+                    },
+                    "cache_write_input_tokens": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.0,
+                      "p95": 0.0
+                    },
+                    "cached_input_tokens": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.0,
+                      "p95": 0.0
+                    },
+                    "cold_end_to_end_first_body_byte_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.5404538328293711,
+                      "p95": 1.3034997649490827
+                    },
+                    "cold_end_to_end_response_headers_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.5402706870809197,
+                      "p95": 1.302919377549551
+                    },
+                    "cold_end_to_end_semantic_ttft_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 1.2048111038748175,
+                      "p95": 2.0782052062917495
+                    },
+                    "cold_end_to_end_stream_total_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 2.091131979133934,
+                      "p95": 3.3658654108177872
+                    },
+                    "input_tokens": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 42.0,
+                      "p95": 45.0
+                    },
+                    "measured_cost_usd": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.0014550000000000001,
+                      "p95": 0.0017737499999999997
+                    },
+                    "observed_cost_usd": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.0014550000000000001,
+                      "p95": 0.0017737499999999997
+                    },
+                    "output_tokens": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 41.5,
+                      "p95": 52.0
+                    },
+                    "request_stream_total_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 2.0489423545077443,
+                      "p95": 3.314366120868362
+                    },
+                    "request_to_first_body_byte_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.49184256233274937,
+                      "p95": 1.2552430083276698
+                    },
+                    "request_to_response_headers_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.491659416584298,
+                      "p95": 1.254662620928138
+                    },
+                    "request_to_semantic_ttft_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 1.1309491673018783,
+                      "p95": 2.015812387410551
+                    },
+                    "setup_dns_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.002478020265698433,
+                      "p95": 0.040087527502328135
+                    },
+                    "setup_tcp_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.01909939548932016,
+                      "p95": 0.025794085324741894
+                    },
+                    "setup_tls_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.02658360404893756,
+                      "p95": 0.037893362599425
+                    },
+                    "throughput_tokens_per_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 52.8245826695139,
+                      "p95": 69.16177203539158
+                    },
+                    "total_tokens": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 84.0,
+                      "p95": 96.1
+                    }
+                  },
+                  "retry_diagnostics": {
+                    "attempt_count_distribution": {
+                      "1": 50
+                    },
+                    "eventual_successes": 50,
+                    "first_attempt_successes": 50,
+                    "logical_cells": 50,
+                    "retry_rescues": 0,
+                    "unknown_cost_attempts": 0
+                  }
+                },
+                "warm": {
+                  "availability": {
+                    "attempted": 50,
+                    "rate": 1.0,
+                    "successes": 50,
+                    "wilson95": {
+                      "confidence": 0.95,
+                      "high": 1.0,
+                      "low": 0.9286499658256813
+                    }
+                  },
+                  "denominators": {
+                    "attempted": 50,
+                    "request_failed": 0,
+                    "route_failed": 0,
+                    "route_unverifiable": 0,
+                    "route_verified": 50,
+                    "scheduled": 50,
+                    "success": 50
+                  },
+                  "metrics": {
+                    "budget_debit_usd": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.0029575,
+                      "p95": 0.0036047499999999994
+                    },
+                    "cache_write_input_tokens": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.0,
+                      "p95": 0.0
+                    },
+                    "cached_input_tokens": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.0,
+                      "p95": 0.0
+                    },
+                    "input_tokens": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 42.0,
+                      "p95": 45.0
+                    },
+                    "measured_cost_usd": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.001445,
+                      "p95": 0.0017455
+                    },
+                    "observed_cost_usd": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.0029575,
+                      "p95": 0.0036047499999999994
+                    },
+                    "output_tokens": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 41.0,
+                      "p95": 51.0
+                    },
+                    "request_stream_total_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 1.9241711250506341,
+                      "p95": 2.7517991245491427
+                    },
+                    "request_to_first_body_byte_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.4260029373690486,
+                      "p95": 0.8457103753229602
+                    },
+                    "request_to_response_headers_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 0.41929920809343457,
+                      "p95": 0.8455722668673842
+                    },
+                    "request_to_semantic_ttft_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 1.0377994372975081,
+                      "p95": 1.924336612760089
+                    },
+                    "throughput_tokens_per_s": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 54.14365228113792,
+                      "p95": 73.77384349482251
+                    },
+                    "total_tokens": {
+                      "coverage": {
+                        "covered": 50,
+                        "ratio": 1.0,
+                        "total": 50
+                      },
+                      "p50": 84.0,
+                      "p95": 94.1
+                    }
+                  },
+                  "retry_diagnostics": {
+                    "attempt_count_distribution": {
+                      "1": 50
+                    },
+                    "eventual_successes": 50,
+                    "first_attempt_successes": 50,
+                    "logical_cells": 50,
+                    "retry_rescues": 0,
+                    "unknown_cost_attempts": 0
+                  }
+                }
+              },
+              "role": "direct"
+            }
+          },
+          {
             "arm_id": "vercel-openai",
             "baseline": false,
             "conditions": {
@@ -1948,6 +2688,33 @@
               }
             },
             "openrouter-openai": {
+              "cold": {
+                "measured": {
+                  "length": 0,
+                  "missing": 50,
+                  "natural_stop": 0,
+                  "other": 0,
+                  "total": 50
+                }
+              },
+              "warm": {
+                "measured": {
+                  "length": 0,
+                  "missing": 50,
+                  "natural_stop": 0,
+                  "other": 0,
+                  "total": 50
+                },
+                "warm_primer": {
+                  "length": 0,
+                  "missing": 50,
+                  "natural_stop": 0,
+                  "other": 0,
+                  "total": 50
+                }
+              }
+            },
+            "ramp-openai": {
               "cold": {
                 "measured": {
                   "length": 0,
@@ -3881,12 +4648,485 @@
               }
             },
             "direct_arm": "direct-openai"
+          },
+          {
+            "arm_id": "ramp-openai",
+            "conditions": {
+              "cold": {
+                "budget_debit_usd": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 4.500000000000001e-05,
+                    "low": -5.999999999999994e-05,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                },
+                "cache_write_input_tokens": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.0,
+                    "low": 0.0,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                },
+                "cached_input_tokens": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.0,
+                    "low": 0.0,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                },
+                "cold_end_to_end_first_body_byte_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.33543383423239,
+                    "low": 0.6163310005795211,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.8161516247782856
+                },
+                "cold_end_to_end_response_headers_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.3354370421729982,
+                    "low": 0.5826042089611292,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.8161298125050962
+                },
+                "cold_end_to_end_semantic_ttft_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.5774540631100535,
+                    "low": 0.045760625042021275,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.25313329230993986
+                },
+                "cold_end_to_end_stream_total_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.3831315622664988,
+                    "low": 0.3630867078900337,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.8306385416071862
+                },
+                "input_tokens": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.0,
+                    "low": 0.0,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                },
+                "measured_cost_usd": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 4.500000000000001e-05,
+                    "low": -5.999999999999994e-05,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                },
+                "observed_cost_usd": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 4.500000000000001e-05,
+                    "low": -5.999999999999994e-05,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                },
+                "output_tokens": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.0124999999999318,
+                    "low": -2.0,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                },
+                "request_stream_total_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.369513832964003,
+                    "low": 0.37796179112046957,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.8251857713330537
+                },
+                "request_to_first_body_byte_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.3357149166986346,
+                    "low": 0.5807343546766788,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.8121064167935401
+                },
+                "request_to_response_headers_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.3357181246392429,
+                    "low": 0.5838832301087677,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.8120846045203507
+                },
+                "request_to_semantic_ttft_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.5419163759797812,
+                    "low": 0.03620096854283478,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.2535228750202805
+                },
+                "setup_dns_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": -0.00021666637621819973,
+                    "low": -0.0005227699875831604,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": -0.0003805209416896105
+                },
+                "setup_tcp_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.0021877912804484367,
+                    "low": -0.0011935620568692684,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0004559159278869629
+                },
+                "setup_tls_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.003180188126862049,
+                    "low": 0.0006778540555387735,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0023489580489695072
+                },
+                "throughput_tokens_per_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": -8.171927131639809,
+                    "low": -14.400789147577413,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": -12.853599072740957
+                },
+                "total_tokens": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.5,
+                    "low": -2.0,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                }
+              },
+              "warm": {
+                "budget_debit_usd": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.00014999999999999974,
+                    "low": -0.00018000000000000004,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": -5.999999999999994e-05
+                },
+                "cache_write_input_tokens": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.0,
+                    "low": 0.0,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                },
+                "cached_input_tokens": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.0,
+                    "low": 0.0,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                },
+                "input_tokens": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.0,
+                    "low": 0.0,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.0
+                },
+                "measured_cost_usd": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.00011999999999999999,
+                    "low": -6.000000000000016e-05,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 4.49999999999999e-05
+                },
+                "observed_cost_usd": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.00014999999999999974,
+                    "low": -0.00018000000000000004,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": -5.999999999999994e-05
+                },
+                "output_tokens": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 4.0,
+                    "low": -2.5,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 1.5
+                },
+                "request_stream_total_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.5831876881420612,
+                    "low": 0.5556532926857471,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.9083914794027805
+                },
+                "request_to_first_body_byte_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.5410301247611642,
+                    "low": 0.8843627283349633,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 1.2946127504110336
+                },
+                "request_to_response_headers_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 1.5410598539747298,
+                    "low": 0.8864973750896752,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 1.2946202922612429
+                },
+                "request_to_semantic_ttft_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 0.8768466045148671,
+                    "low": 0.27938676269259305,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 0.5458823749795556
+                },
+                "throughput_tokens_per_s": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": -0.32372087328075594,
+                    "low": -17.576023598839562,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": -14.47335964972813
+                },
+                "total_tokens": {
+                  "coverage": {
+                    "covered": 50,
+                    "ratio": 1.0,
+                    "total": 50
+                  },
+                  "interval": {
+                    "confidence": 0.95,
+                    "high": 4.0,
+                    "low": -2.5,
+                    "replicates": 2000
+                  },
+                  "median_gateway_minus_direct": 1.5
+                }
+              }
+            },
+            "direct_arm": "direct-openai"
           }
         ],
-        "date": "2026-08-18",
+        "date": "2026-08-20",
         "default": true,
         "experiment_digest": "960f93e76135d177f74363ec9e4001378b92f5ef2f08b3561c377f3ee21a3e03",
         "experiment_id": "gpt-5.6-sol-five-way-responses-probe-credit-rerun",
+        "experiment_path": "gateway-probe/2026-08-18-gpt56-sol-managed-100/experiment.json",
         "family": "gateway_probe",
         "id": "2026-08-18-gpt56-sol-managed-100",
         "kind": "release",
@@ -3935,6 +5175,16 @@
                 "measured": 50
               }
             },
+            "ramp-openai": {
+              "cold": {
+                "equal": 0,
+                "measured": 50
+              },
+              "warm": {
+                "equal": 0,
+                "measured": 50
+              }
+            },
             "vercel-openai": {
               "cold": {
                 "equal": 0,
@@ -3950,459 +5200,28 @@
         },
         "path": null,
         "price_digest": "ca00621f612b706ed9540e10d0e108b95bb60a5386cc0c0629a456cd8dbdb094",
-        "result_count": 500,
+        "result_count": 700,
         "result_schema_version": 4,
         "results_path": "gateway-probe/2026-08-18-gpt56-sol-managed-100/results.jsonl",
-        "retry_summary": {
-          "groups": [
-            {
-              "arm_id": "cloudflare-openai",
-              "attempt_distribution": {
-                "1": 50
-              },
-              "attempts": 50,
-              "condition": "cold",
-              "eventual_successes": 42,
-              "exhausted": 0,
-              "final_attempt_start_offset_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "first_attempt_successes": 42,
-              "logical_cells": 50,
-              "output_limits": {
-                "256": {
-                  "equal": 0,
-                  "measured": 42
-                }
-              },
-              "recovery_completion_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "rescued": 0,
-              "retried": 0,
-              "retry_after_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "wait_actual_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              }
-            },
-            {
-              "arm_id": "cloudflare-openai",
-              "attempt_distribution": {
-                "1": 45,
-                "2": 4,
-                "3": 1
-              },
-              "attempts": 56,
-              "condition": "warm",
-              "eventual_successes": 33,
-              "exhausted": 0,
-              "final_attempt_start_offset_s": {
-                "count": 5,
-                "max": 4.349332958925515,
-                "median": 3.4737804997712374
-              },
-              "first_attempt_successes": 30,
-              "logical_cells": 50,
-              "output_limits": {
-                "256": {
-                  "equal": 0,
-                  "measured": 33
-                }
-              },
-              "recovery_completion_s": {
-                "count": 5,
-                "max": 6.105113624595106,
-                "median": 5.231696874834597
-              },
-              "rescued": 3,
-              "retried": 5,
-              "retry_after_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "wait_actual_s": {
-                "count": 6,
-                "max": 1.010065000038594,
-                "median": 1.0081135001964867
-              }
-            },
-            {
-              "arm_id": "concentrate-openai",
-              "attempt_distribution": {
-                "1": 50
-              },
-              "attempts": 50,
-              "condition": "cold",
-              "eventual_successes": 50,
-              "exhausted": 0,
-              "final_attempt_start_offset_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "first_attempt_successes": 50,
-              "logical_cells": 50,
-              "output_limits": {
-                "256": {
-                  "equal": 0,
-                  "measured": 50
-                }
-              },
-              "recovery_completion_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "rescued": 0,
-              "retried": 0,
-              "retry_after_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "wait_actual_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              }
-            },
-            {
-              "arm_id": "concentrate-openai",
-              "attempt_distribution": {
-                "1": 50
-              },
-              "attempts": 50,
-              "condition": "warm",
-              "eventual_successes": 50,
-              "exhausted": 0,
-              "final_attempt_start_offset_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "first_attempt_successes": 50,
-              "logical_cells": 50,
-              "output_limits": {
-                "256": {
-                  "equal": 0,
-                  "measured": 50
-                }
-              },
-              "recovery_completion_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "rescued": 0,
-              "retried": 0,
-              "retry_after_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "wait_actual_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              }
-            },
-            {
-              "arm_id": "direct-openai",
-              "attempt_distribution": {
-                "1": 50
-              },
-              "attempts": 50,
-              "condition": "cold",
-              "eventual_successes": 50,
-              "exhausted": 0,
-              "final_attempt_start_offset_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "first_attempt_successes": 50,
-              "logical_cells": 50,
-              "output_limits": {
-                "256": {
-                  "equal": 0,
-                  "measured": 50
-                }
-              },
-              "recovery_completion_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "rescued": 0,
-              "retried": 0,
-              "retry_after_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "wait_actual_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              }
-            },
-            {
-              "arm_id": "direct-openai",
-              "attempt_distribution": {
-                "1": 50
-              },
-              "attempts": 50,
-              "condition": "warm",
-              "eventual_successes": 50,
-              "exhausted": 0,
-              "final_attempt_start_offset_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "first_attempt_successes": 50,
-              "logical_cells": 50,
-              "output_limits": {
-                "256": {
-                  "equal": 0,
-                  "measured": 50
-                }
-              },
-              "recovery_completion_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "rescued": 0,
-              "retried": 0,
-              "retry_after_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "wait_actual_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              }
-            },
-            {
-              "arm_id": "openrouter-openai",
-              "attempt_distribution": {
-                "1": 50
-              },
-              "attempts": 50,
-              "condition": "cold",
-              "eventual_successes": 50,
-              "exhausted": 0,
-              "final_attempt_start_offset_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "first_attempt_successes": 50,
-              "logical_cells": 50,
-              "output_limits": {
-                "256": {
-                  "equal": 0,
-                  "measured": 50
-                }
-              },
-              "recovery_completion_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "rescued": 0,
-              "retried": 0,
-              "retry_after_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "wait_actual_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              }
-            },
-            {
-              "arm_id": "openrouter-openai",
-              "attempt_distribution": {
-                "1": 50
-              },
-              "attempts": 50,
-              "condition": "warm",
-              "eventual_successes": 50,
-              "exhausted": 0,
-              "final_attempt_start_offset_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "first_attempt_successes": 50,
-              "logical_cells": 50,
-              "output_limits": {
-                "256": {
-                  "equal": 0,
-                  "measured": 50
-                }
-              },
-              "recovery_completion_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "rescued": 0,
-              "retried": 0,
-              "retry_after_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "wait_actual_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              }
-            },
-            {
-              "arm_id": "vercel-openai",
-              "attempt_distribution": {
-                "1": 50
-              },
-              "attempts": 50,
-              "condition": "cold",
-              "eventual_successes": 50,
-              "exhausted": 0,
-              "final_attempt_start_offset_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "first_attempt_successes": 50,
-              "logical_cells": 50,
-              "output_limits": {
-                "256": {
-                  "equal": 0,
-                  "measured": 50
-                }
-              },
-              "recovery_completion_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "rescued": 0,
-              "retried": 0,
-              "retry_after_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "wait_actual_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              }
-            },
-            {
-              "arm_id": "vercel-openai",
-              "attempt_distribution": {
-                "1": 50
-              },
-              "attempts": 50,
-              "condition": "warm",
-              "eventual_successes": 50,
-              "exhausted": 0,
-              "final_attempt_start_offset_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "first_attempt_successes": 50,
-              "logical_cells": 50,
-              "output_limits": {
-                "256": {
-                  "equal": 0,
-                  "measured": 50
-                }
-              },
-              "recovery_completion_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "rescued": 0,
-              "retried": 0,
-              "retry_after_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              },
-              "wait_actual_s": {
-                "count": 0,
-                "max": null,
-                "median": null
-              }
-            }
-          ],
-          "overall": {
-            "attempt_distribution": {
-              "1": 495,
-              "2": 4,
-              "3": 1
-            },
-            "attempts": 506,
-            "eventual_successes": 475,
-            "exhausted": 0,
-            "final_attempt_start_offset_s": {
-              "count": 5,
-              "max": 4.349332958925515,
-              "median": 3.4737804997712374
-            },
-            "first_attempt_successes": 472,
-            "logical_cells": 500,
-            "output_limits": {
-              "256": {
-                "equal": 0,
-                "measured": 475
-              }
-            },
-            "recovery_completion_s": {
-              "count": 5,
-              "max": 6.105113624595106,
-              "median": 5.231696874834597
-            },
-            "rescued": 3,
-            "retried": 5,
-            "retry_after_s": {
-              "count": 0,
-              "max": null,
-              "median": null
-            },
-            "wait_actual_s": {
-              "count": 6,
-              "max": 1.010065000038594,
-              "median": 1.0081135001964867
-            }
-          }
-        },
+        "retry_summary": null,
         "run_note": "Five routes, each with 50 cold and 50 warm measured requests. Warm measurements include a separate primer. All routes use GPT-5.6 Sol with medium reasoning; temperature and top_p are omitted so provider defaults apply. Gateway routes lock to OpenAI with fallbacks and response caching disabled. Cloudflare returned HTTP 402 for 25 of 100 measured requests; availability is included in its composite score.",
         "schedule_digest": "2ca5f7b04e8860429aafe14365ee02f230c9cf96dc81644f1860c9dd47ec1463",
         "scheduled_blocks_per_condition": 50,
         "submitter": "OpenBench",
+        "supplemental_runs": [
+          {
+            "arm_ids": [
+              "ramp-openai"
+            ],
+            "date": "2026-08-20",
+            "experiment_digest": "86d9f9d746246fdde56b3ea2149913c057955a3cb3c367440f71732df545efe5",
+            "experiment_path": "gateway-probe/2026-08-20-gpt56-ramp-supplemental-100/experiment.json",
+            "id": "2026-08-20-gpt56-ramp-supplemental-100",
+            "results_path": "gateway-probe/2026-08-20-gpt56-ramp-supplemental-100/results.jsonl",
+            "run_note": "Ramp Router adds 50 cold and 50 warm measured requests collected on 2026-08-20. Its direct-relative deltas use the fresh direct OpenAI control from the same supplemental run, not the 2026-08-18 control. Ramp returns the served GPT-5.6 Sol model ID but not an upstream-provider field; OpenBench derives OpenAI ownership from the admitted model identity.",
+            "verified_with_commit": "b7606d1f450f655e41a5ed28b7f890342941093b"
+          }
+        ],
         "title": "GPT-5.6 Sol Gateway Bench, 100 requests per route",
         "track": "request_probe",
         "verified_with_commit": "73c569ebf06a67e4935e5e850a827ebb7d3c78a9"
@@ -8258,6 +9077,7 @@
         "default": false,
         "experiment_digest": "34873bc948a088c2a5e23b3a356ed3425f71418e80f6f14afd400f6b73dcd8c4",
         "experiment_id": "deepseek-v4-flash-five-way-chat-probe",
+        "experiment_path": "gateway-probe/2026-08-03-deepseek-v4-flash-100/experiment.json",
         "family": "gateway_probe",
         "id": "2026-08-03-deepseek-v4-flash-100",
         "kind": "release",
@@ -12625,6 +13445,7 @@
         "default": false,
         "experiment_digest": "9748aef6256df8feeb4f0a075f7cfce5e009aad22d029c55795e5af354550f6c",
         "experiment_id": "kimi-k3-five-way-chat-r100-4096-retry-v1-2026-07-28",
+        "experiment_path": "gateway-probe/2026-07-28-kimi-k3-managed-100/experiment.json",
         "family": "gateway_probe",
         "id": "2026-07-28-kimi-k3-managed-100",
         "kind": "release",
@@ -16582,6 +17403,7 @@
         "default": false,
         "experiment_digest": "e3649dbc6dc423c5209cdc09c73f0d1275bfa6c231a5fa8300e444dc89e6f943",
         "experiment_id": "gpt-4o-mini-five-way-managed-probe-r30-2026-07-27",
+        "experiment_path": "gateway-probe/2026-07-27-gpt4o-mini-managed-30/experiment.json",
         "family": "gateway_probe",
         "id": "2026-07-27-gpt4o-mini-managed-30",
         "kind": "release",
