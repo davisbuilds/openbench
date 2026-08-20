@@ -161,6 +161,18 @@ class GatewayRequestProfileTests(unittest.TestCase):
                 requested_model="gpt-5.6-sol",
                 requested_provider="openai",
             )
+        with self.assertRaisesRegex(
+            gateway_profiles.GatewayProfileError,
+            "unambiguous provider mapping",
+        ):
+            gateway_profiles.validate_arm(
+                route_kind="gateway",
+                gateway="ramp",
+                endpoint="https://router-api.ramp.com/v1/responses",
+                protocol="openai_responses",
+                requested_model="some-unknown-model",
+                requested_provider="openai",
+            )
 
         body = self.base_body()
         body["fallback"] = "attacker/model"
@@ -557,7 +569,7 @@ class GatewayEvidenceTests(unittest.TestCase):
             **kwargs,
         )
 
-    def test_ramp_requires_returned_provider_evidence(self):
+    def test_ramp_derives_only_admitted_unambiguous_model_provider(self):
         proven = self.parse(
             sse(
                 {"model": "gpt-5.6-sol", "provider": "openai"},
@@ -573,7 +585,7 @@ class GatewayEvidenceTests(unittest.TestCase):
         self.assertTrue(proven["route_evidence"]["pass"])
         self.assertEqual(proven["route"]["provider"], "openai")
 
-        unproven = self.parse(
+        model_derived = self.parse(
             sse({"model": "gpt-5.6-sol"}, "[DONE]"),
             gateway="ramp",
             requested_model="gpt-5.6-sol",
@@ -582,8 +594,8 @@ class GatewayEvidenceTests(unittest.TestCase):
             allowed_providers=("openai",),
             model_match="rolling_alias",
         )
-        self.assertFalse(unproven["route_evidence"]["pass"])
-        self.assertIn("missing_provider", unproven["route_evidence"]["reasons"])
+        self.assertTrue(model_derived["route_evidence"]["pass"])
+        self.assertEqual(model_derived["route"]["provider"], "openai")
 
     def test_vercel_documented_route_and_single_attempt_pass(self):
         result = self.parse(

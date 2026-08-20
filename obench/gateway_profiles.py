@@ -26,6 +26,12 @@ _CONCENTRATE_ENDPOINTS = {
 _RAMP_ENDPOINTS = {
     "openai_responses": "https://router-api.ramp.com/v1/responses",
 }
+# Ramp returns the served model but no upstream-provider field. Admit only
+# model IDs whose ownership is unambiguous instead of trusting the profile's
+# requested_provider declaration for arbitrary catalog entries.
+_RAMP_MODEL_PROVIDERS = {
+    "gpt-5.6-sol": "openai",
+}
 _CONCENTRATE_PROVIDER_SLUGS = {
     "moonshotai": "moonshot",
 }
@@ -247,6 +253,12 @@ def validate_arm(
             raise GatewayProfileError(
                 "ramp endpoint must be "
                 f"{expected_endpoint} for protocol {protocol}"
+            )
+        expected_provider = _RAMP_MODEL_PROVIDERS.get(_model_id(requested_model))
+        if expected_provider != _provider_identity(requested_provider):
+            raise GatewayProfileError(
+                "ramp requested_model must have an admitted unambiguous "
+                "provider mapping"
             )
 
     if allow_private_endpoint:
@@ -521,6 +533,10 @@ class GatewayEvidence:
             self._set_model(top_model)
         if top_provider is not None:
             self._set_provider(top_provider)
+        elif top_model is not None:
+            mapped_provider = _RAMP_MODEL_PROVIDERS.get(_model_id(top_model))
+            if mapped_provider is not None:
+                self._set_provider(mapped_provider)
         return True
 
     def _set_provider(self, value: str) -> None:
