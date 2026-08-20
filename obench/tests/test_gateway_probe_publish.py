@@ -286,7 +286,7 @@ class GatewayProbePublishP0SecurityTests(unittest.TestCase):
     def test_projects_provider_default_sampling_and_responses_reasoning(self):
         examples = Path(__file__).parents[1] / "examples"
         experiment = gateway_probe_spec.load_experiment(
-            examples / "gateway-probe-gpt-5.6-sol-five-way-responses.toml"
+            examples / "gateway-probe-gpt-5.6-sol-six-way-responses.toml"
         )
 
         projected = gateway_probe_publish._project_experiment(experiment)
