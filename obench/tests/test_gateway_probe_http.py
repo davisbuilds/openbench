@@ -920,6 +920,21 @@ class GatewayProbeHttpTests(unittest.TestCase):
         self.assertNotIn("provider", bodies["cloudflare-openai"])
         self.assertNotIn("provider", bodies["ramp-openai"])
 
+    def test_ramp_supplemental_example_is_matched_two_arm_probe(self):
+        examples = Path(__file__).parents[1] / "examples"
+        experiment = gateway_probe_spec.load_experiment(
+            examples / "gateway-probe-gpt-5.6-sol-ramp-responses.toml"
+        )
+        self.assertEqual(experiment.repetitions, 50)
+        self.assertEqual(
+            tuple(arm.arm_id for arm in experiment.arms),
+            ("direct-openai", "ramp-openai"),
+        )
+        self.assertTrue(all(
+            arm.inference.reasoning_effort == "medium"
+            for arm in experiment.arms
+        ))
+
     def test_route_reason_taxonomy_is_explicit_and_fail_closed(self):
         expected = {
             "missing_stream_metrics": "unverifiable",
