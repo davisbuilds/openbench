@@ -927,11 +927,18 @@ class GatewayProbeFamilyTests(_SiteFixture):
             "openrouter-moonshot": "OpenRouter",
             "vercel-moonshot": "Vercel",
             "openrouter-openai": "OpenRouter",
+            "ramp-openai": "Ramp Router",
             "vercel-openai": "Vercel",
             "custom-route": "custom-route",
         }
         for arm_id, expected in labels.items():
             self.assertEqual(site._gateway_probe_route_name(arm_id), expected)
+
+    def test_ramp_route_uses_official_icon_asset(self):
+        logo = site._gateway_probe_logo("ramp-openai")
+
+        self.assertIn("data:image/png;base64,", logo)
+        self.assertNotIn(">R<", logo)
 
     def _composite_bundle(self):
         def arm(arm_id, cold, warm, throughput, successes):
