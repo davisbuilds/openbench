@@ -870,7 +870,7 @@ class GatewayProbeHttpTests(unittest.TestCase):
     def test_gpt_5_6_sol_example_uses_common_responses_controls(self):
         examples = Path(__file__).parents[1] / "examples"
         experiment = gateway_probe_spec.load_experiment(
-            examples / "gateway-probe-gpt-5.6-sol-five-way-responses.toml"
+            examples / "gateway-probe-gpt-5.6-sol-six-way-responses.toml"
         )
         auth_envs = {arm.auth_env for arm in experiment.arms}
         plans, _ = gateway_probe_spec.compile_route_plans(
@@ -888,7 +888,7 @@ class GatewayProbeHttpTests(unittest.TestCase):
         }
 
         self.assertEqual(experiment.repetitions, 50)
-        self.assertEqual(len(plans), 5)
+        self.assertEqual(len(plans), 6)
         self.assertEqual({plan.protocol for plan in plans}, {"openai_responses"})
         self.assertTrue(all(plan.sampling.to_dict() == {} for plan in plans))
         self.assertTrue(all(
@@ -918,6 +918,7 @@ class GatewayProbeHttpTests(unittest.TestCase):
             {"providers": ["openai"], "models": []},
         )
         self.assertNotIn("provider", bodies["cloudflare-openai"])
+        self.assertNotIn("provider", bodies["ramp-openai"])
 
     def test_route_reason_taxonomy_is_explicit_and_fail_closed(self):
         expected = {
@@ -930,6 +931,7 @@ class GatewayProbeHttpTests(unittest.TestCase):
             "missing_cloudflare_metadata": "unverifiable",
             "missing_concentrate_metadata": "unverifiable",
             "missing_openrouter_metadata": "unverifiable",
+            "missing_ramp_metadata": "unverifiable",
             "missing_vercel_metadata": "unverifiable",
             "missing_provider": "unverifiable",
             "unqualified_served_model": "unverifiable",

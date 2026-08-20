@@ -2546,7 +2546,7 @@ def _gateway_board(bundle):
 
 def _gateway_route_key(arm_id):
     arm_id = arm_id or ""
-    for provider in ("cloudflare", "concentrate", "openrouter", "vercel"):
+    for provider in ("cloudflare", "concentrate", "openrouter", "ramp", "vercel"):
         if arm_id.startswith(provider + "-"):
             return provider + "-openai"
     for key in (
@@ -2567,6 +2567,7 @@ def _gateway_probe_route_name(arm_id):
         "direct-openai": "Direct OpenAI",
         "direct-moonshot": "Direct Moonshot",
         "openrouter-openai": "OpenRouter",
+        "ramp-openai": "Ramp Router",
         "vercel-openai": "Vercel",
     }.get(_gateway_route_key(arm_id), arm_id)
 

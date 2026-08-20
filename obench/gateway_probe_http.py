@@ -48,6 +48,7 @@ _ROUTE_REASON_STATUS = {
     "missing_cloudflare_metadata": "unverifiable",
     "missing_concentrate_metadata": "unverifiable",
     "missing_openrouter_metadata": "unverifiable",
+    "missing_ramp_metadata": "unverifiable",
     "missing_vercel_metadata": "unverifiable",
     "missing_provider": "unverifiable",
     "unqualified_served_model": "unverifiable",

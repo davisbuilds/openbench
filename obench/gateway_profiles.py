@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from typing import Any
 
 
-GATEWAYS = frozenset({"cloudflare", "concentrate", "openrouter", "vercel"})
+GATEWAYS = frozenset({"cloudflare", "concentrate", "openrouter", "ramp", "vercel"})
 
 _OPENROUTER_ENDPOINTS = {
     "openai_chat": "https://openrouter.ai/api/v1/chat/completions",
@@ -22,6 +22,9 @@ _VERCEL_ENDPOINTS = {
 _CONCENTRATE_ENDPOINTS = {
     "openai_chat": "https://api.concentrate.ai/v1/chat/completions",
     "openai_responses": "https://api.concentrate.ai/v1/responses",
+}
+_RAMP_ENDPOINTS = {
+    "openai_responses": "https://router-api.ramp.com/v1/responses",
 }
 _CONCENTRATE_PROVIDER_SLUGS = {
     "moonshotai": "moonshot",
@@ -238,6 +241,13 @@ def validate_arm(
                 "cloudflare requested_model must be provider-qualified with "
                 "requested_provider"
             )
+    if gateway == "ramp":
+        expected_endpoint = _RAMP_ENDPOINTS.get(protocol)
+        if endpoint != expected_endpoint:
+            raise GatewayProfileError(
+                "ramp endpoint must be "
+                f"{expected_endpoint} for protocol {protocol}"
+            )
 
     if allow_private_endpoint:
         return
@@ -336,6 +346,13 @@ def shape_body(
             "models": [],
         }
         return
+    if gateway == "ramp":
+        for key in (
+            "provider", "providerOptions", "models", "order", "sort",
+            "router", "plugins", "routes", "fallback", "fallbacks",
+        ):
+            payload.pop(key, None)
+        return
     raise GatewayProfileError(f"unsupported gateway profile: {gateway}")
 
 
@@ -365,7 +382,7 @@ def request_headers(
             "cf-aig-max-attempts": "1",
             "cf-aig-collect-log-payload": "false",
         })
-    elif gateway not in {"concentrate", "vercel"}:
+    elif gateway not in {"concentrate", "ramp", "vercel"}:
         raise GatewayProfileError(f"unsupported gateway profile: {gateway}")
     return headers
 
@@ -463,6 +480,8 @@ class GatewayEvidence:
             return self._observe_cloudflare(top_model)
         elif self.gateway == "concentrate":
             return self._observe_concentrate(top_model)
+        elif self.gateway == "ramp":
+            return self._observe_ramp(top_model, top_provider)
         return False
 
     def _observe_cloudflare(self, top_model: str | None) -> bool:
@@ -487,6 +506,21 @@ class GatewayEvidence:
         else:
             self._set_provider(provider)
         self._set_model(top_model)
+        return True
+
+    def _observe_ramp(
+        self,
+        top_model: str | None,
+        top_provider: str | None,
+    ) -> bool:
+        """Keep only route identity the hosted Router returns itself."""
+        if top_model is None and top_provider is None:
+            return False
+        self.metadata_seen = True
+        if top_model is not None:
+            self._set_model(top_model)
+        if top_provider is not None:
+            self._set_provider(top_provider)
         return True
 
     def _set_provider(self, value: str) -> None:

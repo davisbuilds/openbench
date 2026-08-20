@@ -140,6 +140,44 @@ class GatewayRequestProfileTests(unittest.TestCase):
             {"Authorization": "Bearer secret"},
         )
 
+    def test_ramp_requires_hosted_responses_endpoint_and_strips_route_controls(self):
+        gateway_profiles.validate_arm(
+            route_kind="gateway",
+            gateway="ramp",
+            endpoint="https://router-api.ramp.com/v1/responses",
+            protocol="openai_responses",
+            requested_model="gpt-5.6-sol",
+            requested_provider="openai",
+        )
+        with self.assertRaisesRegex(
+            gateway_profiles.GatewayProfileError,
+            "ramp endpoint must be",
+        ):
+            gateway_profiles.validate_arm(
+                route_kind="gateway",
+                gateway="ramp",
+                endpoint="https://router-api.ramp.com/v1/chat/completions",
+                protocol="openai_chat",
+                requested_model="gpt-5.6-sol",
+                requested_provider="openai",
+            )
+
+        body = self.base_body()
+        body["fallback"] = "attacker/model"
+        gateway_profiles.shape_body(
+            body, gateway="ramp", requested_provider="openai"
+        )
+        for key in (
+            "provider", "providerOptions", "models", "order", "sort",
+            "caching", "cache", "fallback",
+        ):
+            self.assertNotIn(key, body)
+        self.assertNotIn("cache_control", body["messages"][0])
+        self.assertEqual(
+            gateway_profiles.request_headers(gateway="ramp", secret="secret"),
+            {"Authorization": "Bearer secret"},
+        )
+
     def test_cloudflare_profile_requires_real_account_and_qualified_model(self):
         rest_endpoint = (
             "https://api.cloudflare.com/client/v4/accounts/"
@@ -518,6 +556,34 @@ class GatewayEvidenceTests(unittest.TestCase):
             completed_at=12.0,
             **kwargs,
         )
+
+    def test_ramp_requires_returned_provider_evidence(self):
+        proven = self.parse(
+            sse(
+                {"model": "gpt-5.6-sol", "provider": "openai"},
+                "[DONE]",
+            ),
+            gateway="ramp",
+            requested_model="gpt-5.6-sol",
+            requested_provider="openai",
+            allowed_models=("gpt-5.6-sol",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+        self.assertTrue(proven["route_evidence"]["pass"])
+        self.assertEqual(proven["route"]["provider"], "openai")
+
+        unproven = self.parse(
+            sse({"model": "gpt-5.6-sol"}, "[DONE]"),
+            gateway="ramp",
+            requested_model="gpt-5.6-sol",
+            requested_provider="openai",
+            allowed_models=("gpt-5.6-sol",),
+            allowed_providers=("openai",),
+            model_match="rolling_alias",
+        )
+        self.assertFalse(unproven["route_evidence"]["pass"])
+        self.assertIn("missing_provider", unproven["route_evidence"]["reasons"])
 
     def test_vercel_documented_route_and_single_attempt_pass(self):
         result = self.parse(
