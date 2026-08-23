@@ -105,6 +105,7 @@ MODELS = {
     "gpt-5.5-medium": "gpt-5.5",
     "gpt-5.6-sol": "gpt-5.6-sol",
     "gpt-5.6-terra": "gpt-5.6-terra",
+    "gpt-5.6-terra-xhigh": "gpt-5.6-terra",
     "gpt-5.6-luna": "gpt-5.6-luna",
 }
 
@@ -113,6 +114,7 @@ _EFFORT = {
     "gpt-5.5-medium": "medium",
     "gpt-5.6-sol": "medium",
     "gpt-5.6-terra": "medium",
+    "gpt-5.6-terra-xhigh": "xhigh",
     "gpt-5.6-luna": "medium",
 }
 
@@ -121,6 +123,7 @@ _EFFORT = {
 _SERVICE_TIER = {
     "gpt-5.6-sol": "default",
     "gpt-5.6-terra": "default",
+    "gpt-5.6-terra-xhigh": "default",
     "gpt-5.6-luna": "default",
 }
 
