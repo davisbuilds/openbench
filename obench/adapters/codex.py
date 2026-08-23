@@ -162,6 +162,11 @@ OPEN_MODELS = {
     "deepseek-v4-flash": {"provider": "deepseek", "model_id": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",     "env_key": "DEEPSEEK_API_KEY", "display": "DeepSeek",      "effort": "medium"},
     "kimi-k2.7-code":    {"provider": "moonshot", "model_id": "kimi-k2.7-code",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi", "effort": "medium"},
     "kimi-k3":    {"provider": "moonshot", "model_id": "kimi-k3",    "base_url": "https://api.moonshot.ai/v1",   "env_key": "MOONSHOT_API_KEY", "display": "Moonshot Kimi K3", "effort": "medium"},
+    # OpenRouter stealth preview (free during its testing window). Only served by
+    # OpenRouter, which is chat-completions-only, so it takes the same bridge path
+    # as the other open models; `model_id` matches the bridge model_name, which
+    # config.yaml routes to `openrouter/stealth/ox-alpha`.
+    "ox-alpha":          {"provider": "openrouter", "model_id": "ox-alpha",          "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "OpenRouter Ox Alpha", "effort": "medium"},
 }
 
 # Host-side bridge (LiteLLM proxy). Port must match bench/openmodel_bridge.sh

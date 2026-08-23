@@ -32,6 +32,13 @@ model_list:
       model: moonshot/kimi-k2.7-code
       api_base: https://api.moonshot.ai/v1
       api_key: os.environ/MOONSHOT_API_KEY
+  # OpenRouter stealth preview. LiteLLM's openrouter/ provider is chat-only, so
+  # /v1/responses ingress from codex auto-bridges to /chat/completions upstream.
+  - model_name: ox-alpha
+    litellm_params:
+      model: openrouter/stealth/ox-alpha
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_API_KEY
 
 litellm_settings:
   # Allow the Responses API -> Chat Completions bridge for models that only
