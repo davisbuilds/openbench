@@ -487,6 +487,7 @@ def build_runner_command(
     timeout: int,
     stall_timeout: int | None,
     exec_mode: str,
+    allow_version_drift: bool = False,
 ) -> list[str]:
     """Build the ``obench run`` subprocess argv for one cell.
 
@@ -514,6 +515,12 @@ def build_runner_command(
         cmd.extend(["--tasks-dir", effective_tasks_dir])
     if effective_exec_mode == "docker":
         cmd.extend(["--exec", "docker"])
+    if allow_version_drift:
+        # Uniform waiver across every arm: a local run against a host CLI newer
+        # than the Dockerfile pin. Each row records version_drift=true, so the
+        # off-pin state is annotated rather than silently bumping the pin (which
+        # is coupled to tests, docker image-contexts, and docs).
+        cmd.append("--allow-version-drift")
     if stall_timeout is not None:
         cmd.extend(["--stall-timeout", str(stall_timeout)])
     # Enable proxy for stall-kill support (required for stall-timeout to work)
@@ -577,6 +584,7 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     timeout = spec.get("timeout", 2400)
     exec_mode = spec.get("exec_mode", "local")
     trials = spec.get("trials", 1)
+    allow_version_drift = bool(spec.get("allow_version_drift", False))
     stall_timeout = spec.get("stall_timeout") or (
         int(os.environ.get("OPENBENCH_STALL_TIMEOUT", "0")) or None
     )
@@ -729,7 +737,8 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         # Run the cell
         print(f"    RUN    {run_id}", flush=True)
         cmd = build_runner_command(
-            cell, results_path, None, timeout, stall_timeout, exec_mode)
+            cell, results_path, None, timeout, stall_timeout, exec_mode,
+            allow_version_drift=allow_version_drift)
         rc, stderr_tail = run_runner(cmd, timeout + 60)
 
         if rc != 0:
@@ -861,6 +870,12 @@ def missing_task_images(spec, spec_dir, docker_runner=None):
     missing = []
     for group in spec.get("task_group") or []:
         tasks_dir = resolve_group_tasks_dir(group, spec, spec_dir)
+        # A group that omits tasks_dir defers resolution to the runner (config or
+        # discovery) and pins no per-task docker image, so there is nothing to
+        # preflight here. Skipping it also avoids os.path.join(None, ...), which
+        # otherwise crashes an entirely local spec before any cell runs.
+        if tasks_dir is None:
+            continue
         for task in group.get("tasks") or []:
             toml_path = os.path.join(tasks_dir, task, "task.toml")
             if not os.path.isfile(toml_path):
