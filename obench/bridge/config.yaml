@@ -39,6 +39,38 @@ model_list:
       model: openrouter/stealth/ox-alpha
       api_base: https://openrouter.ai/api/v1
       api_key: os.environ/OPENROUTER_API_KEY
+  # Free frontier comparators (OpenRouter free tier) for the ox-alpha bake-off.
+  # NOTE: the :free suffix is load-bearing -- the bare id is the PAID variant.
+  - model_name: minimax-m3
+    litellm_params:
+      # PAID variant (no :free) -- ZDR-compliant, so it passes a zero-retention
+      # guardrail where the free route is blocked.
+      model: openrouter/minimax/minimax-m3
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: deepseek-v4-flash-0731
+    litellm_params:
+      model: openrouter/deepseek/deepseek-v4-flash-0731
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: inkling
+    litellm_params:
+      model: openrouter/thinkingmachines/inkling:free
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: laguna-s-2.1
+    litellm_params:
+      model: openrouter/poolside/laguna-s-2.1:free
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_API_KEY
+  # PAID GLM-5.3 Flash (the model formerly served as free stealth/ox-alpha).
+  # No :free suffix -- this is the zero-retention paid endpoint, so it passes a
+  # ZDR guardrail and is not subject to the free-tier caps/throttle.
+  - model_name: glm-5.3-flash
+    litellm_params:
+      model: openrouter/z-ai/glm-5.3-flash
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_API_KEY
 
 litellm_settings:
   # Allow the Responses API -> Chat Completions bridge for models that only

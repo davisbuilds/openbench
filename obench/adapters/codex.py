@@ -107,6 +107,7 @@ MODELS = {
     "gpt-5.6-terra": "gpt-5.6-terra",
     "gpt-5.6-terra-xhigh": "gpt-5.6-terra",
     "gpt-5.6-luna": "gpt-5.6-luna",
+    "gpt-5.6-luna-max": "gpt-5.6-luna",
 }
 
 # canonical model name -> reasoning effort passed via `-c model_reasoning_effort`
@@ -116,6 +117,7 @@ _EFFORT = {
     "gpt-5.6-terra": "medium",
     "gpt-5.6-terra-xhigh": "xhigh",
     "gpt-5.6-luna": "medium",
+    "gpt-5.6-luna-max": "max",
 }
 
 # canonical model name -> service tier override. GPT-5.6 Sol must stay on the
@@ -125,6 +127,7 @@ _SERVICE_TIER = {
     "gpt-5.6-terra": "default",
     "gpt-5.6-terra-xhigh": "default",
     "gpt-5.6-luna": "default",
+    "gpt-5.6-luna-max": "default",
 }
 
 # --- M4 open models (first-party pay-per-token, chat-only vendors) -----------
@@ -170,6 +173,25 @@ OPEN_MODELS = {
     # as the other open models; `model_id` matches the bridge model_name, which
     # config.yaml routes to `openrouter/stealth/ox-alpha`.
     "ox-alpha":          {"provider": "openrouter", "model_id": "ox-alpha",          "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "OpenRouter Ox Alpha", "effort": "medium"},
+    # Free frontier comparator for the ox-alpha bake-off (OpenRouter free tier).
+    # Same bridge path; model_id matches the bridge model_name, which config.yaml
+    # routes to `openrouter/minimax/minimax-m3:free`.
+    "minimax-m3":        {"provider": "openrouter", "model_id": "minimax-m3",        "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "OpenRouter MiniMax M3", "effort": "medium"},
+    # Free frontier comparators for the bake-off. inkling is API-gated to
+    # "agentic harnesses" -- codex IS one, so the gate may pass on this path
+    # where a raw chat probe is refused. model_id matches the bridge model_name;
+    # config.yaml routes each to the vendor's FREE (:free) variant.
+    "inkling":           {"provider": "openrouter", "model_id": "inkling",           "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "OpenRouter Thinking Machines Inkling", "effort": "medium"},
+    "laguna-s-2.1":      {"provider": "openrouter", "model_id": "laguna-s-2.1",      "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "OpenRouter Poolside Laguna S 2.1", "effort": "medium"},
+    # GLM-5.3 Flash: the model that WAS the free "stealth/ox-alpha" (OpenRouter
+    # disclosed the identity when the stealth window closed). This is the PAID
+    # endpoint -- ZDR-compliant (passes a zero-retention guardrail) and
+    # unthrottled, unlike the retired free stealth route. ~$0.00001/call.
+    "glm-5.3-flash":     {"provider": "openrouter", "model_id": "glm-5.3-flash",     "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "Z.ai GLM-5.3 Flash (ex ox-alpha)", "effort": "medium"},
+    # Paid DeepSeek V4 Flash (0731) via OpenRouter -- routed to a ZDR-compliant
+    # provider, so it passes a zero-retention guardrail. Distinct from the
+    # direct-DeepSeek "deepseek-v4-flash" route above (different key/provider).
+    "deepseek-v4-flash-0731": {"provider": "openrouter", "model_id": "deepseek-v4-flash-0731", "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "DeepSeek V4 Flash 0731", "effort": "medium"},
 }
 
 # Host-side bridge (LiteLLM proxy). Port must match bench/openmodel_bridge.sh
@@ -535,7 +557,7 @@ def run(
     if not tail:
         tail = combined[-2000:]
 
-    if model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna") and token_usage.get("token_basis") == "vendor_split":
+    if model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6-luna-max") and token_usage.get("token_basis") == "vendor_split":
         raw = token_usage.get("usage_raw") or {}
         if not any(k in raw for k in ("cache_write_tokens", "cache_creation_input_tokens", "cache_creation_tokens")):
             # GPT-5.6 may expose billable cache writes on newer Codex event
