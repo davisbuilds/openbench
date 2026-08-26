@@ -53,9 +53,17 @@ the PR, not as a "resolved" note here).
   `$OPENBENCH_OPEN_MODELS` (else `~/.openbench/open_models.toml`) and merges them
   over an adapter's built-ins; wired into the **codex** adapter (commit
   `7fbc975`, on `main`).
-- **Next**: adopt `merge_open_models()` in the remaining adapters
-  (`pi`/`opencode`/`claude`/`grokbuild`), which still carry in-code dicts. Upstream
-  contribution tracked as
+- **Next (NOT a drop-in)**: the remaining adapters carry *heterogeneous* entry
+  schemas — `pi` adds `context_window`/`thinking`/`compat`/`thinkingLevelMap`,
+  `opencode` uses `variant` not `effort`, `claude` has no `provider`, `grokbuild`
+  adds `base_url_env`/`proxy_route`/`subscription_bridge`. The current loader
+  validates against codex's `_REQUIRED_KEYS` and normalizes to codex's shape, so
+  it would reject their entries and strip their fields. Generalizing needs (a) a
+  schema-agnostic loader (pass keys through; optional per-adapter
+  `required_keys`), and (b) per-adapter config namespacing (`[codex.models.X]`
+  vs `[pi.models.X]`) since one flat `[models.X]` table can't satisfy two
+  schemas. Low priority until we actually run those harnesses (today only codex).
+  Upstream contribution tracked as
   [minghinmatthewlam/openbench#46](https://github.com/minghinmatthewlam/openbench/issues/46)
   — hold the PR until the maintainer signals interest (issue-first, per plan).
 
