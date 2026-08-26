@@ -50,9 +50,24 @@ the PR, not as a "resolved" note here).
   corrupt the latency numbers the benchmark exists to produce. Until that gate
   passes, use `--workers` only for throughput on distinct-provider arms, not for
   latency-sensitive comparisons.
+- **Timing gate result** (*measured 2026-08-26*, `experiments/analyze_gate.py`,
+  glm-5.3-flash solo vs under 3-way concurrency): **CONDITIONAL PASS**.
+  Local/CPU contention is negligible -- `t_env_setup_s` and `t_checker_s` (the
+  local-CPU parts) are unchanged. BUT on the short, turn-heavy `make-it-run`
+  task, ALL THREE distinct-provider arms inflated `t_agent_s` together (glm
+  27s->57-147s, deepseek->62-103s, minimax->62-107s). Different providers moving
+  in lockstep isolates the cause to the **single shared LiteLLM bridge**
+  (127.0.0.1:4141, one process): it serializes concurrent agent round-trips, so
+  turn-heavy tasks pay a latency penalty. Longer few-turn tasks stayed within
+  noise (-26%..+18%). **Verdict: `--workers` is safe for THROUGHPUT (coverage
+  was identical, every cell solved) but NOT for scored LATENCY comparisons until
+  the bridge is per-arm isolated** (separate port per concurrent arm, or a
+  bridge with real worker concurrency). Directly implicates the "Bridge
+  lifecycle" item below.
 - **Next**: tracked upstream as
   [minghinmatthewlam/openbench#45](https://github.com/minghinmatthewlam/openbench/issues/45).
-  Hold the upstream PR until the timing gate passes and the maintainer signals
+  For latency-safe parallelism, pair `--workers` with per-arm bridge isolation
+  first. Hold the upstream PR until then and until the maintainer signals
   interest.
 
 ### Extensibility

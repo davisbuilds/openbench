@@ -1,0 +1,48 @@
+# Timing-contamination gate -- CONCURRENT arm (workers=3).
+#
+# The other half of the gate: run glm-5.3-flash CONCURRENTLY with two other
+# distinct-provider arms (minimax-m3, deepseek-v4-flash-0731) at workers=3, so
+# glm experiences maximum local contention (3 codex subprocesses + the shared
+# bridge). Compare glm's per-task wall time here against gate-solo-glm.toml.
+#
+# Distinct providers (Z.AI / CoreWeave / OpenInference) -> no shared rate limit,
+# so any wall-time inflation is LOCAL contention, which is exactly what the gate
+# is testing. Same fast task set as the solo baseline; NO webcore.
+#
+#   obench matrix --spec experiments/specs/gate-concurrent.toml --workers 3
+
+results_path = "../../results/gate/concurrent/results.jsonl"
+ledger_dir = "../../results/gate/concurrent/ledger"
+timeout = 600
+exec_mode = "local"
+trials = 3
+allow_version_drift = true
+workers = 3
+max_consecutive_excluded = 4
+max_cell_wall_s = 1200
+
+[retry]
+infra = 1
+stalled = 1
+rate_limited = 2
+rate_limited_backoff_start = 30
+
+[[arm]]
+harness = "codex"
+model = "glm-5.3-flash"
+
+[[arm]]
+harness = "codex"
+model = "minimax-m3"
+
+[[arm]]
+harness = "codex"
+model = "deepseek-v4-flash-0731"
+
+[[task_group]]
+tasks = [
+  "misleading-error",
+  "fix-failing-test",
+  "make-ci-green",
+  "make-it-run",
+]
