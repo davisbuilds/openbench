@@ -31,7 +31,7 @@ import tempfile
 import time
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from . import run as bench_run
 from . import failure_class as fc_mod
@@ -508,6 +508,74 @@ def wall_cap_exceeded(cumulative_wall_s: float, max_cell_wall_s: float | None) -
     if max_cell_wall_s is None:
         return False
     return cumulative_wall_s >= max_cell_wall_s
+
+
+# ── Per-cell decision core ─────────────────────────────────────────────────
+
+class CellDecision(NamedTuple):
+    """The scheduling verdict for one finished cell run.
+
+    ``action`` is one of ``"satisfied"``, ``"config_error"``, ``"requeue"``,
+    ``"exhausted"``, or ``"scored"`` (a present, non-excluded, non-satisfied
+    row -- a defensive no-op the serial loop also does nothing with).
+    """
+
+    action: str
+    failure_class: str | None
+    new_retry_count: int
+    detail: str
+
+
+def decide_cell_outcome(
+    rc: int,
+    row: dict[str, Any] | None,
+    run_id: str,
+    arm_state: "ArmState",
+    prior_attempt: int,
+    result_attempt_count: int,
+    cell_wall: float,
+    max_cell_wall_s: float | None,
+) -> CellDecision:
+    """Decide what to do with a finished cell run -- the serial loop's body,
+    extracted as a pure function of the row plus the owning arm's state.
+
+    Mutates ONLY ``arm_state`` (satisfied/excluded/exhausted bookkeeping), which
+    a single worker owns exclusively, so it needs no lock under arm-level
+    parallelism. It never touches the queue, the results file, or ``state`` --
+    the imperative shell applies the returned action to those. Behavior mirrors
+    ``run_matrix``'s post-run block; keep the two in lockstep.
+    """
+    if cell_is_satisfied(row):
+        arm_state.record_satisfied(run_id)
+        return CellDecision("satisfied", None, prior_attempt,
+                            f"coverage {arm_state.satisfied}/{arm_state.planned}")
+
+    if row is None:
+        # Runner exited without writing any row: a mis-wired arm, not a retry
+        # case. The shell surfaces the stderr reason and stops the arm.
+        return CellDecision("config_error", None, prior_attempt, f"runner exit={rc}")
+
+    new_fc = row_failure_class(row)
+    new_retry = max(prior_attempt + 1, result_attempt_count)
+    if new_fc is not None and new_fc in fc_mod.EXCLUDED_FROM_SOLVE_RATE:
+        arm_state.record_excluded()
+        budget_remaining = arm_state.retries_remaining(new_fc, new_retry)
+        if wall_cap_exceeded(cell_wall, max_cell_wall_s):
+            if run_id not in arm_state.exhausted_cells:
+                arm_state.exhausted_cells.append(run_id)
+            return CellDecision(
+                "exhausted", new_fc, new_retry,
+                f"wall cap: {cell_wall:.0f}s >= {max_cell_wall_s}s")
+        if budget_remaining > 0:
+            return CellDecision("requeue", new_fc, new_retry,
+                                f"retry={budget_remaining} left")
+        if run_id not in arm_state.exhausted_cells:
+            arm_state.exhausted_cells.append(run_id)
+        return CellDecision("exhausted", new_fc, new_retry, "retry budget exhausted")
+
+    # Present row, not satisfied, non-excluded class: unreachable in practice
+    # (not-satisfied implies an excluded class), preserved as a no-op.
+    return CellDecision("scored", new_fc, new_retry, "")
 
 
 # ── Backoff ──────────────────────────────────────────────────────────────
