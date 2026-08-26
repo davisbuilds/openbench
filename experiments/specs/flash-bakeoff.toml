@@ -1,0 +1,72 @@
+# Flash-model coding bake-off (paid, ZDR-compliant, unthrottled).
+#
+# All three arms route through the bridge to OpenRouter PAID endpoints, which
+# OpenRouter serves via zero-retention providers -- so they pass a ZDR guardrail
+# and, being paid, are free of the free-tier daily caps and 429 throttling that
+# strangled the earlier free-stealth runs. None of this touches codex quota.
+#
+#   glm-5.3-flash            = the model formerly served as free "stealth/ox-alpha"
+#                              (identity disclosed when the stealth window closed)
+#   minimax-m3               = MiniMax M3 (paid, CoreWeave)
+#   deepseek-v4-flash-0731   = DeepSeek V4 Flash 0731 (paid, OpenInference)
+#
+# Full task set INCLUDING webcore -- it only ever failed under free-tier
+# throttling; on the paid endpoint it has the runway to complete.
+#
+#   obench matrix --spec experiments/specs/flash-bakeoff.toml
+
+results_path = "../../results/flash-bakeoff/results.jsonl"
+ledger_dir = "../../results/flash-bakeoff/ledger"
+timeout = 1800
+exec_mode = "local"
+trials = 3
+allow_version_drift = true
+max_consecutive_excluded = 4
+
+# Paid endpoints rarely throttle; keep retries low so a genuine failure is
+# scored rather than looped.
+[retry]
+infra = 2
+stalled = 1
+rate_limited = 2
+rate_limited_backoff_start = 60
+
+[[arm]]
+harness = "codex"
+model = "glm-5.3-flash"
+
+[[arm]]
+harness = "codex"
+model = "minimax-m3"
+
+[[arm]]
+harness = "codex"
+model = "deepseek-v4-flash-0731"
+
+[[task_group]]
+tasks = [
+  "misleading-error",
+  "fix-failing-test",
+  "make-ci-green",
+  "make-it-run",
+  "webcore",
+  "build-a-cli",
+  "taskflow",
+  "add-feature",
+]
+
+[[task_group]]
+tasks_dir = "../../tasks-imported/exercism"
+tasks = [
+  "roman-numerals",
+  "luhn",
+  "wordy",
+  "spiral-matrix",
+  "matching-brackets",
+  "atbash-cipher",
+  "phone-number",
+  "run-length-encoding",
+  "all-your-base",
+  "pig-latin",
+  "largest-series-product",
+]

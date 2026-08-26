@@ -1,0 +1,67 @@
+# Ox-Alpha vs daily-driver frontier codex models — clean capability re-run.
+#
+# Harness held constant (codex CLI). Three arms:
+#   - ox-alpha            OpenRouter stealth preview, via the Responses<->Chat
+#                         bridge (free window closes ~2026-08-27).
+#   - gpt-5.6-terra-xhigh prior codex daily driver (xhigh reasoning).
+#   - gpt-5.6-luna-max    current codex daily driver (~/.codex: luna @ max).
+#
+# Tasks: the 8 local core tasks (webcore included — the read we specifically
+# wanted). Local exec: codex runs against the machine-owner ChatGPT
+# subscription; only the ox-alpha arm transits the local LiteLLM bridge.
+#
+# The earlier ad-hoc `legacy run` batch measured OpenRouter THROTTLING, not
+# capability: provider-abandonment ("high demand") turns misclassified as
+# wrong_answer. This matrix run pairs the failure_class fix (PR #43) with retry
+# budgets + backoff so throttle/infra cells are excluded from solve-rate and
+# retried instead of scored as capability failures.
+#
+# Running (from repo root, bridge already up for the ox-alpha arm):
+#   obench matrix --spec experiments/specs/ox-alpha-daily-drivers.toml
+
+results_path = "../../results/ox-alpha-daily-drivers/results.jsonl"
+ledger_dir = "../../results/ox-alpha-daily-drivers/ledger"
+timeout = 1800
+exec_mode = "local"
+trials = 3
+# Host codex is 0.148.0; the Dockerfile pin is 0.144.5. All three arms run the
+# same host CLI, so the drift is uniform and unbiased. Waive it (rows record
+# version_drift=true) rather than bumping the pin, which is coupled to tests,
+# image-contexts, and docs.
+allow_version_drift = true
+
+# Throttle absorption for the free OpenRouter arm: provider abandonment lands as
+# infra (PR #43), and OpenRouter rate limits get long exponential backoff.
+# max_consecutive_excluded pauses a throttled arm and revisits it at the end,
+# giving the free tier time to recover instead of scoring the throttle.
+max_consecutive_excluded = 6
+
+[retry]
+infra = 3
+stalled = 1
+rate_limited = 6
+rate_limited_backoff_start = 120
+
+[[arm]]
+harness = "codex"
+model = "ox-alpha"
+
+[[arm]]
+harness = "codex"
+model = "gpt-5.6-terra-xhigh"
+
+[[arm]]
+harness = "codex"
+model = "gpt-5.6-luna-max"
+
+[[task_group]]
+tasks = [
+  "misleading-error",
+  "fix-failing-test",
+  "make-ci-green",
+  "make-it-run",
+  "webcore",
+  "build-a-cli",
+  "taskflow",
+  "add-feature",
+]

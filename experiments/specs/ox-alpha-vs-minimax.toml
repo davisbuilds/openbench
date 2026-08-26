@@ -1,0 +1,71 @@
+# Free-model coding bake-off: ox-alpha vs MiniMax M3 (both OpenRouter free tier).
+#
+# Harness held constant (codex CLI); both arms transit the local LiteLLM bridge,
+# so NEITHER touches the codex/ChatGPT subscription quota. Runnable while the
+# codex 5h quota is exhausted, and races the closing ox-alpha free window.
+#
+# Task set: 7 core tasks (webcore excluded -- it is throttle-strangled for
+# ox-alpha: heavy request volume collides with the free-tier 429s and times out
+# at the cap every time) + 11 fast exercism tasks. All sub-timeout with
+# deterministic checkers, so the run measures capability, not the 30-min wall.
+#
+# Retry budgets are LOW on purpose: the earlier webcore run showed that retrying
+# a throttle-timeout cell just re-burns the full timeout. Here rate_limited gets
+# only 2 retries and the arm pauses after 4 consecutive throttles, so a
+# throttled cell is excluded and we move on instead of looping for hours.
+#
+# Running (bridge already up):
+#   obench matrix --spec experiments/specs/ox-alpha-vs-minimax.toml
+
+results_path = "../../results/ox-alpha-vs-minimax/results.jsonl"
+ledger_dir = "../../results/ox-alpha-vs-minimax/ledger"
+timeout = 1200
+exec_mode = "local"
+trials = 3
+# Host codex 0.148.0 vs Dockerfile pin 0.144.5; uniform across both arms.
+allow_version_drift = true
+# Pause a throttled arm quickly rather than looping (webcore lesson).
+max_consecutive_excluded = 4
+
+[retry]
+infra = 2
+stalled = 1
+rate_limited = 2
+rate_limited_backoff_start = 60
+
+[[arm]]
+harness = "codex"
+model = "ox-alpha"
+
+[[arm]]
+harness = "codex"
+model = "minimax-m3"
+
+# Core agentic tasks (default tasks/ dir), webcore excluded.
+[[task_group]]
+tasks = [
+  "misleading-error",
+  "fix-failing-test",
+  "make-ci-green",
+  "make-it-run",
+  "build-a-cli",
+  "taskflow",
+  "add-feature",
+]
+
+# Fast algorithmic tasks with deterministic checkers.
+[[task_group]]
+tasks_dir = "../../tasks-imported/exercism"
+tasks = [
+  "roman-numerals",
+  "luhn",
+  "wordy",
+  "spiral-matrix",
+  "matching-brackets",
+  "atbash-cipher",
+  "phone-number",
+  "run-length-encoding",
+  "all-your-base",
+  "pig-latin",
+  "largest-series-product",
+]

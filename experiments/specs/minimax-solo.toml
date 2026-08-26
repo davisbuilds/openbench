@@ -1,0 +1,60 @@
+# MiniMax M3 solo capability read (OpenRouter free tier), bridge-only.
+#
+# ox-alpha's daily stealth bucket is exhausted until 20:00 tonight, but
+# minimax-m3 is on a separate upstream throttle that clears intermittently
+# (~60% of probes succeed). This banks minimax's read now so tonight's ox-alpha
+# reset only has to run the ox-alpha arm for the head-to-head.
+#
+# Harness held constant (codex CLI); minimax transits the bridge, so no codex
+# quota is touched. Same 18 fast tasks as the bake-off (webcore excluded).
+#
+# Retry budgets tuned for the bursty upstream throttle: a couple of retries with
+# short backoff usually lands a clean window; the arm pauses after 5 consecutive
+# throttles and revisits at the end.
+#
+#   obench matrix --spec experiments/specs/minimax-solo.toml
+
+results_path = "../../results/minimax-solo/results.jsonl"
+ledger_dir = "../../results/minimax-solo/ledger"
+timeout = 1200
+exec_mode = "local"
+trials = 3
+allow_version_drift = true
+max_consecutive_excluded = 5
+
+[retry]
+infra = 2
+stalled = 1
+rate_limited = 3
+rate_limited_backoff_start = 45
+
+[[arm]]
+harness = "codex"
+model = "minimax-m3"
+
+[[task_group]]
+tasks = [
+  "misleading-error",
+  "fix-failing-test",
+  "make-ci-green",
+  "make-it-run",
+  "build-a-cli",
+  "taskflow",
+  "add-feature",
+]
+
+[[task_group]]
+tasks_dir = "../../tasks-imported/exercism"
+tasks = [
+  "roman-numerals",
+  "luhn",
+  "wordy",
+  "spiral-matrix",
+  "matching-brackets",
+  "atbash-cipher",
+  "phone-number",
+  "run-length-encoding",
+  "all-your-base",
+  "pig-latin",
+  "largest-series-product",
+]
