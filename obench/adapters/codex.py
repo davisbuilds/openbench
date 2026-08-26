@@ -55,8 +55,10 @@ import tempfile
 
 try:
     from obench.auth_persist import auth_file_lease, auth_lease_proves_path
+    from obench.open_models_config import merge_open_models
 except ImportError:  # file-path / Docker mount layout
     from auth_persist import auth_file_lease, auth_lease_proves_path
+    from open_models_config import merge_open_models
 
 NAME = "codex"
 _EXE = "codex"
@@ -158,7 +160,7 @@ _SERVICE_TIER = {
 # vendor's thinking-on default when levels are not exposed on the bridge route).
 # (Duplicated across the pi/opencode/codex adapters so each stays self-contained
 #  under the runner's isolated importer.)
-OPEN_MODELS = {
+_BUILTIN_OPEN_MODELS = {
     # Thinking parity for the opus frontier lane: codex requests
     # `model_reasoning_effort="medium"`; the LiteLLM bridge preserves that as
     # Anthropic medium reasoning while injecting ANTHROPIC_API_KEY upstream.
@@ -193,6 +195,12 @@ OPEN_MODELS = {
     # direct-DeepSeek "deepseek-v4-flash" route above (different key/provider).
     "deepseek-v4-flash-0731": {"provider": "openrouter", "model_id": "deepseek-v4-flash-0731", "base_url": "https://openrouter.ai/api/v1", "env_key": "OPENROUTER_API_KEY", "display": "DeepSeek V4 Flash 0731", "effort": "medium"},
 }
+
+# Built-ins overlaid with operator-defined routes from
+# $OPENBENCH_OPEN_MODELS (else ~/.openbench/open_models.toml), so new OpenRouter
+# / BYO models can be added without editing this adapter. Config wins on a
+# name collision; a missing or malformed file leaves the built-ins untouched.
+OPEN_MODELS = merge_open_models(_BUILTIN_OPEN_MODELS)
 
 # Host-side bridge (LiteLLM proxy). Port must match bench/openmodel_bridge.sh
 # (both default to 4141; override in lockstep via BENCH_BRIDGE_PORT).
