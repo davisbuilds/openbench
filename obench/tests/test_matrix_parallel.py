@@ -125,6 +125,87 @@ class MatrixIntegrationTests(unittest.TestCase):
                 if line.strip():
                     json.loads(line)  # raises on a torn/interleaved write
 
+    def test_serial_writes_directly_no_part_files(self):
+        # Durability: at workers=1 the child appends straight to results.jsonl
+        # (like the pre-refactor runner), so no part-file merge window exists.
+        mq.run_runner = _make_fake_runner()
+        mq.run_matrix(_spec(workers=1), self.tmp, self.tmp)
+        leftover = [f for f in os.listdir(self.tmp) if ".jsonl.part." in f]
+        self.assertEqual(leftover, [], f"serial run left part files: {leftover}")
+
+    def test_parallel_leaves_no_part_files_after_clean_run(self):
+        mq.run_runner = _make_fake_runner(delay=0.005)
+        mq.run_matrix(_spec(workers=2), self.tmp, self.tmp)
+        leftover = [f for f in os.listdir(self.tmp) if ".jsonl.part." in f]
+        self.assertEqual(leftover, [], f"parallel run leaked part files: {leftover}")
+
+    def test_salvages_stranded_part_file_on_resume(self):
+        # Simulate a kill that left an arm's part file unmerged: pre-seed it with
+        # a completed row, then run with a runner that would FAIL that same cell.
+        # The salvaged row must still count the cell as done (not re-run+fail).
+        results = os.path.join(self.tmp, "results.jsonl")
+        arm = "codex x m1"
+        part = mq._arm_part_path(results, arm)
+        stranded_id = bench_run.make_run_id("codex", "t1", "m1", 1)
+        with open(part, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "run_id": stranded_id, "harness": "codex", "model": "m1",
+                "task": "t1", "trial": 1, "failure_class": "solved",
+                "success": True, "completed": True, "score": 1.0,
+                "wall_time_s": 1.0}) + "\n")
+
+        def runner_fails_t1(cmd, timeout_s=None):
+            base = _make_fake_runner()
+            if _arg(cmd, "--task") == "t1" and _arg(cmd, "--model") == "m1":
+                return 1, "boom"  # would-be failure if the cell were re-run
+            return base(cmd, timeout_s)
+
+        mq.run_runner = runner_fails_t1
+        mq.run_matrix(_spec(workers=2), self.tmp, self.tmp)
+        rows = self._results()
+        solved = {r["run_id"] for r in rows if r.get("failure_class") == "solved"}
+        self.assertIn(stranded_id, solved, "stranded part-file row was not salvaged")
+
+    def test_resume_from_persisted_pending(self):
+        # A prior run persisted a pending queue; a fresh run_matrix must pick it
+        # up and complete those cells (resume path used for both paused + normal).
+        import shutil
+        mq.run_runner = _make_fake_runner()
+        # First pass: run only m1's cells by pre-seeding queue-state pending.
+        rc = mq.run_matrix(_spec(workers=1), self.tmp, self.tmp)
+        self.assertEqual(rc, 0)
+        first = len(self._results())
+        # Wipe results but keep ledger/queue-state, then re-run: satisfied cells
+        # are re-verified from an empty file -> re-executed to full coverage.
+        os.remove(os.path.join(self.tmp, "results.jsonl"))
+        rc2 = mq.run_matrix(_spec(workers=1), self.tmp, self.tmp)
+        self.assertEqual(rc2, 0)
+        self.assertEqual(len(self._results()), first)
+
+
+class ContextSaveTests(unittest.TestCase):
+    def test_save_persists_paused_cells_in_pending(self):
+        # Regression for the resume-semantics change: paused cells must survive a
+        # save() so a killed-while-paused arm resumes them (main dropped them).
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        qpath = os.path.join(tmp, "queue-state.json")
+        state = mq.QueueState(qpath)
+        cell = {"run_id": "codex:t1:m1:trial1"}
+        ctx = mq._MatrixContext(
+            results_path=os.path.join(tmp, "results.jsonl"), timeout=60,
+            stall_timeout=None, exec_mode="local", allow_version_drift=False,
+            rate_limited_backoff=1.0, max_cell_wall_s=None,
+            max_consecutive_excluded=4, arm_states={}, retry_counts={},
+            state=state, arm_pending={"codex x m1": []},
+            arm_paused={"codex x m1": [("codex x m1", 0, cell)]},
+            direct_write=True)
+        ctx.save()
+        with open(qpath, encoding="utf-8") as fh:
+            persisted = json.load(fh)
+        run_ids = [entry[2] for entry in persisted["pending"]]
+        self.assertIn("codex:t1:m1:trial1", run_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -699,17 +699,27 @@ class _MatrixContext:
     """Shared state + config for the per-arm drains, guarded by one lock.
 
     Arms are independent: a run_id encodes the model, so no two arms ever write
-    the same cell or the same results row. The only cross-arm hazards are
-    physical -- interleaved appends to the one results file, a torn line read
-    while another arm appends, and concurrent rewrites of the single queue-state
-    file. All three are serialized by ``self.lock``; the long part (running a
-    cell subprocess) stays outside it, so arms still overlap.
+    the same cell or the same results row. The cross-arm hazards are all touches
+    of shared state -- appends to the one results file, torn line reads, rewrites
+    of the single queue-state file, AND one arm's ``save()`` reading another
+    arm's live ``pending``/``ArmState`` mid-mutation. A single reentrant
+    ``self.lock`` guards every one of them: a drain holds it around its whole
+    post-run bookkeeping (merge, decide, queue/state mutation, save), so no other
+    arm can observe half-applied state. Only the slow part -- running the cell
+    subprocess and the retry backoff sleep -- stays OUTSIDE the lock, so arms
+    still overlap where it matters.
+
+    ``direct_write`` (set when running a single worker) keeps the original
+    behavior of the child appending straight to the results file, so a result is
+    durable the instant the child exits -- no part-file merge window in which a
+    kill could strand a completed cell. Part files are used only with >1 worker,
+    where concurrent direct appends would interleave.
     """
 
     def __init__(self, *, results_path, timeout, stall_timeout, exec_mode,
                  allow_version_drift, rate_limited_backoff, max_cell_wall_s,
                  max_consecutive_excluded, arm_states, retry_counts, state,
-                 arm_pending, arm_paused):
+                 arm_pending, arm_paused, direct_write):
         self.results_path = results_path
         self.timeout = timeout
         self.stall_timeout = stall_timeout
@@ -725,7 +735,10 @@ class _MatrixContext:
         # save() aggregates all arms into the single persisted `pending`.
         self.arm_pending = arm_pending
         self.arm_paused = arm_paused
-        self.lock = threading.Lock()
+        self.direct_write = direct_write
+        # Reentrant so a drain can hold the lock across its bookkeeping and still
+        # call the helper methods below (which each re-acquire it).
+        self.lock = threading.RLock()
 
     def snapshot(self):
         """Locked read of the results file (existing rows + attempt counts)."""
@@ -737,10 +750,12 @@ class _MatrixContext:
             return load_cumulative_wall(self.results_path).get(run_id, 0.0)
 
     def merge_part(self, part_path):
-        """Append a cell's private part-file rows into the canonical results
-        file under the lock, then discard the part. Concurrent children each
-        write their own part file, so their rows can never interleave; only this
-        whole-line append touches the shared file, and only one arm at a time."""
+        """Fold a cell's private part-file rows into the canonical results file
+        under the lock, then discard the part. Concurrent children each write
+        their own part file, so their rows can never interleave; only this
+        whole-line append touches the shared file, and only one arm at a time.
+        Also the resume-salvage path: a part file left behind by a kill (its name
+        is deterministic per arm) is recovered here rather than lost."""
         with self.lock:
             try:
                 with open(part_path, encoding="utf-8") as src:
@@ -750,18 +765,23 @@ class _MatrixContext:
             if rows:
                 with open(self.results_path, "a", encoding="utf-8") as dst:
                     dst.write(rows)
-        try:
-            os.remove(part_path)
-        except OSError:
-            pass
+            try:
+                os.remove(part_path)
+            except OSError:
+                pass
 
     def save(self):
-        """Persist arm states + retry counts + the aggregated pending queue."""
+        """Persist arm states + retry counts + the aggregated pending queue.
+
+        Callers hold ``self.lock`` around the mutations that precede this, so the
+        aggregation reads each arm's list and ArmState in a consistent state.
+        Every persisted structure is COPIED, never aliased into the saved data.
+        """
         with self.lock:
             self.state.set(
                 "arm_states",
                 {n: a.to_dict() for n, a in self.arm_states.items()})
-            self.state.set("retry_counts", self.retry_counts)
+            self.state.set("retry_counts", dict(self.retry_counts))
             remaining = []
             for q in list(self.arm_pending.values()) + list(self.arm_paused.values()):
                 for n, i, c in q:
@@ -770,48 +790,68 @@ class _MatrixContext:
             self.state.save()
 
 
+def _arm_part_path(results_path: str, arm_name: str) -> str:
+    """Deterministic per-arm part-file path (a filesystem-safe slug of the arm
+    name). Deterministic -- not a randomized hash -- so a part file stranded by
+    a kill is found and salvaged on the next run, and two arms can never collide
+    on one path (which would reintroduce the interleave hazard)."""
+    slug = "".join(ch if ch.isalnum() else "_" for ch in arm_name)
+    return f"{results_path}.part.{slug}"
+
+
 def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
     """Run one arm's cells to completion: the serial queue loop scoped to a
-    single arm. Each arm has one drain, so its ``ArmState`` and its own pending/
-    paused lists are touched by exactly one thread; only the shared results and
-    queue-state files are serialized (via ``ctx``)."""
+    single arm. Each arm has one drain thread, so its ``ArmState`` and its own
+    pending/paused lists have a single mutator; ``ctx.lock`` guards every window
+    where another arm's save() could read them mid-change, plus the shared
+    results/queue-state files. The cell subprocess and backoff sleep run outside
+    the lock so arms overlap."""
     as_ = ctx.arm_states[arm_name]
     pending = ctx.arm_pending[arm_name]
     paused = ctx.arm_paused[arm_name]
     visit_paused = False
-    # A private part file so this arm's child never appends to the shared
-    # results file directly (that is the interleave hazard).
-    part_path = f"{ctx.results_path}.part.{abs(hash(arm_name)) & 0xffffffff:08x}"
+    part_path = _arm_part_path(ctx.results_path, arm_name)
+    # Resume salvage: fold in (and clear) any part file a prior kill stranded for
+    # this arm BEFORE the first satisfaction check, so a completed-but-unmerged
+    # cell is seen as done rather than re-run. No-op under direct_write.
+    if not ctx.direct_write:
+        ctx.merge_part(part_path)
 
-    while pending or (paused and not visit_paused):
-        if not pending and paused and not visit_paused:
-            print(f"\n-- {arm_name}: revisiting {len(paused)} paused cell(s) --")
-            pending[:] = paused
-            paused.clear()
-            visit_paused = True
+    while True:
+        # Pick the next cell under the lock: revisiting paused cells and popping
+        # both mutate this arm's shared queue view.
+        with ctx.lock:
+            if not pending and paused and not visit_paused:
+                print(f"\n-- {arm_name}: revisiting {len(paused)} paused cell(s) --")
+                pending[:] = paused
+                paused.clear()
+                visit_paused = True
+            if not pending:
+                break
+            arm_nm, arm_idx, cell = pending.pop(0)
+            run_id = cell["run_id"]
 
-        arm_nm, arm_idx, cell = pending.pop(0)
-        run_id = cell["run_id"]
+            # Pre-run satisfaction / retry-budget check (reads the shared results
+            # snapshot; records verdicts on this arm's ArmState).
+            existing, result_attempt_counts = load_results_snapshot(ctx.results_path)
+            row = existing.get(run_id)
+            if cell_is_satisfied(row):
+                as_.record_satisfied(run_id)
+                print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
+                ctx.save()
+                continue
+            attempt = effective_failed_attempts(
+                row, ctx.retry_counts.get(run_id, 0),
+                result_attempt_counts.get(run_id, 0))
+            fc = row_failure_class(row)
+            budget = as_.retry_budget(fc)
+            if as_.should_exhaust(fc, attempt):
+                as_.exhausted_cells.append(run_id)
+                print(f"    EXHAUSTED {run_id} (fc={fc} attempts={attempt} budget={budget})")
+                ctx.save()
+                continue
 
-        existing, result_attempt_counts = ctx.snapshot()
-        row = existing.get(run_id)
-        if cell_is_satisfied(row):
-            as_.record_satisfied(run_id)
-            print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
-            ctx.save()
-            continue
-
-        attempt = effective_failed_attempts(
-            row, ctx.retry_counts.get(run_id, 0),
-            result_attempt_counts.get(run_id, 0))
-        fc = row_failure_class(row)
-        budget = as_.retry_budget(fc)
-        if as_.should_exhaust(fc, attempt):
-            as_.exhausted_cells.append(run_id)
-            print(f"    EXHAUSTED {run_id} (fc={fc} attempts={attempt} budget={budget})")
-            ctx.save()
-            continue
-
+        # Backoff and the cell run itself stay OUTSIDE the lock so arms overlap.
         if attempt > 0:
             delay = backoff_for_failure(fc, attempt, ctx.rate_limited_backoff)
             print(f"    BACKOFF {run_id} attempt={attempt}/{budget} fc={fc} wait={delay:.0f}s")
@@ -819,61 +859,72 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
 
         print(f"    RUN    {run_id}", flush=True)
         cell_timeout = cell.get("timeout") or ctx.timeout
-        # Route this cell's output to the arm-private part file; merge_part folds
-        # it into the canonical results under the lock once the child exits.
-        try:
-            os.remove(part_path)
-        except OSError:
-            pass
+        # One worker -> child appends straight to the durable results file (no
+        # merge window). >1 worker -> arm-private part file, merged under the
+        # lock after the child exits, so concurrent children never interleave.
+        if ctx.direct_write:
+            target = ctx.results_path
+        else:
+            ctx.merge_part(part_path)  # ensure empty before the child writes
+            target = part_path
         cmd = build_runner_command(
-            cell, part_path, None, ctx.timeout, ctx.stall_timeout, ctx.exec_mode,
+            cell, target, None, ctx.timeout, ctx.stall_timeout, ctx.exec_mode,
             allow_version_drift=ctx.allow_version_drift)
         rc, stderr_tail = run_runner(cmd, cell_timeout + 60)
         if rc != 0:
             print(f"    WARN runner exit={rc} for {run_id}", file=sys.stderr)
+
+        # Post-run bookkeeping under the lock: merge the part, read the fresh
+        # snapshot, decide, apply the decision to the shared queue/state, save.
+        with ctx.lock:
+            if not ctx.direct_write:
+                ctx.merge_part(part_path)
+            existing, result_attempt_counts = load_results_snapshot(ctx.results_path)
+            row = existing.get(run_id)
+            cell_wall = load_cumulative_wall(ctx.results_path).get(run_id, 0.0)
+            decision = decide_cell_outcome(
+                rc, row, run_id, as_,
+                prior_attempt=attempt,
+                result_attempt_count=result_attempt_counts.get(run_id, 0),
+                cell_wall=cell_wall,
+                max_cell_wall_s=ctx.max_cell_wall_s)
+
+            if decision.action == "satisfied":
+                print(f"    SATISFIED {run_id} ({decision.detail})")
+            elif decision.action == "config_error":
+                reason = _last_meaningful_line(stderr_tail) or f"exit={rc}, no row written"
+                as_.config_error = f"exit={rc}: {reason}"
+                print(
+                    f"    CONFIG-ERROR {run_id}: runner exit={rc} wrote no row -- "
+                    f"stopping arm {arm_name!r}. Reason: {reason}",
+                    file=sys.stderr)
+                if stderr_tail.strip():
+                    print("    --- runner stderr (tail) ---", file=sys.stderr)
+                    print(stderr_tail.rstrip(), file=sys.stderr)
+                    print("    --- end runner stderr ---", file=sys.stderr)
+                pending.clear()   # a mis-wired arm: drop its remaining cells
+                paused.clear()
+            else:
+                ctx.retry_counts[run_id] = decision.new_retry_count
+                if decision.action == "requeue":
+                    pending.insert(0, (arm_nm, arm_idx, cell))
+                    print(f"    RE-QUEUED {run_id} (fc={decision.failure_class} {decision.detail})")
+                elif decision.action == "exhausted":
+                    print(f"    EXHAUSTED {run_id} (fc={decision.failure_class} {decision.detail})")
+
+            if as_.config_error is None and as_.consecutive_excluded >= ctx.max_consecutive_excluded:
+                if not as_.paused:
+                    as_.paused = True
+                    paused.extend(pending)
+                    pending.clear()
+                    print(f"    PAUSED arm={arm_name} after {as_.consecutive_excluded} consecutive excluded")
+
+            ctx.save()
+
+    # Housekeeping: salvage/clear any part file left for this arm (no-op if the
+    # last cell already merged it, or under direct_write).
+    if not ctx.direct_write:
         ctx.merge_part(part_path)
-
-        existing, result_attempt_counts = ctx.snapshot()
-        row = existing.get(run_id)
-        cell_wall = ctx.cumulative_wall(run_id)
-        decision = decide_cell_outcome(
-            rc, row, run_id, as_,
-            prior_attempt=attempt,
-            result_attempt_count=result_attempt_counts.get(run_id, 0),
-            cell_wall=cell_wall,
-            max_cell_wall_s=ctx.max_cell_wall_s)
-
-        if decision.action == "satisfied":
-            print(f"    SATISFIED {run_id} ({decision.detail})")
-        elif decision.action == "config_error":
-            reason = _last_meaningful_line(stderr_tail) or f"exit={rc}, no row written"
-            as_.config_error = f"exit={rc}: {reason}"
-            print(
-                f"    CONFIG-ERROR {run_id}: runner exit={rc} wrote no row -- "
-                f"stopping arm {arm_name!r}. Reason: {reason}",
-                file=sys.stderr)
-            if stderr_tail.strip():
-                print("    --- runner stderr (tail) ---", file=sys.stderr)
-                print(stderr_tail.rstrip(), file=sys.stderr)
-                print("    --- end runner stderr ---", file=sys.stderr)
-            pending.clear()   # a mis-wired arm: drop its remaining cells
-            paused.clear()
-        else:
-            ctx.retry_counts[run_id] = decision.new_retry_count
-            if decision.action == "requeue":
-                pending.insert(0, (arm_nm, arm_idx, cell))
-                print(f"    RE-QUEUED {run_id} (fc={decision.failure_class} {decision.detail})")
-            elif decision.action == "exhausted":
-                print(f"    EXHAUSTED {run_id} (fc={decision.failure_class} {decision.detail})")
-
-        if as_.config_error is None and as_.consecutive_excluded >= ctx.max_consecutive_excluded:
-            if not as_.paused:
-                as_.paused = True
-                paused.extend(pending)
-                pending.clear()
-                print(f"    PAUSED arm={arm_name} after {as_.consecutive_excluded} consecutive excluded")
-
-        ctx.save()
 
 
 # ── Main ────────────────────────────────────────────────────────────────
@@ -1005,6 +1056,9 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         arm_pending.setdefault(entry[0], []).append(entry)
     arm_paused: dict[str, list] = {a: [] for a in arm_states}
 
+    active_arms = [a for a, q in arm_pending.items() if q]
+    n_workers = max(1, min(int(workers), len(active_arms))) if active_arms else 1
+
     ctx = _MatrixContext(
         results_path=results_path, timeout=timeout, stall_timeout=stall_timeout,
         exec_mode=exec_mode, allow_version_drift=allow_version_drift,
@@ -1012,17 +1066,29 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         max_consecutive_excluded=max_consecutive_excluded, arm_states=arm_states,
         retry_counts=retry_counts, state=state, arm_pending=arm_pending,
         arm_paused=arm_paused,
+        # Single worker keeps the durable direct-to-results write; part files
+        # (with their merge window) are only needed to de-interleave >1 worker.
+        direct_write=(n_workers == 1),
     )
 
-    active_arms = [a for a, q in arm_pending.items() if q]
-    n_workers = max(1, min(int(workers), len(active_arms))) if active_arms else 1
     if n_workers > 1:
         print(f"  parallel: {n_workers} arm worker(s) over {len(active_arms)} active arm(s)")
         import concurrent.futures as _cf
         with _cf.ThreadPoolExecutor(max_workers=n_workers) as pool:
             futures = {pool.submit(_drain_arm, a, ctx): a for a in active_arms}
+            errors = []
             for fut in _cf.as_completed(futures):
-                fut.result()  # re-raise any worker exception
+                try:
+                    fut.result()
+                except Exception as exc:  # collect ALL arm failures, not just the first
+                    arm = futures[fut]
+                    errors.append((arm, exc))
+                    print(f"  ERROR arm {arm!r} crashed: {exc!r}", file=sys.stderr)
+            if errors:
+                # Surface the first as the cause so the traceback is preserved.
+                raise RuntimeError(
+                    f"{len(errors)} arm worker(s) crashed: "
+                    f"{', '.join(a for a, _ in errors)}") from errors[0][1]
     else:
         for a in active_arms:
             _drain_arm(a, ctx)
