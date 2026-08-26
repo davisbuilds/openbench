@@ -1,0 +1,64 @@
+# Codex daily-driver head-to-head — prior vs current driver, native backend.
+#
+# Both arms run the codex CLI against the machine-owner ChatGPT subscription
+# (exec_mode = local, no LiteLLM bridge). They therefore share ONE codex 5h
+# quota, which is why this run stays SERIAL: concurrent codex processes would
+# drain the same quota no faster in total and only add backend-throttle risk.
+# (Parallelism is being built for the distinct-provider OpenRouter bake-off,
+# where arms hit separate providers — not for shared-quota codex runs.)
+#
+#   gpt-5.6-terra-xhigh   prior codex daily driver (xhigh reasoning)
+#   gpt-5.6-luna-max      current codex daily driver (~/.codex: luna @ max)
+#
+# Tasks: the 8 local core tasks. webcore is a legit capability read HERE — its
+# earlier failures were OpenRouter free/paid throttling, an artifact of that
+# transport, not of the task; on the native ChatGPT backend it has clean runway.
+# max_cell_wall_s stays as a backstop in case the shared quota runs dry mid-cell.
+#
+# Fire the moment the 5h quota resets:
+#   obench matrix --spec experiments/specs/terra-luna-daily-drivers.toml
+
+results_path = "../../results/terra-luna-daily-drivers/results.jsonl"
+ledger_dir = "../../results/terra-luna-daily-drivers/ledger"
+timeout = 1800
+exec_mode = "local"
+trials = 3
+# Host codex is 0.148.0; the Dockerfile pin is 0.144.5. Both arms run the same
+# host CLI, so the drift is uniform and unbiased -- waive it (rows record
+# version_drift=true) rather than bumping the coupled pin.
+allow_version_drift = true
+# If the shared 5h quota empties mid-run, cells land as rate_limited; pause the
+# arm after a run of exclusions and revisit at the end instead of scoring quota
+# exhaustion as a capability failure.
+max_consecutive_excluded = 4
+# Cap cumulative wall per cell at ~2x timeout so a quota-throttled cell exhausts
+# after ~2 attempts instead of re-burning the full timeout across the budget.
+max_cell_wall_s = 3600
+
+[retry]
+infra = 2
+stalled = 1
+# Codex-native throttling is quota-driven, not OpenRouter's per-request 429s;
+# a moderate budget with long backoff rides out a brief quota dip.
+rate_limited = 3
+rate_limited_backoff_start = 120
+
+[[arm]]
+harness = "codex"
+model = "gpt-5.6-terra-xhigh"
+
+[[arm]]
+harness = "codex"
+model = "gpt-5.6-luna-max"
+
+[[task_group]]
+tasks = [
+  "misleading-error",
+  "fix-failing-test",
+  "make-ci-green",
+  "make-it-run",
+  "webcore",
+  "build-a-cli",
+  "taskflow",
+  "add-feature",
+]
