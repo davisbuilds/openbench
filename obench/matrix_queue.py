@@ -867,13 +867,24 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         if rc != 0:
             print(f"    WARN runner exit={rc} for {run_id}", file=sys.stderr)
 
-        # Re-check satisfaction
+        # Re-check satisfaction and decide the cell's fate. The verdict logic
+        # (satisfied / config-error / requeue / exhausted) lives in the pure
+        # decide_cell_outcome core; the shell below owns the side effects it
+        # implies -- queue membership, retry_counts, and the arm-stop drop.
         existing, result_attempt_counts = load_results_snapshot(results_path)
         row = existing.get(run_id)
-        if cell_is_satisfied(row):
-            as_.record_satisfied(run_id)
-            print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
-        elif row is None:
+        cell_wall = load_cumulative_wall(results_path).get(run_id, 0.0)
+        decision = decide_cell_outcome(
+            rc, row, run_id, as_,
+            prior_attempt=attempt,
+            result_attempt_count=result_attempt_counts.get(run_id, 0),
+            cell_wall=cell_wall,
+            max_cell_wall_s=max_cell_wall_s,
+        )
+
+        if decision.action == "satisfied":
+            print(f"    SATISFIED {run_id} ({decision.detail})")
+        elif decision.action == "config_error":
             # The runner wrote NO row for this cell. A completed cell -- even a
             # failing one -- always appends a classified row, so an absent row
             # means the runner itself never ran the cell: a bad --tasks-dir, an
@@ -898,31 +909,15 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
             pending = [(n, i, c) for n, i, c in pending if n != arm_name]
             paused_arms = [(n, i, c) for n, i, c in paused_arms if n != arm_name]
         else:
-            new_fc = row_failure_class(row)
-            retry_counts[run_id] = max(
-                attempt + 1, result_attempt_counts.get(run_id, 0))
-            if new_fc is not None and new_fc in fc_mod.EXCLUDED_FROM_SOLVE_RATE:
-                as_.record_excluded()
-                # Re-queue if budget allows
-                budget_remaining = as_.retries_remaining(
-                    new_fc, retry_counts.get(run_id, 0))
-                # A throttle-dominated cell classifies rate_limited yet burns a
-                # full timeout every attempt; the per-class retry budget alone
-                # lets it re-burn that timeout many times. Stop once its
-                # cumulative wall time crosses the cap, even with budget left.
-                cell_wall = load_cumulative_wall(results_path).get(run_id, 0.0)
-                if wall_cap_exceeded(cell_wall, max_cell_wall_s):
-                    if run_id not in as_.exhausted_cells:
-                        as_.exhausted_cells.append(run_id)
-                    print(f"    EXHAUSTED {run_id} (fc={new_fc} wall cap: "
-                          f"{cell_wall:.0f}s >= {max_cell_wall_s}s)")
-                elif budget_remaining > 0:
-                    pending.insert(0, (arm_name, arm_idx, cell))
-                    print(f"    RE-QUEUED {run_id} (fc={new_fc} retry={budget_remaining} left)")
-                else:
-                    if run_id not in as_.exhausted_cells:
-                        as_.exhausted_cells.append(run_id)
-                    print(f"    EXHAUSTED {run_id} (fc={new_fc} retry budget exhausted)")
+            # requeue / exhausted / scored: the core already updated arm-state
+            # exclusion + exhaustion bookkeeping; the shell records the attempt
+            # count and re-queues if asked.
+            retry_counts[run_id] = decision.new_retry_count
+            if decision.action == "requeue":
+                pending.insert(0, (arm_name, arm_idx, cell))
+                print(f"    RE-QUEUED {run_id} (fc={decision.failure_class} {decision.detail})")
+            elif decision.action == "exhausted":
+                print(f"    EXHAUSTED {run_id} (fc={decision.failure_class} {decision.detail})")
 
         # Arm pause check (skip if the arm just hit a config error and stopped)
         if as_.config_error is None and as_.consecutive_excluded >= max_consecutive_excluded:
