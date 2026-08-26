@@ -693,6 +693,189 @@ def run_runner(cmd: list[str], timeout_s: float | None = None) -> tuple[int, str
         stderr_file.close()
 
 
+# ── Scheduler ───────────────────────────────────────────────────────────
+
+class _MatrixContext:
+    """Shared state + config for the per-arm drains, guarded by one lock.
+
+    Arms are independent: a run_id encodes the model, so no two arms ever write
+    the same cell or the same results row. The only cross-arm hazards are
+    physical -- interleaved appends to the one results file, a torn line read
+    while another arm appends, and concurrent rewrites of the single queue-state
+    file. All three are serialized by ``self.lock``; the long part (running a
+    cell subprocess) stays outside it, so arms still overlap.
+    """
+
+    def __init__(self, *, results_path, timeout, stall_timeout, exec_mode,
+                 allow_version_drift, rate_limited_backoff, max_cell_wall_s,
+                 max_consecutive_excluded, arm_states, retry_counts, state,
+                 arm_pending, arm_paused):
+        self.results_path = results_path
+        self.timeout = timeout
+        self.stall_timeout = stall_timeout
+        self.exec_mode = exec_mode
+        self.allow_version_drift = allow_version_drift
+        self.rate_limited_backoff = rate_limited_backoff
+        self.max_cell_wall_s = max_cell_wall_s
+        self.max_consecutive_excluded = max_consecutive_excluded
+        self.arm_states = arm_states
+        self.retry_counts = retry_counts
+        self.state = state
+        # Per-arm queues, so each drain mutates only its own arm's lists while a
+        # save() aggregates all arms into the single persisted `pending`.
+        self.arm_pending = arm_pending
+        self.arm_paused = arm_paused
+        self.lock = threading.Lock()
+
+    def snapshot(self):
+        """Locked read of the results file (existing rows + attempt counts)."""
+        with self.lock:
+            return load_results_snapshot(self.results_path)
+
+    def cumulative_wall(self, run_id):
+        with self.lock:
+            return load_cumulative_wall(self.results_path).get(run_id, 0.0)
+
+    def merge_part(self, part_path):
+        """Append a cell's private part-file rows into the canonical results
+        file under the lock, then discard the part. Concurrent children each
+        write their own part file, so their rows can never interleave; only this
+        whole-line append touches the shared file, and only one arm at a time."""
+        with self.lock:
+            try:
+                with open(part_path, encoding="utf-8") as src:
+                    rows = src.read()
+            except OSError:
+                return
+            if rows:
+                with open(self.results_path, "a", encoding="utf-8") as dst:
+                    dst.write(rows)
+        try:
+            os.remove(part_path)
+        except OSError:
+            pass
+
+    def save(self):
+        """Persist arm states + retry counts + the aggregated pending queue."""
+        with self.lock:
+            self.state.set(
+                "arm_states",
+                {n: a.to_dict() for n, a in self.arm_states.items()})
+            self.state.set("retry_counts", self.retry_counts)
+            remaining = []
+            for q in list(self.arm_pending.values()) + list(self.arm_paused.values()):
+                for n, i, c in q:
+                    remaining.append([n, i, c["run_id"]])
+            self.state.set("pending", remaining)
+            self.state.save()
+
+
+def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
+    """Run one arm's cells to completion: the serial queue loop scoped to a
+    single arm. Each arm has one drain, so its ``ArmState`` and its own pending/
+    paused lists are touched by exactly one thread; only the shared results and
+    queue-state files are serialized (via ``ctx``)."""
+    as_ = ctx.arm_states[arm_name]
+    pending = ctx.arm_pending[arm_name]
+    paused = ctx.arm_paused[arm_name]
+    visit_paused = False
+    # A private part file so this arm's child never appends to the shared
+    # results file directly (that is the interleave hazard).
+    part_path = f"{ctx.results_path}.part.{abs(hash(arm_name)) & 0xffffffff:08x}"
+
+    while pending or (paused and not visit_paused):
+        if not pending and paused and not visit_paused:
+            print(f"\n-- {arm_name}: revisiting {len(paused)} paused cell(s) --")
+            pending[:] = paused
+            paused.clear()
+            visit_paused = True
+
+        arm_nm, arm_idx, cell = pending.pop(0)
+        run_id = cell["run_id"]
+
+        existing, result_attempt_counts = ctx.snapshot()
+        row = existing.get(run_id)
+        if cell_is_satisfied(row):
+            as_.record_satisfied(run_id)
+            print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
+            ctx.save()
+            continue
+
+        attempt = effective_failed_attempts(
+            row, ctx.retry_counts.get(run_id, 0),
+            result_attempt_counts.get(run_id, 0))
+        fc = row_failure_class(row)
+        budget = as_.retry_budget(fc)
+        if as_.should_exhaust(fc, attempt):
+            as_.exhausted_cells.append(run_id)
+            print(f"    EXHAUSTED {run_id} (fc={fc} attempts={attempt} budget={budget})")
+            ctx.save()
+            continue
+
+        if attempt > 0:
+            delay = backoff_for_failure(fc, attempt, ctx.rate_limited_backoff)
+            print(f"    BACKOFF {run_id} attempt={attempt}/{budget} fc={fc} wait={delay:.0f}s")
+            time.sleep(delay)
+
+        print(f"    RUN    {run_id}", flush=True)
+        cell_timeout = cell.get("timeout") or ctx.timeout
+        # Route this cell's output to the arm-private part file; merge_part folds
+        # it into the canonical results under the lock once the child exits.
+        try:
+            os.remove(part_path)
+        except OSError:
+            pass
+        cmd = build_runner_command(
+            cell, part_path, None, ctx.timeout, ctx.stall_timeout, ctx.exec_mode,
+            allow_version_drift=ctx.allow_version_drift)
+        rc, stderr_tail = run_runner(cmd, cell_timeout + 60)
+        if rc != 0:
+            print(f"    WARN runner exit={rc} for {run_id}", file=sys.stderr)
+        ctx.merge_part(part_path)
+
+        existing, result_attempt_counts = ctx.snapshot()
+        row = existing.get(run_id)
+        cell_wall = ctx.cumulative_wall(run_id)
+        decision = decide_cell_outcome(
+            rc, row, run_id, as_,
+            prior_attempt=attempt,
+            result_attempt_count=result_attempt_counts.get(run_id, 0),
+            cell_wall=cell_wall,
+            max_cell_wall_s=ctx.max_cell_wall_s)
+
+        if decision.action == "satisfied":
+            print(f"    SATISFIED {run_id} ({decision.detail})")
+        elif decision.action == "config_error":
+            reason = _last_meaningful_line(stderr_tail) or f"exit={rc}, no row written"
+            as_.config_error = f"exit={rc}: {reason}"
+            print(
+                f"    CONFIG-ERROR {run_id}: runner exit={rc} wrote no row -- "
+                f"stopping arm {arm_name!r}. Reason: {reason}",
+                file=sys.stderr)
+            if stderr_tail.strip():
+                print("    --- runner stderr (tail) ---", file=sys.stderr)
+                print(stderr_tail.rstrip(), file=sys.stderr)
+                print("    --- end runner stderr ---", file=sys.stderr)
+            pending.clear()   # a mis-wired arm: drop its remaining cells
+            paused.clear()
+        else:
+            ctx.retry_counts[run_id] = decision.new_retry_count
+            if decision.action == "requeue":
+                pending.insert(0, (arm_nm, arm_idx, cell))
+                print(f"    RE-QUEUED {run_id} (fc={decision.failure_class} {decision.detail})")
+            elif decision.action == "exhausted":
+                print(f"    EXHAUSTED {run_id} (fc={decision.failure_class} {decision.detail})")
+
+        if as_.config_error is None and as_.consecutive_excluded >= ctx.max_consecutive_excluded:
+            if not as_.paused:
+                as_.paused = True
+                paused.extend(pending)
+                pending.clear()
+                print(f"    PAUSED arm={arm_name} after {as_.consecutive_excluded} consecutive excluded")
+
+        ctx.save()
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
@@ -706,6 +889,11 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     # lets a throttle-dominated cell re-burn a full timeout on every re-queue.
     max_cell_wall_s = spec.get("max_cell_wall_s")
     allow_version_drift = bool(spec.get("allow_version_drift", False))
+    # Arm-level parallelism (default 1 = serial). Each worker drains one arm; the
+    # pool is capped at the number of active arms. Only sound for arms on
+    # DISTINCT providers -- co-scheduling arms that share a rate limit (or the
+    # one codex quota) re-creates the throttling this avoids. See BACKLOG #45.
+    workers = int(spec.get("workers", 1) or 1)
     stall_timeout = spec.get("stall_timeout") or (
         int(os.environ.get("OPENBENCH_STALL_TIMEOUT", "0")) or None
     )
@@ -804,139 +992,40 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     # Track retry counts per run_id
     retry_counts: dict[str, int] = dict(state.get("retry_counts", {}))
 
-    paused_arms: list[tuple[str, int, dict[str, Any]]] = []
-    visit_paused = False
-
     print(
         f"Matrix queue: {len(all_cells)} planned cells, "
         f"{len(arms)} arm(s), {len(tasks)} task(s), {trials} trial(s)"
     )
 
-    while pending or (paused_arms and not visit_paused):
-        # If we exhausted the main queue and have paused arms, revisit them.
-        if not pending and paused_arms and not visit_paused:
-            print(f"\n-- Revisiting {len(paused_arms)} paused arm(s) --")
-            pending = list(paused_arms)
-            paused_arms = []
-            visit_paused = True
+    # Partition the flat pending queue by arm. Arms are independent (a run_id
+    # encodes the model), so each arm drains its own list; a >1 worker pool runs
+    # arms concurrently. Order within an arm is preserved.
+    arm_pending: dict[str, list] = {a: [] for a in arm_states}
+    for entry in pending:
+        arm_pending.setdefault(entry[0], []).append(entry)
+    arm_paused: dict[str, list] = {a: [] for a in arm_states}
 
-        arm_name, arm_idx, cell = pending.pop(0)
-        as_ = arm_states[arm_name]
-        run_id = cell["run_id"]
+    ctx = _MatrixContext(
+        results_path=results_path, timeout=timeout, stall_timeout=stall_timeout,
+        exec_mode=exec_mode, allow_version_drift=allow_version_drift,
+        rate_limited_backoff=rate_limited_backoff, max_cell_wall_s=max_cell_wall_s,
+        max_consecutive_excluded=max_consecutive_excluded, arm_states=arm_states,
+        retry_counts=retry_counts, state=state, arm_pending=arm_pending,
+        arm_paused=arm_paused,
+    )
 
-        # Check if cell is already satisfied
-        existing, result_attempt_counts = load_results_snapshot(results_path)
-        row = existing.get(run_id)
-        if cell_is_satisfied(row):
-            as_.record_satisfied(run_id)
-            print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
-            state.set("arm_states", {n: a.to_dict() for n, a in arm_states.items()})
-            state.save()
-            continue
-
-        # Check retry budget
-        attempt = effective_failed_attempts(
-            row,
-            retry_counts.get(run_id, 0),
-            result_attempt_counts.get(run_id, 0),
-        )
-        fc = row_failure_class(row)
-        budget = as_.retry_budget(fc)
-        if as_.should_exhaust(fc, attempt):
-            as_.exhausted_cells.append(run_id)
-            print(f"    EXHAUSTED {run_id} (fc={fc} attempts={attempt} budget={budget})")
-            state.set("arm_states", {n: a.to_dict() for n, a in arm_states.items()})
-            state.save()
-            continue
-
-        # Backoff if re-trying
-        if attempt > 0:
-            delay = backoff_for_failure(fc, attempt, rate_limited_backoff)
-            print(f"    BACKOFF {run_id} attempt={attempt}/{budget} fc={fc} wait={delay:.0f}s")
-            time.sleep(delay)
-
-        # Run the cell. A per-group timeout override (carried on the cell) sets
-        # both the runner's --timeout and this outer kill budget.
-        print(f"    RUN    {run_id}", flush=True)
-        cell_timeout = cell.get("timeout") or timeout
-        cmd = build_runner_command(
-            cell, results_path, None, timeout, stall_timeout, exec_mode,
-            allow_version_drift=allow_version_drift)
-        rc, stderr_tail = run_runner(cmd, cell_timeout + 60)
-
-        if rc != 0:
-            print(f"    WARN runner exit={rc} for {run_id}", file=sys.stderr)
-
-        # Re-check satisfaction and decide the cell's fate. The verdict logic
-        # (satisfied / config-error / requeue / exhausted) lives in the pure
-        # decide_cell_outcome core; the shell below owns the side effects it
-        # implies -- queue membership, retry_counts, and the arm-stop drop.
-        existing, result_attempt_counts = load_results_snapshot(results_path)
-        row = existing.get(run_id)
-        cell_wall = load_cumulative_wall(results_path).get(run_id, 0.0)
-        decision = decide_cell_outcome(
-            rc, row, run_id, as_,
-            prior_attempt=attempt,
-            result_attempt_count=result_attempt_counts.get(run_id, 0),
-            cell_wall=cell_wall,
-            max_cell_wall_s=max_cell_wall_s,
-        )
-
-        if decision.action == "satisfied":
-            print(f"    SATISFIED {run_id} ({decision.detail})")
-        elif decision.action == "config_error":
-            # The runner wrote NO row for this cell. A completed cell -- even a
-            # failing one -- always appends a classified row, so an absent row
-            # means the runner itself never ran the cell: a bad --tasks-dir, an
-            # argparse error, a missing adapter, an import crash. This is a
-            # harness/config error, not an unclassifiable capability result.
-            # Burning retries against fc=None here is exactly what silently
-            # declared cells EXHAUSTED on the first live coverage-gap spec, so we
-            # STOP the arm and surface the runner's own stderr instead.
-            reason = _last_meaningful_line(stderr_tail) or f"exit={rc}, no row written"
-            as_.config_error = f"exit={rc}: {reason}"
-            print(
-                f"    CONFIG-ERROR {run_id}: runner exit={rc} wrote no row -- "
-                f"stopping arm {arm_name!r}. Reason: {reason}",
-                file=sys.stderr,
-            )
-            if stderr_tail.strip():
-                print("    --- runner stderr (tail) ---", file=sys.stderr)
-                print(stderr_tail.rstrip(), file=sys.stderr)
-                print("    --- end runner stderr ---", file=sys.stderr)
-            # Drop every remaining cell for this arm from the queue and the
-            # paused list; there is no point retrying a mis-wired arm.
-            pending = [(n, i, c) for n, i, c in pending if n != arm_name]
-            paused_arms = [(n, i, c) for n, i, c in paused_arms if n != arm_name]
-        else:
-            # requeue / exhausted / scored: the core already updated arm-state
-            # exclusion + exhaustion bookkeeping; the shell records the attempt
-            # count and re-queues if asked.
-            retry_counts[run_id] = decision.new_retry_count
-            if decision.action == "requeue":
-                pending.insert(0, (arm_name, arm_idx, cell))
-                print(f"    RE-QUEUED {run_id} (fc={decision.failure_class} {decision.detail})")
-            elif decision.action == "exhausted":
-                print(f"    EXHAUSTED {run_id} (fc={decision.failure_class} {decision.detail})")
-
-        # Arm pause check (skip if the arm just hit a config error and stopped)
-        if as_.config_error is None and as_.consecutive_excluded >= max_consecutive_excluded:
-            if not as_.paused:
-                as_.paused = True
-                # Move all remaining cells for this arm to paused list
-                arm_cells = [(n, i, c) for n, i, c in pending if n == arm_name]
-                pending = [(n, i, c) for n, i, c in pending if n != arm_name]
-                paused_arms.extend(arm_cells)
-                print(f"    PAUSED arm={arm_name} after {as_.consecutive_excluded} consecutive excluded")
-
-        # Persist state
-        state.set("arm_states", {n: a.to_dict() for n, a in arm_states.items()})
-        state.set("retry_counts", retry_counts)
-        remaining_pending = []
-        for n, i, c in pending:
-            remaining_pending.append([n, i, c["run_id"]])
-        state.set("pending", remaining_pending)
-        state.save()
+    active_arms = [a for a, q in arm_pending.items() if q]
+    n_workers = max(1, min(int(workers), len(active_arms))) if active_arms else 1
+    if n_workers > 1:
+        print(f"  parallel: {n_workers} arm worker(s) over {len(active_arms)} active arm(s)")
+        import concurrent.futures as _cf
+        with _cf.ThreadPoolExecutor(max_workers=n_workers) as pool:
+            futures = {pool.submit(_drain_arm, a, ctx): a for a in active_arms}
+            for fut in _cf.as_completed(futures):
+                fut.result()  # re-raise any worker exception
+    else:
+        for a in active_arms:
+            _drain_arm(a, ctx)
 
     # ── Final summary ───────────────────────────────────────────────────
     total_planned = len(all_cells)
@@ -1023,6 +1112,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Matrix queue: retry-aware benchmark runner for OpenBench.")
     parser.add_argument("--spec", required=True,
                         help="TOML spec file defining arms, task groups, retry budgets")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="arm-level parallelism (default 1 = serial). Overrides "
+                             "the spec's `workers`. Only for arms on distinct providers.")
     args = parser.parse_args(argv)
 
     spec_path = os.path.abspath(args.spec)
@@ -1038,6 +1130,9 @@ def main(argv: list[str] | None = None) -> int:
     except SpecError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+
+    if args.workers is not None:
+        spec["workers"] = args.workers  # CLI overrides the spec's `workers`
 
     missing = missing_task_images(spec, spec_dir)
     if missing:
