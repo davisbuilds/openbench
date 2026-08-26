@@ -765,10 +765,14 @@ class _MatrixContext:
             if rows:
                 with open(self.results_path, "a", encoding="utf-8") as dst:
                     dst.write(rows)
-            try:
-                os.remove(part_path)
-            except OSError:
-                pass
+            # Remove the part file AND the sibling lock file the child runner
+            # creates next to any --results-path (run.py: <path>.lock), so a
+            # parallel run doesn't leave an empty .lock per arm behind.
+            for stale in (part_path, part_path + ".lock"):
+                try:
+                    os.remove(stale)
+                except OSError:
+                    pass
 
     def save(self):
         """Persist arm states + retry counts + the aggregated pending queue.
