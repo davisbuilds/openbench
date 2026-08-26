@@ -111,6 +111,46 @@ the PR, not as a "resolved" note here).
 - **Next**: fork-local `bridge up`/`down` helper with a config-hash check + health
   wait, if the friction recurs. Keep local unless it generalizes cleanly.
 
+#### Per-arm bridge isolation — the latency-safe unlock for `--workers`
+- **What**: one shared LiteLLM bridge (127.0.0.1:4141) serves every open-model
+  arm. Fine serially; under `--workers > 1` it becomes the parallelism
+  bottleneck.
+- **Why it matters** (*measured 2026-08-26, timing gate*): with 3 arms on
+  distinct providers running concurrently, all three inflated `t_agent_s`
+  together on the turn-heavy `make-it-run` task (glm 27s→57-147s, and likewise
+  for minimax/deepseek) — different providers moving in lockstep isolates the
+  cause to the shared bridge serializing round-trips. This is exactly why the
+  gate rated `--workers` throughput-safe but *not* latency-safe.
+- **Next**: give each concurrent arm its own bridge instance (a port per arm,
+  templated config) OR run the bridge with real worker concurrency, then re-run
+  the timing gate. Until then `--workers` stays throughput-only (a runtime
+  warning now says so). Unblocks latency-safe parallelism for
+  [#45](https://github.com/minghinmatthewlam/openbench/issues/45).
+
+### Security posture
+
+#### Local-mode checker runs unsandboxed on the host — task-trust boundary
+- **What**: in `exec_mode = "local"`, the agent runs under codex's
+  `workspace-write` Seatbelt sandbox (writes confined to the workdir + temp, no
+  shell network), but `run_checker` (`obench/run.py:1265`) executes the task's
+  `checker.sh` as a plain host `subprocess` — full host env, full host
+  privileges, **no sandbox**. A second, quieter channel: the agent's sandbox
+  blocks outside *writes* and shell *network*, but allows broad *reads*, and
+  anything read enters the model context and is sent to the provider — so a
+  prompt-injected task could read a host secret and exfiltrate it via the model
+  API even though the shell cannot `curl` it out.
+- **Why it matters** (*reviewed 2026-08-26*): local-mode safety therefore rests
+  entirely on the task (both `instruction.md` and `checker.sh`) being trusted.
+  The vendored core + exercism sets were read and verified clean (checkers call
+  only `python3`; prompts are benign) — but any imported/community task set is
+  arbitrary host-privileged code at check time.
+- **Next**: (a) document that untrusted task sets MUST run under `--exec docker`
+  (checker runs in the disposable container, agent reads can't see the host
+  home); (b) consider a preflight that warns when running non-vendored tasks in
+  local mode; (c) optionally wrap the local checker in the same Seatbelt profile
+  as the agent. Decision/risk item — no code change until we actually import an
+  untrusted set.
+
 ---
 
 ## Tracked elsewhere (in flight — will leave this doc on merge)

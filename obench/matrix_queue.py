@@ -1073,6 +1073,13 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
 
     if n_workers > 1:
         print(f"  parallel: {n_workers} arm worker(s) over {len(active_arms)} active arm(s)")
+        # Throughput-only: the timing gate (BACKLOG #45) showed concurrent arms
+        # sharing the one LiteLLM bridge inflate per-cell t_agent_s on turn-heavy
+        # tasks. Coverage is unaffected; latency is. Warn so scored latency
+        # comparisons are not read off a parallel run by mistake.
+        print("  WARNING: --workers is THROUGHPUT mode -- per-cell wall/agent "
+              "time may be inflated by shared-bridge contention; do NOT use these "
+              "runs for scored latency comparisons.", file=sys.stderr)
         import concurrent.futures as _cf
         with _cf.ThreadPoolExecutor(max_workers=n_workers) as pool:
             futures = {pool.submit(_drain_arm, a, ctx): a for a in active_arms}
