@@ -393,6 +393,34 @@ class RunnerCommandBuildingTests(unittest.TestCase):
         # proxy is only added when stall_timeout is set
         self.assertNotIn("--proxy", cmd)
 
+    def test_version_drift_flag_omitted_by_default(self):
+        cell = {"harness": "codex", "model": "a", "task": "t1", "trial": 1}
+        cmd = mq.build_runner_command(cell, "r.jsonl", "/t", 2400, None, "local")
+        self.assertNotIn("--allow-version-drift", cmd)
+
+    def test_version_drift_flag_passed_when_requested(self):
+        cell = {"harness": "codex", "model": "a", "task": "t1", "trial": 1}
+        cmd = mq.build_runner_command(
+            cell, "r.jsonl", "/t", 2400, None, "local", allow_version_drift=True)
+        self.assertIn("--allow-version-drift", cmd)
+
+
+class MissingTaskImagesTests(unittest.TestCase):
+    """Preflight for pinned per-task docker images."""
+
+    def test_local_group_without_tasks_dir_is_skipped_not_crashed(self):
+        # A local task group omits tasks_dir (runner resolves via discovery) and
+        # pins no docker image. The preflight must skip it, not os.path.join a
+        # None tasks_dir -- that TypeError killed an all-local spec before any
+        # cell ran.
+        spec = {
+            "task_group": [{"tasks": ["make-it-run", "webcore"]}],
+        }
+        # docker_runner must never be consulted for a local group.
+        def _fail(_ref):
+            raise AssertionError("docker inspect should not run for a local group")
+        self.assertEqual(mq.missing_task_images(spec, "/spec/dir", docker_runner=_fail), [])
+
 
 class CoverageSummaryTests(unittest.TestCase):
     """Verify coverage output format."""
