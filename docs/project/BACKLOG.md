@@ -37,9 +37,23 @@ the PR, not as a "resolved" note here).
   write-safety, and needs per-provider concurrency caps (uncapped fan-out trades
   serialization for self-inflicted 429s). Prototype behind a **default-off**
   `--workers` flag before committing to it.
+- **In flight** (branch `feat/matrix-parallel-arms`): arm-level `--workers`
+  landed default-off. The per-cell decision was extracted to a pure core
+  (`decide_cell_outcome`), the loop rewired through it, and a per-arm drain runs
+  arms concurrently behind one lock (shared results + queue-state files only);
+  each cell writes an arm-private part file merged as a whole-line append, so
+  concurrent children can't interleave. run_matrix got its first end-to-end net
+  (fake-runner integration tests: serial/parallel coverage, real overlap,
+  no-torn-lines). **Still owed before trusting it for a scored run**: the
+  empirical timing-contamination gate -- one arm solo vs the same arm under
+  concurrency, wall-time delta must stay within noise, else parallel runs
+  corrupt the latency numbers the benchmark exists to produce. Until that gate
+  passes, use `--workers` only for throughput on distinct-provider arms, not for
+  latency-sensitive comparisons.
 - **Next**: tracked upstream as
   [minghinmatthewlam/openbench#45](https://github.com/minghinmatthewlam/openbench/issues/45).
-  Prototype locally behind a flag if the direction is welcomed.
+  Hold the upstream PR until the timing gate passes and the maintainer signals
+  interest.
 
 ### Extensibility
 
