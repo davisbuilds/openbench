@@ -43,18 +43,21 @@ the PR, not as a "resolved" note here).
 
 ### Extensibility
 
-#### Externalize the adapter `OPEN_MODELS` registry to config
-- **What**: adding an open / BYO model means editing the adapter's `OPEN_MODELS`
-  dict in code (`obench/adapters/codex.py`) plus a matching `bridge/config.yaml`
-  route.
+#### Externalize the adapter `OPEN_MODELS` registry to config — *codex done, others pending*
+- **What**: adding an open / BYO model meant editing the adapter's `OPEN_MODELS`
+  dict in code plus a matching `bridge/config.yaml` route.
 - **Why it matters** (*measured 2026-08-26*): wiring the OpenRouter bake-off
-  meant editing `codex.py` **6×** in one session (ox-alpha, glm-5.3-flash,
-  minimax-m3, deepseek-v4-flash-0731, inkling, laguna-s-2.1). Per-model code
-  churn is also a merge-conflict surface against upstream on a fork.
-- **Next**: tracked upstream as
-  [minghinmatthewlam/openbench#46](https://github.com/minghinmatthewlam/openbench/issues/46).
-  A config-driven registry (with the in-code dict as fallback) would mirror how
-  `bridge/config.yaml` already externalizes the LiteLLM routes.
+  meant editing `codex.py` **6×** in one session. Per-model code churn is also a
+  merge-conflict surface against upstream on a fork.
+- **Done locally**: `obench/open_models_config.py` loads operator routes from
+  `$OPENBENCH_OPEN_MODELS` (else `~/.openbench/open_models.toml`) and merges them
+  over an adapter's built-ins; wired into the **codex** adapter (commit
+  `7fbc975`, on `main`).
+- **Next**: adopt `merge_open_models()` in the remaining adapters
+  (`pi`/`opencode`/`claude`/`grokbuild`), which still carry in-code dicts. Upstream
+  contribution tracked as
+  [minghinmatthewlam/openbench#46](https://github.com/minghinmatthewlam/openbench/issues/46)
+  — hold the PR until the maintainer signals interest (issue-first, per plan).
 
 ### Operator ergonomics
 
