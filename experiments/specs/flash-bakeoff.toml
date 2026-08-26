@@ -22,6 +22,10 @@ exec_mode = "local"
 trials = 3
 allow_version_drift = true
 max_consecutive_excluded = 4
+# ~2x timeout: exhaust a throttle-dominated (full-timeout-burn) cell after ~2
+# attempts instead of re-burning the timeout across the retry budget. (Paid
+# endpoints here rarely throttle, but keep the guard as a standing default.)
+max_cell_wall_s = 3600
 
 # Paid endpoints rarely throttle; keep retries low so a genuine failure is
 # scored rather than looped.

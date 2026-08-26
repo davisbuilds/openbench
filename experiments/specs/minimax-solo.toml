@@ -21,6 +21,9 @@ exec_mode = "local"
 trials = 3
 allow_version_drift = true
 max_consecutive_excluded = 5
+# ~2x timeout: exhaust a throttle-dominated (full-timeout-burn) cell after ~2
+# attempts instead of re-burning the timeout across the retry budget.
+max_cell_wall_s = 2400
 
 [retry]
 infra = 2

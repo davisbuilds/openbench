@@ -35,6 +35,10 @@ allow_version_drift = true
 # max_consecutive_excluded pauses a throttled arm and revisits it at the end,
 # giving the free tier time to recover instead of scoring the throttle.
 max_consecutive_excluded = 6
+# Cap cumulative wall time per cell at ~2x the timeout, so a throttle-dominated
+# cell (rate_limited via a full-timeout burn) exhausts after ~2 attempts instead
+# of re-burning the timeout across the whole retry budget.
+max_cell_wall_s = 3600
 
 [retry]
 infra = 3
