@@ -37,9 +37,38 @@ the PR, not as a "resolved" note here).
   write-safety, and needs per-provider concurrency caps (uncapped fan-out trades
   serialization for self-inflicted 429s). Prototype behind a **default-off**
   `--workers` flag before committing to it.
+- **In flight** (branch `feat/matrix-parallel-arms`): arm-level `--workers`
+  landed default-off. The per-cell decision was extracted to a pure core
+  (`decide_cell_outcome`), the loop rewired through it, and a per-arm drain runs
+  arms concurrently behind one lock (shared results + queue-state files only);
+  each cell writes an arm-private part file merged as a whole-line append, so
+  concurrent children can't interleave. run_matrix got its first end-to-end net
+  (fake-runner integration tests: serial/parallel coverage, real overlap,
+  no-torn-lines). **Still owed before trusting it for a scored run**: the
+  empirical timing-contamination gate -- one arm solo vs the same arm under
+  concurrency, wall-time delta must stay within noise, else parallel runs
+  corrupt the latency numbers the benchmark exists to produce. Until that gate
+  passes, use `--workers` only for throughput on distinct-provider arms, not for
+  latency-sensitive comparisons.
+- **Timing gate result** (*measured 2026-08-26*, `experiments/analyze_gate.py`,
+  glm-5.3-flash solo vs under 3-way concurrency): **CONDITIONAL PASS**.
+  Local/CPU contention is negligible -- `t_env_setup_s` and `t_checker_s` (the
+  local-CPU parts) are unchanged. BUT on the short, turn-heavy `make-it-run`
+  task, ALL THREE distinct-provider arms inflated `t_agent_s` together (glm
+  27s->57-147s, deepseek->62-103s, minimax->62-107s). Different providers moving
+  in lockstep isolates the cause to the **single shared LiteLLM bridge**
+  (127.0.0.1:4141, one process): it serializes concurrent agent round-trips, so
+  turn-heavy tasks pay a latency penalty. Longer few-turn tasks stayed within
+  noise (-26%..+18%). **Verdict: `--workers` is safe for THROUGHPUT (coverage
+  was identical, every cell solved) but NOT for scored LATENCY comparisons until
+  the bridge is per-arm isolated** (separate port per concurrent arm, or a
+  bridge with real worker concurrency). Directly implicates the "Bridge
+  lifecycle" item below.
 - **Next**: tracked upstream as
   [minghinmatthewlam/openbench#45](https://github.com/minghinmatthewlam/openbench/issues/45).
-  Prototype locally behind a flag if the direction is welcomed.
+  For latency-safe parallelism, pair `--workers` with per-arm bridge isolation
+  first. Hold the upstream PR until then and until the maintainer signals
+  interest.
 
 ### Extensibility
 
@@ -81,6 +110,46 @@ the PR, not as a "resolved" note here).
   to preserve that boundary.
 - **Next**: fork-local `bridge up`/`down` helper with a config-hash check + health
   wait, if the friction recurs. Keep local unless it generalizes cleanly.
+
+#### Per-arm bridge isolation — the latency-safe unlock for `--workers`
+- **What**: one shared LiteLLM bridge (127.0.0.1:4141) serves every open-model
+  arm. Fine serially; under `--workers > 1` it becomes the parallelism
+  bottleneck.
+- **Why it matters** (*measured 2026-08-26, timing gate*): with 3 arms on
+  distinct providers running concurrently, all three inflated `t_agent_s`
+  together on the turn-heavy `make-it-run` task (glm 27s→57-147s, and likewise
+  for minimax/deepseek) — different providers moving in lockstep isolates the
+  cause to the shared bridge serializing round-trips. This is exactly why the
+  gate rated `--workers` throughput-safe but *not* latency-safe.
+- **Next**: give each concurrent arm its own bridge instance (a port per arm,
+  templated config) OR run the bridge with real worker concurrency, then re-run
+  the timing gate. Until then `--workers` stays throughput-only (a runtime
+  warning now says so). Unblocks latency-safe parallelism for
+  [#45](https://github.com/minghinmatthewlam/openbench/issues/45).
+
+### Security posture
+
+#### Local-mode checker runs unsandboxed on the host — task-trust boundary
+- **What**: in `exec_mode = "local"`, the agent runs under codex's
+  `workspace-write` Seatbelt sandbox (writes confined to the workdir + temp, no
+  shell network), but `run_checker` (`obench/run.py:1265`) executes the task's
+  `checker.sh` as a plain host `subprocess` — full host env, full host
+  privileges, **no sandbox**. A second, quieter channel: the agent's sandbox
+  blocks outside *writes* and shell *network*, but allows broad *reads*, and
+  anything read enters the model context and is sent to the provider — so a
+  prompt-injected task could read a host secret and exfiltrate it via the model
+  API even though the shell cannot `curl` it out.
+- **Why it matters** (*reviewed 2026-08-26*): local-mode safety therefore rests
+  entirely on the task (both `instruction.md` and `checker.sh`) being trusted.
+  The vendored core + exercism sets were read and verified clean (checkers call
+  only `python3`; prompts are benign) — but any imported/community task set is
+  arbitrary host-privileged code at check time.
+- **Next**: (a) document that untrusted task sets MUST run under `--exec docker`
+  (checker runs in the disposable container, agent reads can't see the host
+  home); (b) consider a preflight that warns when running non-vendored tasks in
+  local mode; (c) optionally wrap the local checker in the same Seatbelt profile
+  as the agent. Decision/risk item — no code change until we actually import an
+  untrusted set.
 
 ---
 
