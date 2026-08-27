@@ -76,6 +76,7 @@ def main(argv=None):
         add_help=False,
     )
     sub.add_parser("matrix", help="retry-aware queue-based benchmark runner", add_help=False)
+    sub.add_parser("bridge", help="manage the open-model bridge (LiteLLM proxy) lifecycle", add_help=False)
     sub.add_parser("results", help="query results: summary/pertask/matched/errors/evidence", add_help=False)
     sub.add_parser("export", help="export tasks to external formats (harbor)", add_help=False)
     sub.add_parser("import", help="import tasks from external formats (harbor)", add_help=False)
@@ -96,7 +97,7 @@ def main(argv=None):
 
     known = {
         "run", "legacy", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
-        "matrix", "results", "publish", "verify", "community", "leaderboard",
+        "matrix", "bridge", "results", "publish", "verify", "community", "leaderboard",
         "site", "pack", "export",
         "import",
     }
@@ -104,7 +105,7 @@ def main(argv=None):
         parser.error(
             f"unknown command {command!r}; choose from run, legacy, report, doctor, "
             "validate, admit, gateway, router, harbor, gate, compare, init, publish, verify, community, "
-            "leaderboard, results, site, pack, export, import"
+            "leaderboard, results, site, pack, export, import, matrix, bridge"
         )
 
     if command == "results":
@@ -113,6 +114,9 @@ def main(argv=None):
     if command == "matrix":
         from .matrix_queue import main as matrix_main
         return matrix_main(rest)
+    if command == "bridge":
+        from .bridge_cli import main as bridge_main
+        return bridge_main(rest)
     if command == "run":
         from .suite_run import main as run_main
         return run_main(rest)
