@@ -56,6 +56,24 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 },
             }).encode()
             ctype = "application/json"
+        elif self.path.endswith("/openrouter-cost"):
+            # OpenRouter-style body: usage carries a real accounted `cost`
+            # when the request set usage: {include: true}.
+            payload = json.dumps({
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 5,
+                    "cost": 0.0012,
+                },
+            }).encode()
+            ctype = "application/json"
+        elif self.path.endswith("/litellm-header-cost"):
+            # LiteLLM-computed cost surfaced only as a response header, no
+            # inline `cost` in the usage body.
+            payload = json.dumps({
+                "usage": {"prompt_tokens": 20, "completion_tokens": 5},
+            }).encode()
+            ctype = "application/json"
         else:
             payload = json.dumps({
                 "model": "fixture-model",
@@ -70,6 +88,8 @@ class FixtureHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("content-type", ctype)
         self.send_header("content-length", str(len(payload)))
+        if self.path.endswith("/litellm-header-cost"):
+            self.send_header("x-litellm-response-cost", "0.0034")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -254,6 +274,36 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(row["token_basis_proxy"], "proxy_measured")
         self.assertEqual(row["sampling_observed"], [{"model": "m", "temperature": 0.1}])
 
+    def test_ledger_to_row_mapping_captures_cost(self):
+        row = {}
+        run.apply_proxy_ledger(row, [
+            {"usage": {"prompt_tokens": 20, "completion_tokens": 5, "cost": 0.001},
+             "cost_usd": 0.001, "cost_source": "openrouter_usage"},
+            {"usage": {"input_tokens": 10, "output_tokens": 4},
+             "cost_usd": 0.0005, "cost_source": "openrouter_usage"},
+        ])
+        self.assertAlmostEqual(row["cost_usd"], 0.0015)
+        self.assertEqual(row["cost_source"], "openrouter_usage")
+
+    def test_ledger_to_row_mapping_mixed_cost_sources(self):
+        row = {}
+        run.apply_proxy_ledger(row, [
+            {"usage": {"prompt_tokens": 20, "completion_tokens": 5},
+             "cost_usd": 0.001, "cost_source": "openrouter_usage"},
+            {"usage": {"input_tokens": 10, "output_tokens": 4},
+             "cost_usd": 0.0002, "cost_source": "litellm_header"},
+        ])
+        self.assertAlmostEqual(row["cost_usd"], 0.0012)
+        self.assertEqual(row["cost_source"], "mixed")
+
+    def test_ledger_to_row_mapping_absent_cost_is_none(self):
+        row = {}
+        run.apply_proxy_ledger(row, [
+            {"usage": {"prompt_tokens": 20, "completion_tokens": 5}},
+        ])
+        self.assertIsNone(row["cost_usd"])
+        self.assertIsNone(row["cost_source"])
+
     def test_truncated_ledger_does_not_claim_proxy_measured(self):
         row = {}
         run.apply_proxy_ledger(row, [
@@ -264,6 +314,50 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(row["tokens_proxy_calls"], 1)
         self.assertEqual(row["tokens_proxy_input_uncached"], 20)
         self.assertNotIn("token_basis_proxy", row)
+
+    def test_extract_cost_from_openrouter_usage(self):
+        cost, source = proxy.extract_cost(
+            {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0012}
+        )
+        self.assertEqual(cost, 0.0012)
+        self.assertEqual(source, "openrouter_usage")
+
+    def test_extract_cost_from_litellm_header(self):
+        cost, source = proxy.extract_cost(
+            {"prompt_tokens": 10}, {"x-litellm-response-cost": "0.0034"}
+        )
+        self.assertAlmostEqual(cost, 0.0034)
+        self.assertEqual(source, "litellm_header")
+
+    def test_extract_cost_prefers_openrouter_usage_over_header(self):
+        cost, source = proxy.extract_cost(
+            {"cost": 0.001}, {"x-litellm-response-cost": "0.999"}
+        )
+        self.assertEqual(cost, 0.001)
+        self.assertEqual(source, "openrouter_usage")
+
+    def test_extract_cost_absent_returns_none(self):
+        cost, source = proxy.extract_cost({"prompt_tokens": 10}, {})
+        self.assertIsNone(cost)
+        self.assertIsNone(source)
+
+    def test_ledger_records_openrouter_cost_from_response_body(self):
+        self._post("/cell/tok-or-cost/chat/deepseek/openrouter-cost")
+        row = self._ledger("tok-or-cost")[0]
+        self.assertEqual(row["cost_usd"], 0.0012)
+        self.assertEqual(row["cost_source"], "openrouter_usage")
+
+    def test_ledger_records_litellm_header_cost(self):
+        self._post("/cell/tok-header-cost/chat/deepseek/litellm-header-cost")
+        row = self._ledger("tok-header-cost")[0]
+        self.assertAlmostEqual(row["cost_usd"], 0.0034)
+        self.assertEqual(row["cost_source"], "litellm_header")
+
+    def test_ledger_cost_absent_is_none(self):
+        self._post("/cell/tok-no-cost/chat/deepseek/chat/completions")
+        row = self._ledger("tok-no-cost")[0]
+        self.assertIsNone(row["cost_usd"])
+        self.assertIsNone(row["cost_source"])
 
     def test_remaining_lane_support_matrix(self):
         self.assertFalse(run.proxy_supported_for_cell("cursor", "gpt-5.5-medium"))
