@@ -1,0 +1,20 @@
+*.txt	a.txt	true
+*.txt	a/b.txt	false
+**/*.txt	a/b.txt	true
+**	a/b/c	true
+a?c	abc	true
+a?c	a/c	false
+[abc]x	bx	true
+[a-z]x	Qx	false
+[!abc]x	dx	true
+[!abc]x	ax	false
+*		true
+*	a/b	false
+a*	a	true
+foo	foob	false
+**/foo	foo	false
+[a-c]*	bxyz	true
+[/]	/	false
+a[x	a[x	true
+src/**/*.py	src/a/b/c.py	true
+src/**/*.py	src/a.py	false
