@@ -1,0 +1,55 @@
+# Harder graded task set — does partial-credit scoring separate the frontier?
+#
+# The 8 core tasks are binary (solved / not) and saturate at 1.0 for frontier
+# codex arms — terra AND luna both went 24/24, so the core set can floor-check
+# but cannot RANK models. These tasks are GRADED: their checkers emit
+# `SCORE: passed/total` across many edge cases, so a plausible-but-imperfect
+# solution lands at e.g. 0.8 instead of a clean pass. The hypothesis this spec
+# tests: on graded tasks the two daily drivers spread out (mean score < 1.0,
+# and terra != luna) where the binary set showed them identical.
+#
+#   json-canonicalize  spec-adherence: JSON canonical form (escaping, key order)
+#   glob-match         algorithmic: glob semantics (segment boundaries, globstar)
+#
+# Same native-codex, shared-quota, SERIAL setup as terra-luna-daily-drivers
+# (both arms drain one 5h ChatGPT quota; concurrency buys nothing and adds
+# throttle risk). Scoring note: a graded checker exits nonzero on any miss, so
+# `success` (exit==0) stays strict/binary while `score` carries the partial
+# credit -- rank on the mean SCORE, not the pass RATE.
+#
+#   obench matrix --spec experiments/specs/harder-set.toml
+
+results_path = "../../results/harder-set/results.jsonl"
+ledger_dir = "../../results/harder-set/ledger"
+timeout = 1800
+exec_mode = "local"
+trials = 3
+# Host codex CLI drift vs the Dockerfile pin is uniform across both arms (same
+# host binary) -> waive rather than bump the coupled pin.
+allow_version_drift = true
+# Quota exhaustion (rate_limited) is not a capability failure -- pause the arm
+# after a run of exclusions and revisit rather than scoring it as a miss.
+max_consecutive_excluded = 4
+# Cap cumulative wall per cell at ~2x timeout so a quota-throttled cell exhausts
+# after ~2 attempts instead of re-burning the full timeout across the budget.
+max_cell_wall_s = 3600
+
+[retry]
+infra = 2
+stalled = 1
+rate_limited = 3
+rate_limited_backoff_start = 120
+
+[[arm]]
+harness = "codex"
+model = "gpt-5.6-terra-xhigh"
+
+[[arm]]
+harness = "codex"
+model = "gpt-5.6-luna-max"
+
+[[task_group]]
+tasks = [
+  "json-canonicalize",
+  "glob-match",
+]
