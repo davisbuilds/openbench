@@ -127,6 +127,25 @@ the PR, not as a "resolved" note here).
   warning now says so). Unblocks latency-safe parallelism for
   [#45](https://github.com/minghinmatthewlam/openbench/issues/45).
 
+#### Cost telemetry — capture authoritative per-call cost at request time
+- **What**: rows record a full vendor token split (`token_basis: vendor_split`)
+  but no dollar cost. `experiments/analyze_cost.py` (added 2026-08-27) derives
+  theoretical cost post-hoc = tokens × a per-token price sheet pulled live from
+  OpenRouter `/api/v1/models` (it lists both our OpenRouter arms *and* the
+  `openai/gpt-5.6-terra|luna` codex base models, so even subscription-run codex
+  arms get a real API-list-price figure).
+- **Why it matters** (*observed 2026-08-27*): the derived number is a **floor** —
+  `results.jsonl` keeps only the final saved row per cell, so throttled/retried
+  attempts that still burned tokens are uncounted. Known-priced OpenRouter floor
+  came to ~$0.45 vs the ~$1.62 actually seen on the dashboard; the gap is exactly
+  those discarded attempts. A floor is fine for ranking, wrong for true spend.
+- **Next** (harness change, upstream-worthy): capture cost at the source into the
+  row — OpenRouter returns real `usage.cost` when the request sends
+  `usage:{include:true}` (or via `GET /api/v1/generation?id=`), and LiteLLM emits
+  `x-litellm-response-cost`. Store it per cell so cost is authoritative for
+  proxy-routed arms and every attempt is counted. codex-native arms stay
+  price-sheet-derived (no metered endpoint exists for them).
+
 ### Security posture
 
 #### Local-mode checker runs unsandboxed on the host — task-trust boundary
