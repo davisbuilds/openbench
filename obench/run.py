@@ -92,6 +92,7 @@ ROW_FIELDS = (
     "tokens_output", "tokens_reasoning", "usage_raw", "token_basis",
     "tokens_proxy_input_uncached", "tokens_proxy_cache_read", "tokens_proxy_cache_write",
     "tokens_proxy_output", "tokens_proxy_reasoning", "tokens_proxy_calls",
+    "cost_usd", "cost_source",
     "sampling_observed", "token_basis_proxy", "proxy_capture_truncated",
     "usage_evidence_grade", "usage_ranking_eligible",
     "usage_ranking_exclusion_reason",
@@ -1715,6 +1716,34 @@ def read_proxy_ledger(ledger_dir, token, wait_s=0.0, stable_s=0.1):
     return rows
 
 
+def _proxy_cost_totals(records):
+    """Sum captured per-call USD cost across proxy ledger records.
+
+    Returns ``(cost_usd, cost_source)``. ``cost_usd`` is ``None`` when no
+    record carries a numeric ``cost_usd`` (e.g. codex-native arms that never
+    touch the proxy, or proxy calls whose provider/bridge didn't report a
+    cost). ``cost_source`` is the shared source string when every contributing
+    record agrees, or ``"mixed"`` when a row blends OpenRouter-reported and
+    LiteLLM-header-derived costs across its calls.
+    """
+    total = 0.0
+    have_any = False
+    sources = set()
+    for rec in records:
+        cost = rec.get("cost_usd")
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            total += float(cost)
+            have_any = True
+            source = rec.get("cost_source")
+            if source:
+                sources.add(source)
+    if not have_any:
+        return None, None
+    if len(sources) == 1:
+        return total, next(iter(sources))
+    return total, ("mixed" if sources else None)
+
+
 def apply_proxy_ledger(row, ledger_rows):
     """Populate proxy-measured token fields from scrubbed ledger rows.
 
@@ -1733,6 +1762,9 @@ def apply_proxy_ledger(row, ledger_rows):
     # only comparable across paced and unpaced runs when this is subtracted.
     paced_ms = sum(r.get("paced_wait_ms") or 0 for r in records)
     row["paced_wait_s"] = round(paced_ms / 1000.0, 3)
+    # Cost can accompany a record even when its usage failed to parse, so this
+    # is computed over every record, not just usage-bearing `calls`.
+    row["cost_usd"], row["cost_source"] = _proxy_cost_totals(records)
     if not calls:
         return row
     totals = _empty_proxy_usage()
@@ -1930,6 +1962,12 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "tokens_proxy_output": None,
         "tokens_proxy_reasoning": None,
         "tokens_proxy_calls": None,
+        # Authoritative per-call USD cost from the proxy ledger (OpenRouter's
+        # own `usage.cost` or the LiteLLM `x-litellm-response-cost` header).
+        # Codex-native arms bypass the proxy entirely and never populate
+        # these -- None there is correct, not a gap.
+        "cost_usd": None,
+        "cost_source": None,
         "sampling_observed": None,
         "token_basis_proxy": None,
         "tokens_fresh": None,

@@ -209,6 +209,38 @@ def extract_usage(obj: Any) -> Any:
     return None
 
 
+def extract_cost(usage: Any, headers: dict[str, str] | None = None) -> tuple[float | None, str | None]:
+    """Return ``(cost_usd, cost_source)`` captured alongside one call's usage.
+
+    Two independent signals, in precedence order:
+
+    1. ``openrouter_usage`` -- OpenRouter includes a real per-call ``cost``
+       inside the ``usage`` object when the request body sets
+       ``usage: {include: true}``. This is the vendor's own accounted
+       figure, so it wins whenever present.
+    2. ``litellm_header`` -- the LiteLLM bridge separately computes a cost
+       from its own price sheet and surfaces it as the
+       ``x-litellm-response-cost`` response header. Used only as a fallback,
+       since it is an estimate rather than a vendor-reported figure.
+
+    Returns ``(None, None)`` when neither signal is present -- e.g. codex-
+    native arms that bypass the proxy entirely never reach this function
+    with a populated ``usage``/``headers`` pair.
+    """
+    if isinstance(usage, dict):
+        cost = usage.get("cost")
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            return float(cost), "openrouter_usage"
+    if headers:
+        raw = headers.get("x-litellm-response-cost")
+        if raw is not None:
+            try:
+                return float(raw), "litellm_header"
+            except (TypeError, ValueError):
+                pass
+    return None, None
+
+
 def decode_for_parsing(body: bytes, content_encoding: str) -> bytes:
     enc = (content_encoding or "").lower().strip()
     try:
@@ -426,6 +458,9 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         started_monotonic = time.monotonic()
         status = 502
         usage = None
+        cost_usd = None
+        cost_source = None
+        header_map: dict[str, str] = {}
         body = b""
         sampling: dict[str, Any] = {}
         links: dict[str, str] = {}
@@ -550,6 +585,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 usage = parse_sse_usage(parse_body)
             if gateway_metrics is not None and gateway_metrics.get("usage") is not None:
                 usage = gateway_metrics["usage"]
+            cost_usd, cost_source = extract_cost(usage, header_map)
             links.update(protocol_links(parse_body, response=True))
             conn.close()
         except Exception as exc:  # noqa: BLE001
@@ -582,6 +618,8 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 "path": self._scrub_cell_path(self.path),
                 "status": status,
                 "usage": scrub(usage),
+                "cost_usd": cost_usd,
+                "cost_source": cost_source,
                 "model": sampling.get("model") or configured_sampling.get("model"),
                 "sampling_observed": recorded_sampling,
                 "sampling_source": "http_request" if sampling else (meta.get("source") if recorded_sampling else None),
