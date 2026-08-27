@@ -98,18 +98,21 @@ the PR, not as a "resolved" note here).
 
 ### Operator ergonomics
 
-#### Bridge lifecycle is manual and foreground
+#### Bridge lifecycle is manual and foreground — *shipped (fork-local) 2026-08-27*
 - **What**: the open-model LiteLLM bridge must be started by hand before any
   open-model run; the runner only TCP-probes it and returns SETUP-NEEDED if down.
-- **Why it matters** (*observed 2026-08-26*): restarted the bridge ~5× in one
+- **Why it mattered** (*observed 2026-08-26*): restarted the bridge ~5× in one
   session (each new model route needs a reload). Friction, and an easy way to run
   a whole matrix against a stale config.
-- **Why it may stay local**: the foreground/human-managed design is intentional —
-  the bridge injects real provider keys upstream and has no ingress auth (see the
-  security note in `openmodel_bridge.sh`). A supervised-bridge option would have
-  to preserve that boundary.
-- **Next**: fork-local `bridge up`/`down` helper with a config-hash check + health
-  wait, if the friction recurs. Keep local unless it generalizes cleanly.
+- **Shipped**: `obench bridge up|down|status` (`obench/bridge_cli.py`, 37 tests)
+  wraps `openmodel_bridge.sh` with a sha256 config-hash staleness check + health
+  wait. `up` is a no-op when a healthy bridge's hash matches; warns + refuses on
+  a stale hash; `status` reports in-sync / STALE / untracked. The foreground/
+  human-managed key boundary is preserved (it wraps the existing script, adds no
+  ingress). Stays fork-local unless it generalizes cleanly.
+- **Not yet validated**: launching a real LiteLLM was not exercised in tests (no
+  litellm venv in CI); `down`/`status` verified against no running bridge. One
+  live `up` against the real bridge would close this.
 
 #### Per-arm bridge isolation — the latency-safe unlock for `--workers`
 - **What**: one shared LiteLLM bridge (127.0.0.1:4141) serves every open-model
@@ -127,24 +130,27 @@ the PR, not as a "resolved" note here).
   warning now says so). Unblocks latency-safe parallelism for
   [#45](https://github.com/minghinmatthewlam/openbench/issues/45).
 
-#### Cost telemetry — capture authoritative per-call cost at request time
-- **What**: rows record a full vendor token split (`token_basis: vendor_split`)
-  but no dollar cost. `experiments/analyze_cost.py` (added 2026-08-27) derives
-  theoretical cost post-hoc = tokens × a per-token price sheet pulled live from
-  OpenRouter `/api/v1/models` (it lists both our OpenRouter arms *and* the
-  `openai/gpt-5.6-terra|luna` codex base models, so even subscription-run codex
-  arms get a real API-list-price figure).
-- **Why it matters** (*observed 2026-08-27*): the derived number is a **floor** —
+#### Cost telemetry — *implemented 2026-08-27, pending live validation*
+- **What**: rows record a full vendor token split (`token_basis: vendor_split`).
+  `experiments/analyze_cost.py` derives theoretical cost post-hoc = tokens × a
+  per-token price sheet pulled from OpenRouter `/api/v1/models` (it lists both our
+  OpenRouter arms *and* the `openai/gpt-5.6-terra|luna` codex base models, so even
+  subscription-run codex arms get a real API-list-price figure).
+- **Shipped (authoritative capture)**: rows now carry `cost_usd`/`cost_source`.
+  `proxy.extract_cost()` reads OpenRouter's own `usage.cost` (bridge config sends
+  `extra_body.usage.include` on the six openrouter/ entries) and falls back to
+  LiteLLM's `x-litellm-response-cost` header. `analyze_cost.py` prefers a row's
+  captured cost over the price-sheet estimate (`effective_row_cost`). Codex-native
+  arms bypass the proxy → `cost_usd=None` (price-sheet only, by design).
+- **Why post-hoc derivation is still a floor** (*observed 2026-08-27*):
   `results.jsonl` keeps only the final saved row per cell, so throttled/retried
-  attempts that still burned tokens are uncounted. Known-priced OpenRouter floor
-  came to ~$0.45 vs the ~$1.62 actually seen on the dashboard; the gap is exactly
-  those discarded attempts. A floor is fine for ranking, wrong for true spend.
-- **Next** (harness change, upstream-worthy): capture cost at the source into the
-  row — OpenRouter returns real `usage.cost` when the request sends
-  `usage:{include:true}` (or via `GET /api/v1/generation?id=`), and LiteLLM emits
-  `x-litellm-response-cost`. Store it per cell so cost is authoritative for
-  proxy-routed arms and every attempt is counted. codex-native arms stay
-  price-sheet-derived (no metered endpoint exists for them).
+  attempts are uncounted — known-priced OpenRouter floor ~$0.45 vs ~$1.62 on the
+  dashboard. Authoritative capture fixes attribution going forward but does not
+  retro-count past discarded attempts.
+- **Still needs**: one paid open-model run to confirm `usage.cost` actually
+  arrives now that `extra_body.usage.include` is set (and the header fallback),
+  and a codex-native run confirming `cost_usd` is `None`. Then this is done and
+  the capture piece is upstream-worthy.
 
 ### Security posture
 
