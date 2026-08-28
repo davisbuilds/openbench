@@ -1,0 +1,296 @@
+{
+  "provider": "openai",
+  "lastUpdated": "2026-07-12T00:00:00Z",
+  "models": {
+    "gpt-5.6-sol": {
+      "aliases": [
+        "gpt-5.6"
+      ],
+      "inputCostPerMTok": 5,
+      "outputCostPerMTok": 30,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 6.25,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 10,
+          "outputCostPerMTok": 45,
+          "cacheReadCostPerMTok": 1,
+          "cacheWriteCostPerMTok": 12.5
+        }
+      ]
+    },
+    "gpt-5.6-terra": {
+      "aliases": [],
+      "inputCostPerMTok": 2.5,
+      "outputCostPerMTok": 15,
+      "cacheReadCostPerMTok": 0.25,
+      "cacheWriteCostPerMTok": 3.125,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 5,
+          "outputCostPerMTok": 22.5,
+          "cacheReadCostPerMTok": 0.5,
+          "cacheWriteCostPerMTok": 6.25
+        }
+      ]
+    },
+    "gpt-5.6-luna": {
+      "aliases": [],
+      "inputCostPerMTok": 1,
+      "outputCostPerMTok": 6,
+      "cacheReadCostPerMTok": 0.1,
+      "cacheWriteCostPerMTok": 1.25,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 2,
+          "outputCostPerMTok": 9,
+          "cacheReadCostPerMTok": 0.2,
+          "cacheWriteCostPerMTok": 2.5
+        }
+      ]
+    },
+    "gpt-5.5": {
+      "aliases": [],
+      "inputCostPerMTok": 5,
+      "outputCostPerMTok": 30,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.5-pro": {
+      "aliases": [],
+      "inputCostPerMTok": 30,
+      "outputCostPerMTok": 180,
+      "cacheReadCostPerMTok": 0,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.4": {
+      "aliases": [
+        "gpt-5.4-2026-03-05"
+      ],
+      "inputCostPerMTok": 2.5,
+      "outputCostPerMTok": 15,
+      "cacheReadCostPerMTok": 0.25,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.4-pro": {
+      "aliases": [
+        "gpt-5.4-pro-2026-03-05"
+      ],
+      "inputCostPerMTok": 30,
+      "outputCostPerMTok": 180,
+      "cacheReadCostPerMTok": 0,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.3-chat-latest": {
+      "aliases": [],
+      "inputCostPerMTok": 1.75,
+      "outputCostPerMTok": 14,
+      "cacheReadCostPerMTok": 0.175,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.2": {
+      "aliases": [
+        "gpt-5.2-chat-latest"
+      ],
+      "inputCostPerMTok": 1.75,
+      "outputCostPerMTok": 14,
+      "cacheReadCostPerMTok": 0.175,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.1": {
+      "aliases": [
+        "gpt-5.1-chat-latest"
+      ],
+      "inputCostPerMTok": 1.25,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 0.125,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5": {
+      "aliases": [
+        "gpt-5-chat-latest"
+      ],
+      "inputCostPerMTok": 1.25,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 0.125,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5-mini": {
+      "aliases": [],
+      "inputCostPerMTok": 0.25,
+      "outputCostPerMTok": 2,
+      "cacheReadCostPerMTok": 0.025,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5-nano": {
+      "aliases": [],
+      "inputCostPerMTok": 0.05,
+      "outputCostPerMTok": 0.4,
+      "cacheReadCostPerMTok": 0.005,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.2-pro": {
+      "aliases": [],
+      "inputCostPerMTok": 21,
+      "outputCostPerMTok": 168,
+      "cacheReadCostPerMTok": 0,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5-pro": {
+      "aliases": [],
+      "inputCostPerMTok": 15,
+      "outputCostPerMTok": 120,
+      "cacheReadCostPerMTok": 0,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.2-codex": {
+      "aliases": [],
+      "inputCostPerMTok": 1.75,
+      "outputCostPerMTok": 14,
+      "cacheReadCostPerMTok": 0.175,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.1-codex-max": {
+      "aliases": [],
+      "inputCostPerMTok": 1.25,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 0.125,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.1-codex": {
+      "aliases": [],
+      "inputCostPerMTok": 1.25,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 0.125,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5-codex": {
+      "aliases": [],
+      "inputCostPerMTok": 1.25,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 0.125,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "o3": {
+      "aliases": [
+        "o3-2025-04-16"
+      ],
+      "inputCostPerMTok": 2,
+      "outputCostPerMTok": 8,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "o3-mini": {
+      "aliases": [
+        "o3-mini-2025-01-31"
+      ],
+      "inputCostPerMTok": 1.1,
+      "outputCostPerMTok": 4.4,
+      "cacheReadCostPerMTok": 0.55,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "o4-mini": {
+      "aliases": [
+        "o4-mini-2025-04-16"
+      ],
+      "inputCostPerMTok": 1.1,
+      "outputCostPerMTok": 4.4,
+      "cacheReadCostPerMTok": 0.275,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "o1": {
+      "aliases": [
+        "o1-2024-12-17"
+      ],
+      "inputCostPerMTok": 15,
+      "outputCostPerMTok": 60,
+      "cacheReadCostPerMTok": 7.5,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-4.1": {
+      "aliases": [
+        "gpt-4.1-2025-04-14"
+      ],
+      "inputCostPerMTok": 2,
+      "outputCostPerMTok": 8,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-4.1-mini": {
+      "aliases": [
+        "gpt-4.1-mini-2025-04-14"
+      ],
+      "inputCostPerMTok": 0.4,
+      "outputCostPerMTok": 1.6,
+      "cacheReadCostPerMTok": 0.1,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-4.1-nano": {
+      "aliases": [
+        "gpt-4.1-nano-2025-04-14"
+      ],
+      "inputCostPerMTok": 0.1,
+      "outputCostPerMTok": 0.4,
+      "cacheReadCostPerMTok": 0.025,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-4o": {
+      "aliases": [
+        "gpt-4o-2024-11-20",
+        "gpt-4o-2024-08-06"
+      ],
+      "inputCostPerMTok": 2.5,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 1.25,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-4o-mini": {
+      "aliases": [
+        "gpt-4o-mini-2024-07-18"
+      ],
+      "inputCostPerMTok": 0.15,
+      "outputCostPerMTok": 0.6,
+      "cacheReadCostPerMTok": 0.075,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.3-codex": {
+      "aliases": [],
+      "inputCostPerMTok": 1.75,
+      "outputCostPerMTok": 14,
+      "cacheReadCostPerMTok": 0.175,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    }
+  }
+}

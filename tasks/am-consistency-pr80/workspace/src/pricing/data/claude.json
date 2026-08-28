@@ -1,0 +1,132 @@
+{
+  "provider": "anthropic",
+  "lastUpdated": "2026-08-04T00:00:00Z",
+  "models": {
+    "claude-fable-5": {
+      "aliases": [],
+      "inputCostPerMTok": 10,
+      "outputCostPerMTok": 50,
+      "cacheReadCostPerMTok": 1,
+      "cacheWriteCostPerMTok": 12.5,
+      "deprecated": false
+    },
+    "claude-opus-5": {
+      "aliases": [],
+      "inputCostPerMTok": 5,
+      "outputCostPerMTok": 25,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 6.25,
+      "deprecated": false
+    },
+    "claude-opus-4-8": {
+      "aliases": [],
+      "inputCostPerMTok": 5,
+      "outputCostPerMTok": 25,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 6.25,
+      "deprecated": false
+    },
+    "claude-opus-4-7": {
+      "aliases": [],
+      "inputCostPerMTok": 5,
+      "outputCostPerMTok": 25,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 6.25,
+      "deprecated": false
+    },
+    "claude-opus-4-6": {
+      "aliases": [
+        "claude-opus-4-6-20260219"
+      ],
+      "inputCostPerMTok": 5,
+      "outputCostPerMTok": 25,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 6.25,
+      "deprecated": false
+    },
+    "claude-opus-4-1-20250805": {
+      "aliases": [],
+      "inputCostPerMTok": 15,
+      "outputCostPerMTok": 75,
+      "cacheReadCostPerMTok": 1.5,
+      "cacheWriteCostPerMTok": 18.75,
+      "deprecated": false
+    },
+    "claude-opus-4-5-20251101": {
+      "aliases": [
+        "claude-opus-4-5",
+        "claude-opus-4-5-latest"
+      ],
+      "inputCostPerMTok": 5,
+      "outputCostPerMTok": 25,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 6.25,
+      "deprecated": false
+    },
+    "claude-opus-4-20250514": {
+      "aliases": [
+        "claude-opus-4",
+        "claude-opus-4-latest",
+        "opus"
+      ],
+      "inputCostPerMTok": 15,
+      "outputCostPerMTok": 75,
+      "cacheReadCostPerMTok": 1.5,
+      "cacheWriteCostPerMTok": 18.75,
+      "deprecated": true
+    },
+    "claude-sonnet-5": {
+      "aliases": [
+        "claude-sonnet-5-latest"
+      ],
+      "inputCostPerMTok": 2,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 0.2,
+      "cacheWriteCostPerMTok": 2.5,
+      "deprecated": false
+    },
+    "claude-sonnet-4-6": {
+      "aliases": [],
+      "inputCostPerMTok": 3,
+      "outputCostPerMTok": 15,
+      "cacheReadCostPerMTok": 0.3,
+      "cacheWriteCostPerMTok": 3.75,
+      "deprecated": false
+    },
+    "claude-sonnet-4-5-20250929": {
+      "aliases": [
+        "claude-sonnet-4-5",
+        "claude-sonnet-4-5-latest"
+      ],
+      "inputCostPerMTok": 3,
+      "outputCostPerMTok": 15,
+      "cacheReadCostPerMTok": 0.3,
+      "cacheWriteCostPerMTok": 3.75,
+      "deprecated": false
+    },
+    "claude-sonnet-4-20250514": {
+      "aliases": [
+        "claude-sonnet-4",
+        "claude-sonnet-4-latest",
+        "sonnet"
+      ],
+      "inputCostPerMTok": 3,
+      "outputCostPerMTok": 15,
+      "cacheReadCostPerMTok": 0.3,
+      "cacheWriteCostPerMTok": 3.75,
+      "deprecated": true
+    },
+    "claude-haiku-4-5-20251001": {
+      "aliases": [
+        "claude-haiku-4-5",
+        "claude-haiku-4-5-latest",
+        "haiku"
+      ],
+      "inputCostPerMTok": 1,
+      "outputCostPerMTok": 5,
+      "cacheReadCostPerMTok": 0.1,
+      "cacheWriteCostPerMTok": 1.25,
+      "deprecated": false
+    }
+  }
+}

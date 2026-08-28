@@ -1,0 +1,86 @@
+{
+  "name": "agentmonitor",
+  "version": "0.5.0",
+  "description": "Real-time localhost dashboard for monitoring AI agent activity",
+  "author": "davisbuilds",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "amon": "./dist/cli.js",
+    "agentmonitor": "./dist/cli.js"
+  },
+  "scripts": {
+    "cli": "tsx src/cli.ts",
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\" && rm -rf dist/pricing/data && cp -r src/pricing/data dist/pricing/data && node scripts/check-pricing-dist.mjs && pnpm run css:build && pnpm run frontend:build",
+    "prepack": "pnpm build",
+    "start": "node dist/server.js",
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts' 'scripts/**/*.ts'",
+    "test": "node --import tsx --test tests/*.test.ts tests/codebase/*.test.ts",
+    "test:dead-code": "node --import tsx --test tests/codebase/dead-code.test.ts",
+    "test:watch": "node --import tsx --test --watch tests/*.test.ts tests/codebase/*.test.ts",
+    "frontend:build": "pnpm --dir frontend build",
+    "frontend:dev": "pnpm --dir frontend dev",
+    "frontend:watch": "pnpm --dir frontend build --watch",
+    "frontend:check": "pnpm --dir frontend check",
+    "verify:skill-context-built": "node scripts/verify-skill-context-built.mjs",
+    "reparse:sessions": "tsx scripts/reparse-sessions.ts",
+    "reparse:codex-sessions": "tsx scripts/reparse-codex-sessions.ts",
+    "css:build": "tailwindcss -i src/input.css -o public/css/output.css --minify",
+    "css:watch": "tailwindcss -i src/input.css -o public/css/output.css --watch",
+    "seed": "tsx scripts/seed.ts",
+    "bench:ingest": "tsx scripts/benchmark-ingest.ts",
+    "bench:storage": "tsx scripts/storage-bench.ts",
+    "bench:usage": "tsx scripts/benchmark-usage-overview.ts",
+    "recalculate-costs": "tsx scripts/recalculate-costs.ts",
+    "import": "tsx scripts/import.ts",
+    "reclaim:trace-quality": "tsx scripts/reclaim-trace-quality.ts",
+    "test:parity:ts": "TEST_GLOB='tests/parity/*.test.ts' bash scripts/test/run-parity-ts.sh",
+    "test:v2:contract:ts": "TEST_GLOB='tests/parity/v2/**/*.test.ts' TEST_SETUP_CMD='node scripts/test/seed-v2-contract-fixture.mjs && node scripts/test/seed-v2-codex-fixture.mjs' bash scripts/test/run-parity-ts.sh",
+    "test:parity:ts:live": "AGENTMONITOR_BASE_URL=http://127.0.0.1:3141 node --import tsx --test tests/parity/*.test.ts"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "monitoring",
+    "dashboard"
+  ],
+  "license": "ISC",
+  "engines": {
+    "node": "24.13.0",
+    "pnpm": "10.29.3"
+  },
+  "packageManager": "pnpm@10.29.3",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ],
+    "overrides": {
+      "qs@>=6.11.1 <=6.15.1": "6.15.2",
+      "path-to-regexp@8.3.0": "8.4.0"
+    }
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.2",
+    "chokidar": "^5.0.0",
+    "express": "^5.2.1",
+    "pg": "^8.22.0",
+    "portless": "0.15.5",
+    "uuid": "^14.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.1.2",
+    "@types/pg": "^8.20.3",
+    "eslint": "^10.8.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.5",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0"
+  }
+}
