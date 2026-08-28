@@ -70,6 +70,48 @@ the PR, not as a "resolved" note here).
   first. Hold the upstream PR until then and until the maintainer signals
   interest.
 
+### Benchmark discrimination
+
+#### Frontier-difficulty task tier — the graded set does not rank terra vs luna
+- **What**: build a task tier whose *expected frontier score is < 1.0*, so the
+  two daily drivers (terra-xhigh, luna-max) can be ranked on capability, not just
+  cost.
+- **Why it matters** (*measured 2026-08-28*, `data/harder-set-2026-08-28/`): the
+  binary core set saturates (both 24/24) and the first graded set
+  (`json-canonicalize`, `glob-match`) *also* saturated — both arms 12/12 at mean
+  score **1.0**, zero spread. Naive baselines land 0.80 on those tasks, so the set
+  is harder to *pass* than the core, but the gap is naive→frontier, not
+  within-frontier.
+- **Root cause of saturation** (the design lesson): both tasks were (a) fully
+  specified, (b) small/self-contained single-file pure logic, (c) *textbook
+  algorithms in the training distribution* (JSON canonicalization, glob), and (d)
+  their "hard" edge cases were exactly the ones a well-read model already
+  anticipates. Per-case hit rate for a frontier model was ~99.9%, so mean score
+  pinned at 1.0. **Making a naive baseline fail is not the same as making a
+  frontier answer imperfect.**
+- **Design principle**: partial-credit needs *per-case difficulty × case count*.
+  Aim for a ~85–95% per-case frontier hit rate over 30+ *independent* cases, so
+  the mean lands ~0.9 with enough variance to separate arms. Reach that by leaving
+  the memorized-algorithm distribution: invented/underspecified-but-objective
+  DSLs, clause *interactions* (not individually memorable edge cases), or
+  long-horizon tasks graded by many regression buckets where errors compound.
+- **Candidate axes** (objective graders only — avoid taste-test scoring):
+  (A) *scale-of-requirements* — dense spec, many interacting clauses, score =
+  fraction satisfied (e.g. cron-eval with `L`/`W`/`#`/`?`, semver-range resolver,
+  RFC-3986 URI normalizer); (B/E) *long-horizon build/debug* in a realistic
+  codebase, graded by test buckets — where terra's expensive extra reasoning is
+  most likely to earn out; (F) *quality gradient* — correct AND under a
+  perf/size/token budget.
+- **Open meta-question**: is the goal (i) capability *separation* (find ANY task
+  where terra beats luna — if none exists across a genuinely hard tier, "luna
+  dominates on cost" is itself the decision-relevant finding) or (ii) absolute
+  *difficulty calibration* (both land < 1.0, useful as a standing eval to track
+  future models even if today's two arms tie)? Pick before building the tier.
+- **Next**: build ONE axis-A probe + ONE axis-B/E probe, run them before
+  investing in a full tier. If even axis-A can't drop either arm below 1.0, the
+  discrimination problem is genuinely hard → pivot to long-horizon or accept
+  capability-parity.
+
 ### Extensibility
 
 #### Externalize the adapter `OPEN_MODELS` registry to config — *codex done, others pending*
