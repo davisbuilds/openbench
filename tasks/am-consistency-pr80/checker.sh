@@ -42,13 +42,17 @@ f2=$(run_one skill-context-parser.test.ts \
      'Codex preserves catalog bytes across contiguous content fragments')
 f1=$(run_one skill-consultation-analytics.test.ts \
      'classifies in-window consultations against earlier history in the same session')
+f3=$(run_one skill-consultation-analytics.test.ts \
+     'counts an active session through the response time despite a stale parsed end')
 
 passed=0
 if [ "$f2" = PASS ]; then passed=$((passed + 1));
   else echo "MISS F2: Codex content-fragment byte preservation still broken" >&2; fi
 if [ "$f1" = PASS ]; then passed=$((passed + 1));
   else echo "MISS F1: in-window consultation classification still broken" >&2; fi
+if [ "$f3" = PASS ]; then passed=$((passed + 1));
+  else echo "MISS F3: active-session window membership still broken" >&2; fi
 
-python3 -c "print('SCORE: %.4f' % ($passed / 2))"
-echo "fixed $passed/2 findings"
-[ "$passed" -eq 2 ] && exit 0 || exit 1
+python3 -c "print('SCORE: %.4f' % ($passed / 3))"
+echo "fixed $passed/3 findings"
+[ "$passed" -eq 3 ] && exit 0 || exit 1

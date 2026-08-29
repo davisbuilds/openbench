@@ -209,13 +209,8 @@ function selectScopedSessions(
     intervalValues.push(toExclusive.slice(0, 10));
   }
   if (from) {
-    intervalClauses.push(`
-      CASE
-        WHEN live_status IN ('live', 'active', 'available') THEN ?
-        ELSE COALESCE(ended_at, last_item_at, ?)
-      END >= ?
-    `);
-    intervalValues.push(asOf, asOf, from.slice(0, 10));
+    intervalClauses.push('COALESCE(ended_at, last_item_at, ?) >= ?');
+    intervalValues.push(asOf, from.slice(0, 10));
   }
   const byInterval = selectSessions(
     db,
