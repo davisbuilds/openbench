@@ -1,0 +1,77 @@
+# Pareto study — model × cost on a real long-context consistency bug-fix task
+#
+# `am-consistency-pr80` is a GRADED, long-context task built from real Codex
+# PR-review findings on the user's agentmonitor repo (the dominant real-world
+# defect class in this workspace: cross-site consistency). Unlike the binary core
+# set and the saturated json/glob graded set, this task lives on the axis where
+# frontier models measurably diverge (long-context recall; cf. MRCR Terra 90 vs
+# Luna 41). Score = fraction of the 2 planted findings fixed (0 / 0.5 / 1.0).
+#
+# Goal is NOT just terra-vs-luna: it is the Pareto frontier across the model
+# landscape — which model (and what it costs) is worth using for this kind of
+# real bug-fix work. Codex-native arms (terra/luna) run on the ChatGPT
+# subscription; the four OpenRouter arms route through the LiteLLM bridge, so
+# this run ALSO live-validates `obench bridge up` and authoritative cost-capture
+# (usage.cost lands in cost_usd for the open arms; codex-native stays None).
+#
+# Rank on mean `score` (graded), and read it against captured/derived cost +
+# t_agent_s to place each arm on the score-vs-cost frontier.
+#
+# PREREQ: bring the bridge up first (`obench bridge up`) — the 4 open arms need
+# it. Keep ZDR ON for the open models. The checker needs a prebuilt agentmonitor
+# node_modules on the host (AGENTMONITOR_DEPS or the default path).
+#
+#   obench bridge up
+#   obench matrix --spec experiments/specs/am-consistency.toml
+
+results_path = "../../results/am-consistency/results.jsonl"
+ledger_dir = "../../results/am-consistency/ledger"
+timeout = 2400
+exec_mode = "local"
+trials = 3
+allow_version_drift = true
+max_consecutive_excluded = 4
+# ~2x timeout cap so a quota-throttled cell exhausts after ~2 attempts.
+max_cell_wall_s = 4800
+
+[retry]
+infra = 2
+stalled = 1
+rate_limited = 3
+rate_limited_backoff_start = 120
+
+# --- codex-native (ChatGPT subscription; bypass proxy; cost_usd = None) ---
+[[arm]]
+harness = "codex"
+model = "gpt-5.6-terra-xhigh"
+
+[[arm]]
+harness = "codex"
+model = "gpt-5.6-luna-max"
+
+# --- OpenRouter open models (via LiteLLM bridge; authoritative cost_usd) ---
+[[arm]]
+harness = "codex"
+model = "minimax-m3"
+
+
+[[arm]]
+harness = "codex"
+model = "glm-5.3-flash"
+
+[[arm]]
+harness = "codex"
+model = "deepseek-v4-flash-0731"
+
+[[arm]]
+harness = "codex"
+model = "kimi-k3"
+
+[[arm]]
+harness = "codex"
+model = "nemotron-3-ultra"
+
+[[task_group]]
+tasks = [
+  "am-consistency-pr80",
+]
