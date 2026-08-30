@@ -66,6 +66,14 @@ model = "glm-5.3-flash"
 harness = "codex"
 model = "deepseek-v4-flash-0731"
 
+[[arm]]
+harness = "codex"
+model = "kimi-k3"
+
+[[arm]]
+harness = "codex"
+model = "nemotron-3-ultra"
+
 [[task_group]]
 tasks = [
   "am-consistency-pr80",

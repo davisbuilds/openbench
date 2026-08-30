@@ -84,6 +84,22 @@ model_list:
       api_base: https://openrouter.ai/api/v1
       api_key: os.environ/OPENROUTER_API_KEY
       extra_body: {usage: {include: true}}
+  # PAID Kimi K3 (Moonshot). Bare id = paid/ZDR-compliant route; no :free variant
+  # is offered. 1M ctx, frontier-priced ($3/M in, $15/M out).
+  - model_name: kimi-k3
+    litellm_params:
+      model: openrouter/moonshotai/kimi-k3
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_API_KEY
+      extra_body: {usage: {include: true}}
+  # PAID Nemotron 3 Ultra (NVIDIA, 550B-A55B). Bare id = paid/ZDR-compliant route
+  # (the :free variant is blocked by the ZDR guardrail). 262K ctx.
+  - model_name: nemotron-3-ultra
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-ultra-550b-a55b
+      api_base: https://openrouter.ai/api/v1
+      api_key: os.environ/OPENROUTER_API_KEY
+      extra_body: {usage: {include: true}}
 
 litellm_settings:
   # Allow the Responses API -> Chat Completions bridge for models that only
