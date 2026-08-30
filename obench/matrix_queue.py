@@ -660,10 +660,16 @@ def build_runner_command(
         cmd.extend(["--stall-timeout", str(stall_timeout)])
     # The counting proxy backs two independent needs: stall-kill (it interrupts
     # a stalled call) and authoritative cost capture (it reads usage.cost off
-    # each call). Enable it for EITHER -- previously it rode on stall_timeout
-    # alone, so a spec without a stall timeout silently lost cost capture.
-    if stall_timeout is not None or capture_cost:
+    # each call). A stall run wants both, so --proxy (which also arms the 600s
+    # watchdog downstream). A cost-only run wants metering WITHOUT the watchdog
+    # -- --capture-cost starts the same proxy but never imposes a stall timeout,
+    # so a legitimately long-thinking cell is not killed. Emitting --proxy here
+    # for cost-only would silently re-arm the watchdog (run.py forces a 600s
+    # stall on any --proxy).
+    if stall_timeout is not None:
         cmd.append("--proxy")
+    elif capture_cost:
+        cmd.append("--capture-cost")
     return cmd
 
 

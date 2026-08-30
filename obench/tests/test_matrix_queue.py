@@ -184,21 +184,32 @@ class CellSatisfactionTests(unittest.TestCase):
     def test_rate_limited_is_not_satisfied(self):
         self.assertFalse(mq.cell_is_satisfied({"failure_class": "rate_limited"}))
 
-    def test_capture_cost_appends_proxy_without_stall(self):
-        # capture_cost enables the counting proxy (the only thing that captures
-        # cost_usd) independently of stall_timeout -- previously --proxy was a
-        # side-effect of stall-kill only, so a spec without a stall timeout
-        # silently ran open arms un-metered.
+    def test_capture_cost_uses_capture_cost_flag_not_proxy(self):
+        # capture_cost enables the counting proxy for metering WITHOUT the stall
+        # watchdog. It must emit --capture-cost, NOT --proxy: run.py forces a
+        # 600s stall timeout on any --proxy, which would kill legitimately
+        # long-thinking cells on a cost-only run.
         cell = {"harness": "codex", "model": "minimax-m3", "task": "t", "trial": 1}
         cmd = mq.build_runner_command(
             cell, "/tmp/r.jsonl", None, 2400, None, "local", capture_cost=True)
+        self.assertIn("--capture-cost", cmd)
+        self.assertNotIn("--proxy", cmd)
+        self.assertNotIn("--stall-timeout", cmd)
+
+    def test_stall_run_uses_proxy(self):
+        # A stall timeout still wants --proxy (metering + watchdog together).
+        cell = {"harness": "codex", "model": "minimax-m3", "task": "t", "trial": 1}
+        cmd = mq.build_runner_command(
+            cell, "/tmp/r.jsonl", None, 2400, 600, "local", capture_cost=True)
         self.assertIn("--proxy", cmd)
+        self.assertNotIn("--capture-cost", cmd)
 
     def test_no_proxy_without_stall_or_capture(self):
         cell = {"harness": "codex", "model": "minimax-m3", "task": "t", "trial": 1}
         cmd = mq.build_runner_command(
             cell, "/tmp/r.jsonl", None, 2400, None, "local")
         self.assertNotIn("--proxy", cmd)
+        self.assertNotIn("--capture-cost", cmd)
 
     def test_unmetered_open_arms_flags_open_not_subscription(self):
         arms = [

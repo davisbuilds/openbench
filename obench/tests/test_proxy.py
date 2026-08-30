@@ -378,6 +378,31 @@ class ProxyTests(unittest.TestCase):
         self.assertTrue(run.proxy_supported_for_cell("codex", "gpt-5.6-terra"))
         self.assertFalse(run.proxy_supported_for_cell("codex", "no-such-model"))
 
+    def test_eligibility_forwards_custom_adapters_dir(self):
+        # A custom --adapters-dir may ship a codex.py whose OPEN_MODELS adds
+        # models absent from the packaged registry. The metering-eligibility
+        # check must load THAT adapter, so the selected adapters_dir has to reach
+        # _adapter_open_models -- otherwise a supported custom arm silently gets
+        # no proxy context and cost_usd stays None.
+        import types
+        from unittest import mock
+        seen = {}
+
+        def fake_load(adir, name):
+            seen["dir"] = adir
+            mod = types.ModuleType("stub_codex")
+            mod.OPEN_MODELS = {"custom-xyz": {"provider": "openrouter"}}
+            return mod
+
+        run._adapter_open_models.cache_clear()
+        try:
+            with mock.patch.object(run, "load_adapter", side_effect=fake_load):
+                self.assertTrue(
+                    run.proxy_supported_for_cell("codex", "custom-xyz", "/my/adapters"))
+            self.assertEqual(seen["dir"], "/my/adapters")
+        finally:
+            run._adapter_open_models.cache_clear()
+
 
 if __name__ == "__main__":
     unittest.main()

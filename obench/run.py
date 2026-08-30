@@ -1931,7 +1931,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         from .candidates import candidate_proxy_capable
         proxy_capable = candidate_proxy_capable(candidate)
     else:
-        proxy_capable = proxy_supported_for_cell(proxy_harness, model)
+        proxy_capable = proxy_supported_for_cell(proxy_harness, model, adapters_dir)
     active_proxy_ctx = proxy_ctx if proxy_capable else None
     proxy_server = None
     if active_proxy_ctx:
@@ -2368,7 +2368,13 @@ def main(argv=None):
                              "default comes from OPENBENCH_STALL_TIMEOUT env or 600s")
     parser.add_argument("--proxy", action="store_true",
                         help="start one owned counting proxy and inject it into "
-                             "supported harness/model cells (Cursor and Devin are unsupported)")
+                             "supported harness/model cells (Cursor and Devin are unsupported); "
+                             "also enables the stall watchdog (default 600s)")
+    parser.add_argument("--capture-cost", action="store_true",
+                        help="start the counting proxy for authoritative cost capture "
+                             "WITHOUT enabling the stall watchdog -- unlike --proxy, this "
+                             "never imposes a stall timeout, so long-thinking cells are not "
+                             "killed. Use for cost-only metering.")
     args = parser.parse_args(argv)
     if args.max_consecutive_infra < 0:
         parser.error("--max-consecutive-infra must be >= 0")
@@ -2476,6 +2482,10 @@ def main(argv=None):
     stall_timeout = args.stall_timeout if args.stall_timeout is not None else (
         int(os.environ.get("OPENBENCH_STALL_TIMEOUT", "0")) or None
     )
+    # --proxy implies the stall watchdog (its historical purpose); --capture-cost
+    # starts the same proxy for metering only and must NOT impose a stall timeout,
+    # so a cost-only run never kills a legitimately long-thinking cell.
+    enable_proxy = args.proxy or args.capture_cost
     if args.proxy and stall_timeout is None:
         stall_timeout = 600
     try:
@@ -2494,7 +2504,7 @@ def main(argv=None):
 
     proxy_ctx = None
     proxy_server = None
-    if args.proxy:
+    if enable_proxy:
         from . import proxy as counting_proxy
         ledger_parent = os.environ.get("OPENBENCH_PROXY_LEDGER_DIR") or tempfile.mkdtemp(
             prefix="openbench_proxy_", dir=os.environ.get("OPENBENCH_DOCKER_TMPDIR") or None)
@@ -2536,7 +2546,7 @@ def main(argv=None):
         unsupported_cells = [
             h for h, base in proxy_names.items()
             if h not in manifest_proxy and base in PROXY_HARNESSES
-            and not proxy_supported_for_cell(base, args.model)
+            and not proxy_supported_for_cell(base, args.model, args.adapters_dir)
         ]
         if unsupported:
             print("WARN --proxy does not wire these harnesses yet: " + ",".join(unsupported))
