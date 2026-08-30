@@ -121,6 +121,23 @@ def enumerate_arms(spec: dict[str, Any]) -> list[dict[str, str]]:
     return spec.get("arm") or spec.get("arms", [])
 
 
+def unmetered_open_arms(arms: list[dict[str, str]], proxy_will_run: bool) -> list[str]:
+    """Open-model arm names whose ``cost_usd`` will be None because metering is off.
+
+    Only open models are flagged: subscription arms are ``None`` by design (they
+    run on the ChatGPT subscription, never a metered endpoint), so warning about
+    them would be noise. Returns [] when the proxy will run (cost captured) or no
+    open arms are present.
+    """
+    if proxy_will_run:
+        return []
+    return sorted({
+        arm["model"] for arm in arms
+        if bench_run.proxy_supported_for_cell(arm["harness"], arm["model"])
+        and arm["model"] not in bench_run.PROXY_CODEX_SUBSCRIPTION_MODELS
+    })
+
+
 def enumerate_task_groups(spec: dict[str, Any]) -> list[dict[str, Any]]:
     """Return list of task group dicts from the spec."""
     return spec.get("task_group") or spec.get("task_groups", [])
@@ -602,6 +619,7 @@ def build_runner_command(
     stall_timeout: int | None,
     exec_mode: str,
     allow_version_drift: bool = False,
+    capture_cost: bool = False,
 ) -> list[str]:
     """Build the ``obench run`` subprocess argv for one cell.
 
@@ -640,8 +658,11 @@ def build_runner_command(
         cmd.append("--allow-version-drift")
     if stall_timeout is not None:
         cmd.extend(["--stall-timeout", str(stall_timeout)])
-    # Enable proxy for stall-kill support (required for stall-timeout to work)
-    if stall_timeout is not None:
+    # The counting proxy backs two independent needs: stall-kill (it interrupts
+    # a stalled call) and authoritative cost capture (it reads usage.cost off
+    # each call). Enable it for EITHER -- previously it rode on stall_timeout
+    # alone, so a spec without a stall timeout silently lost cost capture.
+    if stall_timeout is not None or capture_cost:
         cmd.append("--proxy")
     return cmd
 
@@ -719,12 +740,13 @@ class _MatrixContext:
     def __init__(self, *, results_path, timeout, stall_timeout, exec_mode,
                  allow_version_drift, rate_limited_backoff, max_cell_wall_s,
                  max_consecutive_excluded, arm_states, retry_counts, state,
-                 arm_pending, arm_paused, direct_write):
+                 arm_pending, arm_paused, direct_write, capture_cost=False):
         self.results_path = results_path
         self.timeout = timeout
         self.stall_timeout = stall_timeout
         self.exec_mode = exec_mode
         self.allow_version_drift = allow_version_drift
+        self.capture_cost = capture_cost
         self.rate_limited_backoff = rate_limited_backoff
         self.max_cell_wall_s = max_cell_wall_s
         self.max_consecutive_excluded = max_consecutive_excluded
@@ -873,7 +895,8 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
             target = part_path
         cmd = build_runner_command(
             cell, target, None, ctx.timeout, ctx.stall_timeout, ctx.exec_mode,
-            allow_version_drift=ctx.allow_version_drift)
+            allow_version_drift=ctx.allow_version_drift,
+            capture_cost=ctx.capture_cost)
         rc, stderr_tail = run_runner(cmd, cell_timeout + 60)
         if rc != 0:
             print(f"    WARN runner exit={rc} for {run_id}", file=sys.stderr)
@@ -954,6 +977,14 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     )
     if stall_timeout is None and spec.get("proxy", False):
         stall_timeout = DEFAULT_STALL_TIMEOUT
+    # Authoritative cost capture (usage.cost per call) runs through the counting
+    # proxy. It is opt-in per spec so ordinary runs don't pay the interception
+    # overhead. `proxy = true` (which forces a stall timeout above) also enables
+    # it; `capture_cost = true` enables the proxy for metering WITHOUT forcing a
+    # stall timeout. When neither is set, --proxy is not passed and open-model
+    # rows carry cost_usd = None (price-sheet derivation only).
+    capture_cost = bool(spec.get("capture_cost", False))
+    proxy_will_run = capture_cost or stall_timeout is not None
 
     retry_cfg = spec.get("retry", {})
     retry_budgets = resolve_retry_budgets(retry_cfg)
@@ -969,6 +1000,19 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     tasks = resolve_tasks(spec, spec_dir)
     arms = enumerate_arms(spec)
     all_cells = expand_cells_grouped(arms, groups, trials)
+
+    # Warn loudly if metering is off but open-model arms are present -- those
+    # rows will carry cost_usd = None (only subscription arms are None by
+    # design). Silent None is exactly what wasted the am-consistency cost axis.
+    unmetered = unmetered_open_arms(arms, proxy_will_run)
+    if unmetered:
+        print(
+            "WARN cost capture is OFF: "
+            f"{len(unmetered)} open-model arm(s) will record cost_usd=None "
+            f"({', '.join(unmetered[:6])}"
+            f"{'...' if len(unmetered) > 6 else ''}). "
+            "Set `capture_cost = true` in the spec to meter them via the proxy."
+        )
 
     # Quick sanity check: only groups with a resolved tasks_dir can be checked
     # here. Groups that omit tasks_dir defer resolution to the runner (config or
@@ -1070,6 +1114,7 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         max_consecutive_excluded=max_consecutive_excluded, arm_states=arm_states,
         retry_counts=retry_counts, state=state, arm_pending=arm_pending,
         arm_paused=arm_paused,
+        capture_cost=capture_cost,
         # Single worker keeps the durable direct-to-results write; part files
         # (with their merge window) are only needed to de-interleave >1 worker.
         direct_write=(n_workers == 1),

@@ -258,6 +258,21 @@ the PR, not as a "resolved" note here).
   First triage: capture one raw upstream response body on the bridge and grep for
   `cost`. **Still needs**: a codex-native run confirming `cost_usd` is `None` by
   design (that half is presumably fine).
+- **Root cause found + fixed** (*2026-08-30, branch `fix/open-arm-cost-capture`*):
+  suspect (a) was right, plus a second defect. (1) The matrix runner only passed
+  `--proxy` (the sole cost-capture path) as a *side-effect of `stall_timeout`*
+  (`matrix_queue.build_runner_command`); our spec set no stall timeout, so codex
+  hit the bare bridge un-metered. (2) `proxy_supported_for_cell` gated codex
+  metering on hand-maintained sets (`PROXY_CHAT_MODELS` etc.) that had drifted —
+  none of the OpenRouter arms we ran (minimax-m3, glm-5.3-flash,
+  deepseek-v4-flash-0731, nemotron-3-ultra) were in them, so even *with* `--proxy`
+  they would not have metered. Fix: a `capture_cost = true` spec flag enables the
+  proxy independently of stall-kill (+ a startup WARN when open arms run
+  un-metered), and `proxy_supported_for_cell` now derives the eligible open set
+  from the adapter's `OPEN_MODELS` registry so it can never drift again. Tests in
+  `test_proxy.py` / `test_matrix_queue.py`. **Still open**: an actual metered
+  re-run to confirm `usage.cost` now lands end-to-end (credit-gated — see the
+  kimi-k3 deferral).
 
 ### Security posture
 

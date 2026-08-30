@@ -28,6 +28,11 @@ results_path = "../../results/am-consistency/results.jsonl"
 ledger_dir = "../../results/am-consistency/ledger"
 timeout = 2400
 exec_mode = "local"
+# Meter open-model arms through the counting proxy so rows carry an
+# authoritative cost_usd (OpenRouter usage.cost). Without this the open arms
+# record cost_usd=None and cost is price-sheet theoretical only. The runner
+# warns if this is off while open-model arms are present.
+capture_cost = true
 trials = 3
 allow_version_drift = true
 max_consecutive_excluded = 4

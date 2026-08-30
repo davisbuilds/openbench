@@ -20,6 +20,7 @@ subprocess, never the ``timeout`` command).
 
 import argparse
 import fcntl
+import functools
 import hashlib
 import importlib.util
 import json
@@ -640,13 +641,36 @@ def _proxy_docker_args(proxy_ctx):
     return ["--add-host", "host.docker.internal:host-gateway"]
 
 
-def proxy_supported_for_cell(harness, model):
+@functools.lru_cache(maxsize=None)
+def _adapter_open_models(harness, adapters_dir):
+    """Open-model names an adapter exposes via its ``OPEN_MODELS`` registry.
+
+    Derived from the adapter module itself -- the single source of truth for
+    which open/BYO models the harness can route (built-ins plus operator
+    overrides from ``~/.openbench/open_models.toml``). Proxy-metering
+    eligibility reads this instead of a hand-maintained list, so the two can
+    never drift out of sync (the drift that left every OpenRouter arm's
+    ``cost_usd`` None in the am-consistency run). Best-effort: any load failure
+    yields an empty set. Cached because it imports the adapter module.
+    """
+    try:
+        module = load_adapter(adapters_dir or DEFAULT_ADAPTERS_DIR, harness)
+    except Exception:
+        return frozenset()
+    return frozenset(getattr(module, "OPEN_MODELS", {}) or {})
+
+
+def proxy_supported_for_cell(harness, model, adapters_dir=None):
     """True when --proxy has proven adapter wiring for this harness/model."""
     if harness == "codex":
         # Open models reach the LiteLLM bridge through the proxy's ``bridge``
-        # route (adapters/codex.py _bridge_base_url), so they meter too.
+        # route (adapters/codex.py _bridge_base_url), so they meter too. The
+        # eligible open set is derived from the adapter's OPEN_MODELS registry
+        # (see _adapter_open_models); PROXY_CHAT_MODELS is kept as a static
+        # floor for direct-provider routes that predate the registry.
         return (model in PROXY_CODEX_SUBSCRIPTION_MODELS
-                or model in PROXY_CHAT_MODELS)
+                or model in PROXY_CHAT_MODELS
+                or model in _adapter_open_models("codex", adapters_dir))
     if harness == "pi":
         # Open models route via the provider extension's proxied baseUrl
         # (adapters/pi.py _pi_provider_ext), same mechanism as opencode.

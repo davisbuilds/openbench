@@ -364,6 +364,20 @@ class ProxyTests(unittest.TestCase):
         self.assertTrue(run.proxy_supported_for_cell("grokbuild", "deepseek-v4-flash"))
         self.assertFalse(run.proxy_supported_for_cell("devin", "gpt-5.5-medium"))
 
+    def test_codex_open_model_eligibility_derived_from_registry(self):
+        # OpenRouter open arms live in the codex adapter's OPEN_MODELS registry.
+        # Proxy metering eligibility must track that registry, not a
+        # hand-maintained list that silently drifts out of sync (the drift that
+        # produced cost_usd=None across every open arm in the am-consistency run).
+        for model in ("minimax-m3", "glm-5.3-flash", "deepseek-v4-flash-0731"):
+            self.assertTrue(
+                run.proxy_supported_for_cell("codex", model),
+                f"{model} should be proxy-meterable (it is in codex OPEN_MODELS)",
+            )
+        # Subscription arms stay eligible; an unknown model stays ineligible.
+        self.assertTrue(run.proxy_supported_for_cell("codex", "gpt-5.6-terra"))
+        self.assertFalse(run.proxy_supported_for_cell("codex", "no-such-model"))
+
 
 if __name__ == "__main__":
     unittest.main()

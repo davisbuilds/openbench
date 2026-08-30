@@ -184,6 +184,36 @@ class CellSatisfactionTests(unittest.TestCase):
     def test_rate_limited_is_not_satisfied(self):
         self.assertFalse(mq.cell_is_satisfied({"failure_class": "rate_limited"}))
 
+    def test_capture_cost_appends_proxy_without_stall(self):
+        # capture_cost enables the counting proxy (the only thing that captures
+        # cost_usd) independently of stall_timeout -- previously --proxy was a
+        # side-effect of stall-kill only, so a spec without a stall timeout
+        # silently ran open arms un-metered.
+        cell = {"harness": "codex", "model": "minimax-m3", "task": "t", "trial": 1}
+        cmd = mq.build_runner_command(
+            cell, "/tmp/r.jsonl", None, 2400, None, "local", capture_cost=True)
+        self.assertIn("--proxy", cmd)
+
+    def test_no_proxy_without_stall_or_capture(self):
+        cell = {"harness": "codex", "model": "minimax-m3", "task": "t", "trial": 1}
+        cmd = mq.build_runner_command(
+            cell, "/tmp/r.jsonl", None, 2400, None, "local")
+        self.assertNotIn("--proxy", cmd)
+
+    def test_unmetered_open_arms_flags_open_not_subscription(self):
+        arms = [
+            {"harness": "codex", "model": "minimax-m3"},        # open -> flag
+            {"harness": "codex", "model": "deepseek-v4-flash-0731"},  # open -> flag
+            {"harness": "codex", "model": "gpt-5.6-terra"},     # subscription -> skip
+        ]
+        # Metering off: only the open arms are flagged.
+        self.assertEqual(
+            mq.unmetered_open_arms(arms, proxy_will_run=False),
+            ["deepseek-v4-flash-0731", "minimax-m3"],
+        )
+        # Metering on: nothing to warn about.
+        self.assertEqual(mq.unmetered_open_arms(arms, proxy_will_run=True), [])
+
     def test_stalled_is_not_satisfied(self):
         self.assertFalse(mq.cell_is_satisfied({"failure_class": "stalled"}))
 
