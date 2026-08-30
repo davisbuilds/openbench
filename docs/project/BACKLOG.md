@@ -138,7 +138,58 @@ the PR, not as a "resolved" note here).
   [minghinmatthewlam/openbench#46](https://github.com/minghinmatthewlam/openbench/issues/46)
   — hold the PR until the maintainer signals interest (issue-first, per plan).
 
+#### No validation that `bridge/config.yaml` and adapter `OPEN_MODELS` agree
+- **What**: routing a model requires **two** places to agree — the adapter's
+  `OPEN_MODELS` entry (provider/`env_key`/`model_id`, which drives the key
+  preflight and bridge `model_id`) and the bridge `config.yaml` `model_name` →
+  upstream slug. Nothing checks they match, and the adapter's built-in silently
+  wins over `config.yaml`.
+- **Why it matters** (*hit 2026-08-29, adding kimi-k3 + nemotron-3-ultra*):
+  `config.yaml` was given a `kimi-k3` → `openrouter/moonshotai/kimi-k3` route, but
+  the codex adapter *already ships* a built-in `kimi-k3` → **direct Moonshot**
+  (`MOONSHOT_API_KEY`) entry (`codex.py:172`). The config looked correctly wired,
+  yet every cell failed `SETUP-NEEDED: export MOONSHOT_API_KEY` — the built-in
+  shadowed it. Fix was a `~/.openbench/open_models.toml` override (config wins on
+  collision). This is exactly the cross-site-consistency defect class the
+  `am-consistency` task tests: change one place, miss the parallel place that must
+  agree. A new model added only to `config.yaml` is a latent trap.
+- **Next**: a `bridge` (or `doctor`) preflight that cross-checks — every
+  `config.yaml` `model_name` should have a matching adapter/override entry whose
+  `model_id` equals it and whose provider/`env_key` are consistent with the
+  route; warn on any `model_name` present in one surface but routed differently in
+  the other. Cheap to write, kills a whole confusing failure mode.
+
 ### Operator ergonomics
+
+#### Config/setup errors consume the full retry budget instead of failing fast
+- **What**: a deterministic config error — `SETUP-NEEDED: export <KEY>` (missing
+  key) or `unsupported-model` (name not in `OPEN_MODELS`) — is retried like a
+  transient failure and burns the arm's whole `infra` budget before pausing.
+- **Why it matters** (*observed 2026-08-29*): the mis-routed kimi-k3 and
+  not-yet-registered nemotron arms each retried **3×** and paused the arm, when
+  the very first attempt already carried a verdict that no retry could change.
+  Wasted wall time and noisy `exhausted`/`PAUSED` state for a one-line fix.
+- **Next**: classify `SETUP-NEEDED` / `unsupported-model` as **non-retryable
+  config errors** (0 retries, fail fast), and — better — surface them in a
+  *planning-time* preflight (validate every arm's key + registry membership
+  before the queue runs) so the run never starts a doomed cell. `ArmState`
+  already has a `config_error` field to hang this on.
+
+#### Queue-state ledger overrides `results.jsonl` for exhaustion — desync on prune
+- **What**: `results.jsonl` is documented as the resume source of truth, but
+  `queue-state.json` separately persists `exhausted_cells` + `retry_counts` and is
+  restored verbatim at launch (`matrix_queue.py:1008-1014`). Removing a cell's
+  rows from `results.jsonl` to force a re-run does **not** clear its ledger
+  exhaustion, so the runner keeps skipping it.
+- **Why it matters** (*hit 2026-08-29*): after fixing kimi-k3's routing and
+  pruning its 9 failed rows from `results.jsonl`, relaunch still reported it
+  `EXHAUSTED` and never re-ran it — the ledger remembered. The only reset was
+  deleting the whole `queue-state.json` (blunt: also drops unrelated arms' state).
+  This contradicts the "results.jsonl is authoritative" contract.
+- **Next**: either (a) an `obench matrix --requeue <arm|cell>` that clears a
+  cell's exhaustion + retry counts, or (b) reconcile the ledger against
+  `results.jsonl` on load — if a cell's rows are gone, drop it from
+  `exhausted_cells`/`retry_counts` so results-file edits actually take effect.
 
 #### Bridge lifecycle is manual and foreground — *shipped (fork-local) 2026-08-27*
 - **What**: the open-model LiteLLM bridge must be started by hand before any
@@ -189,10 +240,24 @@ the PR, not as a "resolved" note here).
   attempts are uncounted — known-priced OpenRouter floor ~$0.45 vs ~$1.62 on the
   dashboard. Authoritative capture fixes attribution going forward but does not
   retro-count past discarded attempts.
-- **Still needs**: one paid open-model run to confirm `usage.cost` actually
-  arrives now that `extra_body.usage.include` is set (and the header fallback),
-  and a codex-native run confirming `cost_usd` is `None`. Then this is done and
-  the capture piece is upstream-worthy.
+- **Live validation ran — and capture is NOT landing** (*observed 2026-08-29,
+  `results/am-consistency/`*): the `am-consistency` Pareto run exercised four paid
+  OpenRouter arms through the bridge (minimax-m3, glm-5.3-flash,
+  deepseek-v4-flash-0731, nemotron-3-ultra) and **every row came back
+  `cost_usd=None` / `cost_source=None`** — neither OpenRouter's `usage.cost` nor
+  the `x-litellm-response-cost` header reached the row. Codex-native arms are
+  `None` as designed; the open arms should NOT be. This breaks the whole "×cost"
+  axis of the Pareto study (we fall back to price-sheet derivation only). So the
+  authoritative-capture piece is **not** upstream-worthy yet — it regressed or was
+  never exercised end-to-end on this path.
+- **Suspects to check** (unverified): (a) codex's open-model requests take the
+  adapter's bridge path but bypass the *counting proxy* (`OPENBENCH_PROXY` unset
+  in this run), and `extract_cost()` may live only on the proxy path, not the
+  bare-bridge path; (b) LiteLLM's Responses→Chat bridge may strip `usage.cost`
+  out of the projected response; (c) the header may not survive the bridge hop.
+  First triage: capture one raw upstream response body on the bridge and grep for
+  `cost`. **Still needs**: a codex-native run confirming `cost_usd` is `None` by
+  design (that half is presumably fine).
 
 ### Security posture
 
