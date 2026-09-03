@@ -72,25 +72,38 @@ def matrix_usage_policy(
     token_basis: Any,
     *,
     proxy_measured: bool,
+    native_tokens_present: bool = False,
 ) -> tuple[str, bool, str | None]:
     """Return ``(grade, ranking_eligible, exclusion_reason)`` for a matrix-runner row.
 
-    The matrix/legacy runner grades usage from what it actually captured, best
-    evidence first: the counting proxy's independent meter (``proxy_measured``,
-    strongest and authoritative regardless of the adapter's own accounting), else
-    the adapter's vendor token split (``token_basis == "vendor_split"``, the
-    vendor's own reported counts), else a token estimate
-    (``token_basis == "estimated"`` -- present but excluded from ranking so a
-    guess never drives cost/token metrics). Everything else (no meter, an
-    unmetered BYO candidate, a failed cell with no usage) is unavailable.
+    The grade must name the *source the consumers actually rank*, not the best
+    evidence the cell captured. ``stats.effective_tokens`` /
+    ``stats.input_tokens`` / ``stats.output_tokens`` and ``compare._measurement``
+    all prefer the adapter's own native token scalars and consult the proxy meter
+    only as a fallback when those are absent. So:
+
+    - ``native_tokens_present`` (the adapter reported its own token scalars, which
+      the consumers select first): grade the adapter's basis -- ``vendor_split``
+      (or a bare scalar) is the vendor's reported counts (``vendor_reported``,
+      eligible); an ``estimated`` scalar is a guess that is selected before the
+      proxy yet excluded from ranking (``estimated``). A proxy meter that also
+      fired does NOT upgrade the grade, because its number is not the one ranked
+      -- stamping ``proxy_measured`` here would claim independent proxy provenance
+      for a vendor-reported figure.
+    - Otherwise, no native scalar is present and the consumers fall back to the
+      proxy: ``proxy_measured`` (eligible) if it fired, else ``estimated`` for a
+      bare estimate basis, else unavailable (no meter, an unmetered BYO
+      candidate, or a failed cell with no usage).
 
     Distinct from ``harbor_usage_policy``, which grades Harbor-agent-reported
     usage against proxy reconciliation.
     """
+    if native_tokens_present:
+        if token_basis == "estimated":
+            return GRADE_ESTIMATED, False, EXCLUSION_USAGE_ESTIMATED
+        return GRADE_VENDOR_REPORTED, True, None
     if proxy_measured:
         return GRADE_PROXY_MEASURED, True, None
-    if token_basis == "vendor_split":
-        return GRADE_VENDOR_REPORTED, True, None
     if token_basis == "estimated":
         return GRADE_ESTIMATED, False, EXCLUSION_USAGE_ESTIMATED
     return GRADE_UNAVAILABLE, False, EXCLUSION_USAGE_UNAVAILABLE

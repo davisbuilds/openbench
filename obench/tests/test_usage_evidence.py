@@ -20,30 +20,48 @@ from obench import usage_evidence as ue
 
 
 class MatrixUsagePolicyTests(unittest.TestCase):
-    def test_proxy_measured_is_strongest_and_eligible(self):
+    def test_proxy_measured_only_when_no_native_scalar_to_rank(self):
+        # The proxy meter is what the consumers select ONLY as a fallback, when
+        # no native token scalar is present. Then proxy_measured is honest.
         grade, eligible, reason = ue.matrix_usage_policy(
-            "vendor_split", proxy_measured=True)
+            None, proxy_measured=True, native_tokens_present=False)
         self.assertEqual(grade, ue.GRADE_PROXY_MEASURED)
         self.assertTrue(eligible)
         self.assertIsNone(reason)
 
-    def test_proxy_measured_wins_even_over_estimated_basis(self):
-        # The independent proxy meter is authoritative regardless of the adapter's
-        # own accounting quality.
-        grade, eligible, _ = ue.matrix_usage_policy("estimated", proxy_measured=True)
-        self.assertEqual(grade, ue.GRADE_PROXY_MEASURED)
+    def test_native_scalar_present_grades_vendor_not_proxy(self):
+        # Codex P1: stats.effective_tokens/input_tokens/output_tokens and
+        # compare._measurement all prefer the adapter's native token fields and
+        # consult the proxy only as a fallback. So when a proxied adapter ALSO
+        # reports vendor tokens, the number that actually gets ranked is the
+        # vendor's -- labeling the row proxy_measured would claim independent
+        # proxy provenance for a vendor-reported figure.
+        grade, eligible, reason = ue.matrix_usage_policy(
+            "vendor_split", proxy_measured=True, native_tokens_present=True)
+        self.assertEqual(grade, ue.GRADE_VENDOR_REPORTED)
         self.assertTrue(eligible)
+        self.assertIsNone(reason)
+
+    def test_native_estimate_present_is_estimated_even_with_proxy(self):
+        # A native estimate scalar is selected before the proxy by the consumers,
+        # and estimates are excluded from ranking -- so the proxy meter never gets
+        # to stand in for it. Grade the source actually selected: estimated.
+        grade, eligible, reason = ue.matrix_usage_policy(
+            "estimated", proxy_measured=True, native_tokens_present=True)
+        self.assertEqual(grade, ue.GRADE_ESTIMATED)
+        self.assertFalse(eligible)
+        self.assertEqual(reason, ue.EXCLUSION_USAGE_ESTIMATED)
 
     def test_vendor_split_without_proxy_is_vendor_reported_eligible(self):
         grade, eligible, reason = ue.matrix_usage_policy(
-            "vendor_split", proxy_measured=False)
+            "vendor_split", proxy_measured=False, native_tokens_present=True)
         self.assertEqual(grade, ue.GRADE_VENDOR_REPORTED)
         self.assertTrue(eligible)
         self.assertIsNone(reason)
 
     def test_estimated_is_graded_but_not_rankable(self):
         grade, eligible, reason = ue.matrix_usage_policy(
-            "estimated", proxy_measured=False)
+            "estimated", proxy_measured=False, native_tokens_present=True)
         self.assertEqual(grade, ue.GRADE_ESTIMATED)
         self.assertFalse(eligible)
         self.assertEqual(reason, ue.EXCLUSION_USAGE_ESTIMATED)
@@ -51,10 +69,20 @@ class MatrixUsagePolicyTests(unittest.TestCase):
     def test_none_and_unmetered_are_unavailable(self):
         for basis in (None, "unmetered", "something-unknown"):
             grade, eligible, reason = ue.matrix_usage_policy(
-                basis, proxy_measured=False)
+                basis, proxy_measured=False, native_tokens_present=False)
             self.assertEqual(grade, ue.GRADE_UNAVAILABLE, basis)
             self.assertFalse(eligible, basis)
             self.assertEqual(reason, ue.EXCLUSION_USAGE_UNAVAILABLE, basis)
+
+    def test_vendor_basis_without_a_scalar_or_proxy_is_unavailable(self):
+        # A vendor_split basis flag but no native scalar and no proxy meter leaves
+        # nothing for the consumers to rank -> unavailable, not a hollow
+        # vendor_reported claim.
+        grade, eligible, reason = ue.matrix_usage_policy(
+            "vendor_split", proxy_measured=False, native_tokens_present=False)
+        self.assertEqual(grade, ue.GRADE_UNAVAILABLE)
+        self.assertFalse(eligible)
+        self.assertEqual(reason, ue.EXCLUSION_USAGE_UNAVAILABLE)
 
     def test_estimated_grade_fails_ranking_eligible_helper(self):
         # A consumer calling ranking_eligible() on the row must agree with the
@@ -88,6 +116,31 @@ class RunCellGradesEveryRowTests(unittest.TestCase):
         with open(out) as fh:
             emitted = json.loads(fh.readline())
         self.assertEqual(emitted["usage_evidence_grade"], ue.GRADE_UNAVAILABLE)
+
+    def test_proxied_row_with_native_vendor_tokens_grades_vendor_reported(self):
+        # Regression for the Codex P1: a row where the proxy meter fired AND the
+        # adapter reported native vendor tokens must not be stamped
+        # proxy_measured, because the consumers rank the native number.
+        row = {
+            "token_basis": "vendor_split",
+            "token_basis_proxy": "proxy_measured",
+            "tokens": 1234,
+        }
+        run._grade_usage_evidence(row)
+        self.assertEqual(row["usage_evidence_grade"], ue.GRADE_VENDOR_REPORTED)
+        self.assertTrue(row["usage_ranking_eligible"])
+        self.assertIsNone(row["usage_ranking_exclusion_reason"])
+
+    def test_proxy_only_row_grades_proxy_measured(self):
+        # No native scalar of any kind: the proxy meter is what gets ranked.
+        row = {
+            "token_basis": None,
+            "token_basis_proxy": "proxy_measured",
+            "tokens": None,
+        }
+        run._grade_usage_evidence(row)
+        self.assertEqual(row["usage_evidence_grade"], ue.GRADE_PROXY_MEASURED)
+        self.assertTrue(row["usage_ranking_eligible"])
 
 
 if __name__ == "__main__":
