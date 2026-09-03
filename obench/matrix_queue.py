@@ -295,11 +295,19 @@ def derive_study_identity(
     reusable config. Two runs of the same spec (say, on different days) must be
     two studies so a downstream frontier never merges their arms or costs.
 
-    So the identity is minted ONCE, on the first launch, and STORED in the
-    persistent queue state:
+    The identity anchor is the CAMPAIGN -- the shared results file + queue state
+    -- NOT the spec filename. Operational variant specs deliberately point at one
+    ``results_path``/``ledger_dir`` to resume a single bake-off under different
+    filenames (am-consistency.toml + am-consistency-tl.toml + -noLaguna.toml all
+    share results/am-consistency/), so once an identity is persisted in the queue
+    state, EVERY spec run against it reuses that identity -- otherwise a variant's
+    rows would carry a different ``study_sha256`` and could not join the frontier.
 
-      * ``suite``  -- the config-level slug (spec ``name`` or the spec filename
-        stem); stable across every run of this spec.
+    So the identity is minted ONCE, on the first launch that finds no persisted
+    identity, and STORED in the persistent queue state:
+
+      * ``suite``  -- the config-level slug (the first launcher's spec ``name`` or
+        filename stem), shared by all variants of the campaign.
       * ``study``  -- the per-run slug ``{suite}-{launch-date}`` (local date),
         matching the dated output-dir convention (am-consistency-pareto-2026-08-29).
       * ``study_sha256`` -- the exact run key: a digest over the suite, the
@@ -307,15 +315,18 @@ def derive_study_identity(
         spec. The nonce guarantees two fresh campaigns of the identical spec --
         even minted the same second -- get distinct keys.
 
-    Every resume of the same campaign reloads the queue state and reuses the
-    stored identity (so all of a run's rows share it); deleting/resetting the
-    queue state starts a new run, which is the intended way to begin one.
+    Deleting/resetting the queue state starts a new run, which is the intended way
+    to begin one.
     """
-    suite = spec.get("name") or (Path(spec_path).stem if spec_path else "study")
+    # Reuse the campaign's persisted identity regardless of which variant spec is
+    # driving this invocation -- the shared queue state, not the filename, defines
+    # the run. (Codex PR #2 P1: keying reuse on the spec name split am-consistency
+    # variants across two study_sha256 values and broke the intended frontier.)
     persisted = state.get("study_identity")
-    if isinstance(persisted, dict) and persisted.get("suite") == suite:
-        return suite, persisted["study"], persisted["study_sha256"]
+    if isinstance(persisted, dict) and persisted.get("study_sha256"):
+        return persisted["suite"], persisted["study"], persisted["study_sha256"]
 
+    suite = spec.get("name") or (Path(spec_path).stem if spec_path else "study")
     launched = time.time()
     # Local date for the human-readable label, to match the operator's dated
     # output-dir convention; the epoch `launched` in the digest below stays
