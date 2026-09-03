@@ -1904,9 +1904,26 @@ def _grade_usage_evidence(row):
     ``usage_unavailable`` rather than looking indistinguishable from an ungraded
     row. Idempotent and derived purely from the row, so it is safe in the finally.
     """
+    from . import stats  # lazy: only the grading path needs the token predicate
+    # The consumers (stats.effective_tokens/input_tokens/output_tokens and
+    # compare._measurement) each prefer one of these native scalars and fall back
+    # to the proxy meter only when they are all absent. If any is present, the
+    # ranked number is the adapter's, not the proxy's -- so the grade must not
+    # claim proxy provenance. Mirror exactly the fields those consumers read.
+    native_tokens_present = any(
+        stats.is_nonnegative_number(row.get(field))
+        for field in (
+            "tokens",
+            "tokens_total",
+            "tokens_input",
+            "tokens_input_uncached",
+            "tokens_output",
+        )
+    )
     grade, eligible, reason = usage_evidence.matrix_usage_policy(
         row.get("token_basis"),
         proxy_measured=(row.get("token_basis_proxy") == "proxy_measured"),
+        native_tokens_present=native_tokens_present,
     )
     row["usage_evidence_grade"] = grade
     row["usage_ranking_eligible"] = eligible
