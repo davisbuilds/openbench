@@ -202,6 +202,26 @@ _BUILTIN_OPEN_MODELS = {
 # name collision; a missing or malformed file leaves the built-ins untouched.
 OPEN_MODELS = merge_open_models(_BUILTIN_OPEN_MODELS)
 
+
+def model_identity(model):
+    """Decompose a benchmark model name into canonical_model + reasoning_effort.
+
+    Single source of truth for the split the results row needs: the effort suffix
+    baked into a subscription arm's name (``gpt-5.6-terra-xhigh`` -> model
+    ``gpt-5.6-terra`` at effort ``xhigh``) and the ``medium`` thinking the bridge
+    applies to every open model. Unknown names pass through unchanged with no
+    effort claim rather than a guess. Pure and side-effect-free so the runner can
+    call it at row-build time for successful AND failed cells alike.
+    """
+    if model in MODELS:
+        return {"canonical_model": MODELS[model],
+                "reasoning_effort": _EFFORT.get(model)}
+    spec = OPEN_MODELS.get(model)
+    if spec:
+        return {"canonical_model": spec.get("model_id") or model,
+                "reasoning_effort": spec.get("effort")}
+    return {"canonical_model": model, "reasoning_effort": None}
+
 # Host-side bridge (LiteLLM proxy). Port must match bench/openmodel_bridge.sh
 # (both default to 4141; override in lockstep via BENCH_BRIDGE_PORT).
 _BRIDGE_DEFAULT_PORT = 4141

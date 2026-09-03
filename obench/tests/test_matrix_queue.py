@@ -445,6 +445,85 @@ class RunnerCommandBuildingTests(unittest.TestCase):
             cell, "r.jsonl", "/t", 2400, None, "local", allow_version_drift=True)
         self.assertIn("--allow-version-drift", cmd)
 
+    def test_study_flags_passed_when_provided(self):
+        cell = {"harness": "codex", "model": "a", "task": "t1", "trial": 1}
+        cmd = mq.build_runner_command(
+            cell, "r.jsonl", "/t", 2400, None, "local",
+            study="am-consistency-2026-09-03",
+            study_sha256="abc123", suite="am-consistency")
+        self.assertIn("--study", cmd)
+        self.assertIn("am-consistency-2026-09-03", cmd)
+        self.assertIn("--study-sha256", cmd)
+        self.assertIn("abc123", cmd)
+        self.assertIn("--suite", cmd)
+        self.assertIn("am-consistency", cmd)
+
+    def test_study_flags_omitted_when_absent(self):
+        cell = {"harness": "codex", "model": "a", "task": "t1", "trial": 1}
+        cmd = mq.build_runner_command(cell, "r.jsonl", "/t", 2400, None, "local")
+        self.assertNotIn("--study", cmd)
+        self.assertNotIn("--study-sha256", cmd)
+        self.assertNotIn("--suite", cmd)
+
+
+class StudyIdentityTests(unittest.TestCase):
+    """A per-RUN study id: one bake-off's arms grouped, stable across resume."""
+
+    def _spec(self):
+        return {
+            "name": "am-consistency",
+            "results_path": "r.jsonl",
+            "trials": 3,
+            "arm": [{"harness": "codex", "model": "gpt-5.6-terra-xhigh"}],
+            "task_group": [{"tasks": ["t1"]}],
+        }
+
+    def test_mints_per_run_study_and_persists_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = mq.QueueState(os.path.join(d, "queue-state.json"))
+            suite, study, sha = mq.derive_study_identity(
+                self._spec(), "/x/am-consistency.toml", state)
+            self.assertEqual(suite, "am-consistency")
+            self.assertTrue(study.startswith("am-consistency-"))
+            self.assertNotEqual(study, suite)  # run-level != config-level
+            self.assertEqual(len(sha), 64)
+            self.assertEqual(state.get("study_identity")["study"], study)
+            self.assertEqual(state.get("study_identity")["study_sha256"], sha)
+
+    def test_resume_reuses_persisted_identity(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "queue-state.json")
+            _, study1, sha1 = mq.derive_study_identity(
+                self._spec(), "/x/am-consistency.toml", mq.QueueState(path))
+            # A resume reloads state from disk: same campaign, same identity.
+            _, study2, sha2 = mq.derive_study_identity(
+                self._spec(), "/x/am-consistency.toml", mq.QueueState(path))
+            self.assertEqual(study1, study2)
+            self.assertEqual(sha1, sha2)
+
+    def test_distinct_runs_get_distinct_sha(self):
+        # Two fresh campaigns (separate queue state) of the identical spec must
+        # be two studies, even minted back-to-back, so the frontier never merges
+        # arms/costs across runs.
+        with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+            _, _, sha1 = mq.derive_study_identity(
+                self._spec(), "/x/am-consistency.toml",
+                mq.QueueState(os.path.join(d1, "q.json")))
+            _, _, sha2 = mq.derive_study_identity(
+                self._spec(), "/x/am-consistency.toml",
+                mq.QueueState(os.path.join(d2, "q.json")))
+            self.assertNotEqual(sha1, sha2)
+
+    def test_suite_falls_back_to_spec_filename_stem(self):
+        spec = self._spec()
+        del spec["name"]
+        with tempfile.TemporaryDirectory() as d:
+            state = mq.QueueState(os.path.join(d, "q.json"))
+            suite, study, _ = mq.derive_study_identity(
+                spec, "/x/flash-bakeoff.toml", state)
+            self.assertEqual(suite, "flash-bakeoff")
+            self.assertTrue(study.startswith("flash-bakeoff-"))
+
 
 class MissingTaskImagesTests(unittest.TestCase):
     """Preflight for pinned per-task docker images."""
