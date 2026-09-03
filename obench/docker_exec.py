@@ -43,6 +43,12 @@ REPO_ROOT = SOURCE_ROOT
 ENTRY_PATH = os.path.join(HERE, "entry.py")
 CANDIDATES_PATH = os.path.join(HERE, "candidates.py")
 AUTH_PERSIST_PATH = os.path.join(HERE, "auth_persist.py")
+# The codex/pi/opencode adapters import merge_open_models from here INSIDE the
+# container (config-driven OPEN_MODELS registry, commit 7fbc975). It is a
+# single-file stdlib-only module, so it must be mounted like the others above --
+# leaving it out made every codex docker cell die on `ModuleNotFoundError:
+# open_models_config` (the flat-bench import failure this list exists to prevent).
+OPEN_MODELS_CONFIG_PATH = os.path.join(HERE, "open_models_config.py")
 GATEWAY_SPEC_PATH = os.path.join(HERE, "gateway_spec.py")
 GATEWAY_PROFILES_PATH = os.path.join(HERE, "gateway_profiles.py")
 # Pinned per-model context/output limits. The pi adapter reads this INSIDE the
@@ -483,6 +489,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-v", f"{os.path.abspath(adapters_dir)}:/bench/adapters:ro",
         "-v", f"{ENTRY_PATH}:/bench/entry.py:ro",
         "-v", f"{AUTH_PERSIST_PATH}:/bench/auth_persist.py:ro",
+        "-v", f"{OPEN_MODELS_CONFIG_PATH}:/bench/open_models_config.py:ro",
         "-v", f"{GATEWAY_SPEC_PATH}:/bench/gateway_spec.py:ro",
         "-v", f"{GATEWAY_PROFILES_PATH}:/bench/gateway_profiles.py:ro",
         "-v", f"{MODEL_LIMITS_PATH}:/bench/model_limits.json:ro",
