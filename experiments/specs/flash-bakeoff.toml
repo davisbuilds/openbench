@@ -15,6 +15,9 @@
 #
 #   obench matrix --spec experiments/specs/flash-bakeoff.toml
 
+# Config-level suite slug -> row `suite`, and the base of the per-run `study`
+# id (`{name}-{launch-date}`). Defaults to the spec filename stem if omitted.
+name = "flash-bakeoff"
 results_path = "../../results/flash-bakeoff/results.jsonl"
 ledger_dir = "../../results/flash-bakeoff/ledger"
 timeout = 1800

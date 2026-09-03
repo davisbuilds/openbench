@@ -108,6 +108,15 @@ ROW_FIELDS = (
     "paced_wait_s",
     "model_context_window",
     "model_max_tokens",
+    # Additive comparison-identity fields (appended so pre-existing logs stay
+    # readable). canonical_model/reasoning_effort split the glued `model`; study
+    # (per-run) + study_sha256 (exact run key) group one bake-off's cells; suite
+    # is the config-level slug.
+    "canonical_model",
+    "reasoning_effort",
+    "study",
+    "study_sha256",
+    "suite",
 )
 
 
@@ -658,6 +667,35 @@ def _adapter_open_models(harness, adapters_dir):
     except Exception:
         return frozenset()
     return frozenset(getattr(module, "OPEN_MODELS", {}) or {})
+
+
+@functools.lru_cache(maxsize=None)
+def _resolve_model_identity(harness, model, adapters_dir):
+    """``(canonical_model, reasoning_effort)`` for a cell, from the adapter itself.
+
+    The adapter owns the glued-name -> (model, effort) decomposition (see
+    adapters/codex.py ``model_identity``: ``MODELS``/``_EFFORT`` for subscription
+    arms, ``OPEN_MODELS`` for bridge arms), so the row reads its split from that
+    single source of truth instead of the downstream heuristic suffix-strip that
+    a glued ``model`` forces. Best-effort: an adapter with no ``model_identity``
+    hook, or any load/parse failure, yields ``(model, None)`` -- an honest
+    'unknown effort', never a wrong guess. Keyed on harness+model alone so a
+    failed cell (bridge down, setup-needed) still carries identity. Cached
+    because it imports the adapter module.
+    """
+    fallback = (model, None)
+    try:
+        module = load_adapter(adapters_dir or DEFAULT_ADAPTERS_DIR, harness)
+    except Exception:
+        return fallback
+    identity = getattr(module, "model_identity", None)
+    if not callable(identity):
+        return fallback
+    try:
+        info = identity(model) or {}
+    except Exception:
+        return fallback
+    return (info.get("canonical_model") or model, info.get("reasoning_effort"))
 
 
 def proxy_supported_for_cell(harness, model, adapters_dir=None):
@@ -1897,7 +1935,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
              container_versions_reader=read_container_cli_versions,
              transcripts_dir=None, results_stem="", proxy_ctx=None,
              candidate=None, version_drift=False, workspace_observer=None,
-             stall_timeout=None):
+             stall_timeout=None, study=None, study_sha256=None, suite=None):
     """Execute one (task, harness, trial) cell and return its results row.
 
     Materializes the task workspace into a temp dir (snapshot ``workspace/``
@@ -1951,6 +1989,15 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         raise SystemExit(
             f"task {task!r} is dropped from the active set "
             f"(see {os.path.join(task_dir, 'DROPPED.md')}); refusing to schedule it")
+    # Decompose the glued arm name (gpt-5.6-terra-xhigh) into its real model id
+    # and reasoning effort from the adapter's own maps -- BEFORE the cell runs, so
+    # a failed cell (bridge down, setup-needed) still carries identity. For a BYO
+    # candidate the base adapter owns the model string.
+    identity_harness = (
+        (candidate.base_adapter or harness) if candidate is not None else harness
+    )
+    canonical_model, reasoning_effort = _resolve_model_identity(
+        identity_harness, model, adapters_dir)
     row = {
         "run_id": run_id,
         "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
@@ -1963,6 +2010,15 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "host": platform.node(),
         "harness": harness,
         "model": model,
+        # canonical_model + reasoning_effort split the glued `model` (kept as-is
+        # for compatibility) so downstream prices/classifies by the real model.
+        # study groups all cells of ONE bake-off run (matrix runner supplies it,
+        # stable across resume); suite is the lower-granularity config slug.
+        "canonical_model": canonical_model,
+        "reasoning_effort": reasoning_effort,
+        "study": study,
+        "study_sha256": study_sha256,
+        "suite": suite,
         "task": task,
         "trial": trial,
         "success": False,
@@ -2320,6 +2376,16 @@ def main(argv=None):
     parser.add_argument("--results-path", default=None,
                         help="override the results.jsonl path "
                              "(default: <repo|cwd>/results/results.jsonl)")
+    parser.add_argument("--study", default=None,
+                        help="per-run study id shared by every cell of one "
+                             "bake-off (the matrix runner supplies it; stable "
+                             "across resume). Stamped verbatim into each row.")
+    parser.add_argument("--study-sha256", default=None,
+                        help="exact study/run key (see --study); distinguishes "
+                             "separate runs of the same spec.")
+    parser.add_argument("--suite", default=None,
+                        help="config-level suite slug (lower granularity than "
+                             "--study; stable across every run of one spec).")
     parser.add_argument("--adapters-dir", default=None,
                         help="override the adapters directory "
                              "(default: packaged obench/adapters)")
@@ -2617,6 +2683,9 @@ def main(argv=None):
                         candidate=candidate,
                         version_drift=bool(drift),
                         stall_timeout=stall_timeout,
+                        study=args.study,
+                        study_sha256=args.study_sha256,
+                        suite=args.suite,
                     )
                     # Fail-closed on mixed lanes: a mid-run docker→local fallback
                     # must not land in the same results file as docker cells.

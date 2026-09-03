@@ -22,6 +22,7 @@ Persistent queue-state.json enables exact resume after kill or host restart.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -30,6 +31,7 @@ import sys
 import tempfile
 import time
 import threading
+import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -259,6 +261,91 @@ def expand_cells_grouped(
                         "timeout": group.get("timeout"),
                     })
     return cells
+
+
+# ── Study identity ───────────────────────────────────────────────────────
+
+def _canonical_spec_for_digest(spec: dict[str, Any]) -> dict[str, Any]:
+    """The run-defining slice of a spec, for the study digest.
+
+    Only the fields that make two runs the SAME comparison: which arms, which
+    tasks, how many trials. Deliberately excludes run-config knobs (timeouts,
+    retry budgets, workers) that can change on a resume without changing what is
+    being compared.
+    """
+    arms = [
+        {"harness": a.get("harness"), "model": a.get("model")}
+        for a in enumerate_arms(spec)
+    ]
+    groups = [
+        {"tasks": list(g.get("tasks", []))}
+        for g in enumerate_task_groups(spec)
+    ]
+    return {"arms": arms, "task_groups": groups, "trials": spec.get("trials", 1)}
+
+
+def derive_study_identity(
+    spec: dict[str, Any],
+    spec_path: str | os.PathLike[str] | None,
+    state: "QueueState",
+) -> tuple[str, str, str]:
+    """Return ``(suite, study, study_sha256)`` for this campaign.
+
+    A *study* is one bake-off RUN whose arms are compared together, not the
+    reusable config. Two runs of the same spec (say, on different days) must be
+    two studies so a downstream frontier never merges their arms or costs.
+
+    So the identity is minted ONCE, on the first launch, and STORED in the
+    persistent queue state:
+
+      * ``suite``  -- the config-level slug (spec ``name`` or the spec filename
+        stem); stable across every run of this spec.
+      * ``study``  -- the per-run slug ``{suite}-{launch-date}`` (local date),
+        matching the dated output-dir convention (am-consistency-pareto-2026-08-29).
+      * ``study_sha256`` -- the exact run key: a digest over the suite, the
+        first-launch timestamp, a random per-run nonce, and the canonicalized
+        spec. The nonce guarantees two fresh campaigns of the identical spec --
+        even minted the same second -- get distinct keys.
+
+    Every resume of the same campaign reloads the queue state and reuses the
+    stored identity (so all of a run's rows share it); deleting/resetting the
+    queue state starts a new run, which is the intended way to begin one.
+    """
+    suite = spec.get("name") or (Path(spec_path).stem if spec_path else "study")
+    persisted = state.get("study_identity")
+    if isinstance(persisted, dict) and persisted.get("suite") == suite:
+        return suite, persisted["study"], persisted["study_sha256"]
+
+    launched = time.time()
+    # Local date for the human-readable label, to match the operator's dated
+    # output-dir convention; the epoch `launched` in the digest below stays
+    # timezone-independent, and study_sha256 is the exact key regardless.
+    launch_date = time.strftime("%Y-%m-%d", time.localtime(launched))
+    nonce = uuid.uuid4().hex
+    study = f"{suite}-{launch_date}"
+    payload = json.dumps(
+        {
+            "suite": suite,
+            "launched": launched,
+            "nonce": nonce,
+            "spec": _canonical_spec_for_digest(spec),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    study_sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    state.set(
+        "study_identity",
+        {
+            "suite": suite,
+            "study": study,
+            "study_sha256": study_sha256,
+            "launched": launched,
+            "nonce": nonce,
+        },
+    )
+    state.save()
+    return suite, study, study_sha256
 
 
 # ── Queue state ─────────────────────────────────────────────────────────
@@ -620,6 +707,9 @@ def build_runner_command(
     exec_mode: str,
     allow_version_drift: bool = False,
     capture_cost: bool = False,
+    study: str | None = None,
+    study_sha256: str | None = None,
+    suite: str | None = None,
 ) -> list[str]:
     """Build the ``obench run`` subprocess argv for one cell.
 
@@ -648,6 +738,15 @@ def build_runner_command(
     ])
     if effective_tasks_dir:
         cmd.extend(["--tasks-dir", effective_tasks_dir])
+    # Comparison identity: the per-run study id (+ exact key) and config-level
+    # suite slug, stamped verbatim into every row so a downstream frontier can
+    # group one bake-off's cells without parsing the results directory name.
+    if study:
+        cmd.extend(["--study", study])
+    if study_sha256:
+        cmd.extend(["--study-sha256", study_sha256])
+    if suite:
+        cmd.extend(["--suite", suite])
     if effective_exec_mode == "docker":
         cmd.extend(["--exec", "docker"])
     if allow_version_drift:
@@ -746,13 +845,17 @@ class _MatrixContext:
     def __init__(self, *, results_path, timeout, stall_timeout, exec_mode,
                  allow_version_drift, rate_limited_backoff, max_cell_wall_s,
                  max_consecutive_excluded, arm_states, retry_counts, state,
-                 arm_pending, arm_paused, direct_write, capture_cost=False):
+                 arm_pending, arm_paused, direct_write, capture_cost=False,
+                 study=None, study_sha256=None, suite=None):
         self.results_path = results_path
         self.timeout = timeout
         self.stall_timeout = stall_timeout
         self.exec_mode = exec_mode
         self.allow_version_drift = allow_version_drift
         self.capture_cost = capture_cost
+        self.study = study
+        self.study_sha256 = study_sha256
+        self.suite = suite
         self.rate_limited_backoff = rate_limited_backoff
         self.max_cell_wall_s = max_cell_wall_s
         self.max_consecutive_excluded = max_consecutive_excluded
@@ -902,7 +1005,8 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
         cmd = build_runner_command(
             cell, target, None, ctx.timeout, ctx.stall_timeout, ctx.exec_mode,
             allow_version_drift=ctx.allow_version_drift,
-            capture_cost=ctx.capture_cost)
+            capture_cost=ctx.capture_cost,
+            study=ctx.study, study_sha256=ctx.study_sha256, suite=ctx.suite)
         rc, stderr_tail = run_runner(cmd, cell_timeout + 60)
         if rc != 0:
             print(f"    WARN runner exit={rc} for {run_id}", file=sys.stderr)
@@ -962,7 +1066,9 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
 
 # ── Main ────────────────────────────────────────────────────────────────
 
-def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
+def run_matrix(
+    spec: dict[str, Any], spec_dir: str, cwd: str, spec_path: str | None = None
+) -> int:
     """Execute the full matrix queue and return exit code (0 = full coverage)."""
     results_path = os.path.abspath(os.path.join(spec_dir, spec.get("results_path", "results.jsonl")))
     timeout = spec.get("timeout", 2400)
@@ -1054,6 +1160,11 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
     os.makedirs(str(qdir), exist_ok=True)
     state = QueueState(queue_state_path)
 
+    # Mint (or, on resume, reuse) this campaign's study identity. Persisted in
+    # the queue state so every cell of one bake-off -- across resumes -- carries
+    # the same study id, while a fresh run gets a new one.
+    suite, study, study_sha256 = derive_study_identity(spec, spec_path, state)
+
     # Per-arm state (restored or fresh)
     arm_states_raw = state.get("arm_states", {})
     arm_states: dict[str, ArmState] = {}
@@ -1101,6 +1212,7 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         f"Matrix queue: {len(all_cells)} planned cells, "
         f"{len(arms)} arm(s), {len(tasks)} task(s), {trials} trial(s)"
     )
+    print(f"  study={study} ({study_sha256[:12]}) suite={suite}")
 
     # Partition the flat pending queue by arm. Arms are independent (a run_id
     # encodes the model), so each arm drains its own list; a >1 worker pool runs
@@ -1121,6 +1233,7 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
         retry_counts=retry_counts, state=state, arm_pending=arm_pending,
         arm_paused=arm_paused,
         capture_cost=capture_cost,
+        study=study, study_sha256=study_sha256, suite=suite,
         # Single worker keeps the durable direct-to-results write; part files
         # (with their merge window) are only needed to de-interleave >1 worker.
         direct_write=(n_workers == 1),
@@ -1272,7 +1385,7 @@ def main(argv: list[str] | None = None) -> int:
               "pull them, or run on a host that has them.", file=sys.stderr)
         return 1
 
-    return run_matrix(spec, spec_dir, cwd)
+    return run_matrix(spec, spec_dir, cwd, spec_path=spec_path)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,10 @@
 #   obench bridge up
 #   obench matrix --spec experiments/specs/am-consistency.toml
 
+# Config-level suite slug. Stamped into every row as `suite`, and the base of
+# the per-run `study` id (`{name}-{launch-date}`) that groups this bake-off's
+# arms downstream. Defaults to the spec filename stem if omitted.
+name = "am-consistency"
 results_path = "../../results/am-consistency/results.jsonl"
 ledger_dir = "../../results/am-consistency/ledger"
 timeout = 2400

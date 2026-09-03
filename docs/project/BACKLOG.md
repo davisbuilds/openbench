@@ -223,6 +223,35 @@ the PR, not as a "resolved" note here).
   warning now says so). Unblocks latency-safe parallelism for
   [#45](https://github.com/minghinmatthewlam/openbench/issues/45).
 
+#### Downstream results-row identity — *shipped (fork-local) 2026-09-03*
+- **What**: the `results.jsonl` row is a consumed contract (amon's Pareto
+  frontier ingest reads it). Three groupings openbench already knew internally
+  were dropped from the emitted row, forcing brittle downstream reconstruction.
+  Added as ADDITIVE fields (matrix path — `run.py` + `matrix_queue.py`):
+  - `canonical_model` + `reasoning_effort` — the glued arm name
+    (`gpt-5.6-terra-xhigh`) split via the adapter's own maps
+    (`adapters/codex.py:model_identity`, read best-effort by
+    `run._resolve_model_identity`), so downstream prices/classifies by the real
+    model instead of heuristically stripping the suffix. `model` kept as-is.
+  - `study` — the per-RUN id (`{suite}-{launch-date}`) grouping one bake-off's
+    arms; `study_sha256` — the exact run key (suite + first-launch ts + nonce +
+    canonicalized spec). Minted once and persisted in the queue state
+    (`matrix_queue.derive_study_identity`), so all cells of one run — across
+    resumes — share it while a fresh run differs. `suite` — the config-level
+    slug (spec `name` or filename stem). All derived at row-build time so failed
+    cells (bridge down) still carry identity.
+- **Why per-run, not per-config**: two runs of the same spec (e.g. different
+  days) must be two studies, else the frontier merges arms/costs across time.
+- **Note for consumers**: fields are appended to `ROW_FIELDS`; pre-existing rows
+  (the `data/`/`results/` samples) predate them and read as absent → treat
+  missing as unknown. Tests: `test_model_identity.py`,
+  `test_matrix_queue.py::StudyIdentityTests`.
+- **Not done (deliberate, scope)**: canonical suite path
+  (`suite_run.py`/`harbor_results.py`) already carries `canonical_model` +
+  `suite.id` + `manifest_sha256`; parity of the exact field *names* there was
+  left out of this pass. `model_identity` only exists on the codex adapter (the
+  only harness these specs run); other adapters fall back to `(model, None)`.
+
 #### Cost telemetry — *implemented 2026-08-27, pending live validation*
 - **What**: rows record a full vendor token split (`token_basis: vendor_split`).
   `experiments/analyze_cost.py` derives theoretical cost post-hoc = tokens × a
