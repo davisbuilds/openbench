@@ -113,6 +113,21 @@ def resolve_tasks_dir(explicit: str | None = None, start: str | None = None) -> 
     )
 
 
+def default_local_tasks_dir(start: str | None = None) -> str | None:
+    """Optional ``tasks-local`` sibling: the fork-local task tier.
+
+    Fork-local tasks live here rather than in the upstream-owned ``tasks/`` core
+    tier, so ``tasks/`` stays byte-identical to upstream (clean promotion) and
+    local work is never smuggled into a shared directory. See
+    docs/project/FORK_WORKFLOW.md.
+    """
+    root = find_repo_root(start)
+    if root is None:
+        return None
+    path = os.path.join(root, "tasks-local")
+    return path if os.path.isdir(path) else None
+
+
 def default_imported_tasks_dir(start: str | None = None) -> str | None:
     """Optional ``tasks-imported`` sibling when running inside a checkout."""
     root = find_repo_root(start)

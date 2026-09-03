@@ -42,10 +42,17 @@ from .config import load_config
 from .paths import (
     TasksDirError,
     default_imported_tasks_dir,
+    default_local_tasks_dir,
     default_tasks_dir,
     docker_workdir_parent,
     resolve_tasks_dir,
 )
+
+# A checker exits with this code to declare it cannot run in this environment
+# (a fork-local task whose external deps are absent -- e.g. in CI). The
+# validator reports SKIP, not FAIL, and never a faked PASS. Borrowed from the
+# autotools/automake convention so the meaning is self-documenting.
+SKIP_EXIT_CODE = 77
 from .workspace import (
     WorkspaceError,
     has_git_workspace,
@@ -170,6 +177,9 @@ def default_task_roots():
     imported = default_imported_tasks_dir()
     if imported:
         roots.append(("imported", imported))
+    local = default_local_tasks_dir()
+    if local:
+        roots.append(("local", local))
     if roots:
         return roots
     # Fall back to resolve_tasks_dir error path via an empty list; callers
@@ -278,8 +288,28 @@ def main(argv=None):
 
         ws_code = ws_out = sol_code = sol_out = None
         ws_score = sol_score = None
+        skipped = False
+        skip_reason = None
         if not problems:
             ws_code, ws_out, ws_raw = run_checker(task_dir, overlay_solution_flag=False)
+            if ws_code == SKIP_EXIT_CODE:
+                # The checker declared it cannot run here (external deps absent).
+                # Report SKIP, not a pass or a fail, and do not run the solution
+                # overlay -- there is nothing to grade.
+                skipped = True
+                first = (ws_out or "").strip().splitlines()
+                skip_reason = (
+                    first[0] if first
+                    else "checker declared it cannot run here (exit 77)")
+                results.append({
+                    "tier": tier, "name": name,
+                    "ws_code": ws_code, "sol_code": None,
+                    "ws_score": None, "sol_score": None,
+                    "ok": True, "skipped": True, "skip_reason": skip_reason,
+                    "problems": [], "ws_out": ws_out, "sol_out": None,
+                })
+                continue
+
             sol_code, sol_out, sol_raw = run_checker(task_dir, overlay_solution_flag=True)
             ws_score = effective_score(ws_code, ws_raw)
             sol_score = effective_score(sol_code, sol_raw)
@@ -307,6 +337,8 @@ def main(argv=None):
             "ws_score": ws_score,
             "sol_score": sol_score,
             "ok": ok,
+            "skipped": False,
+            "skip_reason": None,
             "problems": problems,
             "ws_out": ws_out,
             "sol_out": sol_out,
@@ -328,11 +360,15 @@ def main(argv=None):
         for r in results:
             if r["tier"] != tier:
                 continue
-            ws = "FAIL(ok)" if (r["ws_code"] not in (None, 0)) else (
-                "n/a" if r["ws_code"] is None else "PASS(bad)")
-            sol = "PASS(ok)" if r["sol_code"] == 0 else (
-                "n/a" if r["sol_code"] is None else "FAIL(bad)")
-            result = "PASS" if r["ok"] else "FAIL"
+            if r["skipped"]:
+                ws = sol = "SKIP"
+                result = "SKIP"
+            else:
+                ws = "FAIL(ok)" if (r["ws_code"] not in (None, 0)) else (
+                    "n/a" if r["ws_code"] is None else "PASS(bad)")
+                sol = "PASS(ok)" if r["sol_code"] == 0 else (
+                    "n/a" if r["sol_code"] is None else "FAIL(bad)")
+                result = "PASS" if r["ok"] else "FAIL"
             print("{:<{tw}}  {:<{w}}  {:>10}  {:>10}  {:>10}  {:>10}  {:>6}".format(
                 r["tier"], r["name"], ws, fmt_score(r["ws_score"]),
                 sol, fmt_score(r["sol_score"]), result, tw=tier_w, w=name_w))
@@ -352,14 +388,28 @@ def main(argv=None):
                 for line in r["sol_out"].splitlines():
                     print("    | {}".format(line))
 
+    # Note why each skipped task was skipped, so a green run is legible.
+    for r in results:
+        if r["skipped"]:
+            print("\n=== {} SKIPPED (env-gated) ===".format(r["name"]))
+            print("  - {}".format(r["skip_reason"]))
+
     print()
     per_tier = ", ".join(
         "{} {}".format(sum(1 for r in results if r["tier"] == tier), tier)
         for tier in seen_tiers
         if any(r["tier"] == tier for r in results))
+    n_skipped = sum(1 for r in results if r["skipped"])
+    n_validated = len(results) - n_skipped
     if all_ok:
-        print("All {} task(s) validated ({}): workspace FAILs, solution PASSes "
-              "(solution score 1.0).".format(len(results), per_tier))
+        if n_validated:
+            line = ("All {} task(s) validated ({}): workspace FAILs, solution "
+                    "PASSes (solution score 1.0).").format(n_validated, per_tier)
+        else:
+            line = "No task(s) validated ({}).".format(per_tier)
+        if n_skipped:
+            line += " {} skipped (env-gated).".format(n_skipped)
+        print(line)
         return 0
     print("Validation FAILED for one or more tasks.")
     return 1

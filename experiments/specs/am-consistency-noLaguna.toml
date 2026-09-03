@@ -72,6 +72,9 @@ harness = "codex"
 model = "nemotron-3-ultra"
 
 [[task_group]]
+# am-consistency-pr80 lives in the fork-local task tier (tasks-local/),
+# not the upstream-owned core tier. Path is relative to this spec file.
+tasks_dir = "../../tasks-local"
 tasks = [
   "am-consistency-pr80",
 ]

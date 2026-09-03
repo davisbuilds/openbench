@@ -41,6 +41,42 @@ A feature is only ready to promote once it stands on its own — e.g. arm-level
 registry (issue #46) waits on schema generalization. Until then it lives on the
 fork.
 
+## Where fork-local content lives (tree ownership)
+
+The flow above governs *commits*; this governs the *tree*. The rule that keeps
+upstream promotion clean by construction:
+
+> **Fork-local content lives in fork-owned locations. Never add it to an
+> upstream-owned directory — each upstream-owned dir has a fork-owned sibling.**
+
+If `tasks/` stays byte-identical to upstream, you never have to remember to
+strip local tasks out of a promotion branch — there is nothing local in there to
+strip.
+
+| Concern            | Upstream-owned (keep clean)      | Fork-owned (never upstream)                 |
+|--------------------|----------------------------------|---------------------------------------------|
+| Benchmark tasks    | `tasks/` (core), `tasks-imported/` | `tasks-local/` (the fork-local task tier)   |
+| Experiment specs   | —                                | `experiments/specs/*`                       |
+| Model wiring       | adapter contracts in `obench/`   | `open_models_config.py`, bake-off routes    |
+| Runner/harness     | `obench/` capability             | fork-local convenience commits on `main`    |
+| Project docs       | `docs/*` (feature docs)          | `docs/project/*` (this doc, `BACKLOG.md`)   |
+
+Two guards enforce the tasks row so it does not decay back into tribal
+knowledge:
+
+- **`obench validate` tiers.** Task discovery walks three tiers: `core`
+  (`tasks/`), `imported` (`tasks-imported/`), and `local` (`tasks-local/`). A
+  fork-local task goes in `tasks-local/`; a spec points its task group at it with
+  `tasks_dir = "../../tasks-local"`.
+- **Environment-gated SKIP.** A fork-local checker that needs host deps absent in
+  CI (or on another machine) exits **77**; `obench validate` reports **SKIP**,
+  not FAIL, and never a faked PASS. So CI exercises the portable local tasks and
+  honestly skips the rest. (`tasks-local/am-consistency-pr80` is the worked
+  example — it needs a host-native agentmonitor `node_modules`.)
+- **Portability tripwire.** `tests/test_core_task_portability.py` fails if any
+  `tasks/` checker hard-codes a machine-specific path or a fork-local dep var, so
+  a local task can never silently re-enter core.
+
 ## Cutting a clean upstream branch from divergent `main`
 
 Because `main` bundles upstream-worthy commits *with* fork-local convenience,

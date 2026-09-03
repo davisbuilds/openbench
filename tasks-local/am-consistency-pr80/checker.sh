@@ -18,10 +18,15 @@ set -uo pipefail
 DEPS="${AGENTMONITOR_DEPS:-/Users/dg-mac-mini/Dev/agentmonitor/node_modules}"
 
 fail0() { echo "SCORE: 0.0"; exit 1; }
+# Exit 77 = "cannot run in this environment" (autotools skip convention).
+# `obench validate` reports this as SKIP, not FAIL: this fork-local task needs a
+# host-native agentmonitor node_modules that is absent in CI and on other
+# machines, so its absence is not a checker defect. See FORK_WORKFLOW.md.
+skip77() { echo "SKIP: $*" >&2; exit 77; }
 
 if [ ! -d src ]; then echo "FAIL: src/ missing in workspace" >&2; fail0; fi
 if [ ! -d "$DEPS" ]; then
-  echo "FAIL: node_modules not found at $DEPS (set AGENTMONITOR_DEPS)" >&2; fail0
+  skip77 "agentmonitor node_modules not found at $DEPS (set AGENTMONITOR_DEPS); env-gated"
 fi
 
 # provision deps (read-only symlink) + hidden regression tests

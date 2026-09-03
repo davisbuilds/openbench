@@ -49,3 +49,9 @@ jobs:
 
       - name: Validate imported Exercism checkers (offline tier)
         run: obench validate --tasks-dir tasks-imported/exercism
+
+      - name: Validate fork-local tasks (offline tier; env-gated tasks SKIP)
+        # tasks-local/ is the fork-local tier (see docs/project/FORK_WORKFLOW.md).
+        # A task needing host deps absent in CI exits 77 and is reported SKIP,
+        # not FAIL -- so CI still exercises the portable local tasks.
+        run: obench validate --tasks-dir tasks-local
