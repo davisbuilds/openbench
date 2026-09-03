@@ -114,6 +114,7 @@ ROW_FIELDS = (
     # is the config-level slug.
     "canonical_model",
     "reasoning_effort",
+    "is_open_model",
     "study",
     "study_sha256",
     "suite",
@@ -671,19 +672,21 @@ def _adapter_open_models(harness, adapters_dir):
 
 @functools.lru_cache(maxsize=None)
 def _resolve_model_identity(harness, model, adapters_dir):
-    """``(canonical_model, reasoning_effort)`` for a cell, from the adapter itself.
+    """``(canonical_model, reasoning_effort, is_open)`` for a cell, from the adapter.
 
-    The adapter owns the glued-name -> (model, effort) decomposition (see
+    The adapter owns the glued-name -> (model, effort, open?) decomposition (see
     adapters/codex.py ``model_identity``: ``MODELS``/``_EFFORT`` for subscription
     arms, ``OPEN_MODELS`` for bridge arms), so the row reads its split from that
     single source of truth instead of the downstream heuristic suffix-strip that
-    a glued ``model`` forces. Best-effort: an adapter with no ``model_identity``
-    hook, or any load/parse failure, yields ``(model, None)`` -- an honest
-    'unknown effort', never a wrong guess. Keyed on harness+model alone so a
-    failed cell (bridge down, setup-needed) still carries identity. Cached
-    because it imports the adapter module.
+    a glued ``model`` forces. ``is_open`` marks a bridge-routed open/pay-per-token
+    arm (True) vs a native subscription arm (False), authoritative from the
+    adapter rather than re-inferred downstream from a pricing table. Best-effort:
+    an adapter with no ``model_identity`` hook, or any load/parse failure, yields
+    ``(model, None, None)`` -- honest 'unknown', never a wrong guess. Keyed on
+    harness+model alone so a failed cell (bridge down, setup-needed) still carries
+    identity. Cached because it imports the adapter module.
     """
-    fallback = (model, None)
+    fallback = (model, None, None)
     try:
         module = load_adapter(adapters_dir or DEFAULT_ADAPTERS_DIR, harness)
     except Exception:
@@ -695,7 +698,9 @@ def _resolve_model_identity(harness, model, adapters_dir):
         info = identity(model) or {}
     except Exception:
         return fallback
-    return (info.get("canonical_model") or model, info.get("reasoning_effort"))
+    return (info.get("canonical_model") or model,
+            info.get("reasoning_effort"),
+            info.get("is_open"))
 
 
 def proxy_supported_for_cell(harness, model, adapters_dir=None):
@@ -1996,7 +2001,7 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     identity_harness = (
         (candidate.base_adapter or harness) if candidate is not None else harness
     )
-    canonical_model, reasoning_effort = _resolve_model_identity(
+    canonical_model, reasoning_effort, is_open_model = _resolve_model_identity(
         identity_harness, model, adapters_dir)
     row = {
         "run_id": run_id,
@@ -2012,10 +2017,14 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "model": model,
         # canonical_model + reasoning_effort split the glued `model` (kept as-is
         # for compatibility) so downstream prices/classifies by the real model.
-        # study groups all cells of ONE bake-off run (matrix runner supplies it,
-        # stable across resume); suite is the lower-granularity config slug.
+        # is_open_model marks a bridge-routed open/pay-per-token arm (True) vs a
+        # native subscription arm (False), authoritative from the adapter's
+        # OPEN_MODELS registry rather than re-inferred downstream. study groups
+        # all cells of ONE bake-off run (matrix runner supplies it, stable across
+        # resume); suite is the lower-granularity config slug.
         "canonical_model": canonical_model,
         "reasoning_effort": reasoning_effort,
+        "is_open_model": is_open_model,
         "study": study,
         "study_sha256": study_sha256,
         "suite": suite,

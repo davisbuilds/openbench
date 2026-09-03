@@ -233,6 +233,10 @@ the PR, not as a "resolved" note here).
     (`adapters/codex.py:model_identity`, read best-effort by
     `run._resolve_model_identity`), so downstream prices/classifies by the real
     model instead of heuristically stripping the suffix. `model` kept as-is.
+  - `is_open_model` — True for a bridge-routed open/pay-per-token arm, False for
+    a native subscription arm (from the adapter's `OPEN_MODELS` registry), so a
+    consumer reads routed-vs-native authoritatively rather than inferring it from
+    a pricing table. `None` when the adapter can't classify.
   - `study` — the per-RUN id (`{suite}-{launch-date}`) grouping one bake-off's
     arms; `study_sha256` — the exact run key (suite + first-launch ts + nonce +
     canonicalized spec). Minted once and persisted in the queue state
