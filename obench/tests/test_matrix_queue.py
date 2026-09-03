@@ -514,6 +514,25 @@ class StudyIdentityTests(unittest.TestCase):
                 mq.QueueState(os.path.join(d2, "q.json")))
             self.assertNotEqual(sha1, sha2)
 
+    def test_variant_spec_sharing_campaign_reuses_identity(self):
+        # Operational variants (am-consistency-tl / -noLaguna) point at one
+        # results_path/ledger_dir to resume a single bake-off under different
+        # filenames. The shared queue state -- not the spec name -- is the
+        # identity anchor, so a variant run must inherit the persisted study, not
+        # mint a second one that splits the frontier. (Codex PR #2 P1.)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "queue-state.json")
+            # First launch: the tl variant (no `name`, stem am-consistency-tl).
+            suite1, study1, sha1 = mq.derive_study_identity(
+                {**self._spec(), "name": None},
+                "/x/am-consistency-tl.toml", mq.QueueState(path))
+            # Resume the SAME campaign with the full spec (name=am-consistency).
+            suite2, study2, sha2 = mq.derive_study_identity(
+                self._spec(), "/x/am-consistency.toml", mq.QueueState(path))
+            self.assertEqual(sha1, sha2)
+            self.assertEqual(study1, study2)
+            self.assertEqual(suite1, suite2)  # variants share one suite label
+
     def test_suite_falls_back_to_spec_filename_stem(self):
         spec = self._spec()
         del spec["name"]
