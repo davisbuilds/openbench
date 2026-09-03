@@ -492,7 +492,13 @@ class CoreTasksHarborRoundTripTests(unittest.TestCase):
         shutil.rmtree(cls.out_root, ignore_errors=True)
 
     def test_exports_all_eight_core_tasks(self):
-        self.assertEqual(sorted(self.by_name), sorted(CORE_TASKS))
+        # The fork adds graded tasks (json-canonicalize, glob-match,
+        # am-consistency-pr80) into tasks/ alongside the upstream binary core, so
+        # asserting exact set equality here breaks every time a task is added.
+        # The durable guarantee is that all 8 core tasks export cleanly -- a
+        # subset check -- not that they are the ONLY tasks present.
+        missing = sorted(set(CORE_TASKS) - set(self.by_name))
+        self.assertEqual(missing, [], f"core tasks failed to export: {missing}")
 
     def test_polarity_holds_for_each_core_task(self):
         """Harbor bridge preserves OpenBench polarity through reward mapping.
