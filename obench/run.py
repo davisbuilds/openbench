@@ -42,6 +42,7 @@ from .bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
                         image_pin_mismatches, parse_image_pin_labels,
                         pinned_versions, reported_version, resolve_pin_key)
 from .failure_class import STALLED, classify_failure, classify_failure_reason
+from . import usage_evidence
 from .config import load_config
 from .paths import (PACKAGE_DIR, SOURCE_ROOT, TasksDirError,
                     default_adapters_dir, default_results_path,
@@ -1893,6 +1894,26 @@ def _finalize_proxy_cell(row, proxy_ctx, cell_token):
     return row
 
 
+def _grade_usage_evidence(row):
+    """Stamp the matrix-path usage-evidence grade from the row's finalized fields.
+
+    Called after proxy finalization so ``token_basis`` and ``token_basis_proxy``
+    are final. Every produced row -- successful, failed, or errored -- gets a
+    concrete grade (and ranking eligibility) instead of ``None``, which is what a
+    downstream data-honesty panel keys on: a failed arm with no usage now grades
+    ``usage_unavailable`` rather than looking indistinguishable from an ungraded
+    row. Idempotent and derived purely from the row, so it is safe in the finally.
+    """
+    grade, eligible, reason = usage_evidence.matrix_usage_policy(
+        row.get("token_basis"),
+        proxy_measured=(row.get("token_basis_proxy") == "proxy_measured"),
+    )
+    row["usage_evidence_grade"] = grade
+    row["usage_ranking_eligible"] = eligible
+    row["usage_ranking_exclusion_reason"] = reason
+    return row
+
+
 def _stall_watchdog_loop(
         proxy_server, cell_token, stall_timeout, kill_callback,
         stalled_event, poll_interval=10.0, stop_event=None,
@@ -2059,6 +2080,11 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "cost_source": None,
         "sampling_observed": None,
         "token_basis_proxy": None,
+        # Graded in the finally from the finalized token_basis fields
+        # (_grade_usage_evidence); defaulted here so the keys always exist.
+        "usage_evidence_grade": None,
+        "usage_ranking_eligible": None,
+        "usage_ranking_exclusion_reason": None,
         "tokens_fresh": None,
         "turns": None,
         "cmd": None,
@@ -2345,6 +2371,10 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         return _populate_proxy_row(row, active_proxy_ctx, cell_token)
     finally:
         _finalize_proxy_cell(row, active_proxy_ctx, cell_token)
+        # Grade usage evidence LAST, from the now-final token_basis fields, so
+        # every path (success, adapter failure, staging error) emits a concrete
+        # grade instead of a None the data-honesty panel can't read.
+        _grade_usage_evidence(row)
         if workspace_observer is not None:
             try:
                 workspace_observer(workdir)

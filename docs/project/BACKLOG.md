@@ -256,6 +256,28 @@ the PR, not as a "resolved" note here).
   left out of this pass. `model_identity` only exists on the codex adapter (the
   only harness these specs run); other adapters fall back to `(model, None)`.
 
+#### Downstream usage-evidence grade in the matrix path — *shipped (fork-local) 2026-09-03*
+- **What**: `usage_evidence_grade` was `None` on every matrix-path row — it is
+  computed only in the canonical Harbor path (`harbor_metering`), never in
+  `run.py` — so a downstream data-honesty panel had nothing to read. Added a
+  matrix-path policy `usage_evidence.matrix_usage_policy(token_basis,
+  proxy_measured=…)` graded on that path's real evidence vocabulary (distinct
+  from Harbor's agent-reported + reconciliation): `proxy_measured` (counting
+  proxy's independent meter, eligible) > `vendor_reported` (adapter vendor split,
+  eligible) > `estimated` (present but ranking-excluded) > `usage_unavailable`
+  (no meter / unmetered candidate / failed cell). `run._grade_usage_evidence`
+  stamps grade + `usage_ranking_eligible` + `usage_ranking_exclusion_reason` in
+  the `finally`, after proxy finalization, so EVERY row (failed cells included)
+  is graded instead of None. Tests: `test_usage_evidence.py`.
+- **Contract note for amon**: the grade STRINGS (`proxy_measured` /
+  `vendor_reported` / `estimated` / `usage_unavailable`) are a new consumer-facing
+  vocabulary — trivially renamable if amon prefers different labels. `estimated`
+  fails closed in `ranking_eligible()` so a token estimate never drives cost
+  metrics.
+- **Not done**: `token_basis` itself is still adapter-supplied
+  (`vendor_split`/`estimated`/`unmetered`/None) — the grade sits on top of it,
+  not a rewrite of it.
+
 #### Cost telemetry — *implemented 2026-08-27, pending live validation*
 - **What**: rows record a full vendor token split (`token_basis: vendor_split`).
   `experiments/analyze_cost.py` derives theoretical cost post-hoc = tokens × a
