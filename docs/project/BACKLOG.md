@@ -22,6 +22,23 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
+#### Codex adapter inherits `HOME`, so `~/.agents/skills` is visible in every Codex cell
+- **What**: `obench/adapters/codex.py` (`run()`, ~L512-552) isolates `CODEX_HOME`
+  with only `auth.json`, but builds the child env from `os.environ.copy()`, so
+  `HOME` is the operator's. Codex also discovers skills at `~/.agents/skills`
+  (`$HOME`-relative, not `CODEX_HOME`-relative), so the operator's installed
+  skill catalog (26 entries on this machine) was present in every native-Codex
+  cell the fork has run, including the 2026-08-29 am-consistency Pareto arms.
+  The docstring's claim that "skills … are absent" is false for this root.
+- **Why it matters**: an uncontrolled treatment on every Codex row; it also
+  breaks the isolation premise of any skill on/off experiment. Found 2026-09-11
+  while planning the skill-outcome experiment
+  (`~/Dev/ops/docs/plans/2026-09-11-skill-outcome-experiment-v0-plan.md`, Task 2).
+- **Next**: set `child_env["HOME"] = isolated_home` beside `CODEX_HOME` with a
+  red/green test planting `.agents/skills/canary/SKILL.md` in a fake parent
+  `HOME`; record that pre-fix Codex rows are not comparable to post-fix rows.
+
+
 ### Runner throughput
 
 #### Optional parallel execution for the matrix / legacy runners
