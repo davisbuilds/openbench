@@ -1,7 +1,7 @@
 """Adapter for the `codex` CLI (OpenAI Codex, ChatGPT-subscription login).
 
 Headless invocation:
-    CODEX_HOME=<isolated tmp with auth.json only> codex exec --json \
+    HOME=<empty tmp> CODEX_HOME=<isolated tmp with auth.json only> codex exec --json \
         --disable apps --disable plugins --disable multi_agent \
         --skip-git-repo-check -C <workdir> -s workspace-write \
         -m gpt-5.5 -c model_reasoning_effort="medium" <instruction>
@@ -17,8 +17,11 @@ Notes / quirks:
   so `--skip-git-repo-check` is required or codex refuses to start.
 - Reasoning effort is set via a config override, not the model string. The
   canonical "-medium" suffix is mapped to model_reasoning_effort.
-- Copies only runtime `auth.json` into a fresh `CODEX_HOME`; personal config,
-  instructions, skills, plugins, MCPs, rules, memories, and sessions are absent.
+- Copies only runtime `auth.json` into a fresh `CODEX_HOME` for stock runs.
+  All runs, including ablations with a supplied `CODEX_HOME`, get a separate
+  empty `HOME` so `$HOME/.agents/skills` does not discover the operator's skills.
+  This isolates those user discovery roots; it is not a filesystem read barrier
+  or a claim about project/system configuration or other inherited env vars.
 - `--json` emits a JSONL event stream. The final `turn.completed` event carries
   `usage={input_tokens,cached_input_tokens,output_tokens,reasoning_output_tokens}`.
   Token accounting emits TOKEN_PARITY.md split fields from the final aggregate:
@@ -462,6 +465,9 @@ def run(
         env_override.get("CODEX_HOME") if env_override else None
     )
     if provided_codex_home:
+        # Resolve '~' against the operator home before replacing the child's
+        # HOME; caller-owned config and auth must keep their original location.
+        child_env["CODEX_HOME"] = os.path.expanduser(provided_codex_home)
         auth_src = os.path.join(
             os.path.expanduser(provided_codex_home), "auth.json"
         )
@@ -488,15 +494,20 @@ def run(
 
     try:
         try:
-            proc = subprocess.run(
-                cmd,
-                cwd=workdir,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                stdin=subprocess.DEVNULL,
-                env=child_env,
-            )
+            # CODEX_HOME does not govern ~/.agents/skills. Isolate HOME even
+            # when an ablation/candidate supplies CODEX_HOME (or HOME), while
+            # leaving the parent's auth staging and persist-back paths intact.
+            with tempfile.TemporaryDirectory(prefix="codex_user_home_") as user_home:
+                child_env["HOME"] = user_home
+                proc = subprocess.run(
+                    cmd,
+                    cwd=workdir,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_s,
+                    stdin=subprocess.DEVNULL,
+                    env=child_env,
+                )
         except subprocess.TimeoutExpired as e:
             full_output = _err_tail(e, limit=None)
             return {
