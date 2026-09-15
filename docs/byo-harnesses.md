@@ -55,6 +55,9 @@ That marker is consumed by the Codex adapter and changes only its explicit
 `multi_agent` feature pin from `--disable` to `--enable`; an inherited host
 environment variable cannot turn on the stock arm.
 
+For an opt-in path with captured HOME assets, explicit credential lanes and required
+trial evidence, see [Captured-context trials](captured-context-trials.md).
+
 ## Generic manifest
 
 ```toml

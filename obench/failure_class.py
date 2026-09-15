@@ -467,9 +467,17 @@ def has_checker_crash(row):
         return False
 
 
+def has_required_evidence_failure(row):
+    """A checker verdict cannot replace a required, unavailable trial record."""
+    row = row or {}
+    return row.get("evidence_required") is True and row.get("evidence_status") != "complete"
+
+
 def classify_failure_reason(row, adapter_output=""):
     """Return a stable diagnostic reason without overriding stronger markers."""
     row = row or {}
+    if has_required_evidence_failure(row):
+        return "required_evidence_unavailable"
     combined = _text(adapter_output, row.get("output_tail"), row.get("error"),
                      row.get("checker_exit"))
     if (bool(row.get("success")) or has_rate_limit_marker(combined)
@@ -487,6 +495,8 @@ def classify_failure(row, adapter_output="", timeout_s=None):
     callers that only have an old row may pass ``output_tail`` instead.
     """
     row = row or {}
+    if has_required_evidence_failure(row):
+        return "infra"
     combined = _text(
         adapter_output,
         row.get("output_tail"),
@@ -579,6 +589,10 @@ def class_for_report(row):
     arm was throttled.
     """
     row = row or {}
+    # Preserve measurement failures before any stored-label correction or
+    # checker-owned verdict can promote an unusable record into the denominator.
+    if has_required_evidence_failure(row):
+        return "infra"
     stored = row.get("failure_class")
     if stored in FAILURE_CLASSES:
         # A checker that could not run its verifier container never reached a

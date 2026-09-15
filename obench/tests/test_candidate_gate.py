@@ -108,6 +108,46 @@ class CandidateGateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unmetered must be a boolean"):
                 candidates.load_candidate(path, os.path.join(BENCH, "adapters"))
 
+    def test_legacy_config_variant_keeps_failure_honesty_gate_behavior(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "candidate.toml")
+            with open(os.path.join(td, "config.toml"), "w", encoding="utf-8") as fh:
+                fh.write("")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="config-variant"\nname="legacy-fixture"\n'
+                         'base_adapter="codex"\nconfig_dir="."\n'
+                         'config_files=["config.toml"]\n'
+                         '[env]\nCODEX_HOME="{config_dir}"\n')
+            with mock.patch.object(candidates.ConfigVariant, "version", return_value="aider 1.2.3"):
+                result = candidate_gate.gate(
+                    path, "deepseek-v4-flash", live=True,
+                    cell_runner=self.runner(),
+                    timeout_runner=lambda _seconds: {"failure_class": "timeout"},
+                    proxy_ctx={"ledger_dir": "mock"})
+        honesty = next(item for item in result["checks"] if item["name"] == "FAILURE HONESTY")
+        self.assertEqual(honesty["status"], "PASS")
+        self.assertEqual(result["status"], "PASS")
+
+    def test_inherited_manifest_environment_still_fails_honesty_gate(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "candidate.toml")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('kind="manifest"\nname="inherited-fixture"\n'
+                         'inherit_env=true\ncommand=["cli", "--batch", "--yes"]\n'
+                         'policy_headless_args=["--batch"]\n'
+                         'policy_auto_approve_args=["--yes"]\n'
+                         'version_command=["cli", "--version"]\n'
+                         'pass_env=["DEEPSEEK_API_KEY"]\n')
+            with mock.patch.object(candidates.ManifestHarness, "version", return_value="aider 1.2.3"):
+                result = candidate_gate.gate(
+                    path, "deepseek-v4-flash", live=True,
+                    cell_runner=self.runner(),
+                    timeout_runner=lambda _seconds: {"failure_class": "timeout"},
+                    proxy_ctx={"ledger_dir": "mock"})
+        honesty = next(item for item in result["checks"] if item["name"] == "FAILURE HONESTY")
+        self.assertEqual(honesty["status"], "FAIL")
+        self.assertIn("inherit_env=true", honesty["detail"])
+
     def test_output_has_check_lines_final_verdict_and_json(self):
         result = candidate_gate.gate(self.path, "deepseek-v4-flash")
         out = io.StringIO()

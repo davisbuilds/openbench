@@ -2,8 +2,13 @@
 
 This adapter supports open models served over vendors' Anthropic-compatible
 endpoints, plus an explicit first-party Anthropic API-key frontier route for
-`claude-opus-4-8`. It never uses Claude Code OAuth or mounts ~/.claude; the
-frontier route is gated only on `ANTHROPIC_API_KEY`.
+`claude-opus-4-8`. Existing API routes use --bare and ANTHROPIC_API_KEY.
+An opt-in subscription route requires OPENBENCH_CLAUDE_AUTH_MODE=subscription
+and CLAUDE_CODE_OAUTH_TOKEN in explicit env_override, never ambient auth.
+Captured candidates can supply a full child environment with replace_env=True,
+CLAUDE_CONFIG_DIR, and OPENBENCH_CAPTURED_HOME. HOME is always a disposable copy;
+no adapter call changes the process-global environment. Subscription output is
+stream-json so final text and tool events can be persisted as trial evidence.
 
 Headless invocation (per open model):
     HOME=<isolated tmp>  CLAUDE_CONFIG_DIR=<iso>/.claude
@@ -60,6 +65,7 @@ Output / token accounting:
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 from urllib.parse import urlsplit
@@ -68,10 +74,11 @@ NAME = "claude"
 _EXE = "claude"
 
 
-def _proxy_cell_url(*parts):
-    base = os.environ.get("OPENBENCH_PROXY_BASE_URL")
-    token = os.environ.get("OPENBENCH_PROXY_CELL_TOKEN")
-    if not os.environ.get("OPENBENCH_PROXY") or not base or not token:
+def _proxy_cell_url(*parts, env=None):
+    env = os.environ if env is None else env
+    base = env.get("OPENBENCH_PROXY_BASE_URL")
+    token = env.get("OPENBENCH_PROXY_CELL_TOKEN")
+    if not env.get("OPENBENCH_PROXY") or not base or not token:
         return None
     path = "/".join(str(p).strip("/") for p in ("cell", token, *parts) if str(p).strip("/"))
     return base.rstrip("/") + "/" + path
@@ -134,7 +141,7 @@ OPEN_MODELS = {
 }
 
 
-def _resolve_exe():
+def _resolve_exe(env=None):
     """Absolute path to a REAL claude binary, skipping nested-session shims.
 
     When the runner is itself launched from inside a Claude Code session, a
@@ -145,7 +152,8 @@ def _resolve_exe():
     PATH, not the child env's, so we must return an absolute path. Falls back to
     the bare name for normal shells and the docker image (no shims there).
     """
-    for d in (os.environ.get("PATH") or "").split(os.pathsep):
+    env = os.environ if env is None else env
+    for d in (env.get("PATH") or os.defpath).split(os.pathsep):
         low = d.lower()
         if not d or "cmux" in low or "shim" in low:
             continue
@@ -158,45 +166,102 @@ def _resolve_exe():
 # Env vars that make a child claude behave as a nested/bridged sub-session (set
 # when the runner is launched from inside Claude Code / cmux). Stripped so the
 # child runs clean. Harmless to strip in normal shells and the docker image.
-def _clean_env(spec, key, iso_home):
-    """Child env: strip nested-session poison, then set open-model auth only."""
+def _clean_env(spec, key, iso_home, *, source=None, config_dir=None, subscription=False):
+    """Construct a child-only environment with one explicit authentication route."""
+    source = os.environ if source is None else source
     env = {}
-    for k, v in os.environ.items():
+    for k, v in source.items():
         if k in ("NODE_OPTIONS", "CLAUDECODE", "AI_AGENT"):
             continue
-        if k.startswith("CMUX_") or k.startswith("CLAUDE_") or k.startswith("ANTHROPIC_"):
+        if k.startswith(("CMUX_", "CLAUDE_", "ANTHROPIC_", "OPENBENCH_CAPTURED_")):
+            continue
+        if subscription and (
+            k.startswith(("AWS_", "GOOGLE_", "GCLOUD_", "AZURE_", "CLOUD_ML_",
+                          "BEDROCK_", "VERTEX_", "OPENBENCH_PROXY"))
+            or k.endswith(("_API_KEY", "_AUTH_TOKEN", "_ACCESS_TOKEN", "_SECRET_KEY"))
+            or k.upper() in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+        ):
             continue
         env[k] = v
-    # Isolate config so the user's real ~/.claude is never read/written.
+    env.pop("OPENBENCH_CLAUDE_AUTH_MODE", None)
     env["HOME"] = iso_home
-    env["CLAUDE_CONFIG_DIR"] = os.path.join(iso_home, ".claude")
-    # Route open-model requests at the vendor host; first-party Anthropic uses
-    # Claude Code's default Anthropic endpoint by leaving ANTHROPIC_BASE_URL
-    # unset. Authenticate with the chosen API key ONLY.
-    proxy_base = None
-    if os.environ.get("OPENBENCH_PROXY"):
-        vendor = spec.get("env_key", "").replace("_API_KEY", "").lower()
-        if spec.get("base_url"):
-            # Preserve vendor-specific Anthropic endpoint prefixes, e.g.
-            # DeepSeek's /anthropic, while routing by a non-secret vendor name.
-            tail = (urlsplit(spec["base_url"]).path or "").strip("/")
-            proxy_base = _proxy_cell_url("anthropic", vendor, tail)
-        else:
-            proxy_base = _proxy_cell_url("anthropic")
-    if proxy_base:
-        env["ANTHROPIC_BASE_URL"] = proxy_base
-    elif spec.get("base_url"):
-        env["ANTHROPIC_BASE_URL"] = spec["base_url"]
-    env["ANTHROPIC_API_KEY"] = key
-    # In the docker lane the container runs as root, and claude refuses
-    # --dangerously-skip-permissions as root UNLESS it's told it's sandboxed.
-    # The disposable bench container IS the external sandbox (same rationale as
-    # codex's BENCH_IN_CONTAINER handling), so opt in with IS_SANDBOX=1.
-    if os.environ.get("BENCH_IN_CONTAINER"):
+    env["CLAUDE_CONFIG_DIR"] = config_dir or os.path.join(iso_home, ".claude")
+    if subscription:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = key
+    else:
+        proxy_base = None
+        if source.get("OPENBENCH_PROXY"):
+            vendor = spec.get("env_key", "").replace("_API_KEY", "").lower()
+            if spec.get("base_url"):
+                tail = (urlsplit(spec["base_url"]).path or "").strip("/")
+                proxy_base = _proxy_cell_url("anthropic", vendor, tail, env=source)
+            else:
+                proxy_base = _proxy_cell_url("anthropic", env=source)
+        if proxy_base:
+            env["ANTHROPIC_BASE_URL"] = proxy_base
+        elif spec.get("base_url"):
+            env["ANTHROPIC_BASE_URL"] = spec["base_url"]
+        env["ANTHROPIC_API_KEY"] = key
+    if source.get("BENCH_IN_CONTAINER"):
         env["IS_SANDBOX"] = "1"
-    # Dataset provenance pins the CLI version; never permit a mid-run update.
     env["DISABLE_AUTOUPDATER"] = "1"
     return env
+
+
+def _check_subscription_settings(config_dir, iso_home, workdir):
+    """Reject settings that can outrank explicit subscription auth.
+
+    Managed machine policy remains a live-smoke obligation; Claude has no flag
+    to disable it. Only the known user/project settings surfaces are read here.
+    """
+    roots = {os.path.join(iso_home, ".claude"), os.path.join(workdir, ".claude")}
+    if config_dir:
+        roots.add(config_dir)
+    for root in roots:
+        if os.path.islink(root):
+            raise ValueError("subscription settings roots cannot be symlinks")
+    settings_paths = {os.path.join(root, name) for root in roots
+                      for name in ("settings.json", "settings.local.json")}
+    for path in sorted(settings_paths):
+        if not os.path.lexists(path):
+            continue
+        if os.path.islink(path) or not os.path.isfile(path):
+            raise ValueError("subscription settings must be regular files")
+        with open(path, encoding="utf-8") as handle:
+            settings = json.load(handle)
+        if not isinstance(settings, dict):
+            raise ValueError("subscription settings must be objects")
+        if "apiKeyHelper" in settings or "forceLoginGatewayUrl" in settings:
+            raise ValueError("subscription settings cannot select another authentication route")
+        if settings.get("forceLoginMethod", "claudeai") != "claudeai":
+            raise ValueError("subscription settings cannot select another login method")
+        configured_env = settings.get("env", {})
+        if not isinstance(configured_env, dict):
+            raise ValueError("subscription settings env must be an object")
+        for key in configured_env:
+            if (key.startswith(("ANTHROPIC_", "CLAUDE_CODE_USE_", "CLAUDE_CODE_OAUTH_",
+                                "CLAUDE_CODE_API_KEY_", "AWS_", "GOOGLE_", "GCLOUD_",
+                                "AZURE_", "CLOUD_ML_", "OPENBENCH_PROXY"))
+                    or key.endswith(("_API_KEY", "_AUTH_TOKEN", "_ACCESS_TOKEN"))
+                    or key.upper() in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+                    or key in ("HOME", "CLAUDE_CONFIG_DIR")):
+                raise ValueError("subscription settings cannot override authentication or routing")
+
+
+def _stage_captured_home(source, destination):
+    """Copy an explicitly staged HOME tree, never following ambient symlinks."""
+    if not os.path.isabs(source) or not os.path.isdir(source):
+        raise ValueError("captured HOME must be an absolute staged directory")
+    paths = [source]
+    for root, dirs, files in os.walk(source, followlinks=False):
+        paths.extend(os.path.join(root, name) for name in dirs + files)
+    for path in paths:
+        mode = os.lstat(path).st_mode
+        if stat.S_ISLNK(mode):
+            raise ValueError("captured HOME cannot contain symlinks")
+        if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+            raise ValueError("captured HOME supports only regular files and directories")
+    shutil.copytree(source, destination, dirs_exist_ok=True)
 
 
 def _unsupported(model):
@@ -362,27 +427,161 @@ def _parse_json(stdout):
     tokens, turns, tail, ok, token_usage = _parse_json_with_usage(stdout)
     return tokens, turns, tail, ok
 
-def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
+def _valid_stream_event(event):
+    """Validate the envelopes we consume, retaining future typed events raw."""
+    if not isinstance(event, dict) or not isinstance(event.get("type"), str) or not event["type"]:
+        return False
+    kind = event["type"]
+    if kind == "result":
+        if not isinstance(event.get("is_error"), bool):
+            return False
+        if not event["is_error"] and not isinstance(event.get("result"), str):
+            return False
+        turns = event.get("num_turns")
+        return turns is None or (type(turns) is int and turns >= 0)
+    if kind not in ("assistant", "user"):
+        return True
+    message = event.get("message")
+    if not isinstance(message, dict):
+        return False
+    content = message.get("content")
+    if kind == "user" and isinstance(content, str):
+        return True
+    if not isinstance(content, list):
+        return False
+    for block in content:
+        if not isinstance(block, dict) or not isinstance(block.get("type"), str) or not block["type"]:
+            return False
+        if block["type"] == "text" and not isinstance(block.get("text"), str):
+            return False
+        if block["type"] == "tool_use":
+            if not all(isinstance(block.get(key), str) and block[key] for key in ("id", "name")):
+                return False
+            if not isinstance(block.get("input"), dict):
+                return False
+        if block["type"] == "tool_result":
+            if not isinstance(block.get("tool_use_id"), str) or not block["tool_use_id"]:
+                return False
+            if "content" in block and not isinstance(block["content"], (str, list)):
+                return False
+    return True
+
+
+def _evidence(stdout, *, stream=False):
+    """Keep native tool events; a truncated or malformed stream is not complete."""
+    events = []
+    malformed = False
+    if stream:
+        for line in (stdout or "").splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                malformed = True
+                continue
+            if _valid_stream_event(event):
+                events.append(event)
+            else:
+                malformed = True
+    else:
+        try:
+            event = json.loads(stdout or "")
+            if isinstance(event, dict):
+                events.append(event)
+        except json.JSONDecodeError:
+            # Preserve the legacy parser's tolerance of non-JSON startup noise.
+            for line in (stdout or "").splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(event, dict):
+                    events.append(event)
+    result = None
+    final_message = None
+    tool_events = []
+    for event in events:
+        if event.get("type") == "result" or (not stream and "is_error" in event):
+            result = event
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        if any(isinstance(block, dict) and block.get("type") in ("tool_use", "tool_result")
+               for block in content):
+            tool_events.append(event)
+        if event.get("type") == "assistant":
+            texts = [block["text"] for block in content
+                     if isinstance(block, dict) and block.get("type") == "text"
+                     and isinstance(block.get("text"), str)]
+            if texts:
+                final_message = "\n".join(texts)
+    if result is not None and isinstance(result.get("result"), str):
+        final_message = result["result"]
+    errors = []
+    if stream and malformed:
+        errors.append("malformed stream-json event")
+    if stream and result is None:
+        errors.append("missing terminal result event")
+    elif stream and not isinstance(result.get("is_error"), bool):
+        errors.append("terminal result has no boolean is_error")
+    return result, {"final_message": final_message, "tool_events": tool_events if stream else None,
+                    "evidence_error": "; ".join(errors) or None}
+
+
+def run(instruction: str, workdir: str, model: str, timeout_s: int,
+        env_override: dict | None = None, *, replace_env: bool = False) -> dict:
+    explicit = dict(env_override or {})
+    source = {} if replace_env else dict(os.environ)
+    source.update(explicit)
+    mode = explicit.get("OPENBENCH_CLAUDE_AUTH_MODE", "api")
+    if mode not in ("api", "subscription"):
+        return {**_setup_needed("OPENBENCH_CLAUDE_AUTH_MODE", model),
+                "error": "SETUP-NEEDED: OPENBENCH_CLAUDE_AUTH_MODE must be api or subscription"}
+    subscription = mode == "subscription"
+    if subscription and model not in MODELS:
+        return {**_unsupported(model), "error": "unsupported-model: subscription requires a first-party Claude model"}
     if model in MODELS:
         spec = MODELS[model]
     elif model in OPEN_MODELS:
         spec = OPEN_MODELS[model]
     else:
         return _unsupported(model)
-
-    key = os.environ.get(spec["env_key"])
-    if not key:
-        return _setup_needed(spec["env_key"], model)
+    # Explicit lane auth is mandatory even when a daily token is inherited.
+    key_name = "CLAUDE_CODE_OAUTH_TOKEN" if subscription else spec["env_key"]
+    key = explicit.get(key_name) if subscription else source.get(key_name)
+    if not isinstance(key, str) or not key.strip():
+        return _setup_needed(key_name, model)
+    config_dir = explicit.get("CLAUDE_CONFIG_DIR")
+    if replace_env and not config_dir:
+        return _setup_needed("CLAUDE_CONFIG_DIR", model)
+    if config_dir and (not os.path.isabs(config_dir) or not os.path.isdir(config_dir)):
+        return {**_setup_needed("CLAUDE_CONFIG_DIR", model),
+                "error": "SETUP-NEEDED: CLAUDE_CONFIG_DIR must be an absolute existing directory"}
 
     iso_home = tempfile.mkdtemp(prefix="claude_home_")
     try:
-        env = _clean_env(spec, key, iso_home)
+        captured_home = explicit.get("OPENBENCH_CAPTURED_HOME")
+        if captured_home:
+            try:
+                _stage_captured_home(captured_home, iso_home)
+            except (OSError, ValueError) as exc:
+                return {**_setup_needed("OPENBENCH_CAPTURED_HOME", model),
+                        "error": f"SETUP-NEEDED: captured HOME staging failed ({type(exc).__name__})"}
+        if subscription:
+            try:
+                _check_subscription_settings(config_dir, iso_home, workdir)
+            except (OSError, ValueError) as exc:
+                return {**_setup_needed("CLAUDE_CONFIG_DIR", model),
+                        "error": f"SETUP-NEEDED: subscription settings rejected ({type(exc).__name__})"}
+        env = _clean_env(spec, key, iso_home, source=source,
+                         config_dir=config_dir, subscription=subscription)
         cmd = [
-            _resolve_exe(), "-p",
-            # Billing boundary: every supported lane is API-key routed. Bare
-            # mode prevents OAuth/keychain reads and Anthropic-billed side calls.
-            "--bare",
-            "--output-format", "json",
+            _resolve_exe(source) if env_override is not None or replace_env else _resolve_exe(), "-p",
+            *(["--output-format", "stream-json", "--verbose",
+               "--setting-sources", "user,project,local"] if subscription
+              else ["--bare", "--output-format", "json"]),
             "--model", spec["model_id"],
             "--effort", spec["effort"],
             "--dangerously-skip-permissions",
@@ -390,60 +589,46 @@ def run(instruction: str, workdir: str, model: str, timeout_s: int) -> dict:
             "--no-session-persistence",
             instruction,
         ]
-
         try:
             proc = subprocess.run(
-                cmd,
-                cwd=workdir,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                stdin=subprocess.DEVNULL,
-                env=env,
+                cmd, cwd=workdir, capture_output=True, text=True,
+                timeout=timeout_s, stdin=subprocess.DEVNULL, env=env,
             )
-        except subprocess.TimeoutExpired as e:
-            full_output = _err_tail(e, limit=None)
+        except subprocess.TimeoutExpired as exc:
+            full_output = _err_tail(exc, limit=None)
+            stdout = exc.stdout or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", "replace")
+            _, evidence = _evidence(stdout, stream=subscription)
             return {
-                "completed": False,
-                "error": f"timeout after {timeout_s}s",
-                "output_tail": full_output[-2000:],
-                "full_output": full_output,
-                "tokens": None,
-                "turns": None,
-                "cmd": cmd,
-                **_empty_token_usage(),
+                "completed": False, "error": f"timeout after {timeout_s}s",
+                "output_tail": full_output[-2000:], "full_output": full_output,
+                "tokens": None, "turns": None, "cmd": cmd,
+                **_empty_token_usage(), **evidence,
             }
-
         combined = (proc.stdout or "") + (proc.stderr or "")
+        result, evidence = _evidence(proc.stdout or "", stream=subscription)
         try:
-            tokens, turns, tail, ok, token_usage = _parse_json_with_usage(proc.stdout or "")
+            # A trailing cleanup event must never replace terminal usage.
+            usage_output = json.dumps(result) if result is not None else (proc.stdout or "")
+            tokens, turns, tail, ok, token_usage = _parse_json_with_usage(usage_output)
         except Exception:  # noqa: BLE001 - never let usage parsing break a run
             tokens, turns, tail, ok, token_usage = None, None, "", None, _empty_token_usage()
         if not tail:
             tail = combined[-2000:]
-
-        # completed == harness process exited 0 AND the result was not an error
-        # (an API/tool error can still exit 0 with is_error=true).
-        completed = proc.returncode == 0 and ok is not False
+        completed = proc.returncode == 0 and ok is not False and not evidence["evidence_error"]
         if completed:
             error = None
         elif proc.returncode != 0:
             error = f"exit {proc.returncode}"
+        elif evidence["evidence_error"]:
+            error = "incomplete evidence: " + evidence["evidence_error"]
         else:
             error = "result is_error=true"
-
         return {
-            "completed": completed,
-            "error": error,
-            "output_tail": tail,
-            # Optional (ADAPTER_SPEC v1): full untruncated stdout+stderr so the
-            # runner can persist a complete local transcript. LOCAL-ONLY:
-            # transcripts are never published unscrubbed.
-            "full_output": combined,
-            "tokens": tokens,
-            "turns": turns,
-            "cmd": cmd,
-            **token_usage,
+            "completed": completed, "error": error, "output_tail": tail,
+            "full_output": combined, "tokens": tokens, "turns": turns, "cmd": cmd,
+            **token_usage, **evidence,
         }
     finally:
         shutil.rmtree(iso_home, ignore_errors=True)

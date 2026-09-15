@@ -883,6 +883,35 @@ def _evaluate_manifest(candidate, model, probes):
     return rows, all_ok
 
 
+def check_captured_auth(p, candidate, model):
+    """Check declarations and presence only; never infer a daily credential lane."""
+    if candidate.base_adapter == "codex":
+        config_root = candidate.env.get("CODEX_HOME", "").replace("{config_dir}", ".", 1)
+        expected = os.path.normpath(os.path.join(config_root, "auth.json"))
+        auth = [entry for entry in candidate.auth_files
+                if os.path.normpath(entry["destination"]) == expected]
+        if not auth:
+            return False, "SETUP-NEEDED: declare lane auth_files at CODEX_HOME/auth.json"
+        if not all(p.exists(entry["source"]) for entry in auth):
+            return False, "SETUP-NEEDED: declared lane auth file missing"
+        return True, "declared lane auth file present (authentication not tested)"
+    if candidate.env.get("OPENBENCH_CLAUDE_AUTH_MODE") == "subscription":
+        key = "CLAUDE_CODE_OAUTH_TOKEN"
+    else:
+        try:
+            adapter = p.import_adapter(candidate.base_adapter)
+            route = (getattr(adapter, "MODELS", {}).get(model)
+                     or getattr(adapter, "OPEN_MODELS", {}).get(model))
+            key = route.get("env_key") if isinstance(route, dict) else None
+        except Exception:
+            key = None
+        if not key:
+            return False, "SETUP-NEEDED: captured authentication route unresolved"
+    if key not in candidate.pass_env or not p.getenv(key):
+        return False, f"SETUP-NEEDED: explicitly pass lane {key}"
+    return True, f"declared {key} present (authentication not tested)"
+
+
 def _evaluate_config_variant(candidate, model, probes, pins):
     """Stock checks for the base adapter, plus config_dir/config_files existence."""
     name = candidate.name
@@ -900,7 +929,9 @@ def _evaluate_config_variant(candidate, model, probes, pins):
 
     cli_ok, cli_detail = check_cli(probes, spec["cli"])
     version_ok, version_detail = check_version(probes, base, spec["cli"], pins)
-    if base == "grokbuild" and model == "gpt-5.6":
+    if getattr(candidate, "captured_context", False):
+        auth_ok, auth_detail = check_captured_auth(probes, candidate, model)
+    elif base == "grokbuild" and model == "gpt-5.6":
         auth_ok, auth_detail = check_subbridge(probes)
     elif model in FRONTIER_MODEL_ENV:
         auth_ok, auth_detail = _auth_frontier(probes, base, model)
@@ -911,7 +942,17 @@ def _evaluate_config_variant(candidate, model, probes, pins):
     else:
         auth_ok, auth_detail = spec["auth"](probes)
     model_ok, model_detail = check_model(probes, base, model)
-    config_ok, config_detail = check_config_variant_files(probes, candidate)
+    if (getattr(candidate, "captured_context", False) and model_ok
+            and (base == "codex" or
+                 candidate.env.get("OPENBENCH_CLAUDE_AUTH_MODE") == "subscription")):
+        native = getattr(probes.import_adapter(base), "MODELS", {})
+        if model not in native:
+            model_ok, model_detail = False, "captured route requires a native model"
+    if getattr(candidate, "captured_context", False):
+        config_ok = bool(candidate.config_contents)
+        config_detail = f"{len(candidate.config_contents)} captured file(s); no live source reads"
+    else:
+        config_ok, config_detail = check_config_variant_files(probes, candidate)
     for check, ok, detail in (
         ("CLI", cli_ok, cli_detail),
         ("VERSION", version_ok, version_detail),

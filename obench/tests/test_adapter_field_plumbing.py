@@ -32,6 +32,9 @@ from obench.run import ROW_FIELDS
 # Reported by an adapter but deliberately not persisted per-field.
 NOT_PERSISTED = {
     "full_output",      # local-only transcript; never published
+    "final_message",    # stored only in the local evidence bundle
+    "tool_events",      # stored only in the local evidence bundle
+    "evidence_error",   # local parser detail; row carries a stable status code
     "output_tail",      # ditto, trimmed copy
     "cmd",              # rewritten by docker_exec into a nested dict
     "candidate_version",  # folded into harness_version

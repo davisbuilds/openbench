@@ -20,6 +20,9 @@ Notes / quirks:
 - Copies only runtime `auth.json` into a fresh `CODEX_HOME` for stock runs.
   All runs, including ablations with a supplied `CODEX_HOME`, get a separate
   empty `HOME` so `$HOME/.agents/skills` does not discover the operator's skills.
+  Captured candidates use replace_env=True and OPENBENCH_CAPTURED_HOME to
+  copy explicitly staged user files into that fresh HOME; CODEX_HOME remains
+  the explicitly supplied config/auth directory, with no daily-auth fallback.
   This isolates those user discovery roots; it is not a filesystem read barrier
   or a claim about project/system configuration or other inherited env vars.
 - `--json` emits a JSONL event stream. The final `turn.completed` event carries
@@ -54,6 +57,7 @@ import os
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import tempfile
 
@@ -67,6 +71,7 @@ except ImportError:  # file-path / Docker mount layout
 NAME = "codex"
 _EXE = "codex"
 _MULTI_AGENT_ENV = "OPENBENCH_CODEX_MULTI_AGENT"
+_CAPTURED_HOME_ENV = "OPENBENCH_CAPTURED_HOME"
 _CACHE_WRITE_FIELDS = (
     "cache_write_input_tokens",
     "cache_write_tokens",
@@ -112,8 +117,13 @@ def _legacy_tokens(token_usage):
 def _num(value):
     return int(value) if isinstance(value, (int, float)) else None
 
+# Astra efforts follow the official model page and Codex 0.154.0 metadata.
+# The runtime-only ultra option delegates automatically and is not a stock arm.
 # canonical model name -> codex `-m` model string
 MODELS = {
+    "gpt-6-astra": "gpt-6-astra",
+    **{f"gpt-6-astra-{effort}": "gpt-6-astra"
+       for effort in ("low", "medium", "high", "xhigh", "max")},
     "gpt-5.5-medium": "gpt-5.5",
     "gpt-5.6-sol": "gpt-5.6-sol",
     "gpt-5.6-terra": "gpt-5.6-terra",
@@ -124,6 +134,9 @@ MODELS = {
 
 # canonical model name -> reasoning effort passed via `-c model_reasoning_effort`
 _EFFORT = {
+    "gpt-6-astra": "medium",
+    **{f"gpt-6-astra-{effort}": effort
+       for effort in ("low", "medium", "high", "xhigh", "max")},
     "gpt-5.5-medium": "medium",
     "gpt-5.6-sol": "medium",
     "gpt-5.6-terra": "medium",
@@ -135,6 +148,7 @@ _EFFORT = {
 # canonical model name -> service tier override. GPT-5.6 Sol must stay on the
 # normal/non-fast lane even if the operator's Codex config defaults to priority.
 _SERVICE_TIER = {
+    **{name: "default" for name in MODELS if name.startswith("gpt-6-astra")},
     "gpt-5.6-sol": "default",
     "gpt-5.6-terra": "default",
     "gpt-5.6-terra-xhigh": "default",
@@ -245,10 +259,11 @@ _BRIDGE_DEFAULT_PORT = 4141
 _KEYS_ENV = os.path.expanduser("~/.openbench/keys.env")
 
 
-def _proxy_cell_url(*parts):
-    base = os.environ.get("OPENBENCH_PROXY_BASE_URL")
-    token = os.environ.get("OPENBENCH_PROXY_CELL_TOKEN")
-    if not os.environ.get("OPENBENCH_PROXY") or not base or not token:
+def _proxy_cell_url(*parts, env=None):
+    env = os.environ if env is None else env
+    base = env.get("OPENBENCH_PROXY_BASE_URL")
+    token = env.get("OPENBENCH_PROXY_CELL_TOKEN")
+    if not env.get("OPENBENCH_PROXY") or not base or not token:
         return None
     path = "/".join(str(p).strip("/") for p in ("cell", token, *parts) if str(p).strip("/"))
     return base.rstrip("/") + "/" + path
@@ -462,6 +477,74 @@ def _parse_json(stdout):
     tokens, turns, tail, token_usage = _parse_json_with_usage(stdout)
     return tokens, turns, tail
 
+def _parse_evidence(stdout):
+    """Retain final text and tool events, flagging incomplete event streams.
+
+    final_message is the last completed agent message with final/unknown phase;
+    the caller must still inspect run completion. These are local evidence,
+    not proof that any named skill was consulted. Malformed lines remain in
+    full_output, while evidence_error prevents accepting a partial stream.
+    """
+    final_message = None
+    tool_events = []
+    evidence_error = None
+    turn_completed = False
+    tool_types = {"command_execution", "file_change", "mcp_tool_call",
+                  "web_search", "collab_tool_call", "collab_agent_tool_call"}
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            evidence_error = evidence_error or "malformed_event_stream"
+            continue
+        if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+            evidence_error = evidence_error or "invalid_event_schema"
+            continue
+        event_type = event["type"]
+        if event_type == "turn.completed":
+            turn_completed = True
+        elif event_type in ("turn.started", "turn.failed", "error"):
+            turn_completed = False
+            if event_type in ("turn.failed", "error"):
+                evidence_error = evidence_error or "failed_turn"
+        if event_type not in ("item.started", "item.updated", "item.completed"):
+            continue
+        turn_completed = False
+        item = event.get("item")
+        if not isinstance(item, dict) or not isinstance(item.get("type"), str):
+            evidence_error = evidence_error or "invalid_event_schema"
+            continue
+        if event_type == "item.completed" and item["type"] == "agent_message":
+            if not isinstance(item.get("text"), str):
+                evidence_error = evidence_error or "invalid_event_schema"
+            elif item.get("phase") in (None, "final_answer", "final"):
+                final_message = item["text"]
+        if item["type"] in tool_types:
+            tool_events.append(event)
+    if not turn_completed:
+        evidence_error = evidence_error or "missing_turn_completed"
+    return {"final_message": final_message, "tool_events": tool_events,
+            "evidence_error": evidence_error}
+
+
+def _stage_captured_home(source, destination):
+    """Copy an explicitly staged HOME tree, never following ambient symlinks."""
+    if not os.path.isabs(source) or not os.path.isdir(source):
+        raise ValueError("captured HOME must be an absolute staged directory")
+    paths = [source]
+    for root, dirs, files in os.walk(source, followlinks=False):
+        paths.extend(os.path.join(root, name) for name in dirs + files)
+    for path in paths:
+        mode = os.lstat(path).st_mode
+        if stat.S_ISLNK(mode):
+            raise ValueError("captured HOME cannot contain symlinks")
+        if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+            raise ValueError("captured HOME supports only regular files and directories")
+    shutil.copytree(source, destination, dirs_exist_ok=True)
+
+
 def run(
     instruction: str,
     workdir: str,
@@ -469,8 +552,20 @@ def run(
     timeout_s: int,
     env_override=None,
     auth_lease_proofs=(),
+    replace_env=False,
 ) -> dict:
-    if os.environ.get("BENCH_IN_CONTAINER"):
+    # Captured callers supply the complete child environment. In particular,
+    # absence of CODEX_HOME never authorizes borrowing the operator's login.
+    child_env = {} if replace_env else os.environ.copy()
+    if env_override:
+        child_env.update(env_override)
+    if replace_env and (model in OPEN_MODELS or not os.path.isabs(
+            child_env.get("CODEX_HOME", ""))):
+        return {"completed": False,
+                "error": "SETUP-NEEDED: captured Codex requires a native model and explicit absolute CODEX_HOME",
+                "output_tail": "", "tokens": None, "turns": None, "cmd": None,
+                **_empty_token_usage()}
+    if child_env.get("BENCH_IN_CONTAINER"):
         # codex's own sandbox (bwrap) needs user namespaces and cannot nest
         # inside the bench container; the disposable container IS the external
         # sandbox, which is the documented intent of this flag.
@@ -491,7 +586,7 @@ def run(
         ]
         if model in _SERVICE_TIER:
             cmd += ["-c", f'service_tier="{_SERVICE_TIER[model]}"']
-        proxy_url = _proxy_cell_url("codex", "backend-api", "codex")
+        proxy_url = _proxy_cell_url("codex", "backend-api", "codex", env=child_env)
         if proxy_url:
             cmd += ["-c", f'openai_base_url="{proxy_url}"']
         cmd += [instruction]
@@ -519,11 +614,14 @@ def run(
     else:
         return _unsupported(model)
 
-    child_env = _codex_env_for_bridge(spec["env_key"]) if model in OPEN_MODELS else os.environ.copy()
-    if env_override:
-        child_env.update(env_override)
-        # This is an adapter control, not child-process configuration.
-        child_env.pop(_MULTI_AGENT_ENV, None)
+    if model in OPEN_MODELS:
+        child_env = _codex_env_for_bridge(spec["env_key"])
+        if env_override:
+            child_env.update(env_override)
+    # Adapter controls must not leak into the model's shell environment.
+    child_env.pop(_MULTI_AGENT_ENV, None)
+    captured_home = child_env.pop(_CAPTURED_HOME_ENV, None) if replace_env else None
+    child_env.pop(_CAPTURED_HOME_ENV, None)
 
     # Stock runs get a fresh CODEX_HOME containing authentication only.  In
     # particular, never copy config.toml, AGENTS.md, skills, MCP definitions,
@@ -570,6 +668,8 @@ def run(
             # when an ablation/candidate supplies CODEX_HOME (or HOME), while
             # leaving the parent's auth staging and persist-back paths intact.
             with tempfile.TemporaryDirectory(prefix="codex_user_home_") as user_home:
+                if captured_home:
+                    _stage_captured_home(captured_home, user_home)
                 child_env["HOME"] = user_home
                 proc = subprocess.run(
                     cmd,
@@ -587,6 +687,7 @@ def run(
                 "error": f"timeout after {timeout_s}s",
                 "output_tail": full_output[-2000:],
                 "full_output": full_output,
+                **_parse_evidence(full_output),
                 "tokens": None,
                 "turns": None,
                 "cmd": cmd,
@@ -610,10 +711,10 @@ def run(
     if not tail:
         tail = combined[-2000:]
 
-    if MODELS.get(model, "").startswith("gpt-5.6-") and token_usage.get("token_basis") == "vendor_split":
+    if MODELS.get(model, "").startswith(("gpt-5.6-", "gpt-6-astra")) and token_usage.get("token_basis") == "vendor_split":
         raw = token_usage.get("usage_raw") or {}
         if not any(k in raw for k in _CACHE_WRITE_FIELDS):
-            # GPT-5.6 may expose billable cache writes on newer Codex event
+            # GPT-5.6/Astra expose billable cache writes on newer Codex event
             # schemas. If this CLI omits the field, keep the legacy fresh-ish
             # scalar usable for the smoke contract but do not assert complete
             # split parity: cache writes are unknown and the uncached lane may
@@ -629,6 +730,7 @@ def run(
         # runner can persist a complete local transcript. Cheap here (already
         # concatenated). LOCAL-ONLY: transcripts are never published unscrubbed.
         "full_output": combined,
+        **_parse_evidence(proc.stdout or ""),
         "tokens": tokens,
         "turns": turns,
         "cmd": cmd,
