@@ -2,6 +2,36 @@
 
 Date: 2026-07-13. Scope: `bench/run.py` adapters, local and disposable-container execution. “Reads” below means host-owner files made reachable to the CLI (auth is listed separately and intentionally preserved).
 
+## Codex HOME correction — 2026-09-14
+
+The July Codex checks below covered `CODEX_HOME`, but missed the inherited
+`HOME` used for `~/.agents/skills` discovery. The stock adapter now assigns an
+empty temporary `HOME` to every child, including ablations and candidates that
+supply their own `CODEX_HOME`. Auth source resolution and lease/persist-back
+remain in the parent environment; supplied config and ablation instructions
+remain in their composed `CODEX_HOME`. The child cannot override this `HOME`
+through `env_override`.
+
+`obench/tests/test_codex_home.py` launches a real offline executable fixture:
+the parent skill canary was visible before the fix in all four tested adapter
+paths, and is absent afterward. The positive control discovers the canary.
+The tests also observe staged fixture auth, auth rotation, supplied config,
+ablation instructions, and temporary-directory cleanup after success, failure,
+and timeout. They prove the child environment contract, **not** the installed
+Codex binary's complete resource discovery or authenticated model behavior.
+An isolated Codex runtime resource-discovery/auth smoke remains required before
+the next scored campaign. Project/system resources and other inherited
+configuration environment variables are outside this correction; changing
+`HOME` is not a filesystem read barrier.
+
+Treat native-Codex results produced before this correction (including the
+2026-08-29 am-consistency study) as a different harness treatment. Do not pool
+them with post-fix rows or use them as clean skill-off controls. A new campaign
+needs a fresh study identity and recorded adapter commit/CLI version; the
+historical rows do not establish whether any particular skill was used.
+
+## Original audit
+
 | adapter | exec | config files read before fix | leakage | what leaked / final state |
 |---|---|---|---|---|
 | codex | local | `~/.codex/config.toml` plus owner CODEX_HOME resources (instructions, skills, MCP/plugins, rules/memories); `auth.json` | yes | Owner defaults/tools/instructions. **Fixed:** fresh CODEX_HOME, auth.json only; approved variance guards still disable apps/plugins/multi_agent. |
