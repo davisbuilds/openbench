@@ -766,6 +766,21 @@ def run_matrix(spec: dict[str, Any], spec_dir: str, cwd: str) -> int:
             state.save()
             continue
 
+        # The result ledger also survives a completed queue or a lost pending
+        # list. Enforce the cumulative cap before spending another retry on
+        # resume, not only when deciding to re-queue a just-finished attempt.
+        # A cell without any result still gets its initial attempt.
+        if row is not None and max_cell_wall_s is not None:
+            cell_wall = load_cumulative_wall(results_path).get(run_id, 0.0)
+            if wall_cap_exceeded(cell_wall, max_cell_wall_s):
+                if run_id not in as_.exhausted_cells:
+                    as_.exhausted_cells.append(run_id)
+                print(f"    EXHAUSTED {run_id} (wall cap: "
+                      f"{cell_wall:.0f}s >= {max_cell_wall_s}s)")
+                state.set("arm_states", {n: a.to_dict() for n, a in arm_states.items()})
+                state.save()
+                continue
+
         # Check retry budget
         attempt = effective_failed_attempts(
             row,
