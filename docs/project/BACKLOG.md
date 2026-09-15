@@ -344,6 +344,11 @@ the PR, not as a "resolved" note here).
 
 ## Tracked elsewhere (in flight — will leave this doc on merge)
 
+- **Codex HOME isolation** — shipped in the fork; standalone generic patch
+  `563c355` is proposed in upstream
+  [issue #51](https://github.com/minghinmatthewlam/openbench/issues/51).
+  Await maintainer interest before opening the PR (issue-first workflow).
+
 - **Classifier: measured no-work incomplete runs → `infra`, not `wrong_answer`** —
   already applied locally; awaiting upstream integration in
   open PR [#43](https://github.com/minghinmatthewlam/openbench/pull/43).
