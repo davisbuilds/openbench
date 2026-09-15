@@ -82,35 +82,19 @@ the PR, not as a "resolved" note here).
   score **1.0**, zero spread. Naive baselines land 0.80 on those tasks, so the set
   is harder to *pass* than the core, but the gap is naive→frontier, not
   within-frontier.
-- **Root cause of saturation** (the design lesson): both tasks were (a) fully
-  specified, (b) small/self-contained single-file pure logic, (c) *textbook
-  algorithms in the training distribution* (JSON canonicalization, glob), and (d)
-  their "hard" edge cases were exactly the ones a well-read model already
-  anticipates. Per-case hit rate for a frontier model was ~99.9%, so mean score
-  pinned at 1.0. **Making a naive baseline fail is not the same as making a
-  frontier answer imperfect.**
-- **Design principle**: partial-credit needs *per-case difficulty × case count*.
-  Aim for a ~85–95% per-case frontier hit rate over 30+ *independent* cases, so
-  the mean lands ~0.9 with enough variance to separate arms. Reach that by leaving
-  the memorized-algorithm distribution: invented/underspecified-but-objective
-  DSLs, clause *interactions* (not individually memorable edge cases), or
-  long-horizon tasks graded by many regression buckets where errors compound.
-- **Candidate axes** (objective graders only — avoid taste-test scoring):
-  (A) *scale-of-requirements* — dense spec, many interacting clauses, score =
-  fraction satisfied (e.g. cron-eval with `L`/`W`/`#`/`?`, semver-range resolver,
-  RFC-3986 URI normalizer); (B/E) *long-horizon build/debug* in a realistic
-  codebase, graded by test buckets — where terra's expensive extra reasoning is
-  most likely to earn out; (F) *quality gradient* — correct AND under a
-  perf/size/token budget.
-- **Open meta-question**: is the goal (i) capability *separation* (find ANY task
-  where terra beats luna — if none exists across a genuinely hard tier, "luna
-  dominates on cost" is itself the decision-relevant finding) or (ii) absolute
-  *difficulty calibration* (both land < 1.0, useful as a standing eval to track
-  future models even if today's two arms tie)? Pick before building the tier.
-- **Next**: build ONE axis-A probe + ONE axis-B/E probe, run them before
-  investing in a full tier. If even axis-A can't drop either arm below 1.0, the
-  discrimination problem is genuinely hard → pivot to long-horizon or accept
-  capability-parity.
+- **Working hypothesis**: small, familiar pure-logic tasks and predictable edge
+  cases helped the models saturate. The recorded outcomes do not establish a
+  per-case frontier success probability or causal explanation. Harder naive
+  baselines alone are insufficient evidence.
+- **Target confirmed 2026-09-15**: a standing set frontier models do not solve
+  reliably. Terra/Luna separation is useful but not required. Use real PR repair
+  interactions, positive controls and independent behavioral buckets; avoid
+  ambiguous requirements as a source of apparent difficulty.
+- **In progress**: cross-repo candidates, partial-repair controls and fresh live
+  Codex isolation/auth smoke. See [PR-derived evals](PR_DERIVED_EVALS.md).
+- **Next**: freeze the treatment and run repeated fresh calibration, then admit
+  only reproducible non-saturating tasks. This backlog item remains open until
+  that model evidence exists.
 
 ### Extensibility
 
@@ -134,9 +118,12 @@ the PR, not as a "resolved" note here).
   `required_keys`), and (b) per-adapter config namespacing (`[codex.models.X]`
   vs `[pi.models.X]`) since one flat `[models.X]` table can't satisfy two
   schemas. Low priority until we actually run those harnesses (today only codex).
+  Upstream PR [#48](https://github.com/minghinmatthewlam/openbench/pull/48)
+  now offers a broader registry, but its schema/discovery differs from this
+  fork; reconcile those contracts before adopting it (checked 2026-09-15).
   Upstream contribution tracked as
   [minghinmatthewlam/openbench#46](https://github.com/minghinmatthewlam/openbench/issues/46)
-  — hold the PR until the maintainer signals interest (issue-first, per plan).
+  — review the now-open PR before creating overlapping work.
 
 #### No validation that `bridge/config.yaml` and adapter `OPEN_MODELS` agree
 - **What**: routing a model requires **two** places to agree — the adapter's
@@ -358,10 +345,12 @@ the PR, not as a "resolved" note here).
 ## Tracked elsewhere (in flight — will leave this doc on merge)
 
 - **Classifier: measured no-work incomplete runs → `infra`, not `wrong_answer`** —
+  already applied locally; awaiting upstream integration in
   open PR [#43](https://github.com/minghinmatthewlam/openbench/pull/43).
 - **Matrix runner: per-group `timeout` override + throttle-timeout retry cap** —
-  on branch `feat/matrix-runner-improvements` (bundles the already-committed
-  local-group preflight crash fix + `allow_version_drift` waiver). Both born from
+  already applied locally; upstream PR [#47](https://github.com/minghinmatthewlam/openbench/pull/47)
+  remains open (checked 2026-09-15). Branch `feat/matrix-runner-improvements`
+  bundles the already-committed local-group preflight crash fix + `allow_version_drift` waiver. Both born from
   measured pain: a single throttled `webcore` cell burned ~947 requests / ~9h
   re-running full 30-min timeouts because a throttle-dominated timeout is
   classified `rate_limited` and retried with no cumulative wall-time cap.

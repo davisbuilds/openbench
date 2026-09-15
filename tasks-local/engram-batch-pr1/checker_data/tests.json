@@ -1,0 +1,28 @@
+{
+  "controls": [
+    "TestBuildPromptEmbedsCorpusAndContract",
+    "TestParseProposalFencedBlock",
+    "TestParseProposalBareObjectFallback",
+    "TestParseProposalRejectsNoJSON",
+    "TestValidateAcceptsGoodOps",
+    "TestValidateRejectsBadOps",
+    "TestApplyFailsClosedOnInvalidBatch",
+    "TestApplyMergeWritesAndDeletesSources",
+    "TestApplyMergeKeepsSourceReusedAsTarget",
+    "TestApplyRescopeChangesScope",
+    "TestApplyBlocksWhenLockHeld",
+    "TestValidateRejectsMergeOntoUnrelatedTarget",
+    "TestValidateCatchesIntraBatchConflicts",
+    "TestApplyRevalidatesAgainstCurrentDisk"
+  ],
+  "buckets": {
+    "ordered_batch": [
+      "TestApplyUpdateThenRescopeKeepsUpdatedContent",
+      "TestGoldenBatchContentSurvivesScopeChanges"
+    ],
+    "malformed_store": [
+      "TestApplyRefusesWhenCanonicalHasParseError",
+      "TestGoldenMalformedStorePreservesAllMemoryBytes"
+    ]
+  }
+}

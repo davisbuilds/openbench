@@ -19,8 +19,9 @@ The tests also observe staged fixture auth, auth rotation, supplied config,
 ablation instructions, and temporary-directory cleanup after success, failure,
 and timeout. They prove the child environment contract, **not** the installed
 Codex binary's complete resource discovery or authenticated model behavior.
-An isolated Codex runtime resource-discovery/auth smoke remains required before
-the next scored campaign. Project/system resources and other inherited
+The subsequent [2026-09-15 live smoke](project/PR_DERIVED_EVALS.md#live-codex-smoke)
+passed on the MacBook with Codex 0.154.0 for Terra xhigh and Luna max, including
+a real discovery positive control and actual exec session inspection. Project/system resources and other inherited
 configuration environment variables are outside this correction; changing
 `HOME` is not a filesystem read barrier.
 

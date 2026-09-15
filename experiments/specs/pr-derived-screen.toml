@@ -1,0 +1,33 @@
+# Native compatibility calibration, separate from canonical Harbor suites.
+# Candidate screening only: no frontier difficulty claim until fresh repeats.
+# Run serially on one host after dependency/polarity checks and live auth smoke.
+# Current preparation uses the MacBook, Codex 0.154.0, post-HOME-fix adapter.
+# Private-source tasks are intentionally absent from this public spec.
+# Never reuse this result directory after changing task/adapter/runtime bytes.
+
+results_path = "../../results/pr-derived-screen-v1/results.jsonl"
+ledger_dir = "../../results/pr-derived-screen-v1/ledger"
+timeout = 1800
+exec_mode = "local"
+trials = 3
+allow_version_drift = true
+max_consecutive_excluded = 2
+max_cell_wall_s = 3600
+
+[retry]
+infra = 1
+stalled = 0
+rate_limited = 2
+rate_limited_backoff_start = 120
+
+[[arm]]
+harness = "codex"
+model = "gpt-5.6-terra-xhigh"
+
+[[arm]]
+harness = "codex"
+model = "gpt-5.6-luna-max"
+
+[[task_group]]
+tasks_dir = "../../tasks-local"
+tasks = ["am-benchmark-pr106", "engram-batch-pr1", "dojo-evidence-pr60"]
