@@ -824,10 +824,21 @@ def _terminate_owned_process_group(
             os.killpg(pgid, sig)
         except ProcessLookupError:
             return True
+        deadline = time.monotonic() + wait_s
         try:
             proc.wait(timeout=wait_s)
         except subprocess.TimeoutExpired:
             pass
+        # The leader can exit before its descendants are reaped. In that case
+        # wait() returns immediately on every later attempt, so waiting on the
+        # leader alone collapses the group grace period into a few syscalls.
+        # Preserve the existing deadline for the whole group, including zombie
+        # members that its parent/init has not reaped yet.
+        while _owned_process_group_exists(pgid):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.01, remaining))
         if not _owned_process_group_exists(pgid):
             return True
     return not _owned_process_group_exists(pgid)
