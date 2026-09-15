@@ -42,6 +42,18 @@ Both existing PRs were refined after reproducing additional gaps:
 
 The upstream PR branches contain no personal eval tasks or private source.
 
+The fork follow-ups are integrated on `main` at `97fd109` and merged into
+`feat/pr-derived-evals`. The combined local suite passes 1,692 tests on Python
+3.13.3 (two Linux-only skips).
+
+[Issue 52](https://github.com/minghinmatthewlam/openbench/issues/52) proposes the
+additional process-cleanup correction on `fix/local-worker-reaping-upstream`
+(`4c46145`). A controlled Linux subreaper reproduces a terminated descendant
+remaining briefly in the process group after the leader exits. Cleanup now
+waits for that group within its original deadline, and still refuses success
+when the child remains unreaped. The new upstream patch passes 1,542 offline
+tests and 22 Linux stall tests. It also follows the issue-first workflow.
+
 ## Candidate set
 
 | Task | Behavioral targets | Initial difficulty hypothesis |
@@ -67,6 +79,12 @@ These snapshots currently use the fork-local compatibility task contract under
 Canonical new suites use `obench run`; provision the matching Harbor environment
 before presenting these as portable harness comparisons. Existing native
 matrix experiments are a separate local calibration treatment.
+
+All four candidates also passed through the actual native runner with the
+built-in null harness at commit `00984c1`: every untouched workspace recorded
+score **0**, checker exit **1**, and `failure_class = "wrong_answer"`. None was
+excluded as infrastructure trouble. This control made no model calls; local
+rows and a sanitized summary are in `results/pr-derived-preparation/`.
 
 ## Live Codex smoke
 

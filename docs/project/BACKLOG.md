@@ -344,6 +344,11 @@ the PR, not as a "resolved" note here).
 
 ## Tracked elsewhere (in flight — will leave this doc on merge)
 
+- **Bounded process-group reaping** — fixed in the fork after a Linux CI
+  reproduction; standalone generic patch `4c46145` is proposed in upstream
+  [issue #52](https://github.com/minghinmatthewlam/openbench/issues/52).
+  The existing cleanup deadline now applies to descendants after leader exit.
+
 - **Codex HOME isolation** — shipped in the fork; standalone generic patch
   `563c355` is proposed in upstream
   [issue #51](https://github.com/minghinmatthewlam/openbench/issues/51).
