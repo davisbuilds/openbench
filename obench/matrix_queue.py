@@ -986,6 +986,19 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
                 print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
                 ctx.save()
                 continue
+            # A restored queue must enforce the cumulative cap before another
+            # retry or backoff. Part-file salvage above is already merged into
+            # this ledger, and the shared lock keeps reads/state updates atomic
+            # with respect to other arm workers. Fresh cells still run once.
+            if row is not None and ctx.max_cell_wall_s is not None:
+                cell_wall = load_cumulative_wall(ctx.results_path).get(run_id, 0.0)
+                if wall_cap_exceeded(cell_wall, ctx.max_cell_wall_s):
+                    if run_id not in as_.exhausted_cells:
+                        as_.exhausted_cells.append(run_id)
+                    print(f"    EXHAUSTED {run_id} (wall cap: "
+                          f"{cell_wall:.0f}s >= {ctx.max_cell_wall_s}s)")
+                    ctx.save()
+                    continue
             attempt = effective_failed_attempts(
                 row, ctx.retry_counts.get(run_id, 0),
                 result_attempt_counts.get(run_id, 0))

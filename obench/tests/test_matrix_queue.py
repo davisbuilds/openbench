@@ -832,3 +832,87 @@ class WallCapTests(unittest.TestCase):
     def test_exceeded_at_or_above_cap(self):
         self.assertTrue(mq.wall_cap_exceeded(3600, 3600))
         self.assertTrue(mq.wall_cap_exceeded(5000, 3600))
+
+
+class ResumeWallCapTests(unittest.TestCase):
+    """The persisted results ledger bounds retries across process restarts."""
+
+    def run_case(self, prior_walls, cap, should_launch, workers):
+        with tempfile.TemporaryDirectory(prefix="mq_wall_resume_") as tmp:
+            spec = {
+                "arm": [
+                    {"harness": "codex", "model": "gpt-5.5"},
+                    {"harness": "codex", "model": "gpt-5.4"},
+                ],
+                "workers": workers,
+                "task_group": [{"tasks": ["fixture"]}],
+                "results_path": "results.jsonl",
+                "max_cell_wall_s": cap,
+                "retry": {"infra": 10},
+            }
+            cells = mq.expand_cells_grouped(
+                mq.enumerate_arms(spec), mq.resolve_groups(spec, tmp, "local"), 1)
+            by_model = {cell["model"]: cell for cell in cells}
+            results_path = os.path.join(tmp, "results.jsonl")
+            with open(results_path, "w", encoding="utf-8") as fh:
+                for cell in cells:
+                    for wall in prior_walls:
+                        fh.write(json.dumps({
+                            "run_id": cell["run_id"], "failure_class": "infra",
+                            "wall_time_s": wall, "success": False,
+                            "completed": False,
+                        }) + "\n")
+
+            # The external agent boundary writes a genuine persisted verdict;
+            # the matrix queue and its resume state run unchanged.
+            targets = []
+            def finish_cell(cmd, _timeout):
+                cell = by_model[cmd[cmd.index("--model") + 1]]
+                target = cmd[cmd.index("--results-path") + 1]
+                targets.append(target)
+                with open(target, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({
+                        "run_id": cell["run_id"], "failure_class": "solved",
+                        "wall_time_s": 1, "success": True,
+                        "completed": True,
+                    }) + "\n")
+                return 0, ""
+
+            with mock.patch.object(mq, "run_runner", side_effect=finish_cell) as launch, \
+                    mock.patch.object(mq.time, "sleep") as sleep, \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                first = mq.run_matrix(spec, tmp, tmp)
+                second = mq.run_matrix(spec, tmp, tmp)
+            self.assertEqual(launch.call_count, len(cells) if should_launch else 0)
+            self.assertEqual((first, second), (0, 0) if should_launch else (1, 1))
+            if not should_launch:
+                sleep.assert_not_called()
+                with open(os.path.join(tmp, ".matrix-queue", "queue-state.json"),
+                          encoding="utf-8") as fh:
+                    saved = json.load(fh)
+                for cell in cells:
+                    arm = saved["arm_states"][cell["arm"]]
+                    self.assertEqual(arm["exhausted_cells"], [cell["run_id"]])
+            elif workers == 2:
+                self.assertEqual(len(set(targets)), 2)
+                self.assertNotIn(results_path, targets)
+            else:
+                self.assertEqual(set(targets), {results_path})
+
+    def test_resume_skips_retry_at_or_above_cumulative_cap(self):
+        for workers in (1, 2):
+            for walls in ([60, 40], [60, 60]):
+                with self.subTest(workers=workers, walls=walls):
+                    self.run_case(walls, 100, False, workers)
+
+    def test_resume_still_retries_below_cap_or_when_disabled(self):
+        for workers in (1, 2):
+            for walls, cap in (([60, 39], 100), ([60, 60], None)):
+                with self.subTest(workers=workers, walls=walls, cap=cap):
+                    self.run_case(walls, cap, True, workers)
+
+    def test_first_attempt_is_not_a_retry_even_with_zero_cap(self):
+        for workers in (1, 2):
+            with self.subTest(workers=workers):
+                self.run_case([], 0, True, workers)
