@@ -24,6 +24,18 @@ the PR, not as a "resolved" note here).
 
 ### Runner throughput
 
+#### Candidate dispatch through the matrix runner
+- **What**: matrix arms currently forward `harness` and `model`, but do not
+  carry a candidate spec into the child runner's `--candidate` option.
+- **Evidence**: [PR #5 review](https://github.com/davisbuilds/openbench/pull/5#discussion_r4017766673)
+  caught documentation advertising an entry point that cannot load captured
+  candidates. The supported path is `obench legacy run --candidate ...`.
+- **Revisit when**: a study needs matrix-managed candidate dispatch rather than
+  an external frozen block schedule. Bind the candidate spec and captured-input
+  identity into cells, resume checks and child argv before adding this support;
+  no scheduler expansion is required for the current native trial path.
+
+
 #### Optional parallel execution for the matrix / legacy runners
 - **What**: both runners are strictly serial — `matrix_queue.run_matrix` pops one
   cell at a time (`pending.pop(0)`) and blocks on a synchronous `run_runner`

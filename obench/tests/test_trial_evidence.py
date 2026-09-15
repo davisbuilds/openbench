@@ -109,12 +109,14 @@ class TrialEvidenceTests(unittest.TestCase):
     def test_required_evidence_disabled_is_explicit_infra(self):
         row = self.cell(required=True, transcripts=False)
         self.assertEqual(row["evidence_status"], "disabled")
+        self.assertEqual(row["transcript_status"], "disabled")
         self.assertEqual(row["failure_class"], "infra")
         self.assertEqual(row["checker_exit"], 0)
 
     def test_early_adapter_failure_records_missing_required_evidence(self):
         row = self.cell(required=True, adapter_error=RuntimeError("fixture adapter failure"))
         self.assertEqual(row["evidence_status"], "missing")
+        self.assertEqual(row["transcript_status"], "missing")
         self.assertTrue(row["evidence_required"])
         self.assertEqual(row["failure_class"], "infra")
 
@@ -142,15 +144,53 @@ class TrialEvidenceTests(unittest.TestCase):
         row = self.cell(required=True)
         self.assertEqual(row["evidence_status"], "failed")
         self.assertEqual(row["evidence_error_code"], "persistence_error")
+        self.assertEqual(row["transcript_status"], "failed")
+        self.assertEqual(row["transcript_error_code"], "persistence_error")
         self.assertEqual(row["failure_class"], "infra")
         self.assertEqual(row["checker_exit"], 0)
         self.assertIsNone(row["evidence_sha256"])
         self.assertEqual((self.root / "transcripts").read_text(), "occupied")
 
+    def test_legacy_transcript_symlink_failure_does_not_invalidate_complete_bundle(self):
+        outside = self.root / "outside"
+        outside.write_text("original target bytes")
+        run_id = run.make_run_id("candidate", "task", "model", 1, "a" * 64)
+        legacy = Path(run.transcript_path(self.root / "transcripts", "screen", run_id))
+        legacy.parent.mkdir(parents=True)
+        legacy.symlink_to(outside)
+
+        row = self.cell(required=True)
+        self.assertEqual(row["evidence_status"], "complete")
+        self.assertIsNone(row["evidence_error_code"])
+        self.assertEqual(row["transcript_status"], "failed")
+        self.assertEqual(row["transcript_error_code"], "persistence_error")
+        self.assertNotEqual(row["failure_class"], "infra")
+        self.assertEqual(row["checker_exit"], 0)
+        bundle = Path(run.evidence_path(self.root / "transcripts", "screen", row["run_id"],
+                                        row["evidence_attempt_id"]))
+        self.assertEqual(row["evidence_sha256"], hashlib.sha256(bundle.read_bytes()).hexdigest())
+        self.assertEqual(outside.read_text(), "original target bytes")
+        output = self.root / "results.jsonl"
+        run.append_row(str(output), row)
+        saved = json.loads(output.read_text())
+        self.assertEqual(saved["transcript_status"], "failed")
+        self.assertEqual(saved["transcript_error_code"], "persistence_error")
+
+        # Positive control: removing only the obstructing symlink restores the copy.
+        legacy.unlink()
+        repaired = self.cell(required=True)
+        self.assertEqual(repaired["evidence_status"], "complete")
+        self.assertEqual(repaired["transcript_status"], "complete")
+        self.assertIsNone(repaired["transcript_error_code"])
+        self.assertIn(self.result["full_output"], legacy.read_text())
+        self.assertEqual(outside.read_text(), "original target bytes")
+
     def test_optional_failure_is_detectable_without_changing_checker_grading(self):
         (self.root / "transcripts").write_text("occupied")
         row = self.cell()
         self.assertEqual(row["evidence_status"], "failed")
+        self.assertEqual(row["transcript_status"], "failed")
+        self.assertEqual(row["transcript_error_code"], "persistence_error")
         self.assertTrue(row["success"])
         self.assertNotEqual(row["failure_class"], "infra")
 

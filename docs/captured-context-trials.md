@@ -5,10 +5,19 @@ Config variants can opt into a stricter native trial path with
 receive a captured set of settings and skills, with complete local evidence.
 Existing stock and config-variant routes retain their default behavior.
 
-This path uses the explicit native compatibility runner (`obench legacy run`
-or `obench matrix`), with `exec_mode = "local"`. Canonical suites still use
-`obench run` and Harbor. Captured variants currently reject Docker execution
-and counting-proxy routing before dispatch; their usage comes from the adapter.
+This path uses the explicit native compatibility runner with `--candidate`
+and `--exec local`, for example:
+
+```bash
+obench legacy run --candidate ./candidate.toml --task example --tasks-dir ./tasks \
+  --model gpt-6-astra-max --trial 1 --results-path ./results/trials.jsonl --exec local
+```
+
+`obench matrix` does not forward candidate specs and is not a supported captured
+candidate entry point. An external frozen block schedule can invoke the native
+command once per planned trial. Canonical suites still use `obench run` and
+Harbor. Captured variants currently reject Docker execution and counting-proxy
+routing before dispatch; their usage comes from the adapter.
 
 ## Candidate contract
 
@@ -113,14 +122,16 @@ beside local transcripts. It includes trial identity, full raw output, final
 assistant text, tool events, parser-error details, and component hashes. The
 row's `evidence_sha256` binds the complete bundle. Files use mode 0600 and the
 containing directory 0700. Identical repeated persistence is idempotent;
-conflicting bytes for the same attempt fail without overwriting it. Automatic
-retries keep the stable cell run ID but receive distinct evidence attempt IDs;
+conflicting bytes for the same attempt fail without overwriting it. Repeated
+invocations keep the stable cell run ID but receive distinct evidence attempt IDs;
 all attempt bundles are retained. The text transcript is the latest diagnostic copy.
 
 Rows carry `evidence_attempt_id`, `evidence_required`, `evidence_status`,
 `evidence_sha256`, and `evidence_error_code`; raw contents and local evidence paths are not added to
 public rows. Evidence remains LOCAL-ONLY and must be reviewed/scrubbed before
-sharing. The legacy text transcript is retained for diagnostics.
+sharing. The legacy text transcript is retained for diagnostics. Its separate
+`transcript_status` and `transcript_error_code` report compatibility-copy failures;
+those failures do not invalidate a successfully persisted authoritative bundle.
 
 Captured candidates require evidence. Accept a trial record only when
 `evidence_status == "complete"`, its bundle exists and its hash and identity
@@ -131,11 +142,11 @@ failure while preserving the independent checker's score and success flag;
 must emit `SCORE: <float>` and exit nonzero; exit zero always means full success
 under the existing checker contract.
 
-The matrix runner's existing retry policy still applies. For a frozen experiment
-ledger, set infrastructure retries to zero and stop/reconcile evidence loss
-before further dispatch. A diagnostic retry receives its own evidence attempt ID and
-must remain a separate observation in the experiment ledger. This feature neither schedules
-randomized blocks nor implements an experiment's statistical policy.
+For a frozen experiment ledger, stop and reconcile evidence loss before further
+dispatch. Repeating a completed cell requires the native runner's explicit
+`--force` flag; the new attempt receives its own evidence attempt ID and must
+remain a separate observation in the experiment ledger. This feature neither
+schedules randomized blocks nor implements an experiment's retry/statistical policy.
 
 ## Before a live pilot
 

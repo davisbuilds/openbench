@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import shlex
 import tempfile
 import unittest
@@ -89,6 +90,27 @@ CAPTURE_CONTROL="declared"
                 self.assertEqual(bundle['final_message'],'finished')
                 self.assertTrue(bundle['tool_events'])
                 self.assertNotIn('later source drift',bundle['full_output'])
+
+                # Exercise the documented entry point, including --candidate
+                # dispatch and default evidence persistence, with fake CLIs only.
+                (capture/'skill').write_text('captured sentinel')
+                cli_env=dict(before)
+                cli_env['PYTHONPATH']=str(Path(run.__file__).resolve().parents[1])
+                result_file=root/'cli-results.jsonl'
+                proc=subprocess.run([
+                    sys.executable, '-m', 'obench', 'legacy', 'run',
+                    '--candidate', str(spec), '--task', 'task',
+                    '--tasks-dir', str(task.parent), '--model', model,
+                    '--trial', '2', '--timeout', '10', '--exec', 'local',
+                    '--allow-version-drift', '--results-path', str(result_file),
+                ], cwd=root, env=cli_env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(proc.returncode,0,proc.stdout+proc.stderr)
+                cli_row=json.loads(result_file.read_text())
+                self.assertEqual(cli_row['harness'],candidate.name)
+                self.assertEqual(cli_row['trial'],2)
+                self.assertEqual(cli_row['score'],0.5)
+                self.assertEqual(cli_row['evidence_status'],'complete')
+                self.assertNotEqual(cli_row['evidence_attempt_id'],row['evidence_attempt_id'])
 
 
 if __name__=='__main__':

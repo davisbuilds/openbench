@@ -127,6 +127,8 @@ ROW_FIELDS = (
     "evidence_status",
     "evidence_sha256",
     "evidence_error_code",
+    "transcript_status",
+    "transcript_error_code",
 )
 
 
@@ -1729,16 +1731,22 @@ def _record_trial_evidence(row, result, transcripts_dir, results_stem):
         row["evidence_sha256"] = write_trial_evidence(
             evidence_path(transcripts_dir, results_stem, row["run_id"],
                           row["evidence_attempt_id"]), row, result)
+    except Exception:  # record I/O/serialization failure without losing the checker verdict
+        row["evidence_status"] = "failed"
+        row["evidence_error_code"] = "persistence_error"
+    try:
         # Preserve the existing diagnostics' transcript path. This is a
-        # compatibility copy; the atomic bundle and digest are authoritative.
+        # compatibility copy; failure here cannot invalidate the authoritative
+        # atomic bundle. Record its outcome independently for diagnostics.
         body = result.get("full_output")
         if body is None:
             body = result.get("output_tail") or ""
         write_transcript(transcript_path(transcripts_dir, results_stem, row["run_id"]),
                          row, body)
-    except Exception:  # record I/O/serialization failure without losing the checker verdict
-        row["evidence_status"] = "failed"
-        row["evidence_error_code"] = "persistence_error"
+        row["transcript_status"] = "complete"
+    except Exception:
+        row["transcript_status"] = "failed"
+        row["transcript_error_code"] = "persistence_error"
 
 
 def _adapter_wall_time_s(start_monotonic, result, exec_used):
@@ -2268,6 +2276,8 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "evidence_status": "missing" if transcripts_dir else "disabled",
         "evidence_sha256": None,
         "evidence_error_code": None,
+        "transcript_status": "missing" if transcripts_dir else "disabled",
+        "transcript_error_code": None,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
