@@ -6,7 +6,7 @@ frontier non-saturation; separating Terra from Luna is useful but not required.
 
 ## Fork baseline
 
-`main` is synchronized with `fork/main` at
+Initial reconciliation pushed `main` and `fork/main` to
 `ee09e68a49a9b741ca2ac4bdeab524cc22567025`. The fork already contains upstream
 `main` through `db193457a3d9128cd4d01fd839c2a890c186c9ac`; no upstream-main merge
 was needed. The two existing local commits were pushed first, followed by the
@@ -24,13 +24,31 @@ separate integration: its model registry schema/discovery differs from the
 fork's existing loader. PRs 43 and 47 remain open upstream, with their patches
 already present locally. Do not reapply them or rebase the fork wholesale.
 
+## Upstream refinements
+
+Both existing PRs were refined after reproducing additional gaps:
+
+- [PR 43](https://github.com/minghinmatthewlam/openbench/pull/43),
+  `f90b52e`: require explicit workspace/telemetry observations before inferring
+  no work; short substantive answers remain capability failures.
+- [PR 47](https://github.com/minghinmatthewlam/openbench/pull/47),
+  `7af268d`: enforce cumulative wall caps before a resumed retry can sleep or
+  launch. The fork port also covers its serial and parallel queue paths.
+- [Issue 51](https://github.com/minghinmatthewlam/openbench/issues/51) proposes
+  the standalone HOME patch on `fix/codex-home-isolation-upstream`, commit
+  `563c355`. It changes only the generic adapter and its offline tests; a PR
+  awaits maintainer interest under the fork
+  [issue-first workflow](FORK_WORKFLOW.md#the-flow).
+
+The upstream PR branches contain no personal eval tasks or private source.
+
 ## Candidate set
 
 | Task | Behavioral targets | Initial difficulty hypothesis |
 |---|---|---|
 | `am-benchmark-pr106` | Study identity/replay, legacy migrations, missing/unscored task×trial coverage | Hard: interacting persistence and aggregation contracts |
-| `engram-batch-pr1` | Ordered batch content preservation, fail-closed malformed-store handling | Medium/hard: sequencing plus no-mutation boundary |
-| `dojo-evidence-pr60` | Authoritative context, invocation-surface gating, qualified identity multiplicity | Medium/hard: provenance and cross-function policy enforcement |
+| `engram-batch-pr1` | Ordered batch content preservation, fail-closed malformed-store handling | Medium: sequencing plus no-mutation boundary |
+| `dojo-evidence-pr60` | Authoritative context, invocation-surface gating, qualified identity multiplicity | Medium: provenance and cross-function policy enforcement |
 
 A fourth, private, cross-language Git-diff case lives under ignored
 `results/private-pr-tasks/`. Its source and oracle must not enter this public
