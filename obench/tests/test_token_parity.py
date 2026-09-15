@@ -4,11 +4,13 @@
 import importlib.util
 import json
 import os
+import subprocess
 
 BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 import tempfile
 import unittest
+from unittest import mock
 
 ADAPTERS_DIR = os.path.join(BENCH_DIR, "adapters")
 FIXTURE_DIR = os.path.join(BENCH_DIR, "tests", "fixtures", "usage", "deepseek-v4-flash")
@@ -144,6 +146,97 @@ class TokenParityFixtureTests(unittest.TestCase):
         self.assertEqual(turns, 1)
         self.assert_usage_matches(actual, expected("codex"))
         self.assertEqual(tokens, 508)  # do not double-count reasoning subset
+
+    def test_codex_153_cache_write_field_survives_run_normalization(self):
+        codex = load_adapter("codex")
+        fixture = os.path.join(BENCH_DIR, "tests", "fixtures", "usage",
+                               "codex-0.153.0", "turn-completed.json")
+        with open(fixture, encoding="utf-8") as fh:
+            event = json.load(fh)
+        # The captured event reports zero. Missing and positive values below
+        # are synthetic boundary cases for the same schema.
+        for writes in (0, None, 30):
+            with self.subTest(cache_write_input_tokens=writes):
+                usage = dict(event["usage"])
+                if writes is None:
+                    usage.pop("cache_write_input_tokens")
+                else:
+                    usage["cache_write_input_tokens"] = writes
+                stream = json.dumps({"type": "turn.completed", "usage": usage})
+                proc = subprocess.CompletedProcess([], 0, stdout=stream, stderr="")
+                with tempfile.TemporaryDirectory() as directory:
+                    with mock.patch.object(codex.subprocess, "run", return_value=proc):
+                        result = codex.run(
+                            "offline replay", directory, "gpt-5.6-sol", 1,
+                            env_override={"CODEX_HOME": directory},
+                        )
+                self.assertTrue(result["completed"])
+                self.assertEqual(result["usage_raw"], usage)
+                self.assertEqual(result["tokens_cache_write"], writes)
+                self.assertEqual(result["token_basis"],
+                                 "estimated" if writes is None else "vendor_split")
+                self.assertEqual(result["tokens_input_uncached"], 17667 - (writes or 0))
+                self.assertEqual(result["tokens_cache_read"], 106368)
+                self.assertEqual(result["tokens_output"], 4774)
+                self.assertEqual(result["tokens_reasoning"], 2278)
+                self.assertEqual(result["tokens"], 22441 - (writes or 0))
+
+    def _replay_codex_cache_usage(self, model, writes):
+        codex = load_adapter("codex")
+        usage = {
+            "input_tokens": 100, "cached_input_tokens": 40,
+            "output_tokens": 20, "reasoning_output_tokens": 10, **writes,
+        }
+        proc = subprocess.CompletedProcess([], 0, stdout=json.dumps({
+            "type": "turn.completed", "usage": usage,
+        }), stderr="")
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(codex.subprocess, "run", return_value=proc):
+                result = codex.run("offline replay", directory, model, 1,
+                                   env_override={"CODEX_HOME": directory})
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["usage_raw"], usage)
+        return result
+
+    def test_codex_reasoning_arms_keep_explicit_writes_and_unknown_missing(self):
+        for model in ("gpt-5.6-terra-xhigh", "gpt-5.6-luna-max"):
+            for writes in (0, 15, None):
+                with self.subTest(model=model, writes=writes):
+                    result = self._replay_codex_cache_usage(model, {} if writes is None
+                        else {"cache_write_input_tokens": writes})
+                    self.assertEqual(result["tokens_cache_write"], writes)
+                    self.assertEqual(result["token_basis"],
+                                     "estimated" if writes is None else "vendor_split")
+                    self.assertEqual(result["tokens_input_uncached"], 60 - (writes or 0))
+                    self.assertEqual(result["tokens"], 80 - (writes or 0))
+
+    def test_codex_cache_write_aliases_use_first_present_including_zero(self):
+        fields = ("cache_write_input_tokens", "cache_write_tokens",
+                  "cache_creation_input_tokens", "cache_creation_tokens")
+        for index, field in enumerate(fields):
+            for writes in (0, 15):
+                with self.subTest(field=field, writes=writes):
+                    # Conflicting lower-priority aliases must not replace zero.
+                    counts = {alias: 25 for alias in fields[index + 1:]}
+                    counts[field] = writes
+                    result = self._replay_codex_cache_usage("gpt-5.6-terra-xhigh", counts)
+                    self.assertEqual(result["tokens_cache_write"], writes)
+                    self.assertEqual(result["tokens_input_uncached"], 60 - writes)
+                    self.assertEqual(result["tokens"], 80 - writes)
+                    self.assertEqual(result["token_basis"], "vendor_split")
+
+    def test_codex_invalid_reported_writes_cannot_fall_back_to_authoritative_counts(self):
+        for field in ("cache_write_input_tokens", "cache_write_tokens",
+                      "cache_creation_input_tokens", "cache_creation_tokens"):
+            for value in (None, "0", True, -1, 1.5, 61):
+                with self.subTest(field=field, value=value):
+                    result = self._replay_codex_cache_usage("gpt-5.6-luna-max", {
+                        "cache_creation_tokens": 15, field: value,
+                    })
+                    self.assertEqual(result["token_basis"], "estimated")
+                    self.assertIsNone(result["tokens_cache_write"])
+                    self.assertIsNone(result["tokens_input_uncached"])
+                    self.assertIsNone(result["tokens"])
 
     def test_invariant_violation_downgrades_basis(self):
         pi = load_adapter("pi")

@@ -23,11 +23,12 @@ Notes / quirks:
   This isolates those user discovery roots; it is not a filesystem read barrier
   or a claim about project/system configuration or other inherited env vars.
 - `--json` emits a JSONL event stream. The final `turn.completed` event carries
-  `usage={input_tokens,cached_input_tokens,output_tokens,reasoning_output_tokens}`.
+  `usage={input_tokens,cached_input_tokens,cache_write_input_tokens,
+          output_tokens,reasoning_output_tokens}` on Codex 0.153.0.
   Token accounting emits TOKEN_PARITY.md split fields from the final aggregate:
-    tokens_input_uncached = input_tokens - cached_input_tokens
+    tokens_input_uncached = input_tokens - cached_input_tokens - cache_write_input_tokens
     tokens_cache_read     = cached_input_tokens
-    tokens_cache_write    = 0
+    tokens_cache_write    = cache_write_input_tokens  # when reported
     tokens_output         = output_tokens  # already reasoning-inclusive
     tokens_reasoning      = reasoning_output_tokens
     tokens                = tokens_input_uncached + tokens_output
@@ -66,6 +67,12 @@ except ImportError:  # file-path / Docker mount layout
 NAME = "codex"
 _EXE = "codex"
 _MULTI_AGENT_ENV = "OPENBENCH_CODEX_MULTI_AGENT"
+_CACHE_WRITE_FIELDS = (
+    "cache_write_input_tokens",
+    "cache_write_tokens",
+    "cache_creation_input_tokens",
+    "cache_creation_tokens",
+)
 
 
 def _feature_flags(env_override=None):
@@ -423,12 +430,12 @@ def _parse_json_with_usage(stdout):
     if last_usage is not None:
         inp = _num(last_usage.get("input_tokens"))
         cached = _num(last_usage.get("cached_input_tokens"))
-        cache_write = _num(
-            last_usage.get("cache_write_tokens")
-            or last_usage.get("cache_creation_input_tokens")
-            or last_usage.get("cache_creation_tokens")
-            or 0
-        )
+        # Presence determines precedence: zero is reported usage, while an
+        # invalid reported value must not fall through to an older alias.
+        cache_write = next((last_usage[key] for key in _CACHE_WRITE_FIELDS
+                            if key in last_usage), 0)
+        if type(cache_write) is not int or cache_write < 0:
+            cache_write = None
         out = _num(last_usage.get("output_tokens"))
         reasoning = _num(last_usage.get("reasoning_output_tokens"))
         invariant_ok = None not in (inp, cached, cache_write, out, reasoning)
@@ -603,9 +610,9 @@ def run(
     if not tail:
         tail = combined[-2000:]
 
-    if model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6-luna-max") and token_usage.get("token_basis") == "vendor_split":
+    if MODELS.get(model, "").startswith("gpt-5.6-") and token_usage.get("token_basis") == "vendor_split":
         raw = token_usage.get("usage_raw") or {}
-        if not any(k in raw for k in ("cache_write_tokens", "cache_creation_input_tokens", "cache_creation_tokens")):
+        if not any(k in raw for k in _CACHE_WRITE_FIELDS):
             # GPT-5.6 may expose billable cache writes on newer Codex event
             # schemas. If this CLI omits the field, keep the legacy fresh-ish
             # scalar usable for the smoke contract but do not assert complete
