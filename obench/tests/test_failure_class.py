@@ -149,6 +149,82 @@ class TestClassifyFailure(unittest.TestCase):
                "workspace_changed": False, "wall_time_s": 419.68, "error": "exit 1"}
         self.assertEqual(failure_class.classify_failure(row, "", timeout_s=2400), "infra")
 
+    def test_incomplete_sparse_row_is_not_no_work_evidence(self):
+        row = {"completed": False, "wall_time_s": 419.0, "checker_exit": 1}
+        self.assertEqual(failure_class.classify_failure(row, timeout_s=2400),
+                         "wrong_answer")
+
+    def test_incomplete_abandonment_requires_observed_workspace_and_core_telemetry(self):
+        measured = {"completed": False, "wall_time_s": 419.0, "checker_exit": 1,
+                    "tokens": None, "tokens_output": None, "turns": None,
+                    "workspace_changed": False}
+        for field in ("tokens", "tokens_output", "turns", "workspace_changed"):
+            with self.subTest(missing=field):
+                sparse = dict(measured)
+                del sparse[field]
+                self.assertEqual(failure_class.classify_failure(sparse, timeout_s=2400),
+                                 "wrong_answer")
+        for unknown in (None, 0, "false"):
+            with self.subTest(workspace_changed=unknown):
+                self.assertEqual(failure_class.classify_failure(
+                    dict(measured, workspace_changed=unknown), timeout_s=2400),
+                    "wrong_answer")
+
+    def test_empty_codex_usage_can_still_be_an_observed_abandonment(self):
+        from obench.adapters import codex
+
+        tokens, turns, tail, usage = codex._parse_json_with_usage("")
+        self.assertIsNone(tokens)
+        self.assertIsNone(turns)
+        row = {"completed": False, "wall_time_s": 419.0, "checker_exit": 1,
+               "tokens": tokens, "turns": turns, "output_tail": tail,
+               "workspace_changed": False, "error": "exit 1", **usage}
+        self.assertEqual(failure_class.classify_failure(row, timeout_s=2400), "infra")
+        self.assertEqual(failure_class.classify_failure(
+            dict(row, tokens=0, tokens_output=0, turns=0), timeout_s=2400), "infra")
+
+    def test_incomplete_short_model_answer_is_not_no_work(self):
+        row = {"completed": False, "wall_time_s": 419.0, "checker_exit": 1,
+               "tokens": None, "tokens_output": None, "turns": None,
+               "workspace_changed": False, "error": "exit 1"}
+        answer = ("I examined the problem carefully but I could not determine how to "
+                  "satisfy every requirement. The current implementation remains incorrect.")
+        for output in (answer, "No solution found."):
+            with self.subTest(output=output):
+                self.assertEqual(failure_class.classify_failure(
+                    row, output, timeout_s=2400), "wrong_answer")
+                self.assertEqual(failure_class.classify_failure(
+                    dict(row, output_tail=output), timeout_s=2400), "wrong_answer")
+
+    def test_incomplete_abandonment_rejects_invalid_measurements(self):
+        row = {"completed": False, "wall_time_s": 419.0, "checker_exit": 1,
+               "tokens": None, "tokens_output": None, "turns": None,
+               "workspace_changed": False}
+        for wall in (-1, float("nan"), float("inf"), True, "419"):
+            with self.subTest(wall=wall):
+                self.assertFalse(failure_class.has_no_work_incomplete_shape(
+                    dict(row, wall_time_s=wall)))
+        for field in ("tokens", "tokens_output", "turns"):
+            for value in (False, "", [], -1):
+                with self.subTest(field=field, value=value):
+                    self.assertFalse(failure_class.has_no_work_incomplete_shape(
+                        dict(row, **{field: value})))
+
+    def test_incomplete_abandonment_does_not_override_other_work_or_timeouts(self):
+        row = {"completed": False, "wall_time_s": 419.0, "checker_exit": 1,
+               "tokens": None, "tokens_output": None, "turns": None,
+               "workspace_changed": False}
+        for work in ({"tokens_proxy_output": 1}, {"tokens_reasoning": 1},
+                     {"turns": 1}, {"workspace_changed": True},
+                     {"workspace_changes": ["answer.py"]}, {"harness": "null"}):
+            with self.subTest(work=work):
+                self.assertEqual(failure_class.classify_failure(
+                    dict(row, **work), timeout_s=2400), "wrong_answer")
+        self.assertEqual(failure_class.classify_failure(
+            dict(row, checker_exit="timeout"), timeout_s=2400), "timeout")
+        self.assertEqual(failure_class.classify_failure(
+            dict(row, error="timeout after 419s"), timeout_s=2400), "timeout")
+
     def test_incomplete_run_that_did_work_is_not_swallowed_as_infra(self):
         # Guard: a cell cut off AFTER real model work (tokens/turns) must not be
         # reclassified by the zero-work gate -- only genuine no-work runs are infra.
