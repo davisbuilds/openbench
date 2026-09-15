@@ -296,8 +296,25 @@ class ConfigVariant:
             raise ValueError("candidate unmetered must be a boolean")
         if self.unmetered:
             raise ValueError("config variants inherit native metering and cannot be unmetered")
-        self.config_dir = os.environ.get("OPENBENCH_CANDIDATE_CONFIG_DIR") or _resolve(
-            self.path, data["config_dir"])
+        self.captured_context = data.get("captured_context", False)
+        if not isinstance(self.captured_context, bool):
+            raise ValueError("captured_context must be a boolean")
+        self.REQUIRE_EVIDENCE = self.captured_context
+        if not self.captured_context and ("inherit_env" in data or "pass_env" in data):
+            raise ValueError("config-variant environment controls require captured_context=true")
+        self.pass_env = data.get("pass_env", [])
+        if (not isinstance(self.pass_env, list) or
+                not all(isinstance(name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+                        for name in self.pass_env)):
+            raise ValueError("config-variant pass_env must be an array of environment names")
+        self.inherit_env = data.get("inherit_env", not self.captured_context)
+        if not isinstance(self.inherit_env, bool):
+            raise ValueError("config-variant inherit_env must be a boolean")
+        if self.captured_context and self.inherit_env:
+            raise ValueError("captured_context requires inherit_env=false")
+        configured_root = _resolve(self.path, data["config_dir"])
+        self.config_dir = (configured_root if self.captured_context else
+                           os.environ.get("OPENBENCH_CANDIDATE_CONFIG_DIR") or configured_root)
         self.config_dir = os.path.abspath(self.config_dir)
         self.config_files = data.get("config_files")
         if not isinstance(self.config_files, list) or not self.config_files:
@@ -321,10 +338,54 @@ class ConfigVariant:
         if self.persist_auth and not self.auth_files:
             raise ValueError("config-variant persist_auth=true requires auth_files")
         self.module = _load_adapter(adapters_dir, self.base_adapter)
+        if self.captured_context:
+            self._validate_captured_context()
         self.provenance = self._provenance()
         self.identity_digest = _candidate_identity(self.provenance)
         self.provenance["candidate_digest"] = self.identity_digest
         self.proxy_adapter = self.base_adapter
+
+    def _validate_captured_context(self):
+        parameters = inspect.signature(self.module.run).parameters
+        if not {"env_override", "replace_env"} <= parameters.keys():
+            raise ValueError("captured_context requires adapter env_override and replace_env support")
+        reserved = {"HOME", "OPENBENCH_CAPTURED_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"}
+        if (reserved | _PROXY_ENV_NAMES) & set(self.pass_env):
+            raise ValueError("captured pass_env cannot override HOME, config roots, or proxy controls")
+        if {"HOME", "OPENBENCH_CAPTURED_HOME"} & self.env.keys():
+            raise ValueError("captured HOME is adapter-owned; stage home assets with destination home/...")
+        if _PROXY_ENV_NAMES & self.env.keys():
+            raise ValueError("captured_context does not support counting-proxy routing")
+        for name in self.env:
+            if name.endswith(("_TOKEN", "_API_KEY", "_SECRET", "_PASSWORD")):
+                raise ValueError("captured credentials must be supplied by pass_env or auth_files, not env literals")
+        if (self.base_adapter == "claude" and
+                self.env.get("OPENBENCH_CLAUDE_AUTH_MODE") != "subscription"):
+            raise ValueError("captured Claude requires the skill-enabled subscription route")
+        config_key = {"codex": "CODEX_HOME", "claude": "CLAUDE_CONFIG_DIR"}.get(self.base_adapter)
+        if config_key is None:
+            raise ValueError("captured_context currently supports codex and claude")
+        value = self.env.get(config_key, "")
+        if value != "{config_dir}" and not value.startswith("{config_dir}/"):
+            raise ValueError(f"{config_key} must refer to captured {{config_dir}}")
+        _safe_destination("/captured", value.replace("{config_dir}", ".", 1))
+        destinations = set()
+        for entry in self.config_files:
+            item = {"source": entry, "destination": entry} if isinstance(entry, str) else entry
+            dest = _safe_destination("/captured", item.get("destination", item["source"]))
+            if dest in destinations:
+                raise ValueError("captured config_files have duplicate destinations")
+            destinations.add(dest)
+            if os.path.basename(dest) in {"auth.json", ".credentials.json"}:
+                raise ValueError("captured credentials must use auth_files, never hashed config_files")
+        auth_destinations = set()
+        for auth in self.auth_files:
+            dest = _safe_destination("/captured", auth["destination"])
+            if dest in destinations:
+                raise ValueError("captured auth_files cannot overwrite config_files")
+            if dest in auth_destinations:
+                raise ValueError("duplicate captured auth_files destination")
+            auth_destinations.add(dest)
 
     def _provenance(self):
         entries = self.config_files or [
@@ -340,6 +401,9 @@ class ConfigVariant:
                 "config_files": entries, "env_names": sorted(self.env),
                 "unmetered": self.unmetered,
                 "persist_auth": self.persist_auth,
+                "captured_context": self.captured_context,
+                "pass_env": list(self.pass_env),
+                "inherit_env": self.inherit_env,
                 "auth_files": [{"source": a["source"], "destination": a["destination"]}
                                for a in self.auth_files]}
 
@@ -350,6 +414,9 @@ class ConfigVariant:
     def run(self, instruction, workdir, model, timeout_s):
         with tempfile.TemporaryDirectory(prefix=f"{self.name}_config_") as staged:
             values = {"config_dir": staged, "workspace": workdir, "model": model}
+            if self.captured_context:
+                values["home"] = os.path.join(staged, "home")
+                os.makedirs(values["home"], mode=0o700)
             if self.config_files:
                 for entry in self.config_files:
                     item = {"source": entry, "destination": entry} if isinstance(entry, str) else entry
@@ -381,9 +448,17 @@ class ConfigVariant:
                     key: _expand(value, values)
                     for key, value in self.env.items()
                 }
+                if self.captured_context:
+                    names = _SAFE_ENV_NAMES | set(self.pass_env)
+                    inherited = {name: os.environ[name] for name in names if name in os.environ}
+                    env = {**inherited, **env, "OPENBENCH_CAPTURED_HOME": values["home"]}
+                    config_key = "CODEX_HOME" if self.base_adapter == "codex" else "CLAUDE_CONFIG_DIR"
+                    os.makedirs(env[config_key], mode=0o700, exist_ok=True)
                 parameters = inspect.signature(self.module.run).parameters
                 if "env_override" in parameters:
                     kwargs = {"env_override": env}
+                    if self.captured_context:
+                        kwargs["replace_env"] = True
                     if "auth_lease_proofs" in parameters:
                         kwargs["auth_lease_proofs"] = auth.proofs
                     result = _tag_unmetered(

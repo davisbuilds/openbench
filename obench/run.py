@@ -36,6 +36,7 @@ import tempfile
 import threading
 import time
 import traceback
+import uuid
 from contextlib import contextmanager
 
 from .bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
@@ -119,6 +120,13 @@ ROW_FIELDS = (
     "study",
     "study_sha256",
     "suite",
+    # Raw trial evidence remains LOCAL-ONLY. Rows carry only verification
+    # metadata, never evidence bodies or local artifact paths.
+    "evidence_required",
+    "evidence_attempt_id",
+    "evidence_status",
+    "evidence_sha256",
+    "evidence_error_code",
 )
 
 
@@ -1614,13 +1622,123 @@ def write_transcript(path, row, body):
         f"task={row['task']} trial={row['trial']} ts={row['ts_iso']}\n"
         "# LOCAL-ONLY -- unscrubbed. Review with obench/scrub.py --check before sharing.\n\n"
     )
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(header)
         fh.write(body or "")
         fh.flush()
         os.fsync(fh.fileno())
+
+
+def evidence_path(transcripts_dir, results_stem, run_id, attempt_id=None):
+    """LOCAL-ONLY bundle path, separating attempts within a stable cell ID."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", run_id)[:120 if attempt_id is not None else 160]
+    digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()
+    suffix = ""
+    if attempt_id is not None:
+        if not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
+            raise ValueError("evidence attempt ID must be a lowercase UUID hex string")
+        suffix = "-" + attempt_id
+    return os.path.join(transcripts_dir, results_stem,
+                        f"{safe}-{digest}{suffix}.evidence.json")
+
+
+def _evidence_bytes(value):
+    return (json.dumps(value, sort_keys=True, ensure_ascii=False,
+                       separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
+
+
+def write_trial_evidence(path, row, result):
+    """Atomically persist one immutable LOCAL-ONLY evidence bundle.
+
+    A same-directory temporary file is fsynced and linked into place without
+    replacing existing evidence. Exact duplicate writes are idempotent;
+    conflicting writes within the same attempt are an explicit failure. Each
+    run_cell invocation has a fresh attempt ID, so retries retain earlier
+    evidence. The SHA-256 binds the entire bundle, including both identities.
+    """
+    body = result.get("full_output")
+    if body is None:
+        body = result.get("output_tail") or ""
+    evidence = {
+        "full_output": body,
+        "final_message": result.get("final_message"),
+        "tool_events": result.get("tool_events"),
+        "evidence_error": result.get("evidence_error"),
+    }
+    bundle = {
+        "schema_version": 1,
+        "local_only": True,
+        **{key: row.get(key) for key in ("run_id", "harness", "model", "task", "trial")},
+        "evidence_attempt_id": row.get("evidence_attempt_id"),
+        "evidence_status": row.get("evidence_status"),
+        "evidence_error_code": row.get("evidence_error_code"),
+        "transcript_source": "full_output" if result.get("full_output") is not None else "output_tail",
+        **evidence,
+        "sha256": {key: hashlib.sha256(_evidence_bytes(value)).hexdigest()
+                   for key, value in evidence.items()},
+    }
+    data = _evidence_bytes(bundle)
+    parent = os.path.dirname(os.path.abspath(path))
+    if os.path.islink(parent):
+        raise OSError("evidence directory must not be a symlink")
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    os.chmod(parent, 0o700)
+    fd, temporary = tempfile.mkstemp(prefix=".evidence-", dir=parent)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            os.fchmod(fh.fileno(), 0o600)
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            existing_fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(existing_fd, "rb") as fh:
+                if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                    raise FileExistsError("evidence destination is not a regular file")
+                if fh.read(len(data) + 1) != data:
+                    raise FileExistsError("conflicting evidence for this attempt")
+        directory_fd = os.open(parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        os.unlink(temporary)
+    return hashlib.sha256(data).hexdigest()
+
+
+def _record_trial_evidence(row, result, transcripts_dir, results_stem):
+    if not transcripts_dir:
+        return
+    if result.get("evidence_error"):
+        error_code = "adapter_evidence_error"
+    elif (not isinstance(result.get("full_output"), str)
+          or not isinstance(result.get("final_message"), str)
+          or not isinstance(result.get("tool_events"), list)
+          or not all(isinstance(event, dict) for event in result["tool_events"])):
+        error_code = "incomplete_adapter_evidence"
+    else:
+        error_code = None
+    row["evidence_status"] = "partial" if error_code else "complete"
+    row["evidence_error_code"] = error_code
+    try:
+        row["evidence_sha256"] = write_trial_evidence(
+            evidence_path(transcripts_dir, results_stem, row["run_id"],
+                          row["evidence_attempt_id"]), row, result)
+        # Preserve the existing diagnostics' transcript path. This is a
+        # compatibility copy; the atomic bundle and digest are authoritative.
+        body = result.get("full_output")
+        if body is None:
+            body = result.get("output_tail") or ""
+        write_transcript(transcript_path(transcripts_dir, results_stem, row["run_id"]),
+                         row, body)
+    except Exception:  # record I/O/serialization failure without losing the checker verdict
+        row["evidence_status"] = "failed"
+        row["evidence_error_code"] = "persistence_error"
 
 
 def _adapter_wall_time_s(start_monotonic, result, exec_used):
@@ -2008,8 +2126,10 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
 
     When ``transcripts_dir`` is set, the cell's full agent transcript
     (adapter ``full_output`` if present, else ``output_tail``) is persisted
-    LOCAL-ONLY to ``<transcripts_dir>/<results_stem>/<run_id>.txt``. See
-    ``write_transcript`` for the local-only handling rule.
+    LOCAL-ONLY with trial-linked final-message and tool-event evidence. See
+    ``evidence_path`` and ``write_trial_evidence``. Required evidence failures
+    exclude a trial as infrastructure failure while preserving its actual
+    checker success/score; consumers must not accept a score alone as evidence.
     """
     run_id = make_run_id(
         harness, task, model, trial,
@@ -2024,7 +2144,11 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         proxy_capable = candidate_proxy_capable(candidate)
     else:
         proxy_capable = proxy_supported_for_cell(proxy_harness, model, adapters_dir)
-    active_proxy_ctx = proxy_ctx if proxy_capable else None
+    # Captured context has an explicit environment contract; this slice does
+    # not route a proxy through it. Refuse below without allocating/registering
+    # proxy evidence for traffic that would bypass that proxy.
+    captured_proxy_refused = bool(getattr(candidate, "captured_context", False) and proxy_ctx)
+    active_proxy_ctx = proxy_ctx if proxy_capable and not captured_proxy_refused else None
     proxy_server = None
     if active_proxy_ctx:
         from . import proxy as counting_proxy  # lazy: stdlib proxy only needed for --proxy
@@ -2139,6 +2263,11 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         "replies_ok": None,
         "replies_throttled": None,
         "paced_wait_s": None,
+        "evidence_required": bool(getattr(candidate, "REQUIRE_EVIDENCE", False)),
+        "evidence_attempt_id": uuid.uuid4().hex,
+        "evidence_status": "missing" if transcripts_dir else "disabled",
+        "evidence_sha256": None,
+        "evidence_error_code": None,
     }
 
     # Namespaced tasks (e.g. terminal-bench/feal) contain "/"; keep the prefix
@@ -2150,6 +2279,18 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
     workdir_parent = docker_workdir_parent() if exec_mode == "docker" else None
     workdir = tempfile.mkdtemp(prefix=f"bench_{harness}_{task.replace('/', '_')}_", dir=workdir_parent)
     try:
+        if getattr(candidate, "captured_context", False) and exec_mode != "local":
+            row["exec_mode"] = exec_mode
+            row["error"] = "captured candidate context requires local execution"
+            row["failure_class"] = "infra"
+            row["failure_reason"] = "captured_context_execution_mode"
+            return row
+        if captured_proxy_refused:
+            row["exec_mode"] = exec_mode
+            row["error"] = "captured candidate context does not support proxy execution"
+            row["failure_class"] = "infra"
+            row["failure_reason"] = "captured_context_proxy"
+            return row
         # Materialize a pristine workspace into the disposable temp dir. Never
         # touch the source under tasks/ (snapshot copy or git archive export).
         # Staging runs on the host for both --exec local and --exec docker; the
@@ -2335,6 +2476,9 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         full_output = result.get("full_output")
         classifier_output = full_output if full_output is not None else row["output_tail"]
         _populate_proxy_row(row, active_proxy_ctx, cell_token, wait_s=2.0)
+        # Persist even a stalled/failed adapter's returned stream before any
+        # early return. Parser failures and partial streams remain observable.
+        _record_trial_evidence(row, result, transcripts_dir, results_stem)
 
         # Stall detection: if the watchdog fired, reclassify and skip checker.
         if stalled_event.is_set() and proxy_ctx:
@@ -2351,21 +2495,6 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
                     "stall watchdog exhausted bounded termination attempts"
                 )
             return _populate_proxy_row(row, active_proxy_ctx, cell_token)
-
-        # Persist the full agent transcript LOCAL-ONLY (prefer the untruncated
-        # full_output; fall back to the ~2000-char output_tail). Never let a
-        # transcript-write failure break the benchmark loop.
-        if transcripts_dir:
-            body = full_output
-            if body is None:
-                body = row["output_tail"]
-            try:
-                write_transcript(
-                    transcript_path(transcripts_dir, results_stem, run_id),
-                    row, body,
-                )
-            except Exception:  # noqa: BLE001 - transcript IO must not fail a cell
-                pass
 
         # The checker is the sole authority on task success (and score). Capture
         # the workspace just before it runs so unauditable rows can be replayed.
@@ -2399,6 +2528,12 @@ def run_cell(harness, task, model, trial, timeout_s, tasks_dir, adapters_dir,
         return _populate_proxy_row(row, active_proxy_ctx, cell_token)
     finally:
         _finalize_proxy_cell(row, active_proxy_ctx, cell_token)
+        if row["evidence_required"] and row["evidence_status"] != "complete":
+            row["failure_class"] = "infra"
+            if not row["failure_reason"]:
+                row["failure_reason"] = "required_evidence_unavailable"
+            if row["error"] is None:
+                row["error"] = "required trial evidence is unavailable"
         # Grade usage evidence LAST, from the now-final token_basis fields, so
         # every path (success, adapter failure, staging error) emits a concrete
         # grade instead of a None the data-honesty panel can't read.
