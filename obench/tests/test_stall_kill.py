@@ -13,6 +13,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -188,6 +189,52 @@ class FailureClassStalledTests(unittest.TestCase):
 
 
 class StallTerminationTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux child subreaper")
+    def test_success_waits_for_owned_descendant_to_be_reaped(self):
+        # Run the subreaper in a separate process so it cannot adopt children
+        # belonging to other tests. The fixture observes a real zombie and
+        # deliberately reaps it within the existing termination grace period.
+        fixture = pathlib.Path(__file__).parent / "fixtures/local_worker_delayed_reap.py"
+        proc = subprocess.run([sys.executable, str(fixture)],
+                              capture_output=True, text=True, timeout=10)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["result"], {"completed": True, "tokens": 17})
+        self.assertIsNone(report["state_at_return"])
+        self.assertTrue(any(row.get("state") == "Z" for row in report["states"]))
+        self.assertTrue(report["states"][-1]["reaped"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux child subreaper")
+    def test_unreaped_descendant_still_fails_after_cleanup_bound(self):
+        fixture = pathlib.Path(__file__).parent / "fixtures/local_worker_delayed_reap.py"
+        proc = subprocess.run([sys.executable, str(fixture), "hold"],
+                              capture_output=True, text=True, timeout=10)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        report = json.loads(proc.stdout)
+        self.assertIsNone(report["result"])
+        self.assertEqual(report["error"],
+                         "local adapter worker process group survived bounded cleanup")
+        self.assertEqual(report["state_at_return"]["state"], "Z")
+        self.assertTrue(report["states"][-1]["reaped"])
+
+    def test_reaped_leader_does_not_shorten_process_group_grace_period(self):
+        proc = mock.Mock(pid=424242)
+        proc.wait.return_value = -15
+        clock = [0.0]
+        with (
+            mock.patch.object(bench_run.time, "monotonic", side_effect=lambda: clock[0]),
+            mock.patch.object(bench_run.time, "sleep",
+                              side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)),
+            mock.patch.object(bench_run, "_owned_process_group_exists",
+                              side_effect=lambda _pgid: clock[0] < 0.03),
+            mock.patch.object(bench_run.os, "killpg") as killpg,
+        ):
+            confirmed = bench_run._terminate_owned_process_group(proc, attempts=3, wait_s=0.25)
+        self.assertTrue(confirmed)
+        self.assertGreaterEqual(clock[0], 0.03)
+        self.assertLessEqual(clock[0], 0.25)
+        self.assertEqual(killpg.call_count, 1)
+
     def test_successful_local_worker_reaps_descendants_and_preserves_result(self):
         with tempfile.TemporaryDirectory(prefix="local_worker_success_") as root_value:
             root = pathlib.Path(root_value)
