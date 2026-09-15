@@ -32,7 +32,7 @@ def sanitize(source):
         if token.type == tokenize.COMMENT and not any(k in token.string.lower() for k in ("copyright", "license", "spdx")):
             token = token._replace(string="")
         tokens.append(token)
-    clean = tokenize.untokenize(tokens)
+    clean = "\n".join(line.rstrip() for line in tokenize.untokenize(tokens).splitlines()).rstrip() + "\n"
     ast.parse(clean)
     return clean
 

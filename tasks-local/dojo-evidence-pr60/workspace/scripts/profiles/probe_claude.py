@@ -81,7 +81,7 @@ def budget_chars(context_tokens: int = DEFAULT_CONTEXT_TOKENS, fraction: float =
 class Entry:
     name: str
     description: str | None
-    shape: str  
+    shape: str
     origin: str = "unknown"
     scope: str = "unknown"
 
@@ -101,11 +101,11 @@ class DebugResult:
     budget_chars: int | None = None
     over_budget: bool = False
     sources: str | None = None
-    
-    
-    
-    
-    
+
+
+
+
+
     warned_skills: int | None = None
     fingerprint: dict = field(default_factory=dict)
 
@@ -264,20 +264,20 @@ def classify(
         elif entry.name in project or entry.name in user:
             entry.origin = "foreign"
         else:
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
+
+
+
+
+
+
+
+
+
+
             entry.origin = "unresolved"
 
-        
-        
+
+
         entry.scope = "project" if entry.name in project else "user" if entry.name in user else "bundled"
     return result
 
@@ -336,10 +336,10 @@ def fingerprint(model: str = "haiku") -> dict:
 
 
 
-    
-    
-    
-    
+
+
+
+
     try:
         version = subprocess.run(
             ["claude", "--version"], capture_output=True, text=True, check=False

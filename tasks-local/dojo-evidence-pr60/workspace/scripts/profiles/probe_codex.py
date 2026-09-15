@@ -249,9 +249,9 @@ def parse_block(block: str) -> Listing:
 
         match = ENTRY_RE.match(line)
         if not match:
-            
-            
-            
+
+
+
             continue
 
         body = match.group("body")
@@ -324,7 +324,7 @@ def active_model(codex_home: Path | None = None) -> str | None:
     for line in config.read_text().splitlines():
         stripped = line.strip()
         if stripped.startswith("["):
-            break  
+            break
         match = re.match(r'^model\s*=\s*"([^"]+)"', stripped)
         if match:
             return match.group(1)
@@ -353,9 +353,9 @@ def fingerprint(cwd: str | Path | None = None) -> dict:
     slug = active_model()
     entry = next((m for m in catalog if m.get("slug") == slug), None)
     if entry is None:
-        
-        
-        
+
+
+
         windows = {m.get("context_window") for m in catalog if m.get("context_window")}
         window = windows.pop() if len(windows) == 1 else None
         resolution = "catalog-unanimous" if window else "indeterminate"
@@ -436,17 +436,17 @@ def classify(
         )
     plugin_cache = f"{home}/plugins/"
     system_root = f"{home}/skills/.system/"
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
+
+
+
     project_root = None
     if cwd:
         candidate = Path(cwd) / ".agents" / "skills"

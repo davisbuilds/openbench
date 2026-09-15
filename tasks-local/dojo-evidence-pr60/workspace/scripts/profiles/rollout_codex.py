@@ -53,7 +53,7 @@ BLOCK_CLOSE = "</skills_instructions>"
 
 SURFACE_TUI = "codex-tui"
 SURFACE_EXEC = "codex_exec"
-SURFACE_PROBE = "exec"  
+SURFACE_PROBE = "exec"
 
 _BLOCK_RE = re.compile(rf"{BLOCK_OPEN}.*?{BLOCK_CLOSE}", re.S)
 
@@ -168,8 +168,8 @@ def classify_locator(locator: str) -> str:
     if any(seg in locator for seg in BUNDLED_SEGMENTS):
         return ORIGIN_BUNDLED
     if PLUGIN_CACHE_SEGMENT in locator:
-        
-        
+
+
         probe = Path(locator)
         for parent in list(probe.parents)[:6]:
             if (parent / REMOTE_MARKER).exists():
@@ -312,10 +312,10 @@ class LimitEvidence:
 
 
     limit: int | None
-    basis: str                       
+    basis: str
     provisional: bool
     reason: str = ""
-    samples: tuple[tuple[int, int], ...] = ()   
+    samples: tuple[tuple[int, int], ...] = ()
 
 
 def derive_limit(obs: list[RolloutObservation], *, clipped_only: bool = True) -> LimitEvidence:
@@ -327,11 +327,11 @@ def derive_limit(obs: list[RolloutObservation], *, clipped_only: bool = True) ->
 
 
 
-    
-    
-    
-    
-    
+
+
+
+
+
     builds = {o.meta.harness_build for o in obs}
     if len(builds) > 1:
         return LimitEvidence(
@@ -448,13 +448,13 @@ def attribute_demand(observation: RolloutObservation,
 
 
 
-    from .probe_codex import line_cost_tokens  
+    from .probe_codex import line_cost_tokens
 
     totals: dict[str, int] = {}
     descriptions = source_descriptions or {}
     for entry in observation.listing.entries:
-        
-        
+
+
         origin = observation.origin_of(entry.locator)
         text = descriptions.get(entry.name, entry.description or "")
         line = f"- {entry.name}: {text} ({entry.locator_kind}: {entry.locator})"

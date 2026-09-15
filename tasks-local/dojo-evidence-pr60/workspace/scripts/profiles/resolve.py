@@ -230,9 +230,9 @@ def resolve_for_harness(
             )
             continue
         if member in listed:
-            
-            
-            
+
+
+
             collisions.append(Collision(skill=member, bundled_entry=member))
         realized.append(member)
 

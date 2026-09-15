@@ -210,9 +210,9 @@ def _parse_profile(path: Path) -> Profile:
             "and a definition that does not say why it exists cannot be challenged"
         )
 
-    
-    
-    
+
+
+
     if raw_members == SENTINEL:
         if name != INSPECTION:
             raise ProfileDefinitionError(
@@ -311,8 +311,8 @@ def _validate_membership(profile: Profile, core: Profile, catalog: dict[str, dic
     if profile.kind != "overlay":
         return
 
-    
-    
+
+
     non_core = sorted(set(profile.members) - set(core.members))
     if len(non_core) < MIN_NON_CORE_MEMBERS:
         raise ProfileDefinitionError(

@@ -68,10 +68,10 @@ class ObservedEntry:
     dir_hash: str | None = None
     duplicate_of: str | None = None
     exempt: bool = False
-    
-    
-    
-    
+
+
+
+
     observed: bool = True
 
 
@@ -84,10 +84,10 @@ class Observation:
     root_lines: list[str] = field(default_factory=list)
     unsupported: list[str] = field(default_factory=list)
     warning: str | None = None
-    
-    
-    
-    
+
+
+
+
     symlinked_scope_roots: list[tuple[str, str]] = field(default_factory=list)
 
     @property
@@ -153,7 +153,7 @@ def _standardizer():
 
     if str(_STANDARDIZER) not in sys.path:
         sys.path.insert(0, str(_STANDARDIZER))
-    import skill_standardizer_lib  
+    import skill_standardizer_lib
 
     return skill_standardizer_lib
 
@@ -219,20 +219,20 @@ def observe_codex(listing: Listing, policy: Policy, skills_root: Path,
             scope=entry.scope,
             locator=_absolute(entry.locator, listing.root_lines),
             listed_description=entry.description,
-            
-            
-            
-            
-            
-            
-            
-            
+
+
+
+
+
+
+
+
             source_description=descriptions.get(entry.name) if entry.origin == "dojo-managed" else None,
             cost=entry.cost_tokens,
             exempt=entry.origin == "harness-bundled",
         )
-        
-        
+
+
         if entry.name in seen and not policy.shadows_by_name:
             observed.duplicate_of = seen[entry.name]
         seen.setdefault(entry.name, observed.locator)
@@ -301,5 +301,5 @@ def _attach_topology(observation: Observation, skills_root: Path) -> None:
             entry.link_target = str(Path(directory).readlink())
         try:
             entry.dir_hash = lib.hash_directory(directory)
-        except Exception:  
+        except Exception:
             entry.dir_hash = None

@@ -36,7 +36,7 @@
       "root": "tasks-local/dojo-evidence-pr60",
       "status": "candidate-uncalibrated",
       "digest_scheme": 2,
-      "task_content_digest": "827d1b99e95234bcdff8b210b224c40d2ce6f031bcb7c26c7b645bd5aeaf047b",
+      "task_content_digest": "9a28649aaa30b6244c2d1829762eaf7de14f59d106b55d6c64396401d3c82449",
       "solution_files_sha256": {
         "scripts/profiles/budget.py": "8214cac0f598bebe51758508e93de6a464502519c8d51aedfae0df39b0e298f0",
         "scripts/profiles/rollout_codex.py": "8f97a7b6f2e0be4769c71fe78fc21c98d00c3af3de3aee8140f113583ae5ad2e"

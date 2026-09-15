@@ -57,11 +57,11 @@ CLAUDE_ELLIPSIS = "…"
 class Degradation(str, Enum):
     """ """
 
-    CODEX_CLIPPED = "codex-clipped-no-marker"        
-    CODEX_PRECAP = "codex-precap-ellipsis"           
-    CODEX_OMITTED = "codex-skill-omitted"            
-    CLAUDE_ELLIPSIS_TRUNCATED = "claude-ellipsis-truncated"   
-    CLAUDE_DESCRIPTION_REMOVED = "claude-description-removed"  
+    CODEX_CLIPPED = "codex-clipped-no-marker"
+    CODEX_PRECAP = "codex-precap-ellipsis"
+    CODEX_OMITTED = "codex-skill-omitted"
+    CLAUDE_ELLIPSIS_TRUNCATED = "claude-ellipsis-truncated"
+    CLAUDE_DESCRIPTION_REMOVED = "claude-description-removed"
 
 
 class Verdict(str, Enum):
@@ -77,7 +77,7 @@ class Policy:
     harness: str
     harness_version: str
     model: str
-    unit: str                    
+    unit: str
     limit: int
     context_window: int | None
     window_field: str | None
@@ -85,14 +85,14 @@ class Policy:
     provenance: str
     measured: str
     probe: str
-    deployable: bool             
+    deployable: bool
     shadows_by_name: bool
     project_scope_root: str
-    
-    
-    
-    
-    
+
+
+
+
+
     limit_basis: str = "vendor"
     declared_surfaces: tuple[str, ...] = ()
     identity: str = ""
@@ -131,9 +131,9 @@ class Assessment:
     degradations: tuple[Degradation, ...] = ()
     reason: str = ""
     entries_scored: int = 0
-    
-    
-    
+
+
+
     surface: str | None = None
 
     @property
@@ -239,15 +239,15 @@ def detect_degradation(entries: list[dict], policy: Policy, warning: str | None 
     found: set[Degradation] = set()
 
     for entry in entries:
-        
-        
-        
-        
-        
-        
-        
-        
-        
+
+
+
+
+
+
+
+
+
         if "listed_description" not in entry:
             continue
 
@@ -269,9 +269,9 @@ def detect_degradation(entries: list[dict], policy: Policy, warning: str | None 
             elif listed and listed.rstrip().endswith(CLAUDE_ELLIPSIS):
                 found.add(Degradation.CLAUDE_ELLIPSIS_TRUNCATED)
 
-    
-    
-    
+
+
+
     if warning and "Exceeded skills context budget" in warning:
         found.add(Degradation.CODEX_OMITTED)
     if candidate_count is not None and len(entries) < candidate_count:

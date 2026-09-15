@@ -101,8 +101,8 @@ class Evidence:
         return ExitCode.NONCONFORMANT
 
     def __post_init__(self) -> None:
-        
-        
+
+
         if self.partial and self.payload.get("state") == STATE_CONFORMANT:
             raise ValueError("a partial report cannot be conformant")
 
@@ -158,20 +158,20 @@ def dirty_state(repo_root: Path, selected_members: tuple[str, ...],
 
     try:
         out = subprocess.run(
-            
-            
-            
-            
+
+
+
+
             ["git", "-C", str(repo_root), "status", "--porcelain", "-uall"],
             capture_output=True, text=True, check=False, timeout=30,
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return ["<git unavailable: source revision unverifiable>"]
 
-    
-    
-    
-    
+
+
+
+
     selected_paths = {f"skills/{name}/" for name in selected_members}
     selected_paths |= {f"profiles/{name}.yaml" for name in selected_definitions}
     dirty = []
@@ -226,11 +226,11 @@ def build_evidence(
         selected_definitions=resolution.selection if resolution else (),
     )
 
-    
-    
-    
-    
-    
+
+
+
+
+
     observed_managed = {e.name for e in observation.entries if e.origin == "dojo-managed"}
     missing = sorted(expected - observed_managed) if resolution else []
     unexpected = sorted(observed_managed - expected) if resolution else []
@@ -244,9 +244,9 @@ def build_evidence(
     elif dirty:
         state = STATE_UNSUPPORTED
     elif observation.unsupported:
-        
-        
-        
+
+
+
         state = STATE_UNSUPPORTED
     elif missing or unexpected:
         state = STATE_NONCONFORMANT
@@ -267,9 +267,9 @@ def build_evidence(
         },
         "realization_identity": realization_id,
         "resolved_members": sorted(members),
-        
-        
-        
+
+
+
         "suppressed": sorted(
             (
                 {"skill": s.skill, "bundled_entry": s.bundled_entry, "evidence": s.evidence}
@@ -320,8 +320,8 @@ def build_evidence(
         "assertions": {"executed": 0, "outcomes": []},
         "equivalence_identity": equivalence_id,
     }
-    
-    
+
+
     payload["profile"]["equivalence_identity"] = payload.pop("equivalence_identity")
 
     return Evidence(payload=payload, partial=partial)
