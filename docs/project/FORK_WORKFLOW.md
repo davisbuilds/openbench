@@ -1,7 +1,16 @@
-# Fork propagation workflow
+# Project and upstream workflow
 
-How change flows in this fork of `minghinmatthewlam/openbench`. The rule is
-one-directional: **local → your fork → upstream (only if broadly relevant)**.
+OpenBench is a first-class project at `~/Dev/openbench`. The canonical trunk is
+`davisbuilds/openbench`; `minghinmatthewlam/openbench` is an upstream source for
+selective integrations and focused contributions. Our roadmap and releases do
+not wait for upstream. Changes flow **local → our trunk → upstream when broadly
+relevant**.
+
+The checkout was promoted out of `_forks/` on 2026-09-16. No compatibility symlink
+is retained. Linked worktrees and editable tool environments were repaired; an
+existing sealed suite manifest verified after relocation. Historical local run
+records retain their original paths as provenance. Start new runs from the new
+root rather than replaying old absolute launcher commands.
 
 ## Remotes
 
@@ -11,8 +20,9 @@ one-directional: **local → your fork → upstream (only if broadly relevant)**
 | `origin` | `github.com/minghinmatthewlam/openbench` | Upstream. Pull from occasionally; PR into it. |
 
 `main` tracks `fork/main`, so `git push` / `git pull` move against **your fork**,
-not upstream. Upstream is a source you sync *from* and open PRs *to*, never a
-push target for your trunk.
+not upstream. Set `remote.pushDefault = fork` for topic branches too. Remote
+names are retained to keep existing branch tracking clear. Upstream is a source
+you integrate *from* and open PRs *to*, never a push target for your trunk.
 
 ## The flow
 
@@ -21,11 +31,13 @@ push target for your trunk.
    coherent.
 2. **Push to your fork.** `git push` sends `main` to `fork/main` — your backup
    and canonical trunk. Your fork is *expected* to diverge from upstream; that is
-   what an actively-edited `_forks/` checkout is for.
+   part of this project's independent development.
 3. **Promote upstream only if broadly relevant.** Capability that benefits every
    openbench user goes upstream as a **clean topic branch cut from `origin/main`**
    carrying *only* that feature's commits — never your whole divergent `main`.
-   File an issue first, PR when the maintainer signals interest.
+   For substantial capabilities, propose a scoped issue before preparing a large
+   PR. Small reproduced compatibility/correctness fixes can go directly to a
+   focused PR. Do not send our divergent trunk wholesale.
 
 ### What goes upstream vs. what stays fork-local
 
@@ -92,20 +104,27 @@ git push fork feat/<thing>-upstream # PR this branch into origin
 
 Keep the topic branch alive on `fork` until its PR merges or closes.
 
-## Reconciling when an upstream PR merges
+## Bringing in useful upstream changes
 
-Some upstream-candidate changes were also applied to local `main` directly (as
-different SHAs) so we didn't wait on review. When such a PR merges upstream:
+Fetch for inspection; integrate on a topic branch, never by resetting our trunk:
 
 ```sh
 git fetch origin
-git rebase origin/main   # git drops the now-duplicated changes; resolve any residue
-git push --force-with-lease fork main
+git log --oneline fork/main..origin/main
+git diff --stat fork/main...origin/main
+git switch -c integrate/<topic> fork/main
+# Cherry-pick a self-contained upstream fix, or merge a reviewed upstream range.
 ```
 
-Expect to hand-resolve where the local and upstreamed versions differ. This is
-the cost of having applied a change locally *and* upstreamed it — deliberate, to
-avoid blocking local work on review latency.
+Review dependencies and overlapping local implementations before selecting a
+commit. If upstream has merged one of our PRs, compare the resulting behavior
+and tests with the local copy before resolving duplicates. Run the owning
+checks and open a PR into our trunk. Preserve published history: routine
+upstream reconciliation does not rebase or force-push `fork/main`.
+
+There is no automatic upstream pull cadence. Inspect upstream when a useful fix
+or feature appears, or during periodic maintenance, and bring in only changes
+whose value and compatibility have been reviewed.
 
 ## Dangling branches
 

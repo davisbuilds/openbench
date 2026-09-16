@@ -1,8 +1,9 @@
 # Repair benchmark isolation
 
-Status: implemented as an opt-in Harbor extension, 2026-09-16. Offline controls
-and a bounded authenticated canonical control pass. **Longer repair-trial
-evidence capture remains an admission gate before calibration.**
+Status: implemented as an opt-in Harbor extension, 2026-09-16. Offline controls,
+short authenticated controls, and a fresh 600-second Luna timeout all preserve
+the required evidence; canonical suite import and manifest verification pass.
+**Difficulty calibration and unattended campaign admission remain separate.**
 
 The native calibration exposed reference/checker files from another worktree;
 those scores remain withdrawn as difficulty evidence. HOME isolation did not
@@ -230,16 +231,25 @@ logs were not retained, so this is a demonstrated limitation, not proof of that
 attempt's exact cause. Separate bounded log/source policies and retained export
 failure diagnostics are now implemented. The offline lifecycle probe verifies
 3 MiB logs after completion and forced timeout, plus oversized-log and symlink
-refusal. A fresh authenticated longer-run check remains required before
-calibration.
+refusal against the same immutable image used by the authenticated recheck.
 
 A subsequent 600-second-per-arm diagnostic at `01cde29` captured both raw logs
 and ATIF trajectories: Terra completed and Luna timed out. Suite import exposed
 the repeated-usage conversion bug described above and correctly refused the
 inconsistent trajectory. The correction passes both a synthetic reproduction
 and read-only replay of both captured sessions. That rejected run remains
-unchanged and is not admitted calibration; fresh canonical import is still
-required after the correction.
+unchanged and is not admitted calibration.
+
+The fresh canonical Luna/max recheck at `883ea32` passed after the correction:
+its 600-second timeout remained `completed=false`, `failure_class=timeout`;
+the trusted artifact grade was 0.6667. A 1,395,651-byte raw rollout, converted
+ATIF, usage, grading receipt, public provider-peer observations, and clean
+solver/broker shutdown all validated. Atomic suite import and independent
+run-manifest verification succeeded. The live rollout was below 2 MiB; the
+separate real-Harbor 3 MiB controls establish the larger-file boundary.
+The sealed suite identity is
+`07674c488942af38c752adc11112f1cb9acb0b9a1c324e11461b2c0b0e2fd93d`.
+This is a diagnostic timeout, not a successful solve or a calibrated score.
 
 These are control and diagnostic results, **not frontier-model difficulty
 measurements**. Preserve the short control beside the longer-run failure, renew

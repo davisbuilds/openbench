@@ -84,27 +84,13 @@ the PR, not as a "resolved" note here).
 
 ### Benchmark discrimination
 
-#### Reliable evidence for longer repair trials
-- **What**: preserve bounded transcript/usage evidence through longer runs and
-  timeouts before admitting PR-derived calibration.
-- **Evidence (2026-09-16)**: the [repair sandbox](REPAIR_SANDBOX.md) passed real
-  authenticated Terra/Luna file-edit controls and atomic suite verification.
-  A separate 600-second repair diagnostic timed out on both arms; Luna's log
-  export failed and required ATIF evidence was absent, correctly blocking suite
-  sealing. A real Docker reproduction accepts a small agent log but rejects a
-  2 MiB + 1 byte log under the shared source-file cap. Original rejected logs
-  were not retained, so that attempt's exact cause remains unconfirmed.
-- **Update**: separate log bounds and retained diagnostics now pass real Harbor
-  completion, timeout, oversize, and symlink controls. The next authenticated
-  long run captured both arms but exposed repeated Codex usage snapshots being
-  counted twice by pinned Harbor's converter. The adapter correction passes
-  synthetic and captured-log replay; tracked in
-  [Harbor #3289](https://github.com/harbor-framework/harbor/issues/3289).
-- **Next**: verify a fresh canonical longer run after the conversion correction.
-  Keep the rejected attempts intact and the strict source/archive/usage checks.
-- **Related admission**: port corrected AM106 to its own external oracle and add
-  aggregate source/log volume quotas before hostile scale. Native contaminated
-  scores remain excluded.
+#### Aggregate sandbox storage bounds
+- **What**: source/log named volumes still lack aggregate disk quotas. Export
+  limits bound what the host accepts, not what a solver can write to its volume.
+- **Next**: add and verify aggregate volume quotas before hostile scale. Keep
+  the current source/archive/export limits and fail-closed evidence checks.
+- **Reference**: [repair sandbox](REPAIR_SANDBOX.md) records the completed
+  large-log, timeout, and authenticated longer-run evidence work.
 
 #### Frontier-difficulty task tier — the graded set does not rank terra vs luna
 - **What**: build a task tier whose *expected frontier score is < 1.0*, so the
@@ -377,6 +363,15 @@ the PR, not as a "resolved" note here).
 ---
 
 ## Tracked elsewhere (in flight — will leave this doc on merge)
+
+- **Harbor custom-environment import compatibility** — standalone upstream
+  [PR #53](https://github.com/minghinmatthewlam/openbench/pull/53) normalizes an
+  omitted/null selector while retaining selector/import-path drift rejection.
+  Local patch is included in the repair smoke hardening work.
+- **Harbor repeated Codex usage snapshots** — upstream
+  [issue #3289](https://github.com/harbor-framework/harbor/issues/3289) has a
+  synthetic reproduction. Our isolated adapter carries a tested correction;
+  remove it only after an admitted Harbor pin provides equivalent behavior.
 
 - **Bounded process-group reaping** — fixed in the fork after a Linux CI
   reproduction; standalone generic patch `4c46145` is proposed in upstream

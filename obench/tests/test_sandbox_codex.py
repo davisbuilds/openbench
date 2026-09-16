@@ -24,6 +24,9 @@ class SandboxCodexTests(unittest.TestCase):
             result = obj._convert_events_to_trajectory([first, first, next_call])
             self.assertEqual(result, [first['info']['last_token_usage'], None,
                                      next_call['info']['last_token_usage']])
+        # Start a new session with the previous session's final snapshot.
+        self.assertEqual(obj._convert_events_to_trajectory([next_call]),
+                         [next_call['info']['last_token_usage']])
 
     def test_changed_last_usage_with_unchanged_totals_remains_visible(self):
         class Base:

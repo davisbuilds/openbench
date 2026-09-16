@@ -92,9 +92,11 @@ The opt-in [repair sandbox](REPAIR_SANDBOX.md) keeps the solver at
 `network=none`, using a per-trial Unix socket to a restricted model gateway.
 It also separates candidate execution from oracle/reward authority. Offline controls now exercise the actual Harbor environment and verifier.
 Authenticated transport and atomic canonical import passed a short, separately
-sealed negative control on 2026-09-16. A longer repair diagnostic exposed failed
-log export and missing required trajectory evidence; sustained capture remains
-unadmitted. See the linked sandbox reference for the distinct outcomes.
+sealed negative control on 2026-09-16. Longer diagnostics exposed log-export and
+usage-conversion defects, now corrected. A fresh 600-second Luna timeout
+preserved all required evidence and passed atomic import and manifest
+verification. See the linked sandbox reference for the distinct outcomes;
+campaign admission and difficulty calibration remain separate.
 
 Use an enforced container/Harbor read boundary with source-only agent images,
 post-agent grading, and a frozen retrieval policy. Verify actual direct and
@@ -126,16 +128,16 @@ inputs. Existing stock profiles remain unchanged. See the
 
 Remaining work:
 
-- Fix and verify bounded large-log/timeout evidence capture, then repeat a longer
-  canonical suite with complete transcript/usage evidence and atomic import.
-  Preserve the passing authenticated short control; it does not establish
-  sustained capture or equivalence with the native treatment.
+- Preserve the short, large-log, timeout, and authenticated longer-run controls;
+  renew them when runtime/adapter bytes change. These do not establish
+  equivalence with the native treatment.
 - Port corrected AM106 to the same boundary with its own external oracle.
 - Freeze an exact pushed commit and admitted runtime on the selected execution
   host, then launch calibration in tmux with logs and an exit receipt.
 
 The authenticated runs are controls and diagnostics, not admitted calibration.
-Both 600-second full-repair attempts timed out; one lacked required trajectory
-evidence, so the suite did not seal. The native contaminated screen is excluded;
-these results do not establish that any candidate is extra hard for frontier
-models.
+Earlier rejected suites remain intact: one lacked a trajectory and another
+had inconsistent converted usage. The fresh Luna timeout sealed successfully
+after correction, retaining its timeout and partial artifact score. The native
+contaminated screen remains excluded; these diagnostics do not establish that
+any candidate is extra hard for frontier models.
