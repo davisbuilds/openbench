@@ -1,0 +1,43 @@
+schema_version = "1.4"
+artifacts = [
+    { source = "/app", destination = "workspace" },
+]
+
+[task]
+name = "openbench/dojo-evidence-pr60-v2"
+version = "2.0.0"
+description = "The profile evidence tools sometimes report a reassuring result that disagrees with the session being inspected."
+authors = []
+keywords = ["openbench"]
+
+[metadata]
+origin = "openbench"
+difficulty = "unknown"
+category = "programming"
+tags = ["openbench"]
+openbench_task = "dojo-evidence-pr60-v2"
+openbench_workspace_kind = "snapshot"
+
+[metadata.openbench_task_content_digest]
+scheme = 2
+sha256 = "afab14cc6df0f9a0e056cd866f294b290545bc880938706a49f86f5e8778b421"
+
+[metadata.openbench_harbor_export]
+schema_version = 1
+base_image = "python:3.12-slim-bookworm@sha256:31c0807da611e2e377a2e9b566ad4eb038ac5a5838cbbbe6f2262259b5dc77a0"
+network_mode = "no-network"
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 1800.0
+
+[environment]
+build_timeout_sec = 1800.0
+network_mode = "no-network"
+os = "linux"
+cpus = 1
+memory_mb = 2048
+storage_mb = 10240
+gpus = 0

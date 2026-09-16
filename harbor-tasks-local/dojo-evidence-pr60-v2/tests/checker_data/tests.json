@@ -1,0 +1,5 @@
+{
+  "rollout": ["RolloutTests.test_developer_listing_is_accepted", "RolloutTests.test_decoys_cannot_replace_developer_listing", "RolloutTests.test_decoys_alone_are_not_observations", "RolloutTests.test_empty_developer_listing_remains_an_observation"],
+  "budget": ["BudgetTests.test_declared_surface_can_deploy_and_gate", "BudgetTests.test_wrong_surface_is_unsupported_and_not_gating", "BudgetTests.test_missing_surface_is_unsupported_and_not_gating", "BudgetTests.test_direct_assessments_enforce_surface_when_gating"],
+  "mismatch": ["MismatchTests.test_equivalent_qualified_listings_compare_equal", "MismatchTests.test_losing_same_name_from_another_origin_is_reported", "MismatchTests.test_duplicate_multiplicity_is_reported", "MismatchTests.test_origin_swap_with_same_name_and_count_is_reported"]
+}
