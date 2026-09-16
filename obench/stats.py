@@ -759,6 +759,10 @@ def validate_suite_rows(rows, *, for_publication=False):
             or "sandbox_grading_sha256" in provenance
             or "sandbox_gateway_module_sha256" in provenance
         ):
+            if (row.get("score") is not None or "sandbox_grading_sha256" in provenance) and not _sha256_hex(
+                provenance.get("sandbox_grading_sha256")
+            ):
+                raise ValueError("suite row sandbox grading receipt digest is missing or invalid")
             expected_gateway = manifest["sandbox"]["implementation_sha256"]["obench.sandbox_gateway"]
             if provenance.get("sandbox_gateway_module_sha256") != expected_gateway:
                 raise ValueError("suite row sandbox gateway differs from sealed implementation")

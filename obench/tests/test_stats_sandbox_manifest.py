@@ -126,6 +126,27 @@ class SandboxManifestTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "sandbox gateway"):
                 stats.validate_suite_rows(rows)
 
+    def test_graded_rows_require_a_well_formed_grading_receipt_digest(self):
+        stats.validate_suite_rows(self.rows)
+        for invalid in (None, "", "x", "a" * 63, "a" * 65, "g" * 64, "A" * 64, 64, True):
+            rows = copy.deepcopy(self.rows)
+            rows[0]["candidate_provenance"]["sandbox_grading_sha256"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "grading receipt"):
+                stats.validate_suite_rows(rows)
+        rows = copy.deepcopy(self.rows)
+        del rows[0]["candidate_provenance"]["sandbox_grading_sha256"]
+        with self.assertRaisesRegex(ValueError, "grading receipt"):
+            stats.validate_suite_rows(rows)
+
+    def test_ungraded_rows_validate_receipt_digest_when_present(self):
+        rows = copy.deepcopy(self.rows)
+        rows[0].update(score=None, completed=False, success=False, failure_class="infra")
+        stats.validate_suite_rows(rows)
+        for invalid in (None, "", "not-a-digest", "g" * 64, False):
+            rows[0]["candidate_provenance"]["sandbox_grading_sha256"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "grading receipt"):
+                stats.validate_suite_rows(rows)
+
     def test_ungraded_failures_may_lack_receipt_but_cannot_forge_one(self):
         rows = copy.deepcopy(self.rows)
         row = rows[0]
