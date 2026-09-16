@@ -51,8 +51,12 @@ python3 scripts/local/verify_dojo_container.py \
 ```
 
 Image build may download the pinned base/dependency. Every probe and checker
-executes offline, with no model calls or credentials. Use `--skip-build` only
-when deliberately reusing the image; the receipt records its immutable ID.
+executes offline, with no model calls or credentials. Each invocation rebuilds
+from this package's reviewed Dockerfile/context, using matching Docker cache
+layers when available. Unattested `--skip-build` reuse is rejected. Containers
+launch from the immutable ID returned by that build, and inspection confirms
+that ID; the mutable `--image` tag is only a build output name. The receipt binds
+the package manifest and built image ID.
 Containers and temporary canaries are removed; the image and requested receipt
 remain. This command is a short offline validation, not a multi-trial campaign.
 

@@ -12,6 +12,7 @@ import ast
 import hashlib
 import itertools
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -96,25 +97,42 @@ def control_overlay(directory: Path, kind: str) -> None:
     (profiles / "budget.py").write_text(budget)
 
 
+def build_image(tag: str) -> str:
+    """Rebuild reviewed inputs, then pin launches to that build's exact image.
+
+    Docker may safely reuse matching build-cache layers, but a caller-supplied
+    tag is never provenance and is never used to select a probe container.
+    """
+    with tempfile.TemporaryDirectory(prefix="dojo-image-build-") as directory:
+        image_file = Path(directory) / "image.id"
+        subprocess.run(["docker", "build", "--tag", tag, "--iidfile", str(image_file),
+                        str(TASK / "environment")], check=True)
+        built = image_file.read_text().strip()
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", built):
+            raise RuntimeError("Docker build did not return an immutable image ID")
+        image_id = run("docker", "image", "inspect", built, "--format", "{{.Id}}").stdout.strip()
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+            raise RuntimeError("Docker could not resolve the built image ID")
+        return image_id
+
+
 def main() -> None:
     if not __debug__:
         raise RuntimeError("Run without -O: this admission probe requires assertions")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default="openbench-local/dojo-evidence-pr60:probe")
-    parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()
     frozen_source = validate_package()
-    if not args.skip_build:
-        subprocess.run(["docker", "build", "--tag", args.image,
-                        str(TASK / "environment")], check=True)
+    package_manifest = manifest(TASK)
+    image_id = build_image(args.image)
     receipt = {"schema": 1, "task": "dojo-evidence-pr60-v2", "started_epoch": time.time(),
                "probe_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                "scope": "offline Docker image and explicit launch; not Harbor/auth admission",
-               "image_id": run("docker", "image", "inspect", args.image,
-                               "--format", "{{.Id}}").stdout.strip(),
+               "image_id": image_id,
+               "image_provenance": "rebuilt-from-reviewed-package",
                "docker_version": run("docker", "version", "--format", "{{json .}}").stdout.strip(),
-               "package_manifest": manifest(TASK), "attempts": []}
+               "package_manifest": package_manifest, "attempts": []}
     with tempfile.TemporaryDirectory(prefix="dojo-boundary-") as temporary:
         scratch = Path(temporary)
         canary = scratch / "host-only.txt"
@@ -129,8 +147,9 @@ def main() -> None:
             try:
                 run("docker", "run", "--detach", "--name", name, "--network", "none",
                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-                    args.image, "sleep", "300")
+                    image_id, "sleep", "300")
                 inspect = json.loads(run("docker", "inspect", name).stdout)[0]
+                assert inspect["Image"] == image_id, "container did not use the rebuilt image"
                 assert inspect["Mounts"] == [], "unexpected host/volume mount"
                 assert inspect["HostConfig"]["NetworkMode"] == "none"
                 image_workspace = json.loads(run("docker", "exec", name, "python3", "-c",
