@@ -6,6 +6,42 @@ from obench.harbor_profiles import resolve_harbor_profile
 
 
 class SandboxCodexTests(unittest.TestCase):
+    def test_repeated_usage_snapshot_is_not_charged_twice_and_resets_between_sessions(self):
+        class Base:
+            @staticmethod
+            def _metrics_from_token_count_payload(payload):
+                return payload['info']['last_token_usage']
+
+            def _convert_events_to_trajectory(self, events):
+                return [self._metrics_from_token_count_payload(event) for event in events]
+
+        obj = object.__new__(_build_agent_class(Base))
+        first = {'info': {'total_token_usage': {'input_tokens': 10, 'output_tokens': 5},
+                          'last_token_usage': {'input_tokens': 10, 'output_tokens': 5}}}
+        next_call = {'info': {'total_token_usage': {'input_tokens': 20, 'output_tokens': 10},
+                              'last_token_usage': {'input_tokens': 10, 'output_tokens': 5}}}
+        for _ in range(2):
+            result = obj._convert_events_to_trajectory([first, first, next_call])
+            self.assertEqual(result, [first['info']['last_token_usage'], None,
+                                     next_call['info']['last_token_usage']])
+        # Start a new session with the previous session's final snapshot.
+        self.assertEqual(obj._convert_events_to_trajectory([next_call]),
+                         [next_call['info']['last_token_usage']])
+
+    def test_changed_last_usage_with_unchanged_totals_remains_visible(self):
+        class Base:
+            @staticmethod
+            def _metrics_from_token_count_payload(payload):
+                return payload['info']['last_token_usage']
+        obj = object.__new__(_build_agent_class(Base))
+        first = {'info': {'total_token_usage': {'input_tokens': 10, 'output_tokens': 5},
+                          'last_token_usage': {'input_tokens': 10, 'output_tokens': 5}}}
+        contradictory = {'info': {'total_token_usage': {'input_tokens': 10, 'output_tokens': 5},
+                                  'last_token_usage': {'input_tokens': 7, 'output_tokens': 3}}}
+        self.assertIsNotNone(obj._metrics_from_token_count_payload(first))
+        self.assertEqual(obj._metrics_from_token_count_payload(contradictory),
+                         contradictory['info']['last_token_usage'])
+
     def test_model_provider_has_only_loopback_transport(self):
         cfg=codex_config()
         provider=cfg['model_providers'][cfg['model_provider']]

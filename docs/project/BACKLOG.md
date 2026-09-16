@@ -84,16 +84,13 @@ the PR, not as a "resolved" note here).
 
 ### Benchmark discrimination
 
-#### Authenticated admission for the repair sandbox
-- **What**: complete one bounded authenticated canonical suite before resuming
-  PR-derived calibration. The [repair sandbox](REPAIR_SANDBOX.md) now implements
-  network-disabled solvers, model-only transport, and external trusted grading.
-- **Evidence**: actual Docker network/filesystem/lifecycle controls and Harbor
-  baseline/reference/malformed trials pass. Provider auth and a complete live
-  suite have not been verified; native contaminated scores remain excluded.
-- **Next**: use an approved benchmark credential, verify actual provider stream
-  and peer, then validate atomic suite import. Port corrected AM106 to its own
-  external oracle. Add aggregate source/log volume quotas before hostile scale.
+#### Aggregate sandbox storage bounds
+- **What**: source/log named volumes still lack aggregate disk quotas. Export
+  limits bound what the host accepts, not what a solver can write to its volume.
+- **Next**: add and verify aggregate volume quotas before hostile scale. Keep
+  the current source/archive/export limits and fail-closed evidence checks.
+- **Reference**: [repair sandbox](REPAIR_SANDBOX.md) records the completed
+  large-log, timeout, and authenticated longer-run evidence work.
 
 #### Frontier-difficulty task tier — the graded set does not rank terra vs luna
 - **What**: build a task tier whose *expected frontier score is < 1.0*, so the
@@ -366,6 +363,15 @@ the PR, not as a "resolved" note here).
 ---
 
 ## Tracked elsewhere (in flight — will leave this doc on merge)
+
+- **Harbor custom-environment import compatibility** — standalone upstream
+  [PR #53](https://github.com/minghinmatthewlam/openbench/pull/53) normalizes an
+  omitted/null selector while retaining selector/import-path drift rejection.
+  Local patch is included in the repair smoke hardening work.
+- **Harbor repeated Codex usage snapshots** — upstream
+  [issue #3289](https://github.com/harbor-framework/harbor/issues/3289) has a
+  synthetic reproduction. Our isolated adapter carries a tested correction;
+  remove it only after an admitted Harbor pin provides equivalent behavior.
 
 - **Bounded process-group reaping** — fixed in the fork after a Linux CI
   reproduction; standalone generic patch `4c46145` is proposed in upstream

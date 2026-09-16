@@ -465,7 +465,14 @@ def validate_body(raw: bytes, config: GatewayConfig) -> dict:
                     ):
                         raise ValueError("invalid local tool namespace")
                     name = namespace + "." + name
-                if name not in names:
+                # The pinned provider may omit namespace from a returned call.
+                # Admit its short spelling only when one declared local tool
+                # matches; do not infer an explicit or ambiguous namespace.
+                unqualified_match = (
+                    "namespace" not in item and "." not in name
+                    and sum(candidate.rsplit(".", 1)[-1] == name for candidate in names) == 1
+                )
+                if name not in names and not unqualified_match:
                     raise ValueError("unknown local tool history")
             elif kind in {"function_call_output", "custom_tool_call_output"}:
                 _keys(
@@ -839,18 +846,51 @@ def _watch_disconnect(connection, stop, cancel):
             return
 
 
+def _headerless_responses_prefix(upstream):
+    """The fixed OAuth endpoint can omit Content-Type; verify SSE before relay."""
+    prefix = b""
+    limit = 1024 * 1024
+    while len(prefix) < limit:
+        chunk = upstream.read(min(16384, limit - len(prefix)))
+        if not chunk:
+            break
+        prefix += chunk
+        normalized = prefix.replace(b"\r\n", b"\n")
+        if b"\n\n" not in normalized:
+            continue
+        first = normalized.split(b"\n\n", 1)[0]
+        lines = first.split(b"\n")
+        data = [line[5:].lstrip() for line in lines if line.startswith(b"data:")]
+        events = [line[6:].strip() for line in lines if line.startswith(b"event:")]
+        event = _json(b"\n".join(data))
+        if (not isinstance(event, dict) or event.get("type") != "response.created"
+                or events not in ([], [b"response.created"])
+                or not isinstance(event.get("response"), dict)
+                or event["response"].get("object") != "response"
+                or not isinstance(event["response"].get("id"), str)
+                or not event["response"]["id"]):
+            raise ValueError("invalid Responses stream prefix")
+        return prefix
+    raise ValueError("missing or oversized Responses stream prefix")
+
+
 def _stream(handler, server, upstream):
     sent = 0
     usage = {}
     event_buffer = b""
     completed = False
-    if (
-        upstream.status != 200
-        or upstream.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-        != "text/event-stream"
-    ):
+    content_type = upstream.headers.get("Content-Type")
+    if (upstream.status != 200 or (content_type is not None and
+            content_type.split(";", 1)[0].strip().lower() != "text/event-stream")):
         handler._error(502, "upstream_rejected")
         return "upstream_rejected", sent, usage
+    prefix = b""
+    if content_type is None:
+        try:
+            prefix = _headerless_responses_prefix(upstream)
+        except (OSError, ValueError, http.client.HTTPException, RecursionError):
+            handler._error(502, "upstream_rejected")
+            return "upstream_rejected", sent, usage
     handler._stream_started = True
     handler.send_response(200)
     handler.send_header("Content-Type", "text/event-stream")
@@ -859,7 +899,8 @@ def _stream(handler, server, upstream):
     handler.end_headers()
     try:
         while not server._revoked.is_set():
-            chunk = upstream.read(16384)
+            chunk = prefix or upstream.read(16384)
+            prefix = b""
             if not chunk:
                 return ("complete" if completed else "upstream_incomplete"), sent, usage
             sent += len(chunk)
@@ -945,11 +986,13 @@ class BrokerServer(_BoundedServer, socketserver.UnixStreamServer):
             if self._revoked.is_set():
                 handler._error(503, "revoked")
                 return
-            if (
-                self._request_count >= self.config.max_requests
-                or self._active_requests >= self.config.max_concurrent_requests
-            ):
+            if self._request_count >= self.config.max_requests:
                 handler._error(429, "request_limit")
+                return
+            if self._active_requests >= self.config.max_concurrent_requests:
+                # A new tool turn can race the previous stream's cleanup.
+                # Codex retries 503; 429 is treated as exhausted quota.
+                handler._error(503, "concurrency_limit")
                 return
             self._request_count += 1
             request_id = self._request_count
@@ -1062,6 +1105,7 @@ class BrokerServer(_BoundedServer, socketserver.UnixStreamServer):
                     "input_bytes": len(raw),
                     "response_bytes": sent,
                     "outcome": outcome,
+                    "upstream_status": getattr(upstream, "status", None),
                     "usage": usage,
                     "upstream_peer": (
                         getattr(upstream, "peer", None)

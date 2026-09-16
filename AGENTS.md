@@ -6,6 +6,11 @@ or contributor picks up the strategic context, not just the mechanics in
 
 ## Local execution context
 
+The canonical local checkout is `~/Dev/openbench`, promoted from `_forks/`.
+There is no compatibility symlink. Our `fork` remote is the primary trunk;
+`origin` remains the upstream source for selective integrations. See
+[project and upstream workflow](docs/project/FORK_WORKFLOW.md).
+
 Before changing benchmark execution or starting a run, read `agents.env` when
 it exists. It is a gitignored, machine-local source of truth for where code is
 developed and where benchmarks are executed. Never commit it or put credentials
@@ -42,8 +47,10 @@ outside candidate code. An exited harness command is not proof that background
 processes stopped. Require effective denial of network answer retrieval too,
 including SSH/tailnet/host services and provider-side search. The selected
 [repair sandbox](docs/project/REPAIR_SANDBOX.md) is opt-in via suite `[sandbox]`
-with offline runtime/trial controls; its authenticated canonical route still
-requires admission. Offline probes do not admit an authenticated campaign.
+with offline runtime/trial controls, passing short authenticated controls, and
+a verified 600-second Luna timeout with complete evidence and atomic suite
+import. Renew controls when runtime or adapter bytes change. These checks do
+not establish difficulty calibration or admit an unattended campaign.
 Treat scores from an unproven boundary as diagnostic, not golden-set evidence.
 
 ## What OpenBench is

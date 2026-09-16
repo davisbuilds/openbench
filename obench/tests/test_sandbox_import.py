@@ -117,6 +117,22 @@ class SandboxImportTests(unittest.TestCase):
         self.assertIsNone(row['workspace_source'])
         self.assertIsNone(row['candidate_provenance']['final_workspace_sha256'])
 
+    def test_custom_environment_null_type_matches_omitted_lock_type(self):
+        fixture, plan = self.fixture()
+        edit_json(fixture.trial() / 'result.json',
+                  lambda value: value['config']['environment'].update(type=None))
+        self.assertEqual(len(self.import_fixture(fixture, plan)), 1)
+
+    def test_custom_environment_explicit_type_and_import_path_drift_are_rejected(self):
+        for change in ({'type': 'docker'}, {'import_path': 'other:Environment'}):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                self.root = Path(directory)
+                fixture, plan = self.fixture()
+                edit_json(fixture.trial() / 'result.json',
+                          lambda value: value['config']['environment'].update(change))
+                with self.assertRaisesRegex(HarborResultsError, 'environment.*does not match'):
+                    self.import_fixture(fixture, plan)
+
     def test_receipt_and_ledger_tampering_reject_before_output(self):
         mutations = {
             'solver_running': lambda value: value['freeze'].update(solver_stopped=False),

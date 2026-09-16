@@ -22,6 +22,10 @@ def main():
         (context / 'obench').mkdir()
         (context / 'obench/__init__.py').write_text('')
         shutil.copyfile(ROOT / 'obench/sandbox_gateway.py', context / 'obench/sandbox_gateway.py')
+        # Campaign launchers intentionally use umask 077. These are public
+        # runtime modules, and the confined UID must be able to import them.
+        for path in context.rglob('*'):
+            path.chmod(0o755 if path.is_dir() else 0o644)
         hashes = {str(p.relative_to(context)): hashlib.sha256(p.read_bytes()).hexdigest()
                   for p in sorted(context.rglob('*')) if p.is_file()}
         image_file = context.parent / (context.name + '.iid')
@@ -34,6 +38,10 @@ def main():
                                      identity, 'codex', '--version'], check=True, capture_output=True, text=True)
             if result.stdout.strip() != 'codex-cli 0.154.0':
                 raise RuntimeError('runtime CLI version differs from treatment')
+            subprocess.run(['docker', 'run', '--rm', '--network', 'none', '--cap-drop', 'ALL',
+                            '--security-opt', 'no-new-privileges', '--user', '10001:10001',
+                            identity, 'python3', '-m', 'obench.sandbox_gateway', '--help'],
+                           check=True, capture_output=True, text=True)
             receipt = {'image_id': identity, 'tag': args.tag, 'context_sha256': hashes,
                        'codex_version': result.stdout.strip()}
             args.receipt.parent.mkdir(parents=True, exist_ok=True)

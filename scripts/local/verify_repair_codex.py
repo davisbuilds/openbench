@@ -55,7 +55,8 @@ class Provider(http.server.BaseHTTPRequestHandler):
    assert any(tool.get('name')=='functions' and any(child.get('name')=='exec' for child in tool.get('tools',[])) for tool in namespaces)
    command="printf '\\n# OPENBENCH_OFFLINE_CODEX_TOOL_PROBE\\n' >> /app/scripts/profiles/__init__.py"
    code='text(await tools.exec_command('+json.dumps({'cmd':command})+'));'
-   item={'id':'tool_offline','type':'custom_tool_call','call_id':'call_offline','name':'exec','namespace':'functions','input':code,'status':'completed'}
+   # The real pinned provider returns the short tool name without namespace.
+   item={'id':'tool_offline','type':'custom_tool_call','call_id':'call_offline','name':'exec','input':code,'status':'completed'}
   response={'id':'resp_offline_'+('final' if has_output else 'tool'),'object':'response','status':'completed','output':[item],'usage':{'input_tokens':10,'output_tokens':5,'total_tokens':15}}
   events=[('response.created',{'type':'response.created','response':{**response,'status':'in_progress','output':[]}}),('response.output_item.done',{'type':'response.output_item.done','output_index':0,'item':item}),('response.completed',{'type':'response.completed','response':response})]
   data=''.join('event: '+event+'\ndata: '+json.dumps(value)+'\n\n' for event,value in events).encode()
