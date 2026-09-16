@@ -42,8 +42,9 @@ outside candidate code. An exited harness command is not proof that background
 processes stopped. Require effective denial of network answer retrieval too,
 including SSH/tailnet/host services and provider-side search. The selected
 [repair sandbox](docs/project/REPAIR_SANDBOX.md) is opt-in via suite `[sandbox]`
-with offline runtime/trial controls; its authenticated canonical route still
-requires admission. Offline probes do not admit an authenticated campaign.
+with offline runtime/trial controls and a passing bounded authenticated canonical
+control. Longer repair-trial evidence capture still requires admission before
+calibration. A short control does not admit an unattended campaign.
 Treat scores from an unproven boundary as diagnostic, not golden-set evidence.
 
 ## What OpenBench is

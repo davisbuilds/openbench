@@ -91,7 +91,10 @@ public benchmark tasks.
 The opt-in [repair sandbox](REPAIR_SANDBOX.md) keeps the solver at
 `network=none`, using a per-trial Unix socket to a restricted model gateway.
 It also separates candidate execution from oracle/reward authority. Offline controls now exercise the actual Harbor environment and verifier.
-Authenticated transport and canonical live-suite admission remain unverified.
+Authenticated transport and atomic canonical import passed a short, separately
+sealed negative control on 2026-09-16. A longer repair diagnostic exposed failed
+log export and missing required trajectory evidence; sustained capture remains
+unadmitted. See the linked sandbox reference for the distinct outcomes.
 
 Use an enforced container/Harbor read boundary with source-only agent images,
 post-agent grading, and a frozen retrieval policy. Verify actual direct and
@@ -123,14 +126,16 @@ inputs. Existing stock profiles remain unchanged. See the
 
 Remaining work:
 
-- Run one bounded authenticated canonical suite with an approved benchmark
-  credential. Verify subscription transport, actual provider peer/stream,
-  transcript/usage evidence, and atomic suite import. Offline fixtures do not
-  establish provider compatibility or treatment equivalence.
+- Fix and verify bounded large-log/timeout evidence capture, then repeat a longer
+  canonical suite with complete transcript/usage evidence and atomic import.
+  Preserve the passing authenticated short control; it does not establish
+  sustained capture or equivalence with the native treatment.
 - Port corrected AM106 to the same boundary with its own external oracle.
 - Freeze an exact pushed commit and admitted runtime on the selected execution
   host, then launch calibration in tmux with logs and an exit receipt.
 
-No new model calibration was launched during this implementation slice. The
-native contaminated screen is excluded; current control results do not establish
-that any candidate is extra hard for frontier models.
+The authenticated runs are controls and diagnostics, not admitted calibration.
+Both 600-second full-repair attempts timed out; one lacked required trajectory
+evidence, so the suite did not seal. The native contaminated screen is excluded;
+these results do not establish that any candidate is extra hard for frontier
+models.

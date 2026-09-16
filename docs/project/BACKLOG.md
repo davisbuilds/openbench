@@ -84,16 +84,23 @@ the PR, not as a "resolved" note here).
 
 ### Benchmark discrimination
 
-#### Authenticated admission for the repair sandbox
-- **What**: complete one bounded authenticated canonical suite before resuming
-  PR-derived calibration. The [repair sandbox](REPAIR_SANDBOX.md) now implements
-  network-disabled solvers, model-only transport, and external trusted grading.
-- **Evidence**: actual Docker network/filesystem/lifecycle controls and Harbor
-  baseline/reference/malformed trials pass. Provider auth and a complete live
-  suite have not been verified; native contaminated scores remain excluded.
-- **Next**: use an approved benchmark credential, verify actual provider stream
-  and peer, then validate atomic suite import. Port corrected AM106 to its own
-  external oracle. Add aggregate source/log volume quotas before hostile scale.
+#### Reliable evidence for longer repair trials
+- **What**: preserve bounded transcript/usage evidence through longer runs and
+  timeouts before admitting PR-derived calibration.
+- **Evidence (2026-09-16)**: the [repair sandbox](REPAIR_SANDBOX.md) passed real
+  authenticated Terra/Luna file-edit controls and atomic suite verification.
+  A separate 600-second repair diagnostic timed out on both arms; Luna's log
+  export failed and required ATIF evidence was absent, correctly blocking suite
+  sealing. A real Docker reproduction accepts a small agent log but rejects a
+  2 MiB + 1 byte log under the shared source-file cap. Original rejected logs
+  were not retained, so that attempt's exact cause remains unconfirmed.
+- **Next**: separate bounded log/source export policies, preserve actionable
+  export-failure diagnostics, and prove timeout/large-log capture followed by
+  atomic import. Keep the strict source and archive safety checks. Repeat the
+  longer control before calibration; do not substitute the short smoke result.
+- **Related admission**: port corrected AM106 to its own external oracle and add
+  aggregate source/log volume quotas before hostile scale. Native contaminated
+  scores remain excluded.
 
 #### Frontier-difficulty task tier — the graded set does not rank terra vs luna
 - **What**: build a task tier whose *expected frontier score is < 1.0*, so the

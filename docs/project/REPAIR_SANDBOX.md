@@ -1,8 +1,8 @@
 # Repair benchmark isolation
 
-Status: implemented as an opt-in Harbor extension, 2026-09-16. Offline runtime
-and trial controls pass. **Authenticated provider transport and a complete live
-`obench run` still require admission before calibration.**
+Status: implemented as an opt-in Harbor extension, 2026-09-16. Offline controls
+and a bounded authenticated canonical control pass. **Longer repair-trial
+evidence capture remains an admission gate before calibration.**
 
 The native calibration exposed reference/checker files from another worktree;
 those scores remain withdrawn as difficulty evidence. HOME isolation did not
@@ -58,6 +58,9 @@ records requests, actual connected peers when available, usage, and clean shutdo
 it does not record prompts or credentials. Evidence persistence failures fail the
 trial. The environment checks the runtime gateway's bytes against the reviewed
 host module before reading credentials.
+An occupied upstream slot returns retryable HTTP 503 without consuming request
+budget; the total request limit remains HTTP 429. This lets a new tool turn
+retry while the preceding stream finishes cleanup, without increasing concurrency.
 
 The admitted model/effort pairs are Terra/xhigh and Luna/max, requested through
 suite names `gpt-5.6-terra-xhigh` and `gpt-5.6-luna-max`. Existing stock treatments
@@ -172,11 +175,34 @@ Offline verification on the MacBook established:
 - Gateway socket/process tests cover policy denial, streaming, cancellation,
   quotas, receipt failures, connected-peer recording, and clean termination.
 
-These are control results, **not frontier-model difficulty measurements**. Before
-another campaign, run one bounded authenticated canonical suite with an approved
-benchmark credential, inspect its real provider peer and stream, and verify the
-atomic imported suite result. Then screen and independently confirm harder cases.
-The previous native scores remain excluded.
+Authenticated verification on the MacBook at `d7322fe` established:
+
+- Terra/xhigh and Luna/max completed a separately sealed file-edit control using
+  the real OAuth endpoint and pinned Linux CLI. Exported source contained the
+  requested edit, provider streams reached public TLS peers, both shutdown
+  receipts were clean, and canonical suite import and run-manifest verification
+  succeeded with transcript and usage evidence.
+- This was an explicit negative grading control: its instruction requested only
+  a harmless comment, so the unchanged repair checker correctly returned zero.
+  It is not a failed repair attempt or a difficulty measurement.
+- A separate full-repair diagnostic gave each model 600 seconds. Both timed out;
+  the trusted artifacts scored Terra 1.0 and Luna 0.3333. Luna's agent-log export
+  failed, leaving no converted ATIF trajectory. Required-evidence validation
+  correctly refused to seal that suite. Those trials are not admitted calibration
+  evidence, and a passing artifact is not a completed harness run.
+
+The remaining capture investigation has a concrete reproduction: a 2 MiB + 1
+byte agent-log file fails the same export route that accepts a small log. Log
+export currently shares the source-file size limit. The original rejected Luna
+logs were not retained, so this is a demonstrated limitation, not proof of that
+attempt's exact cause. Separate bounded log/source policies and retained export
+failure diagnostics need verification before longer campaigns.
+
+These are control and diagnostic results, **not frontier-model difficulty
+measurements**. Preserve the short control beside the longer-run failure, renew
+controls when runtime bytes change, and verify sustained evidence capture before
+screening and independently confirming harder cases. Previous native scores
+remain excluded. Raw trial/provider artifacts stay local-only.
 
 Residual limits: this does not defend against kernel/container-runtime exploits,
 answers already in model weights, or a malicious provider. The broker is trusted
