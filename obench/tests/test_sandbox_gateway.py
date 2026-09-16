@@ -50,6 +50,8 @@ class GatewayTests(unittest.TestCase):
         self.upstream_waiting = threading.Event()
         self.upstream_closed = threading.Event()
         self.upstream_status = 200
+        self.upstream_content_type = "text/event-stream"
+        self.upstream_prefix = b''
         self.stall_headers = False
         owner = self
 
@@ -76,8 +78,10 @@ class GatewayTests(unittest.TestCase):
                     self.wfile.write(SECRET.encode())
                     return
                 self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
+                if owner.upstream_content_type is not None:
+                    self.send_header("Content-Type", owner.upstream_content_type)
                 self.end_headers()
+                self.wfile.write(owner.upstream_prefix)
                 self.wfile.write(
                     b'data: {"type":"response.completed","response":{"usage":{"input_tokens":11,"output_tokens":7}}}\n\ndata: [DONE]\n\n'
                 )
@@ -183,6 +187,34 @@ class GatewayTests(unittest.TestCase):
         threading.Thread(target=self.relay.serve_forever, daemon=True).start()
         self.assertEqual(self.request(relay=True)[0], 200)
         self.assertEqual(len(self.requests), 1)
+
+    def test_missing_content_type_accepts_verified_responses_stream(self):
+        self.upstream_content_type = None
+        self.upstream_prefix = (
+            b'event: response.created\r\n'
+            b'data: {"type":"response.created","response":{"id":"resp_test","object":"response"}}\r\n\r\n'
+        )
+        status, raw = self.request()
+        self.assertEqual(status, 200)
+        self.assertTrue(raw.startswith(self.upstream_prefix))
+        self.assertIn(b'[DONE]', raw)
+        self.assertEqual(self.receipts[0]['outcome'], 'complete')
+        self.assertEqual(self.receipts[0]['response_bytes'], len(raw))
+
+    def test_missing_content_type_rejects_non_response_and_oversized_prefixes(self):
+        self.upstream_content_type = None
+        for prefix in (b'<html>private-error</html>', b'data: {}\n\n',
+                       b'event: response.created\ndata: not-json\n\n',
+                       b'x' * (1024 * 1024 + 1)):
+            with self.subTest(prefix=prefix[:40]):
+                self.upstream_prefix = prefix
+                status, raw = self.request()
+                self.assertEqual(status, 502)
+                self.assertNotIn(b'private-error', raw)
+
+    def test_explicit_wrong_content_type_is_rejected(self):
+        self.upstream_content_type = 'application/json'
+        self.assertEqual(self.request()[0], 502)
 
     def test_forbidden_request_shapes_never_reach_upstream(self):
         variants = [

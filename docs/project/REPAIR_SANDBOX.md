@@ -63,6 +63,13 @@ remain unchanged. This custom HTTP transport is a **distinct treatment** until
 live compatibility is established; do not pool it with native or older runs.
 The broker does not refresh OAuth. Expired credentials fail closed.
 
+The fixed provider endpoint can return a Responses event stream without a
+`Content-Type` header. In that case the broker buffers at most 1 MiB and requires
+a valid opening `response.created` SSE event before forwarding any bytes.
+Explicit incompatible content types, malformed openings, and oversized prefixes
+remain errors. The local metadata ledger includes the upstream HTTP status,
+without recording provider error bodies or response headers.
+
 ### Trusted grading
 
 The broker and solver containers must both be stopped, with PID zero, before
