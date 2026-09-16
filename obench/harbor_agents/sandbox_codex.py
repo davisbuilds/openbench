@@ -82,6 +82,30 @@ def _build_agent_class(codex):
         def _resolve_auth_json_path(self):
             return None
 
+        def _convert_events_to_trajectory(self, session_dir):
+            self._last_usage_snapshot = None
+            try:
+                return super()._convert_events_to_trajectory(session_dir)
+            finally:
+                self._last_usage_snapshot = None
+
+        def _metrics_from_token_count_payload(self, payload):
+            # Codex can repeat a cumulative usage report after partial model
+            # output (e.g. a retry). Harbor 0.20.0 otherwise charges last_usage
+            # again while keeping the unchanged cumulative final metrics.
+            info = payload.get("info")
+            if isinstance(info, dict):
+                total, last = info.get("total_token_usage"), info.get("last_token_usage")
+                if (isinstance(total, dict) and isinstance(last, dict)
+                        and all("input_tokens" in item and "output_tokens" in item
+                                and all(type(value) is int and value >= 0 for value in item.values())
+                                for item in (total, last))):
+                    snapshot = (dict(total), dict(last))
+                    if snapshot == getattr(self, "_last_usage_snapshot", None):
+                        return None
+                    self._last_usage_snapshot = snapshot
+            return super()._metrics_from_token_count_payload(payload)
+
         async def _upload_config_text(self, environment, *, content, remote_path, filename):
             # Write as the confined agent; no host path or privileged chown.
             encoded = base64.b64encode(content.encode()).decode()

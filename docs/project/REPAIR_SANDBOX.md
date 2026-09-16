@@ -68,6 +68,14 @@ remain unchanged. This custom HTTP transport is a **distinct treatment** until
 live compatibility is established; do not pool it with native or older runs.
 The broker does not refresh OAuth. Expired credentials fail closed.
 
+The adapter also corrects a pinned Harbor 0.20.0 conversion bug: an identical
+cumulative-and-last-usage snapshot can be reported again after partial model
+output. It preserves that output without charging the same snapshot twice;
+unchanged per-call counts with increased cumulative totals still count. State
+resets per conversion, raw logs and reported cumulative totals remain unchanged,
+and other inconsistencies still fail validation. Tracked upstream in
+[Harbor #3289](https://github.com/harbor-framework/harbor/issues/3289).
+
 The fixed provider endpoint can return a Responses event stream without a
 `Content-Type` header. In that case the broker buffers at most 1 MiB and requires
 a valid opening `response.created` SSE event before forwarding any bytes.
@@ -146,6 +154,8 @@ python scripts/local/verify_repair_log_export.py \
   --runtime-image "$REPAIR_IMAGE" \
   --task harbor-tasks-local/dojo-evidence-pr60-v3 \
   --output results/repair-log-export
+python scripts/local/verify_repair_trajectory.py \
+  --output results/repair-trajectory-control
 OBENCH_GRADING_TEST_IMAGE="$REPAIR_IMAGE" \
   python -m unittest obench.tests.test_sandbox_grading -v
 ```
@@ -222,6 +232,14 @@ failure diagnostics are now implemented. The offline lifecycle probe verifies
 3 MiB logs after completion and forced timeout, plus oversized-log and symlink
 refusal. A fresh authenticated longer-run check remains required before
 calibration.
+
+A subsequent 600-second-per-arm diagnostic at `01cde29` captured both raw logs
+and ATIF trajectories: Terra completed and Luna timed out. Suite import exposed
+the repeated-usage conversion bug described above and correctly refused the
+inconsistent trajectory. The correction passes both a synthetic reproduction
+and read-only replay of both captured sessions. That rejected run remains
+unchanged and is not admitted calibration; fresh canonical import is still
+required after the correction.
 
 These are control and diagnostic results, **not frontier-model difficulty
 measurements**. Preserve the short control beside the longer-run failure, renew

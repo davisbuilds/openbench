@@ -94,10 +94,14 @@ the PR, not as a "resolved" note here).
   sealing. A real Docker reproduction accepts a small agent log but rejects a
   2 MiB + 1 byte log under the shared source-file cap. Original rejected logs
   were not retained, so that attempt's exact cause remains unconfirmed.
-- **Next**: separate bounded log/source export policies, preserve actionable
-  export-failure diagnostics, and prove timeout/large-log capture followed by
-  atomic import. Keep the strict source and archive safety checks. Repeat the
-  longer control before calibration; do not substitute the short smoke result.
+- **Update**: separate log bounds and retained diagnostics now pass real Harbor
+  completion, timeout, oversize, and symlink controls. The next authenticated
+  long run captured both arms but exposed repeated Codex usage snapshots being
+  counted twice by pinned Harbor's converter. The adapter correction passes
+  synthetic and captured-log replay; tracked in
+  [Harbor #3289](https://github.com/harbor-framework/harbor/issues/3289).
+- **Next**: verify a fresh canonical longer run after the conversion correction.
+  Keep the rejected attempts intact and the strict source/archive/usage checks.
 - **Related admission**: port corrected AM106 to its own external oracle and add
   aggregate source/log volume quotas before hostile scale. Native contaminated
   scores remain excluded.
