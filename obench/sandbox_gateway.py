@@ -465,7 +465,14 @@ def validate_body(raw: bytes, config: GatewayConfig) -> dict:
                     ):
                         raise ValueError("invalid local tool namespace")
                     name = namespace + "." + name
-                if name not in names:
+                # The pinned provider may omit namespace from a returned call.
+                # Admit its short spelling only when one declared local tool
+                # matches; do not infer an explicit or ambiguous namespace.
+                unqualified_match = (
+                    "namespace" not in item and "." not in name
+                    and sum(candidate.rsplit(".", 1)[-1] == name for candidate in names) == 1
+                )
+                if name not in names and not unqualified_match:
                     raise ValueError("unknown local tool history")
             elif kind in {"function_call_output", "custom_tool_call_output"}:
                 _keys(

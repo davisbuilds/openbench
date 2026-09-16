@@ -445,6 +445,20 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(self.request(body)[0], 400)
         self.assertEqual(len(self.requests), 2)
 
+    def test_unqualified_tool_history_requires_one_declared_local_match(self):
+        tool = {"type": "custom", "name": "exec"}
+        namespace = {"type": "namespace", "name": "functions", "tools": [tool]}
+        call = {"type": "custom_tool_call", "call_id": "call_1", "name": "exec", "input": "local command"}
+        body = {**BODY, "input": [
+            {"type": "additional_tools", "role": "developer", "tools": [namespace]}, call]}
+        self.assertEqual(self.request(body)[0], 200)
+        body["input"][0]["tools"].append({**namespace, "name": "other"})
+        self.assertEqual(self.request(body)[0], 400)
+        body["input"][0]["tools"].pop()
+        call["name"] = "undeclared"
+        self.assertEqual(self.request(body)[0], 400)
+        self.assertEqual(len(self.requests), 1)
+
     def test_timeout_interrupts_stalled_response(self):
         self.block_stream = True
         self.broker.timeout_seconds = 0.3

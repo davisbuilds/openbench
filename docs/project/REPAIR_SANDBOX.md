@@ -49,6 +49,8 @@ staged only into the broker. It does not expose a generic proxy or CONNECT tunne
 Redirects, alternate routes/models, hosted web search, remote MCP, file retrieval,
 and URL-fetching input forms are rejected. Validation includes nested tool
 namespaces and `input.additional_tools`, as emitted by Codex 0.154.0.
+Provider-returned tool history may omit a namespace only when its short name
+matches one declared local tool; unknown or ambiguous names remain rejected.
 
 Request size, request count, concurrency, and duration are bounded. Disconnects,
 timeouts, and trial shutdown cancel upstream work. A trusted metadata ledger
