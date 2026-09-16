@@ -16,6 +16,20 @@ runs normally execute on the Mac Mini from an exact pushed commit. Do not edit
 source on the Mini, do not launch from a dirty or stale checkout, and check for
 active benchmark processes before starting another run.
 
+Launch every multi-trial campaign inside a named `tmux` session on the execution
+host, with persistent logs and a completion/exit-code receipt. Do not substitute
+`nohup` or a detached Python process. Verify the live session and runner after
+launch, and report the session name, host, result path and next status check.
+Follow [the campaign launch checklist](docs/benchmark-operations.md).
+
+`tmux` survives terminal/SSH disconnects, not system sleep or reboot. On macOS,
+wrap the runner with `caffeinate -i` and verify its sleep assertion. For laptop
+runs, keep AC power connected and the lid open; do not promise that caffeinate
+prevents lid-triggered sleep. Prefer the Mini for unattended runs when the
+laptop may be closed, after provisioning the exact pushed commit and runtime.
+After unexpected sleep, inspect the ledger, transcripts and power events before
+resuming; preserve original attempts and flag affected timing/timeout evidence.
+
 ## What OpenBench is
 
 A benchmark framework for comparing coding-agent **harnesses** (codex, pi,

@@ -1,7 +1,7 @@
 # PR-derived eval candidates
 
-Status: candidate preparation, 2026-09-15. These are behaviorally validated
-repair tasks, **not yet a calibrated golden set**. The target is repeatable
+Status: initial native screening complete, 2026-09-16. These are behaviorally
+validated repair tasks, **not yet an admitted golden set**. The target is repeatable
 frontier non-saturation; separating Terra from Luna is useful but not required.
 
 ## Fork baseline
@@ -110,7 +110,39 @@ Raw local smoke code and sanitized results:
 
 The public native screening spec is
 `experiments/specs/pr-derived-screen.toml` (three tasks, two arms, three trials).
-It is prepared for later calibration and has not been executed.
+The first screen used a separate local combined spec containing these three
+tasks plus a private fourth case; the public spec itself was not dispatched.
+
+## Initial native screen
+
+The September 15 screen at `fae2324` recorded all 24 intended cells (four tasks,
+two models, three trials), with no duplicate cell IDs or queue retries. The
+matrix reported complete coverage and exit 0. This is a native Codex CLI
+0.154.0 screen on one MacBook, not a portable Harbor comparison or a held-out
+difficulty estimate.
+
+| Public task | Terra xhigh scores | Luna max scores | Screening interpretation |
+|---|---|---|---|
+| `am-benchmark-pr106` | 0 / 0 / 0 | .6667 / .3333 / .3333 | Hard candidate: neither arm fully solved it |
+| `dojo-evidence-pr60` | .6667 / .6667 / .6667 | 1 / .6667 / 1 | Useful partial-repair and intermittent-success candidate |
+| `engram-batch-pr1` | 1 / 1 / 1 | 1 / 1 / 1 | Easy control in this screen |
+
+Retain these as calibration leads pending failure-family audit and fresh
+repeats. Do not infer general model superiority from three trials per task.
+The fourth case and complete audit stay local under
+`results/pr-derived-all-v1/`; do not publish its source or transcripts.
+
+The laptop slept during the campaign. All cells eventually reached the checker,
+but that does not prove uninterrupted execution. Two attempts on the private
+case timed out with passing artifacts; their original completion/error fields
+remain intact. Sleep/timeout overlap is observational, not proof that sleep
+caused the timeouts. Do not use this campaign for uninterrupted latency or
+wall-clock comparisons. The local audit retains power-event evidence.
+
+Future campaigns follow [campaign launch and recovery](../benchmark-operations.md):
+named tmux session, persistent completion receipt, verified idle-sleep prevention
+on macOS, and a host that will remain awake. Unattended execution while the
+laptop may be closed is a concrete reason to provision the Mini.
 
 ## Calibration admission
 
