@@ -56,6 +56,7 @@ strip.
 | Concern            | Upstream-owned (keep clean)      | Fork-owned (never upstream)                 |
 |--------------------|----------------------------------|---------------------------------------------|
 | Benchmark tasks    | `tasks/` (core), `tasks-imported/` | `tasks-local/` (the fork-local task tier)   |
+| Native Harbor task packages | `harbor-tasks/` | `harbor-tasks-local/` (fork calibration/admission) |
 | Experiment specs   | —                                | `experiments/specs/*`                       |
 | Model wiring       | adapter contracts in `obench/`   | `open_models_config.py`, bake-off routes    |
 | Runner/harness     | `obench/` capability             | fork-local convenience commits on `main`    |

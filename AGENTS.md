@@ -30,6 +30,15 @@ laptop may be closed, after provisioning the exact pushed commit and runtime.
 After unexpected sleep, inspect the ledger, transcripts and power events before
 resuming; preserve original attempts and flag affected timing/timeout evidence.
 
+PR-derived difficulty calibration additionally requires an enforced read
+boundary: agents must not see hidden verifiers, reference solutions, sibling
+worktrees, source history or earlier trial transcripts. Native `workspace-write`
+and HOME isolation do not establish that boundary. Before model trials, prove
+allowed workspace reads/writes and denied direct/symlink/subprocess reads of
+known-present host canaries through the actual execution route. Keep verifier
+assets out of the agent image and inject them only after agent execution ends.
+Treat scores from an unproven boundary as diagnostic, not golden-set evidence.
+
 ## What OpenBench is
 
 A benchmark framework for comparing coding-agent **harnesses** (codex, pi,

@@ -1,7 +1,7 @@
 # PR-derived eval candidates
 
-Status: initial native screening complete, 2026-09-16. These are behaviorally
-validated repair tasks, **not yet an admitted golden set**. The target is repeatable
+Status: native screen audited and **not admissible for difficulty calibration**,
+2026-09-16. These are repair candidates, **not an admitted golden set**. The target is repeatable
 frontier non-saturation; separating Terra from Luna is useful but not required.
 
 ## Fork baseline
@@ -115,20 +115,34 @@ tasks plus a private fourth case; the public spec itself was not dispatched.
 
 ## Initial native screen
 
+**Admission withdrawn after transcript and oracle audit (2026-09-16).** Two
+Dojo Luna full-score attempts read both hidden verifier and reference solution
+content from another host worktree. Native HOME isolation did not confine host
+filesystem reads. Other inspected transcripts without observed target-oracle
+reads do not prove isolation. Separately, AgentMonitor's verifier overconstrains
+study-ID representation and migration invocation; those losses cannot all be
+counted as model capability failures. Preserve the original rows, but do not use
+this screen to assign easy/medium/hard labels or claim model differences.
+
+The following table records original checker output only; its former difficulty
+interpretations are superseded. Local evidence and line references are in
+`results/pr-derived-all-v1/failure-audit.md`. Clean repeats require a corrected,
+versioned contract and an enforced read boundary, with a fresh campaign identity.
+
 The September 15 screen at `fae2324` recorded all 24 intended cells (four tasks,
 two models, three trials), with no duplicate cell IDs or queue retries. The
 matrix reported complete coverage and exit 0. This is a native Codex CLI
 0.154.0 screen on one MacBook, not a portable Harbor comparison or a held-out
 difficulty estimate.
 
-| Public task | Terra xhigh scores | Luna max scores | Screening interpretation |
+| Public task | Terra xhigh scores | Luna max scores | Audit disposition |
 |---|---|---|---|
-| `am-benchmark-pr106` | 0 / 0 / 0 | .6667 / .3333 / .3333 | Hard candidate: neither arm fully solved it |
-| `dojo-evidence-pr60` | .6667 / .6667 / .6667 | 1 / .6667 / 1 | Useful partial-repair and intermittent-success candidate |
-| `engram-batch-pr1` | 1 / 1 / 1 | 1 / 1 / 1 | Easy control in this screen |
+| `am-benchmark-pr106` | 0 / 0 / 0 | .6667 / .3333 / .3333 | Oracle contract correction required |
+| `dojo-evidence-pr60` | .6667 / .6667 / .6667 | 1 / .6667 / 1 | Both Luna full solves read hidden assets |
+| `engram-batch-pr1` | 1 / 1 / 1 | 1 / 1 / 1 | No target-oracle content read observed; boundary still unproven |
 
-Retain these as calibration leads pending failure-family audit and fresh
-repeats. Do not infer general model superiority from three trials per task.
+Retain these as diagnostic records for verifier and environment repair. Do not
+infer general model superiority or genuine saturation from this screen.
 The fourth case and complete audit stay local under
 `results/pr-derived-all-v1/`; do not publish its source or transcripts.
 
