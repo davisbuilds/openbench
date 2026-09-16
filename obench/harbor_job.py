@@ -139,6 +139,8 @@ class HarborJobSpec:
     attempts: int
     concurrency: ConcurrencyPolicy
     retry: RetryPolicy
+    environment: Mapping[str, Any] | None = None
+    verifier: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -266,6 +268,11 @@ def build_job_config(spec: HarborJobSpec) -> HarborJobArtifact:
         "agents": agents,
         **source,
     }
+    for key, extension in (("environment", spec.environment), ("verifier", spec.verifier)):
+        if extension is not None:
+            if not isinstance(extension, Mapping):
+                raise HarborJobError(f"{key} must be a mapping")
+            config[key] = dict(extension)
     json_bytes = (
         json.dumps(
             config,

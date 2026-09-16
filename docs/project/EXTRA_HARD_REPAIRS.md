@@ -88,10 +88,10 @@ public benchmark tasks.
 
 ## Clean calibration comes after admission
 
-The selected [sandbox direction](REPAIR_SANDBOX.md) keeps the solver at
+The opt-in [repair sandbox](REPAIR_SANDBOX.md) keeps the solver at
 `network=none`, using a per-trial Unix socket to a restricted model gateway.
-It also separates candidate execution from oracle/reward authority. This is
-not yet integrated into the live route; no authenticated calibration is admitted.
+It also separates candidate execution from oracle/reward authority. Offline controls now exercise the actual Harbor environment and verifier.
+Authenticated transport and canonical live-suite admission remain unverified.
 
 Use an enforced container/Harbor read boundary with source-only agent images,
 post-agent grading, and a frozen retrieval policy. Verify actual direct and
@@ -113,28 +113,24 @@ Report strict artifact success, behavior-group scores, completion/timeout,
 exclusions and individual failure mechanisms. A timeout with passing code is
 not a missing event, and a convenient six-attempt subset is not confirmation.
 
-## Immediate integration work before live repeats
+## Remaining admission before live repeats
 
-The isolated runtime is available: Docker builds and the pinned Harbor 0.20.0
-reference trial both ran successfully. The missing work is in the real model
-path, not a missing container engine:
+The opt-in `repair-v1` suite lane now pins Codex 0.154.0, preserves explicit
+Terra-xhigh/Luna-max identity, enforces a model-only gateway, and grades Dojo v3
+outside candidate authority. Task scheme 3 binds the external oracle and task
+inputs. Existing stock profiles remain unchanged. See the
+[implementation and control commands](REPAIR_SANDBOX.md).
 
-- Preserve native treatment identity explicitly. Stock Harbor currently pins
-  Codex 0.144.5 and medium effort; it rejects the Terra-xhigh/Luna-max names.
-  Add narrowly pinned stock treatments for Codex 0.154.0 with their requested
-  effort and disabled provider-side web search, retaining existing defaults and
-  the stock OAuth lifecycle. Test plan/config/result identity round trips.
-- Verify actual installed CLI version against the requested treatment. Matching
-  ATIF and result versions alone does not prove either matches the requested
-  version. Fail closed on a mismatch before admitting results.
-- Prove the selected model-transport route permits the required API traffic and
-  denies answer retrieval and unintended host services. A hostname allowlist for
-  a host-side counting proxy is not a port-specific grant; do not broadly expose
-  host services as a shortcut. Use a controlled allowed/denied endpoint pair.
-- Complete canonical task binding (dependency-only immutable base images) and
-  port corrected AM106 to the same admitted lane. Confirm buggy/reference and
-  alternate repairs there, then freeze an exact pushed run on the Mini in tmux.
+Remaining work:
 
-No new model calibration was launched during the audit/admission repair slice.
-The current local evidence distinguishes direct Docker probes, a Harbor oracle
-run, and future authenticated model admission; they are not interchangeable.
+- Run one bounded authenticated canonical suite with an approved benchmark
+  credential. Verify subscription transport, actual provider peer/stream,
+  transcript/usage evidence, and atomic suite import. Offline fixtures do not
+  establish provider compatibility or treatment equivalence.
+- Port corrected AM106 to the same boundary with its own external oracle.
+- Freeze an exact pushed commit and admitted runtime on the selected execution
+  host, then launch calibration in tmux with logs and an exit receipt.
+
+No new model calibration was launched during this implementation slice. The
+native contaminated screen is excluded; current control results do not establish
+that any candidate is extra hard for frontier models.

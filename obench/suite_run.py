@@ -202,11 +202,22 @@ def compile_suite(
     if suite.publication.scope == "public" and _suite_is_smoke(suite):
         raise SuiteRunError("smoke suites cannot declare public publication scope")
     registry = load_profile_registry(suite.project_root)
+    if suite.sandbox is not None:
+        if suite.publication.scope != "local_only":
+            raise SuiteRunError("repair sandbox suites currently require local_only publication")
+        if any(task.kind != "local" for task in suite.task_sets):
+            raise SuiteRunError("repair sandbox requires locally pinned task sets")
 
     compiled_arms: list[CompiledArm] = []
     custom_harnesses: dict[str, str] = {}
     for arm in suite.arms:
         profile = registry.get(arm.profile)
+        if suite.sandbox is not None and (
+            not isinstance(profile, StockProfileSpec) or profile.harness != "codex"
+            or arm.harness != "codex"
+            or arm.model not in {"gpt-5.6-terra-xhigh", "gpt-5.6-luna-max"}
+        ):
+            raise SuiteRunError("repair sandbox requires stock Codex Terra-xhigh or Luna-max")
         if isinstance(profile, StockProfileSpec) and arm.harness != profile.harness:
             raise SuiteRunError(
                 f"arm {arm.id!r} harness {arm.harness!r} does not match "
@@ -222,14 +233,25 @@ def compile_suite(
                     f"harness identities {previous_harness!r} and "
                     f"{arm.harness!r}"
                 )
+        sandbox_models = {"gpt-5.6-terra-xhigh": ("gpt-5.6-terra", "xhigh"),
+                          "gpt-5.6-luna-max": ("gpt-5.6-luna", "max")}
         agent = replace(
-            compile_profile(profile, arm.model),
+            compile_profile(profile, sandbox_models[arm.model][0] if suite.sandbox else arm.model),
             profile_id=arm.id,
             arm_id=arm.id,
             canonical_harness=arm.harness,
             canonical_model=arm.model,
             override_timeout_sec=suite.run.timeout_seconds,
         )
+        if suite.sandbox is not None:
+            agent = replace(
+                agent,
+                import_path="obench.harbor_agents.sandbox_codex:SandboxCodex",
+                kwargs={"version": "0.154.0", "reasoning_effort": sandbox_models[arm.model][1]},
+                # Credential paths are consumed by the trusted adapter only.
+                # The adapter must never upload them to the solver.
+                extra_allowed_hosts=(),
+            )
         compiled_arms.append(
             CompiledArm(arm=arm, profile=profile, agent=agent)
         )
@@ -239,6 +261,17 @@ def compile_suite(
         for task_set in suite.task_sets
     )
     _reject_task_collisions(compiled_task_sets)
+    if suite.sandbox is not None:
+        from .sandbox_grading import GradingError, validate_task_binding
+        for selected in compiled_task_sets:
+            if selected.task_names != ("dojo-evidence-pr60-v3",):
+                raise SuiteRunError("repair-v1 currently admits only dojo-evidence-pr60-v3")
+            task_root = selected.task_set.path / "dojo-evidence-pr60-v3"
+            metadata = tomllib.loads((task_root / "task.toml").read_text()).get("metadata", {})
+            try:
+                validate_task_binding(task_root, metadata.get("openbench_task_content_digest"))
+            except GradingError as exc:
+                raise SuiteRunError(str(exc)) from exc
 
     manifest = _semantic_manifest(
         suite,
@@ -311,6 +344,17 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
                 retry=RetryPolicy(
                     max_retries=compiled.suite.run.max_retries
                 ),
+                environment=(None if compiled.suite.sandbox is None else {
+                    "import_path": "obench.harbor_sandbox:RepairSandbox",
+                    "kwargs": {
+                        "runtime_image": compiled.suite.sandbox.runtime_image,
+                        "max_requests": compiled.suite.sandbox.max_requests,
+                    },
+                }),
+                verifier=(None if compiled.suite.sandbox is None else {
+                    "import_path": "obench.sandbox_grading:RepairVerifier",
+                    "kwargs": {"worker_image": compiled.suite.sandbox.runtime_image},
+                }),
             )
         )
         jobs.append(
@@ -350,6 +394,8 @@ def run_suite(
     ):
         raise SuiteRunError("Harbor preflight did not return the pinned build")
     _verify_custom_runtimes(compiled, harbor, run_process=run_process)
+    if compiled.suite.sandbox is not None:
+        _verify_sandbox_runtime(compiled, harbor, run_process=run_process)
 
     manifest_path = _write_manifest(compiled)
     process_env = dict(os.environ)
@@ -1042,7 +1088,7 @@ def _semantic_manifest(
                 ).hexdigest(),
             }
         )
-    return {
+    value = {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "suite": {"id": suite.id, "title": suite.title},
         "harbor": {
@@ -1073,6 +1119,42 @@ def _semantic_manifest(
         },
         "jobs": jobs,
     }
+    if suite.sandbox is not None:
+        value["sandbox"] = {
+            "kind": suite.sandbox.kind,
+            "runtime_image": suite.sandbox.runtime_image,
+            "max_requests": suite.sandbox.max_requests,
+            "implementation_sha256": _sandbox_implementation_hashes(),
+        }
+    return value
+
+
+def _sandbox_implementation_hashes() -> dict[str, str]:
+    package = Path(__file__).resolve().parent
+    modules = ("harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
+    return {"obench." + name: hashlib.sha256(
+        (package / (name.replace(".", "/") + ".py")).read_bytes()).hexdigest()
+        for name in modules}
+
+
+def _verify_sandbox_runtime(compiled: CompiledSuite, harbor: HarborBinary, *, run_process: ProcessRunner) -> None:
+    expected = compiled.manifest["sandbox"]["implementation_sha256"]
+    probe = (
+        "import hashlib,importlib.util,json,pathlib,sys; "
+        "names=json.load(sys.stdin); "
+        "print(json.dumps({n:hashlib.sha256(pathlib.Path(importlib.util.find_spec(n).origin).read_bytes()).hexdigest() for n in names}))"
+    )
+    completed = run_process(
+        [str(_harbor_python_interpreter(harbor)), "-c", probe],
+        input=json.dumps(list(expected)), check=False, capture_output=True, text=True,
+        env={"PYTHONIOENCODING": "utf-8", "PYTHONNOUSERSITE": "1"},
+    )
+    try:
+        observed = json.loads(completed.stdout)
+    except (TypeError, ValueError):
+        observed = None
+    if completed.returncode or observed != expected:
+        raise SuiteRunError("Harbor interpreter does not load the sealed sandbox implementation")
 
 
 def _semantic_task_set(item: CompiledTaskSet, root: Path) -> dict[str, Any]:
@@ -1390,7 +1472,8 @@ def _stage_stock_credentials(
     for item in compiled.arms:
         if not isinstance(item.profile, StockProfileSpec):
             continue
-        current = resolve_harbor_profile(item.profile.harness, item.arm.model)
+        current = resolve_harbor_profile(item.profile.harness,
+                                         item.agent.model_name if compiled.suite.sandbox else item.arm.model)
         previous = resolved.setdefault(item.profile.id, current)
         if previous.auth != current.auth:
             raise SuiteRunError(

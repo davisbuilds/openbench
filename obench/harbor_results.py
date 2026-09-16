@@ -302,12 +302,12 @@ def _validate_digest(value: Any, location: str) -> str:
 
 
 def _validate_openbench_task_content_digest(
-    value: Any, location: str
+    value: Any, location: str, *, allow_sandbox: bool = False
 ) -> dict[str, Any]:
     digest = _object(value, location)
     if set(digest) != {"scheme", "sha256"}:
         raise _fail(location, "expected exactly 'scheme' and 'sha256'")
-    if digest.get("scheme") != 2 or isinstance(digest.get("scheme"), bool):
+    if digest.get("scheme") not in ({2, 3} if allow_sandbox else {2}) or isinstance(digest.get("scheme"), bool):
         raise _fail(f"{location}.scheme", "expected OpenBench digest scheme 2")
     sha256 = digest.get("sha256")
     if (
@@ -318,7 +318,7 @@ def _validate_openbench_task_content_digest(
             f"{location}.sha256",
             "expected 64 lowercase hex characters",
         )
-    return {"scheme": 2, "sha256": sha256}
+    return {"scheme": digest["scheme"], "sha256": sha256}
 
 
 def _validate_openbench_harbor_export(
@@ -1013,7 +1013,7 @@ def _validate_exception_info(
 
 
 def _validate_reward(
-    trial_dir: Path, result: dict[str, Any], location: str
+    trial_dir: Path, result: dict[str, Any], location: str, *, allow_sandbox: bool = False
 ) -> tuple[
     float,
     int,
@@ -1079,6 +1079,7 @@ def _validate_reward(
     openbench_task_content_digest = _validate_openbench_task_content_digest(
         evidence.get("openbench_task_content_digest"),
         f"{location}.verifier_evidence.openbench_task_content_digest",
+        allow_sandbox=allow_sandbox,
     )
     openbench_harbor_export = _validate_openbench_harbor_export(
         evidence.get("openbench_harbor_export"),
@@ -1139,6 +1140,63 @@ def _validate_reward(
     )
 
 
+def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: float, location: str,
+                              *, expected_image: str | None = None,
+                              expected_model: str | None = None, expected_effort: str | None = None) -> Path:
+    """Bind the trusted grader, stopped solver and broker ledger to imported rows."""
+    path = trial_dir / "verifier" / "sandbox-grading.json"
+    receipt = _object(_read_json(path, location), location)
+    frozen = _object(receipt.get("freeze"), location + ".freeze")
+    graded = _object(receipt.get("grading"), location + ".grading")
+    binding = _object(receipt.get("task_binding"), location + ".task_binding")
+    binding_hash = hashlib.sha256(json.dumps(binding, sort_keys=True, separators=(",", ":"),
+                                              allow_nan=False).encode()).hexdigest()
+    if digest != {"scheme": 3, "sha256": binding_hash}:
+        raise _fail(location, "trusted task/grader manifest does not match the task digest")
+    if frozen.get("solver_stopped") is not True or frozen.get("broker_revoked") is not True:
+        raise _fail(location, "solver/model access was not terminated before grading")
+    if _number(graded.get("score"), location + ".score", minimum=0, maximum=1) != score:
+        raise _fail(location, "trusted grading score does not match reward")
+    ledger = trial_dir / "verifier" / "sandbox-gateway.jsonl"
+    _require_regular_file(ledger, location + ".gateway_ledger")
+    if frozen.get("gateway_ledger_sha256") != _sha256_file(ledger):
+        raise _fail(location, "trusted gateway ledger is missing or changed")
+    try:
+        records = [json.loads(line) for line in ledger.read_text().splitlines()]
+    except (ValueError, UnicodeError) as exc:
+        raise _fail(location, "invalid gateway ledger") from exc
+    if not records or records[-1] != {"event": "stopped", "role": "broker", "clean": True}:
+        raise _fail(location, "gateway did not record a clean shutdown")
+    gateway_hash = frozen.get("gateway_module_sha256")
+    if expected_model is not None:
+        if not isinstance(gateway_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", gateway_hash):
+            raise _fail(location, "missing verified gateway implementation hash")
+        for record in records:
+            if not isinstance(record, dict):
+                raise _fail(location, "invalid gateway ledger record")
+            if record.get("event") == "request" and (
+                record.get("model") != expected_model or record.get("effort") != expected_effort
+            ):
+                raise _fail(location, "gateway request treatment differs from locked agent")
+    worker = graded.get("worker")
+    if worker is None:
+        if score != 0 or not isinstance(graded.get("candidate_failure"), str) or not graded["candidate_failure"]:
+            raise _fail(location, "missing confined worker evidence")
+    elif not isinstance(worker, dict) or any(worker.get(k) != v for k, v in {
+        "network": "none", "user": "10001:10001", "host_mounts": False,
+        "read_only_root": True, "capabilities": "none",
+    }.items()):
+        raise _fail(location, "candidate worker boundary differs from the admitted policy")
+    elif expected_image is not None:
+        if worker.get("requested_image") != expected_image or worker.get("image_id") != frozen.get("image_id"):
+            raise _fail(location, "worker image differs from the solver runtime")
+        files = _object(frozen.get("files"), location + ".freeze.files")
+        source_hashes = {name: _object(value, location).get("sha256") for name, value in files.items()}
+        if not source_hashes or graded.get("source_sha256") != source_hashes:
+            raise _fail(location, "graded source differs from the frozen submission")
+    return path
+
+
 def _validate_artifact_source(value: Any, location: str) -> str:
     source = _string(value, location)
     pure_source = PurePosixPath(source)
@@ -1188,6 +1246,7 @@ def _validate_artifacts(
     location: str,
     *,
     required: bool,
+    rejected_source: bool = False,
 ) -> tuple[Path | None, str | None]:
     config = _object(result.get("config"), f"{location}.result.config")
     artifacts = _array(config.get("artifacts"), f"{location}.result.config.artifacts")
@@ -1304,8 +1363,10 @@ def _validate_artifacts(
             f"{location}.artifacts",
             "workspace must have type='directory' and service=null",
         )
+    if rejected_source and final_entry.get("status") != "failed":
+        raise _fail(f"{location}.artifacts", "rejected source must have status='failed'")
     if final_entry.get("status") != "ok":
-        if required:
+        if required and not rejected_source:
             raise _fail(
                 f"{location}.artifacts",
                 "workspace must have status='ok'",
@@ -1552,6 +1613,10 @@ def _validate_trial(
     agent_version = _string(
         agent_info.get("version"), f"{location}.result.agent_info.version"
     )
+    if agent_config_name == "obench.harbor_agents.sandbox_codex:SandboxCodex":
+        requested_version = _object(agent_lock.get("kwargs"), f"{location}.lock.agent.kwargs").get("version")
+        if agent_version != requested_version or agent_version != "0.154.0":
+            raise _fail(f"{location}.result.agent_info.version", "does not match pinned sandbox CLI")
     model_info = _object(
         agent_info.get("model_info"), f"{location}.result.agent_info.model_info"
     )
@@ -1607,6 +1672,7 @@ def _validate_trial(
     verifier_evidence_path = None
     openbench_task_content_digest = None
     openbench_harbor_export = None
+    sandbox_receipt_path = None
     if not terminal_failure or has_reward_evidence:
         (
             score,
@@ -1616,13 +1682,29 @@ def _validate_trial(
             verifier_evidence_path,
             openbench_task_content_digest,
             openbench_harbor_export,
-        ) = _validate_reward(trial_dir, result, location)
+        ) = _validate_reward(trial_dir, result, location, allow_sandbox=(
+            agent_config_name == "obench.harbor_agents.sandbox_codex:SandboxCodex"
+            and _object(trial_lock.get("environment"), location).get("import_path") == "obench.harbor_sandbox:RepairSandbox"
+            and _object(trial_lock.get("verifier"), location).get("import_path") == "obench.sandbox_grading:RepairVerifier"
+        ))
+        if agent_config_name == "obench.harbor_agents.sandbox_codex:SandboxCodex":
+            sandbox_receipt_path = _validate_sandbox_receipt(
+                trial_dir, openbench_task_content_digest, score, location + ".sandbox",
+                expected_image=trial_lock["environment"].get("kwargs", {}).get("runtime_image"),
+                expected_model=agent_lock.get("model_name"),
+                expected_effort=agent_lock.get("kwargs", {}).get("reasoning_effort"),
+            )
 
+    rejected_source = (
+        sandbox_receipt_path is not None and score == 0
+        and _read_json(sandbox_receipt_path, location)["grading"].get("candidate_failure") == "invalid_source_artifact"
+    )
     manifest_path, workspace_digest = _validate_artifacts(
         trial_dir,
         result,
         location,
         required=not terminal_failure,
+        rejected_source=rejected_source,
     )
 
     trajectory_candidate = trial_dir / "agent" / "trajectory.json"
@@ -1701,6 +1783,7 @@ def _validate_trial(
         "result_path": result_path,
         "reward_path": reward_path,
         "verifier_evidence_path": verifier_evidence_path,
+        "sandbox_receipt_path": sandbox_receipt_path,
         "manifest_path": manifest_path,
         "trajectory_path": trajectory_path,
         "trial_id": trial_id,
@@ -2577,6 +2660,11 @@ def load_rows(
                 ),
                 "temporal_matched_block_claim": False,
             }
+            if item["sandbox_receipt_path"] is not None:
+                provenance["sandbox_grading_sha256"] = _sha256_file(item["sandbox_receipt_path"])
+                provenance["sandbox_gateway_module_sha256"] = _read_json(
+                    item["sandbox_receipt_path"], "sandbox receipt"
+                )["freeze"]["gateway_module_sha256"]
             row = {field: None for field in ROW_FIELDS}
             row.update(
                 {
