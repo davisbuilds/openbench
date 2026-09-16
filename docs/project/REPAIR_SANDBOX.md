@@ -101,6 +101,24 @@ shutdown receipt, gateway ledger hash, worker restrictions, and matching frozen
 source/image evidence. Ordinary digest schemes are unchanged. This lane is
 currently local-only; public publication is rejected.
 
+### Log export
+
+Source archives retain their 2 MiB per-file and 16 MiB total limits. Agent logs
+and declared log artifacts have a separate 16 MiB per-file and 48 MiB total
+policy, inside the existing 64 MiB transfer and 4,096-entry bounds. Directory
+and single-file downloads use the same log policy. Links, special files, path
+escapes, duplicates, and malformed archives remain rejected before file writes.
+
+Export failures leave a host-written, local-only JSON diagnostic under the
+trial's `verifier/sandbox-exports/`. It records the requested path, archive size
+when known, failure class, and violated size/limit when available; it contains
+no transcript body or Docker stderr. A transfer-limit observation is a lower
+bound, not a claim to know the entire rejected archive size. Rejected transcripts
+are not copied outside those limits. Diagnostic persistence errors are explicit;
+the environment also reports export failure at stop after cleaning up, because
+pinned Harbor catches the original download exception. Missing required ATIF
+evidence continues to block suite sealing.
+
 ## Build and verify
 
 Build the immutable runtime, then use the returned `image_id`, not the mutable
@@ -124,6 +142,10 @@ python scripts/local/verify_repair_lifecycle.py \
   --task harbor-tasks-local/dojo-evidence-pr60-v3 \
   --reference tasks-local/dojo-evidence-pr60/solution \
   --output results/repair-lifecycle
+python scripts/local/verify_repair_log_export.py \
+  --runtime-image "$REPAIR_IMAGE" \
+  --task harbor-tasks-local/dojo-evidence-pr60-v3 \
+  --output results/repair-log-export
 OBENCH_GRADING_TEST_IMAGE="$REPAIR_IMAGE" \
   python -m unittest obench.tests.test_sandbox_grading -v
 ```
@@ -196,7 +218,10 @@ byte agent-log file fails the same export route that accepts a small log. Log
 export currently shares the source-file size limit. The original rejected Luna
 logs were not retained, so this is a demonstrated limitation, not proof of that
 attempt's exact cause. Separate bounded log/source policies and retained export
-failure diagnostics need verification before longer campaigns.
+failure diagnostics are now implemented. The offline lifecycle probe verifies
+3 MiB logs after completion and forced timeout, plus oversized-log and symlink
+refusal. A fresh authenticated longer-run check remains required before
+calibration.
 
 These are control and diagnostic results, **not frontier-model difficulty
 measurements**. Preserve the short control beside the longer-run failure, renew

@@ -23,6 +23,8 @@ RELAY_SOCKET = "/run/openbench-model/gateway.sock"
 RELAY_PORT = 8765
 MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_SOURCE_BYTES = 16 * 1024 * 1024
+MAX_LOG_FILE_BYTES = 16 * 1024 * 1024
+MAX_LOG_BYTES = 48 * 1024 * 1024
 MAX_TRANSFER_BYTES = 64 * 1024 * 1024
 MAX_FILES = 4096
 
@@ -39,7 +41,17 @@ class SandboxArtifactError(SandboxError):
 
 
 class TransferLimitError(SandboxError):
-    pass
+    def __init__(self, message, *, observed=None, limit=None):
+        super().__init__(message)
+        self.violation = {"kind": "transfer_bytes", "observed_at_least": observed, "limit": limit}
+
+
+class ArchiveLimitError(SandboxError):
+    def __init__(self, message, *, kind, observed, limit, path=None):
+        super().__init__(message)
+        self.violation = {"kind": kind, "observed": observed, "limit": limit}
+        if path is not None:
+            self.violation["path"] = path[:1024]
 
 
 def validate_image(image: str) -> str:
@@ -113,7 +125,8 @@ def pack_files(files: dict[str, bytes]) -> bytes:
 
 
 def unpack_files(data: bytes, *, root: str = ".", allowed: set[str] | None = None,
-                 total_limit: int = MAX_SOURCE_BYTES) -> dict[str, bytes]:
+                 total_limit: int = MAX_SOURCE_BYTES,
+                 file_limit: int = MAX_FILE_BYTES) -> dict[str, bytes]:
     """Parse Docker's tar without extracting or trusting any archive metadata."""
     if len(data) > MAX_TRANSFER_BYTES:
         raise SandboxError("archive exceeds transfer bound")
@@ -140,11 +153,13 @@ def unpack_files(data: bytes, *, root: str = ".", allowed: set[str] | None = Non
                     continue
                 if not entry.isreg() or entry.issparse() or entry.linkname:
                     raise SandboxError("archive contains links or special files")
-                if entry.size < 0 or entry.size > MAX_FILE_BYTES:
-                    raise SandboxError("archive file exceeds bound")
+                if entry.size < 0 or entry.size > file_limit:
+                    raise ArchiveLimitError("archive file exceeds bound", kind="file_bytes",
+                                            path=name, observed=entry.size, limit=file_limit)
                 total += entry.size
                 if total > total_limit:
-                    raise SandboxError("archive content exceeds bound")
+                    raise ArchiveLimitError("archive content exceeds bound", kind="total_bytes",
+                                            observed=total, limit=total_limit)
                 stream = archive.extractfile(entry)
                 if stream is None:
                     raise SandboxError("missing archive file data")
@@ -319,7 +334,7 @@ async def docker_bytes(*args: str, data: bytes | None = None, limit: int = MAX_T
                 return b"".join(chunks)
             size += len(chunk)
             if size > bound:
-                raise TransferLimitError("Docker output exceeded its bound")
+                raise TransferLimitError("Docker output exceeded its bound", observed=size, limit=bound)
             chunks.append(chunk)
     async def send():
         if data is not None:
@@ -556,24 +571,50 @@ os.chown('/run/openbench-model', 0, 10001)
                 write_files(Path(destination), self._frozen_files)
                 return dict(self._receipt)
 
+        async def _download_logs(self, source, destination, *, single_file=False):
+            archive = None
+            try:
+                archive = await docker_bytes("cp", self._containers["main"] + ":" + source, "-")
+                files = unpack_files(archive, file_limit=MAX_LOG_FILE_BYTES, total_limit=MAX_LOG_BYTES)
+                if single_file:
+                    name = PurePosixPath(source).name
+                    if set(files) != {name}:
+                        raise SandboxError("unexpected file export")
+                    files = {Path(destination).name: files[name]}
+                    destination = Path(destination).parent
+                write_files(Path(destination), files)
+            except (SandboxError, OSError, TimeoutError) as exc:
+                # Harbor catches download errors without their reason. Preserve
+                # bounded, content-free diagnostics outside the solver's logs.
+                report = {"schema_version": 1, "source": source.removesuffix("/.")[:1024],
+                          "archive_bytes": len(archive) if archive is not None else None,
+                          "error_type": type(exc).__name__,
+                          "error": str(exc) if isinstance(exc, SandboxError) else "log export I/O failed",
+                          "violation": getattr(exc, "violation", None),
+                          "limits": {"file_bytes": MAX_LOG_FILE_BYTES, "total_bytes": MAX_LOG_BYTES,
+                                     "transfer_bytes": MAX_TRANSFER_BYTES, "files": MAX_FILES}}
+                try:
+                    write_files(self.trial_paths.verifier_dir / "sandbox-exports",
+                                {uuid.uuid4().hex + ".json": (json.dumps(report) + "\n").encode()})
+                except (SandboxError, OSError) as diagnostic_error:
+                    self._log_export_error = "log export diagnostic persistence failed"
+                    raise SandboxError(self._log_export_error) from diagnostic_error
+                self._log_export_error = "log export failed; see verifier/sandbox-exports"
+                raise
+
         async def download_dir(self, source_dir, target_dir):
             if source_dir.rstrip("/") == "/app":
                 await self.freeze_source(target_dir)
                 return
             if source_dir.rstrip("/") not in ("/logs/agent", "/logs/artifacts"):
                 raise SandboxError("unapproved directory export")
-            archive = await docker_bytes("cp", self._containers["main"] + ":" + source_dir.rstrip("/") + "/.", "-")
-            write_files(Path(target_dir), unpack_files(archive, total_limit=MAX_TRANSFER_BYTES))
+            await self._download_logs(source_dir.rstrip("/") + "/.", target_dir)
 
         async def download_file(self, source_path, target_path):
             path = PurePosixPath(source_path)
             if not str(path).startswith("/logs/agent/") or ".." in path.parts:
                 raise SandboxError("unapproved file export")
-            archive = await docker_bytes("cp", self._containers["main"] + ":" + str(path), "-")
-            files = unpack_files(archive)
-            if set(files) != {path.name}:
-                raise SandboxError("unexpected file export")
-            write_files(Path(target_path).parent, {Path(target_path).name: files[path.name]})
+            await self._download_logs(str(path), target_path, single_file=True)
 
         async def exec(self, command, cwd=None, env=None, timeout_sec=None, user=None):
             if self._sealed or str(user) not in ("None", "10001", "10001:10001"):
@@ -659,6 +700,10 @@ os.chown('/run/openbench-model', 0, 10001)
                     await self.seal()
             finally:
                 await self._cleanup()
+            if getattr(self, "_log_export_error", None):
+                # Make failure visible even when Harbor swallowed the download
+                # exception. Always remove containers/volumes before reporting it.
+                raise SandboxError(self._log_export_error)
 
     RepairSandbox.__name__ = "RepairSandbox"
     RepairSandbox.__qualname__ = "RepairSandbox"
