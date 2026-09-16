@@ -275,7 +275,11 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
         saved = {name: os.environ.get(name) for name in key_names}
         saved_candidate_env = dict(getattr(candidate, "env", {}))
         saved_auth = list(getattr(candidate, "auth_files", []))
-        unsafe_inheritance = bool(getattr(candidate, "inherit_env", False))
+        # This refusal governs arbitrary manifest commands. Config variants
+        # retain their native adapter auth checks; captured variants separately
+        # require inherit_env=false during manifest validation.
+        unsafe_inheritance = (candidate.kind == "manifest"
+                              and bool(getattr(candidate, "inherit_env", False)))
         try:
             for name in key_names:
                 os.environ[name] = INVALID_KEY
