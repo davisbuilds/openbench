@@ -196,7 +196,9 @@ sys.exit(0 if all(checks.values()) else 1)
                            "mounts": inspect["Mounts"], "network": "none",
                            "positive_write_observed": True, "host_canary_unchanged": True}
                 if expected_pass:
-                    # Agent phase has ended. Only now inject verifier files.
+                    # This probe has no live harness or untrusted descendants.
+                    # Same-container injection is an offline task control only,
+                    # not proof of production agent/grader phase separation.
                     # Reference oracle is a separate run, never an agent run.
                     if kind == "reference":
                         run("docker", "cp", str(TASK / "solution"), name + ":/solution")

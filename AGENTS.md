@@ -36,7 +36,13 @@ worktrees, source history or earlier trial transcripts. Native `workspace-write`
 and HOME isolation do not establish that boundary. Before model trials, prove
 allowed workspace reads/writes and denied direct/symlink/subprocess reads of
 known-present host canaries through the actual execution route. Keep verifier
-assets out of the agent image and inject them only after agent execution ends.
+assets out of the agent image. Terminate all solver processes before artifact
+extraction; grade in a separate environment, with oracle and reward authority
+outside candidate code. An exited harness command is not proof that background
+processes stopped. Require effective denial of network answer retrieval too,
+including SSH/tailnet/host services and provider-side search. The selected
+[sandbox design](docs/project/REPAIR_SANDBOX.md) is not yet live-integrated;
+offline Docker probes do not admit an authenticated campaign.
 Treat scores from an unproven boundary as diagnostic, not golden-set evidence.
 
 ## What OpenBench is

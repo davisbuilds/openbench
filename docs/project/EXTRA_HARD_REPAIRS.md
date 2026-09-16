@@ -88,6 +88,11 @@ public benchmark tasks.
 
 ## Clean calibration comes after admission
 
+The selected [sandbox direction](REPAIR_SANDBOX.md) keeps the solver at
+`network=none`, using a per-trial Unix socket to a restricted model gateway.
+It also separates candidate execution from oracle/reward authority. This is
+not yet integrated into the live route; no authenticated calibration is admitted.
+
 Use an enforced container/Harbor read boundary with source-only agent images,
 post-agent grading, and a frozen retrieval policy. Verify actual direct and
 indirect access refusal, including a deliberately exposed control that proves

@@ -30,7 +30,9 @@ native task with this v2 oracle substituted, not from the original oracle.
 - No solution, checker, source Git history, previous attempt, host checkout, or
   daily harness configuration is mounted or copied into the agent image.
 - `tests/` is a separate verifier payload, injected **after** the agent phase.
-  `solution/` is for a separate oracle trial only.
+  `solution/` is for a separate oracle trial only. This offline fixture does not
+  prove background-process termination; live execution must use the stronger
+  [solver/grader separation](../../docs/project/REPAIR_SANDBOX.md).
 - The checked-in task policy is `no-network`. The offline probe enforces this
   with Docker's `--network none`, no mounts, dropped capabilities, and
   `no-new-privileges`.

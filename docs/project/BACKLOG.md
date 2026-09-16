@@ -84,6 +84,17 @@ the PR, not as a "resolved" note here).
 
 ### Benchmark discrimination
 
+#### Live repair sandbox and trusted grading
+- **What**: integrate the [repair sandbox design](REPAIR_SANDBOX.md) before
+  resuming PR-derived calibration: no external solver network, a per-trial
+  model-only gateway, and oracle/reward authority outside candidate execution.
+- **Evidence**: the native screen exposed reference/checker files; the new
+  Docker no-network probe is offline only. The current counting proxy is not a
+  retrieval firewall, and the Dojo verifier imports candidate code in-process.
+- **Next**: prove the socket transport with controlled fixtures, then integrate
+  the pinned CLI/profile, Harbor lifecycle and canonical suite admission.
+  Offline plumbing must not be reported as live-model isolation.
+
 #### Frontier-difficulty task tier — the graded set does not rank terra vs luna
 - **What**: build a task tier whose *expected frontier score is < 1.0*, so the
   two daily drivers (terra-xhigh, luna-max) can be ranked on capability, not just
