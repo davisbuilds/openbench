@@ -372,7 +372,7 @@ class GatewayTests(unittest.TestCase):
         conn.close()
         self.assertTrue(self.upstream_closed.wait(1))
 
-    def test_concurrent_limit_refuses_second_call(self):
+    def test_concurrent_limit_is_retryable_without_spending_request_budget(self):
         self.block_stream = True
         conn = UnixConnection(self.socket)
         conn.request(
@@ -380,11 +380,19 @@ class GatewayTests(unittest.TestCase):
         )
         response = conn.getresponse()
         self.assertTrue(self.upstream_waiting.wait(2))
-        self.assertEqual(self.request()[0], 429)
+        self.assertEqual(self.request()[0], 503)
+        self.assertEqual(self.broker._request_count, 1)
         self.assertEqual(len(self.requests), 1)
         response.close()
         conn.close()
         self.assertTrue(self.upstream_closed.wait(1))
+        deadline = time.monotonic() + 1
+        while self.broker._active_requests and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertEqual(self.broker._active_requests, 0)
+        self.block_stream = False
+        self.assertEqual(self.request()[0], 200)
+        self.assertEqual(len(self.requests), 2)
 
     def test_additional_namespaced_tools_are_validated_recursively(self):
         tool = {

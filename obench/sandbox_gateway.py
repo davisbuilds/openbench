@@ -986,11 +986,13 @@ class BrokerServer(_BoundedServer, socketserver.UnixStreamServer):
             if self._revoked.is_set():
                 handler._error(503, "revoked")
                 return
-            if (
-                self._request_count >= self.config.max_requests
-                or self._active_requests >= self.config.max_concurrent_requests
-            ):
+            if self._request_count >= self.config.max_requests:
                 handler._error(429, "request_limit")
+                return
+            if self._active_requests >= self.config.max_concurrent_requests:
+                # A new tool turn can race the previous stream's cleanup.
+                # Codex retries 503; 429 is treated as exhausted quota.
+                handler._error(503, "concurrency_limit")
                 return
             self._request_count += 1
             request_id = self._request_count
