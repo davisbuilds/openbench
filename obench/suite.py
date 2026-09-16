@@ -82,6 +82,13 @@ class PublicationPolicy:
 
 
 @dataclass(frozen=True)
+class RepairSandboxPolicy:
+    kind: str
+    runtime_image: str
+    max_requests: int = 200
+
+
+@dataclass(frozen=True)
 class Suite:
     path: Path
     project_root: Path
@@ -94,6 +101,7 @@ class Suite:
     run: RunPolicy
     evidence: EvidenceRequirements
     publication: PublicationPolicy
+    sandbox: RepairSandboxPolicy | None = None
 
 
 def load_suite(
@@ -130,8 +138,10 @@ def load_suite(
             "run",
             "evidence",
             "publication",
+            "sandbox",
         },
-        "suite",
+        "suite", required={"schema_version", "id", "title", "harbor", "task_sets",
+                           "arms", "run", "evidence", "publication"},
     )
     schema_version = _integer(raw.get("schema_version"), "schema_version", minimum=1)
     if schema_version != SCHEMA_VERSION:
@@ -160,7 +170,25 @@ def load_suite(
         run=run,
         evidence=evidence,
         publication=publication,
+        sandbox=_parse_sandbox(raw.get("sandbox")),
     )
+
+
+def _parse_sandbox(value: Any) -> RepairSandboxPolicy | None:
+    if value is None:
+        return None
+    table = _expect_table(value, "sandbox")
+    _expect_keys(table, {"kind", "runtime_image", "max_requests"}, "sandbox",
+                 required={"kind", "runtime_image"})
+    if table["kind"] != "repair-v1":
+        raise SuiteError("sandbox.kind must be repair-v1")
+    image = _string(table["runtime_image"], "sandbox.runtime_image")
+    if re.fullmatch(r"(?:[A-Za-z0-9][A-Za-z0-9._/:+-]*@)?sha256:[0-9a-f]{64}", image) is None:
+        raise SuiteError("sandbox.runtime_image must be an immutable image digest")
+    limit = _integer(table.get("max_requests", 200), "sandbox.max_requests", minimum=1)
+    if limit > 1000:
+        raise SuiteError("sandbox.max_requests must not exceed 1000")
+    return RepairSandboxPolicy("repair-v1", image, limit)
 
 
 def _project_root(

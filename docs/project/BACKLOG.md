@@ -84,16 +84,16 @@ the PR, not as a "resolved" note here).
 
 ### Benchmark discrimination
 
-#### Live repair sandbox and trusted grading
-- **What**: integrate the [repair sandbox design](REPAIR_SANDBOX.md) before
-  resuming PR-derived calibration: no external solver network, a per-trial
-  model-only gateway, and oracle/reward authority outside candidate execution.
-- **Evidence**: the native screen exposed reference/checker files; the new
-  Docker no-network probe is offline only. The current counting proxy is not a
-  retrieval firewall, and the Dojo verifier imports candidate code in-process.
-- **Next**: prove the socket transport with controlled fixtures, then integrate
-  the pinned CLI/profile, Harbor lifecycle and canonical suite admission.
-  Offline plumbing must not be reported as live-model isolation.
+#### Authenticated admission for the repair sandbox
+- **What**: complete one bounded authenticated canonical suite before resuming
+  PR-derived calibration. The [repair sandbox](REPAIR_SANDBOX.md) now implements
+  network-disabled solvers, model-only transport, and external trusted grading.
+- **Evidence**: actual Docker network/filesystem/lifecycle controls and Harbor
+  baseline/reference/malformed trials pass. Provider auth and a complete live
+  suite have not been verified; native contaminated scores remain excluded.
+- **Next**: use an approved benchmark credential, verify actual provider stream
+  and peer, then validate atomic suite import. Port corrected AM106 to its own
+  external oracle. Add aggregate source/log volume quotas before hostile scale.
 
 #### Frontier-difficulty task tier — the graded set does not rank terra vs luna
 - **What**: build a task tier whose *expected frontier score is < 1.0*, so the

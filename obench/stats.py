@@ -24,6 +24,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import tomllib
 from collections import Counter, defaultdict
@@ -753,6 +754,14 @@ def validate_suite_rows(rows, *, for_publication=False):
         ):
             raise ValueError("suite row has a non-canonical embedded manifest")
         _validate_suite_manifest_shape(manifest, digest)
+        if "sandbox" in manifest and (
+            row.get("score") is not None
+            or "sandbox_grading_sha256" in provenance
+            or "sandbox_gateway_module_sha256" in provenance
+        ):
+            expected_gateway = manifest["sandbox"]["implementation_sha256"]["obench.sandbox_gateway"]
+            if provenance.get("sandbox_gateway_module_sha256") != expected_gateway:
+                raise ValueError("suite row sandbox gateway differs from sealed implementation")
         manifests[digest] = manifest
         publication = manifest.get("publication")
         if (
@@ -1007,8 +1016,10 @@ def _validate_suite_manifest_shape(manifest, digest):
         "publication",
         "jobs",
     }
-    if set(manifest) != expected_fields:
+    if set(manifest) not in (expected_fields, expected_fields | {"sandbox"}):
         raise ValueError("suite manifest has unexpected or missing fields")
+    if "sandbox" in manifest:
+        _validate_suite_sandbox_policy(manifest)
     if (
         not isinstance(manifest.get("suite"), dict)
         or set(manifest["suite"]) != {"id", "title"}
@@ -1084,6 +1095,37 @@ def _validate_suite_manifest_shape(manifest, digest):
     _reject_public_manifest_paths(manifest)
     if hashlib.sha256(_canonical_suite_manifest_bytes(manifest)).hexdigest() != digest:
         raise ValueError("suite manifest digest does not match canonical body")
+
+
+def _validate_suite_sandbox_policy(manifest):
+    policy = manifest["sandbox"]
+    publication = manifest.get("publication")
+    if not isinstance(publication, dict) or publication.get("scope") != "local_only":
+        raise ValueError("suite manifest sandbox requires local_only publication")
+    if not isinstance(policy, dict) or set(policy) != {
+        "kind", "runtime_image", "max_requests", "implementation_sha256"
+    }:
+        raise ValueError("suite manifest sandbox policy fields are invalid")
+    image = policy["runtime_image"]
+    limit = policy["max_requests"]
+    if (
+        policy["kind"] != "repair-v1"
+        or not isinstance(image, str)
+        or re.fullmatch(r"(?:[A-Za-z0-9][A-Za-z0-9._/:+-]*@)?sha256:[0-9a-f]{64}", image) is None
+        or type(limit) is not int
+        or not 1 <= limit <= 1000
+    ):
+        raise ValueError("suite manifest sandbox policy is invalid")
+    hashes = policy["implementation_sha256"]
+    if (
+        not isinstance(hashes, dict)
+        or set(hashes) != {
+            "obench.harbor_sandbox", "obench.sandbox_gateway",
+            "obench.sandbox_grading", "obench.harbor_agents.sandbox_codex",
+        }
+        or not all(_sha256_hex(value) for value in hashes.values())
+    ):
+        raise ValueError("suite manifest sandbox implementation hashes are invalid")
 
 
 def _reject_public_manifest_paths(value):
