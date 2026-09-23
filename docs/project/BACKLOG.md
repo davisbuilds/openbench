@@ -7,7 +7,7 @@ commitment for the active task. Add an item only when it cannot be fixed inline
 and represents recurring friction, meaningful risk or cost, an unresolved
 decision, or a concrete trigger.
 
-This is a fork of `minghinmatthewlam/openbench` under `~/Dev/_forks/`. Capability
+This is a maintained fork of `minghinmatthewlam/openbench`. Capability
 that belongs upstream is tracked as an upstream issue/PR (linked below);
 fork-local convenience stays here.
 

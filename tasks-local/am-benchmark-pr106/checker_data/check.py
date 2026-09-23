@@ -9,7 +9,11 @@ import sys
 import tempfile
 
 workspace, task = (Path(p).resolve() for p in sys.argv[1:])
-deps = Path(os.environ.get('AGENTMONITOR_DEPS', '/Users/dg-mac-mini/Dev/agentmonitor/node_modules')).resolve()
+deps_env = os.environ.get('AGENTMONITOR_DEPS')
+if not deps_env:
+    print('SKIP: set AGENTMONITOR_DEPS to a host-compatible node_modules directory', file=sys.stderr)
+    sys.exit(77)
+deps = Path(deps_env).resolve()
 if not deps.is_dir() or not shutil.which('node'):
     print('SKIP: node or AGENTMONITOR_DEPS unavailable', file=sys.stderr)
     sys.exit(77)

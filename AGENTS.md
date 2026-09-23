@@ -6,8 +6,7 @@ or contributor picks up the strategic context, not just the mechanics in
 
 ## Local execution context
 
-The canonical local checkout is `~/Dev/openbench`, promoted from `_forks/`.
-There is no compatibility symlink. Our `fork` remote is the primary trunk;
+This checkout's `fork` remote is the primary trunk;
 `origin` remains the upstream source for selective integrations. See
 [project and upstream workflow](docs/project/FORK_WORKFLOW.md).
 

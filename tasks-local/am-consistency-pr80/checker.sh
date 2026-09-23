@@ -15,7 +15,7 @@ set -uo pipefail
 
 # Canonical deps (native better-sqlite3 built for this host's node). Override via
 # AGENTMONITOR_DEPS. Machine-specific by design -- this is a fork-local task.
-DEPS="${AGENTMONITOR_DEPS:-/Users/dg-mac-mini/Dev/agentmonitor/node_modules}"
+DEPS="${AGENTMONITOR_DEPS:-}"
 
 fail0() { echo "SCORE: 0.0"; exit 1; }
 # Exit 77 = "cannot run in this environment" (autotools skip convention).
@@ -25,8 +25,8 @@ fail0() { echo "SCORE: 0.0"; exit 1; }
 skip77() { echo "SKIP: $*" >&2; exit 77; }
 
 if [ ! -d src ]; then echo "FAIL: src/ missing in workspace" >&2; fail0; fi
-if [ ! -d "$DEPS" ]; then
-  skip77 "agentmonitor node_modules not found at $DEPS (set AGENTMONITOR_DEPS); env-gated"
+if [ -z "$DEPS" ] || [ ! -d "$DEPS" ]; then
+  skip77 "set AGENTMONITOR_DEPS to a host-compatible node_modules directory; env-gated"
 fi
 
 # provision deps (read-only symlink) + hidden regression tests
