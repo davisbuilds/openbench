@@ -346,6 +346,9 @@ the PR, not as a "resolved" note here).
   `data/` on both this fork and `origin/main`): 39 files contain the same
   contributor home-path marker; 6 files contain proxy cell token assignments.
   This inventory does not establish whether any token is still usable.
+- **Current guard**: `.publication-hygiene.json` pins existing text captures
+  with structural matches by SHA256. CI rejects changed pins and scans all new
+  tracked text; the pinned list is a review queue, not a clearance of its data.
 - **Next**: review the capture fields with upstream, determine token validity
   and redaction scope, and account for task/result digests before changing
   published evidence. Keep any exact private markers out of public docs.
