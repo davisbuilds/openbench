@@ -54,9 +54,9 @@ cleanly. The regression tests assert *behavior*, so any correct fix scores.
 
 ## Caveats / portability
 
-- **Fork-local, machine-specific.** The checker needs a prebuilt agentmonitor
-  `node_modules` (native `better-sqlite3` for this host's node) at
-  `/Users/dg-mac-mini/Dev/agentmonitor/node_modules` or `$AGENTMONITOR_DEPS`.
+- **Fork-local, machine-specific.** The checker needs `$AGENTMONITOR_DEPS` set
+  to prebuilt agentmonitor `node_modules` with native `better-sqlite3` for the
+  host's Node version. The parser snapshot uses an anonymized example slug.
   Not portable to CI without vendoring deps or a docker image.
 - **Local exec only** as written (checker provisions deps on the host). The task
   is the user's own trusted code, so local mode is acceptable here.

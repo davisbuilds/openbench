@@ -2,7 +2,9 @@
 
 This is a versioned correction of `am-benchmark-pr106`, not a harder variant and
 not an untouched historical checkout. No difficulty claim is made before fresh,
-properly isolated calibration. Revision 1 and its results must remain unchanged.
+properly isolated calibration. Historical trial results remain bound to their
+original task bytes; the published snapshots now have an anonymized example
+home-directory slug in one parser comment, with updated source manifests.
 
 ## Source and license
 

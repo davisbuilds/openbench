@@ -318,7 +318,7 @@
     {
       "path": "src/parser/claude-code.ts",
       "source_revision": "d33ef01584fe78f686ef921995f55e0ce70b9760",
-      "sha256": "71c14c02dd569f7d71e4ee01034e8ac3068cdf49f42ded20b8489bd5dc9264f0"
+      "sha256": "4305d78687a173805d55aaae6a282bfe82042de9e6e8629c6a5eff88d02078e1"
     },
     {
       "path": "src/parser/codex-sessions.ts",

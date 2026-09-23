@@ -21,9 +21,12 @@ are restored verbatim to their pre-review versions:
 
 The solution overlay restores exactly those files to the oracle commit. This is
 an explicitly constructed mixed snapshot, not an untouched historical checkout.
-All other source bytes are unmodified. `SOURCE_MANIFEST.json` records per-file
-SHA256s and source revisions. Package metadata, lockfile, workspace configuration,
-TypeScript configuration, and `.nvmrc` come from the oracle commit.
+All other source bytes are unmodified except a publication-only anonymization
+of the example home-directory slug in `src/parser/claude-code.ts`.
+`SOURCE_MANIFEST.json` records the published per-file SHA256s and source revisions.
+Earlier trial results remain tied to the original published task bytes. Package
+metadata, lockfile, workspace configuration, TypeScript configuration, and
+`.nvmrc` come from the oracle commit.
 
 The model workspace excludes Git history, review comments, provenance, solution,
 verifier, upstream tests, frontend, documentation, credentials, and live data.
@@ -92,8 +95,7 @@ because no whole bucket is complete; per-test results preserve that progress.
 
 This is a fork-local native-dependency task matching the existing
 `tasks-local/am-consistency-pr80` execution shape. `AGENTMONITOR_DEPS` must point
-to an AgentMonitor `node_modules` built for the verifier's Node/OS/architecture;
-the checker defaults to `/Users/dg-mac-mini/Dev/agentmonitor/node_modules`.
+to an AgentMonitor `node_modules` built for the verifier's Node/OS/architecture.
 Missing dependencies or an incompatible native SQLite binary return 77 and no
 score. The checker never installs or rebuilds dependencies. It copies only the
 candidate `src/` into a disposable directory and supplies pinned package metadata

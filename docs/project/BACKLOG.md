@@ -7,7 +7,7 @@ commitment for the active task. Add an item only when it cannot be fixed inline
 and represents recurring friction, meaningful risk or cost, an unresolved
 decision, or a concrete trigger.
 
-This is a fork of `minghinmatthewlam/openbench` under `~/Dev/_forks/`. Capability
+This is a maintained fork of `minghinmatthewlam/openbench`. Capability
 that belongs upstream is tracked as an upstream issue/PR (linked below);
 fork-local convenience stays here.
 
@@ -337,6 +337,21 @@ the PR, not as a "resolved" note here).
   kimi-k3 deferral).
 
 ### Security posture
+
+#### Review inherited public capture context
+- **What**: tracked captures inherited from upstream include contributor home
+  paths and proxy cell token fields. These are publication surfaces even when
+  the values are historical.
+- **Evidence** (2026-09-23, `git grep -l` against tracked `ablation/` and
+  `data/` on both this fork and `origin/main`): 39 files contain the same
+  contributor home-path marker; 6 files contain proxy cell token assignments.
+  This inventory does not establish whether any token is still usable.
+- **Current guard**: `.publication-hygiene.json` pins existing text captures
+  with structural matches by SHA256. CI rejects changed pins and scans all new
+  tracked text; the pinned list is a review queue, not a clearance of its data.
+- **Next**: review the capture fields with upstream, determine token validity
+  and redaction scope, and account for task/result digests before changing
+  published evidence. Keep any exact private markers out of public docs.
 
 #### Local-mode checker runs unsandboxed on the host — task-trust boundary
 - **What**: in `exec_mode = "local"`, the agent runs under codex's

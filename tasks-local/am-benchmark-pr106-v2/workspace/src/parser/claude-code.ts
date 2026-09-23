@@ -150,7 +150,7 @@ function previewTextFromBlocks(blocks: ContentBlock[], isMeta: boolean): string 
 function projectFromPath(filePath: string): string | null {
   // Path pattern: ~/.claude/projects/-Users-dev-my-project/session.jsonl
   // The directory name encodes the full path with '-' as separator, prefixed with '-'.
-  // e.g. "-Users-dg-mac-mini-Dev-agentmonitor" → project is "agentmonitor"
+  // e.g. "-Users-example-Dev-agentmonitor" → project is "agentmonitor"
   // e.g. "-Users-dev-my-project" → project is "my-project"
   // Strategy: the encoded dir represents a filesystem path. The last path component
   // (after the last known directory separator) is the project name. We use the cwd

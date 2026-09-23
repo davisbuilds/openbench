@@ -1,16 +1,16 @@
 # Project and upstream workflow
 
-OpenBench is a first-class project at `~/Dev/openbench`. The canonical trunk is
+OpenBench is maintained as a standalone checkout. The canonical trunk is
 `davisbuilds/openbench`; `minghinmatthewlam/openbench` is an upstream source for
 selective integrations and focused contributions. Our roadmap and releases do
 not wait for upstream. Changes flow **local → our trunk → upstream when broadly
 relevant**.
 
-The checkout was promoted out of `_forks/` on 2026-09-16. No compatibility symlink
-is retained. Linked worktrees and editable tool environments were repaired; an
-existing sealed suite manifest verified after relocation. Historical local run
-records retain their original paths as provenance. Start new runs from the new
-root rather than replaying old absolute launcher commands.
+The checkout was promoted to a standalone project on 2026-09-16. Linked
+worktrees and editable tool environments were repaired; an existing sealed
+suite manifest verified after relocation. Historical local run records retain
+their original paths as provenance. Start new runs from the current checkout
+rather than replaying old absolute launcher commands.
 
 ## Remotes
 
