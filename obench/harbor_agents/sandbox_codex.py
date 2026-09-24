@@ -6,6 +6,7 @@ run/tool loop; only its HTTP transport is routed through the narrow gateway.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -15,6 +16,36 @@ import stat
 
 CLI_VERSION = "0.154.0"
 MODELS = {"gpt-5.6-terra": "xhigh", "gpt-5.6-luna": "max"}
+
+
+def _restore_explicit_zero_totals(metrics, session_dir):
+    # Harbor 0.20.0 uses `value or None` for final token counts. Restore only
+    # zeros actually reported in the same last totals record Harbor selects;
+    # absent usage must remain absent so strict import can detect it.
+    session_files = list(session_dir.glob("*.jsonl"))
+    if not session_files:
+        return
+    totals = {}
+    with session_files[0].open() as stream:
+        for line in stream:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict) or event.get("type") != "event_msg":
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, dict) or payload.get("type") != "token_count":
+                continue
+            info = payload.get("info")
+            if isinstance(info, dict) and isinstance(info.get("total_token_usage"), dict):
+                totals = info["total_token_usage"]
+    for source, target in (("input_tokens", "total_prompt_tokens"),
+                           ("output_tokens", "total_completion_tokens"),
+                           ("cached_input_tokens", "total_cached_tokens")):
+        value = totals.get(source)
+        if type(value) is int and value == 0 and getattr(metrics, target) is None:
+            setattr(metrics, target, 0)
 
 
 def codex_config(port: int = 8765) -> dict:
@@ -85,7 +116,11 @@ def _build_agent_class(codex):
         def _convert_events_to_trajectory(self, session_dir):
             self._last_usage_snapshot = None
             try:
-                return super()._convert_events_to_trajectory(session_dir)
+                trajectory = super()._convert_events_to_trajectory(session_dir)
+                metrics = getattr(trajectory, "final_metrics", None)
+                if metrics is not None:
+                    _restore_explicit_zero_totals(metrics, session_dir)
+                return trajectory
             finally:
                 self._last_usage_snapshot = None
 

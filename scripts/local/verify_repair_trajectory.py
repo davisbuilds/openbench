@@ -54,7 +54,21 @@ def main():
         assert any('expected sum 30, got 20' in error for error in before), before
         after = convert(SandboxCodex, root, args.model)
         assert not validate_trajectory(after), validate_trajectory(after)
+        # Real pinned converter: zero cache is known usage, not absent evidence.
+        events = synthetic_events()
+        for event in events:
+            info = event.get('payload', {}).get('info')
+            if info:
+                info['total_token_usage']['cached_input_tokens'] = 0
+                info['last_token_usage']['cached_input_tokens'] = 0
+        (root / 'rollout.jsonl').write_text('\n'.join(json.dumps(e) for e in events) + '\n')
+        stock_zero = convert(Codex, root, args.model)
+        assert 'total_cached_tokens' not in stock_zero['final_metrics']
+        corrected_zero = convert(SandboxCodex, root, args.model)
+        assert corrected_zero['final_metrics']['total_cached_tokens'] == 0
+        assert not validate_trajectory(corrected_zero), validate_trajectory(corrected_zero)
     report = {'synthetic_stock_errors': before, 'synthetic_corrected_valid': True,
+              'explicit_zero_cache_preserved': True,
               'live_inference': False, 'scope': 'conversion replay, not a new model trial'}
     if args.session_dir:
         sources = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
