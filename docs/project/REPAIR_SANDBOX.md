@@ -55,7 +55,8 @@ matches one declared local tool; unknown or ambiguous names remain rejected.
 
 Request size, request count, concurrency, and duration are bounded. Disconnects,
 timeouts, and trial shutdown cancel upstream work. A trusted metadata ledger
-records requests, actual connected peers when available, usage, and clean shutdown;
+records request start times, elapsed durations, configured deadlines, termination
+outcomes, actual connected peers when available, usage, and clean shutdown;
 it does not record prompts or credentials. Evidence persistence failures fail the
 trial. The environment checks the runtime gateway's bytes against the reviewed
 host module before reading credentials.
@@ -117,6 +118,24 @@ binds the four implementation modules. Result import requires the task binding,
 shutdown receipt, gateway ledger hash, worker restrictions, and matching frozen
 source/image evidence. Ordinary digest schemes are unchanged. This lane is
 currently local-only; public publication is rejected.
+
+### Execution and cleanup deadlines
+
+New suite defaults are 1200 seconds; `obench run --timeout-seconds SECONDS`
+overrides an explicit suite budget without editing it. Gateway and relay requests
+use the effective suite budget, capped at 3600 seconds, rather than a fixed
+180-second deadline. These values are part of the sealed treatment.
+
+The adapter returns from its timed execution before sandbox sealing. Harbor's
+post-execution log export seals the environment first, with a separate 60-second
+bound; source freezing independently enforces the same boundary. Logs and source
+cannot be exported while the solver or broker is still running. Sealing failures
+block export and surface as infrastructure errors. A finished agent no longer
+becomes an agent timeout merely because stopping its containers takes longer.
+
+Existing results retain their original budgets and classifications. New runtime
+bytes require a new image and admission controls before authenticated calibration.
+The credential-free deadline control is `scripts/ci/verify_sandbox_timeouts.py`.
 
 ### Log export
 

@@ -129,6 +129,11 @@ them as the default workflow.
 
 ## Always-run CI (offline)
 
+Workflow changes follow [the CI baseline](docs/project/CI.md): pinned action
+SHAs and runner versions, bounded jobs, minimal permissions, superseded-run
+cancellation, frozen dependencies, and a workflow self-audit. Keep hosted
+credential-free Harbor integration separate from authenticated model campaigns.
+
 Match [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 ```bash

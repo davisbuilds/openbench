@@ -1106,10 +1106,23 @@ def _validate_suite_sandbox_policy(manifest):
     publication = manifest.get("publication")
     if not isinstance(publication, dict) or publication.get("scope") != "local_only":
         raise ValueError("suite manifest sandbox requires local_only publication")
-    if not isinstance(policy, dict) or set(policy) != {
-        "kind", "runtime_image", "max_requests", "implementation_sha256"
-    }:
+    required = {"kind", "runtime_image", "max_requests", "implementation_sha256"}
+    if (not isinstance(policy, dict) or not required <= set(policy)
+            or set(policy) - required - {"request_timeout_seconds"}):
         raise ValueError("suite manifest sandbox policy fields are invalid")
+    # Historical seals predate the explicit request budget and remain valid.
+    # New seals bind it to the same execution policy used by the compiler.
+    if "request_timeout_seconds" in policy:
+        timeout = policy["request_timeout_seconds"]
+        run = manifest.get("run")
+        execution_timeout = run.get("timeout_seconds") if isinstance(run, dict) else None
+        if (isinstance(timeout, bool) or not isinstance(timeout, (float, int))
+                or not math.isfinite(timeout) or timeout <= 0
+                or isinstance(execution_timeout, bool)
+                or not isinstance(execution_timeout, (float, int))
+                or not math.isfinite(execution_timeout) or execution_timeout <= 0
+                or timeout != min(execution_timeout, 3600)):
+            raise ValueError("suite manifest sandbox request timeout is invalid")
     image = policy["runtime_image"]
     limit = policy["max_requests"]
     if (

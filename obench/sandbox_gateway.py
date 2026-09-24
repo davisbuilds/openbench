@@ -997,6 +997,8 @@ class BrokerServer(_BoundedServer, socketserver.UnixStreamServer):
             self._request_count += 1
             request_id = self._request_count
             self._active_requests += 1
+        started_at_unix_seconds = time.time()
+        started_at_monotonic = time.monotonic()
         upstream = None
         pending = None
         timed_out = threading.Event()
@@ -1100,6 +1102,9 @@ class BrokerServer(_BoundedServer, socketserver.UnixStreamServer):
                 {
                     "event": "request",
                     "request_id": request_id,
+                    "started_at_unix_seconds": started_at_unix_seconds,
+                    "elapsed_seconds": time.monotonic() - started_at_monotonic,
+                    "timeout_seconds": self.timeout_seconds,
                     "model": self.config.model,
                     "effort": self.config.effort,
                     "input_bytes": len(raw),

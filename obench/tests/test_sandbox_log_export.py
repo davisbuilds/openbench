@@ -19,7 +19,33 @@ class LogExportTests(unittest.IsolatedAsyncioTestCase):
         cls = sandbox._build_environment_class(object, None, None)
         self.env = cls.__new__(cls)
         self.env._containers = {"main": "offline-container"}
+        # Export-content tests start after sealing; separate controls exercise
+        # sealing refusal and the real Harbor/Docker lifecycle.
+        self.env._sealed = True
+        self.env._image_id = "sha256:" + "a" * 64
+        self.env._gateway_ledger_sha = "b" * 64
         self.env.trial_paths = SimpleNamespace(verifier_dir=self.root / "verifier")
+
+    async def test_sealing_failure_prevents_log_export(self):
+        self.env.seal = AsyncMock(side_effect=sandbox.SandboxError("termination not confirmed"))
+        target = self.root / "logs"
+        with patch.object(sandbox, "docker_bytes", AsyncMock()) as transport:
+            with self.assertRaisesRegex(sandbox.SandboxError, "termination not confirmed"):
+                await self.env.download_dir("/logs/agent", target)
+            transport.assert_not_awaited()
+        self.assertFalse(target.exists())
+        self.assertIn("log export failed", self.env._log_export_error)
+
+    async def test_sealing_deadline_is_a_cleanup_error(self):
+        import asyncio
+
+        async def stalled_stop():
+            await asyncio.sleep(60)
+
+        self.env._seal_containers = stalled_stop
+        with patch.object(sandbox, "SEAL_TIMEOUT_SECONDS", .01):
+            with self.assertRaisesRegex(sandbox.SandboxError, "cleanup deadline"):
+                await self.env.seal()
 
     async def test_large_log_exports_by_directory_and_file_but_not_as_source(self):
         content = b"x" * (sandbox.MAX_FILE_BYTES + 1)

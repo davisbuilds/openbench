@@ -34,7 +34,7 @@ model = "gpt-5.6-sol"
 attempts = 1
 concurrency = 1
 max_retries = 0
-timeout_seconds = 900
+timeout_seconds = 1200
 
 [evidence]
 harbor_lock = true
@@ -80,7 +80,11 @@ Each arm requires an `id`, `harness`, `profile`, and `model`. IDs and complete
 not a filesystem or credential path.
 
 `attempts` and `concurrency` are positive integers. `max_retries` is a
-non-negative integer. `timeout_seconds` is a positive finite number. TOML
+non-negative integer. `timeout_seconds` is a positive finite number and defaults to 1200 seconds (20 minutes) when omitted.
+`obench run --timeout-seconds 1800` overrides the suite value for every attempt.
+The effective budget is sealed into the semantic manifest and Harbor job config;
+the suite file is not edited. Precedence is CLI override, suite value, then default.
+A changed budget is a new treatment and cannot resume an existing sealed run. TOML
 booleans are never accepted as integers, and `nan`/`inf` are rejected.
 
 ## Evidence and publication
@@ -205,3 +209,19 @@ The old OpenBench cell runner is available only through:
 ```bash
 obench legacy run ...
 ```
+
+
+### Repair sandbox deadlines
+
+The repair sandbox uses the effective execution budget for gateway and relay
+requests, capped at one hour per request. It does not retain a hidden three-minute
+request cap. The effective request budget is recorded in the semantic manifest
+and Harbor environment configuration. Request receipts include their start time,
+elapsed seconds, configured deadline, and termination outcome; elapsed time
+covers forwarding through upstream cleanup, not time spent receiving the request.
+
+Sandbox sealing happens during Harbor's post-execution log/artifact export and
+has a separate 60-second bound. No logs or source artifacts can be exported until
+the solver and broker are confirmed stopped. Failure to seal remains an
+infrastructure error; unfinished agent work retains Harbor's execution timeout.
+Artifact correctness and execution completion remain separate measurements.

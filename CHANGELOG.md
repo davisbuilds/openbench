@@ -8,6 +8,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Twenty-minute default for new Harbor suites and a sealed `obench run
+  --timeout-seconds` override. Repair gateway/relay deadlines follow that budget;
+  receipts record request timing. Sandbox sealing has a separate bounded phase
+  before log/artifact export, preserving completion near the execution deadline.
+- Credential-free pinned Harbor/Docker integration CI, workflow security audits,
+  frozen CI dependency graphs, and consistent action pins and job limits.
+
 - Local-only per-cell transcript persistence: the runner writes each cell's full
   agent transcript alongside its results row, gitignored and never published
   as-is.

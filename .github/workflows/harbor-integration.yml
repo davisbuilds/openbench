@@ -1,0 +1,84 @@
+name: Harbor Integration
+
+# Hosted, credential-free controls for the fork's actual execution boundary.
+# Package/image downloads are allowed; no live model request is made.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harbor-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sandbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.11.19'
+          enable-cache: false
+      - name: Install the frozen Harbor graph
+        run: |
+          uv venv --python 3.13 .venv
+          uv pip sync --build-constraint .github/requirements/harbor-build.txt .github/requirements/harbor.txt
+      - name: Replay real Codex trajectory conversion
+        run: .venv/bin/python scripts/local/verify_repair_trajectory.py --output results/ci/trajectory
+      - name: Build the isolated runtime
+        run: |
+          python3 scripts/local/build_repair_runtime.py --receipt results/ci/runtime.json
+          python3 - <<'PY'
+          import json, os
+          image = json.load(open('results/ci/runtime.json'))['image_id']
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              stream.write(f'OBENCH_GRADING_TEST_IMAGE={image}\n')
+          PY
+      - name: Check Docker grading controls
+        run: .venv/bin/python -m unittest obench.tests.test_sandbox_grading.DockerGradingTests -v
+      - name: Check effective sandbox boundaries
+        run: >-
+          .venv/bin/python scripts/local/verify_repair_sandbox.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --receipt results/ci/boundary.json
+      - name: Check completion and timeout across real Harbor cleanup
+        run: >-
+          .venv/bin/python scripts/ci/verify_sandbox_timeouts.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --output results/ci/timeouts
+      - name: Check source grading and artifact import through Harbor
+        run: >-
+          .venv/bin/python scripts/local/verify_repair_lifecycle.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --task harbor-tasks-local/dojo-evidence-pr60-v3
+          --reference tasks-local/dojo-evidence-pr60/solution
+          --output results/ci/lifecycle
+      - name: Check bounded log export and refusal
+        run: >-
+          .venv/bin/python scripts/local/verify_repair_log_export.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --task harbor-tasks-local/dojo-evidence-pr60-v3
+          --output results/ci/log-export
+      - name: Check sandbox cleanup
+        if: always()
+        run: |
+          # This runner is ephemeral and dedicated to this job. Scripts perform
+          # normal cleanup; fail the check if one leaked a container or volume.
+          containers="$(docker ps -aq --filter name=obench-sandbox- --filter name=obench-canary-)"
+          volumes="$(docker volume ls -q --filter name=obench-sandbox-)"
+          networks="$(docker network ls -q --filter name=obench-sandbox- --filter name=obench-probe-)"
+          if [ -n "$containers$volumes$networks" ]; then
+            echo 'Sandbox resources survived the integration checks'
+            exit 1
+          fi

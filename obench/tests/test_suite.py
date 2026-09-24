@@ -237,6 +237,10 @@ ref = "{digest.upper().replace('SHA256:', 'sha256:')}"
                         )
                     )
 
+    def test_omitted_timeout_defaults_to_twenty_minutes(self):
+        suite = self._load(self._valid().replace("timeout_seconds = 900\n", ""))
+        self.assertEqual(suite.run.timeout_seconds, 1200)
+
     def test_rejects_partial_or_empty_local_task_sets(self):
         task = self.tmp / ".openbench" / "tasks" / "example"
         (task / "instruction.md").unlink()

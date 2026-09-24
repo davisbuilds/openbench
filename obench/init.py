@@ -18,6 +18,7 @@ import sys
 
 from . import add_task
 from .config import CONFIG_DIRNAME, CONFIG_FILENAME
+from .suite import DEFAULT_TIMEOUT_SECONDS
 
 
 HARBOR_VERSION = "0.20.0"
@@ -65,7 +66,7 @@ model = "gpt-5.6-sol"
 attempts = 1
 concurrency = 1
 max_retries = 0
-timeout_seconds = 900
+timeout_seconds = {DEFAULT_TIMEOUT_SECONDS}
 
 [evidence]
 harbor_lock = true

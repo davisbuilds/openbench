@@ -54,6 +54,11 @@ class SandboxManifestTests(unittest.TestCase):
         self.validate(self.ordinary)
         self.validate(self.sandbox)
 
+    def test_historical_manifest_without_request_timeout_remains_valid(self):
+        manifest = copy.deepcopy(self.sandbox)
+        del manifest["sandbox"]["request_timeout_seconds"]
+        self.validate(manifest)
+
     def test_valid_policy_boundaries_and_named_image_digest(self):
         for limit in (1, 1000):
             manifest = copy.deepcopy(self.sandbox)
@@ -66,6 +71,7 @@ class SandboxManifestTests(unittest.TestCase):
             "kind": ("repair-v2", None),
             "runtime_image": ("image:latest", "sha256:" + "a" * 63, "sha256:" + "A" * 64, None),
             "max_requests": (0, 1001, True, 1.0, "1", None),
+            "request_timeout_seconds": (0, -1, True, "1200", None, 180),
             "implementation_sha256": ({}, [], None),
         }
         for key, values in changes.items():
@@ -79,7 +85,7 @@ class SandboxManifestTests(unittest.TestCase):
     def test_rejects_missing_extra_and_malformed_policy_fields(self):
         policies = [None, [], {}, {**self.sandbox["sandbox"], "upstream": "example.com"}]
         policies.extend({key: value for key, value in self.sandbox["sandbox"].items() if key != omitted}
-                        for omitted in self.sandbox["sandbox"])
+                        for omitted in self.sandbox["sandbox"] if omitted != "request_timeout_seconds")
         for policy in policies:
             with self.subTest(policy=policy):
                 manifest = copy.deepcopy(self.sandbox)

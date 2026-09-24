@@ -16,6 +16,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
+DEFAULT_TIMEOUT_SECONDS = 1200
 
 _IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 _HARBOR_NAME_RE = re.compile(
@@ -315,12 +316,17 @@ def _parse_arms(value: Any) -> tuple[Arm, ...]:
     return tuple(result)
 
 
+def validate_timeout_seconds(value: Any) -> float:
+    return _positive_number(value, "run.timeout_seconds")
+
+
 def _parse_run(value: Any) -> RunPolicy:
     table = _expect_table(value, "run")
     _expect_keys(
         table,
         {"attempts", "concurrency", "max_retries", "timeout_seconds"},
         "run",
+        required={"attempts", "concurrency", "max_retries"},
     )
     return RunPolicy(
         attempts=_integer(table.get("attempts"), "run.attempts", minimum=1),
@@ -330,8 +336,8 @@ def _parse_run(value: Any) -> RunPolicy:
         max_retries=_integer(
             table.get("max_retries"), "run.max_retries", minimum=0
         ),
-        timeout_seconds=_positive_number(
-            table.get("timeout_seconds"), "run.timeout_seconds"
+        timeout_seconds=validate_timeout_seconds(
+            table.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
         ),
     )
 

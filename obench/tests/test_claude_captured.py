@@ -267,7 +267,9 @@ else:
                 self.assertIsNotNone(evidence['evidence_error'])
 
     def test_timeout_retains_partial_tool_evidence(self):
-        result = self.run_lane(explicit={**self.explicit, 'FIXTURE_MODE': 'timeout'}, timeout=0.2)
+        # Allow cold interpreter startup before the fixture's five-second stall.
+        # A 200 ms cap can kill it before it emits any partial evidence.
+        result = self.run_lane(explicit={**self.explicit, 'FIXTURE_MODE': 'timeout'}, timeout=2)
         self.assertFalse(result['completed'])
         self.assertIn('timeout', result['error'])
         self.assertEqual(len(result['tool_events']), 2)

@@ -1,0 +1,2 @@
+# Must match obench.harbor_job.HARBOR_GIT_COMMIT; model calls are never made in CI.
+harbor @ git+https://github.com/harbor-framework/harbor.git@72bc40b1e58b47a9cc6e0f14c29aced3a9e53767

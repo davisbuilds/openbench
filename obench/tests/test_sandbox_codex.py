@@ -110,3 +110,39 @@ class SandboxCodexTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _validate_openbench_task_content_digest(value,'test')
         self.assertEqual(_validate_openbench_task_content_digest(value,'test',allow_sandbox=True),value)
+
+
+class ExecutionBudgetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_completed_agent_does_not_spend_execution_budget_on_sealing(self):
+        import asyncio
+
+        class Base:
+            def _get_env(self, key):
+                return self.env.get(key)
+
+            async def run(self, instruction, environment, context):
+                await asyncio.sleep(.01)
+                context.finished = True
+
+        class Environment:
+            async def start_gateway(self, *args):
+                pass
+
+            async def seal(self):
+                await asyncio.sleep(2)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            auth, returned = root / "input.json", root / "return.json"
+            auth.write_text("{}")
+            auth.chmod(0o600)
+            agent = object.__new__(_build_agent_class(Base))
+            agent._sandbox_version_verified = True
+            agent.model_name = "gpt-5.6-terra"
+            agent.env = {"CODEX_AUTH_JSON_PATH": str(auth),
+                         "OPENBENCH_CODEX_AUTH_RETURN_PATH": str(returned)}
+            context = SimpleNamespace(finished=False)
+            await asyncio.wait_for(agent.run("", Environment(), context), 1)
+            self.assertTrue(context.finished)
+            self.assertEqual(returned.read_bytes(), auth.read_bytes())

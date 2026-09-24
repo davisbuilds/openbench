@@ -33,6 +33,8 @@ class SandboxSuiteTests(unittest.TestCase):
         config = job.artifact.as_dict()
         self.assertEqual(config['environment']['import_path'], 'obench.harbor_sandbox:RepairSandbox')
         self.assertEqual(config['environment']['kwargs']['max_requests'], 37)
+        self.assertEqual(config['environment']['kwargs']['request_timeout_seconds'], 1200)
+        self.assertEqual(compiled.manifest['sandbox']['request_timeout_seconds'], 1200)
         self.assertEqual(config['verifier']['import_path'], 'obench.sandbox_grading:RepairVerifier')
         self.assertEqual(config['agents'][0]['import_path'], 'obench.harbor_agents.sandbox_codex:SandboxCodex')
         self.assertEqual(config['agents'][0]['kwargs']['version'], '0.154.0')

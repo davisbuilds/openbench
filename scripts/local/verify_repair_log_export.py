@@ -29,17 +29,13 @@ class LogFixtureAgent(FixtureAgent):
                    f"Path('/logs/agent/payload.log').write_bytes(b'x' * {size})")
         if self.mode == 'symlink':
             program += "; Path('/logs/agent/unsafe').symlink_to('/etc/passwd')"
-        try:
-            result = await environment.exec('python3 -c ' + shlex.quote(program))
-            if result.return_code:
-                raise RuntimeError('log fixture creation failed')
-            context.metadata = {'offline_fixture': self.mode, 'model_calls': 0}
-            context.n_input_tokens = context.n_output_tokens = 0
-            if self.mode == 'timeout':
-                await asyncio.sleep(60)
-        finally:
-            # Match SandboxCodex: stop the solver before logs are copied.
-            await environment.seal()
+        result = await environment.exec('python3 -c ' + shlex.quote(program))
+        if result.return_code:
+            raise RuntimeError('log fixture creation failed')
+        context.metadata = {'offline_fixture': self.mode, 'model_calls': 0}
+        context.n_input_tokens = context.n_output_tokens = 0
+        if self.mode == 'timeout':
+            await asyncio.sleep(60)
 
 
 async def main():

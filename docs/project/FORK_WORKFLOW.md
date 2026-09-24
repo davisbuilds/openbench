@@ -132,3 +132,9 @@ A topic branch fully merged into `main` (`git branch --merged main`) that backs
 no open PR is dead weight — delete it (`git branch -d`, which only succeeds when
 it is fully merged, so that is its own safety check). A branch backing an open
 upstream PR stays until the PR merges or closes.
+
+## CI ownership
+
+The fork maintains its own [CI coverage and workflow baseline](CI.md), including
+credential-free pinned Harbor/Docker integration. Preserve portable upstream
+contracts while adding controls for the execution paths maintained here.
