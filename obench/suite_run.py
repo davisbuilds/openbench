@@ -271,6 +271,8 @@ def compile_suite(
         for selected in compiled_task_sets:
             if selected.task_names not in (("dojo-evidence-pr60-v3",), ("dojo-evidence-pr60-v4",)):
                 raise SuiteRunError("repair-v1 currently admits only dojo-evidence-pr60-v3 or dojo-evidence-pr60-v4")
+            if selected.logical_names != (f"openbench/{selected.task_names[0]}",):
+                raise SuiteRunError("Dojo logical task identity differs from selected task")
             task_root = selected.task_set.path / selected.task_names[0]
             metadata = tomllib.loads((task_root / "task.toml").read_text()).get("metadata", {})
             try:
