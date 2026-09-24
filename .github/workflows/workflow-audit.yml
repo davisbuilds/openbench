@@ -1,0 +1,33 @@
+name: Workflow Security Audit
+
+on:
+  pull_request:
+    paths: ['.github/workflows/**', '.github/requirements/**', '.github/dependabot.yml', 'scripts/ci/check_locks.py', 'obench/harbor_job.py', 'pyproject.toml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/**', '.github/requirements/**', '.github/dependabot.yml', 'scripts/ci/check_locks.py', 'obench/harbor_job.py', 'pyproject.toml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.11.19'
+          enable-cache: false
+      - name: Audit workflow permissions, pins and injection
+        run: uvx zizmor@1.30.1 --offline .github/workflows/
+      - name: Check dependency lock drift
+        run: python3 scripts/ci/check_locks.py

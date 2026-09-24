@@ -1,0 +1,2 @@
+# Build backend for the stdlib-only package; compile to build.txt with uv.
+setuptools>=61

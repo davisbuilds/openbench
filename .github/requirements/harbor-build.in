@@ -1,0 +1,2 @@
+# Build backend required by the pinned Harbor source.
+uv_build>=0.8.4,<0.9.0
