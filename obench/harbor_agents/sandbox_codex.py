@@ -172,9 +172,8 @@ def _build_agent_class(codex):
                 await environment.start_gateway(self.model_name, MODELS[self.model_name], str(source))
                 await super().run(instruction, environment, context)
             finally:
-                # This kills background tool processes before Harbor collects
-                # artifacts or dispatches the trusted verifier.
-                await environment.seal()
+                # RepairSandbox seals at the first log/artifact export, outside
+                # Harbor's agent deadline and before any evidence is consumed.
                 # This lane deliberately does not refresh or mutate credentials.
                 # Preserve the existing trusted suite credential lifecycle.
                 fd, temporary = tempfile.mkstemp(prefix="auth-return-", dir=source.parent)

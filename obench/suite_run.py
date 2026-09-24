@@ -63,7 +63,7 @@ from .profile_spec import (
     load_profile_registry,
 )
 from .run import ROW_FIELDS, results_file_lock
-from .suite import Arm, Suite, SuiteError, TaskSet, load_suite
+from .suite import Arm, Suite, SuiteError, TaskSet, load_suite, validate_timeout_seconds
 
 
 MANIFEST_SCHEMA_VERSION = 1
@@ -187,10 +187,15 @@ def compile_suite(
     path: str | os.PathLike[str] | None = None,
     *,
     start: str | os.PathLike[str] | None = None,
+    timeout_seconds: float | None = None,
 ) -> CompiledSuite:
     """Compile suite intent without staging auth or invoking Harbor."""
 
     suite, config = discover_suite(path, start=start)
+    if timeout_seconds is not None:
+        suite = replace(suite, run=replace(
+            suite.run, timeout_seconds=validate_timeout_seconds(timeout_seconds)
+        ))
     _validate_harbor_pin(suite)
     if (
         suite.publication.scope == "public"
@@ -349,6 +354,7 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
                     "kwargs": {
                         "runtime_image": compiled.suite.sandbox.runtime_image,
                         "max_requests": compiled.suite.sandbox.max_requests,
+                        "request_timeout_seconds": min(compiled.suite.run.timeout_seconds, 3600),
                     },
                 }),
                 verifier=(None if compiled.suite.sandbox is None else {
@@ -1124,6 +1130,7 @@ def _semantic_manifest(
             "kind": suite.sandbox.kind,
             "runtime_image": suite.sandbox.runtime_image,
             "max_requests": suite.sandbox.max_requests,
+            "request_timeout_seconds": min(suite.run.timeout_seconds, 3600),
             "implementation_sha256": _sandbox_implementation_hashes(),
         }
     return value
@@ -1766,6 +1773,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("suite", nargs="?", help="explicit suite.toml path")
     parser.add_argument(
+        "--timeout-seconds", type=float, metavar="SECONDS",
+        help="override each attempt's execution budget; otherwise use run.timeout_seconds (default: 1200)",
+    )
+    parser.add_argument(
         "--plan",
         action="store_true",
         help="emit the deterministic semantic manifest without execution",
@@ -1784,9 +1795,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.verify_run_manifest:
-            if args.suite or args.plan:
+            if args.suite or args.plan or args.timeout_seconds is not None:
                 parser.error(
-                    "--verify-run-manifest cannot be combined with a suite or --plan"
+                    "--verify-run-manifest cannot be combined with a suite, --plan or --timeout-seconds"
                 )
             verified = verify_suite_run(args.verify_run_manifest)
             print(
@@ -1798,7 +1809,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"results: {verified['results_path']}")
             print(f"run manifest: {verified['run_manifest_path']}")
             return 0
-        compiled = compile_suite(args.suite)
+        compiled = compile_suite(args.suite, timeout_seconds=args.timeout_seconds)
         if args.plan:
             plan_jobs(compiled)
             output = {

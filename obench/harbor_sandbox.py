@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -19,6 +20,7 @@ import uuid
 
 
 UID = 10001
+SEAL_TIMEOUT_SECONDS = 60
 RELAY_SOCKET = "/run/openbench-model/gateway.sock"
 RELAY_PORT = 8765
 MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -363,11 +365,18 @@ def _build_environment_class(DockerEnvironment, EnvironmentCapabilities, Network
         relay_port = RELAY_PORT
 
         def __init__(self, *args, runtime_image: str, max_requests: int = 200,
-                     source_paths: list[str] | None = None, **kwargs):
+                     source_paths: list[str] | None = None,
+                     request_timeout_seconds: float = 1200, **kwargs):
             self.runtime_image = validate_image(runtime_image)
             if type(max_requests) is not int or not 1 <= max_requests <= 10000:
                 raise SandboxError("invalid gateway request budget")
             self.max_requests = max_requests
+            if (isinstance(request_timeout_seconds, bool)
+                    or not isinstance(request_timeout_seconds, (int, float))
+                    or not math.isfinite(request_timeout_seconds)
+                    or not 0 < request_timeout_seconds <= 3600):
+                raise SandboxError("invalid gateway request timeout")
+            self.request_timeout_seconds = request_timeout_seconds
             self._token = uuid.uuid4().hex[:24]
             self._private = tempfile.TemporaryDirectory(prefix="obench-sandbox-")
             self._sandbox_compose = Path(self._private.name) / "compose.json"
@@ -500,7 +509,8 @@ os.chown('/run/openbench-model', 0, 10001)
             self._gateway_code_sha = expected_gateway
             auth = read_regular(Path(auth_path), 1024 * 1024)
             config = json.dumps({"model": model, "effort": effort, "max_requests": budget,
-                                 "max_body_bytes": 8 * 1024 * 1024, "timeout_seconds": 180}).encode()
+                                 "max_body_bytes": 8 * 1024 * 1024,
+                                 "timeout_seconds": self.request_timeout_seconds}).encode()
             for name, data in (("auth.json", auth), ("config.json", config), ("start", b"ready")):
                 await docker_bytes("exec", "-i", self._containers["broker"], "python3", "-c",
                     "import os,sys; p='/run/private/'+sys.argv[1]; "
@@ -513,7 +523,9 @@ os.chown('/run/openbench-model', 0, 10001)
                 if json.loads(ready):
                     await docker_bytes("exec", "--detach", "--user", "10001:10001", self._containers["main"],
                         "sh", "-c", "exec python3 -m obench.sandbox_gateway relay --socket " + RELAY_SOCKET +
-                        " --port " + str(RELAY_PORT) + " > /logs/agent/relay.log 2>&1")
+                        " --port " + str(RELAY_PORT) +
+                        " --timeout-seconds " + str(self.request_timeout_seconds) +
+                        " > /logs/agent/relay.log 2>&1")
                     for _ in range(100):
                         relay = await docker_bytes("exec", "--user", "10001:10001", self._containers["main"],
                             "python3", "-c", "import socket; s=socket.socket(); s.settimeout(.1); "
@@ -529,6 +541,12 @@ os.chown('/run/openbench-model', 0, 10001)
             raise SandboxError("gateway did not become ready")
 
         async def seal(self):
+            try:
+                return await asyncio.wait_for(self._seal_containers(), SEAL_TIMEOUT_SECONDS)
+            except TimeoutError as exc:
+                raise SandboxError("sandbox sealing exceeded its cleanup deadline") from exc
+
+        async def _seal_containers(self):
             if self._sealed:
                 return self._boundary_receipt()
             if not self._started:
@@ -574,6 +592,10 @@ os.chown('/run/openbench-model', 0, 10001)
         async def _download_logs(self, source, destination, *, single_file=False):
             archive = None
             try:
+                # Harbor downloads logs after the timed agent phase, including
+                # timeout/error recovery. Stop all solver processes before the
+                # first export; freeze_source separately enforces the same gate.
+                await self.seal()
                 archive = await docker_bytes("cp", self._containers["main"] + ":" + source, "-")
                 files = unpack_files(archive, file_limit=MAX_LOG_FILE_BYTES, total_limit=MAX_LOG_BYTES)
                 if single_file:

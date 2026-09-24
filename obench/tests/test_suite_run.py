@@ -359,6 +359,24 @@ model = "gpt-5.6-terra"
         self.assertEqual(default.suite.id, "private-default")
         self.assertEqual(explicit.suite.id, "alternate")
 
+    def test_timeout_override_is_bound_into_plan_without_editing_suite(self):
+        root = self._project()
+        original = self._suite_text(root)
+        default = suite_run.compile_suite(start=root)
+        overridden = suite_run.compile_suite(start=root, timeout_seconds=1800)
+        self.assertEqual(default.suite.run.timeout_seconds, 1200)
+        self.assertEqual(overridden.manifest["run"]["timeout_seconds"], 1800)
+        agent = suite_run.plan_jobs(overridden)[0].artifact.as_dict()["agents"][0]
+        self.assertEqual(agent["override_timeout_sec"], 1800)
+        self.assertNotEqual(default.manifest_sha256, overridden.manifest_sha256)
+        self.assertEqual(self._suite_text(root), original)
+
+    def test_timeout_override_rejects_invalid_numbers(self):
+        root = self._project()
+        for value in (True, 0, -1, float("inf"), float("nan")):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                suite_run.compile_suite(start=root, timeout_seconds=value)
+
     def test_relocation_preserves_semantic_manifest_digest(self):
         first = self._project("first")
         second = self._project("second")
@@ -394,7 +412,7 @@ model = "gpt-5.6-terra"
             )
             self.assertEqual(
                 [agent["override_timeout_sec"] for agent in agents],
-                [900.0, 900.0],
+                [1200.0, 1200.0],
             )
             plan = job.artifact.comparison_plan.as_dict()
             self.assertEqual(
@@ -640,7 +658,7 @@ model = "gpt-5.6-terra"
             )
             self.assertEqual(
                 {agent["override_timeout_sec"] for agent in config["agents"]},
-                {900.0},
+                {1200.0},
             )
             for manifest_arm, config_agent in zip(
                 compiled.manifest["arms"], config["agents"]
@@ -1280,7 +1298,7 @@ model = "gpt-5.6-sol"
         try:
             os.chdir(nested)
             with redirect_stdout(stdout), redirect_stderr(stderr):
-                returncode = suite_run.main(["--plan"])
+                returncode = suite_run.main(["--plan", "--timeout-seconds", "1800"])
         finally:
             os.chdir(prior)
 
@@ -1288,7 +1306,7 @@ model = "gpt-5.6-sol"
         payload = json.loads(stdout.getvalue())
         self.assertEqual(
             payload["manifest_sha256"],
-            suite_run.compile_suite(start=root).manifest_sha256,
+            suite_run.compile_suite(start=root, timeout_seconds=1800).manifest_sha256,
         )
         self.assertFalse(
             (root / ".openbench" / "results" / "suite-runs").exists()

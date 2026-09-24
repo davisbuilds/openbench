@@ -6,9 +6,11 @@ No case is labeled extra-hard yet.
 
 The first isolated repeated screen has finished and its sealed suites reverify.
 Captured artifacts also reproduce their original grading in fresh workers.
-Confirmation remains on hold for two follow-ups: distinguish model completion
-from time spent in mandatory container cleanup, and audit whether mismatch
-diagnostics are graded more narrowly than the advertised behavior. See the
+Execution now defaults to 20 minutes with separately bounded sandbox sealing;
+credential-free Harbor controls cover near-deadline completion and real timeouts.
+Confirmation remains on hold pending runtime admission of the changed treatment
+and an audit of whether mismatch diagnostics are graded more narrowly than the
+advertised behavior. See the
 [benchmark discrimination backlog](BACKLOG.md#benchmark-discrimination).
 Retain original scores and timeout classifications; any revised task or runtime
 starts a new treatment. Detailed trial evidence remains local-only.

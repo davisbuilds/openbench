@@ -499,6 +499,9 @@ class GatewayTests(unittest.TestCase):
         while not self.receipts and time.monotonic() < deadline:
             time.sleep(0.01)
         self.assertEqual(self.receipts[0]["outcome"], "timeout")
+        self.assertGreater(self.receipts[0]["started_at_unix_seconds"], 0)
+        self.assertGreaterEqual(self.receipts[0]["elapsed_seconds"], .15)
+        self.assertEqual(self.receipts[0]["timeout_seconds"], .3)
 
     def test_revocation_cancels_active_stream(self):
         self.block_stream = True

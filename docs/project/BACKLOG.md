@@ -84,16 +84,6 @@ the PR, not as a "resolved" note here).
 
 ### Benchmark discrimination
 
-#### Separate model completion from sandbox cleanup timeouts
-- **What**: the enclosing Harbor agent deadline includes mandatory sandbox
-  sealing. A model can finish its turn within the budget but be reported as an
-  agent timeout while Docker stops its containers.
-- **Next**: reproduce with a synthetic agent that finishes just inside its
-  deadline and delayed cleanup. Preserve the model completion event and give
-  mandatory cleanup a separately bounded phase, without permitting grading
-  before every solver process and broker request has stopped. Keep old results
-  unchanged and renew runtime admission before another treatment.
-
 #### Audit repair-oracle diagnostic representation requirements
 - **What**: a source-replacement repair can report the correct mismatch in its
   diagnostic detail while leaving legacy name-only difference arrays empty.
