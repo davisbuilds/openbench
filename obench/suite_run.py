@@ -267,13 +267,16 @@ def compile_suite(
     )
     _reject_task_collisions(compiled_task_sets)
     if suite.sandbox is not None:
-        from .sandbox_grading import GradingError, validate_task_binding
+        from .sandbox_grading import GradingError, dojo_oracle_version, validate_task_binding
         for selected in compiled_task_sets:
-            if selected.task_names != ("dojo-evidence-pr60-v3",):
-                raise SuiteRunError("repair-v1 currently admits only dojo-evidence-pr60-v3")
-            task_root = selected.task_set.path / "dojo-evidence-pr60-v3"
+            if selected.task_names not in (("dojo-evidence-pr60-v3",), ("dojo-evidence-pr60-v4",)):
+                raise SuiteRunError("repair-v1 currently admits only dojo-evidence-pr60-v3 or dojo-evidence-pr60-v4")
+            task_root = selected.task_set.path / selected.task_names[0]
             metadata = tomllib.loads((task_root / "task.toml").read_text()).get("metadata", {})
             try:
+                if metadata.get("openbench_task") != selected.task_names[0]:
+                    raise GradingError("Dojo task identity differs from selected task")
+                dojo_oracle_version(metadata)
                 validate_task_binding(task_root, metadata.get("openbench_task_content_digest"))
             except GradingError as exc:
                 raise SuiteRunError(str(exc)) from exc

@@ -84,16 +84,6 @@ the PR, not as a "resolved" note here).
 
 ### Benchmark discrimination
 
-#### Audit repair-oracle diagnostic representation requirements
-- **What**: a source-replacement repair can report the correct mismatch in its
-  diagnostic detail while leaving legacy name-only difference arrays empty.
-  Requiring particular array cardinalities may reject an otherwise valid repair
-  when those semantics were not explicitly specified to the solver.
-- **Next**: settle the observable diagnostic contract, test alternative valid
-  representations against both positive and negative controls, and version any
-  task/oracle correction. Keep the original screen sealed; do not reinterpret a
-  format-sensitive miss as established model difficulty.
-
 #### Aggregate sandbox storage bounds
 - **What**: source/log named volumes still lack aggregate disk quotas. Export
   limits bound what the host accepts, not what a solver can write to its volume.

@@ -61,14 +61,14 @@ jobs:
         run: >-
           .venv/bin/python scripts/local/verify_repair_lifecycle.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
-          --task harbor-tasks-local/dojo-evidence-pr60-v3
+          --task harbor-tasks-local/dojo-evidence-pr60-v4
           --reference tasks-local/dojo-evidence-pr60/solution
           --output results/ci/lifecycle
       - name: Check bounded log export and refusal
         run: >-
           .venv/bin/python scripts/local/verify_repair_log_export.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
-          --task harbor-tasks-local/dojo-evidence-pr60-v3
+          --task harbor-tasks-local/dojo-evidence-pr60-v4
           --output results/ci/log-export
       - name: Check sandbox cleanup
         if: always()

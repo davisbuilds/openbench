@@ -304,8 +304,10 @@ def record(role, text):
     return {'type':'response_item','payload':{'type':'message','role':role,'content':[{'type':'input_text','text':text}]}}
 
 
-def dojo_cases():
+def dojo_cases(*, oracle_version=3):
     """Hidden oracle inputs and expected comparisons remain in the trusted process."""
+    if type(oracle_version) is not int or oracle_version not in (3, 4):
+        raise GradingError('unsupported Dojo oracle version')
     dojo='/synthetic/.agents/skills/review/SKILL.md'
     bundled='/synthetic/.codex/skills/.system/review/SKILL.md'
     connector='/synthetic/.codex/plugins/cache/openai-curated-remote/demo/1/review/SKILL.md'
@@ -331,15 +333,42 @@ def dojo_cases():
     mismatch([('review',dojo)],[('review',dojo),('review',bundled)],(1,2,0,1))
     mismatch([('review',dojo)],[('review',dojo)]*3,(1,3,0,2))
     mismatch([('review',dojo)],[('review',connector)],(1,1,1,1))
+    if oracle_version == 4:
+        # Paired equality/difference cases prevent an always-mismatch repair.
+        # These expectations name observable outcomes, not a reference algorithm.
+        for entries in ([], [('review', dojo)], [('review', dojo)] * 3,
+                        [('review', dojo), ('review', bundled), ('other', connector)]):
+            mismatch(entries, list(reversed(entries)), None)
+        mismatch([('review', dojo)] * 3, [('review', dojo)], (3, 1, 2, 0))
+        mismatch([('review', connector)], [('review', dojo)], (1, 1, 1, 1))
+        mismatch([('review', bundled)], [('review', connector)], (1, 1, 1, 1))
+        mismatch([], [('review', dojo)], (0, 1, 0, 1))
+        mismatch([('review', dojo)], [], (1, 0, 1, 0))
+        mismatch([('other', dojo)], [('review', dojo)], (1, 1, 1, 1))
+        mismatch([('review', dojo)], [('review', 'r0/review/SKILL.md')], None,
+                 ['- `r0` = `/synthetic/.agents/skills`'])
+        mismatch([('review', connector)],
+                 [('review', connector.replace('/demo/1/', '/demo/2/'))], None)
     return cases
 
 
-def comparison(value, expected):
+def comparison(value, expected, *, oracle_version=3):
     if expected == 'budget-positive':
         return (isinstance(value,dict) and value.get('verdict')=='deployable' and value.get('gating') is True
                 and type(value.get('demand')) in (int,float) and value['demand']>0 and value.get('entries_scored')==1)
     if expected == 'budget-negative':
         return (isinstance(value,dict) and value.get('verdict')=='unsupported' and value.get('gating') is False and value.get('entries_scored')==0)
+    if isinstance(expected, tuple) and oracle_version == 4:
+        # Preserve the public diagnostic shape, but do not prescribe whether
+        # difference arrays contain names, qualified identities or duplicates.
+        return (isinstance(value, dict) and value.get('kind') == 'surface-mismatch'
+                and all(type(value.get(key)) is int for key in ('live_entries', 'recorded_entries'))
+                and (value['live_entries'], value['recorded_entries']) == expected[:2]
+                and all(isinstance(value.get(key), list)
+                        and all(isinstance(item, str) for item in value[key])
+                        for key in ('only_in_live', 'only_in_recorded'))
+                and all(isinstance(value.get(key), str)
+                        for key in ('live_surface', 'recorded_surface', 'detail')))
     if isinstance(expected,tuple):
         return (isinstance(value,dict) and value.get('kind')=='surface-mismatch'
                 and (value.get('live_entries'),value.get('recorded_entries'))==expected[:2]
@@ -348,18 +377,18 @@ def comparison(value, expected):
     return value == expected
 
 
-def grade_dojo(root, permitted, image, *, timeout=30):
+def grade_dojo(root, permitted, image, *, timeout=30, oracle_version=3):
     archive, hashes = source_archive(Path(root),set(permitted))
-    cases=dojo_cases()
+    cases=dojo_cases(oracle_version=oracle_version)
     results, receipt=run_worker(image,archive,[case[1] for case in cases],timeout=timeout)
     buckets={name:True for name in ('rollout','budget','mismatch')}
     checks=[]
     for (bucket,_,expected), result in zip(cases,results):
-        passed=result['ok'] and comparison(result.get('value'),expected)
+        passed=result['ok'] and comparison(result.get('value'),expected,oracle_version=oracle_version)
         buckets[bucket] &= passed
         checks.append({'bucket':bucket,'pass':passed})
     return {'score':round(sum(buckets.values())/3,4),'buckets':buckets,'checks':checks,
-            'source_sha256':hashes,'worker':receipt}
+            'source_sha256':hashes,'worker':receipt,'oracle_version':oracle_version}
 
 
 def candidate_failure_result(reason):
@@ -368,9 +397,9 @@ def candidate_failure_result(reason):
             'checks': [], 'source_sha256': None, 'worker': None}
 
 
-def grade_submission(root, permitted, image, *, timeout=30):
+def grade_submission(root, permitted, image, *, timeout=30, oracle_version=3):
     try:
-        return grade_dojo(root, permitted, image, timeout=timeout)
+        return grade_dojo(root, permitted, image, timeout=timeout, oracle_version=oracle_version)
     except CandidateFailure as exc:
         return candidate_failure_result(exc.reason)
 
@@ -389,6 +418,14 @@ async def freeze_submission(environment, destination):
     return receipt, failure
 
 
+def dojo_oracle_version(metadata):
+    versions = {'dojo-evidence-pr60-v3': 3, 'dojo-evidence-pr60-v4': 4}
+    name = metadata.get('openbench_task')
+    if not isinstance(name, str) or name not in versions:
+        raise GradingError('unsupported Dojo task identity')
+    return versions[name]
+
+
 class _TrustedDojoVerifier:
     def __init__(self,*args,worker_image=None,worker_timeout=30,**kwargs):
         super().__init__(*args,**kwargs)
@@ -401,6 +438,7 @@ class _TrustedDojoVerifier:
         from harbor.models.verifier.result import VerifierResult
         start=time.monotonic()
         metadata=self.task.config.metadata
+        oracle_version=dojo_oracle_version(metadata)
         binding=validate_task_binding(self.task.paths.task_dir, metadata.get('openbench_task_content_digest'))
         app=self.task.paths.environment_dir/'app'
         permitted={p.relative_to(app).as_posix() for p in (app/'scripts/profiles').glob('*.py')}
@@ -411,7 +449,7 @@ class _TrustedDojoVerifier:
             # Freeze may await cleanup; detect trusted-task drift again before work.
             validate_task_binding(self.task.paths.task_dir, metadata['openbench_task_content_digest'])
             if graded is None:
-                graded=await asyncio.to_thread(grade_submission,Path(directory),permitted,self.worker_image,timeout=self.worker_timeout)
+                graded=await asyncio.to_thread(grade_submission,Path(directory),permitted,self.worker_image,timeout=self.worker_timeout,oracle_version=oracle_version)
         validate_task_binding(self.task.paths.task_dir, metadata['openbench_task_content_digest'])
         logs=self.trial_paths.verifier_dir
         logs.mkdir(parents=True,exist_ok=True)

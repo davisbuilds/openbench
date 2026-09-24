@@ -290,3 +290,21 @@ networked code. Source/log named volumes do not yet have aggregate disk quotas;
 file/export, CPU, memory, process, and request limits are enforced. A disposable
 worker VM with no personal repos or tailnet adds containment; moving to the Mini
 alone does not. `tmux` survives disconnects, not laptop sleep or reboot.
+
+## Dojo diagnostic contract revision 4
+
+The suite compiler also accepts `dojo-evidence-pr60-v4`. The trusted verifier
+selects the oracle from bound task metadata and the compiler checks that identity
+against the selected task. V4 accepts both name-only and qualified-identity
+mismatch diagnostics; counts and existing field types remain checked. Equal,
+reordered, aliased and version-equivalent listings must return no mismatch;
+removed duplicates, source replacements, changed names and empty/nonempty pairs
+must report one. Diagnostic prose and difference-array cardinalities are not
+scored. Docker controls reject always/never-mismatch, name-set-only detection and
+wrong-count repairs while accepting multiple valid representations.
+
+The v3 comparator remains unchanged. Because scheme 3 binds the entire grading
+module, its checked-in binding is refreshed with shared module edits. Historical
+sealed runs remain tied to their original commit and are not regraded in place.
+Runtime admission and new repeated screening are still required for v4; this
+oracle correction alone is not evidence of frontier difficulty.

@@ -80,6 +80,23 @@ class SandboxSuiteTests(unittest.TestCase):
         with self.assertRaisesRegex(suite_run.SuiteRunError, 'only dojo'):
             self.compile()
 
+    def test_v4_task_compiles_and_task_identity_cannot_select_legacy_oracle(self):
+        from obench.sandbox_grading import task_digest
+        shutil.rmtree(self.task_root / 'dojo-evidence-pr60-v3')
+        source = Path(__file__).resolve().parents[2] / 'harbor-tasks-local/dojo-evidence-pr60-v4'
+        target = self.task_root / source.name
+        shutil.copytree(source, target)
+        compiled = self.compile()
+        self.assertEqual(compiled.task_sets[0].task_names, ('dojo-evidence-pr60-v4',))
+        config = target / 'task.toml'
+        config.write_text(config.read_text().replace(
+            'openbench_task = "dojo-evidence-pr60-v4"', 'openbench_task = "dojo-evidence-pr60-v3"'))
+        import re
+        config.write_text(re.sub(r'(scheme = 3\nsha256 = ")[a-f0-9]{64}',
+                                lambda m: m[1] + task_digest(target), config.read_text()))
+        with self.assertRaisesRegex(suite_run.SuiteRunError, 'identity differs'):
+            self.compile()
+
     def test_ordinary_suite_keeps_existing_route(self):
         self.path.write_text(self.base.replace('gpt-5.6-terra-xhigh', 'gpt-5.6-terra'))
         compiled = suite_run.compile_suite(self.path)
