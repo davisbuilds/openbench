@@ -203,14 +203,28 @@ class GatewayTests(unittest.TestCase):
 
     def test_missing_content_type_rejects_non_response_and_oversized_prefixes(self):
         self.upstream_content_type = None
+        request_finished = threading.Event()
+
+        def receipt(record):
+            self.receipts.append(record)
+            if record.get('event') == 'request':
+                request_finished.set()
+
+        self.broker.receipt = receipt
         for prefix in (b'<html>private-error</html>', b'data: {}\n\n',
                        b'event: response.created\ndata: not-json\n\n',
                        b'x' * (1024 * 1024 + 1)):
             with self.subTest(prefix=prefix[:40]):
+                request_finished.clear()
                 self.upstream_prefix = prefix
                 status, raw = self.request()
                 self.assertEqual(status, 502)
                 self.assertNotIn(b'private-error', raw)
+                # The error body arrives before upstream cleanup releases the
+                # slot. Wait for its receipt so the next case reaches upstream
+                # validation instead of correctly receiving a busy-slot 503.
+                self.assertTrue(request_finished.wait(3), 'request did not finish cleanup')
+        self.assertEqual(len(self.requests), 4)
 
     def test_explicit_wrong_content_type_is_rejected(self):
         self.upstream_content_type = 'application/json'

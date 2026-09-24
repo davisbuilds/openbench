@@ -77,6 +77,14 @@ resets per conversion, raw logs and reported cumulative totals remain unchanged,
 and other inconsistencies still fail validation. Tracked upstream in
 [Harbor #3289](https://github.com/harbor-framework/harbor/issues/3289).
 
+Pinned Harbor also drops explicitly reported zero final token counts while its
+trial result retains zero. The adapter restores only integer zeros present in
+the last cumulative usage record, keeping missing or malformed usage absent.
+This prevents a valid zero-cache trial from failing strict result/trajectory
+comparison without relaxing the importer. Raw logs remain unchanged. A
+screening control exposed this case before any repair trials dispatched;
+that rejected suite remains diagnostic evidence, and screening uses a new pin.
+
 The fixed provider endpoint can return a Responses event stream without a
 `Content-Type` header. In that case the broker buffers at most 1 MiB and requires
 a valid opening `response.created` SSE event before forwarding any bytes.

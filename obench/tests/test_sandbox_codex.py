@@ -1,11 +1,48 @@
 """Pinned Codex transport configuration; full runtime probes exercise the boundary."""
 import unittest
+import json
+from pathlib import Path
+import tempfile
+from types import SimpleNamespace
 from obench.harbor_agents.sandbox_codex import codex_config, _build_agent_class
 from obench.harbor_results import _validate_openbench_task_content_digest
 from obench.harbor_profiles import resolve_harbor_profile
 
 
 class SandboxCodexTests(unittest.TestCase):
+    def test_final_metrics_preserve_only_explicit_zero_from_last_totals(self):
+        fields = {'input_tokens': 'total_prompt_tokens',
+                  'output_tokens': 'total_completion_tokens',
+                  'cached_input_tokens': 'total_cached_tokens'}
+
+        class Base:
+            def _convert_events_to_trajectory(self, directory):
+                # Pinned Harbor drops zero-valued totals during conversion.
+                return SimpleNamespace(final_metrics=SimpleNamespace(
+                    **{field: None for field in fields.values()}))
+
+        obj = object.__new__(_build_agent_class(Base))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for value in (0, None, False, '', 4):
+                with self.subTest(value=value):
+                    events = [{'type': 'event_msg', 'payload': {'type': 'token_count',
+                               'info': {'total_token_usage': totals}}}
+                              for totals in ({key: 0 for key in fields},
+                                             {key: value for key in fields})]
+                    (root / 'rollout.jsonl').write_text(
+                        '\n'.join(json.dumps(e) for e in events) + '\n')
+                    metrics = obj._convert_events_to_trajectory(root).final_metrics
+                    for field in fields.values():
+                        self.assertEqual(getattr(metrics, field),
+                                         0 if type(value) is int and value == 0 else None)
+            # Missing metrics in the latest valid totals must not inherit zero
+            # from either an earlier report or an earlier conversion.
+            events[-1]['payload']['info']['total_token_usage'] = {}
+            (root / 'rollout.jsonl').write_text('\n'.join(json.dumps(e) for e in events))
+            metrics = obj._convert_events_to_trajectory(root).final_metrics
+            self.assertTrue(all(getattr(metrics, field) is None for field in fields.values()))
+
     def test_repeated_usage_snapshot_is_not_charged_twice_and_resets_between_sessions(self):
         class Base:
             @staticmethod
