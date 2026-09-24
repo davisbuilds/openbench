@@ -52,6 +52,12 @@ jobs:
           .venv/bin/python scripts/local/verify_repair_sandbox.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --receipt results/ci/boundary.json
+      - name: Check the real Codex tool loop without inference
+        run: >-
+          .venv/bin/python scripts/local/verify_repair_codex.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --task harbor-tasks-local/dojo-evidence-pr60-v4
+          --output-dir results/ci/codex-tool-loop
       - name: Check completion and timeout across real Harbor cleanup
         run: >-
           .venv/bin/python scripts/ci/verify_sandbox_timeouts.py
