@@ -268,18 +268,24 @@ def compile_suite(
     _reject_task_collisions(compiled_task_sets)
     if suite.sandbox is not None:
         from .sandbox_grading import GradingError, dojo_oracle_version, validate_task_binding
+        from .repair_oracles import registry as oracles
         for selected in compiled_task_sets:
-            if selected.task_names not in (("dojo-evidence-pr60-v3",), ("dojo-evidence-pr60-v4",)):
-                raise SuiteRunError("repair-v1 currently admits only dojo-evidence-pr60-v3 or dojo-evidence-pr60-v4")
-            if selected.logical_names != (f"openbench/{selected.task_names[0]}",):
-                raise SuiteRunError("Dojo logical task identity differs from selected task")
-            task_root = selected.task_set.path / selected.task_names[0]
+            if len(selected.task_names or ()) != 1:
+                raise SuiteRunError("repair-v1 requires one trusted repair per task set")
+            name=selected.task_names[0]
+            if selected.logical_names != (f"openbench/{name}",):
+                raise SuiteRunError("repair logical task identity differs from selected task")
+            task_root = selected.task_set.path / name
             metadata = tomllib.loads((task_root / "task.toml").read_text()).get("metadata", {})
             try:
-                if metadata.get("openbench_task") != selected.task_names[0]:
-                    raise GradingError("Dojo task identity differs from selected task")
-                dojo_oracle_version(metadata)
-                validate_task_binding(task_root, metadata.get("openbench_task_content_digest"))
+                if metadata.get("openbench_task") != name:
+                    raise GradingError("repair task identity differs from selected task")
+                if metadata.get("openbench_oracle") is not None:
+                    oracles.select(metadata)
+                    oracles.validate_task_binding(task_root,metadata.get("openbench_task_content_digest"))
+                else:
+                    dojo_oracle_version(metadata)
+                    validate_task_binding(task_root,metadata.get("openbench_task_content_digest"))
             except GradingError as exc:
                 raise SuiteRunError(str(exc)) from exc
 
@@ -340,6 +346,7 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
             f"{compiled.suite.id}-{item.task_set.id}-"
             f"{compiled.manifest_sha256[:12]}"
         )
+        oracle_id = _registered_oracle_id(item) if compiled.suite.sandbox is not None else None
         artifact = build_job_config(
             HarborJobSpec(
                 job_name=job_name,
@@ -358,13 +365,15 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
                     "import_path": "obench.harbor_sandbox:RepairSandbox",
                     "kwargs": {
                         "runtime_image": compiled.suite.sandbox.runtime_image,
+                        **({"oracle_id": oracle_id} if oracle_id else {}),
                         "max_requests": compiled.suite.sandbox.max_requests,
                         "request_timeout_seconds": min(compiled.suite.run.timeout_seconds, 3600),
                     },
                 }),
                 verifier=(None if compiled.suite.sandbox is None else {
-                    "import_path": "obench.sandbox_grading:RepairVerifier",
-                    "kwargs": {"worker_image": compiled.suite.sandbox.runtime_image},
+                    "import_path": ("obench.repair_grading:RepairVerifier" if oracle_id else "obench.sandbox_grading:RepairVerifier"),
+                    "kwargs": {"worker_image": compiled.suite.sandbox.runtime_image,
+                               **({"oracle_id": oracle_id} if oracle_id else {})},
                 }),
             )
         )
@@ -1136,14 +1145,25 @@ def _semantic_manifest(
             "runtime_image": suite.sandbox.runtime_image,
             "max_requests": suite.sandbox.max_requests,
             "request_timeout_seconds": min(suite.run.timeout_seconds, 3600),
-            "implementation_sha256": _sandbox_implementation_hashes(),
+            "implementation_sha256": _sandbox_implementation_hashes(
+                registered=any(_registered_oracle_id(item) for item in task_sets)),
         }
     return value
 
 
-def _sandbox_implementation_hashes() -> dict[str, str]:
+def _registered_oracle_id(item):
+    if item.task_set.path is None or len(item.task_names or ()) != 1:
+        return None
+    task=item.task_set.path/item.task_names[0]/"task.toml"
+    return tomllib.loads(task.read_text()).get("metadata",{}).get("openbench_oracle")
+
+
+def _sandbox_implementation_hashes(*, registered=False) -> dict[str, str]:
     package = Path(__file__).resolve().parent
     modules = ("harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
+    if registered:
+        from .repair_oracles.registry import MODULES
+        modules=tuple(sorted(set(modules)|{name.removeprefix("obench.") for name in MODULES}))
     return {"obench." + name: hashlib.sha256(
         (package / (name.replace(".", "/") + ".py")).read_bytes()).hexdigest()
         for name in modules}

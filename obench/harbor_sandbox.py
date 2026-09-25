@@ -365,7 +365,7 @@ def _build_environment_class(DockerEnvironment, EnvironmentCapabilities, Network
         relay_port = RELAY_PORT
 
         def __init__(self, *args, runtime_image: str, max_requests: int = 200,
-                     source_paths: list[str] | None = None,
+                     source_paths: list[str] | None = None, oracle_id: str | None = None,
                      request_timeout_seconds: float = 1200, **kwargs):
             self.runtime_image = validate_image(runtime_image)
             if type(max_requests) is not int or not 1 <= max_requests <= 10000:
@@ -409,8 +409,20 @@ def _build_environment_class(DockerEnvironment, EnvironmentCapabilities, Network
             kwargs["mounts"] = []
             super().__init__(*args, **kwargs)
             self._seed_files = read_tree(self.environment_dir / "app")
-            self._source_paths = ({relative_path(p) for p in source_paths} if source_paths else
-                                  {p for p in self._seed_files if p.startswith("scripts/profiles/") and p.endswith(".py")})
+            self._oracle = None
+            if oracle_id is not None:
+                from .repair_oracles.registry import select, source_names, validate_task_binding
+                import tomllib
+                task_root = self.environment_dir.parent
+                metadata = tomllib.loads((task_root / "task.toml").read_text()).get("metadata", {})
+                self._oracle = select(metadata)
+                if self._oracle.id != oracle_id or source_paths is not None:
+                    raise SandboxError("source policy differs from the locked oracle")
+                validate_task_binding(task_root, metadata.get("openbench_task_content_digest"))
+                self._source_paths = source_names(self._oracle, self._seed_files)
+            else:
+                self._source_paths = ({relative_path(p) for p in source_paths} if source_paths else
+                                      {p for p in self._seed_files if p.startswith("scripts/profiles/") and p.endswith(".py")})
             if not self._source_paths or not self._source_paths <= self._seed_files.keys():
                 raise SandboxError("source allowlist must select existing workspace files")
             cpus = self._effective_cpus or 2
@@ -583,9 +595,16 @@ os.chown('/run/openbench-model', 0, 10001)
                         raise SandboxArtifactError("candidate source archive exceeds its bound", self._boundary_receipt()) from exc
                     try:
                         all_files = unpack_files(archive)
-                        if not self._source_paths <= all_files.keys():
-                            raise SandboxError("candidate removed a required source file")
-                        self._frozen_files = {name: all_files[name] for name in self._source_paths}
+                        if self._oracle is not None:
+                            from .repair_oracles.registry import source_names
+                            selected = source_names(self._oracle, all_files)
+                            if not selected:
+                                raise SandboxError("candidate removed every permitted source file")
+                        else:
+                            selected = self._source_paths
+                            if not selected <= all_files.keys():
+                                raise SandboxError("candidate removed a required source file")
+                        self._frozen_files = {name: all_files[name] for name in selected}
                         self._workspace_files = source_receipt(all_files)["files"]
                     except SandboxError as exc:
                         raise SandboxArtifactError(str(exc), self._boundary_receipt()) from exc

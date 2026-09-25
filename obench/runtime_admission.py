@@ -29,6 +29,7 @@ SCRIPTS = (
     'scripts/local/verify_repair_lifecycle.py',
     'scripts/local/verify_repair_log_export.py',
     'scripts/local/verify_repair_trajectory.py',
+    'scripts/local/verify_registered_repair.py',
 )
 
 CONTROLS = (*SCRIPTS, "runtime-sockets")
@@ -53,6 +54,9 @@ def fingerprint(compiled, harbor_binary):
     daemon = json.loads(subprocess.check_output(['docker','info','--format','{{json .}}'],text=True))
     files = [p for p in (ROOT/'obench').rglob('*.py') if 'tests' not in p.relative_to(ROOT).parts]
     files += [ROOT/p for p in SCRIPTS] + [ROOT/'docker/repair-sandbox/Dockerfile', ROOT/'obench/tests/test_sandbox_gateway.py']
+    files += list((ROOT/'docker/repair-sandbox/node').glob('*.json'))
+    for control_root in ('harbor-tasks-local/dojo-evidence-pr60-v4','tasks-local/am-benchmark-pr106-v2'):
+        files += [p for p in (ROOT/control_root).rglob('*') if p.is_file() and '__pycache__' not in p.parts]
     return {'schema':1, 'host':socket.gethostname(),
             'image':{'id':image['Id'],'requested':compiled.suite.sandbox.runtime_image,'os':image['Os'],'architecture':image['Architecture']},
             'docker':{key:daemon.get(key) for key in ('ID','ServerVersion','OperatingSystem','Architecture')},
@@ -112,13 +116,13 @@ def prepare_control(compiled, directory):
     if len(compiled.task_sets) != 1:
         raise AdmissionError('qualification currently requires one repair task set')
     selected = compiled.task_sets[0]
-    if selected.task_names not in (('dojo-evidence-pr60-v3',),('dojo-evidence-pr60-v4',)):
-        raise AdmissionError('this runtime control requires an admitted Dojo task')
+    # Runtime qualification is independent of the requested repair's oracle.
+    # Compilation already validates that target's trusted task binding.
     directory.mkdir(parents=True, exist_ok=False)
     init.init_scaffold(directory)
     tasks = directory/'.openbench/tasks'
     shutil.rmtree(tasks)
-    source = selected.task_set.path / selected.task_names[0]
+    source = ROOT/'harbor-tasks-local/dojo-evidence-pr60-v4'
     task = tasks/source.name
     shutil.copytree(source,task)
     (task/'instruction.md').write_text(
@@ -179,7 +183,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     harbor=preflight_harbor_binary(harbor_binary)
     python=str(suite_run._harbor_python_interpreter(harbor))
     image=compiled.suite.sandbox.runtime_image
-    task=compiled.task_sets[0].task_set.path/compiled.task_sets[0].task_names[0]
+    task=ROOT/'harbor-tasks-local/dojo-evidence-pr60-v4'
     commands=[
         [python,SCRIPTS[0],'--runtime-image',image,'--task',str(task),'--receipt',str(directory/'boundary.json')],
         [python,SCRIPTS[1],'--runtime-image',image,'--task',str(task),'--output-dir',str(directory/'tool-loop')],
@@ -187,6 +191,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
         [python,SCRIPTS[3],'--runtime-image',image,'--task',str(task),'--reference',str(ROOT/'tasks-local/dojo-evidence-pr60/solution'),'--output',str(directory/'lifecycle')],
         [python,SCRIPTS[4],'--runtime-image',image,'--task',str(task),'--output',str(directory/'log-export')],
         [python,SCRIPTS[5],'--output',str(directory/'trajectory')],
+        [python,SCRIPTS[6],'--runtime-image',image,'--output',str(directory/'registered-oracle')],
         ['docker','run','--rm','--network','none','--cap-drop','ALL','--security-opt','no-new-privileges',
          '--user','10001:10001','-i',image,'python3','-','-v'],
     ]
