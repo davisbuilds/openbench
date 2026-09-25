@@ -237,6 +237,17 @@ def campaign_status(directory):
         except (OSError, ValueError, KeyError):
             state = 'completion_evidence_invalid'
             errors.append('sealed suite verification failed')
+    if finished and finished['state'] == 'qualified':
+        try:
+            from .runtime_admission import validate_admission
+            admission = Path(finished['admission'])
+            # Status validates the recorded qualification evidence. Launch
+            # separately compares that receipt with the current runtime.
+            fingerprint = read_record(admission)['fingerprint']
+            validate_admission(admission, fingerprint)
+        except (OSError, ValueError, KeyError, TypeError):
+            state = 'completion_evidence_invalid'
+            errors.append('qualification evidence verification failed')
     latest = None
     jobs = launch['jobs']
     if launch.get('mode') == 'qualify' and (directory / 'control-jobs.json').exists():
