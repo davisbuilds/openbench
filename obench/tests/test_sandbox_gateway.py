@@ -47,6 +47,7 @@ class GatewayTests(unittest.TestCase):
         self.requests = []
         self.receipts = []
         self.block_stream = False
+        self.upstream_body = None
         self.upstream_waiting = threading.Event()
         self.upstream_closed = threading.Event()
         self.upstream_status = 200
@@ -82,9 +83,12 @@ class GatewayTests(unittest.TestCase):
                     self.send_header("Content-Type", owner.upstream_content_type)
                 self.end_headers()
                 self.wfile.write(owner.upstream_prefix)
-                self.wfile.write(
-                    b'data: {"type":"response.completed","response":{"usage":{"input_tokens":11,"output_tokens":7}}}\n\ndata: [DONE]\n\n'
-                )
+                # Cancellation tests must stall before the terminal event.
+                body = owner.upstream_body
+                if body is None:
+                    body = (b'data: {"type":"response.created"}\n\n' if owner.block_stream else
+                            b'data: {"type":"response.completed","response":{"usage":{"input_tokens":11,"output_tokens":7}}}\n\ndata: [DONE]\n\n')
+                self.wfile.write(body)
                 self.wfile.flush()
                 if owner.block_stream:
                     owner.upstream_waiting.set()
@@ -385,6 +389,74 @@ class GatewayTests(unittest.TestCase):
         response.close()
         conn.close()
         self.assertTrue(self.upstream_closed.wait(1))
+
+    def stream_receipt(self, body, *, close_early):
+        self.block_stream = True
+        self.upstream_body = body
+        self.relay = gateway.RelayServer(
+            ("127.0.0.1", 0), self.socket, max_body_bytes=65536, timeout_seconds=3
+        )
+        threading.Thread(target=self.relay.serve_forever, daemon=True).start()
+        conn = http.client.HTTPConnection(*self.relay.server_address, timeout=3)
+        conn.request("POST", "/responses", json.dumps(BODY), {"Content-Type": "application/json"})
+        response = conn.getresponse()
+        try:
+            raw = response.read(len(body))
+            self.assertEqual(raw, body)
+            if not close_early:
+                # Completion must not wait for the provider to close its socket.
+                self.assertTrue(self.upstream_closed.wait(1))
+                self.assertEqual(response.read(), b"")
+        finally:
+            response.close()
+            conn.close()
+        self.assertTrue(self.upstream_closed.wait(1))
+        deadline = time.monotonic() + 1
+        while not self.receipts and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertEqual(len(self.receipts), 1)
+        return self.receipts[0]
+
+    def test_terminal_event_finishes_without_waiting_for_provider_eof(self):
+        body = b'data: {"type":"response.completed","response":{"usage":{"input_tokens":11,"output_tokens":7}}}\n\n'
+        receipt = self.stream_receipt(body, close_early=False)
+        self.assertEqual(receipt['outcome'], 'complete')
+        self.assertEqual(receipt['response_bytes'], len(body))
+        self.assertEqual(receipt['usage'], {'input_tokens': 11, 'output_tokens': 7})
+
+    def test_client_close_after_terminal_event_preserves_completion_and_usage(self):
+        body = b'data: {"type":"response.completed","response":{"usage":{"input_tokens":11,"output_tokens":7}}}\n\n'
+        receipt = self.stream_receipt(body, close_early=True)
+        self.assertEqual(receipt['outcome'], 'complete')
+        self.assertEqual(receipt['response_bytes'], len(body))
+        self.assertEqual(receipt['usage'], {'input_tokens': 11, 'output_tokens': 7})
+
+    def test_client_close_before_completion_preserves_partial_byte_count(self):
+        body = b'data: {"type":"response.created"}\n\n'
+        receipt = self.stream_receipt(body, close_early=True)
+        self.assertEqual(receipt['outcome'], 'client_disconnected')
+        self.assertEqual(receipt['response_bytes'], len(body))
+        self.assertEqual(receipt['usage'], {})
+
+    def test_unterminated_terminal_event_is_not_completion(self):
+        body = b'data: {"type":"response.completed"}\n'
+        receipt = self.stream_receipt(body, close_early=True)
+        self.assertEqual(receipt['outcome'], 'client_disconnected')
+        self.assertEqual(receipt['response_bytes'], len(body))
+
+    def test_eof_after_unterminated_terminal_event_is_incomplete(self):
+        self.upstream_body = b'data: {"type":"response.completed"}\n'
+        self.assertEqual(self.request()[0], 200)
+        self.assertEqual(self.receipts[0]['outcome'], 'upstream_incomplete')
+
+    def test_fragmented_multiline_crlf_terminal_event_preserves_usage(self):
+        body = (b'event: response.completed\r\ndata: {"type":"response.completed",\r\n'
+                b'data: "response":{"padding":"' + b'x' * 20000 +
+                b'","usage":{"input_tokens":11,"output_tokens":7}}}\r\n\r\n')
+        receipt = self.stream_receipt(body, close_early=True)
+        self.assertEqual(receipt['outcome'], 'complete')
+        self.assertEqual(receipt['response_bytes'], len(body))
+        self.assertEqual(receipt['usage'], {'input_tokens': 11, 'output_tokens': 7})
 
     def test_concurrent_limit_is_retryable_without_spending_request_budget(self):
         self.block_stream = True

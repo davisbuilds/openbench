@@ -308,3 +308,19 @@ module, its checked-in binding is refreshed with shared module edits. Historical
 sealed runs remain tied to their original commit and are not regraded in place.
 Runtime admission and new repeated screening are still required for v4; this
 oracle correction alone is not evidence of frontier difficulty.
+
+## Stream completion and cancellation receipts
+
+The gateway finishes a successfully forwarded terminal SSE event without waiting
+for provider socket EOF. Complete frames, including CRLF and multiline data, are
+required; an unterminated terminal line does not establish completion. A client's
+normal close after completion does not replace a completed receipt with
+`client_disconnected`. Premature disconnects, deadlines and revocation retain
+separate failure outcomes and partial byte accounting.
+
+Cancellation shuts down the socket to wake blocked IO, then closes the HTTP
+response after its reader unwinds. This avoids a concurrent `read1`/`close` race
+that previously discarded byte and usage totals on some completed streams.
+The offline controls exercise both relay and broker with real sockets, including
+inside the pinned runtime image. A rebuilt image and renewed admission are
+required before future calibration; historical receipts are not rewritten.

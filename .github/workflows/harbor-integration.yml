@@ -45,6 +45,11 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as stream:
               stream.write(f'OBENCH_GRADING_TEST_IMAGE={image}\n')
           PY
+      - name: Check stream lifecycle in the runtime's Python
+        run: |
+          docker run --rm --network none --cap-drop ALL \
+            --security-opt no-new-privileges --user 10001:10001 -i \
+            "$OBENCH_GRADING_TEST_IMAGE" python3 - -v < obench/tests/test_sandbox_gateway.py
       - name: Check Docker grading controls
         run: .venv/bin/python -m unittest obench.tests.test_sandbox_grading.DockerGradingTests -v
       - name: Check effective sandbox boundaries
