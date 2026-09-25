@@ -582,10 +582,15 @@ os.chown('/run/openbench-model', 0, 10001)
                     except TransferLimitError as exc:
                         raise SandboxArtifactError("candidate source archive exceeds its bound", self._boundary_receipt()) from exc
                     try:
-                        self._frozen_files = unpack_files(archive, allowed=self._source_paths)
+                        all_files = unpack_files(archive)
+                        if not self._source_paths <= all_files.keys():
+                            raise SandboxError("candidate removed a required source file")
+                        self._frozen_files = {name: all_files[name] for name in self._source_paths}
+                        self._workspace_files = source_receipt(all_files)["files"]
                     except SandboxError as exc:
                         raise SandboxArtifactError(str(exc), self._boundary_receipt()) from exc
-                    self._receipt = {**source_receipt(self._frozen_files), **self._boundary_receipt()}
+                    self._receipt = {**source_receipt(self._frozen_files), **self._boundary_receipt(),
+                                 "workspace_files": self._workspace_files}
                 write_files(Path(destination), self._frozen_files)
                 return dict(self._receipt)
 

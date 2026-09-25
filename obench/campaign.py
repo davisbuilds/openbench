@@ -10,6 +10,7 @@ from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import uuid
 
 from .suite_run import compile_suite, plan_jobs, run_suite, verify_suite_run
 
@@ -63,10 +65,16 @@ def git_identity(root=ROOT):
     return {'root': str(root), 'commit': commit}
 
 
-def session_exists(session):
+def session_exists(session, directory=None):
     result = subprocess.run(['tmux', 'has-session', '-t', '=' + session],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    if directory is not None:
+        marker = subprocess.run(['tmux','show-environment','-t','='+session,'OPENBENCH_CAMPAIGN_DIRECTORY'],
+                                capture_output=True,text=True)
+        return marker.returncode == 0 and marker.stdout.strip() == 'OPENBENCH_CAMPAIGN_DIRECTORY=' + str(directory)
+    return True
 
 
 @contextmanager
@@ -100,6 +108,7 @@ def spawn_supervisor(directory, launch, command, env):
         if session_exists(launch['session']):
             raise CampaignError('campaign tmux session already exists')
         argv = ['tmux', 'new-session', '-d', '-s', launch['session'], '-c', launch['source']['root'],
+                '-e', 'OPENBENCH_CAMPAIGN_DIRECTORY=' + str(directory),
                 '/usr/bin/env', '-i', *[f'{key}={value}' for key, value in sorted(env.items())], *command]
         try:
             subprocess.run(argv, check=True, capture_output=True, text=True)
@@ -126,13 +135,14 @@ def launch_campaign(suite, *, harbor_binary='harbor', admission=None, qualify=Fa
         runtime_admission.validate_admission(admission, expected)
         admission_hash = runtime_admission.digest(admission)
     if qualify:
-        runtime_admission.fingerprint(compiled, harbor_binary)
+        qualification_fingerprint = runtime_admission.fingerprint(compiled, harbor_binary)
+        qualification_key = hashlib.sha256(json.dumps(qualification_fingerprint,sort_keys=True).encode()).hexdigest()
     harbor = shutil.which(harbor_binary)
     if not harbor:
         raise CampaignError('Harbor executable not found')
     base = Path(compiled.config.results_dir) / 'campaigns'
     base.mkdir(parents=True, exist_ok=True, mode=0o700)
-    directory = base / (compiled.manifest_sha256 + ('-qualification' if qualify else ''))
+    directory = base / (('qualification-' + qualification_key[:24] + '-' + uuid.uuid4().hex[:12]) if qualify else compiled.manifest_sha256)
     try:
         directory.mkdir(mode=0o700)
     except FileExistsError:
@@ -145,8 +155,8 @@ def launch_campaign(suite, *, harbor_binary='harbor', admission=None, qualify=Fa
               'admission_sha256': admission_hash,
               'auth_file': str(Path(auth_file).expanduser().absolute()) if qualify else None,
               'manifest': compiled.manifest, 'harbor_binary': str(Path(harbor).absolute()),
-              'python': sys.executable, 'session': 'obench-' + compiled.manifest_sha256[:24] + ('-qualify' if qualify else ''),
-              'jobs': [str(Path(compiled.config.jobs_dir) / j.artifact.job_name) for j in jobs],
+              'python': sys.executable, 'session': ('obench-qualify-' + qualification_key[:24]) if qualify else ('obench-' + compiled.manifest_sha256[:24]),
+              'jobs': [] if qualify else [str(Path(compiled.config.jobs_dir) / j.artifact.job_name) for j in jobs],
               'idle_sleep_prevention': sys.platform == 'darwin'}
     write_record(directory / 'launch.json', launch)
     command = [sys.executable, '-m', 'obench.campaign', '_execute', str(directory)]
@@ -218,7 +228,7 @@ def campaign_status(directory):
         active = True
     finished_path = directory / 'finished.json'
     finished = read_record(finished_path) if finished_path.exists() else None
-    tmux_alive = session_exists(launch['session'])
+    tmux_alive = session_exists(launch['session'], directory)
     state = finished['state'] if finished else 'running' if active else 'starting' if tmux_alive else 'interrupted_or_not_started'
     trials, outcomes, errors = [], Counter(), []
     if finished and finished['state'] == 'completed':
@@ -228,7 +238,10 @@ def campaign_status(directory):
             state = 'completion_evidence_invalid'
             errors.append('sealed suite verification failed')
     latest = None
-    for job in launch['jobs']:
+    jobs = launch['jobs']
+    if launch.get('mode') == 'qualify' and (directory / 'control-jobs.json').exists():
+        jobs = read_record(directory / 'control-jobs.json')['jobs']
+    for job in jobs:
         root = Path(job)
         for path in sorted(root.glob('*/result.json')):
             try:
@@ -248,7 +261,7 @@ def campaign_status(directory):
             except (OSError, ValueError, KeyError, AttributeError):
                 errors.append(str(path))
     log = directory / 'campaign.log'
-    return {'schema': SCHEMA, 'state': state, 'host': launch['host'], 'session': launch['session'],
+    return {'schema': SCHEMA, 'state': state, 'mode': launch.get('mode','run'), 'host': launch['host'], 'session': launch['session'],
             'directory': str(directory), 'manifest_sha256': launch['manifest_sha256'],
             'supervisor_active': active, 'tmux_session_present': tmux_alive,
             'log': str(log), 'last_log_update_unix': log.stat().st_mtime if log.exists() else None,

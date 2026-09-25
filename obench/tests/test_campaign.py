@@ -93,7 +93,8 @@ class CampaignTests(unittest.TestCase):
                 if (self.directory/'alive').exists(): break
                 time.sleep(.05)
             self.assertEqual((self.directory/'alive').read_text(),'False')
-            self.assertTrue(campaign.session_exists(self.session))
+            self.assertTrue(campaign.session_exists(self.session, self.directory))
+            self.assertFalse(campaign.session_exists(self.session, self.root/'previous-attempt'))
             with self.assertRaisesRegex(campaign.CampaignError,'active|already exists'):
                 campaign.spawn_supervisor(self.directory,self.launch,command,env)
         finally:
@@ -121,3 +122,36 @@ class CampaignTests(unittest.TestCase):
         self.assertEqual(finished['state'],'failed')
         self.assertEqual(finished['error_type'],'CampaignError')
         self.assertIn('source',(self.directory/'campaign.log').read_text())
+
+    def test_requalification_preserves_attempts_with_same_or_changed_runtime(self):
+        from obench import runtime_admission
+        init.init_scaffold(self.root)
+        suite=self.root/'.openbench/suites/default.toml'
+        directories=[]
+        with patch.object(campaign,'git_identity',return_value=self.launch['source']), patch.object(campaign.shutil,'which',return_value=sys.executable), patch.object(campaign,'spawn_supervisor') as spawn:
+            for fingerprint in ({'runtime':'first'}, {'runtime':'first'}, {'runtime':'second'}):
+                with patch.object(runtime_admission,'fingerprint',return_value=fingerprint):
+                    directories.append(campaign.launch_campaign(suite,qualify=True,auth_file=self.root/'auth.json'))
+        self.assertEqual(len(set(directories)),3)
+        launches=[campaign.read_record(d/'launch.json') for d in directories]
+        self.assertEqual(launches[0]['session'],launches[1]['session'])
+        self.assertNotEqual(launches[0]['session'],launches[2]['session'])
+        self.assertEqual(len({v['manifest_sha256'] for v in launches}),1)
+        self.assertTrue(all(v['jobs']==[] for v in launches))
+        self.assertEqual(spawn.call_count,3)
+
+    def test_qualification_status_reads_control_jobs_instead_of_target(self):
+        campaign.write_record(self.directory/'launch.json',{**self.launch,'mode':'qualify','jobs':[]})
+        target=self.root/'jobs/target'
+        target.mkdir(parents=True)
+        (target/'result.json').write_text('{}')
+        control=self.directory/'control/job/trial'
+        (control/'verifier').mkdir(parents=True)
+        (control/'result.json').write_text('{"verifier_result":{"rewards":{"reward":0}}}')
+        (control/'verifier/sandbox-gateway.jsonl').write_text('{"event":"request","outcome":"complete"}\n')
+        with patch.object(campaign,'session_exists',return_value=False):
+            self.assertEqual(campaign.campaign_status(self.directory)['trial_results'],[])
+            campaign.write_record(self.directory/'control-jobs.json',{'schema':1,'jobs':[str(control.parent)]})
+            status=campaign.campaign_status(self.directory)
+        self.assertEqual([r['path'] for r in status['trial_results']],[str(control)])
+        self.assertEqual(status['transport_outcomes'],{'complete':1})

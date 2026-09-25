@@ -154,11 +154,12 @@ def verify_control(control, task, result_path):
     for row in rows:
         p=row['candidate_provenance']
         trial=jobs[p['suite_task_set_id']]/p['harbor_trial_name']
-        for original in (task/'environment/app/scripts/profiles').glob('*.py'):
-            relative=original.relative_to(task/'environment/app')
-            expected=original.read_bytes()+(MARKER if str(relative)==CONTROL_TARGET else b'')
-            if (trial/'artifacts/workspace'/relative).read_bytes()!=expected:
-                raise AdmissionError('authenticated file-edit control failed')
+        receipt=json.loads((trial/'verifier/sandbox-grading.json').read_text())
+        from .harbor_sandbox import read_tree, source_receipt
+        expected=read_tree(task/'environment/app')
+        expected[CONTROL_TARGET]+=MARKER
+        if receipt['freeze'].get('workspace_files') != source_receipt(expected)['files']:
+            raise AdmissionError('authenticated control changed workspace beyond the requested edit')
         events=[json.loads(line) for line in (trial/'verifier/sandbox-gateway.jsonl').read_text().splitlines()]
         complete=[e for e in events if e.get('event')=='request' and e.get('outcome')=='complete']
         if not complete:
@@ -199,6 +200,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     if canonical(before) != canonical(fingerprint(compiled,harbor_binary)):
         raise AdmissionError('runtime changed during offline controls; authentication was not read')
     control,control_task=prepare_control(compiled,directory/'control')
+    write_record(directory/'control-jobs.json', {'schema':1, 'jobs':[str(Path(control.config.jobs_dir)/job.artifact.job_name) for job in suite_run.plan_jobs(control)]})
     # Authentication is read only after all offline controls pass. File bytes
     # stay in a private temporary HOME; never hash or copy them into receipts.
     auth_file=Path(auth_file).expanduser()

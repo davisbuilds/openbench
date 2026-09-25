@@ -42,8 +42,8 @@ decision changes the contract. No scored campaign is implied by this pass.
 - [ ] **4. Trusted oracle boundary and second task.** Separate generic source
   extraction/worker lifecycle from a trusted oracle registry. Preserve historical
   digest verification. New tasks bind their own oracle/protocol and the shared
-  boundary with explicit versions. Prove this using the AgentMonitor concurrent
-  upgrade candidate, including an alternative valid repair. Do not weaken the
+  boundary with explicit versions. Prove this using corrected AgentMonitor PR #106, including its alternative valid repairs.
+  User selected #106 on 2026-09-25; #123 remains separate extra-hard oracle work. Do not weaken the
   authority boundary or make solver code a host plugin.
 
 Each slice gets relevant tests, a fork PR, a completed Codex review, addressed
@@ -88,12 +88,13 @@ Old runs and oracle versions remain unchanged; changed treatments get new IDs.
 - Durable priorities: `BACKLOG.md`, local commit `497303d`.
 - Step 1 merged in PR #14 (`4ec77a7`); all CI checks pass and both review
   findings are resolved. Both checkouts synced. See `docs/results-queries.md`.
-- Active step: campaign supervisor and runtime qualification in isolated worktree;
-  real tmux/process-lock controls and admission binding tests pass. Not launched
-  against a model yet; broader verification and review pending.
-- Next: finish step 1 and record its PR/checks here; ground launch/admission
-  contracts before implementing their process and credential boundaries.
-- PRs: [#14](https://github.com/davisbuilds/openbench/pull/14), merged.
+- Active step: finish campaign/admission review regressions and repeat Mini
+  qualification on the corrected pushed commit. Then merge/sync PR #15 and begin
+  the trusted oracle boundary with corrected AgentMonitor #106.
+- PRs: [#14](https://github.com/davisbuilds/openbench/pull/14), merged;
+  [#15](https://github.com/davisbuilds/openbench/pull/15), open. Initial Mini
+  qualification passed offline controls and both authenticated model controls
+  at `3249c55`. Three review findings are being fixed before renewed controls.
 
 This is a rolling execution checklist. Stages 2–4 require their grounded
 authority/recovery contracts and paired runtime controls before activation.

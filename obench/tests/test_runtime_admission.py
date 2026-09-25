@@ -102,3 +102,33 @@ class RuntimeAdmissionTests(unittest.TestCase):
         write_record(path,value)
         with self.assertRaisesRegex(admission.AdmissionError,'another execution treatment'):
             admission.validate_admission(path,changed)
+
+    def test_file_edit_control_rejects_all_unrequested_workspace_changes(self):
+        from obench.harbor_sandbox import read_tree, source_receipt
+        path,_,value=self.receipt()
+        verified=suite_run.verify_suite_run(self.root/value['authenticated_control'])
+        result_path=Path(verified['results_path'])
+        rows=[json.loads(line) for line in result_path.read_text().splitlines()]
+        jobs={j.task_set_id:Path(self.control.config.jobs_dir)/j.artifact.job_name for j in suite_run.plan_jobs(self.control)}
+        for row in rows:
+            row['candidate_provenance']['harbor_trial_name']='control-trial'
+        result_path.write_text(''.join(json.dumps(row)+'\n' for row in rows))
+        trial=jobs[rows[0]['candidate_provenance']['suite_task_set_id']]/'control-trial'
+        (trial/'verifier').mkdir(parents=True)
+        (trial/'verifier/sandbox-gateway.jsonl').write_text(json.dumps({'event':'request','outcome':'complete','upstream_status':200,'upstream_peer':{'ip':'8.8.8.8','port':443}})+'\n')
+        expected=read_tree(self.task/'environment/app')
+        expected[admission.CONTROL_TARGET]+=admission.MARKER
+        from obench.harbor_sandbox import write_files
+        write_files(trial/'artifacts/workspace', {name:data for name,data in expected.items() if name.startswith('scripts/profiles/')})
+        receipt=trial/'verifier/sandbox-grading.json'
+        receipt.write_text(json.dumps({'freeze':{'workspace_files':source_receipt(expected)['files']}}))
+        admission.verify_control(self.control,self.task,result_path)
+        for change in ('requirements','extra-file','missing-file','missing-marker'):
+            files=dict(expected)
+            if change=='requirements': files['requirements.txt']=b'changed dependency\n'
+            elif change=='extra-file': files['new.txt']=b'unrequested\n'
+            elif change=='missing-file': del files['requirements.txt']
+            else: files[admission.CONTROL_TARGET]=files[admission.CONTROL_TARGET].removesuffix(admission.MARKER)
+            receipt.write_text(json.dumps({'freeze':{'workspace_files':source_receipt(files)['files']}}))
+            with self.subTest(change=change),self.assertRaisesRegex(admission.AdmissionError,'beyond the requested edit'):
+                admission.verify_control(self.control,self.task,result_path)

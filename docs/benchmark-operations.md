@@ -125,8 +125,12 @@ entry point; the campaign wrapper enforces the unattended launch policy. API-key
 environment variables are not forwarded through tmux. File-based OAuth and local
 Docker configuration use explicitly captured path variables.
 
-Each launch has an exclusive directory and deterministic tmux session. Repeating
-it refuses to overwrite evidence or create a second supervisor. Status reports
+Each scored launch has an exclusive directory and deterministic tmux session.
+Repeating it refuses to overwrite evidence or create a second supervisor.
+Qualification gets a fresh evidence directory per attempt and a tmux session keyed
+to the runtime fingerprint. This permits requalification after runtime changes or
+a failed control while refusing concurrent qualification of the same runtime.
+Qualification status follows the control jobs, separately from the target study. Status reports
 supervisor liveness, log update time, available Harbor trial outcomes, transport
 outcomes and verified final suite evidence separately. Partial/unreadable evidence
 is visible. A timed-out trial may have a passing artifact; neither value replaces
