@@ -11,7 +11,7 @@ number, where it came from so a human can verify it with grep.
 Definitions (shared with obench.report):
   judged     a cell whose failure_class is NOT excluded (infra/rate_limited/
              stalled) -- i.e. the model got a real verdict.
-  planned    every distinct (task, trial) cell that has any row at all.
+  planned    the embedded Harbor plan; observed cells for legacy inputs.
   coverage   |judged cells| / |planned cells|. Solve rates at low coverage
              skew HIGH: excluded cells run longer and long cells are harder.
   matched    the subset of cells where EVERY selected arm has a verdict, so
@@ -35,36 +35,25 @@ import sys
 
 from .failure_class import EXCLUDED_FROM_SOLVE_RATE, class_for_report
 from .report import wilson_ci
+from . import stats, reporting_inputs
 
 EXCLUDED = tuple(EXCLUDED_FROM_SOLVE_RATE)
 
 
 def load(paths):
     """Load rows from JSONL files; each row remembers its source file."""
-    rows = []
-    for path in paths:
-        if not os.path.isfile(path):
-            raise SystemExit(f"no such results file: {path}")
-        with open(path, encoding="utf-8") as fh:
-            for lineno, line in enumerate(fh, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                row["_src"] = f"{path}:{lineno}"
-                rows.append(row)
-    return rows
+    return reporting_inputs.load_jsonl(paths)
 
 
 def arm_of(row):
-    return f"{row.get('harness', '?').split('@')[0]} x {row.get('model', '?')}"
+    label = f"{row.get('harness', '?')} x {row.get('model', '?')}"
+    if stats.is_harbor_result_row(row):
+        label += f" [{row['candidate_provenance']['comparison_arm_id']}]"
+    return label
 
 
 def cell_of(row):
-    return (row.get("task"), row.get("trial"))
+    return stats.comparison_cell_key(row)
 
 
 def is_judged(row):
@@ -97,8 +86,9 @@ def _rank(row):
     return (is_judged(row), row.get("ts_iso") or "")
 
 
-def _arm_cells(rows):
+def _arm_cells(rows, *, scope=None):
     """arm -> {cell: chosen row}: judged beats excluded, then latest ts wins."""
+    reporting_inputs.validate_rows(rows if scope is None else scope)
     cells = collections.defaultdict(dict)
     for r in rows:
         key, cell = arm_of(r), cell_of(r)
@@ -108,15 +98,27 @@ def _arm_cells(rows):
     return cells
 
 
+def _planned_cells(byc):
+    planned = set(byc)
+    for cell, row in byc.items():
+        if stats.is_harbor_result_row(row):
+            provenance = row['candidate_provenance']
+            plan = provenance['comparison_plan']
+            planned.update((*cell[:-2], task, trial)
+                           for task in provenance['comparison_resolved_tasks']
+                           for trial in range(1, plan['attempts'] + 1))
+    return planned
+
+
 def cmd_summary(rows, args):
-    cells = _arm_cells(rows)
+    cells = _arm_cells(rows, scope=getattr(args, "_scope", None))
     print(f"{'arm':<32}{'solved':>8}{'judged':>8}{'planned':>9}{'rate':>7}"
           f"{'coverage':>10}  wilson95")
     for armname in sorted(cells):
         byc = cells[armname]
         judged = [r for r in byc.values() if is_judged(r)]
         solved = [r for r in judged if r.get("success")]
-        n, s, planned = len(judged), len(solved), len(byc)
+        n, s, planned = len(judged), len(solved), len(_planned_cells(byc))
         lo, hi = wilson_ci(s, n)
         cov = n / planned if planned else 0.0
         flag = "" if cov >= 0.95 else " !"
@@ -125,7 +127,8 @@ def cmd_summary(rows, args):
     srcs = sorted({r['_src'].split(':')[0] for r in rows})
     print(f"\nevidence: {sum(1 for _ in rows)} rows from {', '.join(srcs)}; "
           f"excluded classes = {EXCLUDED}; a cell counts once "
-          f"(judged beats excluded, then latest ts_iso wins).")
+          f"(judged beats excluded, then latest ts_iso wins). "
+          f"Coverage uses embedded Harbor plans or observed legacy cells.")
     _warn_low_coverage(cells)
     _warn_missing_cells(cells)
     _warn_mixed_hosts(cells)
@@ -192,17 +195,20 @@ def _warn_missing_cells(cells):
     highest trial number seen. An arm that deliberately ran a subset still gets
     flagged, which is correct -- it cannot be compared on the full grid.
     """
-    tasks = {t for byc in cells.values() for (t, _) in byc}
-    trials = {tr for byc in cells.values() for (_, tr) in byc}
+    tasks = {c[-2] for byc in cells.values() for c in byc}
+    trials = {c[-1] for byc in cells.values() for c in byc}
     if not tasks or not trials:
         return
     grid = {(t, tr) for t in tasks for tr in trials}
     for armname in sorted(cells):
-        absent = grid - set(cells[armname])
+        expected = _planned_cells(cells[armname])
+        if not any(stats.is_harbor_result_row(r) for r in cells[armname].values()):
+            expected = grid
+        absent = expected - set(cells[armname])
         if not absent:
             continue
-        sample = ", ".join(f"{t}#t{tr}" for t, tr in sorted(absent)[:4])
-        print(f"  MISSING-CELLS {armname}: {len(cells[armname])} of {len(grid)} "
+        sample = ", ".join(f"{t}#t{tr}" for *_, t, tr in sorted(absent)[:4])
+        print(f"  MISSING-CELLS {armname}: {len(cells[armname])} of {len(expected)} "
               f"grid cells ever ran; {len(absent)} never produced a row "
               f"(e.g. {sample}). True coverage is below the figure above.")
 
@@ -244,22 +250,22 @@ def _warn_low_coverage(cells):
         byc = cells[armname]
         missing = [c for c, r in byc.items() if not is_judged(r)]
         if missing and len(missing) / len(byc) > 0.05:
-            sample = ", ".join(f"{t}#t{tr}" for t, tr in sorted(missing)[:4])
+            sample = ", ".join(f"{t}#t{tr}" for *_, t, tr in sorted(missing)[:4])
             print(f"  COVERAGE WARNING {armname}: {len(missing)} cells have no "
                   f"verdict (e.g. {sample}); rate likely skews HIGH.")
 
 
 def cmd_pertask(rows, args):
-    cells = _arm_cells(rows)
+    cells = _arm_cells(rows, scope=getattr(args, "_scope", None))
     arms = sorted(cells)
-    tasks = sorted({c[0] for byc in cells.values() for c in byc})
+    tasks = sorted({c[-2] for byc in cells.values() for c in byc})
     header = f"{'task':<32}" + "".join(f"{a.split(' x ')[-1][:12]:>14}" for a in arms)
     print(header)
     for t in tasks:
         line = f"{t[:31]:<32}"
         for a in arms:
-            judged = [r for (task, _), r in cells[a].items()
-                      if task == t and is_judged(r)]
+            judged = [r for c, r in cells[a].items()
+                      if c[-2] == t and is_judged(r)]
             s = sum(1 for r in judged if r.get("success"))
             line += f"{f'{s}/{len(judged)}' if judged else '--':>14}"
         print(line)
@@ -268,7 +274,7 @@ def cmd_pertask(rows, args):
 
 
 def cmd_matched(rows, args):
-    cells = _arm_cells(rows)
+    cells = _arm_cells(rows, scope=getattr(args, "_scope", None))
     arms = sorted(cells)
     if len(arms) < 2:
         raise SystemExit("matched needs >=2 arms after filtering")
@@ -284,14 +290,14 @@ def cmd_matched(rows, args):
         print(f"  {a:<32}{s:>3}/{n:<4}= {s / n if n else 0:>4.0%}  [{lo:.2f},{hi:.2f}]")
     dropped = {a: len({c for c, r in cells[a].items() if is_judged(r)}) - len(common)
                for a in arms}
-    print(f"\nevidence: matched run_ids share (task, trial); per-arm judged cells "
+    print(f"\nevidence: matched cells share validated comparison identity; per-arm judged cells "
           f"dropped to match: { {a.split(' x ')[-1]: d for a, d in dropped.items()} }")
     sample = sorted(common)[:5]
-    print(f"sample matched cells: {[f'{t}#t{tr}' for t, tr in sample]}")
+    print(f"sample matched cells: {[f'{t}#t{tr}' for *_, t, tr in sample]}")
 
 
 def cmd_errors(rows, args):
-    cells = _arm_cells(rows)
+    cells = _arm_cells(rows, scope=getattr(args, "_scope", None))
     for armname in sorted(cells):
         byc = cells[armname]
         tax = collections.Counter(class_for_report(r) for r in byc.values())
@@ -330,12 +336,26 @@ def main(argv=None):
     ap.add_argument("--arm")
     ap.add_argument("--exclude-task", action="append")
     ap.add_argument("--run-id")
+    ap.add_argument("--separate-inputs", action="store_true",
+                    help="report each input independently; never pool treatments")
     args = ap.parse_args(argv)
-    rows = _filter(load(args.paths), args)
-    if not rows:
-        raise SystemExit("no rows after filtering")
-    {"summary": cmd_summary, "pertask": cmd_pertask, "matched": cmd_matched,
-     "errors": cmd_errors, "evidence": cmd_evidence}[args.command](rows, args)
+    groups = [[path] for path in args.paths] if args.separate_inputs else [args.paths]
+    # Validate every input before printing a partial report.
+    prepared = []
+    for paths in groups:
+        scope = load(paths)
+        if args.command != "evidence":
+            reporting_inputs.validate_rows(scope)
+        rows = _filter(scope, args)
+        if not rows:
+            raise SystemExit("no rows after filtering")
+        prepared.append((paths, scope, rows))
+    for paths, scope, rows in prepared:
+        args._scope = scope
+        if args.separate_inputs:
+            print(f"\nInput: {paths[0]}")
+        {"summary": cmd_summary, "pertask": cmd_pertask, "matched": cmd_matched,
+         "errors": cmd_errors, "evidence": cmd_evidence}[args.command](rows, args)
     return 0
 
 

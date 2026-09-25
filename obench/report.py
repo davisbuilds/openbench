@@ -76,20 +76,9 @@ def wilson_ci(successes, n, z=1.96):
 
 
 def load_rows(results_path):
-    """Load results rows from a JSONL file, skipping blank/corrupt lines."""
-    rows = []
-    if not os.path.isfile(results_path):
-        return rows
-    with open(results_path, encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return rows
+    """Load rows without silently discarding malformed evidence."""
+    from .reporting_inputs import load_jsonl
+    return load_jsonl([results_path])
 
 
 def _arm_key(row):
