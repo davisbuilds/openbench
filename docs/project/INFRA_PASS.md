@@ -94,7 +94,10 @@ Old runs and oracle versions remain unchanged; changed treatments get new IDs.
 - PRs: [#14](https://github.com/davisbuilds/openbench/pull/14), merged;
   [#15](https://github.com/davisbuilds/openbench/pull/15), open. Initial Mini
   qualification passed offline controls and both authenticated model controls
-  at `3249c55`. Three review findings are being fixed before renewed controls.
+  at `3249c55`. Three review findings are fixed at `1eb59c0`; renewed Mini qualification passed.
+  Admitted resume then exposed Harbor rewriting completed job metadata. The runner
+  now preserves completed jobs and re-imports their evidence without dispatch;
+  regression and renewed runtime verification are required before merge.
 
 This is a rolling execution checklist. Stages 2–4 require their grounded
 authority/recovery contracts and paired runtime controls before activation.

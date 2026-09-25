@@ -140,3 +140,8 @@ There is no automatic restart or campaign-level retry. Without a completion
 receipt, status is interrupted/unknown. Inspect the original Harbor job, processes
 and containers before using the canonical runner's verified resume path. Preserve
 failed launch directories; a deliberately fresh study uses a new suite identity.
+
+Finalized canonical resume revalidates completed Harbor jobs without dispatching
+Harbor again: Harbor otherwise rewrites job metadata even with no trials left.
+Every trial and the existing sealed output still pass normal import validation;
+changed evidence fails instead of replacing the earlier result.
