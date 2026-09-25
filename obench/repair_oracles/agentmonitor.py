@@ -208,3 +208,13 @@ def grade(results):
         checks.append({'case':name,'bucket':bucket,'pass':passed})
     score=round(sum(buckets[k] for k in ('identity','migration','coverage'))/3,4) if buckets['guards'] else 0.0
     return {'score':score,'buckets':buckets,'checks':checks,'oracle_version':2}
+
+
+def validate_runtime(image):
+    from ..repair_worker import runtime_probe
+    from ..sandbox_grading import GradingError
+    code="const DB=require('/opt/repair-deps/node_modules/better-sqlite3');const db=new DB(':memory:');db.prepare('SELECT 1').get();db.close();process.stdout.write(JSON.stringify({sqlite:require('/opt/repair-deps/node_modules/better-sqlite3/package.json').version,tsx:require('/opt/repair-deps/node_modules/tsx/package.json').version}));"
+    observed=runtime_probe(image,['node','-e',code])
+    if observed!={'sqlite':'13.0.2','tsx':'4.23.5'}:
+        raise GradingError('registered worker native dependency versions differ')
+    return observed

@@ -19,6 +19,7 @@ def oracle_module(oracle):
 
 def grade_submission(root, oracle, image, *, timeout=90):
     module=oracle_module(oracle)
+    runtime=module.validate_runtime(image)
     try:
         files=read_tree(Path(root))
         permitted=source_names(oracle,files)
@@ -28,7 +29,7 @@ def grade_submission(root, oracle, image, *, timeout=90):
         observations,worker=repair_worker.run_worker(image,archive,
             [request for _,_,request in module.cases()],program=module.worker_program(),timeout=timeout)
         graded=module.grade(observations)
-        return {**graded,'source_sha256':hashes,'worker':worker,'oracle_id':oracle.id,'protocol':oracle.protocol}
+        return {**graded,'source_sha256':hashes,'worker':{**worker,'runtime_dependencies':runtime},'oracle_id':oracle.id,'protocol':oracle.protocol}
     except CandidateFailure as exc:
         graded=module.grade([{'ok':False} for _ in module.cases()])
         return {**graded,'candidate_failure':exc.reason,'source_sha256':None,'worker':None,

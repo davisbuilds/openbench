@@ -43,7 +43,7 @@
     "data/tb-gpt56sol-2026-07-10/tb-gpt56sol-n3.jsonl": "b353a129c2a78a1d71b2bfa995338ecf6df34afd4ef2ea49b367ae0bc4f528c1",
     "data/tb-gpt56sol-2026-07-10/tb-gpt56sol-stats.md": "1ea43a69c8de43d13f7a794e5d824ed27d1d5adefb9369b1b511052c3b0513ec",
     "data/tb-open-n3-2026-07-09/tb-open-n3-stats.md": "deb72d4ef4a5386cfaf8ccc2bf92a88b79d18c6ee47dbfa3ed03dabcd43aa4c3",
-    "docker/repair-sandbox/Dockerfile": "c4412a7d400e2c89c5dde30c192c1b14eeca7c4078af94cef46ac798c4b086dc",
+    "docker/repair-sandbox/Dockerfile": "c521660a3394667347517a8f66d74f862b2510c700953212471e7a58120aa6e9",
     "experiments/candidates/deepagents-code.toml": "ad995fc938a0daac98126d4b748a085993136697fde88c7457e1fbbe5d4d5da1",
     "experiments/candidates/omp.toml": "5cc8300c9743a1247a4d1ae63d57e1fac55592b270f9f4f22e847dbbc85c8597",
     "obench/harbor_sandbox.py": "2431e8bd05516d563171c87b5edb6a6c8382e6a359a70c3071959f3c6d0b8455",

@@ -93,3 +93,23 @@ def run_worker(image: str, archive: bytes, cases: list[dict], *, program: str, t
             cleaned = subprocess.run(['docker','rm','--force',name], capture_output=True, timeout=30)
             if cleaned.returncode:
                 raise GradingError('worker cleanup failed')
+
+
+def runtime_probe(image, argv):
+    """Check installed runtime dependencies before any candidate code is loaded."""
+    if not re.fullmatch(r'(?:[A-Za-z0-9][A-Za-z0-9._:/-]*@)?sha256:[0-9a-f]{64}',image):
+        raise GradingError('runtime probe requires an immutable image')
+    name='obench-grade-probe-'+uuid.uuid4().hex
+    created=False
+    try:
+        bounded_command(['docker','create','--name',name,'--network','none','--user','10001:10001',
+            '--cap-drop','ALL','--security-opt','no-new-privileges:true','--read-only',
+            '--pids-limit','64','--memory','256m','--cpus','1',image,*argv])
+        created=True
+        return strict_json(bounded_command(['docker','start','--attach',name],timeout=30))
+    except (ValueError,_CommandFailure) as exc:
+        raise GradingError('registered worker runtime dependency probe failed') from exc
+    finally:
+        if created:
+            result=subprocess.run(['docker','rm','--force',name],capture_output=True,timeout=30)
+            if result.returncode: raise GradingError('runtime dependency probe cleanup failed')

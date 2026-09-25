@@ -30,6 +30,7 @@ SCRIPTS = (
     'scripts/local/verify_repair_log_export.py',
     'scripts/local/verify_repair_trajectory.py',
     'scripts/local/verify_registered_repair.py',
+    'scripts/local/verify_registered_lifecycle.py',
 )
 
 CONTROLS = (*SCRIPTS, "runtime-sockets")
@@ -192,6 +193,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
         [python,SCRIPTS[4],'--runtime-image',image,'--task',str(task),'--output',str(directory/'log-export')],
         [python,SCRIPTS[5],'--output',str(directory/'trajectory')],
         [python,SCRIPTS[6],'--runtime-image',image,'--output',str(directory/'registered-oracle')],
+        [python,SCRIPTS[7],'--runtime-image',image,'--output',str(directory/'registered-lifecycle')],
         ['docker','run','--rm','--network','none','--cap-drop','ALL','--security-opt','no-new-privileges',
          '--user','10001:10001','-i',image,'python3','-','-v'],
     ]

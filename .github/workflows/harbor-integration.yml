@@ -57,6 +57,11 @@ jobs:
           .venv/bin/python scripts/local/verify_registered_repair.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/registered-oracle
+      - name: Check registered oracle through Harbor lifecycle
+        run: >-
+          .venv/bin/python scripts/local/verify_registered_lifecycle.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --output results/ci/registered-lifecycle
       - name: Check effective sandbox boundaries
         run: >-
           .venv/bin/python scripts/local/verify_repair_sandbox.py

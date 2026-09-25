@@ -77,7 +77,7 @@ class SandboxSuiteTests(unittest.TestCase):
         with self.assertRaisesRegex(suite_run.SuiteRunError, 'binding mismatch'):
             self.compile()
         source.rename(self.task_root / 'another-task')
-        with self.assertRaisesRegex(suite_run.SuiteRunError, 'only dojo'):
+        with self.assertRaisesRegex(suite_run.SuiteRunError, 'task identity differs'):
             self.compile()
 
     def test_v4_task_compiles_and_task_identity_cannot_select_legacy_oracle(self):

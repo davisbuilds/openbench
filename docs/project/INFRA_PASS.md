@@ -26,13 +26,13 @@ decision changes the contract. No scored campaign is implied by this pass.
   treatments. Use embedded plans for coverage where available. Proof: regression
   tests for corruption, mixed treatments, valid comparisons, missing cells and
   retries, plus existing reporter/suite tests.
-- [ ] **2. Persistent campaign operations.** A thin local launch/status interface
+- [x] **2. Persistent campaign operations.** A thin local launch/status interface
   wraps the canonical runner with tmux and macOS idle-sleep prevention, immutable
   launch receipts, duplicate-launch refusal and explicit completion/unknown
   states. Read Harbor progress and evidence; do not introduce another scheduler.
   Proof: real subprocess/tmux launch, interrupted launch and duplicate controls,
   fake-provider Harbor integration, no surviving sandbox resources.
-- [ ] **3. Runtime admission.** Gather existing offline controls and a bounded
+- [x] **3. Runtime admission.** Gather existing offline controls and a bounded
   authenticated control into evidence bound to the actual image/platform,
   loaded implementation and selected model/effort. Enforce that record at
   campaign launch only after control and inspection paths exist. Controls can
@@ -88,16 +88,15 @@ Old runs and oracle versions remain unchanged; changed treatments get new IDs.
 - Durable priorities: `BACKLOG.md`, local commit `497303d`.
 - Step 1 merged in PR #14 (`4ec77a7`); all CI checks pass and both review
   findings are resolved. Both checkouts synced. See `docs/results-queries.md`.
-- Active step: finish campaign/admission review regressions and repeat Mini
-  qualification on the corrected pushed commit. Then merge/sync PR #15 and begin
-  the trusted oracle boundary with corrected AgentMonitor #106.
-- PRs: [#14](https://github.com/davisbuilds/openbench/pull/14), merged;
-  [#15](https://github.com/davisbuilds/openbench/pull/15), open. Initial Mini
-  qualification passed offline controls and both authenticated model controls
-  at `3249c55`. Three review findings are fixed at `1eb59c0`; renewed Mini qualification passed.
-  Admitted resume then exposed Harbor rewriting completed job metadata. The runner
-  now preserves completed jobs and re-imports their evidence without dispatch;
-  regression and renewed runtime verification are required before merge.
+- Steps 2–3 merged in PR #15 (`0f28026`), synced on both main checkouts.
+  Two cloud review passes, all four findings resolved, all CI green. Final Mini
+  qualification at `803d58d` passed all offline/authenticated controls; admitted
+  exact resume preserved evidence and made no additional model requests.
+- Active step 4: `feat/trusted-repair-oracles`; grounded contract and acceptance
+  are in [TRUSTED_ORACLE_BOUNDARY.md](TRUSTED_ORACLE_BOUNDARY.md). Corrected #106
+  is the proof task; #123 remains afterward. Container proof/review pending.
+- PRs: [#14](https://github.com/davisbuilds/openbench/pull/14) and
+  [#15](https://github.com/davisbuilds/openbench/pull/15), merged.
 
 This is a rolling execution checklist. Stages 2–4 require their grounded
 authority/recovery contracts and paired runtime controls before activation.
