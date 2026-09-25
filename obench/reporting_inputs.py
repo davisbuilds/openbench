@@ -1,5 +1,6 @@
 """Strict read-only input checks shared by convenience reports."""
 import json
+import math
 from collections import defaultdict
 
 from . import stats
@@ -18,6 +19,13 @@ def _constant(value):
     raise ValueError(f'nonfinite JSON number {value}')
 
 
+def _float(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("nonfinite JSON number")
+    return number
+
+
 def load_jsonl(paths):
     rows = []
     for path in paths:
@@ -26,7 +34,7 @@ def load_jsonl(paths):
                 if not line.strip():
                     continue
                 try:
-                    row = json.loads(line, object_pairs_hook=_object, parse_constant=_constant)
+                    row = json.loads(line, object_pairs_hook=_object, parse_constant=_constant, parse_float=_float)
                     if not isinstance(row, dict):
                         raise ValueError('row is not an object')
                 except ValueError as exc:

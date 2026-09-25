@@ -46,7 +46,7 @@ class ResultsIntegrityTests(unittest.TestCase):
 
     def test_non_objects_duplicate_keys_and_nonfinite_numbers_are_rejected(self):
         path = self.root / 'invalid.jsonl'
-        for text in ('[]', 'null', '{"score":NaN}', '{"task":"a","task":"b"}'):
+        for text in ('[]', 'null', '{"score":NaN}', '{"score":1e999}', '{"task":"a","task":"b"}'):
             path.write_text(text + '\n')
             with self.subTest(text=text), self.assertRaisesRegex(ValueError, 'invalid.jsonl:1'):
                 query.load([str(path)])

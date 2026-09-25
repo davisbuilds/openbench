@@ -98,14 +98,14 @@ def _arm_cells(rows, *, scope=None):
     return cells
 
 
-def _planned_cells(byc):
+def _planned_cells(byc, excluded_tasks=()):
     planned = set(byc)
     for cell, row in byc.items():
         if stats.is_harbor_result_row(row):
             provenance = row['candidate_provenance']
             plan = provenance['comparison_plan']
             planned.update((*cell[:-2], task, trial)
-                           for task in provenance['comparison_resolved_tasks']
+                           for task in provenance['comparison_resolved_tasks'] if task not in excluded_tasks
                            for trial in range(1, plan['attempts'] + 1))
     return planned
 
@@ -118,7 +118,7 @@ def cmd_summary(rows, args):
         byc = cells[armname]
         judged = [r for r in byc.values() if is_judged(r)]
         solved = [r for r in judged if r.get("success")]
-        n, s, planned = len(judged), len(solved), len(_planned_cells(byc))
+        n, s, planned = len(judged), len(solved), len(_planned_cells(byc, args.exclude_task or ()))
         lo, hi = wilson_ci(s, n)
         cov = n / planned if planned else 0.0
         flag = "" if cov >= 0.95 else " !"
@@ -130,7 +130,7 @@ def cmd_summary(rows, args):
           f"(judged beats excluded, then latest ts_iso wins). "
           f"Coverage uses embedded Harbor plans or observed legacy cells.")
     _warn_low_coverage(cells)
-    _warn_missing_cells(cells)
+    _warn_missing_cells(cells, args.exclude_task or ())
     _warn_mixed_hosts(cells)
     _warn_mixed_harness_versions(cells)
 
@@ -183,7 +183,7 @@ def _warn_mixed_harness_versions(cells):
               f"no recorded harness_version: {sorted(unknown)[:4]}")
 
 
-def _warn_missing_cells(cells):
+def _warn_missing_cells(cells, excluded_tasks=()):
     """Flag arms that are missing whole cells from the grid the other arms ran.
 
     ``planned`` counts cells that produced at least one ROW, so a cell that never
@@ -201,7 +201,7 @@ def _warn_missing_cells(cells):
         return
     grid = {(t, tr) for t in tasks for tr in trials}
     for armname in sorted(cells):
-        expected = _planned_cells(cells[armname])
+        expected = _planned_cells(cells[armname], excluded_tasks)
         if not any(stats.is_harbor_result_row(r) for r in cells[armname].values()):
             expected = grid
         absent = expected - set(cells[armname])
@@ -210,7 +210,7 @@ def _warn_missing_cells(cells):
         sample = ", ".join(f"{t}#t{tr}" for *_, t, tr in sorted(absent)[:4])
         print(f"  MISSING-CELLS {armname}: {len(cells[armname])} of {len(expected)} "
               f"grid cells ever ran; {len(absent)} never produced a row "
-              f"(e.g. {sample}). True coverage is below the figure above.")
+              f"(e.g. {sample}). Harbor coverage includes these; legacy coverage may be overstated.")
 
 
 def _warn_mixed_hosts(cells):
