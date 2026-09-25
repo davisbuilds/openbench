@@ -36,6 +36,20 @@ class ResultsIntegrityTests(unittest.TestCase):
     def harbor(self, **extra):
         return CompareTestCase.harbor_row('codex', 'task', 1, True, arm_id='codex', **extra)
 
+    def test_missing_files_keep_user_facing_behavior(self):
+        path = str(self.root / 'missing.jsonl')
+        self.assertEqual(report.load_rows(path), [])
+        with self.assertRaisesRegex(SystemExit, 'no such results file'):
+            query.load([path])
+
+    def test_missing_entire_harbor_arm_is_explicit(self):
+        path = self.write('absent-arm.jsonl', [self.harbor()])
+        out = self.run_query('summary', path)
+        self.assertIn('MISSING-ARM pi x m [pi]: 0/1 planned cells', out)
+        self.assertNotIn('MISSING-ARM codex', out)
+        filtered = self.run_query('summary', path, '--harness', 'codex')
+        self.assertNotIn('MISSING-ARM', filtered)
+
     def test_corruption_has_file_and_line_in_both_readers(self):
         path = self.write('bad.jsonl', [self.legacy()])
         with open(path, 'a') as stream:

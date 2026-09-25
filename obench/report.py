@@ -78,6 +78,8 @@ def wilson_ci(successes, n, z=1.96):
 def load_rows(results_path):
     """Load rows without silently discarding malformed evidence."""
     from .reporting_inputs import load_jsonl
+    if not os.path.exists(results_path):
+        return []
     return load_jsonl([results_path])
 
 

@@ -42,6 +42,9 @@ EXCLUDED = tuple(EXCLUDED_FROM_SOLVE_RATE)
 
 def load(paths):
     """Load rows from JSONL files; each row remembers its source file."""
+    for path in paths:
+        if not os.path.isfile(path):
+            raise SystemExit(f"no such results file: {path}")
     return reporting_inputs.load_jsonl(paths)
 
 
@@ -108,6 +111,23 @@ def _planned_cells(byc, excluded_tasks=()):
                            for task in provenance['comparison_resolved_tasks'] if task not in excluded_tasks
                            for trial in range(1, plan['attempts'] + 1))
     return planned
+
+
+def _warn_missing_arms(scope, rows, args):
+    observed = {arm_of(row) for row in rows}
+    expected = collections.defaultdict(set)
+    for row in scope:
+        if not stats.is_harbor_result_row(row):
+            continue
+        provenance = row['candidate_provenance']
+        for arm in provenance['comparison_plan']['arms']:
+            hint = dict(row, harness=arm['canonical_harness'], model=arm['canonical_model'],
+                        candidate_provenance={**provenance, 'comparison_arm_id': arm['arm_id']})
+            if not _filter([hint], args):
+                continue
+            expected[arm_of(hint)].update(_planned_cells({cell_of(row): row}, args.exclude_task or ()))
+    for arm in sorted(expected.keys() - observed):
+        print(f"MISSING-ARM {arm}: 0/{len(expected[arm])} planned cells; no verdicts")
 
 
 def cmd_summary(rows, args):
@@ -354,6 +374,8 @@ def main(argv=None):
         args._scope = scope
         if args.separate_inputs:
             print(f"\nInput: {paths[0]}")
+        if args.command != "evidence":
+            _warn_missing_arms(scope, rows, args)
         {"summary": cmd_summary, "pertask": cmd_pertask, "matched": cmd_matched,
          "errors": cmd_errors, "evidence": cmd_evidence}[args.command](rows, args)
     return 0
