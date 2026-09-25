@@ -761,6 +761,30 @@ model = "gpt-5.6-terra"
         with self.assertRaisesRegex(SuiteRunError, "divergent existing"):
             self._run_simulated(compiled)
 
+    def test_finalized_completed_resume_never_rewrites_harbor_evidence(self):
+        root = self._project()
+        compiled = suite_run.compile_suite(start=root)
+        first = self._run_simulated(compiled)
+        job = first.artifacts[0].harbor_job_path
+        job.mkdir(parents=True)
+        (job / "config.json").write_bytes(first.artifacts[0].config_path.read_bytes())
+        summary = {"finished_at": "2026-09-25T20:00:00Z", "n_total_trials": 1,
+                   "stats": {"n_completed_trials": 1, "n_pending_trials": 0, "n_running_trials": 0}}
+        (job / "result.json").write_text(json.dumps(summary))
+        before = {p.name: p.read_bytes() for p in job.iterdir()}
+        # If Harbor is dispatched this returns a failing code. Completed jobs
+        # must instead be re-imported/validated without rewriting their hashes.
+        second = self._run_simulated(compiled, returncodes=[99])
+        self.assertEqual(second.results_sha256, first.results_sha256)
+        self.assertEqual({p.name: p.read_bytes() for p in job.iterdir()}, before)
+        first.results_path.write_text("{}\n")
+        with self.assertRaisesRegex(SuiteRunError, "divergent existing"):
+            self._run_simulated(compiled, returncodes=[99])
+        def invalid_import(*args, **kwargs):
+            raise ValueError("changed trial evidence")
+        with self.assertRaisesRegex(SuiteRunError, "changed trial evidence"):
+            self._run_simulated(compiled, returncodes=[99], importer=invalid_import)
+
     def test_local_verifier_rejects_config_and_run_manifest_tampering(self):
         root = self._project()
         compiled = suite_run.compile_suite(start=root)

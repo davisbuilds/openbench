@@ -456,11 +456,17 @@ def run_suite(
                 and _completed_harbor_job(command.expected_job_path)
             )
             _prepare_oauth_returns(oauth_credentials)
-            completed = run_process(
-                list(command.argv),
-                check=False,
-                env=process_env,
-            )
+            if finalize and no_op_resume:
+                # Harbor rewrites job lock/result metadata even when every trial
+                # is already complete. Preserve those evidence bytes and let the
+                # full importer below revalidate every trial and the sealed pair.
+                completed = subprocess.CompletedProcess(list(command.argv), 0)
+            else:
+                completed = run_process(
+                    list(command.argv),
+                    check=False,
+                    env=process_env,
+                )
             artifacts.append(
                 SuiteRunArtifact(
                     task_set_id=job.task_set_id,

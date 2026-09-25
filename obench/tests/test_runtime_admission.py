@@ -132,3 +132,22 @@ class RuntimeAdmissionTests(unittest.TestCase):
             receipt.write_text(json.dumps({'freeze':{'workspace_files':source_receipt(files)['files']}}))
             with self.subTest(change=change),self.assertRaisesRegex(admission.AdmissionError,'beyond the requested edit'):
                 admission.verify_control(self.control,self.task,result_path)
+
+    def test_qualified_status_requires_intact_admission_evidence(self):
+        import socket
+        from obench import campaign
+        path,_,value=self.receipt()
+        write_record(self.root/'launch.json',{'schema':1,'host':socket.gethostname(),'mode':'qualify',
+            'session':'not-running','manifest_sha256':self.compiled.manifest_sha256,'jobs':[]})
+        write_record(self.root/'finished.json',{'schema':1,'state':'qualified','admission':str(path),'exit_code':0})
+        (self.root/'execution.lock').touch()
+        with patch.object(campaign,'session_exists',return_value=False):
+            self.assertEqual(campaign.campaign_status(self.root)['state'],'qualified')
+            log=self.root/'offline-0.log'
+            original=log.read_bytes()
+            log.write_text('changed')
+            self.assertEqual(campaign.campaign_status(self.root)['state'],'completion_evidence_invalid')
+            log.write_bytes(original)
+            self.assertEqual(campaign.campaign_status(self.root)['state'],'qualified')
+            path.unlink()
+            self.assertEqual(campaign.campaign_status(self.root)['state'],'completion_evidence_invalid')
