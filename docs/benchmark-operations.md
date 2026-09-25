@@ -119,8 +119,9 @@ does not invalidate it. This records successful authentication at the control's
 time, not a promise that credentials never expire. Expired authentication still
 fails through the normal runner. Admission is separate from task difficulty.
 
-The initial qualification control supports the existing Dojo repair lane and
-serial execution. `obench run` remains the low-level canonical execution/control
+Qualification supports the legacy Dojo and registered AgentMonitor repair lanes
+with serial execution. The authenticated control uses the selected task’s verifier
+with a separate file-edit instruction and task digest. `obench run` remains the low-level canonical execution/control
 entry point; the campaign wrapper enforces the unattended launch policy. API-key
 environment variables are not forwarded through tmux. File-based OAuth and local
 Docker configuration use explicitly captured path variables.

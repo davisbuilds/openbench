@@ -112,6 +112,15 @@ def validate_admission(path, expected):
     return value
 
 
+
+def control_edit(task):
+    import tomllib
+    metadata=tomllib.loads((Path(task)/'task.toml').read_text()).get('metadata',{})
+    if metadata.get('openbench_oracle') == 'agentmonitor-benchmark-v2':
+        return 'src/db/schema.ts', b'// OPENBENCH_RUNTIME_CONTROL_OK\n'
+    return CONTROL_TARGET, MARKER
+
+
 def prepare_control(compiled, directory):
     """A bounded file-edit control, kept outside the benchmark task identity."""
     if len(compiled.task_sets) != 1:
@@ -123,18 +132,21 @@ def prepare_control(compiled, directory):
     init.init_scaffold(directory)
     tasks = directory/'.openbench/tasks'
     shutil.rmtree(tasks)
-    source = ROOT/'harbor-tasks-local/dojo-evidence-pr60-v4'
+    source = selected.task_set.path/selected.task_names[0]
     task = tasks/source.name
     shutil.copytree(source,task)
+    target,marker=control_edit(task)
     (task/'instruction.md').write_text(
-        "This is a file-edit control. Append exactly the Python comment "
-        "'# OPENBENCH_RUNTIME_CONTROL_OK' and a newline to "
-        "/app/scripts/profiles/__init__.py, with no extra blank line. Leave "
-        "every other file unchanged. Reply 'done' and stop. This is not a repair challenge.\n")
-    from .sandbox_grading import task_digest
+        "This is a file-edit control. Append exactly the comment "
+        +repr(marker.decode().strip())+" and a newline to /app/"+target+
+        ", with no extra blank line. Leave every other file unchanged. "
+        "Reply 'done' and stop. This is not a repair challenge.\n")
+    from .sandbox_grading import task_digest as legacy_digest
+    from .repair_oracles.registry import task_digest as registered_digest
     config = task/'task.toml'
-    text = re.sub(r'(\[metadata.openbench_task_content_digest\]\nscheme = 3\nsha256 = ")[a-f0-9]{64}',
-                  lambda m:m.group(1)+task_digest(task),config.read_text())
+    digest_fn=registered_digest if target.startswith('src/') else legacy_digest
+    text = re.sub(r'(\[metadata.openbench_task_content_digest\]\nscheme = [34]\nsha256 = ")[a-f0-9]{64}',
+                  lambda m:m.group(1)+digest_fn(task),config.read_text())
     config.write_text(text)
     suite = directory/'.openbench/suites/default.toml'
     text = init.DEFAULT_SUITE_TOML.replace('private-default','runtime-control')
@@ -162,7 +174,8 @@ def verify_control(control, task, result_path):
         receipt=json.loads((trial/'verifier/sandbox-grading.json').read_text())
         from .harbor_sandbox import read_tree, source_receipt
         expected=read_tree(task/'environment/app')
-        expected[CONTROL_TARGET]+=MARKER
+        target,marker=control_edit(task)
+        expected[target]+=marker
         if receipt['freeze'].get('workspace_files') != source_receipt(expected)['files']:
             raise AdmissionError('authenticated control changed workspace beyond the requested edit')
         events=[json.loads(line) for line in (trial/'verifier/sandbox-gateway.jsonl').read_text().splitlines()]

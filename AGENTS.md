@@ -128,6 +128,7 @@ them as the default workflow.
 | Counting proxy | `obench/proxy.py` |
 | Harbor jobs/results/evidence | `obench/harbor_job.py`, `obench/harbor_results.py`, `obench/harbor_run.py` |
 | Versioned packs (tasks + harness) | `obench/packs.py`, `docs/task-packs.md`, `docs/packs.json` |
+| Trusted repair oracles | `obench/repair_oracles/`, `obench/repair_grading.py`, `obench/repair_worker.py` |
 | Stock adapters | `obench/adapters/` |
 | Unit tests | `obench/tests/` |
 | Tasks | `harbor-tasks/` (canonical), `tasks/` (historical compatibility), `.openbench/tasks/` (private-init) |

@@ -324,3 +324,27 @@ that previously discarded byte and usage totals on some completed streams.
 The offline controls exercise both relay and broker with real sockets, including
 inside the pinned runtime image. A rebuilt image and renewed admission are
 required before future calibration; historical receipts are not rewritten.
+
+## Versioned trusted oracles
+
+Scheme-3 Dojo tasks retain the frozen `sandbox_grading.py` implementation and
+historical bindings. New registered repairs use `repair_oracles/registry.py`,
+`repair_worker.py`, and `repair_grading.py`. Scheme 4 binds the task tree, selected
+oracle/protocol, and shared implementation dependencies. Only built-in oracle IDs
+are accepted; task metadata cannot import a host plugin.
+
+`am-benchmark-pr106-v3` packages the corrected revision-2 AgentMonitor behavior.
+Its public observation protocol runs candidate TypeScript in a disposable worker;
+expected values and comparisons remain on the host. The trusted source policy
+accepts files under `src/`, including new helpers, after whole-archive validation.
+Package metadata and installed dependencies are fixed. A dependency probe runs
+before candidate execution so a broken Node/SQLite runtime is an infrastructure
+failure. The runtime builds SQLite from locked source to match the pinned base
+image's libc; it contains no oracle or reference repairs.
+
+Offline controls live in `verify_registered_repair.py` and
+`verify_registered_lifecycle.py`: baseline, reference, partial repairs, all four
+valid alternatives, new helpers, malformed artifacts, reward forgery, and paired
+workspace/host/oracle reads. Runtime qualification includes these controls before
+its separate authenticated file-edit control. Runtime/oracle admission does not
+establish frontier-model difficulty; a fresh calibration cohort remains separate.

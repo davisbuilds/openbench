@@ -59,6 +59,22 @@ class SandboxReceiptTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.validate()
 
 
+    def test_registered_receipt_binds_oracle_protocol_and_digest_scheme(self):
+        oracle='agentmonitor-benchmark-v2'
+        protocol='am-benchmark-observations-v1'
+        self.binding.update(scheme=4,schema='openbench-isolated-repair-task-v2',oracle={'id':oracle,'protocol':protocol})
+        self.digest={'scheme':4,'sha256':hashlib.sha256(json.dumps(self.binding,sort_keys=True,separators=(',',':')).encode()).hexdigest()}
+        self.receipt['grading'].update(oracle_id=oracle,protocol=protocol)
+        def check(expected=oracle):
+            (self.verifier/'sandbox-grading.json').write_text(json.dumps(self.receipt))
+            return _validate_sandbox_receipt(self.root,self.digest,1,'test',expected_oracle=expected)
+        check()
+        for expected in (None,'unknown'):
+            with self.subTest(expected=expected),self.assertRaises(ValueError):check(expected)
+        self.receipt['grading']['protocol']='another-protocol'
+        with self.assertRaisesRegex(ValueError,'oracle differs'):check()
+
+
 class StagedAuthTests(unittest.TestCase):
     def test_private_staging_allows_repeat_return_but_rejects_links(self):
         with tempfile.TemporaryDirectory() as directory:

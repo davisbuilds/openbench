@@ -107,4 +107,7 @@ class RegisteredSuiteTests(unittest.TestCase):
             self.assertIn('obench.repair_oracles.agentmonitor',compiled.manifest['sandbox']['implementation_sha256'])
             from obench import runtime_admission
             control,_=runtime_admission.prepare_control(compiled,root/'control')
-            self.assertEqual(control.task_sets[0].task_names,('dojo-evidence-pr60-v4',))
+            self.assertEqual(control.task_sets[0].task_names,('am-benchmark-pr106-v3',))
+            control_task=control.task_sets[0].task_set.path/'am-benchmark-pr106-v3'
+            self.assertIn('// OPENBENCH_RUNTIME_CONTROL_OK',(control_task/'instruction.md').read_text())
+            self.assertEqual(suite_run.plan_jobs(control)[0].artifact.as_dict()['verifier']['import_path'],'obench.repair_grading:RepairVerifier')
