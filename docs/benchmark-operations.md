@@ -87,3 +87,61 @@ receipts. Do not launch a second copy simply because a session disappeared.
 - Resume only after confirming no original worker remains and verifying the
   runner's exact resume identity/inputs. Stopping a tmux session is not proof
   of descendant cleanup; use the runner's stop procedure and verify processes.
+
+## Persistent campaign commands
+
+For checkout-based execution, the supervisor checks a clean source commit that
+is present on a fetched remote branch. Run these commands on the execution host.
+It uses tmux and, on macOS, `caffeinate -i`; it does not prevent lid sleep or
+survive reboot. Use an interpreter with the pinned Harbor environment available.
+
+```sh
+obench campaign qualify path/to/suite.toml \
+  --harbor-binary /path/to/harbor --auth-file /path/to/local/auth.json
+obench campaign status /path/printed/by/qualify
+obench campaign launch path/to/suite.toml \
+  --harbor-binary /path/to/harbor --admission /path/to/qualification/admission.json
+obench campaign status /path/printed/by/launch
+```
+
+`qualify` is an explicit live-control operation. It runs the existing offline
+boundary, CLI, deadline, grading, export, trajectory and runtime socket controls
+first, then a 180-second file-edit control for each selected model. It uses zero
+retries and at most 20 requests per arm. OAuth is copied read-only from the
+explicit local file into a private temporary HOME after offline checks pass;
+credential bytes are never hashed or included in admission evidence. No scored
+repair task is dispatched by qualification.
+
+Admission binds the effective image/platform, Docker daemon, execution host,
+Harbor pin, implementation/control bytes and model/effort selection. The launch
+and supervisor both revalidate it before dispatch; changing documentation alone
+does not invalidate it. This records successful authentication at the control's
+time, not a promise that credentials never expire. Expired authentication still
+fails through the normal runner. Admission is separate from task difficulty.
+
+The initial qualification control supports the existing Dojo repair lane and
+serial execution. `obench run` remains the low-level canonical execution/control
+entry point; the campaign wrapper enforces the unattended launch policy. API-key
+environment variables are not forwarded through tmux. File-based OAuth and local
+Docker configuration use explicitly captured path variables.
+
+Each scored launch has an exclusive directory and deterministic tmux session.
+Repeating it refuses to overwrite evidence or create a second supervisor.
+Qualification gets a fresh evidence directory per attempt and a tmux session keyed
+to the runtime fingerprint. This permits requalification after runtime changes or
+a failed control while refusing concurrent qualification of the same runtime.
+Qualification status follows the control jobs, separately from the target study. Status reports
+supervisor liveness, log update time, available Harbor trial outcomes, transport
+outcomes and verified final suite evidence separately. Partial/unreadable evidence
+is visible. A timed-out trial may have a passing artifact; neither value replaces
+the other.
+
+There is no automatic restart or campaign-level retry. Without a completion
+receipt, status is interrupted/unknown. Inspect the original Harbor job, processes
+and containers before using the canonical runner's verified resume path. Preserve
+failed launch directories; a deliberately fresh study uses a new suite identity.
+
+Finalized canonical resume revalidates completed Harbor jobs without dispatching
+Harbor again: Harbor otherwise rewrites job metadata even with no trials left.
+Every trial and the existing sealed output still pass normal import validation;
+changed evidence fails instead of replacing the earlier result.

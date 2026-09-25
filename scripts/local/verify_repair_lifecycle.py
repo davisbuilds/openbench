@@ -66,6 +66,10 @@ class FixtureAgent(BaseAgent):
                 'rm /app/scripts/profiles/__init__.py && ln -s /etc/passwd /app/scripts/profiles/__init__.py')
             if result.return_code != 0:
                 raise RuntimeError('malformed-source control did not activate')
+        if self.mode == 'baseline':
+            result = await environment.exec("printf 'unsubmitted control' > /app/control-note.txt")
+            if result.return_code != 0:
+                raise RuntimeError('unsubmitted-file control did not activate')
         context.metadata = {'offline_fixture': self.mode, 'model_calls': 0}
         context.n_input_tokens = 0
         context.n_output_tokens = 0
@@ -107,6 +111,12 @@ async def main():
             trial_dir, evidence['openbench_task_content_digest'], score, mode,
             expected_image=args.runtime_image, expected_model='gpt-5.6-terra', expected_effort='xhigh')
         receipt = json.loads(receipt_path.read_text())
+        if mode == 'baseline':
+            metadata = receipt['freeze']['workspace_files'].get('control-note.txt')
+            if metadata != {'bytes': len(b'unsubmitted control'), 'sha256': hashlib.sha256(b'unsubmitted control').hexdigest()}:
+                raise RuntimeError('full workspace metadata did not capture unsubmitted file')
+            if 'control-note.txt' in receipt['freeze']['files']:
+                raise RuntimeError('unsubmitted file escaped source allowlist')
         failure = receipt['grading'].get('candidate_failure')
         rejected = failure == 'invalid_source_artifact'
         if rejected != (mode == 'malformed'):
