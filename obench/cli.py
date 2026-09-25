@@ -25,6 +25,7 @@ def main(argv=None):
     )
     sub = parser.add_subparsers(dest="command")
 
+    sub.add_parser("campaign", help="launch and inspect persistent local campaigns", add_help=False)
     sub.add_parser("run", help="run a Harbor-native benchmark suite", add_help=False)
     sub.add_parser(
         "legacy",
@@ -96,7 +97,7 @@ def main(argv=None):
         return 0
 
     known = {
-        "run", "legacy", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
+        "campaign", "run", "legacy", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
         "matrix", "bridge", "results", "publish", "verify", "community", "leaderboard",
         "site", "pack", "export",
         "import",
@@ -108,6 +109,9 @@ def main(argv=None):
             "leaderboard, results, site, pack, export, import, matrix, bridge"
         )
 
+    if command == "campaign":
+        from .campaign import main as campaign_main
+        return campaign_main(rest)
     if command == "results":
         from .results_query import main as results_main
         return results_main(rest)

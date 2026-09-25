@@ -24,7 +24,12 @@ Launch every multi-trial campaign inside a named `tmux` session on the execution
 host, with persistent logs and a completion/exit-code receipt. Do not substitute
 `nohup` or a detached Python process. Verify the live session and runner after
 launch, and report the session name, host, result path and next status check.
-Follow [the campaign launch checklist](docs/benchmark-operations.md).
+Follow [the campaign launch checklist](docs/benchmark-operations.md). For
+checkout-based isolated repair campaigns, use `obench campaign qualify` then
+`obench campaign launch --admission ...`; the wrapper supervises canonical
+`obench run` and rejects missing or stale runtime admission. Inspect with
+`obench campaign status`. Direct `obench run` remains the control/diagnostic and
+verified Harbor-resume entry point.
 
 `tmux` survives terminal/SSH disconnects, not system sleep or reboot. On macOS,
 wrap the runner with `caffeinate -i` and verify its sleep assertion. For laptop

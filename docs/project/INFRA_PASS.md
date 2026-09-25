@@ -20,7 +20,7 @@ decision changes the contract. No scored campaign is implied by this pass.
 
 ## Sequence and acceptance
 
-- [ ] **1. Reporting integrity.** Reject malformed JSONL with a source line;
+- [x] **1. Reporting integrity.** Reject malformed JSONL with a source line;
   preserve legacy retry semantics within their known identity; validate canonical
   Harbor/suite identities before aggregation. Never silently pool incompatible
   treatments. Use embedded plans for coverage where available. Proof: regression
@@ -86,11 +86,14 @@ Old runs and oracle versions remain unchanged; changed treatments get new IDs.
 ## Progress / continuation
 
 - Durable priorities: `BACKLOG.md`, local commit `497303d`.
-- Active step: reporting implementation complete; focused regressions pass.
-  Full offline checks and PR review pending. See `docs/results-queries.md`.
+- Step 1 merged in PR #14 (`4ec77a7`); all CI checks pass and both review
+  findings are resolved. Both checkouts synced. See `docs/results-queries.md`.
+- Active step: campaign supervisor and runtime qualification in isolated worktree;
+  real tmux/process-lock controls and admission binding tests pass. Not launched
+  against a model yet; broader verification and review pending.
 - Next: finish step 1 and record its PR/checks here; ground launch/admission
   contracts before implementing their process and credential boundaries.
-- PRs: pending.
+- PRs: [#14](https://github.com/davisbuilds/openbench/pull/14), merged.
 
 This is a rolling execution checklist. Stages 2–4 require their grounded
 authority/recovery contracts and paired runtime controls before activation.
