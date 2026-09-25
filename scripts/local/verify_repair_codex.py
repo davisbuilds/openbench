@@ -162,9 +162,9 @@ async def run(args):
                     data = await docker_bytes("exec", env._containers["broker"], "python3", "-c",
                         "import sys;from pathlib import Path;p=Path('/run/private')/sys.argv[1];sys.stdout.buffer.write(p.read_bytes() if p.exists() else b'')", source)
                     (output / target).write_bytes(data)
-            boundary = await original_seal()
-            await env.download_dir("/logs/agent", output / "agent")
-            return boundary
+            # Export invokes seal itself. Keep this hook limited to shutdown;
+            # the caller exports logs after the agent finishes below.
+            return await original_seal()
 
         env.seal = observed_seal
         agent = SandboxCodex(logs_dir=paths.agent_dir, model_name="gpt-5.6-terra", version=CLI_VERSION,

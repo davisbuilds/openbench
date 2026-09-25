@@ -45,6 +45,11 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as stream:
               stream.write(f'OBENCH_GRADING_TEST_IMAGE={image}\n')
           PY
+      - name: Check stream lifecycle in the runtime's Python
+        run: |
+          docker run --rm --network none --cap-drop ALL \
+            --security-opt no-new-privileges --user 10001:10001 -i \
+            "$OBENCH_GRADING_TEST_IMAGE" python3 - -v < obench/tests/test_sandbox_gateway.py
       - name: Check Docker grading controls
         run: .venv/bin/python -m unittest obench.tests.test_sandbox_grading.DockerGradingTests -v
       - name: Check effective sandbox boundaries
@@ -52,6 +57,12 @@ jobs:
           .venv/bin/python scripts/local/verify_repair_sandbox.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --receipt results/ci/boundary.json
+      - name: Check the real Codex tool loop without inference
+        run: >-
+          .venv/bin/python scripts/local/verify_repair_codex.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --task harbor-tasks-local/dojo-evidence-pr60-v4
+          --output-dir results/ci/codex-tool-loop
       - name: Check completion and timeout across real Harbor cleanup
         run: >-
           .venv/bin/python scripts/ci/verify_sandbox_timeouts.py
@@ -61,14 +72,14 @@ jobs:
         run: >-
           .venv/bin/python scripts/local/verify_repair_lifecycle.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
-          --task harbor-tasks-local/dojo-evidence-pr60-v3
+          --task harbor-tasks-local/dojo-evidence-pr60-v4
           --reference tasks-local/dojo-evidence-pr60/solution
           --output results/ci/lifecycle
       - name: Check bounded log export and refusal
         run: >-
           .venv/bin/python scripts/local/verify_repair_log_export.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
-          --task harbor-tasks-local/dojo-evidence-pr60-v3
+          --task harbor-tasks-local/dojo-evidence-pr60-v4
           --output results/ci/log-export
       - name: Check sandbox cleanup
         if: always()

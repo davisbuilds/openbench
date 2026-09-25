@@ -4,8 +4,8 @@ artifacts = [
 ]
 
 [task]
-name = "openbench/dojo-evidence-pr60-v3"
-version = "3.0.0"
+name = "openbench/dojo-evidence-pr60-v4"
+version = "4.0.0"
 description = "The profile evidence tools sometimes report a reassuring result that disagrees with the session being inspected."
 authors = []
 keywords = ["openbench"]
@@ -15,12 +15,12 @@ origin = "openbench"
 difficulty = "unknown"
 category = "programming"
 tags = ["openbench"]
-openbench_task = "dojo-evidence-pr60-v3"
+openbench_task = "dojo-evidence-pr60-v4"
 openbench_workspace_kind = "snapshot"
 
 [metadata.openbench_task_content_digest]
 scheme = 3
-sha256 = "7f89aa3f077f90de4c9d2f35031418ca67d5e35e00859052c3b89fd576aaa6c7"
+sha256 = "3b8b7ef396140f1cfe9ce167e71af4af9546490c11a31c20152c0a11cdfe0642"
 
 [metadata.openbench_harbor_export]
 schema_version = 1

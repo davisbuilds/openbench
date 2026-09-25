@@ -8,7 +8,7 @@ explicit run against an exact commit and immutable runtime.
 | Workflow | Coverage |
 |---|---|
 | CI | Python 3.11/3.13 unit tests; core, imported offline, and portable fork-local checker polarity |
-| Harbor Integration | Real pinned Codex trajectory conversion; Docker grading controls, confinement, completion/timeout classification, artifact import, and bounded log export |
+| Harbor Integration | Real pinned Codex trajectory conversion; gateway stream lifecycle in the runtime Python, Docker grading controls, confinement, completion/timeout classification, artifact import, and bounded log export |
 | Publication Hygiene | Tracked public content and detector controls |
 | Workflow Security Audit | Pinned zizmor audit and dependency-lock drift |
 | Community submissions | Reverification of changed published bundles |

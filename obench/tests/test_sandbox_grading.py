@@ -60,6 +60,33 @@ class ArtifactTests(unittest.TestCase):
             bounded_command([sys.executable,'-c','import time; time.sleep(5)'],timeout=.1)
 
 
+class DiagnosticContractTests(unittest.TestCase):
+    def diagnostic(self, **changes):
+        return dict(kind='surface-mismatch', live_surface='exec',
+                    recorded_surface='codex-tui', live_entries=1, recorded_entries=1,
+                    only_in_live=[], only_in_recorded=[],
+                    detail='source or locator changed for review', **changes)
+
+    def test_name_only_diagnostics_are_valid_in_v4_but_not_legacy_v3(self):
+        value = self.diagnostic()
+        self.assertFalse(comparison(value, (1, 1, 1, 1)))
+        self.assertTrue(comparison(value, (1, 1, 1, 1), oracle_version=4))
+        qualified = dict(value, only_in_live=['dojo:review'],
+                         only_in_recorded=['connector:review'])
+        self.assertTrue(comparison(qualified, (1, 1, 1, 1), oracle_version=4))
+
+    def test_representation_freedom_does_not_accept_missing_or_malformed_detection(self):
+        value = self.diagnostic()
+        for wrong in (None, {}, dict(value, kind='equal'),
+                      dict(value, live_entries=0), dict(value, live_entries=True),
+                      dict(value, only_in_live='review'),
+                      dict(value, only_in_recorded=[{}]), dict(value, detail=None)):
+            with self.subTest(wrong=wrong):
+                self.assertFalse(comparison(wrong, (1, 1, 1, 1), oracle_version=4))
+        self.assertFalse(comparison(value, None, oracle_version=4))
+        self.assertTrue(comparison(None, None, oracle_version=4))
+
+
 class FreezeClassificationTests(unittest.IsolatedAsyncioTestCase):
     async def test_only_proven_stopped_candidate_rejection_scores_zero(self):
         from obench.harbor_sandbox import SandboxArtifactError, SandboxError
@@ -190,6 +217,38 @@ class DockerGradingTests(unittest.TestCase):
                 graded=grade_dojo(root,allowed,IMAGE)
                 self.assertEqual(graded['score'],score)
                 self.assertFalse(graded['worker']['host_mounts'])
+
+    def test_v4_accepts_valid_representations_and_rejects_partial_detection(self):
+        controls = [('reference', 1), ('name-only', 1), ('unqualified', 1),
+                    ('always-mismatch', .6667), ('never-mismatch', .6667),
+                    ('names-only-detection', .6667), ('wrong-counts', .6667)]
+        for name, score in controls:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                allowed = self.prepare(root, ('budget.py', 'rollout_codex.py'))
+                path = root / 'scripts/profiles/rollout_codex.py'
+                text = path.read_text()
+                if name in ('name-only', 'unqualified'):
+                    for field in ('live', 'recorded'):
+                        old = f'sorted(only_{field}.elements())'
+                        new = ('[]' if name == 'name-only' else
+                               f'[s.split(":", 1)[1] for s in sorted(only_{field}.elements())]')
+                        self.assertIn(old, text)
+                        text = text.replace(old, new)
+                elif name == 'always-mismatch':
+                    self.assertIn('if live_ids == recorded_ids:', text)
+                    text = text.replace('if live_ids == recorded_ids:', 'if False:')
+                elif name == 'never-mismatch':
+                    text += '\ndef surface_mismatch(live, recorded): return None\n'
+                elif name == 'names-only-detection':
+                    text = text.replace('if live_ids == recorded_ids:',
+                        'if {e.name for e in live.entries} == {e.name for e in recorded.listing.entries}:')
+                elif name == 'wrong-counts':
+                    text = text.replace('sum(live_ids.values())', 'len(live_ids)')
+                path.write_text(text)
+                graded = grade_dojo(root, allowed, IMAGE, oracle_version=4)
+                self.assertEqual(graded['score'], score)
+                self.assertEqual(graded['oracle_version'], 4)
 
     def test_candidate_cannot_write_trusted_reward_or_read_host_oracle(self):
         with tempfile.TemporaryDirectory() as directory:

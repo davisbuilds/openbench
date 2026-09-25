@@ -8,9 +8,11 @@ The first isolated repeated screen has finished and its sealed suites reverify.
 Captured artifacts also reproduce their original grading in fresh workers.
 Execution now defaults to 20 minutes with separately bounded sandbox sealing;
 credential-free Harbor controls cover near-deadline completion and real timeouts.
-Confirmation remains on hold pending runtime admission of the changed treatment
-and an audit of whether mismatch diagnostics are graded more narrowly than the
-advertised behavior. See the
+The diagnostic-contract audit found that v3 required unspecified difference-array
+cardinalities. Revision 4 accepts name-only and qualified diagnostics while
+checking mismatch detection, entry totals and return shapes against paired
+equality/difference cases. Confirmation remains on hold pending runtime admission
+and fresh screening of this changed treatment. See the
 [benchmark discrimination backlog](BACKLOG.md#benchmark-discrimination).
 Retain original scores and timeout classifications; any revised task or runtime
 starts a new treatment. Detailed trial evidence remains local-only.
@@ -138,6 +140,9 @@ inputs. Existing stock profiles remain unchanged. See the
 [implementation and control commands](REPAIR_SANDBOX.md).
 
 Remaining work:
+
+- Screen Dojo v4 as a new treatment after offline and authenticated controls;
+  preserve v3 results and use the original pinned commit for historical replay.
 
 - Preserve the short, large-log, timeout, and authenticated longer-run controls;
   renew them when runtime/adapter bytes change. These do not establish

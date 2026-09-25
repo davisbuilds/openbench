@@ -531,6 +531,7 @@ class UpstreamStream:
         self.status = response.status
         self.headers = response.headers
         self._close_lock = threading.Lock()
+        self._read_lock = threading.Lock()
         self._closed = False
         sock = connection.sock
         if sock is None:
@@ -538,31 +539,31 @@ class UpstreamStream:
                 sock = response.fp.raw._sock
             except AttributeError:
                 pass
+        self._socket = sock
         self.peer = _socket_peer(sock)
 
     def read(self, size):
-        return self.response.read1(size)
+        with self._read_lock:
+            if self._closed:
+                return b""
+            return self.response.read1(size)
 
     def close(self):
         with self._close_lock:
             if self._closed:
                 return
             self._closed = True
-        # HTTP/1.0 responses may have detached the connection socket; the
-        # response still owns it. Shutdown first so cancellation wakes a reader.
-        sock = self.connection.sock
-        if sock is None:
+        # Interrupt blocking IO first; only its owning reader may finish using
+        # HTTPResponse.fp before close mutates it. Closing concurrently with
+        # read1 can raise AttributeError and discard the stream's accounting.
+        if self._socket is not None:
             try:
-                sock = self.response.fp.raw._sock
-            except AttributeError:
-                pass
-        if sock is not None:
-            try:
-                sock.shutdown(socket.SHUT_RDWR)
+                self._socket.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
-        self.connection.close()
-        self.response.close()
+        with self._read_lock:
+            self.connection.close()
+            self.response.close()
 
 
 class _CancellableHTTPSConnection(http.client.HTTPSConnection):
@@ -579,7 +580,8 @@ class _CancellableHTTPSConnection(http.client.HTTPSConnection):
                 sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
-        self.close()
+        # The transport/UpstreamStream owner closes HTTPResponse after its
+        # reader unwinds. Cancellation must not mutate that reader's fp.
 
     def connect(self):
         if self.cancelled.is_set():
@@ -908,19 +910,21 @@ def _stream(handler, server, upstream):
                 return "response_limit", sent, usage
             handler.wfile.write(chunk)
             handler.wfile.flush()
-            # Parse metadata only. Never persist events, prompts or model text.
-            event_buffer += chunk
+            # Parse complete SSE frames only. A client may close immediately
+            # after response.completed; do not wait for provider socket EOF.
+            # Never persist events, prompts or model text.
+            event_buffer = (event_buffer + chunk).replace(b"\r\n", b"\n")
             if len(event_buffer) > 1024 * 1024:
                 event_buffer = b""
-            while b"\n" in event_buffer:
-                line, event_buffer = event_buffer.split(b"\n", 1)
-                if not line.startswith(b"data: "):
-                    continue
+            while b"\n\n" in event_buffer:
+                frame, event_buffer = event_buffer.split(b"\n\n", 1)
+                data = b"\n".join(line[5:].lstrip(b" ") for line in frame.split(b"\n")
+                                  if line.startswith(b"data:"))
                 try:
-                    if line[6:].strip() == b"[DONE]":
+                    if data.strip() == b"[DONE]":
                         completed = True
                         continue
-                    event = _json(line[6:])
+                    event = _json(data)
                     if event.get("type") == "response.completed":
                         completed = True
                     candidate = event.get("response", {}).get("usage", {})
@@ -937,6 +941,8 @@ def _stream(handler, server, upstream):
                     RecursionError,
                 ):
                     pass
+            if completed:
+                return "complete", sent, usage
         return "revoked", sent, usage
     except TimeoutError:
         return "timeout", sent, usage
@@ -1096,7 +1102,7 @@ class BrokerServer(_BoundedServer, socketserver.UnixStreamServer):
                 outcome = "timeout"
             elif self._revoked.is_set():
                 outcome = "revoked"
-            elif disconnected.is_set():
+            elif disconnected.is_set() and outcome != "complete":
                 outcome = "client_disconnected"
             self.record(
                 {
