@@ -24,16 +24,22 @@ User direction, 2026-09-26: retain GPT-5.6 Terra, add GPT-6 Sol, and replace
 GPT-5.6 Luna with GPT-6 Luna for future calibration. Historical model identities,
 specs and sealed results remain unchanged; the new lineup is a fresh treatment.
 
-Before AM123 admission and the next screen, add explicit Codex adapter mappings
-and isolated repair-lane support for `gpt-6-sol` and `gpt-6-luna`. Verify emitted
-model/effort/tier settings, sealed identity, and model-specific authenticated
-controls before scored trials. Current repair-lane allowlists cover only the
-older Terra/Luna arms, so this lineup is not launch-ready yet.
+Model support precedes AM123 admission and the next screen. Native
+Codex and the isolated repair lane accept explicit `low`, `medium`, `high`,
+`xhigh`, and `max` aliases for both GPT-6 models. Bare names follow local Codex
+metadata: Sol defaults to low and Luna to medium; these are adapter defaults,
+not selected campaign settings. Ordinary Harbor stock profiles accept the bare
+names and pin Codex 0.154.0, while historical profiles retain their original pin.
 
-Efforts await confirmation. Proposed starting point: Terra xhigh, Sol xhigh,
-Luna max, retaining the existing normal service tier. The three-attempt triage
-screen becomes three tasks by three models by three attempts (27 trials) once
-all tasks and model routes are admitted; this is not a confirmed launch schedule.
+The user explicitly deferred campaign effort selection. Freeze those settings
+later and run matching authenticated controls before scored trials. Existing
+admissions cannot authorize the changed model/runtime treatment. Three attempts
+across the proposed three tasks and three models would total 27 trials once all
+routes/tasks are admitted; this is not a confirmed launch schedule.
+
+API capability references: [Sol](https://developers.openai.com/api/docs/models/gpt-6-sol)
+and [Luna](https://developers.openai.com/api/docs/models/gpt-6-luna). API support
+alone does not prove account access through the pinned Codex execution route.
 
 ## What should make these tasks hard
 

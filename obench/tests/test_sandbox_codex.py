@@ -79,6 +79,27 @@ class SandboxCodexTests(unittest.TestCase):
         self.assertEqual(obj._metrics_from_token_count_payload(contradictory),
                          contradictory['info']['last_token_usage'])
 
+    def test_constructor_accepts_only_supported_model_effort_pairs(self):
+        # Exercise our constructor without requiring optional Harbor in unit CI.
+        class Base:
+            def __init__(self, model_name, reasoning_effort=None, **kwargs):
+                self.model_name = model_name
+                self._resolved_flags = {'reasoning_effort': reasoning_effort}
+                self.config = kwargs['config']
+
+        cls = _build_agent_class(Base)
+        for model in ('gpt-6-sol', 'gpt-6-luna'):
+            for effort in ('low', 'medium', 'high', 'xhigh', 'max'):
+                with self.subTest(model=model, effort=effort):
+                    obj = cls(model_name=model, reasoning_effort=effort, version='0.154.0')
+                    self.assertEqual(obj.config['service_tier'], 'default')
+            for effort in ('none', 'ultra', None):
+                with self.subTest(model=model, effort=effort), self.assertRaisesRegex(ValueError, 'model/effort'):
+                    cls(model_name=model, reasoning_effort=effort, version='0.154.0')
+        for model, effort in [('gpt-5.6-terra', 'medium'), ('gpt-6-astra', 'max'), ('unknown', 'low')]:
+            with self.subTest(model=model), self.assertRaisesRegex(ValueError, 'model/effort'):
+                cls(model_name=model, reasoning_effort=effort, version='0.154.0')
+
     def test_model_provider_has_only_loopback_transport(self):
         cfg=codex_config()
         provider=cfg['model_providers'][cfg['model_provider']]
@@ -140,6 +161,7 @@ class ExecutionBudgetTests(unittest.IsolatedAsyncioTestCase):
             agent = object.__new__(_build_agent_class(Base))
             agent._sandbox_version_verified = True
             agent.model_name = "gpt-5.6-terra"
+            agent._resolved_flags = {"reasoning_effort": "xhigh"}
             agent.env = {"CODEX_AUTH_JSON_PATH": str(auth),
                          "OPENBENCH_CODEX_AUTH_RETURN_PATH": str(returned)}
             context = SimpleNamespace(finished=False)

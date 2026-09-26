@@ -44,6 +44,32 @@ class SandboxSuiteTests(unittest.TestCase):
         self.assertNotIn('host.docker.internal', json.dumps(config))
         self.assertNotIn('extra_allowed_hosts', config['agents'][0])
 
+    def test_sol_luna_compile_with_explicit_identity_and_distinct_seals(self):
+        base = self.base
+        seals = set()
+        for model, default in [('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
+            for suffix, effort in [('', default)] + [('-' + e, e) for e in ('low', 'medium', 'high', 'xhigh', 'max')]:
+                alias = model + suffix
+                with self.subTest(alias=alias):
+                    self.base = base.replace('gpt-5.6-terra-xhigh', alias)
+                    compiled = self.compile()
+                    config = suite_run.plan_jobs(compiled)[0].artifact.as_dict()
+                    agent = config['agents'][0]
+                    self.assertEqual(agent['model_name'], model)
+                    self.assertEqual(agent['kwargs']['reasoning_effort'], effort)
+                    self.assertEqual(compiled.arms[0].arm.model, alias)
+                    self.assertEqual(agent['import_path'], 'obench.harbor_agents.sandbox_codex:SandboxCodex')
+                    self.assertIn('obench.codex_models', compiled.manifest['sandbox']['implementation_sha256'])
+                    seals.add(compiled.manifest_sha256)
+        self.assertEqual(len(seals), 12)
+
+    def test_unlisted_model_or_effort_cannot_compile_into_repair_lane(self):
+        base = self.base
+        for alias in ('gpt-6-sol-ultra', 'gpt-6-luna-none', 'gpt-6-luna-typo', 'gpt-6-astra-max'):
+            self.base = base.replace('gpt-5.6-terra-xhigh', alias)
+            with self.subTest(alias=alias), self.assertRaisesRegex(suite_run.SuiteRunError, 'repair sandbox'):
+                self.compile()
+
     def test_policy_change_changes_suite_and_job_identity(self):
         a = self.compile('max_requests = 10\n')
         b = self.compile('max_requests = 11\n')

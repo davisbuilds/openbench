@@ -96,12 +96,15 @@ class RuntimeAdmissionTests(unittest.TestCase):
 
     def test_wrong_model_control_cannot_admit_requested_model(self):
         path,expected,value=self.receipt()
-        changed=copy.deepcopy(expected)
-        changed['models']=[['gpt-5.6-luna-max','gpt-5.6-luna','max']]
-        value['fingerprint']=changed
-        write_record(path,value)
-        with self.assertRaisesRegex(admission.AdmissionError,'another execution treatment'):
-            admission.validate_admission(path,changed)
+        for alias, model, effort in [('gpt-5.6-luna-max', 'gpt-5.6-luna', 'max'),
+                                     ('gpt-6-sol-low', 'gpt-6-sol', 'low'),
+                                     ('gpt-6-luna-high', 'gpt-6-luna', 'high')]:
+            changed=copy.deepcopy(expected)
+            changed['models']=[[alias, model, effort]]
+            value['fingerprint']=changed
+            write_record(path,value)
+            with self.subTest(model=model), self.assertRaisesRegex(admission.AdmissionError,'another execution treatment'):
+                admission.validate_admission(path,changed)
 
     def test_file_edit_control_rejects_all_unrequested_workspace_changes(self):
         from obench.harbor_sandbox import read_tree, source_receipt
