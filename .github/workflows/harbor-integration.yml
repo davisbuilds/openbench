@@ -62,6 +62,11 @@ jobs:
           .venv/bin/python scripts/local/verify_registered_lifecycle.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/registered-lifecycle
+      - name: Check concurrent upgrade development controls
+        run: >-
+          .venv/bin/python scripts/local/verify_am123_oracle.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --output results/ci/am123-oracle
       - name: Check effective sandbox boundaries
         run: >-
           .venv/bin/python scripts/local/verify_repair_sandbox.py
@@ -96,7 +101,7 @@ jobs:
         run: |
           # This runner is ephemeral and dedicated to this job. Scripts perform
           # normal cleanup; fail the check if one leaked a container or volume.
-          containers="$(docker ps -aq --filter name=obench-sandbox- --filter name=obench-canary-)"
+          containers="$(docker ps -aq --filter name=obench-sandbox- --filter name=obench-canary- --filter name=obench-grade-)"
           volumes="$(docker volume ls -q --filter name=obench-sandbox-)"
           networks="$(docker network ls -q --filter name=obench-sandbox- --filter name=obench-probe-)"
           if [ -n "$containers$volumes$networks" ]; then

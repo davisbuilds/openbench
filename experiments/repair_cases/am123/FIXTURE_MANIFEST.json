@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "source_manifest_sha256": "84cf3dcbc9bddaad789fcced4809942fd5f99bf6e33a38d5176ea56180fd7f02",
+  "reference_commit": "7917a6b5f420b35fac7ff291d48db1e73d9e8ede",
+  "producer_driver_sha256": "903c656c2fed1671281c1b005acacec3fb5daf284a9a13ce07c54a13af09007b",
+  "worker": {
+    "image_id": "sha256:d9958aa7dd5bd40b2c34ec236861d76363cd818fb9ed09c8e9d45022c30d61ba",
+    "requested_image": "sha256:d9958aa7dd5bd40b2c34ec236861d76363cd818fb9ed09c8e9d45022c30d61ba",
+    "network": "none",
+    "user": "10001:10001",
+    "host_mounts": false,
+    "read_only_root": true,
+    "capabilities": "none"
+  },
+  "files": {
+    "current.sql": "50c678c1624077c4fda15cb47a15f17b5cc3cfe739e2d83e74e3193fed58a961",
+    "current-schema.json": "14b14a2a960fb555e9976e3a586740b96b18311f84bc714c04b5412c60c43cbd"
+  },
+  "capture_ddl_sha256": "fbcf423b4076937c5e8ef624e5361c389c02d80596d58634f435a2a6f8cc9a36",
+  "normalization": "Create tables before indexes/triggers; let SQLite regenerate FTS shadow tables."
+}

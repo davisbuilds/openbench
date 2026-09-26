@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "pr": "https://github.com/davisbuilds/agentmonitor/pull/123",
+  "files": {
+    "source/src/db/schema.ts": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "78f7700240831a3fd93856394830e67c4a6a3749",
+      "path": "src/db/schema.ts",
+      "sha256": "9a671f51f32bd654e0ca5844f7be60f53782ee941cd9da2e5322564982a1077c"
+    },
+    "source/src/db/connection.ts": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "78f7700240831a3fd93856394830e67c4a6a3749",
+      "path": "src/db/connection.ts",
+      "sha256": "a90ea707443165f89884f5031afa60fbf49cc2012c34e57d3fcc895feac033f1"
+    },
+    "source/src/config.ts": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "78f7700240831a3fd93856394830e67c4a6a3749",
+      "path": "src/config.ts",
+      "sha256": "2ace67d0675b8c1972f9924cd89f41aa92b38aef4f35fa0d6c59613e4c878016"
+    },
+    "source/src/db-path.ts": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "78f7700240831a3fd93856394830e67c4a6a3749",
+      "path": "src/db-path.ts",
+      "sha256": "1b3fb9e37c77198a6a145bcfc34ccdfe905d677219ec3d89d22c099d052823ca"
+    },
+    "source/src/pricing/index.ts": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "78f7700240831a3fd93856394830e67c4a6a3749",
+      "path": "src/pricing/index.ts",
+      "sha256": "1f9024f598d15b5eb7dd610d3b7f558506d00b6906d909c6de81e25b94b94432"
+    },
+    "source/src/trace-quality/constants.ts": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "78f7700240831a3fd93856394830e67c4a6a3749",
+      "path": "src/trace-quality/constants.ts",
+      "sha256": "d9664af8ef68e7d1210db95a35e54f4921ac8cb38c09dc7c799a688493d40e30"
+    },
+    "source/src/pricing/data/claude.json": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "78f7700240831a3fd93856394830e67c4a6a3749",
+      "path": "src/pricing/data/claude.json",
+      "sha256": "67367b7281c463a801a63cdebd81cb10cd05f97ba854b665350087d414587e16"
+    },
+    "source/src/pricing/data/codex.json": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "78f7700240831a3fd93856394830e67c4a6a3749",
+      "path": "src/pricing/data/codex.json",
+      "sha256": "45bde80995892baae5da798bb142b898dcf2a71b6046853c8303add1735a2f5a"
+    },
+    "source/src/pricing/data/gemini.json": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "78f7700240831a3fd93856394830e67c4a6a3749",
+      "path": "src/pricing/data/gemini.json",
+      "sha256": "4f413fdf0b2df048e562219e2b521b810ca04aef7c5cb1d94a79915a71458984"
+    },
+    "source/src/pricing/data/openrouter.json": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "78f7700240831a3fd93856394830e67c4a6a3749",
+      "path": "src/pricing/data/openrouter.json",
+      "sha256": "a50a741f69f02f00a2aeb08bc90a42334c610c86fdf5bdae9dbf84789c023b50"
+    },
+    "partial/src/db/schema.ts": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "2d79714c0a83f5b49719033d3ce1124ecca493e1",
+      "path": "src/db/schema.ts",
+      "sha256": "ed1709522868a45b959e82d7083d4043a3fcde1f29fbc1dad13b6714762bedcd"
+    },
+    "reference/src/db/schema.ts": {
+      "repository": "https://github.com/davisbuilds/agentmonitor",
+      "commit": "7917a6b5f420b35fac7ff291d48db1e73d9e8ede",
+      "path": "src/db/schema.ts",
+      "sha256": "4a4b2c4c6573d1886aa2f41df0dbd3bdb11ab14edcdc784111102ed8a3b305e9"
+    }
+  }
+}

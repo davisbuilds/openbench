@@ -1,6 +1,6 @@
 # Extra-hard PR repair tier
 
-Status: implementation and admission work in progress, 2026-09-16.
+Status: #123 oracle development in progress, 2026-09-26.
 Contract: [extra-hard repairs](../specs/2026-09-16-extra-hard-repairs-spec.md).
 No case is labeled extra-hard yet.
 
@@ -147,7 +147,8 @@ Remaining work:
 - Preserve the short, large-log, timeout, and authenticated longer-run controls;
   renew them when runtime/adapter bytes change. These do not establish
   equivalence with the native treatment.
-- Port corrected AM106 to the same boundary with its own external oracle.
+- Corrected AM106 now has a registered external oracle and passing lifecycle
+  controls from PR #16; preserve that task identity for fresh calibration.
 - Freeze an exact pushed commit and admitted runtime on the selected execution
   host, then launch calibration in tmux with logs and an exit receipt.
 
@@ -157,3 +158,38 @@ had inconsistent converted usage. The fresh Luna timeout sealed successfully
 after correction, retaining its timeout and partial artifact score. The native
 contaminated screen remains excluded; these diagnostics do not establish that
 any candidate is extra hard for frontier models.
+
+## Active PR slice: #123 oracle controls
+
+The infrastructure pass shipped in PR #16. This slice develops portable,
+credential-free oracle controls before packaging #123 as a selectable task.
+The existing prototype is provenance evidence; it is not the new grader.
+
+- Pin a minimal source closure and schema-only historical reference/partial
+  overlays from the public PR. Verify snapshot bytes before each control.
+- Replace SQL-text and transaction-method checkpoints with a sweep over ordinal
+  database-read boundaries. A real second process runs at each paused boundary;
+  observed SQLite ownership determines safe release. Record actual interleaving,
+  not a timing-based race claim. Check ownership before starting the contender;
+  wait for actual completion when the slot is free. The ordinary worker deadline
+  aborts incomplete controls; there is no shorter scheduling grace. External
+  mutex scheduling remains outside this fixed-control development slice.
+- Check all required tables/columns, preserved rows, exactly-once correction,
+  legacy export foreign-key repair, current WAL read progress, reopen stability,
+  and rollback/retry after an injected update failure.
+- Require a structurally different optimistic-retry repair and a SQL/API variant
+  to pass, alongside baseline, historical partial and wrong-repair controls.
+- Candidate code executes only through the existing confined worker. Host-side
+  expectations never enter that worker. No registry selection, production
+  admission policy, scored campaign or difficulty label changes in this slice.
+- The development runner accepts only manifest-pinned snapshots and reviewed
+  synthetic controls. Its same-process scheduling/connection/read events can be
+  forged by editable code. Before accepting model submissions, replace that
+  evidence path with externally owned observations and prove forged events
+  cannot earn credit. Moving events to another file descriptor is insufficient.
+
+Completion requires offline regression tests, real pinned-image controls on the
+Mini and hosted Linux, cloud review, green CI, and merge/sync. The source and
+observation driver live in `experiments/repair_cases/am123/`; receipts stay under
+ignored `results/`. Interrupted controls retain their output directory; a new
+attempt uses a fresh directory and repeats from the pinned source.
