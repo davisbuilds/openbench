@@ -29,6 +29,8 @@ SCRIPTS = (
     'scripts/local/verify_repair_lifecycle.py',
     'scripts/local/verify_repair_log_export.py',
     'scripts/local/verify_repair_trajectory.py',
+    'scripts/local/verify_registered_repair.py',
+    'scripts/local/verify_registered_lifecycle.py',
 )
 
 CONTROLS = (*SCRIPTS, "runtime-sockets")
@@ -53,6 +55,9 @@ def fingerprint(compiled, harbor_binary):
     daemon = json.loads(subprocess.check_output(['docker','info','--format','{{json .}}'],text=True))
     files = [p for p in (ROOT/'obench').rglob('*.py') if 'tests' not in p.relative_to(ROOT).parts]
     files += [ROOT/p for p in SCRIPTS] + [ROOT/'docker/repair-sandbox/Dockerfile', ROOT/'obench/tests/test_sandbox_gateway.py']
+    files += list((ROOT/'docker/repair-sandbox/node').glob('*.json'))
+    for control_root in ('harbor-tasks-local/dojo-evidence-pr60-v4','tasks-local/am-benchmark-pr106-v2'):
+        files += [p for p in (ROOT/control_root).rglob('*') if p.is_file() and '__pycache__' not in p.parts]
     return {'schema':1, 'host':socket.gethostname(),
             'image':{'id':image['Id'],'requested':compiled.suite.sandbox.runtime_image,'os':image['Os'],'architecture':image['Architecture']},
             'docker':{key:daemon.get(key) for key in ('ID','ServerVersion','OperatingSystem','Architecture')},
@@ -107,29 +112,41 @@ def validate_admission(path, expected):
     return value
 
 
+
+def control_edit(task):
+    import tomllib
+    metadata=tomllib.loads((Path(task)/'task.toml').read_text()).get('metadata',{})
+    if metadata.get('openbench_oracle') == 'agentmonitor-benchmark-v2':
+        return 'src/db/schema.ts', b'// OPENBENCH_RUNTIME_CONTROL_OK\n'
+    return CONTROL_TARGET, MARKER
+
+
 def prepare_control(compiled, directory):
     """A bounded file-edit control, kept outside the benchmark task identity."""
     if len(compiled.task_sets) != 1:
         raise AdmissionError('qualification currently requires one repair task set')
     selected = compiled.task_sets[0]
-    if selected.task_names not in (('dojo-evidence-pr60-v3',),('dojo-evidence-pr60-v4',)):
-        raise AdmissionError('this runtime control requires an admitted Dojo task')
+    # Runtime qualification is independent of the requested repair's oracle.
+    # Compilation already validates that target's trusted task binding.
     directory.mkdir(parents=True, exist_ok=False)
     init.init_scaffold(directory)
     tasks = directory/'.openbench/tasks'
     shutil.rmtree(tasks)
-    source = selected.task_set.path / selected.task_names[0]
+    source = selected.task_set.path/selected.task_names[0]
     task = tasks/source.name
     shutil.copytree(source,task)
+    target,marker=control_edit(task)
     (task/'instruction.md').write_text(
-        "This is a file-edit control. Append exactly the Python comment "
-        "'# OPENBENCH_RUNTIME_CONTROL_OK' and a newline to "
-        "/app/scripts/profiles/__init__.py, with no extra blank line. Leave "
-        "every other file unchanged. Reply 'done' and stop. This is not a repair challenge.\n")
-    from .sandbox_grading import task_digest
+        "This is a file-edit control. Append exactly the comment "
+        +repr(marker.decode().strip())+" and a newline to /app/"+target+
+        ", with no extra blank line. Leave every other file unchanged. "
+        "Reply 'done' and stop. This is not a repair challenge.\n")
+    from .sandbox_grading import task_digest as legacy_digest
+    from .repair_oracles.registry import task_digest as registered_digest
     config = task/'task.toml'
-    text = re.sub(r'(\[metadata.openbench_task_content_digest\]\nscheme = 3\nsha256 = ")[a-f0-9]{64}',
-                  lambda m:m.group(1)+task_digest(task),config.read_text())
+    digest_fn=registered_digest if target.startswith('src/') else legacy_digest
+    text = re.sub(r'(\[metadata.openbench_task_content_digest\]\nscheme = [34]\nsha256 = ")[a-f0-9]{64}',
+                  lambda m:m.group(1)+digest_fn(task),config.read_text())
     config.write_text(text)
     suite = directory/'.openbench/suites/default.toml'
     text = init.DEFAULT_SUITE_TOML.replace('private-default','runtime-control')
@@ -157,7 +174,8 @@ def verify_control(control, task, result_path):
         receipt=json.loads((trial/'verifier/sandbox-grading.json').read_text())
         from .harbor_sandbox import read_tree, source_receipt
         expected=read_tree(task/'environment/app')
-        expected[CONTROL_TARGET]+=MARKER
+        target,marker=control_edit(task)
+        expected[target]+=marker
         if receipt['freeze'].get('workspace_files') != source_receipt(expected)['files']:
             raise AdmissionError('authenticated control changed workspace beyond the requested edit')
         events=[json.loads(line) for line in (trial/'verifier/sandbox-gateway.jsonl').read_text().splitlines()]
@@ -179,7 +197,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     harbor=preflight_harbor_binary(harbor_binary)
     python=str(suite_run._harbor_python_interpreter(harbor))
     image=compiled.suite.sandbox.runtime_image
-    task=compiled.task_sets[0].task_set.path/compiled.task_sets[0].task_names[0]
+    task=ROOT/'harbor-tasks-local/dojo-evidence-pr60-v4'
     commands=[
         [python,SCRIPTS[0],'--runtime-image',image,'--task',str(task),'--receipt',str(directory/'boundary.json')],
         [python,SCRIPTS[1],'--runtime-image',image,'--task',str(task),'--output-dir',str(directory/'tool-loop')],
@@ -187,6 +205,8 @@ def qualify(compiled, directory, harbor_binary, auth_file):
         [python,SCRIPTS[3],'--runtime-image',image,'--task',str(task),'--reference',str(ROOT/'tasks-local/dojo-evidence-pr60/solution'),'--output',str(directory/'lifecycle')],
         [python,SCRIPTS[4],'--runtime-image',image,'--task',str(task),'--output',str(directory/'log-export')],
         [python,SCRIPTS[5],'--output',str(directory/'trajectory')],
+        [python,SCRIPTS[6],'--runtime-image',image,'--output',str(directory/'registered-oracle')],
+        [python,SCRIPTS[7],'--runtime-image',image,'--output',str(directory/'registered-lifecycle')],
         ['docker','run','--rm','--network','none','--cap-drop','ALL','--security-opt','no-new-privileges',
          '--user','10001:10001','-i',image,'python3','-','-v'],
     ]

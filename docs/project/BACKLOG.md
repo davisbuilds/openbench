@@ -24,45 +24,6 @@ the PR, not as a "resolved" note here).
 
 ### Canonical repair workflow
 
-#### Make convenience reporting respect frozen treatments
-- **What**: `results_query.load` silently skips malformed JSONL, while
-  `_arm_cells` groups by harness/model and task/trial without validating run or
-  treatment identity. This can silently discard attempts from separate runs.
-- **Evidence** (offline probe, 2026-09-25, `7206d33`): two synthetic rows with
-  different run IDs and scheme-3 task digests collapse to one cell; the
-  distinct-trial control retains both. An invalid line between valid rows is
-  silently skipped. This is separate from the strict canonical suite importer.
-- **Next**: default to explicit parse errors; require compatible sealed
-  treatment identity before aggregation. Preserve attempt/run identity and
-  expose explicit comparison across treatments instead of silently deduplicating
-  them. Derive intended coverage from the comparison plan when available;
-  observed rows alone cannot reveal an entirely missing planned cell.
-
-#### One persistent campaign launch and status interface
-- **What**: `docs/benchmark-operations.md` still requires hand-built launch
-  scripts, tmux/caffeinate, logs, completion receipts and process inspection.
-  The canonical CLI has no campaign status interface combining that evidence.
-- **Next**: add a thin local operator wrapper around `obench run`, with immutable
-  launch identity, duplicate-launch refusal, persistent receipts and read-only
-  status. Distinguish runner liveness, last artifact activity, completed trials,
-  timeouts, grading and final import. Include transport outcome summaries and
-  evidence links. Harbor keeps scheduling, retries, trial locks and resume.
-- **Boundary**: support the existing Mini execution workflow without copying
-  credentials or promising recovery across reboot; interrupted launches require
-  verified Harbor resume. No new service or task scheduler is needed initially.
-
-#### Enforce repair-runtime admission at campaign launch
-- **What**: current checks bind implementation bytes, runtime identity and trial
-  evidence, but the requirement to renew offline and authenticated controls
-  after runtime changes remains procedural. `run_suite` does not consume a
-  passing admission receipt.
-- **Next**: collect the existing controls into a local admission record bound to
-  image/platform, loaded Harbor and adapter bytes, model/effort and boundary
-  policy. Campaign launch must reject missing or mismatched required evidence.
-  Keep control execution possible before admission; never treat CI's fake
-  provider as authentication proof. Do not force unrelated documentation changes
-  to invalidate an unchanged runtime. Task/oracle admission remains separate.
-
 #### Separate trusted repair infrastructure from task-specific oracles
 - **What**: `compile_suite` admits only named Dojo revisions; `sandbox_grading`
   combines source extraction, confined worker execution, Dojo observations and
@@ -222,6 +183,17 @@ the PR, not as a "resolved" note here).
   the other. Cheap to write, kills a whole confusing failure mode.
 
 ### Operator ergonomics
+
+#### Preserve upstream authentication failures in campaign diagnostics
+- **What**: the gateway records upstream HTTP status but returns a generic 502
+  to the solver. Codex retries until the local request budget returns 429, so
+  the final harness exception can incorrectly suggest provider throttling.
+- **Evidence**: the 2026-09-25 #106 qualification at `94ec429` recorded 20
+  upstream 401s per arm, ending with `ApiRateLimitError`; no admission was issued.
+- **Next**: surface upstream status counts in campaign status and fail promptly
+  on persistent authentication rejection, without exposing upstream bodies or
+  credentials. Cover actual 401, 429 and transient 5xx separately. Renew gateway
+  runtime controls if response behavior changes.
 
 #### Config/setup errors consume the full retry budget instead of failing fast
 - **What**: a deterministic config error — `SETUP-NEEDED: export <KEY>` (missing

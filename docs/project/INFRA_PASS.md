@@ -5,7 +5,7 @@ topic: pre-benchmark-infrastructure
 stage: plan
 status: in-progress
 risk_profile: high
-readiness: draft
+readiness: ready
 source: User-authorized infrastructure pass following PR 13
 ---
 
@@ -26,13 +26,13 @@ decision changes the contract. No scored campaign is implied by this pass.
   treatments. Use embedded plans for coverage where available. Proof: regression
   tests for corruption, mixed treatments, valid comparisons, missing cells and
   retries, plus existing reporter/suite tests.
-- [ ] **2. Persistent campaign operations.** A thin local launch/status interface
+- [x] **2. Persistent campaign operations.** A thin local launch/status interface
   wraps the canonical runner with tmux and macOS idle-sleep prevention, immutable
   launch receipts, duplicate-launch refusal and explicit completion/unknown
   states. Read Harbor progress and evidence; do not introduce another scheduler.
   Proof: real subprocess/tmux launch, interrupted launch and duplicate controls,
   fake-provider Harbor integration, no surviving sandbox resources.
-- [ ] **3. Runtime admission.** Gather existing offline controls and a bounded
+- [x] **3. Runtime admission.** Gather existing offline controls and a bounded
   authenticated control into evidence bound to the actual image/platform,
   loaded implementation and selected model/effort. Enforce that record at
   campaign launch only after control and inspection paths exist. Controls can
@@ -61,7 +61,7 @@ checkout; never move a checkout while its benchmark is running.
   `scripts/ci/`; CI's fake provider does not prove authentication.
 - `compile_suite` and `sandbox_grading` hard-code Dojo. Scheme 3 hashes the whole
   grading module, so historical verification needs an explicit compatibility
-  design before extraction. Stage 4 readiness is not yet established.
+  design before extraction. Stage 4 contract is recorded in TRUSTED_ORACLE_BOUNDARY.md.
 - Harbor owns scheduling, retries, locks, trial lifecycle and resume. Raw
   transcripts and private configuration remain local-only under `results/`.
 - Changes belong on the development checkout. Unattended controls belong on the
@@ -88,16 +88,29 @@ Old runs and oracle versions remain unchanged; changed treatments get new IDs.
 - Durable priorities: `BACKLOG.md`, local commit `497303d`.
 - Step 1 merged in PR #14 (`4ec77a7`); all CI checks pass and both review
   findings are resolved. Both checkouts synced. See `docs/results-queries.md`.
-- Active step: finish campaign/admission review regressions and repeat Mini
-  qualification on the corrected pushed commit. Then merge/sync PR #15 and begin
-  the trusted oracle boundary with corrected AgentMonitor #106.
-- PRs: [#14](https://github.com/davisbuilds/openbench/pull/14), merged;
-  [#15](https://github.com/davisbuilds/openbench/pull/15), open. Initial Mini
-  qualification passed offline controls and both authenticated model controls
-  at `3249c55`. Three review findings are fixed at `1eb59c0`; renewed Mini qualification passed.
-  Admitted resume then exposed Harbor rewriting completed job metadata. The runner
-  now preserves completed jobs and re-imports their evidence without dispatch;
-  regression and renewed runtime verification are required before merge.
+- Steps 2–3 merged in PR #15 (`0f28026`), synced on both main checkouts.
+  Two cloud review passes, all four findings resolved, all CI green. Final Mini
+  qualification at `803d58d` passed all offline/authenticated controls; admitted
+  exact resume preserved evidence and made no additional model requests.
+- Active step 4: `feat/trusted-repair-oracles`; grounded contract and acceptance
+  are in [TRUSTED_ORACLE_BOUNDARY.md](TRUSTED_ORACLE_BOUNDARY.md). Corrected #106
+  is the proof task; #123 remains afterward. PR [#16](https://github.com/davisbuilds/openbench/pull/16)
+  at `94ec429` has green CI and two completed cloud reviews with no findings.
+  All nine offline Mini controls passed, including ten behavioral variants and
+  five registered Harbor lifecycle controls. Baseline, partial, reference and
+  alternative repair scores matched expectations; helper extraction and refusal
+  controls passed.
+- Step 4 live gate (2026-09-25): both authenticated file-edit controls failed
+  before an edit, with 20 upstream HTTP 401 responses per arm. The final harness
+  `ApiRateLimitError` reflected exhaustion of the local request budget, not an
+  upstream 429. No admission receipt was issued and no scored campaign ran.
+  Preserve the failed attempt; refresh authentication on the execution host,
+  rerun qualification, then prove admitted exact resume adds no model requests.
+  Merge/sync remains gated on that proof. Local evidence is under
+  `results/infra-pass/am106-qualification-target/`; the launch shortcut is
+  `results/infra-pass/am106-qualification-launch.json`.
+- PRs: [#14](https://github.com/davisbuilds/openbench/pull/14) and
+  [#15](https://github.com/davisbuilds/openbench/pull/15), merged.
 
 This is a rolling execution checklist. Stages 2–4 require their grounded
 authority/recovery contracts and paired runtime controls before activation.

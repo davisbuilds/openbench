@@ -19,6 +19,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix='obench-runtime-build-') as d:
         context = Path(d)
         shutil.copyfile(ROOT / 'docker/repair-sandbox/Dockerfile', context / 'Dockerfile')
+        (context / 'node').mkdir()
+        for name in ('package.json', 'package-lock.json'):
+            shutil.copyfile(ROOT / 'docker/repair-sandbox/node' / name, context / 'node' / name)
         (context / 'obench').mkdir()
         (context / 'obench/__init__.py').write_text('')
         shutil.copyfile(ROOT / 'obench/sandbox_gateway.py', context / 'obench/sandbox_gateway.py')
