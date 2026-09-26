@@ -41,8 +41,16 @@ class Am123OracleTests(unittest.TestCase):
             state=driver.snapshot(database)
         schema=state.pop('schema')
         state['schema_key']='schema'
-        worker={'exit_code':0,'result':{'error':None,'foreign_keys_before':1,'foreign_keys_after':1,'in_transaction':False}}
-        return {'schemas':{'schema':schema},'observations':[{'workers':[worker],'state':state}]}
+        worker={'exit_code':0,'result':{'error':None,'foreign_keys_before':1,'foreign_keys_after':1,'in_transaction':False,'reads':0,'read_value':{'id':'keep','value':'unchanged'}}}
+        row={'workers':[worker],'state':state}
+        if case_name=='current_read':
+            row['writer_held']=True
+            observations=[row]
+        else:
+            row['ordinal']='serial'
+            pair={**copy.deepcopy(row),'ordinal':0,'workers':[copy.deepcopy(worker),copy.deepcopy(worker)]}
+            observations=[row,pair]
+        return {'schemas':{'schema':schema},'observations':observations}
 
     def test_valid_current_read_and_preservation_failures_are_distinguished(self):
         value=self.example('current_read')
@@ -66,11 +74,12 @@ class Am123OracleTests(unittest.TestCase):
     def test_noop_and_double_correction_are_rejected_but_correct_rows_pass(self):
         value=self.example('correction')
         self.assertFalse(oracle.grade('correction',value))
-        row=value['observations'][0]['state']
-        row['version']=7
-        for event in row['rows']['events']:
-            if event['event_id']=='first': event['tokens_in']=60000
-            if event['event_id']=='second': event['tokens_in']=80000
+        for observation in value['observations']:
+            row=observation['state']
+            row['version']=7
+            for event in row['rows']['events']:
+                if event['event_id']=='first': event['tokens_in']=60000
+                if event['event_id']=='second': event['tokens_in']=80000
         self.assertTrue(oracle.grade('correction',value))
         bad=copy.deepcopy(value)
         next(e for e in bad['observations'][0]['state']['rows']['events'] if e['event_id']=='first')['tokens_in']=20000
@@ -84,3 +93,30 @@ class Am123OracleTests(unittest.TestCase):
         self.assertTrue(oracle.grade('current_read',value))
         row['reopened_state']['version']=0
         self.assertFalse(oracle.grade('current_read',value))
+
+    def test_omitted_schedules_and_missing_writer_or_actual_read_fail(self):
+        value=self.example('current_read')
+        self.assertTrue(oracle.grade('current_read',value))
+        for key in ('writer_held','read_value'):
+            bad=copy.deepcopy(value)
+            row=bad['observations'][0]
+            if key=='writer_held': row.pop(key)
+            else: row['workers'][0]['result'].pop(key)
+            self.assertFalse(oracle.grade('current_read',bad))
+        value=self.example('correction')
+        for observation in value['observations']:
+            state=observation['state']
+            state['version']=7
+            for event in state['rows']['events']:
+                event['tokens_in']={'first':60000,'second':80000,'anthropic':12000}[event['event_id']]
+        self.assertTrue(oracle.grade('correction',value))
+        self.assertFalse(oracle.grade('correction',{'schemas':value['schemas'],'observations':value['observations'][:1]}))
+        failed=self.example('correction')['observations'][0]
+        failed['phase']='injected_failure'
+        failed['workers'][0]['result']['error']={'code':'SQLITE_CONSTRAINT_TRIGGER'}
+        retry=copy.deepcopy(value['observations'][0])
+        retry['phase']='retry'
+        rollback={'schemas':value['schemas'],'observations':[failed,retry]}
+        self.assertTrue(oracle.grade('rollback',rollback))
+        for row in (failed,retry):
+            self.assertFalse(oracle.grade('rollback',{**rollback,'observations':[row]}))

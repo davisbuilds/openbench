@@ -73,6 +73,23 @@ def grade(name, value):
     schemas = value.get('schemas', {})
     if not observations:
         return False
+    if name == 'rollback':
+        if [row.get('phase') for row in observations] != ['injected_failure','retry']:
+            return False
+    elif name == 'current_read':
+        if len(observations) != 1 or observations[0].get('writer_held') is not True:
+            return False
+    else:
+        first = observations[0]
+        workers = first.get('workers', [])
+        count = (workers[0].get('result') or {}).get('reads') if len(workers) == 1 else None
+        if type(count) is not int or not 0 <= count <= 64:
+            return False
+        expected = ['serial', *(range(1,count+1) if count else [0])]
+        if [row.get('ordinal') for row in observations] != expected:
+            return False
+        if any(len(row.get('workers', [])) != 2 for row in observations[1:]):
+            return False
     for row in observations:
         state = row.get('state', {})
         rollback = name == 'rollback' and row.get('phase') == 'injected_failure'
@@ -85,6 +102,10 @@ def grade(name, value):
             if tokens(state) != {'first':100000,'second':90000,'anthropic':12000}:
                 return False
         elif not workers_ok(row.get('workers', [])):
+            return False
+        if name in ('current_read','legacy_read') and any(
+                (worker.get('result') or {}).get('read_value') != {'id':'keep','value':'unchanged'}
+                for worker in row.get('workers', [])):
             return False
         if name in ('structure','legacy_read') and state.get('rows',{}).get('browsing_sessions') != [
                 {'id':'keep','agent':'codex','first_message':'preserve me'}]:
@@ -121,6 +142,9 @@ def variants(base, partial, reference):
 }
 
 '''+reference[end:]
+    output['column-only-retry'] = output['optimistic-retry']
+    output['optimistic-retry'] = output['optimistic-retry'].replace(
+        '/duplicate column name/i', '/duplicate column name|(?:table|index|trigger) .+ already exists/i')
     explicit = reference[:start]+'''export function initSchema(): void {
   const db=getDb();
   ensureTraceQualityExportStateFkFree(db);

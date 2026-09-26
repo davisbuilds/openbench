@@ -57,7 +57,7 @@ candidate processes is outside this instrumentation's coverage.
 
 Controls include the historical baseline/partial/reference, optimistic structural
 retry, alternate SQL/transaction APIs, overbroad initialization on reads,
-non-atomic migration, and a no-op initializer. Additional columns are allowed;
+non-atomic migration, column-only conflict recovery, and a no-op initializer. Additional columns are allowed;
 removing required schema or preserved content fails.
 
 ## Run
@@ -80,3 +80,11 @@ when those inputs change; never pool development receipts with model trials.
 Before packaging, add the public task contract, seal its source/oracle identity,
 and prove the registered verifier through Harbor and canonical suite import.
 Only then run fresh model screening under the extra-hard repair spec.
+
+## Development finding
+
+The first full read-boundary sweep also exposed an FTS trigger-creation race
+that the older column-specific prototype never scheduled. The initial optimistic
+repair handled duplicate columns but failed on an already-created trigger. That
+version remains a negative control; the alternative must handle both conflicts.
+This establishes an additional repair obligation, not a model-difficulty claim.

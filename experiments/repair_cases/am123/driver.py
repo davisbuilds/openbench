@@ -4,6 +4,7 @@ Schedules at ordinal database-read boundaries. It does not match SQL strings,
 name a transaction API, or decide whether an observed state is correct.
 """
 import base64
+from contextlib import closing
 import hashlib
 import io
 import json
@@ -55,14 +56,18 @@ db.prepare=(...args)=>{
 };
 emit({event:'started'});
 let error=null;
+let read_value=null;
 try {
   if(operation==='init') schema.initSchema();
   else if(operation==='migrate') schema.runDataMigrations(db);
-  else if(operation==='read') schema.ensureSchemaForRead();
+  else if(operation==='read') {
+    schema.ensureSchemaForRead();
+    read_value=db.prepare('SELECT id,value FROM preserved WHERE id=?').get('keep');
+  }
   else if(operation==='fk') schema.ensureTraceQualityExportStateFkFree(db);
   else throw Error('unknown operation');
 } catch(e){error={code:String(e.code||''),message:String(e.message).slice(0,240)};}
-const result={event:'done',reads,error,foreign_keys_before:before,
+const result={event:'done',reads,error,read_value,foreign_keys_before:before,
   foreign_keys_after:rawPragma('foreign_keys',{simple:true}),in_transaction:db.inTransaction};
 closeDb();
 emit(result);
@@ -105,8 +110,11 @@ class Child:
 
     def release(self):
         if self.process.poll() is None:
-            self.process.stdin.write(b'\n')
-            self.process.stdin.flush()
+            try:
+                self.process.stdin.write(b'\n')
+                self.process.stdin.flush()
+            except BrokenPipeError:
+                pass  # finish() still records the process's actual outcome.
 
     def finish(self, timeout=8):
         try:
@@ -135,13 +143,13 @@ def quote(name):
 
 
 def seed(database, sql):
-    with sqlite3.connect(database) as db:
+    with closing(sqlite3.connect(database)) as db, db:
         db.execute('PRAGMA journal_mode=WAL')
         db.executescript(sql)
 
 
 def snapshot(database):
-    with sqlite3.connect(database, timeout=0) as db:
+    with closing(sqlite3.connect(database, timeout=0)) as db, db:
         db.row_factory = sqlite3.Row
         tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
         schema = {name: [row['name'] for row in db.execute('PRAGMA table_info('+quote(name)+')')] for name in tables}
@@ -222,7 +230,7 @@ def run_case(root, case):
         if case['kind'] == 'capture':
             database = directory/'capture.db'
             result = single(root, database, 'init')
-            with sqlite3.connect(database) as db:
+            with closing(sqlite3.connect(database)) as db, db:
                 shadows = {row[1] for row in db.execute('PRAGMA table_list') if row[2] == 'shadow'}
                 ddl = ';\n'.join(row[1] for row in db.execute(
                     "SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' "
@@ -261,7 +269,7 @@ def run_case(root, case):
             database = directory/'rollback.db'
             seed(database, case['sql'])
             observations.append({'phase': 'injected_failure', 'workers': [single(root, database, 'migrate')], 'state': observe(database)})
-            with sqlite3.connect(database) as db:
+            with closing(sqlite3.connect(database)) as db, db:
                 db.execute('DROP TRIGGER fail_second_correction')
             observations.append({'phase': 'retry', 'workers': [single(root, database, 'migrate')], 'state': observe(database)})
         else:

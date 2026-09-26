@@ -65,6 +65,7 @@ def main():
         'buggy': {'structure','correction','legacy_read'},
         'historical-partial': {'structure','legacy_read'},
         'reference': set(), 'optimistic-retry': set(), 'sql-api-alternative': set(),
+        'column-only-retry': {'structure','legacy_read'},
         'always-initialize': {'current_read'},
         'non-atomic-migration': {'correction','rollback'},
         'no-op-initializer': {'structure','foreign_keys','legacy_read'},
