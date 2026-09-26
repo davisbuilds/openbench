@@ -5,7 +5,7 @@ topic: pre-benchmark-infrastructure
 stage: plan
 status: in-progress
 risk_profile: high
-readiness: draft
+readiness: ready
 source: User-authorized infrastructure pass following PR 13
 ---
 
@@ -61,7 +61,7 @@ checkout; never move a checkout while its benchmark is running.
   `scripts/ci/`; CI's fake provider does not prove authentication.
 - `compile_suite` and `sandbox_grading` hard-code Dojo. Scheme 3 hashes the whole
   grading module, so historical verification needs an explicit compatibility
-  design before extraction. Stage 4 readiness is not yet established.
+  design before extraction. Stage 4 contract is recorded in TRUSTED_ORACLE_BOUNDARY.md.
 - Harbor owns scheduling, retries, locks, trial lifecycle and resume. Raw
   transcripts and private configuration remain local-only under `results/`.
 - Changes belong on the development checkout. Unattended controls belong on the
@@ -94,7 +94,21 @@ Old runs and oracle versions remain unchanged; changed treatments get new IDs.
   exact resume preserved evidence and made no additional model requests.
 - Active step 4: `feat/trusted-repair-oracles`; grounded contract and acceptance
   are in [TRUSTED_ORACLE_BOUNDARY.md](TRUSTED_ORACLE_BOUNDARY.md). Corrected #106
-  is the proof task; #123 remains afterward. Container proof/review pending.
+  is the proof task; #123 remains afterward. PR [#16](https://github.com/davisbuilds/openbench/pull/16)
+  at `94ec429` has green CI and two completed cloud reviews with no findings.
+  All nine offline Mini controls passed, including ten behavioral variants and
+  five registered Harbor lifecycle controls. Baseline, partial, reference and
+  alternative repair scores matched expectations; helper extraction and refusal
+  controls passed.
+- Step 4 live gate (2026-09-25): both authenticated file-edit controls failed
+  before an edit, with 20 upstream HTTP 401 responses per arm. The final harness
+  `ApiRateLimitError` reflected exhaustion of the local request budget, not an
+  upstream 429. No admission receipt was issued and no scored campaign ran.
+  Preserve the failed attempt; refresh authentication on the execution host,
+  rerun qualification, then prove admitted exact resume adds no model requests.
+  Merge/sync remains gated on that proof. Local evidence is under
+  `results/infra-pass/am106-qualification-target/`; the launch shortcut is
+  `results/infra-pass/am106-qualification-launch.json`.
 - PRs: [#14](https://github.com/davisbuilds/openbench/pull/14) and
   [#15](https://github.com/davisbuilds/openbench/pull/15), merged.
 

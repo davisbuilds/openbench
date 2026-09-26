@@ -63,7 +63,11 @@ new task treatment and require fresh difficulty calibration later.
   protocol are implemented on `feat/trusted-repair-oracles`.
 - Canonical suite compilation/import routes the selected built-in oracle and
   binds all implementation modules. Legacy scheme-3 bytes remain unchanged.
-- Node dependency lock, snapshot packaging, and offline baseline/reference/
-  partial/alternative controls are prepared. Local focused tests pass; real
-  container controls and broader review are still pending. No admission claim.
-- PR #15's final campaign fixes must be merged into this branch before delivery.
+- Locked Node dependencies and native SQLite build passed on Mini ARM64 and
+  hosted Linux. All ten behavioral variants and five Harbor lifecycle controls
+  passed; both Python CI lanes and the sandbox lane are green at `94ec429`.
+- PR #15's final campaign fixes are integrated. Two cloud reviews completed
+  without findings. The selected-task authenticated qualification reached the
+  provider but received HTTP 401 for every request; admission and exact-resume
+  proof remain pending a valid execution-host login. See INFRA_PASS.md for the
+  continuation gate. No difficulty or full runtime-admission claim.

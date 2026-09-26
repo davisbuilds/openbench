@@ -184,6 +184,17 @@ the PR, not as a "resolved" note here).
 
 ### Operator ergonomics
 
+#### Preserve upstream authentication failures in campaign diagnostics
+- **What**: the gateway records upstream HTTP status but returns a generic 502
+  to the solver. Codex retries until the local request budget returns 429, so
+  the final harness exception can incorrectly suggest provider throttling.
+- **Evidence**: the 2026-09-25 #106 qualification at `94ec429` recorded 20
+  upstream 401s per arm, ending with `ApiRateLimitError`; no admission was issued.
+- **Next**: surface upstream status counts in campaign status and fail promptly
+  on persistent authentication rejection, without exposing upstream bodies or
+  credentials. Cover actual 401, 429 and transient 5xx separately. Renew gateway
+  runtime controls if response behavior changes.
+
 #### Config/setup errors consume the full retry budget instead of failing fast
 - **What**: a deterministic config error — `SETUP-NEEDED: export <KEY>` (missing
   key) or `unsupported-model` (name not in `OPEN_MODELS`) — is retried like a
