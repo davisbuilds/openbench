@@ -5,10 +5,11 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from obench.harbor_sandbox import read_tree
+from obench.harbor_sandbox import read_tree, write_files
 from obench.repair_worker import run_worker
 from obench.sandbox_grading import source_archive
 
@@ -36,7 +37,10 @@ def main():
     program = (CASE/'driver.py').read_text()
     if args.capture_fixture:
         files = source('reference')
-        results, worker = run_worker(args.runtime_image, source_archive(files), [{'kind': 'capture'}], program=program, timeout=60)
+        with tempfile.TemporaryDirectory(prefix='am123-source-') as staging:
+            write_files(Path(staging), files)
+            archive, hashes = source_archive(Path(staging), set(files))
+        results, worker = run_worker(args.runtime_image, archive, [{'kind': 'capture'}], program=program, timeout=60)
         result = results[0]['value']
         if result['worker']['exit_code'] != 0 or result['worker']['result']['error'] is not None:
             raise RuntimeError('reference schema capture failed')
