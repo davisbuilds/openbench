@@ -67,7 +67,8 @@ new task treatment and require fresh difficulty calibration later.
   hosted Linux. All ten behavioral variants and five Harbor lifecycle controls
   passed; both Python CI lanes and the sandbox lane are green at `94ec429`.
 - PR #15's final campaign fixes are integrated. Two cloud reviews completed
-  without findings. The selected-task authenticated qualification reached the
-  provider but received HTTP 401 for every request; admission and exact-resume
-  proof remain pending a valid execution-host login. See INFRA_PASS.md for the
-  continuation gate. No difficulty or full runtime-admission claim.
+  without findings at `94ec429`. Managed-token refresh restored authentication;
+  qualification then correctly rejected a misplaced edit. Follow-up changes
+  clarify the control command and serialize concurrent canary logging after a
+  reproduced CI failure. Fresh qualification, CI and exact-resume proof remain
+  pending; see INFRA_PASS.md. No difficulty or full runtime-admission claim.

@@ -22,6 +22,11 @@ from harbor.models.trial.paths import TrialPaths
 
 SERVER = r'''
 import json, socket, threading, time
+log_lock = threading.Lock()
+def emit(line):
+    # print writes its line and newline separately; keep each record together.
+    with log_lock:
+        print(line, flush=True)
 def serve(family, kind, port):
     s=socket.socket(family,kind)
     if family == socket.AF_INET6: s.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,1)
@@ -32,11 +37,11 @@ def serve(family, kind, port):
             c,_=s.accept(); data=c.recv(1024); c.sendall(data); c.close()
         else:
             data,peer=s.recvfrom(1024); s.sendto(data,peer)
-        print(json.dumps({'family':family,'kind':kind,'port':port,'challenge':data.decode()}),flush=True)
+        emit(json.dumps({'family':family,'kind':kind,'port':port,'challenge':data.decode()}))
 for family in (socket.AF_INET,socket.AF_INET6):
     for kind,port in ((socket.SOCK_STREAM,443),(socket.SOCK_STREAM,22),(socket.SOCK_DGRAM,53)):
         threading.Thread(target=serve,args=(family,kind,port),daemon=True).start()
-print('READY',flush=True)
+emit('READY')
 while True: time.sleep(1)
 '''
 

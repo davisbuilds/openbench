@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import socket
 import subprocess
 import tempfile
@@ -136,10 +137,11 @@ def prepare_control(compiled, directory):
     task = tasks/source.name
     shutil.copytree(source,task)
     target,marker=control_edit(task)
+    append_command = "printf '%s\\n' " + shlex.quote(marker.decode().strip()) + " >> " + shlex.quote('/app/'+target)
     (task/'instruction.md').write_text(
-        "This is a file-edit control. Append exactly the comment "
-        +repr(marker.decode().strip())+" and a newline to /app/"+target+
-        ", with no extra blank line. Leave every other file unchanged. "
+        "This is a file-edit control. Run this shell command to append one comment "
+        "at the absolute end of the file, after all existing content:\n\n"
+        +append_command+"\n\nLeave all existing bytes and every other file unchanged. "
         "Reply 'done' and stop. This is not a repair challenge.\n")
     from .sandbox_grading import task_digest as legacy_digest
     from .repair_oracles.registry import task_digest as registered_digest

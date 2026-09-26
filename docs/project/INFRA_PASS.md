@@ -104,9 +104,15 @@ Old runs and oracle versions remain unchanged; changed treatments get new IDs.
   before an edit, with 20 upstream HTTP 401 responses per arm. The final harness
   `ApiRateLimitError` reflected exhaustion of the local request budget, not an
   upstream 429. No admission receipt was issued and no scored campaign ran.
-  Preserve the failed attempt; refresh authentication on the execution host,
-  rerun qualification, then prove admitted exact resume adds no model requests.
-  Merge/sync remains gated on that proof. Local evidence is under
+  A zero-inference managed-token refresh on the execution host restored auth.
+  The second attempt completed 18 model requests, but Terra inserted the marker
+  inside the file; Luna appended it correctly. The strict control rejected that
+  attempt. Both failures remain preserved. The prompt now gives an explicit
+  shell append command; its byte-exact acceptance check is unchanged.
+- A documentation-only CI rerun exposed concurrent canary log writes producing
+  invalid JSONL. A regression reproduced the same parse failure; serializing
+  whole log records fixes it. Renew qualification and CI, then prove admitted
+  exact resume adds no model requests before merge/sync. Local evidence is under
   `results/infra-pass/am106-qualification-target/`; the launch shortcut is
   `results/infra-pass/am106-qualification-launch.json`.
 - PRs: [#14](https://github.com/davisbuilds/openbench/pull/14) and
