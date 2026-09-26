@@ -3,7 +3,7 @@ date: 2026-09-26
 author: Codex
 topic: repository-layout
 stage: plan
-status: in_progress
+status: completed
 source: User request to organize the root and similarly named directories
 risk_profile: routine
 readiness: ready
@@ -96,3 +96,20 @@ place. Rollback is an ordinary Git revert; no state/history migration is involve
 | Integration | Offline CI and Harbor integration | Green checks without inference |
 | Publication | Staged publication guard and link audit | No new leaks or moved-link breaks |
 | Delivery | GitHub PR and Git status | Reviewed merge; clean synced main |
+
+## Delivery
+
+Merged in [PR #18](https://github.com/davisbuilds/openbench/pull/18) at
+`176d71f`. MacBook and inactive Mini checkouts fast-forwarded to the merge.
+Codex reviewed `1a0cc48`; both path findings were corrected in `0eb64a6`,
+and the inline thread was resolved. A nested pack-discovery fix is in `4f56406`.
+
+Final-head CI passed Python 3.11 and 3.13 (1,933 tests each, five expected skips),
+checker validation, publication hygiene, workflow checks, and credential-free
+Docker/Harbor integration. All 1,795 task files remain byte-identical; historical
+receipts, captures, datasets, and published artifacts were preserved. The
+maintained ablation probe received path repairs without running inference.
+
+The next campaign still requires fresh runtime qualification. Old paths remain
+valid provenance for their recorded checkout; results must be interpreted with
+their task, grader, harness, and runtime versions, not as isolated scores.
