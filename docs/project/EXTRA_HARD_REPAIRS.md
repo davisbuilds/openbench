@@ -18,6 +18,23 @@ and fresh screening of this changed treatment. See the
 Retain original scores and timeout classifications; any revised task or runtime
 starts a new treatment. Detailed trial evidence remains local-only.
 
+## Next screening lineup
+
+User direction, 2026-09-26: retain GPT-5.6 Terra, add GPT-6 Sol, and replace
+GPT-5.6 Luna with GPT-6 Luna for future calibration. Historical model identities,
+specs and sealed results remain unchanged; the new lineup is a fresh treatment.
+
+Before AM123 admission and the next screen, add explicit Codex adapter mappings
+and isolated repair-lane support for `gpt-6-sol` and `gpt-6-luna`. Verify emitted
+model/effort/tier settings, sealed identity, and model-specific authenticated
+controls before scored trials. Current repair-lane allowlists cover only the
+older Terra/Luna arms, so this lineup is not launch-ready yet.
+
+Efforts await confirmation. Proposed starting point: Terra xhigh, Sol xhigh,
+Luna max, retaining the existing normal service tier. The three-attempt triage
+screen becomes three tasks by three models by three attempts (27 trials) once
+all tasks and model routes are admitted; this is not a confirmed launch schedule.
+
 ## What should make these tasks hard
 
 The useful unit is a **repair trap**: a plausible local fix restores one
