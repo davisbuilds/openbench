@@ -90,6 +90,8 @@ def grade(name, value):
             return False
         if any(len(row.get('workers', [])) != 2 for row in observations[1:]):
             return False
+        if any('reopen' not in row or 'reopened_state' not in row for row in observations[1:]):
+            return False
     for row in observations:
         state = row.get('state', {})
         rollback = name == 'rollback' and row.get('phase') == 'injected_failure'
@@ -97,7 +99,15 @@ def grade(name, value):
             return False
         if rollback:
             workers = row.get('workers', [])
-            if len(workers) != 1 or not (workers[0].get('result') or {}).get('error'):
+            if len(workers) != 1:
+                return False
+            result = workers[0].get('result') or {}
+            error = result.get('error') or {}
+            if (workers[0].get('exit_code') != 0
+                    or error.get('message') != 'injected correction failure'
+                    or result.get('foreign_keys_before') != 1
+                    or result.get('foreign_keys_after') != 1
+                    or result.get('in_transaction') is not False):
                 return False
             if tokens(state) != {'first':100000,'second':90000,'anthropic':12000}:
                 return False

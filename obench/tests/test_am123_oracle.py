@@ -49,6 +49,8 @@ class Am123OracleTests(unittest.TestCase):
         else:
             row['ordinal']='serial'
             pair={**copy.deepcopy(row),'ordinal':0,'workers':[copy.deepcopy(worker),copy.deepcopy(worker)]}
+            pair['reopen']=copy.deepcopy(worker)
+            pair['reopened_state']=pair['state']
             observations=[row,pair]
         return {'schemas':{'schema':schema},'observations':observations}
 
@@ -111,12 +113,24 @@ class Am123OracleTests(unittest.TestCase):
                 event['tokens_in']={'first':60000,'second':80000,'anthropic':12000}[event['event_id']]
         self.assertTrue(oracle.grade('correction',value))
         self.assertFalse(oracle.grade('correction',{'schemas':value['schemas'],'observations':value['observations'][:1]}))
+        for key in ('reopen','reopened_state'):
+            bad=copy.deepcopy(value)
+            bad['observations'][1].pop(key)
+            self.assertFalse(oracle.grade('correction',bad))
         failed=self.example('correction')['observations'][0]
         failed['phase']='injected_failure'
-        failed['workers'][0]['result']['error']={'code':'SQLITE_CONSTRAINT_TRIGGER'}
+        failed['workers'][0]['result']['error']={'code':'SQLITE_CONSTRAINT_TRIGGER','message':'injected correction failure'}
         retry=copy.deepcopy(value['observations'][0])
         retry['phase']='retry'
         rollback={'schemas':value['schemas'],'observations':[failed,retry]}
         self.assertTrue(oracle.grade('rollback',rollback))
         for row in (failed,retry):
             self.assertFalse(oracle.grade('rollback',{**rollback,'observations':[row]}))
+        for defect in ('wrong-error','crashed-worker','open-transaction','foreign-mode'):
+            bad=copy.deepcopy(rollback)
+            worker=bad['observations'][0]['workers'][0]
+            if defect=='wrong-error': worker['result']['error']['message']='unrelated failure'
+            elif defect=='crashed-worker': worker['exit_code']=1
+            elif defect=='open-transaction': worker['result']['in_transaction']=True
+            else: worker['result']['foreign_keys_after']=0
+            self.assertFalse(oracle.grade('rollback',bad))
