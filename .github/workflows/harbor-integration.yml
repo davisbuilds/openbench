@@ -52,6 +52,16 @@ jobs:
             "$OBENCH_GRADING_TEST_IMAGE" python3 - -v < obench/tests/test_sandbox_gateway.py
       - name: Check Docker grading controls
         run: .venv/bin/python -m unittest obench.tests.test_sandbox_grading.DockerGradingTests -v
+      - name: Check registered repair oracle and alternative valid repairs
+        run: >-
+          .venv/bin/python scripts/local/verify_registered_repair.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --output results/ci/registered-oracle
+      - name: Check registered oracle through Harbor lifecycle
+        run: >-
+          .venv/bin/python scripts/local/verify_registered_lifecycle.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --output results/ci/registered-lifecycle
       - name: Check effective sandbox boundaries
         run: >-
           .venv/bin/python scripts/local/verify_repair_sandbox.py

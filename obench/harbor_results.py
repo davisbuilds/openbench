@@ -307,7 +307,7 @@ def _validate_openbench_task_content_digest(
     digest = _object(value, location)
     if set(digest) != {"scheme", "sha256"}:
         raise _fail(location, "expected exactly 'scheme' and 'sha256'")
-    if digest.get("scheme") not in ({2, 3} if allow_sandbox else {2}) or isinstance(digest.get("scheme"), bool):
+    if digest.get("scheme") not in ({2, 3, 4} if allow_sandbox else {2}) or isinstance(digest.get("scheme"), bool):
         raise _fail(f"{location}.scheme", "expected OpenBench digest scheme 2")
     sha256 = digest.get("sha256")
     if (
@@ -1145,7 +1145,8 @@ def _validate_reward(
 
 def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: float, location: str,
                               *, expected_image: str | None = None,
-                              expected_model: str | None = None, expected_effort: str | None = None) -> Path:
+                              expected_model: str | None = None, expected_effort: str | None = None,
+                              expected_oracle: str | None = None) -> Path:
     """Bind the trusted grader, stopped solver and broker ledger to imported rows."""
     path = trial_dir / "verifier" / "sandbox-grading.json"
     receipt = _object(_read_json(path, location), location)
@@ -1154,7 +1155,15 @@ def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: fl
     binding = _object(receipt.get("task_binding"), location + ".task_binding")
     binding_hash = hashlib.sha256(json.dumps(binding, sort_keys=True, separators=(",", ":"),
                                               allow_nan=False).encode()).hexdigest()
-    if digest != {"scheme": 3, "sha256": binding_hash}:
+    scheme = 4 if expected_oracle is not None else 3
+    if scheme == 4:
+        from .repair_oracles.registry import ORACLES
+        oracle = ORACLES.get(expected_oracle)
+        if (oracle is None or binding.get("scheme") != 4
+                or binding.get("oracle") != {"id": oracle.id, "protocol": oracle.protocol}
+                or graded.get("oracle_id") != oracle.id or graded.get("protocol") != oracle.protocol):
+            raise _fail(location, "trusted oracle differs from locked verifier")
+    if digest != {"scheme": scheme, "sha256": binding_hash}:
         raise _fail(location, "trusted task/grader manifest does not match the task digest")
     if frozen.get("solver_stopped") is not True or frozen.get("broker_revoked") is not True:
         raise _fail(location, "solver/model access was not terminated before grading")
@@ -1688,14 +1697,22 @@ def _validate_trial(
         ) = _validate_reward(trial_dir, result, location, allow_sandbox=(
             agent_config_name == "obench.harbor_agents.sandbox_codex:SandboxCodex"
             and _object(trial_lock.get("environment"), location).get("import_path") == "obench.harbor_sandbox:RepairSandbox"
-            and _object(trial_lock.get("verifier"), location).get("import_path") == "obench.sandbox_grading:RepairVerifier"
+            and _object(trial_lock.get("verifier"), location).get("import_path") in {
+                "obench.sandbox_grading:RepairVerifier", "obench.repair_grading:RepairVerifier"}
         ))
         if agent_config_name == "obench.harbor_agents.sandbox_codex:SandboxCodex":
+            verifier_lock = _object(trial_lock.get("verifier"), location)
+            registered = verifier_lock.get("import_path") == "obench.repair_grading:RepairVerifier"
+            oracle_id = verifier_lock.get("kwargs", {}).get("oracle_id") if registered else None
+            if registered and (not isinstance(oracle_id, str) or
+                    trial_lock["environment"].get("kwargs", {}).get("oracle_id") != oracle_id):
+                raise _fail(location, "environment and verifier oracle identities differ")
             sandbox_receipt_path = _validate_sandbox_receipt(
                 trial_dir, openbench_task_content_digest, score, location + ".sandbox",
                 expected_image=trial_lock["environment"].get("kwargs", {}).get("runtime_image"),
                 expected_model=agent_lock.get("model_name"),
                 expected_effort=agent_lock.get("kwargs", {}).get("reasoning_effort"),
+                expected_oracle=oracle_id,
             )
 
     rejected_source = (

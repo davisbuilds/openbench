@@ -1,0 +1,17 @@
+{
+  "name": "openbench-repair-runtime-dependencies",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "better-sqlite3": "13.0.2",
+    "chokidar": "5.0.0",
+    "express": "5.2.1",
+    "pg": "8.22.0",
+    "portless": "0.15.5",
+    "tsx": "4.23.5",
+    "uuid": "14.0.1"
+  },
+  "devDependencies": {
+    "node-gyp": "13.0.2"
+  }
+}

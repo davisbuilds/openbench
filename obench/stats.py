@@ -1136,10 +1136,11 @@ def _validate_suite_sandbox_policy(manifest):
     hashes = policy["implementation_sha256"]
     if (
         not isinstance(hashes, dict)
-        or set(hashes) != {
-            "obench.harbor_sandbox", "obench.sandbox_gateway",
-            "obench.sandbox_grading", "obench.harbor_agents.sandbox_codex",
-        }
+        or set(hashes) not in (
+            {"obench.harbor_sandbox", "obench.sandbox_gateway", "obench.sandbox_grading", "obench.harbor_agents.sandbox_codex"},
+            {"obench.harbor_sandbox", "obench.sandbox_gateway", "obench.sandbox_grading", "obench.harbor_agents.sandbox_codex",
+             "obench.repair_worker", "obench.repair_grading", "obench.repair_oracles.registry", "obench.repair_oracles.agentmonitor"},
+        )
         or not all(_sha256_hex(value) for value in hashes.values())
     ):
         raise ValueError("suite manifest sandbox implementation hashes are invalid")
