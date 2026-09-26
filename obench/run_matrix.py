@@ -150,7 +150,7 @@ def _termination_handler(signum, _frame):
 
 def run_cell_subprocess(cmd):
     global _ACTIVE_PROC
-    # Keep bench/run.py out of the terminal's SIGINT process group so Ctrl-C
+    # Keep obench/run.py out of the terminal's SIGINT process group so Ctrl-C
     # reaches this wrapper, records a stop request, and lets the current cell
     # append its row. SIGHUP/SIGTERM handlers above still clean up this detached
     # process group so a dying wrapper does not orphan a costly agent run.
@@ -264,7 +264,7 @@ def main(argv=None):
     parser.add_argument("--task", required=True, help="comma-separated task names")
     parser.add_argument("--trials", type=int, required=True, help="trials per (harness, model, task)")
     parser.add_argument("--out", default=DEFAULT_OUT, help=f"output JSONL path (default: {DEFAULT_OUT})")
-    parser.add_argument("--docker", action="store_true", help="run cells through bench/run.py --exec docker")
+    parser.add_argument("--docker", action="store_true", help="run cells through obench/run.py --exec docker")
     parser.add_argument("--timeout", type=int, default=2400,
                         help="per-cell adapter timeout in seconds (default: 2400)")
     parser.add_argument("--tasks-dir", default=DEFAULT_TASKS_DIR, help="task root directory")

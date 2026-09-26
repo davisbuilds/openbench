@@ -14,7 +14,7 @@ class RegistryTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)/'task'
-        old=Path(__file__).resolve().parents[2]/'harbor-tasks-local/dojo-evidence-pr60-v4'
+        old=Path(__file__).resolve().parents[2]/'benchmarks/harbor/local/dojo-evidence-pr60-v4'
         shutil.copytree(old,self.root)
         config=self.root/'task.toml'
         text=config.read_text().replace('dojo-evidence-pr60-v4','am-benchmark-pr106-v3').replace('[metadata]\n','[metadata]\nopenbench_oracle = "agentmonitor-benchmark-v2"\n').replace('scheme = 3','scheme = 4')
@@ -44,7 +44,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_legacy_dojo_digest_is_unchanged(self):
         import tomllib
-        task=Path(__file__).resolve().parents[2]/'harbor-tasks-local/dojo-evidence-pr60-v4'
+        task=Path(__file__).resolve().parents[2]/'benchmarks/harbor/local/dojo-evidence-pr60-v4'
         expected=tomllib.loads((task/'task.toml').read_text())['metadata']['openbench_task_content_digest']
         self.assertEqual(expected,{'scheme':3,'sha256':legacy_digest(task)})
 
@@ -96,7 +96,7 @@ class RegisteredSuiteTests(unittest.TestCase):
             init.init_scaffold(root)
             tasks=root/'.openbench/tasks'
             shutil.rmtree(tasks)
-            source=Path(__file__).resolve().parents[2]/'harbor-tasks-local/am-benchmark-pr106-v3'
+            source=Path(__file__).resolve().parents[2]/'benchmarks/harbor/local/am-benchmark-pr106-v3'
             shutil.copytree(source,tasks/source.name)
             suite=root/'.openbench/suites/default.toml'
             suite.write_text(suite.read_text().replace('gpt-5.6-sol','gpt-5.6-terra-xhigh')+'\n[sandbox]\nkind="repair-v1"\nruntime_image="sha256:'+'a'*64+'"\n')

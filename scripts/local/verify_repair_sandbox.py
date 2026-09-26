@@ -66,7 +66,7 @@ print(json.dumps(results))
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-image", required=True)
-    parser.add_argument("--task", type=Path, default=Path("harbor-tasks-local/dojo-evidence-pr60-v3"))
+    parser.add_argument("--task", type=Path, default=Path("benchmarks/harbor/local/dojo-evidence-pr60-v3"))
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()
     token = uuid.uuid4().hex[:12]

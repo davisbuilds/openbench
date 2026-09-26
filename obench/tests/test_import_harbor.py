@@ -346,7 +346,7 @@ class FixtureImportTests(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    os.path.isdir(os.path.join(SOURCE_ROOT, "tasks", "make-it-run")),
+    os.path.isdir(os.path.join(SOURCE_ROOT, "benchmarks", "core", "make-it-run")),
     "core tasks/ not present in this install layout",
 )
 class RoundTripExportImportTests(unittest.TestCase):
@@ -356,12 +356,12 @@ class RoundTripExportImportTests(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="obench_harbor_rt_")
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.task_name = "make-it-run"
-        self.original = os.path.join(SOURCE_ROOT, "tasks", self.task_name)
+        self.original = os.path.join(SOURCE_ROOT, "benchmarks", "core", self.task_name)
 
     def test_export_import_round_trip_polarity(self):
         harbor_out = os.path.join(self.tmp, "harbor")
         eh.export_tasks(
-            os.path.join(SOURCE_ROOT, "tasks"),
+            os.path.join(SOURCE_ROOT, "benchmarks", "core"),
             harbor_out,
             self.task_name,
         )
@@ -408,7 +408,7 @@ class RoundTripExportImportTests(unittest.TestCase):
             eh.main([
                 "harbor",
                 "--task", self.task_name,
-                "--tasks-dir", os.path.join(SOURCE_ROOT, "tasks"),
+                "--tasks-dir", os.path.join(SOURCE_ROOT, "benchmarks", "core"),
                 "--out", harbor_out,
             ]),
             0,

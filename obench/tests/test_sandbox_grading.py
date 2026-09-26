@@ -14,8 +14,8 @@ from obench.sandbox_grading import (
 )
 
 REPO = Path(__file__).resolve().parents[2]
-BASE = REPO / 'harbor-tasks-local/dojo-evidence-pr60-v2/environment/app'
-REFERENCE = REPO / 'tasks-local/dojo-evidence-pr60/solution'
+BASE = REPO / 'benchmarks/harbor/local/dojo-evidence-pr60-v2/environment/app'
+REFERENCE = REPO / 'benchmarks/local/dojo-evidence-pr60/solution'
 IMAGE = os.environ.get('OBENCH_GRADING_TEST_IMAGE')
 
 

@@ -22,7 +22,7 @@ from obench.harbor_sandbox import RepairSandbox
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime-image', required=True)
-    parser.add_argument('--task', type=Path, default=ROOT / 'harbor-tasks-local/dojo-evidence-pr60-v3')
+    parser.add_argument('--task', type=Path, default=ROOT / 'benchmarks/harbor/local/dojo-evidence-pr60-v3')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)

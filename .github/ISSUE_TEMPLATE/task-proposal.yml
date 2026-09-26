@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thanks for proposing a task! Please read
-        [CONTRIBUTING-TASKS.md](../blob/main/CONTRIBUTING-TASKS.md) first — it is
+        [docs/guides/contributing-tasks.md](https://github.com/davisbuilds/openbench/blob/main/docs/guides/contributing-tasks.md) first — it is
         the full contract. This form captures the essentials so a maintainer can
         evaluate the task quickly. A task must be **original**, its checker must
         **fail on the unsolved workspace and pass on your golden solution**, and
@@ -64,7 +64,7 @@ body:
     id: directory-contract
     attributes:
       label: Directory contract
-      description: The layout enforced for every task (see CONTRIBUTING-TASKS.md).
+      description: The layout enforced for every task (see docs/guides/contributing-tasks.md).
       options:
         - label: "tasks/<name>/ has instruction.md, workspace/, solution/, and checker.sh."
           required: true
@@ -78,12 +78,12 @@ body:
     attributes:
       label: Validation run output
       description: >
-        Paste the row for your task from `python3 validate_tasks.py`. It should
+        Paste the row for your task from `obench validate`. It should
         read FAIL(ok) ... PASS(ok) ... PASS (workspace fails as expected, the
         solution passes with score 1.0).
       render: text
       placeholder: |
-        $ python3 validate_tasks.py
+        $ obench validate
         my-task-name    FAIL(ok)  PASS(ok)  PASS
     validations:
       required: true
@@ -93,7 +93,7 @@ body:
     attributes:
       label: Local checks
       options:
-        - label: "obench validate (or python3 validate_tasks.py) passes (my task shows FAIL(ok) ... PASS(ok) ... PASS)."
+        - label: "obench validate (or obench validate) passes (my task shows FAIL(ok) ... PASS(ok) ... PASS)."
           required: true
         - label: "python3 -m unittest discover -s obench/tests passes."
           required: true

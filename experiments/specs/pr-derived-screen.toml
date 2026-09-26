@@ -29,5 +29,5 @@ harness = "codex"
 model = "gpt-5.6-luna-max"
 
 [[task_group]]
-tasks_dir = "../../tasks-local"
+tasks_dir = "../../benchmarks/local"
 tasks = ["am-benchmark-pr106", "engram-batch-pr1", "dojo-evidence-pr60"]

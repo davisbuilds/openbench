@@ -21,7 +21,7 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     args.output.mkdir(parents=True,exist_ok=False)
-    task=ROOT/'tasks-local/am-benchmark-pr106-v2'
+    task=ROOT/'benchmarks/local/am-benchmark-pr106-v2'
     spec=importlib.util.spec_from_file_location('am106_control_variants',task/'validate_controls.py')
     variants_module=importlib.util.module_from_spec(spec)
     spec.loader.exec_module(variants_module)

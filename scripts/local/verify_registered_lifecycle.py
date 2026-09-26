@@ -59,13 +59,13 @@ async def main():
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     output=args.output.resolve();output.mkdir(parents=True,exist_ok=False)
-    task=ROOT/'harbor-tasks-local/am-benchmark-pr106-v3'
+    task=ROOT/'benchmarks/harbor/local/am-benchmark-pr106-v3'
     records=[]
     for mode,expected in [('baseline',0),('reference',1),('helper',1),('malformed',0),('forged-reward',0)]:
         config=TrialConfig.model_validate({
             'task':{'path':str(task)},'trial_name':mode,'trials_dir':str(output),
             'agent':{'import_path':'verify_registered_lifecycle:FixtureAgent',
-                     'kwargs':{'mode':mode,'reference':str(ROOT/'tasks-local/am-benchmark-pr106-v2/solution')}},
+                     'kwargs':{'mode':mode,'reference':str(ROOT/'benchmarks/local/am-benchmark-pr106-v2/solution')}},
             'environment':{'import_path':'obench.harbor_sandbox:RepairSandbox',
                            'kwargs':{'runtime_image':args.runtime_image,'oracle_id':ORACLE}},
             'verifier':{'import_path':'obench.repair_grading:RepairVerifier',

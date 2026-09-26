@@ -192,7 +192,7 @@ def discover_tasks(task_roots=None):
 
     Returns a list of ``(tier, display_name, task_dir)``. A task is any
     directory containing a ``checker.sh``. Flat roots (``tasks/``) hold them
-    one level deep; nested roots (``tasks-imported/``) nest them under a
+    one level deep; nested roots (``benchmarks/imported/``) nest them under a
     collection, so both are walked to any depth.
     """
     roots = list(task_roots) if task_roots is not None else default_task_roots()
@@ -243,11 +243,11 @@ def main(argv=None):
         "--tasks-dir", default=None,
         help="task root to validate (default: openbench.toml tasks_dir, else "
              "./tasks or ./.openbench/tasks; in a checkout also validates "
-             "tasks-imported/)",
+             "benchmarks/imported/)",
     )
     parser.add_argument(
         "--no-imported", action="store_true",
-        help="skip tasks-imported/ even when running inside a checkout",
+        help="skip benchmarks/imported/ even when running inside a checkout",
     )
     args = parser.parse_args(argv)
 

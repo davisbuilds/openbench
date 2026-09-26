@@ -9,10 +9,11 @@ import sys
 from pathlib import Path
 
 from . import results, gateway_publish, gateway_report, gateway_run, gateway_spec
+from .paths import default_tasks_dir
 
 
 def _tasks_dir(value: str | None) -> str:
-    return value or "tasks"
+    return value or default_tasks_dir() or "tasks"
 
 
 def _print_error(exc: Exception) -> int:

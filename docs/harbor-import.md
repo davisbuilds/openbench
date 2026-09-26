@@ -5,8 +5,8 @@ task directories so you can run them under OpenBench harness adapters, metering,
 and reporting.
 
 ```bash
-obench import harbor --from /path/to/harbor-task --out ./tasks-imported --collection tb2
-obench import harbor --from '/data/harbor-datasets/tb2/*' --out ./tasks-imported --collection tb2
+obench import harbor --from /path/to/harbor-task --out ./benchmarks/imported --collection tb2
+obench import harbor --from '/data/harbor-datasets/tb2/*' --out ./benchmarks/imported --collection tb2
 ```
 
 This is the reverse of [`docs/harbor-export.md`](harbor-export.md)
@@ -90,9 +90,9 @@ obench export harbor --task make-it-run --out ./harbor-out
 harbor run -p ./harbor-out/make-it-run -a oracle
 
 # Harbor → OpenBench (harness comparison / metering / report)
-obench import harbor --from ./harbor-out/make-it-run --out ./tasks-imported --collection from-harbor
-obench validate --tasks-dir ./tasks-imported/from-harbor
-obench legacy run --tasks-dir ./tasks-imported --task from-harbor/make-it-run --harness pi
+obench import harbor --from ./harbor-out/make-it-run --out ./benchmarks/imported --collection from-harbor
+obench validate --tasks-dir ./benchmarks/imported/from-harbor
+obench legacy run --tasks-dir ./benchmarks/imported --task from-harbor/make-it-run --harness pi
 obench report
 ```
 

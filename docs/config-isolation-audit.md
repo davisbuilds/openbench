@@ -1,6 +1,6 @@
 # OpenBench harness config-isolation audit
 
-Date: 2026-07-13. Scope: `bench/run.py` adapters, local and disposable-container execution. “Reads” below means host-owner files made reachable to the CLI (auth is listed separately and intentionally preserved).
+Date: 2026-07-13. Scope: `obench/run.py` adapters, local and disposable-container execution. “Reads” below means host-owner files made reachable to the CLI (auth is listed separately and intentionally preserved).
 
 ## Codex HOME correction — 2026-09-14
 
@@ -50,7 +50,7 @@ historical rows do not establish whether any particular skill was used.
 
 ## Rotating refresh tokens and auth persist-back
 
-Subscription CLIs can rotate single-use refresh tokens while running. After every CLI return (success, non-zero exit, or timeout), local Pi, OpenCode, Grok Build, and stock/ablation Codex adapters compare only the isolated `auth.json` with its master. Changed bytes are accepted only as valid JSON with the same provider/account structure and changes limited to token/expiry metadata, then persisted through a mode-`0600`, fsynced temporary file and `os.replace`; identical files are untouched. Persistence I/O failures are warned without masking the cell result. Claude remains API-key-only.
+Subscription CLIs can rotate single-use refresh tokens while running. After every CLI return (success, non-zero exit, or timeout), local Pi, OpenCode, Grok Build, and stock/experiments/ablations Codex adapters compare only the isolated `auth.json` with its master. Changed bytes are accepted only as valid JSON with the same provider/account structure and changes limited to token/expiry metadata, then persisted through a mode-`0600`, fsynced temporary file and `os.replace`; identical files are untouched. Persistence I/O failures are warned without masking the cell result. Claude remains API-key-only.
 
 Docker keeps auth staging read-only and mounts a private per-cell host directory read-write at `/bench/auth-return` only for `AUTH_PERSIST` allowlisted harnesses. `entry.py` returns only the declared auth file, then `docker_exec.py` applies the same comparison and atomic replacement. Grok returns to `~/.openbench/grok-container-auth/auth.json` when that dedicated credential supplied container `~/.grok/auth.json`, otherwise to the host Grok fallback. No config, sessions, or other isolated-HOME state is returned.
 

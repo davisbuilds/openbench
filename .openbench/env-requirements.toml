@@ -4,7 +4,7 @@
 # Checked by `obench doctor --docker-env`.
 #
 # NOTE: This is the floor, not a recommendation. Colima should be started with
-# the pinned config from tools/colima-benchmark.sh to ensure adequate headroom
+# the pinned config from scripts/local/colima-benchmark.sh to ensure adequate headroom
 # for concurrent container execution (agent container + checker + proxy).
 
 cpus = 4

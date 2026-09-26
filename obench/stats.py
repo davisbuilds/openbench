@@ -9,7 +9,7 @@ Exclusion rules (single source of truth for headline stats):
 * Rows for tasks whose task directory contains ``DROPPED.md`` are quarantined:
   they are excluded from denominators and reported separately as dropped-task
   quarantines. Task directories are resolved from ``--tasks-dir`` roots; by
-  default the tool checks ``tasks/`` and ``tasks-imported/terminal-bench/``.
+  default the tool checks ``tasks/`` and ``benchmarks/imported/terminal-bench/``.
 * Every other structurally usable row counts in denominators, whether solved or
   failed. Nothing is silently dropped.
 
@@ -40,16 +40,15 @@ def _default_task_dirs():
     tasks = default_tasks_dir()
     if tasks:
         dirs.append(tasks)
-    root = find_repo_root()
-    if root:
-        tb = os.path.join(root, "tasks-imported", "terminal-bench")
+    imported = default_imported_tasks_dir()
+    if imported:
+        tb = os.path.join(imported, "terminal-bench")
         if os.path.isdir(tb):
             dirs.append(tb)
-    elif default_imported_tasks_dir():
-        pass
     return tuple(dirs) if dirs else (
+        os.path.join(os.getcwd(), "benchmarks", "core"),
         os.path.join(os.getcwd(), "tasks"),
-        os.path.join(os.getcwd(), "tasks-imported", "terminal-bench"),
+        os.path.join(os.getcwd(), "benchmarks/imported", "terminal-bench"),
     )
 
 

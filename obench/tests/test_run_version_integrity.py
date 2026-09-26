@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for Docker/local harness version provenance in bench/run.py."""
+"""Tests for Docker/local harness version provenance in obench/run.py."""
 
 import contextlib
 import io

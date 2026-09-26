@@ -3,7 +3,7 @@
 Docker mechanism: ``bench/docker_exec.py`` treats ``codex_v1``/``codex_v2`` as
 Codex-like harnesses, staging the same read-only ``~/.codex/auth.json`` surface
 as stock ``codex`` and mounting only the selected repository variant directory
-(e.g. ``ablation/codex-home-v1``) at ``/bench/ablation/codex-home-v1:ro``. This
+(e.g. ``experiments/ablations/codex-home-v1``) at ``/bench/ablation/codex-home-v1:ro``. This
 helper then composes a fresh writable CODEX_HOME inside the running
 host/container temp space, copying only the variant config, instructions file,
 and the staged runtime auth. No auth file is ever copied into the repo or baked
@@ -52,7 +52,7 @@ def version():
 def _ablation_root():
     if os.environ.get("BENCH_IN_CONTAINER") and os.path.isdir(_CONTAINER_ABLATION):
         return _CONTAINER_ABLATION
-    return os.path.join(_REPO_ROOT, "ablation")
+    return os.path.join(_REPO_ROOT, "experiments/ablations")
 
 
 def _source_codex_home():

@@ -7,8 +7,8 @@ a **shakedown result** — proof that the harness, checkers, and statistics work
 a real spend — not a leaderboard. Read it as "the pipeline works and here is what
 it found," not "harness X beats harness Y."
 
-Dataset: [`data/m3-2026-07-02/results.jsonl`](data/m3-2026-07-02/results.jsonl)
-(provenance in [`data/m3-2026-07-02/README.md`](data/m3-2026-07-02/README.md)).
+Dataset: [`data/m3-2026-07-02/results.jsonl`](../../data/m3-2026-07-02/results.jsonl)
+(provenance in [`data/m3-2026-07-02/README.md`](../../data/m3-2026-07-02/README.md)).
 Every number below was recomputed from that committed file.
 
 ## Headline finding: correctness saturates, speed separates
@@ -26,7 +26,7 @@ too easy to tell frontier harnesses apart on whether they succeed.
 harnesses span nearly 4× — from `pi` at ~16 s to `opencode` at ~63 s per cell —
 and most of those gaps are real (their mean confidence intervals don't overlap).
 
-## Success table (verbatim `bench/report.py` output)
+## Success table (verbatim `obench/report.py` output)
 
 ```
 harness   fix-failing-test  build-a-cli  make-it-run  overall       wilson95        mean_s  tokens
@@ -76,9 +76,9 @@ headlessly on `gpt-5.5-medium`, and grades the result solely by `checker.sh` exi
 a single macOS host on one day, with the OpenAI key unset so every harness used
 its subscription OAuth credential (no API-key billing). The `null` adapter does
 nothing and is the negative control. Full contract, task format, and the Wilson-
-interval rationale are in the repo [`README.md`](README.md); the exact run
+interval rationale are in the repo [`README.md`](../../README.md); the exact run
 configuration and provenance are in
-[`data/m3-2026-07-02/README.md`](data/m3-2026-07-02/README.md).
+[`data/m3-2026-07-02/README.md`](../../data/m3-2026-07-02/README.md).
 
 ## Limitations (be honest about what this is not)
 
@@ -120,7 +120,7 @@ adapter — 5 harnesses × 3 tasks × **3 trials** (45 real cells + 3 null),
 question here (it already saturated in M3); this measures the **cost of a
 solve**. All 45 real cells passed, zero adapter errors, and every real row
 carried a positive-integer token count (no parser gaps). Dataset:
-[`data/m3.5-2026-07-02/`](data/m3.5-2026-07-02/).
+[`data/m3.5-2026-07-02/`](../../data/m3.5-2026-07-02).
 
 ## Headline: tokens separate the field more than time does
 
@@ -400,7 +400,7 @@ model is involved.
 Terminal-Bench open-model n=3 promotes the first 5-harness comparison on four
 harder Terminal-Bench tasks: 5 harnesses × 3 open models × 4 TB tasks × 3 trials
 = **180 rows**. Dataset and methodology artifacts are in
-[`data/tb-open-n3-2026-07-09/`](data/tb-open-n3-2026-07-09/).
+[`data/tb-open-n3-2026-07-09/`](../../data/tb-open-n3-2026-07-09).
 
 ## Headline
 
@@ -411,7 +411,7 @@ models and tasks, `pi` solves **26/32 = 81%** valid rows; the field sits at
 11/11 solved** after excluding one documented infra row.
 
 **Efficiency remains matched-cell sensitive.** The strict matched-cell summaries
-in [`tb-open-n3-stats.md`](data/tb-open-n3-2026-07-09/tb-open-n3-stats.md)
+in [`tb-open-n3-stats.md`](../../data/tb-open-n3-2026-07-09/tb-open-n3-stats.md)
 restrict to cells solved by every harness in the comparison set and to trials with
 that metric available. On the all-5 strict slice, `pi` is effectively tied for the
 lowest fresh-token median (63,058 tokens/solve vs `opencode` 63,068) while
@@ -429,7 +429,7 @@ unchanged, so this is not just a bookkeeping artifact.
 
 Methodology notes: write-time classifier, contamination purge and rerun,
 independent audit, parity backfill, and adversarial review are summarized in
-[`tb-open-n3-methodology-notes.md`](data/tb-open-n3-2026-07-09/tb-open-n3-methodology-notes.md).
+[`tb-open-n3-methodology-notes.md`](../../data/tb-open-n3-2026-07-09/tb-open-n3-methodology-notes.md).
 
 ---
 
@@ -515,10 +515,10 @@ cost we can sustain, did not bite.
 
 The hardest tasks we run: five frontier-hard tasks imported from
 [Terminal-Bench](https://github.com/laude-institute/terminal-bench) (Apache-2.0,
-`tasks-imported/terminal-bench/`), run in the **docker lane** with the same model
+`benchmarks/imported/terminal-bench/`), run in the **docker lane** with the same model
 (`gpt-5.5-medium`) across the three container-compatible harnesses. **n=3 per
 (harness, task)**, 45 cells, plus a `deepseek-v4-flash` shakeout baseline. Raw
-data + provenance: [`data/tb-frontier-2026-07-05/`](data/tb-frontier-2026-07-05/).
+data + provenance: [`data/tb-frontier-2026-07-05/`](../../data/tb-frontier-2026-07-05).
 
 ## Headline
 

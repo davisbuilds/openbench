@@ -174,8 +174,9 @@ def _default_tasks_dirs(site_dir):
     """Resolve source-backed task roots for repository leaderboard builds."""
     repo_root = os.path.dirname(os.path.abspath(site_dir))
     candidates = [
+        os.path.join(repo_root, "benchmarks", "core"),
         os.path.join(repo_root, "tasks"),
-        os.path.join(repo_root, "tasks-imported", "terminal-bench"),
+        os.path.join(repo_root, "benchmarks/imported", "terminal-bench"),
         *stats.DEFAULT_TASK_DIRS,
     ]
     roots = []

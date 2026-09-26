@@ -21,8 +21,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `bench/scrub.py`, a PII scrubber that replaces emails, home paths, username,
   hostnames, and key/token-shaped strings with placeholders, with a `--check`
   report mode. It never modifies originals and over-redacts on purpose.
-- Import tier under `tasks-imported/`: 11 Exercism exercises converted by
-  `tools/convert_exercism.py`, reusing only upstream canonical test cases (each
+- Import tier under `benchmarks/imported/`: 11 Exercism exercises converted by
+  `scripts/imports/convert_exercism.py`, reusing only upstream canonical test cases (each
   records its origin and license in `provenance.json`) while instruction prose
   and reference solutions are written fresh. Kept a separate, unblended tier for
   higher contamination risk.
@@ -31,7 +31,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Offline CI (`.github/workflows/ci.yml`): unit tests + task-checker validation
   on every push and pull request, across Python 3.11 and 3.13, with no live
   harness or model-API calls.
-- Contribution docs (`CONTRIBUTING.md`, `CONTRIBUTING-TASKS.md`) covering the
+- Contribution docs (`CONTRIBUTING.md`, `docs/guides/contributing-tasks.md`) covering the
   task directory contract, the `SCORE:` partial-credit line, and the adapter
   interface.
 - OSS project polish: README CI + license badges, GitHub issue templates
@@ -42,21 +42,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 First public release: a from-scratch benchmark that asks whether the coding
 agent's harness matters when the model is held fixed. See
-[`WRITEUP.md`](WRITEUP.md) for the full story and [`RESULTS.md`](RESULTS.md) for
+[`docs/reports/writeup.md`](docs/reports/writeup.md) for the full story and [`docs/reports/results.md`](docs/reports/results.md) for
 the per-milestone findings.
 
 ### Added
 
 - Benchmark harness — Python 3 standard library only, no dependencies:
-  - `bench/run.py`, a resumable runner (one row per task × harness × trial) that
+  - `obench/run.py`, a resumable runner (one row per task × harness × trial) that
     copies a fresh workspace per cell and records one appended JSON line to
     `results/results.jsonl`.
-  - `bench/report.py`, aggregating results into a table with Wilson 95%
+  - `obench/report.py`, aggregating results into a table with Wilson 95%
     confidence intervals, mean score, wall-clock time, tokens-per-solve, and an
     `--efficiency` view.
   - `validate_tasks.py`, proving every checker fails on the untouched workspace
     and passes on the golden solution.
-  - `bench/doctor.py`, a token-free preflight that checks each harness CLI,
+  - `obench/doctor.py`, a token-free preflight that checks each harness CLI,
     auth, and model-pin resolution.
   - Container-per-cell isolation (`--exec docker`) with the same adapter modules
     running unchanged, plus a local fallback.
@@ -64,7 +64,7 @@ the per-milestone findings.
   mapping the canonical `gpt-5.5-medium` to the harness's own flags, handling
   auth read-only, enforcing timeouts, and reporting tokens/turns. Plus a
   built-in `null` negative control. Contract in
-  [`bench/ADAPTER_SPEC.md`](bench/ADAPTER_SPEC.md).
+  [`bench/ADAPTER_SPEC.md`](obench/ADAPTER_SPEC.md).
 - Partial-credit grading via the `SCORE:` contract, so a near-miss can separate
   harnesses on harder tasks.
 - Open-model support: `pi` and `opencode` wired to first-party APIs for
@@ -72,7 +72,7 @@ the per-milestone findings.
 - Benchmark tasks with validated checkers (`fix-failing-test`, `build-a-cli`,
   `make-it-run`) plus the harder partial-credit set (`make-ci-green`,
   `add-feature`, `misleading-error`) and additional originals.
-- Four committed datasets and their write-ups in [`RESULTS.md`](RESULTS.md):
+- Four committed datasets and their write-ups in [`docs/reports/results.md`](docs/reports/results.md):
   M3 (`data/m3-2026-07-02/`), M3.5 (`data/m3.5-2026-07-02/`),
   M4.5 (`data/m4.5-2026-07-03/`), M4 (`data/m4-2026-07-03/`).
 - Findings: on correctness, frontier harnesses on a frontier model are
@@ -80,7 +80,7 @@ the per-milestone findings.
   tokens per solve). Three of four open models reach frontier parity, with the
   whole 72-run open-model matrix costing about $1.02. Two summary-level
   conclusions were overturned by a per-cell look at the raw data — the
-  verification discipline documented in [`WRITEUP.md`](WRITEUP.md).
+  verification discipline documented in [`docs/reports/writeup.md`](docs/reports/writeup.md).
 
 [Unreleased]: https://github.com/minghinmatthewlam/openbench/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/minghinmatthewlam/openbench/releases/tag/v0.1.0

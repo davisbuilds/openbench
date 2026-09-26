@@ -4,9 +4,9 @@
 # ============================================================================
 #
 # Usage:
-#   bash tools/colima-benchmark.sh           # full setup (idempotent)
-#   bash tools/colima-benchmark.sh --restart  # full stop + recreate + setup
-#   bash tools/colima-benchmark.sh --status   # print VM resources + exit
+#   bash scripts/local/colima-benchmark.sh           # full setup (idempotent)
+#   bash scripts/local/colima-benchmark.sh --restart  # full stop + recreate + setup
+#   bash scripts/local/colima-benchmark.sh --status   # print VM resources + exit
 #
 # What this does (idempotently):
 #   1. Stop any running colima (unless --no-stop)
@@ -21,7 +21,7 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Pinned resource reservation — must match .openbench/env-requirements.toml.
 COLIMA_CPUS=4

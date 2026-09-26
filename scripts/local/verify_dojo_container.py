@@ -22,8 +22,8 @@ import uuid
 
 
 REPO = Path(__file__).resolve().parents[2]
-TASK = REPO / "harbor-tasks-local/dojo-evidence-pr60-v2"
-SOURCE = REPO / "tasks-local/dojo-evidence-pr60"
+TASK = REPO / "benchmarks/harbor/local/dojo-evidence-pr60-v2"
+SOURCE = REPO / "benchmarks/local/dojo-evidence-pr60"
 
 
 def run(*args: str, **kwargs) -> subprocess.CompletedProcess:

@@ -122,7 +122,7 @@ class TestCodexChildHome(unittest.TestCase):
         self.assertFalse(Path(report["codex_home"]).exists())
 
     def test_ablation_keeps_composed_instructions_with_isolated_user_home(self):
-        variant = self.root / "ablation/codex-home-v1"
+        variant = self.root / "experiments/ablations/codex-home-v1"
         variant.mkdir(parents=True)
         (variant / "config.toml").write_text(
             'model_instructions_file = "instructions.md"\n'

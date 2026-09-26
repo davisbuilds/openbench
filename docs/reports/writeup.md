@@ -186,7 +186,7 @@ that's the point — but reproduce them before you cite them.
   factory on the open/mid band where it *does* discriminate (`glm-4.7-flash` =
   0.47). Caveat, in keeping with the rest of this write-up: n=3 trials, one probe
   model, one harness — a weak lever demonstrated, not a proof none exists. Full
-  numbers in `RESULTS.md`.
+  numbers in `docs/reports/results.md`.
 - **Longitudinal drift tracking**: the same tasks over time, as models and
   harnesses ship, to catch regressions like the ones above before they reach a run.
 - **Held-out tasks** to guard against the tasks leaking into training or tuning.
@@ -196,14 +196,14 @@ that's the point — but reproduce them before you cite them.
 ## Data
 
 Every claim is backed by a committed dataset and a per-milestone write-up in
-`RESULTS.md`:
+`docs/reports/results.md`:
 
 - M3 — `data/m3-2026-07-02/`
 - M3.5 — `data/m3.5-2026-07-02/`
 - M4.5 — `data/m4.5-2026-07-03/`
 - M4 — `data/m4-2026-07-03/`
 
-Re-run any report with `python3 bench/report.py --efficiency --results-path <file>`.
+Re-run any report with `python3 -m obench.report --efficiency --results-path <file>`.
 
 The measurable takeaway: on today's tasks, the wrapper barely moves *whether* the
 work gets done, but it moves *what it costs* by up to an order of magnitude — and

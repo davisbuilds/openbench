@@ -163,7 +163,7 @@ tag. Build/probe receipts and raw logs belong in gitignored `results/`.
 ```sh
 python3 scripts/local/build_repair_runtime.py \
   --receipt results/repair-runtime.json
-python3 -m obench.sandbox_grading harbor-tasks-local/dojo-evidence-pr60-v3 --check
+python3 -m obench.sandbox_grading benchmarks/harbor/local/dojo-evidence-pr60-v3 --check
 ```
 
 Run these scripts with the interpreter that has OpenBench and the pinned Harbor
@@ -175,12 +175,12 @@ python scripts/local/verify_repair_sandbox.py \
   --runtime-image "$REPAIR_IMAGE" --receipt results/repair-boundary.json
 python scripts/local/verify_repair_lifecycle.py \
   --runtime-image "$REPAIR_IMAGE" \
-  --task harbor-tasks-local/dojo-evidence-pr60-v3 \
-  --reference tasks-local/dojo-evidence-pr60/solution \
+  --task benchmarks/harbor/local/dojo-evidence-pr60-v3 \
+  --reference benchmarks/local/dojo-evidence-pr60/solution \
   --output results/repair-lifecycle
 python scripts/local/verify_repair_log_export.py \
   --runtime-image "$REPAIR_IMAGE" \
-  --task harbor-tasks-local/dojo-evidence-pr60-v3 \
+  --task benchmarks/harbor/local/dojo-evidence-pr60-v3 \
   --output results/repair-log-export
 python scripts/local/verify_repair_trajectory.py \
   --output results/repair-trajectory-control

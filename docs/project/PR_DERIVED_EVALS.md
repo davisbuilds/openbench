@@ -75,7 +75,7 @@ partial repair earns credit only for complete behavioral buckets. Historical
 intermediate fixes are useful mutation controls, not proof of model difficulty.
 
 These snapshots currently use the fork-local compatibility task contract under
-`tasks-local/`. They are not yet Harbor task images or an admitted/public suite.
+`benchmarks/local/`. They are not yet Harbor task images or an admitted/public suite.
 Canonical new suites use `obench run`; provision the matching Harbor environment
 before presenting these as portable harness comparisons. Existing native
 matrix experiments are a separate local calibration treatment.

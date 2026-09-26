@@ -1146,7 +1146,7 @@ def main(argv=None):
     harbor.add_argument(
         "--out",
         required=True,
-        help="output OpenBench tasks root (e.g. tasks-imported)",
+        help="output OpenBench tasks root (e.g. benchmarks/imported)",
     )
     harbor.add_argument(
         "--collection",

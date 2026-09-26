@@ -33,11 +33,11 @@ attempts that still burned tokens are overwritten, so this UNDER-counts real
 spend. Treat it as a floor, cross-checkable against the provider dashboard.
 
 Usage:
-    python experiments/analyze_cost.py                     # all results/*/
-    python experiments/analyze_cost.py results/terra-luna-daily-drivers
-    python experiments/analyze_cost.py --refresh-prices    # re-pull OR prices
-    python experiments/analyze_cost.py --codex-prices oai.json
-    python experiments/analyze_cost.py --selftest
+    python scripts/analysis/analyze_cost.py                     # all results/*/
+    python scripts/analysis/analyze_cost.py results/terra-luna-daily-drivers
+    python scripts/analysis/analyze_cost.py --refresh-prices    # re-pull OR prices
+    python scripts/analysis/analyze_cost.py --codex-prices oai.json
+    python scripts/analysis/analyze_cost.py --selftest
 """
 
 from __future__ import annotations

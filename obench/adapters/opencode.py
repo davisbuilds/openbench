@@ -222,7 +222,7 @@ def _err_tail(exc, limit=2000):
 def _parse_json_with_usage(stdout):
     """Parse opencode's JSONL event stream into (tokens, turns, tail, usage).
 
-    opencode reports visible output and reasoning separately; TOKEN_PARITY.md
+    opencode reports visible output and reasoning separately; docs/reference/token-accounting.md
     normalizes ``tokens_output`` to vendor completion tokens by adding them.
     A vendor-side hidden title/background call is not present in CLI JSONL, so
     this parser intentionally accounts only for reported ``step_finish`` events.

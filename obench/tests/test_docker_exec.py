@@ -237,9 +237,9 @@ class TestBuildDockerCmd(unittest.TestCase):
                         instruction_path="/tmp/instr.txt",
                     )
                     joined = " ".join(cmd)
-                    expected = f"/ablation/codex-home-{variant}:/bench/ablation/codex-home-{variant}:ro"
+                    expected = f"/experiments/ablations/codex-home-{variant}:/bench/ablation/codex-home-{variant}:ro"
                     self.assertIn(expected, joined)
-                    self.assertNotIn("/ablation:/bench/ablation:ro", joined)
+                    self.assertNotIn("/experiments/ablations:/bench/ablation:ro", joined)
                     self.assertIn("OPENROUTER_API_KEY=openbench-bridge-placeholder", cmd)
                     self.assertNotIn("DEEPSEEK_API_KEY", cmd)
 

@@ -174,7 +174,7 @@ class CandidateTests(unittest.TestCase):
 
     def test_v2_variant_matches_ad_hoc_command_and_environment(self):
         helper = load("_codex_ablation")
-        spec_path = os.path.join(os.path.dirname(BENCH), "ablation", "codex-home-v2", "candidate.toml")
+        spec_path = os.path.join(os.path.dirname(BENCH), "experiments/ablations", "codex-home-v2", "candidate.toml")
         with tempfile.TemporaryDirectory() as td:
             auth = os.path.join(td, "auth.json")
             with open(auth, "w", encoding="utf-8") as fh:

@@ -50,7 +50,7 @@ Output / token accounting:
 - ``--output-format json`` prints a SINGLE result object with ``num_turns``,
   ``is_error``, ``result`` (final assistant text), a top-level ``usage`` and a
   per-model ``modelUsage`` map. See ``_parse_json``.
-- Token accounting emits TOKEN_PARITY.md split fields. Anthropic-style
+- Token accounting emits docs/reference/token-accounting.md split fields. Anthropic-style
   input/cache fields are disjoint and cumulative ``modelUsage`` is preferred:
       tokens_input_uncached = inputTokens
       tokens_cache_read     = cacheReadInputTokens
@@ -378,7 +378,7 @@ def _usage_from_top_level(usage):
 def _parse_json_with_usage(stdout):
     """Parse claude's JSON result into (tokens, turns, tail, ok, token_usage).
 
-    ``modelUsage`` is preferred because TOKEN_PARITY.md verified it is the
+    ``modelUsage`` is preferred because docs/reference/token-accounting.md verified it is the
     cumulative run total. Claude Code does not expose reasoning tokens today, so
     ``tokens_reasoning`` is deliberately ``None``.
     """

@@ -58,7 +58,7 @@ tasks = [
 
 # Fast algorithmic tasks with deterministic checkers.
 [[task_group]]
-tasks_dir = "../../tasks-imported/exercism"
+tasks_dir = "../../benchmarks/imported/exercism"
 tasks = [
   "roman-numerals",
   "luhn",

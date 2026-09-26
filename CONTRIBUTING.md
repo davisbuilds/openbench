@@ -20,7 +20,7 @@ New benchmark tasks are the highest-value contribution. A task is a small,
 and passes on a golden solution. The full contract — directory layout, the
 `SCORE:` partial-credit line, the fail-on-workspace/pass-on-solution discipline,
 the original-code-only rule, and how CI validates it — is in
-**[CONTRIBUTING-TASKS.md](CONTRIBUTING-TASKS.md)**.
+**[docs/guides/contributing-tasks.md](docs/guides/contributing-tasks.md)**.
 
 You do **not** need API keys or to run any harness to contribute a task; a clean
 `obench validate` is the bar. Maintainers pilot difficulty post-merge.

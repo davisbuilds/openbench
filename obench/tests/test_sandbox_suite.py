@@ -19,7 +19,7 @@ class SandboxSuiteTests(unittest.TestCase):
         self.base = self.path.read_text().replace('gpt-5.6-sol', 'gpt-5.6-terra-xhigh')
         self.task_root = self.root / '.openbench/tasks'
         shutil.rmtree(self.task_root)
-        source = Path(__file__).resolve().parents[2] / 'harbor-tasks-local/dojo-evidence-pr60-v3'
+        source = Path(__file__).resolve().parents[2] / 'benchmarks/harbor/local/dojo-evidence-pr60-v3'
         shutil.copytree(source, self.task_root / source.name)
 
     def compile(self, extra=''):
@@ -83,7 +83,7 @@ class SandboxSuiteTests(unittest.TestCase):
     def test_v4_task_compiles_and_task_identity_cannot_select_legacy_oracle(self):
         from obench.sandbox_grading import task_digest
         shutil.rmtree(self.task_root / 'dojo-evidence-pr60-v3')
-        source = Path(__file__).resolve().parents[2] / 'harbor-tasks-local/dojo-evidence-pr60-v4'
+        source = Path(__file__).resolve().parents[2] / 'benchmarks/harbor/local/dojo-evidence-pr60-v4'
         target = self.task_root / source.name
         shutil.copytree(source, target)
         compiled = self.compile()
@@ -103,7 +103,7 @@ class SandboxSuiteTests(unittest.TestCase):
         for version in (3, 4):
             with self.subTest(version=version):
                 shutil.rmtree(self.task_root)
-                source = Path(__file__).resolve().parents[2] / f'harbor-tasks-local/dojo-evidence-pr60-v{version}'
+                source = Path(__file__).resolve().parents[2] / f'benchmarks/harbor/local/dojo-evidence-pr60-v{version}'
                 target = self.task_root / source.name
                 shutil.copytree(source, target)
                 valid = self.compile()

@@ -209,7 +209,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-image", required=True)
     parser.add_argument("--output-dir", required=True, type=Path)
-    parser.add_argument("--task", type=Path, default=REPO / "harbor-tasks-local/dojo-evidence-pr60-v3")
+    parser.add_argument("--task", type=Path, default=REPO / "benchmarks/harbor/local/dojo-evidence-pr60-v3")
     asyncio.run(run(parser.parse_args()))
 
 

@@ -57,7 +57,7 @@ def fingerprint(compiled, harbor_binary):
     files = [p for p in (ROOT/'obench').rglob('*.py') if 'tests' not in p.relative_to(ROOT).parts]
     files += [ROOT/p for p in SCRIPTS] + [ROOT/'docker/repair-sandbox/Dockerfile', ROOT/'obench/tests/test_sandbox_gateway.py']
     files += list((ROOT/'docker/repair-sandbox/node').glob('*.json'))
-    for control_root in ('harbor-tasks-local/dojo-evidence-pr60-v4','tasks-local/am-benchmark-pr106-v2'):
+    for control_root in ('benchmarks/harbor/local/dojo-evidence-pr60-v4','benchmarks/local/am-benchmark-pr106-v2'):
         files += [p for p in (ROOT/control_root).rglob('*') if p.is_file() and '__pycache__' not in p.parts]
     return {'schema':1, 'host':socket.gethostname(),
             'image':{'id':image['Id'],'requested':compiled.suite.sandbox.runtime_image,'os':image['Os'],'architecture':image['Architecture']},
@@ -199,12 +199,12 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     harbor=preflight_harbor_binary(harbor_binary)
     python=str(suite_run._harbor_python_interpreter(harbor))
     image=compiled.suite.sandbox.runtime_image
-    task=ROOT/'harbor-tasks-local/dojo-evidence-pr60-v4'
+    task=ROOT/'benchmarks/harbor/local/dojo-evidence-pr60-v4'
     commands=[
         [python,SCRIPTS[0],'--runtime-image',image,'--task',str(task),'--receipt',str(directory/'boundary.json')],
         [python,SCRIPTS[1],'--runtime-image',image,'--task',str(task),'--output-dir',str(directory/'tool-loop')],
         [python,SCRIPTS[2],'--runtime-image',image,'--task',str(task),'--output',str(directory/'timeouts')],
-        [python,SCRIPTS[3],'--runtime-image',image,'--task',str(task),'--reference',str(ROOT/'tasks-local/dojo-evidence-pr60/solution'),'--output',str(directory/'lifecycle')],
+        [python,SCRIPTS[3],'--runtime-image',image,'--task',str(task),'--reference',str(ROOT/'benchmarks/local/dojo-evidence-pr60/solution'),'--output',str(directory/'lifecycle')],
         [python,SCRIPTS[4],'--runtime-image',image,'--task',str(task),'--output',str(directory/'log-export')],
         [python,SCRIPTS[5],'--output',str(directory/'trajectory')],
         [python,SCRIPTS[6],'--runtime-image',image,'--output',str(directory/'registered-oracle')],

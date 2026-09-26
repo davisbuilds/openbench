@@ -182,7 +182,7 @@
 
 <section id="pipeline">
   <h2>The run pipeline</h2>
-  <p>Everything flows through <code>bench/run.py</code>. For each <strong>cell</strong> — one
+  <p>Everything flows through <code>obench/run.py</code>. For each <strong>cell</strong> — one
   <span class="mono">(task, harness, trial)</span> triple — the runner executes this exact sequence.
   The green box is the only authority on success.</p>
 
@@ -196,9 +196,9 @@
     <div class="step"><div class="n">04</div><h4>Classify + append</h4><p>Failure class computed, one JSON row appended to <code>results.jsonl</code>.</p></div>
   </div>
 
-  <p>Then <code>bench/report.py</code> reads that log and aggregates it into per-harness tables. Two more tools
+  <p>Then <code>obench/report.py</code> reads that log and aggregates it into per-harness tables. Two more tools
   bracket the loop: <code>validate_tasks.py</code> proves every checker is honest <em>before</em> a run, and
-  <code>bench/doctor.py</code> preflights each harness's CLI/auth <em>without spending tokens</em>.</p>
+  <code>obench/doctor.py</code> preflights each harness's CLI/auth <em>without spending tokens</em>.</p>
 
   <div class="note info">
     <span class="k">The key invariant</span>
@@ -272,7 +272,7 @@
 <section id="tasks">
   <h2>Anatomy of a task</h2>
   <p>A core task is a directory under <code>tasks/&lt;name&gt;/</code>. Imported tiers live under
-  <code>tasks-imported/&lt;collection&gt;/</code> and run with <code>--tasks-dir tasks-imported</code>.</p>
+  <code>benchmarks/imported/&lt;collection&gt;/</code> and run with <code>--tasks-dir benchmarks/imported</code>.</p>
   <pre><code>tasks/make-ci-green/
 ├── instruction.md   what the harness is told (reads as a normal engineering request)
 ├── workspace/       starting files; copied fresh into a temp dir every run
@@ -291,8 +291,8 @@
   <table>
     <tr><th>Tier</th><th>Location</th><th>What it is</th></tr>
     <tr><td><strong>Core synthetic</strong></td><td><code>tasks/</code></td><td>8 repo-authored tasks incl. partial-credit hard ones (<code>make-ci-green</code>, <code>add-feature</code>, <code>misleading-error</code>).</td></tr>
-    <tr><td><strong>Exercism</strong></td><td><code>tasks-imported/exercism/</code></td><td>11 MIT-licensed spec tasks with per-task provenance.</td></tr>
-    <tr><td><strong>Terminal-Bench</strong></td><td><code>tasks-imported/terminal-bench/</code></td><td>5 Apache-2.0 TB tasks — the new <em>frontier</em> tier, run through the Docker lane.</td></tr>
+    <tr><td><strong>Exercism</strong></td><td><code>benchmarks/imported/exercism/</code></td><td>11 MIT-licensed spec tasks with per-task provenance.</td></tr>
+    <tr><td><strong>Terminal-Bench</strong></td><td><code>benchmarks/imported/terminal-bench/</code></td><td>5 Apache-2.0 TB tasks — the new <em>frontier</em> tier, run through the Docker lane.</td></tr>
   </table>
 </section>
 
@@ -384,7 +384,7 @@ def run(instruction, workdir, model, timeout_s) -> dict:
 
 <section id="report">
   <h2>Reporting &amp; Wilson intervals</h2>
-  <p><code>bench/report.py</code> reads the JSONL log and prints, per harness: per-task success <span class="mono">(x/n)</span>,
+  <p><code>obench/report.py</code> reads the JSONL log and prints, per harness: per-task success <span class="mono">(x/n)</span>,
   overall success + Wilson 95% CI, <strong>mean score</strong>, mean wall-clock, <strong>tokens-per-solve</strong>, and mean turns.
   <code>--efficiency</code> prints the harness-tax view alone.</p>
   <div class="note info">
@@ -440,7 +440,7 @@ null     0/1               0/1          0/2 (0%)  [0.000, 0.658]  0.00    -</cod
 <section id="arc">
   <h2>The findings arc</h2>
   <p>The milestones tell a single story: correctness saturates, so the interesting signal moves to efficiency and to
-  the open-model frontier. Committed datasets live under <code>data/</code>; analyses in <code>RESULTS.md</code>.</p>
+  the open-model frontier. Committed datasets live under <code>data/</code>; analyses in <code>docs/reports/results.md</code>.</p>
 
   <h3>M3 — correctness saturates; speed separates ~4×</h3>
   <p>3 easy tasks × 5 harnesses × 5 trials. Every harness solved every task: <strong>15/15</strong>, identical Wilson
@@ -504,24 +504,24 @@ null     0/1               0/1          0/2 (0%)  [0.000, 0.658]  0.00    -</cod
   <h2>Repo map — where to look next</h2>
   <table>
     <tr><th>Path</th><th>What it is</th></tr>
-    <tr><td class="mono">bench/run.py</td><td>The runner. Start here — the whole pipeline is one file, ~480 lines.</td></tr>
-    <tr><td class="mono">bench/report.py</td><td>Aggregation, Wilson CIs, efficiency &amp; taxonomy tables.</td></tr>
+    <tr><td class="mono">obench/run.py</td><td>The runner. Start here — the whole pipeline is one file, ~480 lines.</td></tr>
+    <tr><td class="mono">obench/report.py</td><td>Aggregation, Wilson CIs, efficiency &amp; taxonomy tables.</td></tr>
     <tr><td class="mono">bench/failure_class.py</td><td>The 5-class taxonomy shared by runner, report, and backfill.</td></tr>
     <tr><td class="mono">bench/adapters/*.py</td><td>One per harness. Read <code>pi.py</code> first — cleanest. Plus the <code>null</code> control (in run.py).</td></tr>
     <tr><td class="mono">bench/ADAPTER_SPEC.md</td><td>The adapter contract, verbatim.</td></tr>
     <tr><td class="mono">bench/docker_exec.py &middot; entry.py &middot; docker/</td><td>The container-per-cell isolation lane.</td></tr>
-    <tr><td class="mono">bench/doctor.py</td><td>Token-free preflight: CLI installed? auth present? model pin resolves?</td></tr>
+    <tr><td class="mono">obench/doctor.py</td><td>Token-free preflight: CLI installed? auth present? model pin resolves?</td></tr>
     <tr><td class="mono">bench/scrub.py</td><td>PII scrubber for transcripts (local-only).</td></tr>
     <tr><td class="mono">bench/openmodel_bridge.sh &middot; bridge/</td><td>Codex Responses↔Chat bridge for open models.</td></tr>
     <tr><td class="mono">validate_tasks.py</td><td>Proves every checker is correctly polarized (fail-on-empty, pass-on-solution).</td></tr>
-    <tr><td class="mono">tasks/ &middot; tasks-imported/</td><td>The benchmark tasks (3 separately-scored tiers).</td></tr>
-    <tr><td class="mono">tasks-candidates/</td><td>Work-in-progress tasks (incl. the perf-budget prototype) not yet promoted.</td></tr>
+    <tr><td class="mono">tasks/ &middot; benchmarks/imported/</td><td>The benchmark tasks (3 separately-scored tiers).</td></tr>
+    <tr><td class="mono">benchmarks/candidates/</td><td>Work-in-progress tasks (incl. the perf-budget prototype) not yet promoted.</td></tr>
     <tr><td class="mono">data/&lt;milestone&gt;/</td><td>Committed, citable datasets. <code>results/</code> is gitignored scratch.</td></tr>
     <tr><td class="mono">bench/tests/</td><td>Unit tests — good executable spec for scoring, Wilson, taxonomy, adapters.</td></tr>
   </table>
-  <p style="color:var(--ink-2)">Prose entry points: <a class="link" href="WRITEUP.md">WRITEUP.md</a> (the story arc),
-  <a class="link" href="RESULTS.md">RESULTS.md</a> (per-milestone analyses),
-  <a class="link" href="SETUP.md">SETUP.md</a> (the runbook),
+  <p style="color:var(--ink-2)">Prose entry points: <a class="link" href="docs/reports/writeup.md">docs/reports/writeup.md</a> (the story arc),
+  <a class="link" href="docs/reports/results.md">docs/reports/results.md</a> (per-milestone analyses),
+  <a class="link" href="docs/guides/setup.md">docs/guides/setup.md</a> (the runbook),
   <a class="link" href="README.md">README.md</a> (reference).</p>
 </section>
 

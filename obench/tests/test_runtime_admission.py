@@ -20,7 +20,7 @@ class RuntimeAdmissionTests(unittest.TestCase):
         init.init_scaffold(self.root)
         tasks=self.root/'.openbench/tasks'
         shutil.rmtree(tasks)
-        source=Path(__file__).resolve().parents[2]/'harbor-tasks-local/dojo-evidence-pr60-v4'
+        source=Path(__file__).resolve().parents[2]/'benchmarks/harbor/local/dojo-evidence-pr60-v4'
         shutil.copytree(source,tasks/source.name)
         suite=self.root/'.openbench/suites/default.toml'
         suite.write_text(suite.read_text().replace('gpt-5.6-sol','gpt-5.6-terra-xhigh')+'\n[sandbox]\nkind="repair-v1"\nruntime_image="sha256:'+'a'*64+'"\n')

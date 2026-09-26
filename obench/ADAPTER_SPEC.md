@@ -65,8 +65,8 @@ returns completed=True) is used as a negative control.
 | Harness  | Invocation hint (verify against --help before relying on it)        |
 |----------|---------------------------------------------------------------------|
 | codex    | `codex exec -m gpt-5.5 -c model_reasoning_effort="medium" ...`       |
-| codex_v1 | `codex` with runtime `CODEX_HOME` from `ablation/codex-home-v1`       |
-| codex_v2 | `codex` with runtime `CODEX_HOME` from `ablation/codex-home-v2`       |
+| codex_v1 | `codex` with runtime `CODEX_HOME` from `experiments/ablations/codex-home-v1`       |
+| codex_v2 | `codex` with runtime `CODEX_HOME` from `experiments/ablations/codex-home-v2`       |
 | pi       | `pi -p --model openai/gpt-5.5 ...` (thinking-level syntax `:medium`) |
 | opencode | `opencode run -m openai/gpt-5.5 --variant medium ...`                |
 | cursor   | `cursor-agent -p --force --model gpt-5.5-medium ...`                 |

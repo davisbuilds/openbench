@@ -14,7 +14,7 @@ with stock `--harness` names.
 kind = "config-variant"
 name = "codex-v2"
 base_adapter = "codex"
-config_dir = "../../ablation/codex-home-v2"
+config_dir = "../../experiments/ablations/codex-home-v2"
 config_files = [
   # String entries copy unchanged. Table entries may rename and expand
   # {config_dir}/{workspace}/{model} in text files while staging.
@@ -33,7 +33,7 @@ Files are copied to a disposable directory. `{config_dir}`, `{workspace}`, and
 `template = true`. Config entries may also rename a source with `destination`.
 The base adapter retains model mapping, output parsing, version capture, and
 proxy behavior. The checked-in V2 declaration is
-`ablation/codex-home-v2/candidate.toml`; its staged config is byte-equivalent to
+`experiments/ablations/codex-home-v2/candidate.toml`; its staged config is byte-equivalent to
 the former `env_override` composer.
 
 A config variant may also select an adapter-supported experimental toggle. The
