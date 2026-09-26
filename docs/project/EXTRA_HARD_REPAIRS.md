@@ -170,8 +170,10 @@ The existing prototype is provenance evidence; it is not the new grader.
 - Replace SQL-text and transaction-method checkpoints with a sweep over ordinal
   database-read boundaries. A real second process runs at each paused boundary;
   observed SQLite ownership determines safe release. Record actual interleaving,
-  not a timing-based race claim. A bounded contender wait only releases the
-  schedule, and does not determine correctness.
+  not a timing-based race claim. Check ownership before starting the contender;
+  wait for actual completion when the slot is free. The ordinary worker deadline
+  aborts incomplete controls; there is no shorter scheduling grace. External
+  mutex scheduling remains outside this fixed-control development slice.
 - Check all required tables/columns, preserved rows, exactly-once correction,
   legacy export foreign-key repair, current WAL read progress, reopen stability,
   and rollback/retry after an injected update failure.

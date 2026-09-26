@@ -77,10 +77,10 @@ emit(result);
 
 
 class Child:
-    def __init__(self, root, operation, database, target=0):
+    def __init__(self, root, operation, database, target=0, *, command=None):
         self.stderr = tempfile.TemporaryFile()
         self.process = subprocess.Popen(
-            ['node', '--import', '/opt/repair-deps/node_modules/tsx/dist/loader.mjs',
+            command or ['node', '--import', '/opt/repair-deps/node_modules/tsx/dist/loader.mjs',
              'observe.mjs', operation, str(database), str(target)], cwd=root,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr)
         self.buffer = b''
@@ -178,15 +178,21 @@ def single(root, database, operation):
         child.close()
 
 
+def completed_contender(child):
+    # Use the ordinary worker-completion deadline, never a short scheduling
+    # grace. A deadline failure is an incomplete control run, not a scored race.
+    ended = child.until('done')
+    return 'b_completed_before_a_release' if ended and ended.get('event') == 'done' else 'b_exited_before_a_release'
+
+
 def pair(root, database, operation, ordinal):
     children = []
     try:
         a = Child(root, operation, database, ordinal)
         children.append(a)
         gate = a.until('gate') if ordinal else a.until('started')
-        b = Child(root, operation, database)
-        children.append(b)
-        b.until('started')
+        # Check ownership while A is the only worker. Starting B first could
+        # misattribute B's write lock to A and release the intended pause early.
         ownership = sqlite3.connect(database, timeout=0)
         try:
             try:
@@ -199,15 +205,12 @@ def pair(root, database, operation, ordinal):
                 write_slot = 'held'
         finally:
             ownership.close()
+        b = Child(root, operation, database)
+        children.append(b)
+        b.until('started')
         order = 'no_gate' if not gate or gate.get('event') != 'gate' else 'sqlite_owner_released'
         if gate and gate.get('event') == 'gate' and write_slot == 'free':
-            try:
-                ended = b.until('done', timeout=1)
-                order = 'b_completed_before_a_release' if ended and ended.get('event') == 'done' else 'b_exited_before_a_release'
-            except TimeoutError:
-                # Another valid synchronization strategy may own an external
-                # lock. This grace only releases a schedule; it never scores it.
-                order = 'contender_wait_released'
+            order = completed_contender(b)
         a.release()
         return {'ordinal': ordinal, 'gate_observed': bool(gate and gate.get('event') == 'gate'),
                 'write_slot': write_slot, 'order': order, 'workers': [a.finish(), b.finish()]}

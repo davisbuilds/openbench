@@ -38,13 +38,14 @@ read-only statement execution and the database's pragma interface, without
 matching SQL text, requiring a specific transaction method, or prescribing where
 a repair acquires ownership. Iterated rows are observation boundaries too.
 
-After the second process starts, an independent SQLite connection tests the write
+Before the second process starts, an independent SQLite connection tests the write
 slot. When the first process owns it, the controller releases that process to
 avoid creating a test-induced deadlock. When it is free, the second process may
-finish before the first resumes: the receipt records that actual ordering. A
-bounded contender wait releases a schedule for other locking strategies; its
-elapsed time is not a correctness assertion or proof of an interleaving. Every
-schedule still requires both processes to finish correctly and preserve state.
+finish before the first resumes: the controller waits for its completion event
+using the ordinary worker deadline, and the receipt records that actual ordering.
+There is no shorter grace cutoff. Exceeding the worker deadline aborts the
+control run; it never fabricates a completed interleaving or a repair score.
+Every schedule requires both processes to finish correctly and preserve state.
 Known-buggy controls must witness a second completion before the first release.
 
 This is a finite read-boundary sweep, not exhaustive verification of all possible
@@ -52,6 +53,8 @@ process schedules. The 64-read development budget fails explicitly. Alternative
 synchronization strategies must pass before task promotion; no particular
 checkpoint count earns or loses points. SQL executed entirely in additional
 candidate processes is outside this instrumentation's coverage.
+The fixed controls use SQLite ownership or optimistic retry; scheduling repairs
+that hold external mutexes is not supported by this development controller.
 
 ## Behavioral obligations
 

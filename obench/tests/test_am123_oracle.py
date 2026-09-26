@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import sys
 import sqlite3
 import tempfile
 import unittest
@@ -13,6 +14,16 @@ from scripts.local import verify_am123_oracle as controls
 
 
 class Am123OracleTests(unittest.TestCase):
+    def test_slow_contender_completion_is_observed_without_a_grace_cutoff(self):
+        command=[sys.executable,'-u','-c',
+                 'import json,time; time.sleep(1.2); print(json.dumps({"event":"done"}))']
+        child=driver.Child(Path.cwd(),'unused',Path('unused'),command=command)
+        try:
+            self.assertEqual(driver.completed_contender(child),'b_completed_before_a_release')
+            self.assertEqual(child.finish()['exit_code'],0)
+        finally:
+            child.close()
+
     def test_only_manifest_pinned_control_sources_can_enter_the_worker(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)/'case'
