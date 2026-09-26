@@ -45,7 +45,7 @@ exec_mode = "docker"
 tasks = ["adaptive-rejection-sampler","merge-diff-arc-agi-task","overfull-hbox","query-optimize","sanitize-git-repo","winning-avg-corewars"]
 
 [[task_group]]
-tasks_dir = "../../tasks"
+tasks_dir = "../../benchmarks/core"
 exec_mode = "local"
 tasks = ["add-feature","build-a-cli","fix-failing-test","make-ci-green","make-it-run","misleading-error","taskflow","webcore"]
 
