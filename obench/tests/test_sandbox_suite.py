@@ -37,7 +37,7 @@ class SandboxSuiteTests(unittest.TestCase):
         self.assertEqual(compiled.manifest['sandbox']['request_timeout_seconds'], 1200)
         self.assertEqual(config['verifier']['import_path'], 'obench.sandbox_grading:RepairVerifier')
         self.assertEqual(config['agents'][0]['import_path'], 'obench.harbor_agents.sandbox_codex:SandboxCodex')
-        self.assertEqual(config['agents'][0]['kwargs']['version'], '0.154.0')
+        self.assertEqual(config['agents'][0]['kwargs']['version'], '0.157.0')
         self.assertEqual(config['agents'][0]['kwargs']['reasoning_effort'], 'xhigh')
         self.assertEqual(config['agents'][0]['model_name'], 'gpt-5.6-terra')
         self.assertEqual(compiled.manifest['sandbox']['kind'], 'repair-v1')

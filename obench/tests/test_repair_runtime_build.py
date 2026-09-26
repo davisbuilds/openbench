@@ -24,7 +24,7 @@ if args[0] == 'build':
     (pathlib.Path(__file__).parent / 'modes.json').write_text(json.dumps(modes))
     pathlib.Path(args[args.index('--iidfile') + 1]).write_text('sha256:' + 'a' * 64)
 elif args[-2:] == ['codex', '--version']:
-    print('codex-cli 0.154.0')
+    print('codex-cli 0.157.0')
 else:
     assert 'obench.sandbox_gateway' in args and '--help' in args
     print('gateway help')

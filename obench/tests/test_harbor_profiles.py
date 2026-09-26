@@ -130,7 +130,7 @@ class HarborProfileTests(unittest.TestCase):
             with self.subTest(model=model):
                 profile = resolve_harbor_profile('codex', model)
                 self.assertEqual(profile.harbor_model_name, model)
-                self.assertEqual(profile.cli_version, '0.154.0')
+                self.assertEqual(profile.cli_version, '0.157.0')
                 self.assertEqual(dict(profile.flags)['reasoning_effort'], effort)
                 self.assertEqual(profile.agent_kwargs()['config']['service_tier'], 'default')
 

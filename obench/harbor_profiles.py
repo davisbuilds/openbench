@@ -386,7 +386,7 @@ def resolve_harbor_profile(
         model=model,
         semantic_name=harness,
         agent_import_path=_IMPORTS[harness],
-        cli_version=("0.154.0" if harness == "codex" and model in SOL_LUNA_DEFAULTS
+        cli_version=("0.157.0" if harness == "codex" and model in SOL_LUNA_DEFAULTS
                      else _VERSIONS[harness]),
         harbor_model_name=harbor_model,
         flags=flags,

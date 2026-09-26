@@ -29,7 +29,11 @@ Codex and the isolated repair lane accept explicit `low`, `medium`, `high`,
 `xhigh`, and `max` aliases for both GPT-6 models. Bare names follow local Codex
 metadata: Sol defaults to low and Luna to medium; these are adapter defaults,
 not selected campaign settings. Ordinary Harbor stock profiles accept the bare
-names and pin Codex 0.154.0, while historical profiles retain their original pin.
+names and pin Codex 0.157.0, while historical stock profiles retain their original pin.
+The isolated lane also moves to 0.157.0: 0.154.0 lacks Sol/Luna metadata and
+falls back to a different tool interface. Credential-free probes reproduce the
+failure on 0.154.0 and pass both new model tool loops on 0.157.0. Historical
+0.154.0 results remain importable; new runs require fresh runtime qualification.
 
 The user explicitly deferred campaign effort selection. Freeze those settings
 later and run matching authenticated controls before scored trials. Existing
@@ -157,8 +161,8 @@ not a missing event, and a convenient six-attempt subset is not confirmation.
 
 ## Remaining admission before live repeats
 
-The opt-in `repair-v1` suite lane now pins Codex 0.154.0, preserves explicit
-Terra-xhigh/Luna-max identity, enforces a model-only gateway, and grades Dojo v3
+The opt-in `repair-v1` suite lane now pins Codex 0.157.0, preserves explicit
+model/effort identity, enforces a model-only gateway, and grades Dojo v3
 outside candidate authority. Task scheme 3 binds the external oracle and task
 inputs. Existing stock profiles remain unchanged. See the
 [implementation and control commands](REPAIR_SANDBOX.md).

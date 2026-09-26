@@ -186,6 +186,8 @@ async def run(args):
         if FINAL not in text or MARKER not in source:
             raise RuntimeError("actual Codex tool execution or final response was not observed")
         ast.parse(source)
+        if f"Model metadata for `{model}` not found" in text:
+            raise RuntimeError("pinned CLI lacks the selected model metadata")
         if len(requests) != 2 or not any(item.get("type") == "custom_tool_call_output" for item in requests[-1]["input"]):
             raise RuntimeError("expected the actual two-request tool loop")
         if any(request.get("model") != model or request.get("reasoning", {}).get("effort") != effort for request in requests):
