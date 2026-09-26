@@ -364,6 +364,16 @@ class ProxyTests(unittest.TestCase):
         self.assertTrue(run.proxy_supported_for_cell("grokbuild", "deepseek-v4-flash"))
         self.assertFalse(run.proxy_supported_for_cell("devin", "gpt-5.5-medium"))
 
+    def test_sol_luna_proxy_eligibility_and_sampling_preserve_selected_effort(self):
+        for model, default in [('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
+            for suffix, effort in [('', default)] + [('-' + e, e) for e in ('low', 'medium', 'high', 'xhigh', 'max')]:
+                alias = model + suffix
+                with self.subTest(alias=alias):
+                    self.assertTrue(run.proxy_supported_for_cell('codex', alias))
+                    self.assertEqual(run._proxy_sampling_for_cell('codex', alias),
+                                     {'model': model, 'reasoning_effort': effort})
+                    self.assertFalse(run.proxy_supported_for_cell('pi', alias))
+
     def test_codex_open_model_eligibility_derived_from_registry(self):
         # OpenRouter open arms live in the codex adapter's OPEN_MODELS registry.
         # Proxy metering eligibility must track that registry, not a
