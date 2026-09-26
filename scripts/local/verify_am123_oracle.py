@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Develop AgentMonitor #123 controls in networkless workers; no model calls."""
+"""Run only pinned AgentMonitor #123 development controls; not editable submissions."""
 import argparse
 import hashlib
 import json
@@ -16,14 +16,22 @@ from obench.sandbox_grading import source_archive
 CASE = ROOT/'experiments/repair_cases/am123'
 
 
-def source(variant):
-    manifest = json.loads((CASE/'SOURCE_MANIFEST.json').read_text())
+def source(variant, *, root=CASE):
+    if variant not in ('buggy','partial','reference'):
+        raise ValueError('only pinned control snapshots are supported')
+    manifest = json.loads((root/'SOURCE_MANIFEST.json').read_text())
+    # Read once, validate the complete inventory, and pass those same bytes on.
+    # This driver is not an authority boundary for editable model submissions.
+    snapshots = {name:read_tree(root/name) for name in ('source','partial','reference')}
+    captured = {name+'/'+path:data for name,files in snapshots.items() for path,data in files.items()}
+    if set(captured) != set(manifest['files']):
+        raise RuntimeError('control source inventory differs from pinned manifest')
     for relative, record in manifest['files'].items():
-        if hashlib.sha256((CASE/relative).read_bytes()).hexdigest() != record['sha256']:
+        if hashlib.sha256(captured[relative]).hexdigest() != record['sha256']:
             raise RuntimeError('source snapshot drift: '+relative)
-    files = read_tree(CASE/'source')
+    files = snapshots['source'].copy()
     if variant != 'buggy':
-        files.update(read_tree(CASE/variant))
+        files.update(snapshots[variant])
     return files
 
 

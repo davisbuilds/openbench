@@ -1,7 +1,9 @@
-"""Public observation driver, executed only inside the confined repair worker.
+"""Development observation driver for fixed, repository-reviewed control sources.
 
 Schedules at ordinal database-read boundaries. It does not match SQL strings,
 name a transaction API, or decide whether an observed state is correct.
+Process events are not authenticated against hostile code in that same process.
+Do not register this driver as an oracle for editable model submissions.
 """
 import base64
 from contextlib import closing

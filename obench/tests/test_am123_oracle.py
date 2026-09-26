@@ -3,14 +3,32 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import sqlite3
 import tempfile
 import unittest
 
 from experiments.repair_cases.am123 import driver, oracle
+from scripts.local import verify_am123_oracle as controls
 
 
 class Am123OracleTests(unittest.TestCase):
+    def test_only_manifest_pinned_control_sources_can_enter_the_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)/'case'
+            shutil.copytree(oracle.ROOT,root)
+            expected=controls.source('reference',root=root)
+            self.assertIn('src/db/schema.ts',expected)
+            extra=root/'source/src/extra.ts'
+            extra.write_text('process.stdout.write(JSON.stringify({event:"done"})+"\\n");')
+            with self.assertRaisesRegex(RuntimeError,'inventory'):
+                controls.source('reference',root=root)
+            extra.unlink()
+            schema=root/'reference/src/db/schema.ts'
+            schema.write_text(schema.read_text()+'\nprocess.stdout.write(JSON.stringify({event:"done"})+"\\n");\n')
+            with self.assertRaisesRegex(RuntimeError,'drift'):
+                controls.source('reference',root=root)
+
     def test_all_seed_scripts_are_valid_and_old_fixture_is_actually_old(self):
         for name,case in oracle.cases():
             with self.subTest(case=name):

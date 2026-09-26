@@ -1,6 +1,7 @@
-"""Trusted development expectations for the #123 observation driver.
+"""Host-side development expectations for the #123 observation driver.
 
 This module is not sent to candidate containers or registered for model trials.
+Its fixed-control event inputs are not evidence from an adversarial boundary.
 """
 import json
 from pathlib import Path

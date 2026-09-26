@@ -147,7 +147,8 @@ Remaining work:
 - Preserve the short, large-log, timeout, and authenticated longer-run controls;
   renew them when runtime/adapter bytes change. These do not establish
   equivalence with the native treatment.
-- Port corrected AM106 to the same boundary with its own external oracle.
+- Corrected AM106 now has a registered external oracle and passing lifecycle
+  controls from PR #16; preserve that task identity for fresh calibration.
 - Freeze an exact pushed commit and admitted runtime on the selected execution
   host, then launch calibration in tmux with logs and an exit receipt.
 
@@ -179,6 +180,11 @@ The existing prototype is provenance evidence; it is not the new grader.
 - Candidate code executes only through the existing confined worker. Host-side
   expectations never enter that worker. No registry selection, production
   admission policy, scored campaign or difficulty label changes in this slice.
+- The development runner accepts only manifest-pinned snapshots and reviewed
+  synthetic controls. Its same-process scheduling/connection/read events can be
+  forged by editable code. Before accepting model submissions, replace that
+  evidence path with externally owned observations and prove forged events
+  cannot earn credit. Moving events to another file descriptor is insufficient.
 
 Completion requires offline regression tests, real pinned-image controls on the
 Mini and hosted Linux, cloud review, green CI, and merge/sync. The source and

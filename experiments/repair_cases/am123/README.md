@@ -16,8 +16,19 @@ container with no host mounts, a read-only root and bounded scratch space.
 Only captured source, the public observation driver and fixture operations enter
 it. `oracle.py`, expected scores and reference controls stay on the host. No
 credentials, model calls, package downloads or daily database access occur.
-Host-side code checks resulting observations; the candidate's own success
-message is not a grading signal.
+Host-side code checks resulting observations. The runner accepts only the exact
+manifest inventory and bytes plus the repository-defined control mutations;
+there is no submitted-source or arbitrary-patch input. Unexpected files and
+edits to the snapshots are rejected before worker creation.
+
+This is a fixed-control experiment, not an adversarial grading boundary. The
+observed Node process supplies scheduling events, connection state and read
+results over stdout. Editable code in that same process could forge those
+events; a private file descriptor alone would not isolate it. Database snapshots
+are separate observations, but do not independently prove all those fields.
+Do not feed model submissions to this driver or register it as a trusted oracle.
+Promotion requires externally owned observations and controls demonstrating
+that forged events cannot earn credit or fabricate a schedule.
 
 ## Concurrency scheduling
 
@@ -57,8 +68,9 @@ candidate processes is outside this instrumentation's coverage.
 
 Controls include the historical baseline/partial/reference, optimistic structural
 retry, alternate SQL/transaction APIs, overbroad initialization on reads,
-non-atomic migration, column-only conflict recovery, and a no-op initializer. Additional columns are allowed;
-removing required schema or preserved content fails.
+non-atomic migration, column-only conflict recovery, and a no-op initializer.
+Additional columns are allowed; removing required schema or preserved content
+fails.
 
 ## Run
 
@@ -77,8 +89,9 @@ Per-case receipts retain schedules, worker outcomes, schema observations and
 source/driver/oracle/image identities. Preserve failed attempts. Rerun controls
 when those inputs change; never pool development receipts with model trials.
 
-Before packaging, add the public task contract, seal its source/oracle identity,
-and prove the registered verifier through Harbor and canonical suite import.
+Before packaging, replace the same-process event trust described above, add the
+public task contract, seal its source/oracle identity, and prove the registered
+verifier through Harbor and canonical suite import.
 Only then run fresh model screening under the extra-hard repair spec.
 
 ## Development finding
