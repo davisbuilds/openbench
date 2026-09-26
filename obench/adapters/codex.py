@@ -61,12 +61,12 @@ import stat
 import subprocess
 import tempfile
 
-from obench.codex_models import SOL_LUNA_PAIRS
-
 try:
+    from obench.codex_models import SOL_LUNA_PAIRS
     from obench.auth_persist import auth_file_lease, auth_lease_proves_path
     from obench.open_models_config import merge_open_models
 except ImportError:  # file-path / Docker mount layout
+    from codex_models import SOL_LUNA_PAIRS
     from auth_persist import auth_file_lease, auth_lease_proves_path
     from open_models_config import merge_open_models
 
