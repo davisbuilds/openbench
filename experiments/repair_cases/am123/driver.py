@@ -152,7 +152,8 @@ def snapshot(database):
             'preserved': '*', 'trace_quality_export_state': '*',
         }.items():
             if table in tables:
-                rows[table] = [dict(row) for row in db.execute('SELECT '+columns+' FROM '+quote(table)+' ORDER BY 1')]
+                selected = '*' if columns == '*' else ','.join(quote(c) for c in columns.split(',') if c in schema[table])
+                rows[table] = [dict(row) for row in db.execute('SELECT '+selected+' FROM '+quote(table)+' ORDER BY 1')]
         return {'schema': schema, 'rows': rows,
                 'version': db.execute('PRAGMA user_version').fetchone()[0],
                 'integrity': [row[0] for row in db.execute('PRAGMA integrity_check')],
@@ -222,8 +223,11 @@ def run_case(root, case):
             database = directory/'capture.db'
             result = single(root, database, 'init')
             with sqlite3.connect(database) as db:
-                ddl = ';\n'.join(row[0] for row in db.execute(
-                    "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type DESC,name"))+';\nPRAGMA user_version=7;\n'
+                shadows = {row[1] for row in db.execute('PRAGMA table_list') if row[2] == 'shadow'}
+                ddl = ';\n'.join(row[1] for row in db.execute(
+                    "SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' "
+                    "ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,name")
+                    if row[0] not in shadows)+';\nPRAGMA user_version=7;\n'
             return {'worker': result, 'ddl': ddl, 'state': snapshot(database)}
         if case['kind'] == 'sweep':
             database = directory/'trace.db'
