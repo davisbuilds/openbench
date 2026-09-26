@@ -31,7 +31,7 @@ private-runtime rules.
 | `.openbench/trajectories/` | no | Private ATIF trajectories |
 
 If a previous OpenBench scaffold already owns `.openbench/tasks/`, init
-preserves it and places the native example under `.openbench/harbor-tasks/`.
+preserves it and places the native example under `.openbench/benchmarks/harbor/core/`.
 The generated suite records the isolated path. A colliding
 `tasks/example-greeting/` directory is likewise preserved as a unit rather than
 being merged with generated files.

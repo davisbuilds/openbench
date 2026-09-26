@@ -62,7 +62,7 @@ the PR, not as a "resolved" note here).
   corrupt the latency numbers the benchmark exists to produce. Until that gate
   passes, use `--workers` only for throughput on distinct-provider arms, not for
   latency-sensitive comparisons.
-- **Timing gate result** (*measured 2026-08-26*, `experiments/analyze_gate.py`,
+- **Timing gate result** (*measured 2026-08-26*, `scripts/analysis/analyze_gate.py`,
   glm-5.3-flash solo vs under 3-way concurrency): **CONDITIONAL PASS**.
   Local/CPU contention is negligible -- `t_env_setup_s` and `t_checker_s` (the
   local-CPU parts) are unchanged. BUT on the short, turn-heavy `make-it-run`
@@ -298,7 +298,7 @@ the PR, not as a "resolved" note here).
 
 #### Cost telemetry — *implemented 2026-08-27, pending live validation*
 - **What**: rows record a full vendor token split (`token_basis: vendor_split`).
-  `experiments/analyze_cost.py` derives theoretical cost post-hoc = tokens × a
+  `scripts/analysis/analyze_cost.py` derives theoretical cost post-hoc = tokens × a
   per-token price sheet pulled from OpenRouter `/api/v1/models` (it lists both our
   OpenRouter arms *and* the `openai/gpt-5.6-terra|luna` codex base models, so even
   subscription-run codex arms get a real API-list-price figure).

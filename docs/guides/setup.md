@@ -3,11 +3,10 @@
 This is the shortest path for a first-time visitor to run one benchmark cell and then scale up to the imported Terminal-Bench tier or open-model runs.
 
 For evaluating harnesses on a **private company codebase**, see
-[`docs/private-evals.md`](docs/private-evals.md) (`obench init`).
+[`docs/private-evals.md`](../private-evals.md) (`obench init`).
 
-Legacy note: `python3 bench/run.py` (and other `bench/*.py` shims) still forward
-to the `obench` package with a deprecation warning. Prefer the `obench` CLI
-below.
+Use the `obench` CLI below. The older file-entry wrappers have been retired;
+`python3 -m obench.<module>` remains available for module invocation.
 
 ## Requirements
 
@@ -59,7 +58,7 @@ Before benchmarking, prove every checker is polarized: the untouched workspace m
 obench validate
 ```
 
-This validates both `tasks/` and maintainer-curated imported tiers under `tasks-imported/`.
+This validates both `tasks/` and maintainer-curated imported tiers under `benchmarks/imported/`.
 
 ## Run one cell end-to-end
 
@@ -88,7 +87,7 @@ obench run \
 
 The default result log is `results/results.jsonl`; `results/` and raw `transcripts/` are local-only and gitignored.
 
-## Imported tasks (`--tasks-dir tasks-imported`)
+## Imported tasks (`--tasks-dir benchmarks/imported`)
 
 Imported tiers are addressed as `collection/task` and are scored separately from the core tier.
 
@@ -96,7 +95,7 @@ Exercism example:
 
 ```bash
 obench run \
-  --tasks-dir tasks-imported \
+  --tasks-dir benchmarks/imported \
   --harness null \
   --task exercism/luhn \
   --results-path /tmp/openbench-exercism-smoke.jsonl
@@ -108,7 +107,7 @@ Terminal-Bench frontier tier example (use Docker isolation):
 docker build -t openbench-harness:latest obench/docker
 
 obench run \
-  --tasks-dir tasks-imported \
+  --tasks-dir benchmarks/imported \
   --exec docker \
   --harness pi \
   --task terminal-bench/count-call-stack \

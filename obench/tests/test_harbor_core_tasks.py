@@ -25,8 +25,8 @@ CORE_TASKS = {
     "webcore",
 }
 SOURCE_COMMIT = "802014700f6b3c62eddc1a406e3062a438ce572f"
-LEGACY_ROOT = Path(SOURCE_ROOT) / "tasks"
-HARBOR_ROOT = Path(SOURCE_ROOT) / "harbor-tasks" / "openbench-lite"
+LEGACY_ROOT = Path(SOURCE_ROOT) / "benchmarks" / "core"
+HARBOR_ROOT = Path(SOURCE_ROOT) / "benchmarks/harbor/core" / "openbench-lite"
 
 
 def _tree(root: Path, *, exclude: set[str] | None = None) -> dict[str, tuple[bytes, int]]:

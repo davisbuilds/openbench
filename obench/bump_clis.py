@@ -409,12 +409,12 @@ def refresh_baselines(image):
         "terminal-bench/feal-differential-cryptanalysis,"
         "terminal-bench/llm-inference-batching-scheduler,"
         "terminal-bench/schemelike-metacircular-eval "
-        "--tasks-dir tasks-imported "
+        "--tasks-dir benchmarks/imported "
         "--trials 3 "
         "--out results/tb-frontier.jsonl "
         "--skip-gate"
     )
-    print(f"# Uses bench/run.py's default Docker image tag; build it first as: docker build -t {image} bench/docker")
+    print(f"# Uses obench/run.py's default Docker image tag; build it first as: docker build -t {image} bench/docker")
 
 
 def apply(args):

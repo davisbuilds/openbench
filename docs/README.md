@@ -1,4 +1,13 @@
-# OpenBench GitHub Pages
+# Documentation
+
+- [Repository layout](project/REPOSITORY_LAYOUT.md): where files belong and path compatibility.
+- [Setup](guides/setup.md) and [task authoring](guides/contributing-tasks.md).
+- [Campaign launch and recovery](benchmark-operations.md).
+- [Fork workflow](project/FORK_WORKFLOW.md), [backlog](project/BACKLOG.md), and [extra-hard repair work](project/EXTRA_HARD_REPAIRS.md).
+- [Token accounting contract](reference/token-accounting.md).
+- Historical [results](reports/results.md), [writeup](reports/writeup.md), and [architecture diagram](system/openbench-architecture.html).
+
+## Published GitHub Pages
 
 This directory is a self-contained static release site. To publish it:
 

@@ -11,11 +11,11 @@ explicit inputs:
 ```bash
 obench export harbor \
   --task make-it-run \
-  --out /absolute/path/to/harbor-tasks \
+  --out /absolute/path/to/benchmarks/harbor/core \
   --network-mode public
 
 obench harbor oauth-run \
-  --task /absolute/path/to/harbor-tasks/make-it-run \
+  --task /absolute/path/to/benchmarks/harbor/core/make-it-run \
   --model openai/gpt-5 \
   --master-auth-json /absolute/path/to/auth.json \
   --jobs-dir /absolute/path/to/harbor-jobs \

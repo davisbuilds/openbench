@@ -82,10 +82,10 @@ non-reads in other transcripts into an isolation claim.
 
 Implemented admission artifacts:
 
-- `tasks-local/am-benchmark-pr106-v2`: public startup migration fixtures and
+- `benchmarks/local/am-benchmark-pr106-v2`: public startup migration fixtures and
   behavior-based identity/coverage assertions; baseline/reference 0/1, partial
   repairs, and four passing alternative implementations. Original v1 is unchanged.
-- `harbor-tasks-local/dojo-evidence-pr60-v2`: source-only container image and
+- `benchmarks/harbor/local/dojo-evidence-pr60-v2`: source-only container image and
   post-agent verifier; baseline/reference 0/1, six partial repairs and a valid
   alternative diagnostic representation. Effective Docker canary controls pass;
   an offline Harbor reference trial also returns 1. Live/authenticated execution

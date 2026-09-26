@@ -60,11 +60,11 @@ exec_mode = "docker"
 tasks = ["adaptive-rejection-sampler", "merge-diff-arc-agi-task", "overfull-hbox", "query-optimize", "sanitize-git-repo", "winning-avg-corewars"]
 
 [[task_group]]
-tasks_dir = "../../tasks-imported/terminal-bench-2"
+tasks_dir = "../../benchmarks/imported/terminal-bench-2"
 exec_mode = "docker"
 tasks = ["cobol-modernization", "constraints-scheduling", "dna-assembly", "extract-elf", "log-summary-date-ranges", "path-tracing", "polyglot-c-py", "prove-plus-comm", "regex-log", "sparql-university", "sqlite-db-truncate", "vulnerable-secret"]
 
 [[task_group]]
-tasks_dir = "../../tasks-imported/terminal-bench"
+tasks_dir = "../../benchmarks/imported/terminal-bench"
 exec_mode = "docker"
 tasks = ["count-call-stack", "db-wal-recovery", "feal-differential-cryptanalysis", "gcode-to-text", "llm-inference-batching-scheduler", "raman-fitting", "schemelike-metacircular-eval"]

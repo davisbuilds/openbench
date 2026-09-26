@@ -44,12 +44,12 @@ memory_gib = 12
 
 ### Helper Script
 
-Use `tools/colima-benchmark.sh` for a one-command setup:
+Use `scripts/local/colima-benchmark.sh` for a one-command setup:
 
 ```bash
-bash tools/colima-benchmark.sh          # full setup (idempotent)
-bash tools/colima-benchmark.sh --restart # full stop + recreate
-bash tools/colima-benchmark.sh --status  # check current VM resources
+bash scripts/local/colima-benchmark.sh          # full setup (idempotent)
+bash scripts/local/colima-benchmark.sh --restart # full stop + recreate
+bash scripts/local/colima-benchmark.sh --status  # check current VM resources
 ```
 
 This script:

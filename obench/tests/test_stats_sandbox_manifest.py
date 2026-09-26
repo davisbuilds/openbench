@@ -22,7 +22,7 @@ class SandboxManifestTests(unittest.TestCase):
         cls.ordinary = suite_run.compile_suite(path).manifest
         task_root = root / ".openbench/tasks"
         shutil.rmtree(task_root)
-        source = Path(__file__).resolve().parents[2] / "harbor-tasks-local/dojo-evidence-pr60-v3"
+        source = Path(__file__).resolve().parents[2] / "benchmarks/harbor/local/dojo-evidence-pr60-v3"
         shutil.copytree(source, task_root / source.name)
         path.write_text(
             path.read_text().replace("gpt-5.6-sol", "gpt-5.6-terra-xhigh")

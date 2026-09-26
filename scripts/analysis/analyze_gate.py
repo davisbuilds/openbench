@@ -10,7 +10,7 @@ import json
 import os
 import statistics as st
 
-ROOT = os.path.join(os.path.dirname(__file__), "..", "results", "gate")
+ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "results", "gate")
 
 
 def load(path, model="glm-5.3-flash"):

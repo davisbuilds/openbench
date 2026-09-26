@@ -7,10 +7,10 @@ golden solution**, and CI must be able to prove that offline.
 
 ## The directory contract
 
-Create `tasks/<your-task-name>/` with exactly this layout:
+Create `benchmarks/core/<your-task-name>/` with exactly this layout:
 
 ```
-tasks/<name>/
+benchmarks/core/<name>/
   instruction.md      what the harness is told — reads as a normal engineering
                       request. NEVER mention the checker, the solution, scoring,
                       or that this is a benchmark.
@@ -18,7 +18,7 @@ tasks/<name>/
                       dir for every run; the agent edits that copy. Must be in a
                       state where the checker FAILS.
   solution/           golden files overlaid on a fresh workspace to prove the
-                      task is solvable. Used ONLY by validate_tasks.py — never
+                      task is solvable. Used ONLY by obench validate — never
                       shown to the harness.
   checker.sh          grades the result. Exit 0 = solved. See below.
   checker_data/       OPTIONAL — inputs / expected outputs the checker owns,
@@ -34,10 +34,10 @@ answer changes or adds, not the whole tree.
 `checker.sh` runs with:
 
 - **cwd = the temp workspace copy** (never your source tree), and
-- **`$TASK_DIR`** = the absolute path to your `tasks/<name>/` directory.
+- **`$TASK_DIR`** = the absolute path to your `benchmarks/core/<name>/` directory.
 
 Reference your own data as `$TASK_DIR/checker_data/...`, never by a relative
-path — the checker runs from the temp workspace, not from `tasks/<name>/`.
+path — the checker runs from the temp workspace, not from `benchmarks/core/<name>/`.
 
 Keep it to tools that exist on a bare Ubuntu CI runner: **`bash` and
 `python3`** (standard library) are safe. Do **not** depend on `pytest`, `node`,
@@ -84,7 +84,7 @@ behaves exactly as pass→1.0 / fail→0.0.
 
 ## The discipline: fail-on-workspace, pass-on-solution
 
-Every task must satisfy two properties, both enforced by `validate_tasks.py`:
+Every task must satisfy two properties, both enforced by `obench validate`:
 
 1. The checker run against a **fresh `workspace/`** (nothing solved) **must fail**
    (nonzero exit). Otherwise the task scores as solved before the agent does
@@ -99,7 +99,7 @@ golden solution**, not hand-written: it guarantees the two ends actually agree.
 Run it locally before opening a PR:
 
 ```
-python3 validate_tasks.py
+obench validate
 ```
 
 You want your task's row to read `FAIL(ok) … PASS(ok) … PASS` (workspace fails
@@ -120,29 +120,29 @@ output you haven't rewritten.** Two reasons:
 Write the workspace, the bug/spec, and the solution yourself. Small, realistic,
 self-contained problems beat large or exotic ones.
 
-## The import tier (`tasks-imported/`)
+## The import tier (`benchmarks/imported/`)
 
-Alongside the original `tasks/`, the repo carries a maintainer-curated **import
-tier** under `tasks-imported/<collection>/` — for example tasks converted from
+Alongside the original `benchmarks/core/`, the repo carries a maintainer-curated **import
+tier** under `benchmarks/imported/<collection>/` — for example tasks converted from
 the MIT-licensed [Exercism problem-specifications](https://github.com/exercism/problem-specifications)
-by `tools/convert_exercism.py`, which reuses only the upstream canonical test
+by `scripts/imports/convert_exercism.py`, which reuses only the upstream canonical test
 cases (each task records its origin and license in `provenance.json`) while the
 instruction prose and reference solution are written fresh. These tasks are a
-**separate tier**: `validate_tasks.py` proves them like any other task but
+**separate tier**: `obench validate` proves them like any other task but
 reports them under their own tier, and the benchmark **never blends them into a
 core run** (they carry a higher contamination risk since the exercises exist on
 the public web, so they are scored on their own). Curating imports is a
 maintainer activity; **outside contributions remain original-only** — please add
-your task under `tasks/` following the rules above, not `tasks-imported/`.
+your task under `benchmarks/core/` following the rules above, not `benchmarks/imported/`.
 
 ## How CI checks your task
 
 On every pull request, GitHub Actions (`.github/workflows/ci.yml`) runs, with no
 network and no credentials:
 
-1. `python3 -m unittest discover bench/tests` — the runner/report/adapter unit
+1. `python3 -m unittest discover -s obench/tests` — the runner/report/adapter unit
    tests.
-2. `python3 validate_tasks.py` — the fail-on-workspace / pass-on-solution proof
+2. `obench validate` — the fail-on-workspace / pass-on-solution proof
    for **every** task, including yours.
 
 If either fails, the PR is red. No live harness or model is ever invoked in CI.
@@ -154,16 +154,16 @@ hard it is. Calibrating difficulty (does it separate strong from weak harnesses,
 or does everyone floor/saturate?) requires paid live runs, so **maintainers pilot
 new tasks post-merge** on a small harness panel and fold the result into the next
 matrix. You don't need API keys or to run any harness to contribute a task; a
-clean `validate_tasks.py` is the bar.
+clean `obench validate` is the bar.
 
 ## Checklist
 
-- [ ] `tasks/<name>/` has `instruction.md`, `workspace/`, `solution/`, `checker.sh`.
+- [ ] `benchmarks/core/<name>/` has `instruction.md`, `workspace/`, `solution/`, `checker.sh`.
 - [ ] `instruction.md` reads as a normal request; no mention of checker/solution/benchmark.
 - [ ] Checker uses only `bash` + `python3` stdlib; references data via `$TASK_DIR`.
 - [ ] All code is original (no copied/licensed material).
-- [ ] `python3 validate_tasks.py` shows your task `FAIL(ok) … PASS(ok) … PASS`.
-- [ ] `python3 -m unittest discover bench/tests` passes.
+- [ ] `obench validate` shows your task `FAIL(ok) … PASS(ok) … PASS`.
+- [ ] `python3 -m unittest discover -s obench/tests` passes.
 
-See [`README.md`](README.md#task-format) for the runtime contract and
-[`validate_tasks.py`](validate_tasks.py) for the exact validation logic.
+See [`README.md`](../../README.md#task-format) for the runtime contract and
+[`obench validate`](../../obench/obench validate) for the exact validation logic.

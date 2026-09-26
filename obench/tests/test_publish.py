@@ -188,7 +188,7 @@ def _suite_harbor_row(row, *, scope):
         "task_sets": [{
             "id": "core",
             "kind": "local",
-            "path": "harbor-tasks",
+            "path": "benchmarks/harbor/core",
             "content_sha256": "e" * 64,
             "tasks": [{"directory": "alpha", "logical_name": "alpha"}],
         }],
@@ -449,7 +449,7 @@ class PublishBundleTests(unittest.TestCase):
             )
 
         public_results = os.path.join(self.tmp.name, "suite-public.jsonl")
-        harbor_task = os.path.join(self.tmp.name, "harbor-tasks", "alpha")
+        harbor_task = os.path.join(self.tmp.name, "benchmarks/harbor/core", "alpha")
         os.makedirs(harbor_task)
         with open(
             os.path.join(harbor_task, "task.toml"),
@@ -809,7 +809,7 @@ class PublishBundleTests(unittest.TestCase):
         other_tasks = os.path.join(self.tmp.name, "other-tasks")
         os.makedirs(other_tasks)
         _make_task(other_tasks, "alpha")
-        harbor_task = os.path.join(self.tmp.name, "harbor-tasks", "alpha")
+        harbor_task = os.path.join(self.tmp.name, "benchmarks/harbor/core", "alpha")
         os.makedirs(harbor_task)
         with open(
             os.path.join(harbor_task, "task.toml"),

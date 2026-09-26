@@ -1,6 +1,6 @@
 # OpenBench
 
-[![CI](https://github.com/minghinmatthewlam/openbench/actions/workflows/ci.yml/badge.svg)](https://github.com/minghinmatthewlam/openbench/actions/workflows/ci.yml)
+[![CI](https://github.com/davisbuilds/openbench/actions/workflows/ci.yml/badge.svg)](https://github.com/davisbuilds/openbench/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A benchmark for comparing coding-agent **harnesses** — the CLI tools that wrap a
@@ -8,8 +8,8 @@ model in a run loop, tool set, and permission policy (`codex`, `pi`, `opencode`,
 `cursor`, `devin`, and open-model `claude`). The question it answers is: *given
 the same underlying model and task, how much does the harness around it matter?*
 
-**New here?** [`WRITEUP.md`](WRITEUP.md) tells the story arc; [`RESULTS.md`](RESULTS.md)
-has the milestone analyses; [`SETUP.md`](SETUP.md) is the practical runbook for a
+**New here?** [`docs/reports/writeup.md`](docs/reports/writeup.md) tells the story arc; [`docs/reports/results.md`](docs/reports/results.md)
+has the milestone analyses; [`docs/guides/setup.md`](docs/guides/setup.md) is the practical runbook for a
 first local cell, Docker, imported tasks, and open-model keys. Evaluating
 harnesses on a **private codebase**? Start with
 [`docs/private-evals.md`](docs/private-evals.md) (`obench init` creates a
@@ -63,15 +63,15 @@ contract without claiming a working runner.
 
 Current Harness Bench tiers:
 
-- **Canonical Harbor tasks (`harbor-tasks/openbench-lite/`).** Native Harbor
+- **Canonical Harbor tasks (`benchmarks/harbor/core/openbench-lite/`).** Native Harbor
   tasks used by the default local-only suite.
-- **Historical core tasks (`tasks/`).** Compatibility tasks for
+- **Historical core tasks (`benchmarks/core/`).** Compatibility tasks for
   `obench legacy run`, including
   including partial-credit harder tasks such as `make-ci-green`, `add-feature`,
   and `misleading-error`.
-- **Exercism imported tier (`tasks-imported/exercism/`).** MIT-licensed problem-
+- **Exercism imported tier (`benchmarks/imported/exercism/`).** MIT-licensed problem-
   specification tasks with per-task provenance.
-- **Terminal-Bench imported frontier tier (`tasks-imported/terminal-bench/`).**
+- **Terminal-Bench imported frontier tier (`benchmarks/imported/terminal-bench/`).**
   Five Apache-2.0 Terminal-Bench tasks adapted for OpenBench's Docker lane and
   scored separately from the core tier.
 
@@ -83,7 +83,7 @@ Two result framings are used:
 - **Open-model panels.** Open models (`glm-5.2`, `deepseek-v4-flash`,
   `kimi-k2.7-code`, `glm-4.7-flash`) run through adapters that can reach the
   providers. `pi`, `opencode`, and `claude` call providers directly; `codex` uses
-  the local Responses↔Chat bridge in `bench/openmodel_bridge.sh`.
+  the local Responses↔Chat bridge in `obench/openmodel_bridge.sh`.
 
 **Honest caveats:** `devin` is flaky in the latest published analysis and is
 excluded from M4.5 rankings; `cursor`/`devin` have closed model menus for open
@@ -113,13 +113,13 @@ No GPU is required. Core and Exercism tasks run on a normal laptop; Terminal-Ben
 cells can take minutes and should use Docker isolation. Real harness runs require
 that harness's CLI and auth. Frontier Track A uses subscription/OAuth logins;
 open-model panels use first-party provider API keys kept outside the repo. See
-[`SETUP.md`](SETUP.md) for install/auth caveats and one-cell commands.
+[`docs/guides/setup.md`](docs/guides/setup.md) for install/auth caveats and one-cell commands.
 
 ## Reproduce a cheap open-model panel (~$1)
 
 The committed **M4 open-model matrix** — two harnesses (`pi`, `opencode`) × four
 open models × three harder tasks × three trials — reproduces for about **$1 of
-API credit**. The dataset is in [`data/m4-2026-07-03/`](data/m4-2026-07-03/).
+API credit**. The dataset is in [`data/m4-2026-07-03/`](data/m4-2026-07-03).
 
 Create `~/.openbench/keys.env` (or export the same names) with names only in the
 repo docs; values stay local:
@@ -153,29 +153,23 @@ obench report --efficiency --results-path results/results.jsonl
 ```
 
 For a single first run, Docker, imported tasks, `claude`, or `codex` open-model
-runs through the bridge, use [`SETUP.md`](SETUP.md).
+runs through the bridge, use [`docs/guides/setup.md`](docs/guides/setup.md).
 
 ## Layout
 
+```text
+obench/        Python package, CLI, adapters, graders, and unit tests
+benchmarks/    core, imported, local, candidate, and Harbor task collections
+scripts/       maintained local controls, CI checks, importers, and analysis
+experiments/   study specs, harness configurations, repair prototypes, and history
+docker/        isolated repair runtime build inputs
+docs/          guides, reference material, project direction, and published site
+data/          checked-in datasets, price sheets, packs, and historical evidence
+results/       private local runs and working evidence (gitignored)
 ```
-tasks/                 core benchmark tasks (see "Task format")
-tasks-imported/        separately scored Exercism and Terminal-Bench tiers
-obench/                installable package (CLI: obench)
-obench/suite_run.py    Harbor-first suite execution and atomic result sealing
-obench/run.py          legacy compatibility runner
-obench/report.py       aggregates results into a table with Wilson CIs
-obench/adapters/*.py   one adapter per harness (+ built-in "null" control)
-obench/ADAPTER_SPEC.md the adapter contract
-obench/openmodel_bridge.sh  foreground Codex Responses↔Chat bridge for open models
-obench/scrub.py        PII scrubber for transcripts (local-only; see below)
-obench/entry.py        in-container entrypoint for --exec docker
-obench/docker_exec.py  container-per-cell execution backend
-obench/docker/         isolation image for --exec docker
-bench/*.py             thin deprecation shims → obench
-validate_tasks.py      forwarding shim → obench validate
-results/results.jsonl  append-only local results log (gitignored)
-transcripts/           per-cell agent transcripts (gitignored, local-only)
-```
+
+See [repository layout and compatibility](docs/project/REPOSITORY_LAYOUT.md)
+for task collection ownership and where new files belong.
 
 ## Install
 
@@ -197,7 +191,7 @@ Then use the umbrella CLI: `obench init`, `obench run [suite.toml]`,
 `obench publish`, `obench verify`, `obench pack`, `obench export`,
 `obench import`, `obench import harbor-results`, `obench harbor job-run`, and
 `obench gateway validate|doctor|run|report|publish|verify`. Legacy
-`python3 bench/run.py` (and friends) still forward with a deprecation note.
+`python3 -m obench.run` remains the legacy runner; use `obench run` for Harbor suites. The old `bench/*.py` and root validator wrappers have been retired.
 Versioned packs (`org/name@version`) are documented in
 [`docs/task-packs.md`](docs/task-packs.md).
 
@@ -205,22 +199,20 @@ Versioned packs (`org/name@version`) are documented in
 
 Everything in the core harness runner is Python 3 standard library only — no
 third-party Python dependencies. Real harnesses, Docker, and the Codex
-open-model bridge have external CLI/tool requirements; see [`SETUP.md`](SETUP.md).
+open-model bridge have external CLI/tool requirements; see [`docs/guides/setup.md`](docs/guides/setup.md).
 
 **1. Validate the tasks.** Confirms each checker fails on the untouched
 workspace and passes on the golden solution (see "Task format"). This covers both
-`tasks/` and imported tiers under `tasks-imported/`:
+`benchmarks/core/` and imported tiers under `benchmarks/imported/`:
 
 ```
 obench validate
-# legacy: python3 validate_tasks.py
 ```
 
 **2. Preflight.**
 
 ```
 obench doctor
-# legacy: python3 bench/doctor.py
 ```
 
 For each harness it checks — spending no tokens — that the CLI is installed, its
@@ -228,7 +220,7 @@ auth/login or required key name is present, and the canonical model pin resolves
 to the harness's own model string. A failing preflight exits nonzero.
 
 **3. Run.** The repository default is a secret-free, `local_only` suite over
-`harbor-tasks/openbench-lite` using the stock Codex and Pi profiles:
+`benchmarks/harbor/core/openbench-lite` using the stock Codex and Pi profiles:
 
 ```
 obench run --plan   # offline; validates and prints canonical suite intent
@@ -242,14 +234,13 @@ divergent existing outputs fail. The command prints the result JSONL, semantic
 manifest, sealed run manifest, and local run-record paths. Verify a local seal
 with `obench run --verify-run-manifest <path>`.
 
-Historical `tasks/` and the old native cell runner remain available only via
+Historical `benchmarks/core/` and the old native cell runner remain available only via
 `obench legacy run --help`.
 
 **4. Report.**
 
 ```
 obench report
-# legacy: python3 bench/report.py
 ```
 
 Example output (from the `null` control on two tasks):
@@ -262,22 +253,22 @@ null     0/1               0/1          0/2 (0%)  [0.000, 0.658]  0.00    -
 
 ## Task format
 
-A core task is a directory under `tasks/<name>/`; an imported task is addressed
-as `tasks-imported/<collection>/<name>/` and run with `--tasks-dir tasks-imported`:
+A core task is a directory under `benchmarks/core/<name>/`; an imported task is addressed
+as `benchmarks/imported/<collection>/<name>/` and run with `--tasks-dir benchmarks/imported`:
 
 ```
 instruction.md      what the harness is told (reads as a normal engineering request)
 workspace/          starting files; copied fresh into a temp dir for every run
                     OR workspace.toml — git-ref materialization (see below)
 checker.sh          grades the result; exit 0 = solved
-solution/           golden files, used ONLY by validate_tasks.py (never shown to the harness)
+solution/           golden files, used ONLY by obench validate (never shown to the harness)
 checker_data/       optional: inputs/expected outputs the checker owns (kept out of workspace/)
 ```
 
 Contract the runner honors for every cell:
 
 - The starting workspace is materialized into a disposable temp dir; the harness
-  edits that copy. The source under `tasks/` is never modified.
+  edits that copy. The source under `benchmarks/core/` is never modified.
   - **Snapshot mode:** `workspace/` is copytree'd.
   - **Git mode:** `workspace.toml` exports a git ref via `git archive` (optional
     `subdir` / `setup` script). See [`docs/private-evals.md`](docs/private-evals.md).
@@ -308,7 +299,7 @@ behaves exactly as before (pass → 1.0, fail → 0.0).
 
 ### Validation discipline
 
-`validate_tasks.py` enforces that each checker is correctly polarized:
+`obench validate` enforces that each checker is correctly polarized:
 
 1. Run the checker against a freshly materialized workspace → it **must fail**
    (otherwise the task is scored solved before the agent does anything).
@@ -339,7 +330,7 @@ never modified:
 
 | Harness  | Frontier `gpt-5.5-medium` | Open models | Auth handling |
 |----------|----------------------------|-------------|---------------|
-| codex    | `gpt-5.5`, `model_reasoning_effort=medium` | Via foreground `bench/openmodel_bridge.sh` | Uses existing `codex` login for frontier; bridge/vendor keys for open models. |
+| codex    | `gpt-5.5`, `model_reasoning_effort=medium` | Via foreground `obench/openmodel_bridge.sh` | Uses existing `codex` login for frontier; bridge/vendor keys for open models. |
 | pi       | `gpt-5.5`, `--thinking medium` | Direct vendor endpoints | Isolated `HOME` (temp dir) with only `.pi/agent/auth.json` copied in, plus `--no-extensions`, so personal extensions never load. |
 | opencode | `openai/gpt-5.5`, `--variant medium` | Direct vendor endpoints | Strips `OPENAI_API_KEY` from frontier child env to force subscription OAuth; open models use provider keys. |
 | cursor   | `gpt-5.5-medium` (effort baked into name) | Not supported (closed menu) | Uses the existing `cursor-agent` login as-is. |
@@ -352,11 +343,11 @@ never edits the workspace, every task's checker fails — it is the benchmark's
 
 ## Results
 
-Findings from the milestone runs are in [`RESULTS.md`](RESULTS.md), with committed
-datasets under [`data/`](data/). Local scratch runs stay under gitignored
+Findings from the milestone runs are in [`docs/reports/results.md`](docs/reports/results.md), with committed
+datasets under [`data/`](data). Local scratch runs stay under gitignored
 `results/` unless intentionally promoted to `data/`.
 
-`bench/run.py` appends one JSON object per line to `results/results.jsonl`. The
+`obench/run.py` appends one JSON object per line to `results/results.jsonl`. The
 fields:
 
 | Field          | Meaning                                                                 |
@@ -383,7 +374,7 @@ fields:
 Rows written before `score`, `harness_version`, or `timeout_s` existed simply
 omit them; the report derives a score from `success` (`1.0`/`0.0`) for those.
 
-`bench/report.py` reads that log and prints one row per harness: per-task
+`obench/report.py` reads that log and prints one row per harness: per-task
 success (`x/n`), overall success with a Wilson 95% interval, **mean score**
 (averaged over all trials, the discriminating number for partial-credit tasks),
 mean wall-clock time, tokens-per-solve, and mean turns. `--efficiency` prints a
@@ -443,7 +434,7 @@ at 0/n and n/n, which the naive formula does not.
 - **Fresh workspace per run.** Every cell gets an untouched copy of the task
   workspace; runs cannot contaminate each other or the source tree.
 - **Checker is the sole judge.** Success is `checker.sh` exit 0, never the
-  harness's self-report. `validate_tasks.py` guarantees each checker actually
+  harness's self-report. `obench validate` guarantees each checker actually
   discriminates a solved workspace from an unsolved one.
 - **Negative control.** The `null` adapter should score 0% everywhere; a nonzero
   `null` success would indicate a broken (too-lenient) checker.

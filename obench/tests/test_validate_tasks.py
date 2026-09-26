@@ -4,7 +4,7 @@
 Two boundary behaviors the fork needs on top of the upstream core/imported
 tiers:
 
-  * a ``local`` tier (``tasks-local/``) so fork-local tasks are discovered
+  * a ``local`` tier (``benchmarks/local/``) so fork-local tasks are discovered
     without polluting the upstream-owned ``tasks/`` core tier, and
   * an environment-gated SKIP: a checker that cannot run in this environment
     (a fork-local task whose external deps are absent, e.g. in CI) exits 77 and
@@ -65,12 +65,12 @@ class LocalTierDiscoveryTests(unittest.TestCase):
 
     def test_default_local_tasks_dir_returns_tasks_local_when_present(self):
         self.assertIsNone(paths.default_local_tasks_dir(start=self.tmp))
-        local = os.path.join(self.tmp, "tasks-local")
+        local = os.path.join(self.tmp, "benchmarks/local")
         os.makedirs(local)
         self.assertEqual(paths.default_local_tasks_dir(start=self.tmp), local)
 
     def test_discover_tasks_walks_a_local_root(self):
-        local = os.path.join(self.tmp, "tasks-local")
+        local = os.path.join(self.tmp, "benchmarks/local")
         _make_task(local, "am-thing", _POLARITY_OK)
         found = vt.discover_tasks([("local", local)])
         self.assertEqual(found, [("local", "am-thing", os.path.join(local, "am-thing"))])

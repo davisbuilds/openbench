@@ -474,7 +474,7 @@ class ExportTaskTests(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    os.path.isdir(os.path.join(SOURCE_ROOT, "tasks", "make-it-run")),
+    os.path.isdir(os.path.join(SOURCE_ROOT, "benchmarks", "core", "make-it-run")),
     "core tasks/ not present in this install layout",
 )
 class CoreTasksHarborRoundTripTests(unittest.TestCase):
@@ -482,7 +482,7 @@ class CoreTasksHarborRoundTripTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.tasks_dir = os.path.join(SOURCE_ROOT, "tasks")
+        cls.tasks_dir = os.path.join(SOURCE_ROOT, "benchmarks", "core")
         cls.out_root = tempfile.mkdtemp(prefix="obench_harbor_core_")
         cls.summaries = eh.export_tasks(cls.tasks_dir, cls.out_root, "all")
         cls.by_name = {s["task_name"]: s for s in cls.summaries}
@@ -494,7 +494,7 @@ class CoreTasksHarborRoundTripTests(unittest.TestCase):
     def test_exports_all_eight_core_tasks(self):
         # The fork adds graded tasks (json-canonicalize, glob-match) into tasks/
         # alongside the upstream binary core (fork-local machine-specific tasks
-        # live in tasks-local/, not here), so asserting exact set equality here
+        # live in benchmarks/local/, not here), so asserting exact set equality here
         # breaks every time a task is added.
         # The durable guarantee is that all 8 core tasks export cleanly -- a
         # subset check -- not that they are the ONLY tasks present.

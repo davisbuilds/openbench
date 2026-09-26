@@ -9,7 +9,7 @@ commit = "72bc40b1e58b47a9cc6e0f14c29aced3a9e53767"
 [[task_sets]]
 id = "openbench-lite"
 kind = "local"
-path = "harbor-tasks/openbench-lite"
+path = "benchmarks/harbor/core/openbench-lite"
 
 [[arms]]
 id = "codex-sol"

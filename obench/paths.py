@@ -1,8 +1,7 @@
 """Resolve default filesystem paths for repo vs installed usage.
 
-When the current working directory contains a ``tasks/`` directory, defaults
-match the historical OpenBench checkout layout. Otherwise tasks are discovered
-under ``./tasks`` or ``./.openbench/tasks``, results default under CWD (or
+The source checkout groups task collections under ``benchmarks/``. Custom
+projects still discover ``./tasks`` or ``./.openbench/tasks``. Results default under CWD (or
 ``.openbench/results/`` when an ``openbench.toml`` config is present), and
 adapters come from the installed package.
 """
@@ -22,9 +21,9 @@ class TasksDirError(FileNotFoundError):
 
 
 def find_repo_root(start: str | None = None) -> str | None:
-    """Return ``start`` (default: cwd) when it contains a ``tasks/`` directory."""
+    """Return cwd when it contains a checkout or custom-project task root."""
     cwd = os.path.abspath(start or os.getcwd())
-    if os.path.isdir(os.path.join(cwd, "tasks")):
+    if any(os.path.isdir(os.path.join(cwd, name)) for name in ("benchmarks/core", "tasks")):
         return cwd
     return None
 
@@ -74,11 +73,9 @@ def default_tasks_dir(start: str | None = None) -> str | None:
     cfg = load_config(start)
     if cfg.tasks_dir and os.path.isdir(cfg.tasks_dir):
         return cfg.tasks_dir
-    root = find_repo_root(start)
-    if root is not None:
-        return os.path.join(root, "tasks")
     cwd = os.path.abspath(start or os.getcwd())
     for candidate in (
+        os.path.join(cwd, "benchmarks", "core"),
         os.path.join(cwd, "tasks"),
         os.path.join(cwd, ".openbench", "tasks"),
     ):
@@ -106,7 +103,8 @@ def resolve_tasks_dir(explicit: str | None = None, start: str | None = None) -> 
     cwd = os.path.abspath(start or os.getcwd())
     raise TasksDirError(
         "No tasks directory found.\n"
-        f"Looked for {os.path.join(cwd, 'tasks')} and "
+        f"Looked for {os.path.join(cwd, 'benchmarks', 'core')}, "
+        f"{os.path.join(cwd, 'tasks')} and "
         f"{os.path.join(cwd, '.openbench', 'tasks')}.\n"
         "Run `obench init`, create ./tasks or ./.openbench/tasks, "
         "or pass --tasks-dir."
@@ -114,27 +112,24 @@ def resolve_tasks_dir(explicit: str | None = None, start: str | None = None) -> 
 
 
 def default_local_tasks_dir(start: str | None = None) -> str | None:
-    """Optional ``tasks-local`` sibling: the fork-local task tier.
-
-    Fork-local tasks live here rather than in the upstream-owned ``tasks/`` core
-    tier, so ``tasks/`` stays byte-identical to upstream (clean promotion) and
-    local work is never smuggled into a shared directory. See
-    docs/project/FORK_WORKFLOW.md.
-    """
-    root = find_repo_root(start)
-    if root is None:
-        return None
-    path = os.path.join(root, "tasks-local")
-    return path if os.path.isdir(path) else None
+    """Fork-owned tasks, with the existing custom-project layout supported."""
+    return _optional_tier(start, "benchmarks/local", "tasks-local")
 
 
 def default_imported_tasks_dir(start: str | None = None) -> str | None:
-    """Optional ``tasks-imported`` sibling when running inside a checkout."""
+    """Imported tasks, with the existing custom-project layout supported."""
+    return _optional_tier(start, "benchmarks/imported", "tasks-imported")
+
+
+def _optional_tier(start: str | None, *names: str) -> str | None:
     root = find_repo_root(start)
     if root is None:
         return None
-    path = os.path.join(root, "tasks-imported")
-    return path if os.path.isdir(path) else None
+    for name in names:
+        path = os.path.join(root, name)
+        if os.path.isdir(path):
+            return path
+    return None
 
 
 def ensure_package_path_on_sys_path() -> str:

@@ -46,7 +46,7 @@ class SuiteRunTests(unittest.TestCase):
         self.assertEqual(compiled.suite.publication.scope, "local_only")
         self.assertEqual(
             compiled.manifest["task_sets"][0]["path"],
-            "harbor-tasks/openbench-lite",
+            "benchmarks/harbor/core/openbench-lite",
         )
         self.assertEqual(
             [arm["id"] for arm in compiled.manifest["arms"]],

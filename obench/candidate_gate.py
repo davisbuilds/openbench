@@ -150,7 +150,7 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
     imported_tasks_dir = (
         imported_tasks_dir
         or default_imported_tasks_dir()
-        or os.path.join(find_repo_root() or os.getcwd(), "tasks-imported")
+        or os.path.join(find_repo_root() or os.getcwd(), "benchmarks/imported")
     )
     spec_path = candidates.resolve_candidate_path(spec_path)
     candidate = candidates.load_candidate(spec_path, adapters_dir)

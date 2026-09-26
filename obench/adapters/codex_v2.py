@@ -1,11 +1,11 @@
 """Codex V2 ablation harness: V1 plus optional context blocks disabled.
 
 At run time this adapter composes a temporary CODEX_HOME from
-``ablation/codex-home-v2`` with ``model_instructions_file`` rewritten to an
+``experiments/ablations/codex-home-v2`` with ``model_instructions_file`` rewritten to an
 absolute path inside that temp home, then copies only runtime ``auth.json`` from
 the real ``$CODEX_HOME``/``~/.codex``. Docker mode mounts the same read-only
 Codex auth surface as stock ``codex`` plus only this variant directory at
-``/bench/ablation/codex-home-v2:ro``; composition happens inside the container
+``/bench/experiments/ablations/codex-home-v2:ro``; composition happens inside the container
 before delegating to ``codex.py``. Auth is never stored in the repo or image.
 """
 

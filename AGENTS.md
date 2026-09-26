@@ -2,7 +2,7 @@
 
 Read this first. It captures what this project is trying to become, so any agent
 or contributor picks up the strategic context, not just the mechanics in
-`README.md` / `WRITEUP.md`.
+`README.md` / `docs/reports/writeup.md`.
 
 ## Local execution context
 
@@ -106,12 +106,14 @@ them as the default workflow.
 - **OpenBench's defensible edge:** harness-vs-harness comparison under
   realistic conditions — same-model pinning, subscription/OAuth auth handling,
   counting-proxy token metering, polarity-validated checkers
-  (`validate_tasks.py`), the null negative control, and the candidate
+  (`obench validate`), the null negative control, and the candidate
   admission gate (`obench/candidate_gate.py`, `docs/byo-harnesses.md`). Plus an
   ultra-light stdlib-only, files-plus-shell-checker contract that non-Python
   users and private repos can adopt without learning a framework API.
 
 ## Code map (where to look)
+
+See [repository layout](docs/project/REPOSITORY_LAYOUT.md) for asset ownership and path compatibility.
 
 | Area | Path |
 |------|------|
@@ -131,7 +133,7 @@ them as the default workflow.
 | Trusted repair oracles | `obench/repair_oracles/`, `obench/repair_grading.py`, `obench/repair_worker.py` |
 | Stock adapters | `obench/adapters/` |
 | Unit tests | `obench/tests/` |
-| Tasks | `harbor-tasks/` (canonical), `tasks/` (historical compatibility), `.openbench/tasks/` (private-init) |
+| Tasks | `benchmarks/harbor/core/` (canonical), `benchmarks/core/` (historical compatibility), `.openbench/tasks/` (private-init) |
 
 ## Always-run CI (offline)
 
@@ -146,8 +148,8 @@ Match [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 pip install -e .
 python3 -m unittest discover -s obench/tests -v
 obench validate --no-imported
-obench validate --tasks-dir tasks-imported/terminal-bench
-obench validate --tasks-dir tasks-imported/exercism
+obench validate --tasks-dir benchmarks/imported/terminal-bench
+obench validate --tasks-dir benchmarks/imported/exercism
 ```
 
 No live harness or model-API calls; stdlib-only. Docker-backed imported tiers,
@@ -168,7 +170,7 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
 - **`obench/report.py` aggregates** — key by `(harness, model)`, not harness alone.
 - **Auth / proxy / transcripts** — auth is read-only staging; transcripts are
   LOCAL-ONLY and never published unscrubbed (`obench/scrub.py`).
-- **Legacy `bench/` tree** — shims may remain; new code and docs target `obench/`.
+- **Entry points** — use `obench` or `python -m obench.<module>`; the old `bench/` and root validator wrappers are retired.
 
 ## Roadmap (priority order)
 
@@ -176,8 +178,8 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
   PyPI name **`obench`** (`pip install obench`, `obench run ...`). Umbrella CLI
   (`run / report / doctor / validate / gate / compare / init / publish / verify /
   pack / …`).
-  CWD discovery (`tasks/`, then `.openbench/tasks/`) when run outside the repo.
-- **P0 — Arbitrary task roots. [DONE Jul 2026]** `validate_tasks.py` accepts
+  Custom-project discovery (`tasks/`, then `.openbench/tasks/`) when run outside the repo.
+- **P0 — Arbitrary task roots. [DONE Jul 2026]** `obench validate` accepts
   custom task directories; `--preflight-smoke` picks a smoke task from the given
   root (prefers `make-it-run` when present).
 - **P0 — `obench init` for private repos. [DONE Jul 2026]** `.openbench/`
@@ -220,7 +222,7 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
 ## Working conventions for agents
 
 - The checker is the sole judge of success; never trust harness self-reports.
-- Every new task must pass `validate_tasks.py` polarity (fails untouched,
+- Every new task must pass `obench validate` polarity (fails untouched,
   passes with `solution/` overlaid).
 - Transcripts are local-only and never published unscrubbed (`obench/scrub.py`).
 - Committed datasets live under `data/`; local scratch stays in gitignored

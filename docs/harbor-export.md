@@ -6,8 +6,8 @@ while OpenBench stays the comparison / stats / auth layer. The reverse direction
 (`obench import harbor`) is documented in [`docs/harbor-import.md`](harbor-import.md).
 
 ```bash
-obench export harbor --task all --out /tmp/harbor-tasks
-obench export harbor --task make-it-run,fix-failing-test --out /tmp/harbor-tasks
+obench export harbor --task all --out /tmp/benchmarks/harbor/core
+obench export harbor --task make-it-run,fix-failing-test --out /tmp/benchmarks/harbor/core
 ```
 
 Codex OAuth tasks require public egress. Export those tasks explicitly:

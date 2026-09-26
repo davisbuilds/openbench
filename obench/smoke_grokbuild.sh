@@ -8,7 +8,7 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
-exec python3 bench/run.py \
+exec python3 -m obench.run \
   --harness grokbuild \
   --model deepseek-v4-flash \
   --task make-it-run \

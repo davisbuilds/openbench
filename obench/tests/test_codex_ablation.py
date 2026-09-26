@@ -26,7 +26,7 @@ class TestCodexAblationCompose(unittest.TestCase):
     def test_compose_writes_config_instructions_and_auth(self):
         helper = load_adapter("_codex_ablation")
         with tempfile.TemporaryDirectory() as tmp:
-            ablation_root = os.path.join(tmp, "ablation")
+            ablation_root = os.path.join(tmp, "experiments/ablations")
             variant_dir = os.path.join(ablation_root, "codex-home-v1")
             source_home = os.path.join(tmp, "real-codex")
             runtime_home = os.path.join(tmp, "runtime-codex")
@@ -77,7 +77,7 @@ class TestCodexAblationCompose(unittest.TestCase):
     def test_missing_auth_returns_setup_needed(self):
         helper = load_adapter("_codex_ablation")
         with tempfile.TemporaryDirectory() as tmp:
-            ablation_root = os.path.join(tmp, "ablation")
+            ablation_root = os.path.join(tmp, "experiments/ablations")
             variant_dir = os.path.join(ablation_root, "codex-home-v1")
             os.makedirs(variant_dir)
             with open(os.path.join(variant_dir, "pi-style-instructions.md"), "w", encoding="utf-8") as fh:
@@ -94,7 +94,7 @@ class TestCodexAblationCompose(unittest.TestCase):
     def test_run_variant_hands_active_auth_proof_to_codex(self):
         helper = load_adapter("_codex_ablation")
         with tempfile.TemporaryDirectory() as tmp:
-            ablation_root = os.path.join(tmp, "ablation")
+            ablation_root = os.path.join(tmp, "experiments/ablations")
             variant_dir = os.path.join(ablation_root, "codex-home-v1")
             source_home = os.path.join(tmp, "real-codex")
             os.makedirs(variant_dir)

@@ -2,12 +2,12 @@
 """Convert an Exercism exercise into an OpenBench task directory.
 
 Usage:
-    python3 tools/convert_exercism.py <slug> [<slug> ...]
-    python3 tools/convert_exercism.py --all
+    python3 scripts/imports/convert_exercism.py <slug> [<slug> ...]
+    python3 scripts/imports/convert_exercism.py --all
 
 For each slug it fetches the upstream canonical data (the test cases) and the
 description from the MIT-licensed ``exercism/problem-specifications`` repo, then
-emits a task under ``tasks-imported/exercism/<slug>/`` in OpenBench's task
+emits a task under ``benchmarks/imported/exercism/<slug>/`` in OpenBench's task
 contract:
 
     instruction.md        our own prose + a generated interface section
@@ -39,8 +39,8 @@ import sys
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
-OUT_ROOT = os.path.join(REPO, "tasks-imported", "exercism")
+REPO = os.path.dirname(os.path.dirname(HERE))
+OUT_ROOT = os.path.join(REPO, "benchmarks/imported", "exercism")
 
 sys.path.insert(0, HERE)
 from exercism_registry import REGISTRY  # noqa: E402

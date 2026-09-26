@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixture-backed tests for TOKEN_PARITY.md adapter usage normalization."""
+"""Fixture-backed tests for docs/reference/token-accounting.md adapter usage normalization."""
 
 import importlib.util
 import json

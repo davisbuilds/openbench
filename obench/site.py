@@ -86,7 +86,7 @@ def _gateway_run_note(value):
 def _load_pricing():
     """Repo price sheet, when present. Missing prices simply omit $/solve."""
     for candidate in (
-        os.path.join(SOURCE_ROOT, "prices.json"),
+        os.path.join(SOURCE_ROOT, "data", "prices.json"),
         os.path.join(os.getcwd(), "prices.json"),
     ):
         if os.path.isfile(candidate):

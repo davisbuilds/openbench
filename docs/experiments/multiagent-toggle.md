@@ -59,7 +59,7 @@ OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/off-core" obench run \
   --harness codex --model gpt-5.6-sol --task "$CORE" --trials 5 \
   --timeout 2400 --proxy --results-path "$ROOT/codex-off.jsonl"
 OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/off-tb" obench run \
-  --harness codex --model gpt-5.6-sol --task "$TB" --tasks-dir tasks-imported \
+  --harness codex --model gpt-5.6-sol --task "$TB" --tasks-dir benchmarks/imported \
   --trials 5 --timeout 2400 --proxy --results-path "$ROOT/codex-off.jsonl"
 
 # ON, declarative candidate (40 core + 35 imported cells)
@@ -69,12 +69,12 @@ OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/on-core" obench run \
   --results-path "$ROOT/codex-on.jsonl"
 OPENBENCH_PROXY_LEDGER_DIR="$ROOT/ledger/on-tb" obench run \
   --candidate experiments/multiagent-toggle/codex-on.toml \
-  --model gpt-5.6-sol --task "$TB" --tasks-dir tasks-imported \
+  --model gpt-5.6-sol --task "$TB" --tasks-dir benchmarks/imported \
   --trials 5 --timeout 2400 --proxy --results-path "$ROOT/codex-on.jsonl"
 
 # Canonical solve/hack-adjusted and efficiency summaries.
 python3 -m obench.stats --strict-provenance --min-n 75 \
-  --tasks-dir tasks --tasks-dir tasks-imported \
+  --tasks-dir tasks --tasks-dir benchmarks/imported \
   "$ROOT/codex-off.jsonl" "$ROOT/codex-on.jsonl" | tee "$ROOT/stats.txt"
 obench report --efficiency --results-path "$ROOT/codex-off.jsonl" \
   | tee "$ROOT/off-efficiency.txt"

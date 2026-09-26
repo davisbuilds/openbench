@@ -28,7 +28,7 @@ Notes / quirks:
 - `--json` emits a JSONL event stream. The final `turn.completed` event carries
   `usage={input_tokens,cached_input_tokens,cache_write_input_tokens,
           output_tokens,reasoning_output_tokens}` on Codex 0.153.0.
-  Token accounting emits TOKEN_PARITY.md split fields from the final aggregate:
+  Token accounting emits docs/reference/token-accounting.md split fields from the final aggregate:
     tokens_input_uncached = input_tokens - cached_input_tokens - cache_write_input_tokens
     tokens_cache_read     = cached_input_tokens
     tokens_cache_write    = cache_write_input_tokens  # when reported
@@ -665,7 +665,7 @@ def run(
     try:
         try:
             # CODEX_HOME does not govern ~/.agents/skills. Isolate HOME even
-            # when an ablation/candidate supplies CODEX_HOME (or HOME), while
+            # when an experiments/ablations/candidate supplies CODEX_HOME (or HOME), while
             # leaving the parent's auth staging and persist-back paths intact.
             with tempfile.TemporaryDirectory(prefix="codex_user_home_") as user_home:
                 if captured_home:

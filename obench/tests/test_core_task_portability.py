@@ -7,7 +7,7 @@ docs/project/FORK_WORKFLOW.md). A checker that hard-codes a developer's absolute
 path or a fork-local dependency env var passes on the machine that has it and
 fails everywhere else -- exactly the trap that put a fork-local, agentmonitor-
 dependent task into core and broke CI. Fork-local tasks belong in the
-``tasks-local/`` tier, which is env-gated (exit-77 SKIP) instead.
+``benchmarks/local/`` tier, which is env-gated (exit-77 SKIP) instead.
 
 This guard scans the real core tier, so it fails the moment such a task lands.
 """
@@ -18,7 +18,7 @@ import unittest
 
 from obench.paths import SOURCE_ROOT
 
-_CORE_TASKS_DIR = os.path.join(SOURCE_ROOT, "tasks")
+_CORE_TASKS_DIR = os.path.join(SOURCE_ROOT, "benchmarks", "core")
 
 # Substrings that mark a checker as non-portable / fork-local. Absolute home
 # paths bind a checker to one machine; the agentmonitor deps var is a fork-local
@@ -53,7 +53,7 @@ class CoreTaskPortabilityTests(unittest.TestCase):
         self.assertEqual(
             offenders, [],
             "Core-tier checkers must be portable. Move a fork-local, "
-            "machine-specific task to tasks-local/ (env-gated exit-77 SKIP) "
+            "machine-specific task to benchmarks/local/ (env-gated exit-77 SKIP) "
             "per docs/project/FORK_WORKFLOW.md:\n  " + "\n  ".join(offenders),
         )
 
