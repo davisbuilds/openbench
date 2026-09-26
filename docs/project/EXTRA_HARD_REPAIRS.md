@@ -39,9 +39,12 @@ and rejects Sol/Luna; use the repair lane or native Codex 0.157.0 instead.
 Qualification runs and binds an offline tool-loop receipt for every selected
 model/effort, followed by the model-specific authenticated controls.
 
-The user explicitly deferred campaign effort selection. Freeze those settings
-later and run matching authenticated controls before scored trials. Existing
-admissions cannot authorize the changed model/runtime treatment. Three attempts
+Campaign efforts selected by the user on 2026-09-26: GPT-6 Sol at `high`
+(`gpt-6-sol-high`) and GPT-6 Luna at `max` (`gpt-6-luna-max`). Retain the existing
+Terra `xhigh` baseline (`gpt-5.6-terra-xhigh`). Use these explicit aliases when
+compiling the next screening suite; bare adapter defaults are not the campaign
+settings. Run matching offline and authenticated controls before scored trials.
+Existing admissions cannot authorize the changed model/runtime treatment. Three attempts
 across the proposed three tasks and three models would total 27 trials once all
 routes/tasks are admitted; this is not a confirmed launch schedule.
 
