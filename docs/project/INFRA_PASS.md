@@ -3,7 +3,7 @@ date: 2026-09-25
 author: Codex
 topic: pre-benchmark-infrastructure
 stage: plan
-status: in-progress
+status: complete
 risk_profile: high
 readiness: ready
 source: User-authorized infrastructure pass following PR 13
@@ -39,7 +39,7 @@ decision changes the contract. No scored campaign is implied by this pass.
   run before admission; missing/stale evidence cannot authorize a campaign.
   Proof: accepted matching evidence and rejected changed/missing evidence before
   credentials or model calls; effective-runtime controls on the execution host.
-- [ ] **4. Trusted oracle boundary and second task.** Separate generic source
+- [x] **4. Trusted oracle boundary and second task.** Separate generic source
   extraction/worker lifecycle from a trusted oracle registry. Preserve historical
   digest verification. New tasks bind their own oracle/protocol and the shared
   boundary with explicit versions. Prove this using corrected AgentMonitor PR #106, including its alternative valid repairs.
@@ -92,31 +92,23 @@ Old runs and oracle versions remain unchanged; changed treatments get new IDs.
   Two cloud review passes, all four findings resolved, all CI green. Final Mini
   qualification at `803d58d` passed all offline/authenticated controls; admitted
   exact resume preserved evidence and made no additional model requests.
-- Active step 4: `feat/trusted-repair-oracles`; grounded contract and acceptance
-  are in [TRUSTED_ORACLE_BOUNDARY.md](TRUSTED_ORACLE_BOUNDARY.md). Corrected #106
-  is the proof task; #123 remains afterward. PR [#16](https://github.com/davisbuilds/openbench/pull/16)
-  at `94ec429` has green CI and two completed cloud reviews with no findings.
-  All nine offline Mini controls passed, including ten behavioral variants and
-  five registered Harbor lifecycle controls. Baseline, partial, reference and
-  alternative repair scores matched expectations; helper extraction and refusal
-  controls passed.
-- Step 4 live gate (2026-09-25): both authenticated file-edit controls failed
-  before an edit, with 20 upstream HTTP 401 responses per arm. The final harness
-  `ApiRateLimitError` reflected exhaustion of the local request budget, not an
-  upstream 429. No admission receipt was issued and no scored campaign ran.
-  A zero-inference managed-token refresh on the execution host restored auth.
-  The second attempt completed 18 model requests, but Terra inserted the marker
-  inside the file; Luna appended it correctly. The strict control rejected that
-  attempt. Both failures remain preserved. The prompt now gives an explicit
-  shell append command; its byte-exact acceptance check is unchanged.
-- A documentation-only CI rerun exposed concurrent canary log writes producing
-  invalid JSONL. A regression reproduced the same parse failure; serializing
-  whole log records fixes it. Renew qualification and CI, then prove admitted
-  exact resume adds no model requests before merge/sync. Local evidence is under
-  `results/infra-pass/am106-qualification-target/`; the launch shortcut is
-  `results/infra-pass/am106-qualification-launch.json`.
-- PRs: [#14](https://github.com/davisbuilds/openbench/pull/14) and
-  [#15](https://github.com/davisbuilds/openbench/pull/15), merged.
+- Step 4 merged in [PR #16](https://github.com/davisbuilds/openbench/pull/16)
+  (`241a3e2`). Final implementation `7fac584` passed all CI checks and cloud
+  review with no findings. All nine Mini offline controls passed, including
+  ten behavioral variants and five registered Harbor lifecycle controls.
+- Both authenticated file-edit controls passed. Admitted exact resume
+  revalidated the sealed two-row suite with four model requests before and
+  after; qualification evidence stayed valid and sandbox cleanup completed.
+  The execution host's `results/infra-pass/am106-qualification-launch-v3.json`
+  and `am106-resume-proof.json` locate the local evidence. Earlier authentication
+  and misplaced-edit failures remain separate attempts. A managed-token refresh
+  restored auth; clarified append instructions retained strict byte checking.
+  The observed CI canary-log race has a reproduced regression and verified fix.
 
-This is a rolling execution checklist. Stages 2–4 require their grounded
-authority/recovery contracts and paired runtime controls before activation.
+## Next phase
+
+The infrastructure pass is complete. Develop AgentMonitor #123 separately using
+[EXTRA_HARD_REPAIRS.md](EXTRA_HARD_REPAIRS.md): neutral concurrency instrumentation,
+complete state invariants, and alternative valid repair controls precede task
+packaging. Runtime admission and corrected #106 do not establish extra-hard
+benchmark difficulty. No scored campaign was launched by this pass.

@@ -22,22 +22,6 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
-### Canonical repair workflow
-
-#### Separate trusted repair infrastructure from task-specific oracles
-- **What**: `compile_suite` admits only named Dojo revisions; `sandbox_grading`
-  combines source extraction, confined worker execution, Dojo observations and
-  expected answers. Its whole-module hash participates in every task binding.
-- **Why**: adding the next repository currently needs compiler/grader edits and
-  can change unrelated task identities. Multi-repository calibration is the
-  concrete reason to introduce a smaller extension boundary.
-- **Next**: extract the generic execution boundary and introduce an explicit
-  trusted registry for oracle ID/version, source allowlist, worker protocol and
-  behavioral grading. Bind each selected oracle and shared boundary separately.
-  Preserve legacy digest verification; new bindings require explicit versions.
-  Never import candidate-controlled code or an arbitrary task-specified plugin
-  into the trusted host process. Prove the interface with a second real task.
-
 ### Runner throughput
 
 #### Candidate dispatch through the matrix runner

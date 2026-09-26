@@ -1,6 +1,6 @@
 ---
 date: 2026-09-25
-status: in-progress
+status: complete
 stage: plan
 risk_profile: high
 readiness: ready
@@ -57,18 +57,16 @@ new task treatment and require fresh difficulty calibration later.
 5. PR, cloud review, addressed findings, green CI, merge/sync; record evidence in
    INFRA_PASS.md. Admission proves execution and oracle validity, not difficulty.
 
-## Implementation progress
+## Delivery evidence
 
-- New registry, scheme-4 binding, confined worker lifecycle, and #106 observation
-  protocol are implemented on `feat/trusted-repair-oracles`.
-- Canonical suite compilation/import routes the selected built-in oracle and
-  binds all implementation modules. Legacy scheme-3 bytes remain unchanged.
-- Locked Node dependencies and native SQLite build passed on Mini ARM64 and
-  hosted Linux. All ten behavioral variants and five Harbor lifecycle controls
-  passed; both Python CI lanes and the sandbox lane are green at `94ec429`.
-- PR #15's final campaign fixes are integrated. Two cloud reviews completed
-  without findings at `94ec429`. Managed-token refresh restored authentication;
-  qualification then correctly rejected a misplaced edit. Follow-up changes
-  clarify the control command and serialize concurrent canary logging after a
-  reproduced CI failure. Fresh qualification, CI and exact-resume proof remain
-  pending; see INFRA_PASS.md. No difficulty or full runtime-admission claim.
+Merged in [PR #16](https://github.com/davisbuilds/openbench/pull/16). Final
+implementation `7fac584` passed cloud review, Python 3.11/3.13 CI, and real
+Docker/Harbor checks on hosted Linux and Mini ARM64. All ten behavioral variants
+and five registered lifecycle controls passed. Legacy scheme-3 grading bytes
+remain unchanged.
+
+Mini runtime qualification passed all nine offline controls and both authenticated
+file-edit controls. Admitted exact resume preserved the sealed two-row suite,
+control evidence and four-request count. Detailed local evidence pointers and
+the separate #123 follow-up are in INFRA_PASS.md. This proves the infrastructure
+contract; it makes no benchmark-difficulty claim.

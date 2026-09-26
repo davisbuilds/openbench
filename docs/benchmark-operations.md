@@ -119,6 +119,13 @@ does not invalidate it. This records successful authentication at the control's
 time, not a promise that credentials never expire. Expired authentication still
 fails through the normal runner. Admission is separate from task difficulty.
 
+If gateway evidence records upstream HTTP 401, verify or refresh managed
+Codex authentication on the execution host before staging another control.
+`codex login status` only confirms cached credentials; it does not prove a token
+can refresh. Inspect the recorded upstream status: retries may exhaust the local
+request budget and end with a misleading rate-limit exception. Preserve the
+failed attempt and qualify again in a fresh evidence directory.
+
 Qualification supports the legacy Dojo and registered AgentMonitor repair lanes
 with serial execution. The authenticated control uses the selected task’s verifier
 with a separate file-edit instruction and task digest. `obench run` remains the low-level canonical execution/control
