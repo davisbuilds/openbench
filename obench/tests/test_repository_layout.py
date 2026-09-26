@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from obench import paths
+from obench.packs import default_packs_root
 
 
 class RepositoryLayoutTests(unittest.TestCase):
@@ -31,3 +32,10 @@ class RepositoryLayoutTests(unittest.TestCase):
             self.assertEqual(paths.default_tasks_dir(directory),str(root/'.openbench/tasks'))
             self.assertIsNone(paths.default_local_tasks_dir(directory))
             self.assertIsNone(paths.default_imported_tasks_dir(directory))
+
+    def test_pack_lookup_from_nested_grouped_checkout_uses_checkout_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            nested=root/'benchmarks/core/example/workspace'
+            nested.mkdir(parents=True)
+            self.assertEqual(default_packs_root(str(nested)),str(root/'.openbench/packs'))

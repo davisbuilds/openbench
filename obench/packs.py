@@ -399,13 +399,14 @@ def resolve_install_identity(spec: str, meta: dict) -> dict:
 def default_packs_root(start: str | None = None) -> str:
     """Project-scoped ``.openbench/packs`` discovered from any subdirectory."""
     from .config import load_config
+    from .paths import find_repo_root
     cfg = load_config(start)
     base = cfg.project_root
     if base is None:
         base = os.path.abspath(start or os.getcwd())
         probe = base
         while True:
-            if os.path.isdir(os.path.join(probe, "tasks")):
+            if find_repo_root(probe) is not None:
                 base = probe
                 break
             parent = os.path.dirname(probe)
