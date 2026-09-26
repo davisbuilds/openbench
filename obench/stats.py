@@ -1138,10 +1138,13 @@ def _validate_suite_sandbox_policy(manifest):
         "obench.repair_worker", "obench.repair_grading", "obench.repair_oracles.registry", "obench.repair_oracles.agentmonitor"}
     # Retain historical seals, but every new model treatment must bind the
     # shared registry that now selects its canonical model and effort.
+    arms = manifest.get("arms")
+    if not isinstance(arms, list) or not arms or not all(isinstance(arm, dict) for arm in arms):
+        raise ValueError("suite manifest sandbox arms are invalid")
     needs_registry = any(
         isinstance(arm.get("canonical_model"), str)
         and arm["canonical_model"].startswith(("gpt-6-sol", "gpt-6-luna"))
-        for arm in manifest["arms"]
+        for arm in arms
     )
     accepted = (base_modules | {"obench.codex_models"},
                 registered_modules | {"obench.codex_models"})

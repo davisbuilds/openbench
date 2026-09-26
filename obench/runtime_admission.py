@@ -72,6 +72,48 @@ def canonical(value):
     return json.loads(json.dumps(value,sort_keys=True,allow_nan=False))
 
 
+def model_control_records(expected):
+    """One recorded offline tool loop per selected model/effort identity."""
+    from .codex_models import REPAIR_MODEL_PAIRS
+    models = expected.get('models')
+    if (not isinstance(models, (list, tuple)) or not models
+            or any(not isinstance(item, (list, tuple)) or len(item) != 3
+                   or not all(isinstance(part, str) for part in item)
+                   or REPAIR_MODEL_PAIRS.get(item[0]) != tuple(item[1:]) for item in models)):
+        raise AdmissionError('invalid selected model identities for offline controls')
+    if len({item[0] for item in models}) != len(models):
+        raise AdmissionError('duplicate selected model identity for offline controls')
+    return {alias: {
+        'model': model, 'effort': effort,
+        'log': 'offline-1.log' if index == 0 else f'model-{index}.log',
+        'receipt': ('tool-loop' if index == 0 else f'tool-loop-{index}') + '/receipt.json',
+    } for index, (alias, model, effort) in enumerate(models)}
+
+
+def validate_model_controls(directory, expected, records, evidence=None):
+    from .harbor_agents.sandbox_codex import CLI_VERSION
+    required = model_control_records(expected)
+    if not required or records != required:
+        raise AdmissionError('every selected model requires an offline tool-loop control')
+    for alias, record in required.items():
+        if evidence is not None and any(record[key] not in evidence for key in ('log', 'receipt')):
+            raise AdmissionError('model control evidence is not bound')
+        try:
+            receipt = json.loads((Path(directory) / record['receipt']).read_text())
+        except (OSError, ValueError) as exc:
+            raise AdmissionError('model control receipt is unavailable or invalid') from exc
+        if not isinstance(receipt, dict):
+            raise AdmissionError('model control receipt must be an object')
+        exact = {'status': 'passed', 'cleanup_confirmed': True, 'live_inference': False,
+                 'real_credentials': False, 'model_alias': alias, 'model': record['model'],
+                 'effort': record['effort'], 'runtime_image': expected['image']['requested'],
+                 'codex_version': CLI_VERSION, 'probe_sha256': expected['implementation'][SCRIPTS[1]],
+                 'actual_tool_mutation': True, 'tool_result_returned': True,
+                 'final_response_present': True, 'request_count': 2}
+        if any(type(receipt.get(key)) is not type(value) or receipt.get(key) != value for key, value in exact.items()):
+            raise AdmissionError('model control used another or incomplete execution treatment')
+
+
 def validate_admission(path, expected):
     """Re-read immutable control artifacts, then compare current runtime inputs."""
     path = Path(path).resolve()
@@ -110,6 +152,7 @@ def validate_admission(path, expected):
             or treatment['run']['attempts'] != 1 or treatment['run']['max_retries'] != 0
             or treatment['run']['concurrency'] != 1 or treatment['run']['timeout_seconds'] != 180):
         raise AdmissionError('authenticated control used another execution treatment')
+    validate_model_controls(path.parent, expected, value.get('model_controls'), evidence)
     return value
 
 
@@ -200,9 +243,11 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     python=str(suite_run._harbor_python_interpreter(harbor))
     image=compiled.suite.sandbox.runtime_image
     task=ROOT/'benchmarks/harbor/local/dojo-evidence-pr60-v4'
+    model_records = model_control_records(before)
+    first_alias = next(iter(model_records))
     commands=[
         [python,SCRIPTS[0],'--runtime-image',image,'--task',str(task),'--receipt',str(directory/'boundary.json')],
-        [python,SCRIPTS[1],'--runtime-image',image,'--task',str(task),'--output-dir',str(directory/'tool-loop')],
+        [python,SCRIPTS[1],'--runtime-image',image,'--task',str(task),'--model',first_alias,'--output-dir',str(directory/'tool-loop')],
         [python,SCRIPTS[2],'--runtime-image',image,'--task',str(task),'--output',str(directory/'timeouts')],
         [python,SCRIPTS[3],'--runtime-image',image,'--task',str(task),'--reference',str(ROOT/'benchmarks/local/dojo-evidence-pr60/solution'),'--output',str(directory/'lifecycle')],
         [python,SCRIPTS[4],'--runtime-image',image,'--task',str(task),'--output',str(directory/'log-export')],
@@ -219,6 +264,12 @@ def qualify(compiled, directory, harbor_binary, auth_file):
                     subprocess.run(command,cwd=ROOT,check=True,stdin=source,stdout=log,stderr=subprocess.STDOUT)
             else:
                 subprocess.run(command,cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
+    for alias, record in list(model_records.items())[1:]:
+        with (directory/record['log']).open('x') as log:
+            subprocess.run([python,SCRIPTS[1],'--runtime-image',image,'--task',str(task),
+                            '--model',alias,'--output-dir',str((directory/record['receipt']).parent)],
+                           cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
+    validate_model_controls(directory, before, model_records)
     if canonical(before) != canonical(fingerprint(compiled,harbor_binary)):
         raise AdmissionError('runtime changed during offline controls; authentication was not read')
     control,control_task=prepare_control(compiled,directory/'control')
@@ -252,6 +303,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
         raise AdmissionError('unexpected link or credential artifact in control evidence')
     receipt={'schema':1,'kind':'repair-runtime-admission','passed':True,'created_at':stamp(),
              'fingerprint':canonical(after),'offline_controls':{script:{'exit_code':0,'log':f'offline-{index}.log'} for index,script in enumerate(CONTROLS)},
+             'model_controls':model_records,
              'authenticated_control':str(manifest.relative_to(directory)),
              'evidence':{str(p.relative_to(directory)):digest(p) for p in files}}
     destination=directory/'admission.json'

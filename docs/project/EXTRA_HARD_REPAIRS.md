@@ -34,6 +34,10 @@ The isolated lane also moves to 0.157.0: 0.154.0 lacks Sol/Luna metadata and
 falls back to a different tool interface. Credential-free probes reproduce the
 failure on 0.154.0 and pass both new model tool loops on 0.157.0. Historical
 0.154.0 results remain importable; new runs require fresh runtime qualification.
+The old general-purpose legacy Docker image remains pinned for historical arms
+and rejects Sol/Luna; use the repair lane or native Codex 0.157.0 instead.
+Qualification runs and binds an offline tool-loop receipt for every selected
+model/effort, followed by the model-specific authenticated controls.
 
 The user explicitly deferred campaign effort selection. Freeze those settings
 later and run matching authenticated controls before scored trials. Existing

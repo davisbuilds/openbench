@@ -2696,6 +2696,16 @@ def main(argv=None):
     if not harnesses:
         parser.error("at least one --harness or --candidate is required")
 
+    if args.exec_mode == "docker":
+        from .docker_exec import require_supported_legacy_model
+        try:
+            for name in harnesses:
+                candidate = candidates.get(name)
+                require_supported_legacy_model(
+                    (candidate.base_adapter if candidate else None) or name, args.model)
+        except ValueError as exc:
+            parser.error(str(exc))
+
     # Docker fallback can turn a nominal Docker invocation into a mixed run, so
     # it must satisfy the same host gate. Every Docker invocation also checks
     # its build-time pin labels with one inspect before any cell can execute.

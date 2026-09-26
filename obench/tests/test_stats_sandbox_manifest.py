@@ -71,6 +71,13 @@ class SandboxManifestTests(unittest.TestCase):
             bound["sandbox"]["implementation_sha256"]["obench.codex_models"] = "a" * 64
             stats._validate_suite_sandbox_policy(bound)
 
+    def test_malformed_arms_raise_validation_errors(self):
+        for arms in (None, 'invalid', {}, [], [None], [1], ['invalid']):
+            manifest = copy.deepcopy(self.sandbox)
+            manifest['arms'] = arms
+            with self.subTest(arms=arms), self.assertRaises(ValueError):
+                self.validate(manifest)
+
     def test_valid_policy_boundaries_and_named_image_digest(self):
         for limit in (1, 1000):
             manifest = copy.deepcopy(self.sandbox)

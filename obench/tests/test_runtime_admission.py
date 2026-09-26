@@ -55,19 +55,93 @@ class RuntimeAdmissionTests(unittest.TestCase):
         with patch.object(suite_run,'_verify_sandbox_runtime'):
             result=fixture._run_simulated(self.control,importer=imported)
         image=self.control.suite.sandbox.runtime_image
-        expected={'image':{'requested':image},'implementation':{admission.SCRIPTS[0]:'b'*64},
+        expected={'image':{'requested':image},'implementation':{admission.SCRIPTS[0]:'b'*64, admission.SCRIPTS[1]:'c'*64},
                   'models':[['gpt-5.6-terra-xhigh','gpt-5.6-terra','xhigh']]}
         (self.root/'boundary.json').write_text(json.dumps({'runtime_image':image,'probe_sha256':'b'*64}))
         for i in range(len(admission.CONTROLS)):
             (self.root/f'offline-{i}.log').write_text('synthetic offline control\n')
+        model_records = self.model_receipts(expected)
         files=[p for p in self.root.rglob('*') if p.is_file()]
         value={'schema':1,'kind':'repair-runtime-admission','passed':True,'fingerprint':expected,
                'offline_controls':{script:{'exit_code':0,'log':f'offline-{i}.log'} for i,script in enumerate(admission.CONTROLS)},
+               'model_controls':model_records,
                'authenticated_control':str(result.run_manifest_path.relative_to(self.root)),
                'evidence':{str(p.relative_to(self.root)):admission.digest(p) for p in files}}
         path=self.root/'admission.json'
         write_record(path,value)
         return path,expected,value
+
+    def model_receipt(self, expected, alias, record):
+        return {'status':'passed', 'cleanup_confirmed':True,
+            'live_inference':False, 'real_credentials':False, 'model_alias':alias,
+            'model':record['model'], 'effort':record['effort'],
+            'runtime_image':expected['image']['requested'], 'codex_version':'0.157.0',
+            'probe_sha256':expected['implementation'][admission.SCRIPTS[1]],
+            'actual_tool_mutation':True, 'tool_result_returned':True,
+            'final_response_present':True, 'request_count':2}
+
+    def model_receipts(self, expected):
+        records = admission.model_control_records(expected)
+        for alias, record in records.items():
+            path = self.root / record['receipt']
+            path.parent.mkdir(parents=True, exist_ok=True)
+            (self.root / record['log']).write_text('synthetic model control\n')
+            write_record(path, self.model_receipt(expected, alias, record))
+        return records
+
+    def test_each_selected_model_requires_bound_correct_offline_evidence(self):
+        expected = {'image':{'requested':'sha256:'+'a'*64},
+                    'implementation':{admission.SCRIPTS[1]:'c'*64},
+                    'models':[['gpt-6-sol-low','gpt-6-sol','low'],
+                              ['gpt-6-luna-max','gpt-6-luna','max']]}
+        records = self.model_receipts(expected)
+        evidence = {r[k]:'unused' for r in records.values() for k in ('log','receipt')}
+        admission.validate_model_controls(self.root, expected, records, evidence)
+        with self.assertRaisesRegex(admission.AdmissionError, 'every selected model'):
+            admission.validate_model_controls(self.root, expected, {}, evidence)
+        missing = dict(evidence)
+        del missing[records['gpt-6-luna-max']['receipt']]
+        with self.assertRaisesRegex(admission.AdmissionError, 'not bound'):
+            admission.validate_model_controls(self.root, expected, records, missing)
+        path = self.root / records['gpt-6-luna-max']['receipt']
+        original = json.loads(path.read_text())
+        for change in ({'effort':'low'}, {'model':'gpt-5.6-terra'}, {'status':'failed'},
+                       {'codex_version':'0.154.0'}, {'actual_tool_mutation':False}):
+            write_record(path, {**original, **change})
+            with self.subTest(change=change), self.assertRaisesRegex(admission.AdmissionError, 'execution treatment'):
+                admission.validate_model_controls(self.root, expected, records, evidence)
+        write_record(path, None)
+        with self.assertRaisesRegex(admission.AdmissionError, 'object'):
+            admission.validate_model_controls(self.root, expected, records, evidence)
+
+    def test_qualification_dispatches_a_probe_for_every_selected_pair_before_auth(self):
+        from types import SimpleNamespace
+        expected = {'image':{'requested':self.compiled.suite.sandbox.runtime_image},
+                    'implementation':{admission.SCRIPTS[1]:'c'*64},
+                    'models':[['gpt-6-sol-low','gpt-6-sol','low'],
+                              ['gpt-6-luna-max','gpt-6-luna','max']]}
+        records = admission.model_control_records(expected)
+        commands = []
+        def offline(command, **kwargs):
+            # The actual CLI/control runner is expensive and separately covered
+            # by Docker CI. Record its emitted argv and supply synthetic receipts.
+            if len(command)>1 and command[1] == admission.SCRIPTS[1]:
+                commands.append(command)
+                alias = command[command.index('--model')+1]
+                target = Path(command[command.index('--output-dir')+1])/'receipt.json'
+                target.parent.mkdir(parents=True, exist_ok=True)
+                write_record(target, self.model_receipt(expected, alias, records[alias]))
+        with patch.object(admission,'fingerprint',return_value=expected), \
+             patch.object(admission,'preflight_harbor_binary',return_value=SimpleNamespace()), \
+             patch.object(suite_run,'_harbor_python_interpreter',return_value=Path('/fake/python')), \
+             patch.object(admission.subprocess,'run',side_effect=offline), \
+             patch.object(admission,'prepare_control',side_effect=RuntimeError('stop before auth')):
+            with self.assertRaisesRegex(RuntimeError,'stop before auth'):
+                admission.qualify(self.compiled,self.root,'/fake/harbor','/never-read-auth')
+        self.assertEqual([c[c.index('--model')+1] for c in commands],
+                         ['gpt-6-sol-low','gpt-6-luna-max'])
+        self.assertEqual([Path(c[c.index('--output-dir')+1]).name for c in commands],
+                         ['tool-loop','tool-loop-1'])
 
     def test_matching_evidence_is_accepted_and_changed_runtime_refused(self):
         path,expected,value=self.receipt()
