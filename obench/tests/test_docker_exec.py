@@ -55,6 +55,7 @@ class TestBuildDockerCmd(unittest.TestCase):
         self.assertIn("/repo/obench/adapters:/bench/adapters:ro", joined)
         self.assertIn("/tmp/instr.txt:/bench/instruction.txt:ro", joined)
         self.assertIn("entry.py:/bench/entry.py:ro", joined)
+        self.assertIn(f"{docker_exec.CODEX_MODELS_PATH}:/bench/codex_models.py:ro", cmd)
         self.assertIn("HOME=/root", joined)
 
     def test_task_container_workdir_mount(self):
