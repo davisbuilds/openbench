@@ -45,6 +45,7 @@ from .bump_clis import (DOCKERFILE as CLI_PINS_DOCKERFILE, PIN_BY_KEY,
 from .failure_class import STALLED, classify_failure, classify_failure_reason
 from . import usage_evidence
 from .config import load_config
+from .codex_models import SOL_LUNA_PAIRS
 from .paths import (PACKAGE_DIR, SOURCE_ROOT, TasksDirError,
                     default_adapters_dir, default_results_path,
                     default_tasks_dir, docker_workdir_parent,
@@ -722,7 +723,8 @@ def proxy_supported_for_cell(harness, model, adapters_dir=None):
         # eligible open set is derived from the adapter's OPEN_MODELS registry
         # (see _adapter_open_models); PROXY_CHAT_MODELS is kept as a static
         # floor for direct-provider routes that predate the registry.
-        return (model in PROXY_CODEX_SUBSCRIPTION_MODELS
+        return (model in SOL_LUNA_PAIRS
+                or model in PROXY_CODEX_SUBSCRIPTION_MODELS
                 or model in PROXY_CHAT_MODELS
                 or model in _adapter_open_models("codex", adapters_dir))
     if harness == "pi":
@@ -745,6 +747,9 @@ def proxy_supported_for_cell(harness, model, adapters_dir=None):
 
 def _proxy_sampling_for_cell(harness, model):
     """Non-secret sampling metadata requested by the adapter, for ledger context."""
+    if harness == "codex" and model in SOL_LUNA_PAIRS:
+        canonical, effort = SOL_LUNA_PAIRS[model]
+        return {"model": canonical, "reasoning_effort": effort}
     subscription_models = {
         "gpt-5.5-medium": "gpt-5.5",
         "gpt-5.6-sol": "gpt-5.6-sol",
@@ -2690,6 +2695,16 @@ def main(argv=None):
             harnesses.append(name)
     if not harnesses:
         parser.error("at least one --harness or --candidate is required")
+
+    if args.exec_mode == "docker":
+        from .docker_exec import require_supported_legacy_model
+        try:
+            for name in harnesses:
+                candidate = candidates.get(name)
+                require_supported_legacy_model(
+                    (candidate.base_adapter if candidate else None) or name, args.model)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     # Docker fallback can turn a nominal Docker invocation into a mixed run, so
     # it must satisfy the same host gate. Every Docker invocation also checks

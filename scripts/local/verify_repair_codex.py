@@ -27,12 +27,13 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 from obench.harbor_agents.sandbox_codex import CLI_VERSION, SandboxCodex
+from obench.codex_models import REPAIR_MODEL_PAIRS
 from obench.harbor_sandbox import RepairSandbox, docker_bytes, validate_image
 
 MARKER = "OPENBENCH_OFFLINE_CODEX_TOOL_PROBE"
 FINAL = "Offline tool transport verified."
 FAKE = r'''
-import http.server,http.client,json,os,signal,threading
+import http.server,http.client,json,os,signal,threading,sys
 from pathlib import Path
 from obench.sandbox_gateway import BrokerServer,GatewayConfig,AuthCredentials,UpstreamStream
 import obench.sandbox_gateway as gateway
@@ -67,7 +68,7 @@ def transport(body,headers,timeout):
  connection=http.client.HTTPConnection(*provider.server_address,timeout=timeout)
  connection.request('POST','/fake-provider',body,headers)
  return UpstreamStream(connection,connection.getresponse())
-broker=BrokerServer('/run/openbench-model/gateway.sock',GatewayConfig('gpt-5.6-terra','xhigh',3,8*1024*1024,30),AuthCredentials('offline-fake-token','offline-fake-account'),transport=transport)
+broker=BrokerServer('/run/openbench-model/gateway.sock',GatewayConfig(sys.argv[1],sys.argv[2],3,8*1024*1024,30),AuthCredentials('offline-fake-token','offline-fake-account'),transport=transport)
 Path('/run/private/fake.pid').write_text(str(os.getpid()))
 def stop(*_): threading.Thread(target=broker.stop,daemon=True).start()
 signal.signal(signal.SIGTERM,stop)
@@ -82,6 +83,7 @@ finally:
 
 
 async def run(args):
+    model, effort = REPAIR_MODEL_PAIRS[args.model]
     output = args.output_dir.resolve()
     if not output.is_relative_to((REPO / "results").resolve()):
         raise ValueError("--output-dir must be under the repository's ignored results directory")
@@ -92,6 +94,7 @@ async def run(args):
     receipt = {"schema": 1, "scope": "actual pinned Linux Codex adapter, tool loop, relay, gateway and environment; explicitly injected fake provider transport",
                "live_inference": False, "real_credentials": False, "production_gateway_lifecycle": False,
                "runtime_image": image, "codex_version": CLI_VERSION,
+               "model_alias": args.model, "model": model, "effort": effort,
                "probe_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
     env = None
     temporary = tempfile.TemporaryDirectory(prefix="obench-codex-offline-")
@@ -106,7 +109,9 @@ async def run(args):
             trial_paths=paths, task_env_config=EnvironmentConfig(network_mode="no-network", cpus=1, memory_mb=1024),
             network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), runtime_image=image)
 
-        async def fake_start(self, *_):
+        async def fake_start(self, actual_model, actual_effort, *_):
+            if (actual_model, actual_effort) != (model, effort):
+                raise RuntimeError("adapter passed a different model/effort to the broker")
             # Verify the actual loaded broker bytes before injecting the
             # test-only transport. Never call production start_gateway.
             expected = hashlib.sha256((REPO / "obench/sandbox_gateway.py").read_bytes()).hexdigest()
@@ -124,7 +129,7 @@ async def run(args):
             await docker_bytes("exec", "-i", self._containers["broker"], "python3", "-c",
                 "import sys;open('/run/private/fake.py','wb').write(sys.stdin.buffer.read())", data=FAKE.encode())
             await docker_bytes("exec", "--detach", self._containers["broker"], "sh", "-c",
-                "exec python3 /run/private/fake.py > /run/private/fake.log 2>&1")
+                "exec python3 /run/private/fake.py " + shlex.quote(model) + " " + shlex.quote(effort) + " > /run/private/fake.log 2>&1")
             for _ in range(100):
                 ready = await docker_bytes("exec", self._containers["broker"], "python3", "-c",
                     "import os;print(os.path.exists('/run/openbench-model/gateway.sock'))")
@@ -167,8 +172,8 @@ async def run(args):
             return await original_seal()
 
         env.seal = observed_seal
-        agent = SandboxCodex(logs_dir=paths.agent_dir, model_name="gpt-5.6-terra", version=CLI_VERSION,
-            reasoning_effort="xhigh", extra_env={"CODEX_AUTH_JSON_PATH": str(auth),
+        agent = SandboxCodex(logs_dir=paths.agent_dir, model_name=model, version=CLI_VERSION,
+            reasoning_effort=effort, extra_env={"CODEX_AUTH_JSON_PATH": str(auth),
                 "OPENBENCH_CODEX_AUTH_RETURN_PATH": str(root / "return.json")})
         await env.start()
         await agent.setup(env)
@@ -181,8 +186,12 @@ async def run(args):
         if FINAL not in text or MARKER not in source:
             raise RuntimeError("actual Codex tool execution or final response was not observed")
         ast.parse(source)
+        if f"Model metadata for `{model}` not found" in text:
+            raise RuntimeError("pinned CLI lacks the selected model metadata")
         if len(requests) != 2 or not any(item.get("type") == "custom_tool_call_output" for item in requests[-1]["input"]):
             raise RuntimeError("expected the actual two-request tool loop")
+        if any(request.get("model") != model or request.get("reasoning", {}).get("effort") != effort for request in requests):
+            raise RuntimeError("provider request changed the selected model/effort")
         ledger = [json.loads(line) for line in (output / "gateway.jsonl").read_text().splitlines()]
         if ledger[-1] != {"event": "stopped", "role": "offline-fake-broker", "clean": True}:
             raise RuntimeError("injected broker did not drain cleanly")
@@ -210,6 +219,7 @@ def main():
     parser.add_argument("--runtime-image", required=True)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--task", type=Path, default=REPO / "benchmarks/harbor/local/dojo-evidence-pr60-v3")
+    parser.add_argument("--model", choices=sorted(REPAIR_MODEL_PAIRS), default="gpt-5.6-terra-xhigh")
     asyncio.run(run(parser.parse_args()))
 
 

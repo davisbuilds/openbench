@@ -30,6 +30,8 @@ class HarborProfileTests(unittest.TestCase):
                         "gpt-5.6-luna",
                         "gpt-5.6-sol",
                         "gpt-5.6-terra",
+                        "gpt-6-luna",
+                        "gpt-6-sol",
                     ),
                 ),
                 (
@@ -122,6 +124,15 @@ class HarborProfileTests(unittest.TestCase):
                     )
                 else:
                     self.assertIsNone(config)
+
+    def test_sol_luna_stock_profiles_pin_cli_effort_and_normal_tier(self):
+        for model, effort in [('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
+            with self.subTest(model=model):
+                profile = resolve_harbor_profile('codex', model)
+                self.assertEqual(profile.harbor_model_name, model)
+                self.assertEqual(profile.cli_version, '0.157.0')
+                self.assertEqual(dict(profile.flags)['reasoning_effort'], effort)
+                self.assertEqual(profile.agent_kwargs()['config']['service_tier'], 'default')
 
     def test_canonical_model_identity_preserves_exact_profile_lock(self):
         expected = (

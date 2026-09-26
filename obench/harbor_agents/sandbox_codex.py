@@ -14,8 +14,11 @@ import shlex
 import shutil
 import stat
 
-CLI_VERSION = "0.154.0"
-MODELS = {"gpt-5.6-terra": "xhigh", "gpt-5.6-luna": "max"}
+from obench.codex_models import REPAIR_MODEL_PAIRS, SOL_LUNA_DEFAULTS
+
+CLI_VERSION = "0.157.0"
+# Defaults retained for trajectory diagnostics; admission uses exact pairs.
+MODELS = {"gpt-5.6-terra": "xhigh", "gpt-5.6-luna": "max", **SOL_LUNA_DEFAULTS}
 
 
 def _restore_explicit_zero_totals(metrics, session_dir):
@@ -94,7 +97,7 @@ def _build_agent_class(codex):
             kwargs["config"] = codex_config()
             kwargs["web_search"] = "disabled"
             super().__init__(*args, **kwargs)
-            if self.model_name not in MODELS or self._resolved_flags.get("reasoning_effort") != MODELS[self.model_name]:
+            if (self.model_name, self._resolved_flags.get("reasoning_effort")) not in REPAIR_MODEL_PAIRS.values():
                 raise ValueError("repair sandbox model/effort pair is not admitted")
             if getattr(self, "mcp_servers", None) or getattr(self, "_mcp_servers", None):
                 raise ValueError("repair sandbox forbids external MCP servers")
@@ -169,7 +172,7 @@ def _build_agent_class(codex):
                 raise RuntimeError("trusted staged auth paths are required")
             source, destination = staged_auth_paths(auth, returned)
             try:
-                await environment.start_gateway(self.model_name, MODELS[self.model_name], str(source))
+                await environment.start_gateway(self.model_name, self._resolved_flags["reasoning_effort"], str(source))
                 await super().run(instruction, environment, context)
             finally:
                 # RepairSandbox seals at the first log/artifact export, outside

@@ -1133,16 +1133,27 @@ def _validate_suite_sandbox_policy(manifest):
     ):
         raise ValueError("suite manifest sandbox policy is invalid")
     hashes = policy["implementation_sha256"]
-    if (
-        not isinstance(hashes, dict)
-        or set(hashes) not in (
-            {"obench.harbor_sandbox", "obench.sandbox_gateway", "obench.sandbox_grading", "obench.harbor_agents.sandbox_codex"},
-            {"obench.harbor_sandbox", "obench.sandbox_gateway", "obench.sandbox_grading", "obench.harbor_agents.sandbox_codex",
-             "obench.repair_worker", "obench.repair_grading", "obench.repair_oracles.registry", "obench.repair_oracles.agentmonitor"},
-        )
-        or not all(_sha256_hex(value) for value in hashes.values())
-    ):
+    base_modules = {"obench.harbor_sandbox", "obench.sandbox_gateway", "obench.sandbox_grading", "obench.harbor_agents.sandbox_codex"}
+    registered_modules = base_modules | {
+        "obench.repair_worker", "obench.repair_grading", "obench.repair_oracles.registry", "obench.repair_oracles.agentmonitor"}
+    # Retain historical seals, but every new model treatment must bind the
+    # shared registry that now selects its canonical model and effort.
+    arms = manifest.get("arms")
+    if not isinstance(arms, list) or not arms or not all(isinstance(arm, dict) for arm in arms):
+        raise ValueError("suite manifest sandbox arms are invalid")
+    needs_registry = any(
+        isinstance(arm.get("canonical_model"), str)
+        and arm["canonical_model"].startswith(("gpt-6-sol", "gpt-6-luna"))
+        for arm in arms
+    )
+    accepted = (base_modules | {"obench.codex_models"},
+                registered_modules | {"obench.codex_models"})
+    if not needs_registry:
+        accepted += (base_modules, registered_modules)
+    if (not isinstance(hashes, dict) or set(hashes) not in accepted
+            or not all(_sha256_hex(value) for value in hashes.values())):
         raise ValueError("suite manifest sandbox implementation hashes are invalid")
+
 
 
 def _reject_public_manifest_paths(value):

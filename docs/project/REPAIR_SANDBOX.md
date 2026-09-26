@@ -9,6 +9,12 @@ The native calibration exposed reference/checker files from another worktree;
 those scores remain withdrawn as difficulty evidence. HOME isolation did not
 restrict reads or SSH. The new lane enforces those boundaries in Docker.
 
+The 2026-09-26 Sol/Luna support update moves the current runtime to Codex
+0.157.0 because 0.154.0 lacks their model metadata. Both new models pass the
+credential-free tool-loop probe on 0.157.0. Prior authenticated receipts remain
+historical evidence; the updated runtime needs fresh qualification for every
+selected campaign model/effort before scored execution.
+
 ## Execution boundary
 
 ```text
@@ -35,7 +41,7 @@ hold source and logs. A third volume exposes only the broker socket, read-only
 to the solver. The relay contains no credentials. Bypassing or replacing it
 still grants only the broker's restricted inference capability.
 
-The runtime build context contains the pinned dependencies, Codex 0.154.0, and
+The runtime build context contains the pinned dependencies, Codex 0.157.0, and
 public gateway/relay code. It contains no task, reference solution, grader,
 repository history, or personal configuration. The trusted environment copies
 only `environment/app/` into a fresh source volume before execution. Task-authored

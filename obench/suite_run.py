@@ -23,6 +23,7 @@ import tomllib
 from typing import Any, Callable
 
 from .config import OpenBenchConfig, require_suite_config
+from .codex_models import REPAIR_MODEL_PAIRS
 from .harbor_agents._subscription import staged_subscription_auth
 from .harbor_job import (
     ConcurrencyPolicy,
@@ -220,9 +221,9 @@ def compile_suite(
         if suite.sandbox is not None and (
             not isinstance(profile, StockProfileSpec) or profile.harness != "codex"
             or arm.harness != "codex"
-            or arm.model not in {"gpt-5.6-terra-xhigh", "gpt-5.6-luna-max"}
+            or arm.model not in REPAIR_MODEL_PAIRS
         ):
-            raise SuiteRunError("repair sandbox requires stock Codex Terra-xhigh or Luna-max")
+            raise SuiteRunError("repair sandbox requires a supported stock Codex model/effort pair")
         if isinstance(profile, StockProfileSpec) and arm.harness != profile.harness:
             raise SuiteRunError(
                 f"arm {arm.id!r} harness {arm.harness!r} does not match "
@@ -238,10 +239,8 @@ def compile_suite(
                     f"harness identities {previous_harness!r} and "
                     f"{arm.harness!r}"
                 )
-        sandbox_models = {"gpt-5.6-terra-xhigh": ("gpt-5.6-terra", "xhigh"),
-                          "gpt-5.6-luna-max": ("gpt-5.6-luna", "max")}
         agent = replace(
-            compile_profile(profile, sandbox_models[arm.model][0] if suite.sandbox else arm.model),
+            compile_profile(profile, REPAIR_MODEL_PAIRS[arm.model][0] if suite.sandbox else arm.model),
             profile_id=arm.id,
             arm_id=arm.id,
             canonical_harness=arm.harness,
@@ -252,7 +251,7 @@ def compile_suite(
             agent = replace(
                 agent,
                 import_path="obench.harbor_agents.sandbox_codex:SandboxCodex",
-                kwargs={"version": "0.154.0", "reasoning_effort": sandbox_models[arm.model][1]},
+                kwargs={"version": "0.157.0", "reasoning_effort": REPAIR_MODEL_PAIRS[arm.model][1]},
                 # Credential paths are consumed by the trusted adapter only.
                 # The adapter must never upload them to the solver.
                 extra_allowed_hosts=(),
@@ -1166,7 +1165,7 @@ def _registered_oracle_id(item):
 
 def _sandbox_implementation_hashes(*, registered=False) -> dict[str, str]:
     package = Path(__file__).resolve().parent
-    modules = ("harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
+    modules = ("codex_models", "harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
     if registered:
         from .repair_oracles.registry import MODULES
         modules=tuple(sorted(set(modules)|{name.removeprefix("obench.") for name in MODULES}))

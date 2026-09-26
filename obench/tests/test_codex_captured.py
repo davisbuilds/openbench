@@ -90,6 +90,21 @@ print(json.dumps({'type':'turn.completed','usage':{}}))
                 {'canonical_model':'gpt-6-astra', 'reasoning_effort':effort, 'is_open':False})
         self.assertEqual(codex.model_identity('gpt-6-astra')['reasoning_effort'], 'medium')
 
+    def test_sol_luna_efforts_reach_cli_and_result_identity(self):
+        for model, default in [('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
+            for suffix, effort in [('', default)] + [('-' + e, e) for e in ('low', 'medium', 'high', 'xhigh', 'max')]:
+                alias = model + suffix
+                with self.subTest(alias=alias):
+                    result = codex.run('fixture', str(self.root), alias, 5,
+                                       env_override=self.env, replace_env=True)
+                    self.assertTrue(result['completed'], result.get('error'))
+                    argv = json.loads(result['final_message'])['argv']
+                    self.assertEqual(argv[argv.index('-m') + 1], model)
+                    self.assertIn(f'model_reasoning_effort="{effort}"', argv)
+                    self.assertIn('service_tier="default"', argv)
+                    self.assertEqual(codex.model_identity(alias), {
+                        'canonical_model': model, 'reasoning_effort': effort, 'is_open': False})
+
     def test_evidence_preserves_tool_lifecycle_and_final_message(self):
         events = [
             {'type':'item.completed','item':{'type':'agent_message','text':'earlier'}},
@@ -118,16 +133,17 @@ print(json.dumps({'type':'turn.completed','usage':{}}))
                  'phase':'commentary', 'text':'Working on it'}}
         self.assertIsNone(codex._parse_evidence(json.dumps(event))['final_message'])
 
-    def test_astra_missing_cache_writes_are_unknown(self):
+    def test_gpt6_missing_cache_writes_are_unknown(self):
         import subprocess
         event = {'type':'turn.completed', 'usage':{'input_tokens':20,
                  'cached_input_tokens':5, 'output_tokens':3, 'reasoning_output_tokens':1}}
         proc = subprocess.CompletedProcess(['codex'], 0, json.dumps(event), '')
-        with mock.patch.object(codex.subprocess, 'run', return_value=proc):
-            result = codex.run('fixture', str(self.root), 'gpt-6-astra', 5,
-                               env_override=self.env, replace_env=True)
-        self.assertEqual(result['token_basis'], 'estimated')
-        self.assertIsNone(result['tokens_cache_write'])
+        for model in ('gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna'):
+            with self.subTest(model=model), mock.patch.object(codex.subprocess, 'run', return_value=proc):
+                result = codex.run('fixture', str(self.root), model, 5,
+                                   env_override=self.env, replace_env=True)
+                self.assertEqual(result['token_basis'], 'estimated')
+                self.assertIsNone(result['tokens_cache_write'])
 
     def test_evidence_rejects_truncated_and_unfinished_streams(self):
         message = json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'done'}})

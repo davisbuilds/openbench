@@ -59,6 +59,25 @@ class SandboxManifestTests(unittest.TestCase):
         del manifest["sandbox"]["request_timeout_seconds"]
         self.validate(manifest)
 
+    def test_legacy_registry_free_seal_is_readable_but_new_models_require_registry(self):
+        manifest = copy.deepcopy(self.sandbox)
+        del manifest["sandbox"]["implementation_sha256"]["obench.codex_models"]
+        self.validate(manifest)
+        for model in ('gpt-6-sol-low', 'gpt-6-luna-max'):
+            manifest["arms"][0]["canonical_model"] = model
+            with self.subTest(model=model), self.assertRaisesRegex(ValueError, "sandbox implementation"):
+                stats._validate_suite_sandbox_policy(manifest)
+            bound = copy.deepcopy(manifest)
+            bound["sandbox"]["implementation_sha256"]["obench.codex_models"] = "a" * 64
+            stats._validate_suite_sandbox_policy(bound)
+
+    def test_malformed_arms_raise_validation_errors(self):
+        for arms in (None, 'invalid', {}, [], [None], [1], ['invalid']):
+            manifest = copy.deepcopy(self.sandbox)
+            manifest['arms'] = arms
+            with self.subTest(arms=arms), self.assertRaises(ValueError):
+                self.validate(manifest)
+
     def test_valid_policy_boundaries_and_named_image_digest(self):
         for limit in (1, 1000):
             manifest = copy.deepcopy(self.sandbox)
@@ -102,7 +121,7 @@ class SandboxManifestTests(unittest.TestCase):
                     manifest["sandbox"]["implementation_sha256"][name] = value
                     with self.assertRaisesRegex(ValueError, "sandbox"):
                         self.validate(manifest)
-        for hashes in ({key: value for key, value in original.items() if key != next(iter(original))},
+        for hashes in ({key: value for key, value in original.items() if key != "obench.harbor_sandbox"},
                        {**original, "obench.extra": "a" * 64}):
             manifest = copy.deepcopy(self.sandbox)
             manifest["sandbox"]["implementation_sha256"] = hashes

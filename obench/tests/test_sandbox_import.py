@@ -28,14 +28,15 @@ class SandboxImportTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
 
-    def fixture(self, *, rejected=False):
+    def fixture(self, *, rejected=False, cli_version="0.154.0", model="gpt-5.6-terra", effort="xhigh"):
+        agent = {**AGENT, "model_name": model, "kwargs": {"version": cli_version, "reasoning_effort": effort}}
         score = 0.0 if rejected else 1.0
         fixture = GoldenHarborJob(self.root / 'job', specs=[{
             'name': 'dojo__one', 'task': 'dojo-evidence-pr60-v3',
             'id': '00000000-0000-0000-0000-000000000001',
             'score': score, 'offset': 0,
         }])
-        fixture.set_custom_agent(0, AGENT, reported_name='codex')
+        fixture.set_custom_agent(0, agent, reported_name='codex')
         trial = fixture.trial()
         lock = json.loads((trial / 'lock.json').read_text())
         lock['environment'].pop('type')
@@ -46,12 +47,12 @@ class SandboxImportTests(unittest.TestCase):
         _write_json(trial / 'lock.json', lock)
         edit_json(fixture.root / 'lock.json', lambda value: value.update(trials=[lock]))
         result = json.loads((trial / 'result.json').read_text())
-        result['agent_info']['version'] = '0.154.0'
+        result['agent_info']['version'] = cli_version
         result['config']['environment'] = lock['environment']
         result['config']['verifier'] = lock['verifier']
         _write_json(trial / 'result.json', result)
         edit_json(trial / 'agent/trajectory.json',
-                  lambda value: value['agent'].update(version='0.154.0'))
+                  lambda value: value['agent'].update(version=cli_version))
         binding = {
             'scheme': 3, 'schema': 'openbench-isolated-repair-task-v1',
             'task_config': {'task': {'name': 'openbench/dojo-evidence-pr60-v3'}},
@@ -62,9 +63,11 @@ class SandboxImportTests(unittest.TestCase):
             binding, sort_keys=True, separators=(',', ':')).encode()).hexdigest()}
         edit_json(trial / 'verifier/openbench-verifier-evidence.json',
                   lambda value: value.update(openbench_task_content_digest=digest))
-        ledger = (b'{"event":"ready","role":"broker"}\n'
-                  b'{"event":"request","model":"gpt-5.6-terra","effort":"xhigh"}\n'
-                  b'{"event":"stopped","role":"broker","clean":true}\n')
+        ledger = ('\n'.join(json.dumps(row) for row in [
+            {"event": "ready", "role": "broker"},
+            {"event": "request", "model": model, "effort": effort},
+            {"event": "stopped", "role": "broker", "clean": True},
+        ]) + '\n').encode()
         (trial / 'verifier/sandbox-gateway.jsonl').write_bytes(ledger)
         source_hash = hashlib.sha256((trial / 'artifacts/workspace/answer.txt').read_bytes()).hexdigest()
         receipt = {
@@ -89,8 +92,8 @@ class SandboxImportTests(unittest.TestCase):
         _write_json(trial / 'verifier/sandbox-grading.json', receipt)
         fixture.sync_aggregate()
         plan = fixture.write_comparison_plan(
-            attempts=1, arms=[_comparison_arm('isolated', AGENT, canonical_harness='codex')],
-            agents=[AGENT])
+            attempts=1, arms=[_comparison_arm('isolated', agent, canonical_harness='codex')],
+            agents=[agent])
         return fixture, plan
 
     def import_fixture(self, fixture, plan):
@@ -108,6 +111,25 @@ class SandboxImportTests(unittest.TestCase):
                          hashlib.sha256(receipt.read_bytes()).hexdigest())
         self.assertEqual(rows[0]['candidate_provenance']['sandbox_gateway_module_sha256'], '4' * 64)
         self.assertEqual(len((self.root / 'rows.jsonl').read_text().splitlines()), 1)
+
+    def test_new_cli_pin_imports_without_invalidating_historical_pin(self):
+        fixture, plan = self.fixture(cli_version='0.157.0')
+        rows = self.import_fixture(fixture, plan)
+        self.assertEqual(rows[0]['score'], 1.0)
+
+    def test_sol_luna_import_require_new_cli_and_preserve_model_identity(self):
+        for model, effort in [('gpt-6-sol', 'low'), ('gpt-6-luna', 'max')]:
+            for version in ('0.154.0', '0.157.0'):
+                with self.subTest(model=model, version=version), tempfile.TemporaryDirectory() as directory:
+                    self.root = Path(directory)
+                    fixture, plan = self.fixture(cli_version=version, model=model, effort=effort)
+                    if version == '0.154.0':
+                        with self.assertRaisesRegex(HarborResultsError, 'GPT-6 Sol/Luna requires'):
+                            self.import_fixture(fixture, plan)
+                    else:
+                        rows = self.import_fixture(fixture, plan)
+                        self.assertEqual(rows[0]['model'], model)
+                        self.assertEqual(rows[0]['score'], 1.0)
 
     def test_rejected_source_imports_as_wrong_answer_without_workspace(self):
         fixture, plan = self.fixture(rejected=True)

@@ -55,7 +55,16 @@ class TestBuildDockerCmd(unittest.TestCase):
         self.assertIn("/repo/obench/adapters:/bench/adapters:ro", joined)
         self.assertIn("/tmp/instr.txt:/bench/instruction.txt:ro", joined)
         self.assertIn("entry.py:/bench/entry.py:ro", joined)
+        self.assertIn(f"{docker_exec.CODEX_MODELS_PATH}:/bench/codex_models.py:ro", cmd)
         self.assertIn("HOME=/root", joined)
+
+    def test_gpt6_aliases_are_rejected_before_legacy_container_preflight(self):
+        self.assertIsNone(docker_exec.require_supported_legacy_model('codex', 'gpt-5.6-terra'))
+        for model in ('gpt-6-sol-low', 'gpt-6-luna-max'):
+            with self.subTest(model=model), mock.patch.object(docker_exec, 'preflight', side_effect=AssertionError('Docker must not start')):
+                with self.assertRaisesRegex(ValueError, 'legacy Docker'):
+                    docker_exec.run_in_container('codex', 'fixture', '/tmp/wd', model, 10,
+                                                 '/repo/obench/adapters', 'legacy:image')
 
     def test_task_container_workdir_mount(self):
         cmd = docker_exec.build_docker_cmd(

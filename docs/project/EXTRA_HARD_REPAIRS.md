@@ -18,6 +18,37 @@ and fresh screening of this changed treatment. See the
 Retain original scores and timeout classifications; any revised task or runtime
 starts a new treatment. Detailed trial evidence remains local-only.
 
+## Next screening lineup
+
+User direction, 2026-09-26: retain GPT-5.6 Terra, add GPT-6 Sol, and replace
+GPT-5.6 Luna with GPT-6 Luna for future calibration. Historical model identities,
+specs and sealed results remain unchanged; the new lineup is a fresh treatment.
+
+Model support precedes AM123 admission and the next screen. Native
+Codex and the isolated repair lane accept explicit `low`, `medium`, `high`,
+`xhigh`, and `max` aliases for both GPT-6 models. Bare names follow local Codex
+metadata: Sol defaults to low and Luna to medium; these are adapter defaults,
+not selected campaign settings. Ordinary Harbor stock profiles accept the bare
+names and pin Codex 0.157.0, while historical stock profiles retain their original pin.
+The isolated lane also moves to 0.157.0: 0.154.0 lacks Sol/Luna metadata and
+falls back to a different tool interface. Credential-free probes reproduce the
+failure on 0.154.0 and pass both new model tool loops on 0.157.0. Historical
+0.154.0 results remain importable; new runs require fresh runtime qualification.
+The old general-purpose legacy Docker image remains pinned for historical arms
+and rejects Sol/Luna; use the repair lane or native Codex 0.157.0 instead.
+Qualification runs and binds an offline tool-loop receipt for every selected
+model/effort, followed by the model-specific authenticated controls.
+
+The user explicitly deferred campaign effort selection. Freeze those settings
+later and run matching authenticated controls before scored trials. Existing
+admissions cannot authorize the changed model/runtime treatment. Three attempts
+across the proposed three tasks and three models would total 27 trials once all
+routes/tasks are admitted; this is not a confirmed launch schedule.
+
+API capability references: [Sol](https://developers.openai.com/api/docs/models/gpt-6-sol)
+and [Luna](https://developers.openai.com/api/docs/models/gpt-6-luna). API support
+alone does not prove account access through the pinned Codex execution route.
+
 ## What should make these tasks hard
 
 The useful unit is a **repair trap**: a plausible local fix restores one
@@ -134,8 +165,8 @@ not a missing event, and a convenient six-attempt subset is not confirmation.
 
 ## Remaining admission before live repeats
 
-The opt-in `repair-v1` suite lane now pins Codex 0.154.0, preserves explicit
-Terra-xhigh/Luna-max identity, enforces a model-only gateway, and grades Dojo v3
+The opt-in `repair-v1` suite lane now pins Codex 0.157.0, preserves explicit
+model/effort identity, enforces a model-only gateway, and grades Dojo v3
 outside candidate authority. Task scheme 3 binds the external oracle and task
 inputs. Existing stock profiles remain unchanged. See the
 [implementation and control commands](REPAIR_SANDBOX.md).

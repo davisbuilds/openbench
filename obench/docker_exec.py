@@ -37,6 +37,7 @@ from types import SimpleNamespace
 
 from .auth_persist import AUTH_PERSIST, auth_file_lease, try_persist_auth_file
 from .paths import PACKAGE_DIR, SOURCE_ROOT
+from .codex_models import SOL_LUNA_PAIRS
 
 HERE = PACKAGE_DIR
 REPO_ROOT = SOURCE_ROOT
@@ -49,6 +50,7 @@ AUTH_PERSIST_PATH = os.path.join(HERE, "auth_persist.py")
 # leaving it out made every codex docker cell die on `ModuleNotFoundError:
 # open_models_config` (the flat-bench import failure this list exists to prevent).
 OPEN_MODELS_CONFIG_PATH = os.path.join(HERE, "open_models_config.py")
+CODEX_MODELS_PATH = os.path.join(HERE, "codex_models.py")
 GATEWAY_SPEC_PATH = os.path.join(HERE, "gateway_spec.py")
 GATEWAY_PROFILES_PATH = os.path.join(HERE, "gateway_profiles.py")
 # Pinned per-model context/output limits. The pi adapter reads this INSIDE the
@@ -490,6 +492,7 @@ def build_docker_cmd(harness, workdir, model, timeout_s, adapters_dir, image,
         "-v", f"{ENTRY_PATH}:/bench/entry.py:ro",
         "-v", f"{AUTH_PERSIST_PATH}:/bench/auth_persist.py:ro",
         "-v", f"{OPEN_MODELS_CONFIG_PATH}:/bench/open_models_config.py:ro",
+        "-v", f"{CODEX_MODELS_PATH}:/bench/codex_models.py:ro",
         "-v", f"{GATEWAY_SPEC_PATH}:/bench/gateway_spec.py:ro",
         "-v", f"{GATEWAY_PROFILES_PATH}:/bench/gateway_profiles.py:ro",
         "-v", f"{MODEL_LIMITS_PATH}:/bench/model_limits.json:ro",
@@ -605,6 +608,12 @@ def image_digest(image):
     return None
 
 
+def require_supported_legacy_model(harness, model):
+    if harness in {"codex", "codex_v1", "codex_v2"} and model in SOL_LUNA_PAIRS:
+        raise ValueError("GPT-6 Sol/Luna are unsupported in the legacy Docker image; "
+                         "use a qualified repair-v1 suite or native Codex 0.157.0")
+
+
 def run_in_container(harness, instruction, workdir, model, timeout_s,
                      adapters_dir, image=DEFAULT_IMAGE, extra_docker_args=None,
                      extra_env=None, candidate_path=None, base_harness=None,
@@ -620,6 +629,7 @@ def run_in_container(harness, instruction, workdir, model, timeout_s,
     failed result dict (``completed=False``), never raised, so the runner loop
     keeps going.
     """
+    require_supported_legacy_model(base_harness or harness, model)
     env_setup_start = time.monotonic()
     instruction_path = None
     candidate_spec_path = None

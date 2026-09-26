@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import json
 from typing import Any
 
+from .codex_models import SOL_LUNA_DEFAULTS
+
 
 HARBOR_VERSION = "0.20.0"
 AUTH_STRATEGY_OAUTH = "oauth"
@@ -34,6 +36,7 @@ _MODEL_PREFIX_BY_PROFILE = {
 
 _MODEL_IDS_BY_HARNESS = {
     "codex": {
+        **{model: model for model in SOL_LUNA_DEFAULTS},
         "gpt-5.5-medium": "gpt-5.5",
         "gpt-5.6-sol": "gpt-5.6-sol",
         "gpt-5.6-terra": "gpt-5.6-terra",
@@ -312,7 +315,7 @@ def _codex_config(model: str) -> str:
             "multi_agent": False,
         },
     }
-    if model.startswith("gpt-5.6-"):
+    if model.startswith(("gpt-5.6-", "gpt-6-")):
         config["service_tier"] = "default"
     return json.dumps(config, sort_keys=True, separators=(",", ":"))
 
@@ -358,7 +361,7 @@ def resolve_harbor_profile(
     model_id = model_ids[model]
     if harness == "codex":
         harbor_model = model_id
-        flags = (("reasoning_effort", "medium"),)
+        flags = (("reasoning_effort", SOL_LUNA_DEFAULTS.get(model, "medium")),)
         config_json = _codex_config(model)
     elif harness == "pi":
         harbor_model = f"openai-codex/{model_id}"
@@ -383,7 +386,8 @@ def resolve_harbor_profile(
         model=model,
         semantic_name=harness,
         agent_import_path=_IMPORTS[harness],
-        cli_version=_VERSIONS[harness],
+        cli_version=("0.157.0" if harness == "codex" and model in SOL_LUNA_DEFAULTS
+                     else _VERSIONS[harness]),
         harbor_model_name=harbor_model,
         flags=flags,
         config_json=config_json,

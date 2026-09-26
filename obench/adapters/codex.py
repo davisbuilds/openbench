@@ -62,9 +62,11 @@ import subprocess
 import tempfile
 
 try:
+    from obench.codex_models import SOL_LUNA_PAIRS
     from obench.auth_persist import auth_file_lease, auth_lease_proves_path
     from obench.open_models_config import merge_open_models
 except ImportError:  # file-path / Docker mount layout
+    from codex_models import SOL_LUNA_PAIRS
     from auth_persist import auth_file_lease, auth_lease_proves_path
     from open_models_config import merge_open_models
 
@@ -121,6 +123,7 @@ def _num(value):
 # The runtime-only ultra option delegates automatically and is not a stock arm.
 # canonical model name -> codex `-m` model string
 MODELS = {
+    **{alias: pair[0] for alias, pair in SOL_LUNA_PAIRS.items()},
     "gpt-6-astra": "gpt-6-astra",
     **{f"gpt-6-astra-{effort}": "gpt-6-astra"
        for effort in ("low", "medium", "high", "xhigh", "max")},
@@ -134,6 +137,7 @@ MODELS = {
 
 # canonical model name -> reasoning effort passed via `-c model_reasoning_effort`
 _EFFORT = {
+    **{alias: pair[1] for alias, pair in SOL_LUNA_PAIRS.items()},
     "gpt-6-astra": "medium",
     **{f"gpt-6-astra-{effort}": effort
        for effort in ("low", "medium", "high", "xhigh", "max")},
@@ -148,6 +152,7 @@ _EFFORT = {
 # canonical model name -> service tier override. GPT-5.6 Sol must stay on the
 # normal/non-fast lane even if the operator's Codex config defaults to priority.
 _SERVICE_TIER = {
+    **{alias: "default" for alias in SOL_LUNA_PAIRS},
     **{name: "default" for name in MODELS if name.startswith("gpt-6-astra")},
     "gpt-5.6-sol": "default",
     "gpt-5.6-terra": "default",
@@ -711,10 +716,10 @@ def run(
     if not tail:
         tail = combined[-2000:]
 
-    if MODELS.get(model, "").startswith(("gpt-5.6-", "gpt-6-astra")) and token_usage.get("token_basis") == "vendor_split":
+    if MODELS.get(model, "").startswith(("gpt-5.6-", "gpt-6-")) and token_usage.get("token_basis") == "vendor_split":
         raw = token_usage.get("usage_raw") or {}
         if not any(k in raw for k in _CACHE_WRITE_FIELDS):
-            # GPT-5.6/Astra expose billable cache writes on newer Codex event
+            # GPT-5.6/GPT-6 expose billable cache writes on newer Codex event
             # schemas. If this CLI omits the field, keep the legacy fresh-ish
             # scalar usable for the smoke contract but do not assert complete
             # split parity: cache writes are unknown and the uncached lane may
