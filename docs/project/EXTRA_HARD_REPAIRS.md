@@ -1,6 +1,7 @@
 # Extra-hard PR repair tier
 
-Status: #123 oracle development in progress, 2026-09-26.
+Status: #123 fixed-control development shipped; task promotion remains blocked
+on externally owned observations, 2026-09-26.
 Contract: [extra-hard repairs](../specs/2026-09-16-extra-hard-repairs-spec.md).
 No case is labeled extra-hard yet.
 
@@ -159,7 +160,7 @@ after correction, retaining its timeout and partial artifact score. The native
 contaminated screen remains excluded; these diagnostics do not establish that
 any candidate is extra hard for frontier models.
 
-## Active PR slice: #123 oracle controls
+## Shipped development slice: #123 oracle controls
 
 The infrastructure pass shipped in PR #16. This slice develops portable,
 credential-free oracle controls before packaging #123 as a selectable task.
@@ -188,8 +189,19 @@ The existing prototype is provenance evidence; it is not the new grader.
   evidence path with externally owned observations and prove forged events
   cannot earn credit. Moving events to another file descriptor is insufficient.
 
-Completion requires offline regression tests, real pinned-image controls on the
-Mini and hosted Linux, cloud review, green CI, and merge/sync. The source and
-observation driver live in `experiments/repair_cases/am123/`; receipts stay under
-ignored `results/`. Interrupted controls retain their output directory; a new
-attempt uses a fresh directory and repeats from the pinned source.
+[PR #17](https://github.com/davisbuilds/openbench/pull/17) merged after eight
+offline regression tests, the nine-variant/six-group matrix on the Mini and
+hosted Linux, two cloud review passes, and green CI. Final implementation:
+`566cb6469ead0508ed5cd078a4f19882c84f51ee`; Mini receipts:
+`results/am123-controls/run-v5/`. All 54 results matched their expected outcomes;
+the reference and both valid alternatives passed every group. The sweep found
+an additional FTS trigger-creation race and retains column-only recovery as a
+negative control.
+
+The source and observation driver live in `experiments/repair_cases/am123/`.
+Preserve ignored receipts, including failed attempts; reruns use fresh output
+directories and pinned source. Next: establish an observation boundary safe for
+editable submissions, including forged-event and external-lock controls, then
+package/register the task and prove Harbor import before fresh model screening.
+These fixed-control results do not establish model difficulty or golden-set
+admission.
