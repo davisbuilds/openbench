@@ -25,6 +25,7 @@ class WorkspaceGitTests(unittest.TestCase):
             (app / 'source.py').write_text('answer = 1\n')
             self.assertIn('+answer = 1', git('diff'))
             self.assertTrue((app / '.git').is_file())
+            self.assertEqual((app / '.git').read_text(), f'gitdir: {(root / "history").resolve()}\n')
             self.assertFalse(list((root / 'history/hooks').glob('*')))
 
     def test_refuses_supplied_git_history(self):

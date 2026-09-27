@@ -225,6 +225,9 @@ def verify_control(control, task, result_path):
         receipt=json.loads((trial/'verifier/sandbox-grading.json').read_text())
         from .harbor_sandbox import read_tree, source_receipt
         expected=read_tree(task/'environment/app')
+        # Git's separate object directory is private solver scratch. Keep its
+        # exact regular pointer in evidence; do not ignore arbitrary .git edits.
+        expected['.git']=b'gitdir: /tmp/openbench-workspace.git\n'
         target,marker=control_edit(task)
         expected[target]+=marker
         if receipt['freeze'].get('workspace_files') != source_receipt(expected)['files']:
