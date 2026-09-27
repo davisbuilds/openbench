@@ -1147,7 +1147,8 @@ def _validate_suite_sandbox_policy(manifest):
         for arm in arms
     )
     accepted = (base_modules | {"obench.codex_models"},
-                registered_modules | {"obench.codex_models"})
+                registered_modules | {"obench.codex_models"},
+                registered_modules | {"obench.codex_models", "obench.repair_oracles.agentmonitor_v3"})
     if not needs_registry:
         accepted += (base_modules, registered_modules)
     if (not isinstance(hashes, dict) or set(hashes) not in accepted

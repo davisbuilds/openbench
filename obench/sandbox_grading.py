@@ -306,7 +306,7 @@ def record(role, text):
 
 def dojo_cases(*, oracle_version=3):
     """Hidden oracle inputs and expected comparisons remain in the trusted process."""
-    if type(oracle_version) is not int or oracle_version not in (3, 4):
+    if type(oracle_version) is not int or oracle_version not in (3, 4, 5):
         raise GradingError('unsupported Dojo oracle version')
     dojo='/synthetic/.agents/skills/review/SKILL.md'
     bundled='/synthetic/.codex/skills/.system/review/SKILL.md'
@@ -333,7 +333,7 @@ def dojo_cases(*, oracle_version=3):
     mismatch([('review',dojo)],[('review',dojo),('review',bundled)],(1,2,0,1))
     mismatch([('review',dojo)],[('review',dojo)]*3,(1,3,0,2))
     mismatch([('review',dojo)],[('review',connector)],(1,1,1,1))
-    if oracle_version == 4:
+    if oracle_version >= 4:
         # Paired equality/difference cases prevent an always-mismatch repair.
         # These expectations name observable outcomes, not a reference algorithm.
         for entries in ([], [('review', dojo)], [('review', dojo)] * 3,
@@ -357,8 +357,17 @@ def comparison(value, expected, *, oracle_version=3):
         return (isinstance(value,dict) and value.get('verdict')=='deployable' and value.get('gating') is True
                 and type(value.get('demand')) in (int,float) and value['demand']>0 and value.get('entries_scored')==1)
     if expected == 'budget-negative':
+        if oracle_version == 5:
+            # Unsupported modes must not gate builds. Observational diagnostics
+            # may still count entries; the task does not require zeroing them.
+            return (isinstance(value,dict) and value.get('verdict')=='unsupported'
+                    and value.get('gating') is False
+                    # Each budget fixture supplies one entry: omit its count
+                    # when unsupported, or retain the actual observed count.
+                    and type(value.get('entries_scored')) is int and value['entries_scored'] in (0, 1)
+                    and type(value.get('demand')) in (int,float))
         return (isinstance(value,dict) and value.get('verdict')=='unsupported' and value.get('gating') is False and value.get('entries_scored')==0)
-    if isinstance(expected, tuple) and oracle_version == 4:
+    if isinstance(expected, tuple) and oracle_version >= 4:
         # Preserve the public diagnostic shape, but do not prescribe whether
         # difference arrays contain names, qualified identities or duplicates.
         return (isinstance(value, dict) and value.get('kind') == 'surface-mismatch'
@@ -419,7 +428,7 @@ async def freeze_submission(environment, destination):
 
 
 def dojo_oracle_version(metadata):
-    versions = {'dojo-evidence-pr60-v3': 3, 'dojo-evidence-pr60-v4': 4}
+    versions = {'dojo-evidence-pr60-v3': 3, 'dojo-evidence-pr60-v4': 4, 'dojo-evidence-pr60-v5': 5}
     name = metadata.get('openbench_task')
     if not isinstance(name, str) or name not in versions:
         raise GradingError('unsupported Dojo task identity')

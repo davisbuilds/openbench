@@ -57,7 +57,9 @@ def fingerprint(compiled, harbor_binary):
     files = [p for p in (ROOT/'obench').rglob('*.py') if 'tests' not in p.relative_to(ROOT).parts]
     files += [ROOT/p for p in SCRIPTS] + [ROOT/'docker/repair-sandbox/Dockerfile', ROOT/'obench/tests/test_sandbox_gateway.py']
     files += list((ROOT/'docker/repair-sandbox/node').glob('*.json'))
-    for control_root in ('benchmarks/harbor/local/dojo-evidence-pr60-v4','benchmarks/local/am-benchmark-pr106-v2'):
+    for control_root in ('benchmarks/harbor/local/dojo-evidence-pr60-v5',
+                         'benchmarks/harbor/local/am-benchmark-pr106-v4',
+                         'benchmarks/local/am-benchmark-pr106-v2'):
         files += [p for p in (ROOT/control_root).rglob('*') if p.is_file() and '__pycache__' not in p.parts]
     return {'schema':1, 'host':socket.gethostname(),
             'image':{'id':image['Id'],'requested':compiled.suite.sandbox.runtime_image,'os':image['Os'],'architecture':image['Architecture']},
@@ -160,7 +162,7 @@ def validate_admission(path, expected):
 def control_edit(task):
     import tomllib
     metadata=tomllib.loads((Path(task)/'task.toml').read_text()).get('metadata',{})
-    if metadata.get('openbench_oracle') == 'agentmonitor-benchmark-v2':
+    if metadata.get('openbench_oracle') in ('agentmonitor-benchmark-v2', 'agentmonitor-benchmark-v3'):
         return 'src/db/schema.ts', b'// OPENBENCH_RUNTIME_CONTROL_OK\n'
     return CONTROL_TARGET, MARKER
 
@@ -242,7 +244,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     harbor=preflight_harbor_binary(harbor_binary)
     python=str(suite_run._harbor_python_interpreter(harbor))
     image=compiled.suite.sandbox.runtime_image
-    task=ROOT/'benchmarks/harbor/local/dojo-evidence-pr60-v4'
+    task=ROOT/'benchmarks/harbor/local/dojo-evidence-pr60-v5'
     model_records = model_control_records(before)
     first_alias = next(iter(model_records))
     commands=[
