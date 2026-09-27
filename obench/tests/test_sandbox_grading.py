@@ -73,7 +73,8 @@ class DiagnosticContractTests(unittest.TestCase):
         valid = dict(verdict='unsupported', gating=False, demand=20, entries_scored=1)
         for changes in ({'gating': True}, {'verdict': 'deployable'},
                         {'entries_scored': '1'}, {'entries_scored': True},
-                        {'entries_scored': -1}, {'demand': '20'}, {'demand': True}):
+                        {'entries_scored': -1}, {'entries_scored': 999},
+                        {'demand': '20'}, {'demand': True}):
             with self.subTest(changes=changes):
                 self.assertFalse(comparison(dict(valid, **changes), 'budget-negative', oracle_version=5))
         self.assertFalse(comparison(valid, 'budget-positive', oracle_version=5))
@@ -211,8 +212,9 @@ class TaskBindingTests(unittest.TestCase):
 @unittest.skipUnless(IMAGE and BASE.is_dir(), 'set OBENCH_GRADING_TEST_IMAGE to a pinned local image ID')
 class DockerGradingTests(unittest.TestCase):
     def test_v5_budget_observations_are_not_a_gating_requirement(self):
-        for wrong_mode, expected in ((False, 1), (True, .6667)):
-            with self.subTest(wrong_mode=wrong_mode), tempfile.TemporaryDirectory() as directory:
+        for wrong_mode, corrupt_count, expected in ((False, False, 1), (True, False, .6667),
+                                                   (False, True, .6667)):
+            with self.subTest(wrong_mode=wrong_mode, corrupt_count=corrupt_count), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 allowed = self.prepare(root, ('budget.py', 'rollout_codex.py'))
                 path = root / 'scripts/profiles/budget.py'
@@ -223,14 +225,15 @@ _original_assess = assess
 def assess(entries, policy, **kwargs):
     result = _original_assess(entries, policy, **kwargs)
     if not policy.accepts_surface(kwargs.get('surface')):
-        result = _replace(result, demand=20, entries_scored=len(entries)''' +
+        result = _replace(result, demand=20, entries_scored=''' +
+                    ('999' if corrupt_count else 'len(entries)') +
                     (', verdict=Verdict.DEPLOYABLE' if wrong_mode else '') + ''')
     return result
 ''')
                 current = grade_dojo(root, allowed, IMAGE, oracle_version=5)
                 self.assertEqual(current['score'], expected)
-                self.assertEqual(current['buckets']['budget'], not wrong_mode)
-                if not wrong_mode:
+                self.assertEqual(current['buckets']['budget'], not wrong_mode and not corrupt_count)
+                if not wrong_mode and not corrupt_count:
                     legacy = grade_dojo(root, allowed, IMAGE, oracle_version=4)
                     self.assertEqual(legacy['score'], .6667)
 

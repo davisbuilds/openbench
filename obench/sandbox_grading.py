@@ -362,7 +362,9 @@ def comparison(value, expected, *, oracle_version=3):
             # may still count entries; the task does not require zeroing them.
             return (isinstance(value,dict) and value.get('verdict')=='unsupported'
                     and value.get('gating') is False
-                    and type(value.get('entries_scored')) is int and value['entries_scored'] >= 0
+                    # Each budget fixture supplies one entry: omit its count
+                    # when unsupported, or retain the actual observed count.
+                    and type(value.get('entries_scored')) is int and value['entries_scored'] in (0, 1)
                     and type(value.get('demand')) in (int,float))
         return (isinstance(value,dict) and value.get('verdict')=='unsupported' and value.get('gating') is False and value.get('entries_scored')==0)
     if isinstance(expected, tuple) and oracle_version >= 4:
