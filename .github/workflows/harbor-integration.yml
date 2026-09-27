@@ -95,7 +95,7 @@ jobs:
         run: >-
           .venv/bin/python scripts/local/verify_repair_lifecycle.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
-          --task benchmarks/harbor/local/dojo-evidence-pr60-v4
+          --task benchmarks/harbor/local/dojo-evidence-pr60-v5
           --reference benchmarks/local/dojo-evidence-pr60/solution
           --output results/ci/lifecycle
       - name: Check bounded log export and refusal

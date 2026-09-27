@@ -20,6 +20,31 @@ starts a new treatment. Detailed trial evidence remains local-only.
 
 ## Next screening lineup
 
+### September 27 oracle audit and confirmation
+
+The three-model screen completed and all 18 frozen submissions reproduced their
+original checks in fresh confined workers. The audit found an extra requirement
+in the v4 budget oracle: unsupported, non-gating assessments lost credit when
+they retained diagnostic entry counts. The prompt does not require zeroing those
+counts. `dojo-evidence-pr60-v5` corrects that comparator while preserving the v4
+instruction and buggy source bytes. V3/v4 comparator behavior and historical
+sealed results remain unchanged; shared-module task bindings are refreshed for
+new execution at this commit.
+
+Fresh confirmation uses six attempts for each selected model on Dojo v5, serial,
+without retries, with the same 1,200-second and 200-request limits. This is a new
+oracle treatment. Keep v4 screening, v5 artifact replay, and fresh v5 attempts
+separate. Sol fully solved the screened task, so this allocation checks
+repeatability and model separation; it does not meet the existing all-model
+extra-hard selection rule. AM106 remains a mostly solved control.
+
+Missing optional shell tools, failed patch applications, and command-policy
+rejections are harness friction. The replayed code defects are observable without
+those events, but their contribution to model trajectories is not causally ruled
+out. Preserve the runtime for confirmation rather than silently repairing the
+environment between samples. Trial-level audit evidence stays local under
+`results/gpt6-screen-20260926/audit/` on the execution host.
+
 User direction, 2026-09-26: retain GPT-5.6 Terra, add GPT-6 Sol, and replace
 GPT-5.6 Luna with GPT-6 Luna for future calibration. Historical model identities,
 specs and sealed results remain unchanged; the new lineup is a fresh treatment.

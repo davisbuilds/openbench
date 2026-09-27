@@ -126,7 +126,7 @@ class SandboxSuiteTests(unittest.TestCase):
     def test_resealed_task_cannot_use_another_logical_treatment_identity(self):
         import re
         from obench.sandbox_grading import task_digest
-        for version in (3, 4):
+        for version in (3, 4, 5):
             with self.subTest(version=version):
                 shutil.rmtree(self.task_root)
                 source = Path(__file__).resolve().parents[2] / f'benchmarks/harbor/local/dojo-evidence-pr60-v{version}'

@@ -61,6 +61,23 @@ class ArtifactTests(unittest.TestCase):
 
 
 class DiagnosticContractTests(unittest.TestCase):
+    def test_v5_unsupported_budget_can_retain_observational_counts(self):
+        retained = dict(verdict='unsupported', gating=False, demand=20, entries_scored=1)
+        self.assertFalse(comparison(retained, 'budget-negative', oracle_version=4))
+        self.assertTrue(comparison(retained, 'budget-negative', oracle_version=5))
+        self.assertTrue(comparison(dict(retained, demand=0, entries_scored=0),
+                                   'budget-negative', oracle_version=5))
+        self.assertEqual(dojo_cases(oracle_version=5), dojo_cases(oracle_version=4))
+
+    def test_v5_still_requires_unsupported_non_gating_budget_and_public_types(self):
+        valid = dict(verdict='unsupported', gating=False, demand=20, entries_scored=1)
+        for changes in ({'gating': True}, {'verdict': 'deployable'},
+                        {'entries_scored': '1'}, {'entries_scored': True},
+                        {'entries_scored': -1}, {'demand': '20'}, {'demand': True}):
+            with self.subTest(changes=changes):
+                self.assertFalse(comparison(dict(valid, **changes), 'budget-negative', oracle_version=5))
+        self.assertFalse(comparison(valid, 'budget-positive', oracle_version=5))
+
     def diagnostic(self, **changes):
         return dict(kind='surface-mismatch', live_surface='exec',
                     recorded_surface='codex-tui', live_entries=1, recorded_entries=1,
@@ -193,6 +210,30 @@ class TaskBindingTests(unittest.TestCase):
 
 @unittest.skipUnless(IMAGE and BASE.is_dir(), 'set OBENCH_GRADING_TEST_IMAGE to a pinned local image ID')
 class DockerGradingTests(unittest.TestCase):
+    def test_v5_budget_observations_are_not_a_gating_requirement(self):
+        for wrong_mode, expected in ((False, 1), (True, .6667)):
+            with self.subTest(wrong_mode=wrong_mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                allowed = self.prepare(root, ('budget.py', 'rollout_codex.py'))
+                path = root / 'scripts/profiles/budget.py'
+                path.write_text(path.read_text() + '''
+
+from dataclasses import replace as _replace
+_original_assess = assess
+def assess(entries, policy, **kwargs):
+    result = _original_assess(entries, policy, **kwargs)
+    if not policy.accepts_surface(kwargs.get('surface')):
+        result = _replace(result, demand=20, entries_scored=len(entries)''' +
+                    (', verdict=Verdict.DEPLOYABLE' if wrong_mode else '') + ''')
+    return result
+''')
+                current = grade_dojo(root, allowed, IMAGE, oracle_version=5)
+                self.assertEqual(current['score'], expected)
+                self.assertEqual(current['buckets']['budget'], not wrong_mode)
+                if not wrong_mode:
+                    legacy = grade_dojo(root, allowed, IMAGE, oracle_version=4)
+                    self.assertEqual(legacy['score'], .6667)
+
     def prepare(self,root,parts=()):
         allowed={p.relative_to(BASE).as_posix() for p in (BASE/'scripts/profiles').glob('*.py')}
         for relative in allowed:
