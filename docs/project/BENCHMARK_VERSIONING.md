@@ -53,7 +53,10 @@ at `1.0.0`. Installed task-pack versions, OpenBench's package version, Harbor
 The compiler validates the declaration and records `repair_revision` in each
 repair task set in the sealed suite manifest. It contains the four fields above
 plus `case_sha256`, a canonical fingerprint of `instruction.md` and every file
-under `environment/`, including hidden build files. Docs, hidden tests and task
+under `environment/`, including hidden build files, POSIX permission bits and
+directory entries (including empty directories). Checkout-local timestamps and
+ownership are excluded; effective runtime identity remains in the suite seal.
+Docs, hidden tests and task
 metadata remain covered by the full task seal rather than this component hash.
 Model/effort, runtime and budgets are already bound in the same suite manifest;
 they do not need another manually incremented execution counter.

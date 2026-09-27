@@ -165,6 +165,31 @@ class RevisionManifestTests(unittest.TestCase):
         self.assertEqual(records['dojo-evidence-pr60-v3']['case_revision'], 1)
         self.assertEqual(records['dojo-evidence-pr60-v4']['case_revision'], 2)
 
+    def test_case_and_task_seals_bind_permissions_and_empty_build_directories(self):
+        target = self.stage('dojo-evidence-pr60-v5')
+        def identities():
+            return repair_identity.record(task_manifest(target))['case_sha256'], task_digest(target)
+        before = identities()
+        script = target / 'environment/app/scripts/profiles/evidence.py'
+        old_mode = script.stat().st_mode & 0o7777
+        script.chmod(old_mode ^ 0o111)
+        after = identities()
+        self.assertNotEqual(before[0], after[0])
+        self.assertNotEqual(before[1], after[1])
+        script.chmod(old_mode)
+        self.assertEqual(identities(), before)
+        empty = target / 'environment/app/empty-build-directory'
+        empty.mkdir(mode=0o755)
+        added = identities()
+        self.assertNotEqual(before[0], added[0])
+        self.assertNotEqual(before[1], added[1])
+        empty.chmod(0o700)
+        changed = identities()
+        self.assertNotEqual(added[0], changed[0])
+        self.assertNotEqual(added[1], changed[1])
+        empty.rmdir()
+        self.assertEqual(identities(), before)
+
     def test_historical_manifest_remains_readable_without_revision_records(self):
         self.stage('dojo-evidence-pr60-v5')
         historical = copy.deepcopy(suite_run.compile_suite(self.suite).manifest)

@@ -61,23 +61,29 @@ def task_name(revision):
     return f"{revision['case']}-c{revision['case_revision']}-o{revision['oracle_revision']}"
 
 
-def case_digest(files):
+def case_digest(files, file_modes, directory_modes):
     """Fingerprint the prompt and complete environment build context.
 
-    Input is the already validated task manifest's path->SHA256 mapping. Oracle,
-    provenance, package metadata and README edits do not change this component.
-    The full task seal still covers all of them.
+    Inputs are the already validated task manifest's file hashes and POSIX
+    permissions. Directory entries bind empty directories too. Checkout-local
+    timestamps and ownership are deliberately excluded. Oracle, provenance,
+    package metadata and README edits are covered by the full task seal instead.
     """
-    selected = {name: value for name, value in files.items()
+    selected = {name: {'sha256': value, 'mode': file_modes[name]} for name, value in files.items()
                 if name == 'instruction.md' or name.startswith('environment/')}
     if 'instruction.md' not in selected or not any(n.startswith('environment/') for n in selected):
         raise ValueError('repair case requires prompt and environment files')
-    return hashlib.sha256(json.dumps(selected, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    directories = {name: mode for name, mode in directory_modes.items()
+                   if name == 'environment' or name.startswith('environment/')}
+    value = {'schema': 1, 'files': selected, 'directories': directories}
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
 def record(manifest):
     return {**resolve(manifest['task_config'].get('metadata', {})),
-            'case_sha256': case_digest(manifest['task_files_sha256'])}
+            'case_sha256': case_digest(manifest['task_files_sha256'],
+                                       manifest['task_files_mode'],
+                                       manifest['task_directories_mode'])}
 
 
 def validate_record(value, name):

@@ -27,7 +27,7 @@ oracle_revision = 3
 
 [metadata.openbench_task_content_digest]
 scheme = 4
-sha256 = "b22b5717900fb60c7c3165c9ad28fdcad42d971db10fd6377ee8020a3e4071a0"
+sha256 = "0c3cd84d79629044222f838a75e8701e088024562a1eb16b2ab90d252cbb2b76"
 
 [metadata.openbench_harbor_export]
 schema_version = 1
