@@ -10,6 +10,26 @@ from obench.sandbox_grading import GradingError, task_digest as legacy_digest
 
 
 class RegistryTests(unittest.TestCase):
+    def test_migration_observation_allows_rekeying_but_requires_preserved_values(self):
+        import sqlite3
+        from contextlib import closing
+        from obench.repair_oracles import agentmonitor, agentmonitor_v3
+        def query(module):
+            return next(request['steps'][2]['sql'] for name, _, request in module.cases() if name == 'MIG2')
+        with closing(sqlite3.connect(':memory:')) as db:
+            db.row_factory = sqlite3.Row
+            db.executescript(agentmonitor.RESTRICTIVE_SCHEMA)
+            db.execute("UPDATE events SET event_id='new-storage-id', session_id='new-session-id'")
+            self.assertEqual(db.execute(query(agentmonitor)).fetchall(), [])
+            def observes_preservation():
+                rows = [dict(r) for r in db.execute(query(agentmonitor_v3))]
+                return agentmonitor.compare('MIG2', [None, None, rows, None, None, [{'n': 2}]])
+            self.assertTrue(observes_preservation())
+            db.execute('UPDATE events SET tokens_in=0')
+            self.assertFalse(observes_preservation())
+            db.execute('DELETE FROM events')
+            self.assertFalse(observes_preservation())
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -90,24 +110,32 @@ class AgentMonitorOracleTests(unittest.TestCase):
 
 class RegisteredSuiteTests(unittest.TestCase):
     def test_registered_task_compiles_into_locked_oracle_and_isolated_plugins(self):
+        for task, oracle in (('am-benchmark-pr106-v3', 'agentmonitor-benchmark-v2'),
+                             ('am-benchmark-pr106-v4', 'agentmonitor-benchmark-v3')):
+            with self.subTest(task=task):
+                self.check_registered_task(task, oracle)
+
+    def check_registered_task(self, task, oracle):
         from obench import init,suite_run
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary)
             init.init_scaffold(root)
             tasks=root/'.openbench/tasks'
             shutil.rmtree(tasks)
-            source=Path(__file__).resolve().parents[2]/'benchmarks/harbor/local/am-benchmark-pr106-v3'
+            source=Path(__file__).resolve().parents[2]/'benchmarks/harbor/local'/task
             shutil.copytree(source,tasks/source.name)
             suite=root/'.openbench/suites/default.toml'
             suite.write_text(suite.read_text().replace('gpt-5.6-sol','gpt-5.6-terra-xhigh')+'\n[sandbox]\nkind="repair-v1"\nruntime_image="sha256:'+'a'*64+'"\n')
             compiled=suite_run.compile_suite(suite)
             job=suite_run.plan_jobs(compiled)[0].artifact.as_dict()
-            self.assertEqual(job['environment']['kwargs']['oracle_id'],'agentmonitor-benchmark-v2')
+            self.assertEqual(job['environment']['kwargs']['oracle_id'],oracle)
+            from obench.stats import _validate_suite_sandbox_policy
+            _validate_suite_sandbox_policy(compiled.manifest)
             self.assertEqual(job['verifier']['import_path'],'obench.repair_grading:RepairVerifier')
             self.assertIn('obench.repair_oracles.agentmonitor',compiled.manifest['sandbox']['implementation_sha256'])
             from obench import runtime_admission
             control,_=runtime_admission.prepare_control(compiled,root/'control')
-            self.assertEqual(control.task_sets[0].task_names,('am-benchmark-pr106-v3',))
-            control_task=control.task_sets[0].task_set.path/'am-benchmark-pr106-v3'
+            self.assertEqual(control.task_sets[0].task_names,(task,))
+            control_task=control.task_sets[0].task_set.path/task
             self.assertIn('// OPENBENCH_RUNTIME_CONTROL_OK',(control_task/'instruction.md').read_text())
             self.assertEqual(suite_run.plan_jobs(control)[0].artifact.as_dict()['verifier']['import_path'],'obench.repair_grading:RepairVerifier')

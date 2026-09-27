@@ -19,12 +19,16 @@ class Oracle:
 
 
 ORACLES = {
+    'agentmonitor-benchmark-v3': Oracle(
+        'agentmonitor-benchmark-v3', 'am-benchmark-pr106-v4',
+        'obench.repair_oracles.agentmonitor_v3', 'src/', 'am-benchmark-observations-v1'),
     'agentmonitor-benchmark-v2': Oracle(
         'agentmonitor-benchmark-v2', 'am-benchmark-pr106-v3',
         'obench.repair_oracles.agentmonitor', 'src/', 'am-benchmark-observations-v1'),
 }
 MODULES = ('obench.sandbox_grading', 'obench.harbor_sandbox', 'obench.repair_worker', 'obench.repair_grading',
-           'obench.repair_oracles.registry', 'obench.repair_oracles.agentmonitor')
+           'obench.repair_oracles.registry', 'obench.repair_oracles.agentmonitor',
+           'obench.repair_oracles.agentmonitor_v3')
 PACKAGE = Path(__file__).resolve().parents[1]
 
 

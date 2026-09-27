@@ -31,6 +31,13 @@ instruction and buggy source bytes. V3/v4 comparator behavior and historical
 sealed results remain unchanged; shared-module task bindings are refreshed for
 new execution at this commit.
 
+The AM106 migration observer also searched for a fixed pre-migration event ID,
+although the instruction permits changing storage IDs. The saved repair retained
+the study fields and tokens under a new ID. `am-benchmark-pr106-v4` uses oracle
+`agentmonitor-benchmark-v3` to observe benchmark rows independently of storage ID,
+while still checking cardinality, values, new event types, and repeated startup.
+Its prompt and source also remain byte-identical to the previous version.
+
 Fresh confirmation uses six attempts for each selected model on Dojo v5, serial,
 without retries, with the same 1,200-second and 200-request limits. This is a new
 oracle treatment. Keep v4 screening, v5 artifact replay, and fresh v5 attempts

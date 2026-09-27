@@ -15,7 +15,7 @@ from harbor.models.trial.config import TrialConfig
 from harbor.trial.trial import Trial
 from obench.harbor_results import _validate_artifacts,_validate_sandbox_receipt
 
-ORACLE='agentmonitor-benchmark-v2'
+ORACLE='agentmonitor-benchmark-v3'
 
 
 class FixtureAgent(DojoFixture):
@@ -59,7 +59,7 @@ async def main():
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     output=args.output.resolve();output.mkdir(parents=True,exist_ok=False)
-    task=ROOT/'benchmarks/harbor/local/am-benchmark-pr106-v3'
+    task=ROOT/'benchmarks/harbor/local/am-benchmark-pr106-v4'
     records=[]
     for mode,expected in [('baseline',0),('reference',1),('helper',1),('malformed',0),('forged-reward',0)]:
         config=TrialConfig.model_validate({

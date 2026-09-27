@@ -160,7 +160,7 @@ def validate_admission(path, expected):
 def control_edit(task):
     import tomllib
     metadata=tomllib.loads((Path(task)/'task.toml').read_text()).get('metadata',{})
-    if metadata.get('openbench_oracle') == 'agentmonitor-benchmark-v2':
+    if metadata.get('openbench_oracle') in ('agentmonitor-benchmark-v2', 'agentmonitor-benchmark-v3'):
         return 'src/db/schema.ts', b'// OPENBENCH_RUNTIME_CONTROL_OK\n'
     return CONTROL_TARGET, MARKER
 
