@@ -157,6 +157,11 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
 
 ## Dangerous zones
 
+- **Repair revisions** — follow [benchmark versioning](docs/project/BENCHMARK_VERSIONING.md).
+  Advance case and oracle revisions independently; execution settings stay in
+  the sealed suite. Preserve historical aliases and results. Resealing shared
+  grader bytes alone is not a semantic revision bump.
+
 - **`obench/run.py` `ROW_FIELDS` / append / resume** — corrupt JSONL or dropped
   fields silently skew resume and published claims; keep append fsync + fail-closed
   corrupt-line handling.

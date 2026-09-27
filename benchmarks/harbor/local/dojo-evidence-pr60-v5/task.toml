@@ -18,9 +18,15 @@ tags = ["openbench"]
 openbench_task = "dojo-evidence-pr60-v5"
 openbench_workspace_kind = "snapshot"
 
+[metadata.openbench_revision]
+case = "dojo-evidence-pr60"
+case_revision = 2
+oracle = "dojo-evidence"
+oracle_revision = 5
+
 [metadata.openbench_task_content_digest]
 scheme = 3
-sha256 = "64a1e187c3838a4387b7eecf333c15a24c4648ec647875b20f60bab96fd4ffda"
+sha256 = "b9be7c70b12461e97f57e013b424d9f169b19fab7259c7c73345b46a2ed6cb8c"
 
 [metadata.openbench_harbor_export]
 schema_version = 1

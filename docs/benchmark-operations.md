@@ -13,6 +13,8 @@ resume or credential policy.
    destination, credential lane, exact command and timeout/stop procedure.
    Keep local receipts and raw logs under ignored `results/`; never put secrets
    in commands or receipts. Keep this checkout unchanged while it executes.
+   For isolated repairs, inspect the sealed case/oracle revisions and case
+   fingerprint using the [versioning policy](project/BENCHMARK_VERSIONING.md).
 3. Choose a host that can stay awake. Prefer the Mini for unattended work if
    the laptop will be closed. Deploy the pinned code and verify dependencies,
    authentication and controls there first; do not blindly move an active run

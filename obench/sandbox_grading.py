@@ -22,8 +22,11 @@ import time
 import tomllib
 import uuid
 
+from obench import repair_identity
+
 # Bind the implementation loaded by this process, not a later edit on disk.
 _LOADED_GRADER_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+_LOADED_REVISION_SHA256 = hashlib.sha256(Path(repair_identity.__file__).read_bytes()).hexdigest()
 
 MAX_SOURCE = 2 * 1024 * 1024
 MAX_OUTPUT = 128 * 1024
@@ -101,6 +104,8 @@ def task_manifest(task_root: Path) -> dict:
     """
     if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != _LOADED_GRADER_SHA256:
         raise GradingError('trusted grader changed after import')
+    if hashlib.sha256(Path(repair_identity.__file__).read_bytes()).hexdigest() != _LOADED_REVISION_SHA256:
+        raise GradingError('trusted revision implementation changed after import')
     root = Path(task_root)
     if root.is_symlink() or not root.is_dir():
         raise GradingError('invalid task root')
@@ -112,7 +117,14 @@ def task_manifest(task_root: Path) -> dict:
     if not isinstance(metadata, dict):
         raise GradingError('invalid task metadata')
     metadata.pop('openbench_task_content_digest', None)
+    if 'openbench_revision' in metadata:
+        try:
+            repair_identity.resolve(metadata)
+        except ValueError as exc:
+            raise GradingError(str(exc)) from exc
     files = {}
+    file_modes = {}
+    directory_modes = {}
     for directory, dirs, names in os.walk(root, followlinks=False):
         for name in dirs + names:
             path = Path(directory) / name
@@ -120,13 +132,20 @@ def task_manifest(task_root: Path) -> dict:
             if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
                 raise GradingError('unsupported task artifact type')
             if stat.S_ISREG(mode) and path != task_file:
-                files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+                relative = path.relative_to(root).as_posix()
+                files[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+                file_modes[relative] = stat.S_IMODE(mode)
+            elif stat.S_ISDIR(mode):
+                directory_modes[path.relative_to(root).as_posix()] = stat.S_IMODE(mode)
     return {
         'scheme': 3,
         'schema': 'openbench-isolated-repair-task-v1',
         'task_config': config,
         'task_files_sha256': dict(sorted(files.items())),
+        'task_files_mode': dict(sorted(file_modes.items())),
+        'task_directories_mode': dict(sorted(directory_modes.items())),
         'grading_module_sha256': _LOADED_GRADER_SHA256,
+        'revision_module_sha256': _LOADED_REVISION_SHA256,
         'worker_entry_sha256': hashlib.sha256(WORKER.encode()).hexdigest(),
     }
 
@@ -428,11 +447,13 @@ async def freeze_submission(environment, destination):
 
 
 def dojo_oracle_version(metadata):
-    versions = {'dojo-evidence-pr60-v3': 3, 'dojo-evidence-pr60-v4': 4, 'dojo-evidence-pr60-v5': 5}
-    name = metadata.get('openbench_task')
-    if not isinstance(name, str) or name not in versions:
+    try:
+        revision = repair_identity.resolve(metadata)
+    except ValueError as exc:
+        raise GradingError(str(exc)) from exc
+    if revision['oracle'] != 'dojo-evidence':
         raise GradingError('unsupported Dojo task identity')
-    return versions[name]
+    return revision['oracle_revision']
 
 
 class _TrustedDojoVerifier:

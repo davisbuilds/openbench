@@ -1145,6 +1145,11 @@ def _semantic_manifest(
         "jobs": jobs,
     }
     if suite.sandbox is not None:
+        from . import repair_identity
+        from .sandbox_grading import task_manifest
+        for entry, selected in zip(value['task_sets'], task_sets):
+            entry['repair_revision'] = repair_identity.record(task_manifest(
+                selected.task_set.path / selected.task_names[0]))
         value["sandbox"] = {
             "kind": suite.sandbox.kind,
             "runtime_image": suite.sandbox.runtime_image,
@@ -1165,7 +1170,7 @@ def _registered_oracle_id(item):
 
 def _sandbox_implementation_hashes(*, registered=False) -> dict[str, str]:
     package = Path(__file__).resolve().parent
-    modules = ("codex_models", "harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
+    modules = ("codex_models", "repair_identity", "harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
     if registered:
         from .repair_oracles.registry import MODULES
         modules=tuple(sorted(set(modules)|{name.removeprefix("obench.") for name in MODULES}))
