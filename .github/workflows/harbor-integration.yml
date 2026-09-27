@@ -86,6 +86,11 @@ jobs:
               --task benchmarks/harbor/local/dojo-evidence-pr60-v4 \
               --model "$model" --output-dir "results/ci/tool-loop-$model"
           done
+      - name: Check developer workflows in both supplied repair checkouts
+        run: >-
+          .venv/bin/python scripts/local/verify_repair_developer.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --output results/ci/developer-workflows
       - name: Check completion and timeout across real Harbor cleanup
         run: >-
           .venv/bin/python scripts/ci/verify_sandbox_timeouts.py

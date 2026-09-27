@@ -78,7 +78,7 @@ class RuntimeAdmissionTests(unittest.TestCase):
             'runtime_image':expected['image']['requested'], 'codex_version':'0.157.0',
             'probe_sha256':expected['implementation'][admission.SCRIPTS[1]],
             'actual_tool_mutation':True, 'tool_result_returned':True,
-            'final_response_present':True, 'request_count':2}
+            'final_response_present':True, 'request_count':2, 'developer_workflows_passed':True}
 
     def model_receipts(self, expected):
         records = admission.model_control_records(expected)
@@ -195,16 +195,19 @@ class RuntimeAdmissionTests(unittest.TestCase):
         (trial/'verifier/sandbox-gateway.jsonl').write_text(json.dumps({'event':'request','outcome':'complete','upstream_status':200,'upstream_peer':{'ip':'8.8.8.8','port':443}})+'\n')
         expected=read_tree(self.task/'environment/app')
         expected[admission.CONTROL_TARGET]+=admission.MARKER
+        expected['.git']=b'gitdir: /tmp/openbench-workspace.git\n'
         from obench.harbor_sandbox import write_files
         write_files(trial/'artifacts/workspace', {name:data for name,data in expected.items() if name.startswith('scripts/profiles/')})
         receipt=trial/'verifier/sandbox-grading.json'
         receipt.write_text(json.dumps({'freeze':{'workspace_files':source_receipt(expected)['files']}}))
         admission.verify_control(self.control,self.task,result_path)
-        for change in ('requirements','extra-file','missing-file','missing-marker'):
+        for change in ('requirements','extra-file','missing-file','missing-marker','missing-git','changed-git'):
             files=dict(expected)
             if change=='requirements': files['requirements.txt']=b'changed dependency\n'
             elif change=='extra-file': files['new.txt']=b'unrequested\n'
             elif change=='missing-file': del files['requirements.txt']
+            elif change=='missing-git': del files['.git']
+            elif change=='changed-git': files['.git']=b'gitdir: /somewhere/else\n'
             else: files[admission.CONTROL_TARGET]=files[admission.CONTROL_TARGET].removesuffix(admission.MARKER)
             receipt.write_text(json.dumps({'freeze':{'workspace_files':source_receipt(files)['files']}}))
             with self.subTest(change=change),self.assertRaisesRegex(admission.AdmissionError,'beyond the requested edit'):

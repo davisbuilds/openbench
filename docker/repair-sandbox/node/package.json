@@ -3,12 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/express": "5.0.6",
+    "@types/node": "26.1.2",
+    "@types/pg": "8.20.3",
     "better-sqlite3": "13.0.2",
     "chokidar": "5.0.0",
     "express": "5.2.1",
     "pg": "8.22.0",
     "portless": "0.15.5",
     "tsx": "4.23.5",
+    "typescript": "6.0.3",
     "uuid": "14.0.1"
   },
   "devDependencies": {

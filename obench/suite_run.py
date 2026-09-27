@@ -1170,7 +1170,7 @@ def _registered_oracle_id(item):
 
 def _sandbox_implementation_hashes(*, registered=False) -> dict[str, str]:
     package = Path(__file__).resolve().parent
-    modules = ("codex_models", "repair_identity", "harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
+    modules = ("codex_models", "repair_identity", "repair_devtools", "harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
     if registered:
         from .repair_oracles.registry import MODULES
         modules=tuple(sorted(set(modules)|{name.removeprefix("obench.") for name in MODULES}))

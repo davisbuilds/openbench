@@ -68,6 +68,11 @@ the full suite seals still distinguish those runs. Qualification's bounded
 file-edit controls intentionally have different prompt hashes and live under
 their separate control suite identity.
 
+Developer-ready packages currently use `am-benchmark-pr106-c2-o3` and
+`dojo-evidence-pr60-c3-o5`: additional public tests and development instructions
+advance each case revision; oracle behavior stays unchanged. The richer runtime
+is separately pinned as the execution treatment.
+
 ## Historical aliases
 
 Existing task directories stay in place. Their names are permanent aliases:

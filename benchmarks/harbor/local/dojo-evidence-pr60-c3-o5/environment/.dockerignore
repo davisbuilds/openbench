@@ -1,0 +1,9 @@
+**
+!Dockerfile
+!.dockerignore
+!app/
+!app/**
+**/__pycache__
+**/*.pyc
+**/.git
+**/.git/**

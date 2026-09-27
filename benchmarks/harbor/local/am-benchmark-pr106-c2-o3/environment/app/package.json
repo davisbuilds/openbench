@@ -1,0 +1,63 @@
+{
+  "name": "agentmonitor",
+  "version": "0.5.0",
+  "description": "Real-time localhost dashboard for monitoring AI agent activity",
+  "author": "davisbuilds",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "amon": "./dist/cli.js",
+    "agentmonitor": "./dist/cli.js"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:watch": "node --import tsx --test --watch tests/*.test.ts"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "monitoring",
+    "dashboard"
+  ],
+  "license": "ISC",
+  "engines": {
+    "node": "24.13.0",
+    "pnpm": "10.29.3"
+  },
+  "packageManager": "pnpm@10.29.3",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ],
+    "overrides": {
+      "qs@>=6.11.1 <=6.15.1": "6.15.2",
+      "path-to-regexp@8.3.0": "8.4.0",
+      "nanoid@<3.3.18": "3.3.18",
+      "body-parser@>=2.0.0 <2.3.0": "2.3.0"
+    }
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.2",
+    "chokidar": "^5.0.0",
+    "express": "^5.2.1",
+    "pg": "^8.22.0",
+    "portless": "0.15.5",
+    "uuid": "^14.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.1.2",
+    "@types/pg": "^8.20.3",
+    "eslint": "^10.8.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.5",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0"
+  }
+}
