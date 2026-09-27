@@ -32,6 +32,7 @@ SCRIPTS = (
     'scripts/local/verify_repair_trajectory.py',
     'scripts/local/verify_registered_repair.py',
     'scripts/local/verify_registered_lifecycle.py',
+    'scripts/local/verify_repair_developer.py',
 )
 
 CONTROLS = (*SCRIPTS, "runtime-sockets")
@@ -59,7 +60,9 @@ def fingerprint(compiled, harbor_binary):
     files += list((ROOT/'docker/repair-sandbox/node').glob('*.json'))
     for control_root in ('benchmarks/harbor/local/dojo-evidence-pr60-v5',
                          'benchmarks/harbor/local/am-benchmark-pr106-v4',
-                         'benchmarks/local/am-benchmark-pr106-v2'):
+                         'benchmarks/local/am-benchmark-pr106-v2',
+                         'benchmarks/harbor/local/dojo-evidence-pr60-c3-o5',
+                         'benchmarks/harbor/local/am-benchmark-pr106-c2-o3'):
         files += [p for p in (ROOT/control_root).rglob('*') if p.is_file() and '__pycache__' not in p.parts]
     return {'schema':1, 'host':socket.gethostname(),
             'image':{'id':image['Id'],'requested':compiled.suite.sandbox.runtime_image,'os':image['Os'],'architecture':image['Architecture']},
@@ -112,6 +115,7 @@ def validate_model_controls(directory, expected, records, evidence=None):
                  'codex_version': CLI_VERSION, 'probe_sha256': expected['implementation'][SCRIPTS[1]],
                  'actual_tool_mutation': True, 'tool_result_returned': True,
                  'final_response_present': True, 'request_count': 2}
+        exact['developer_workflows_passed'] = True
         if any(type(receipt.get(key)) is not type(value) or receipt.get(key) != value for key, value in exact.items()):
             raise AdmissionError('model control used another or incomplete execution treatment')
 
@@ -256,6 +260,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
         [python,SCRIPTS[5],'--output',str(directory/'trajectory')],
         [python,SCRIPTS[6],'--runtime-image',image,'--output',str(directory/'registered-oracle')],
         [python,SCRIPTS[7],'--runtime-image',image,'--output',str(directory/'registered-lifecycle')],
+        [python,SCRIPTS[8],'--runtime-image',image,'--output',str(directory/'developer-workflows')],
         ['docker','run','--rm','--network','none','--cap-drop','ALL','--security-opt','no-new-privileges',
          '--user','10001:10001','-i',image,'python3','-','-v'],
     ]

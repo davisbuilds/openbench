@@ -43,10 +43,10 @@
     "data/tb-gpt56sol-2026-07-10/tb-gpt56sol-n3.jsonl": "b353a129c2a78a1d71b2bfa995338ecf6df34afd4ef2ea49b367ae0bc4f528c1",
     "data/tb-gpt56sol-2026-07-10/tb-gpt56sol-stats.md": "1ea43a69c8de43d13f7a794e5d824ed27d1d5adefb9369b1b511052c3b0513ec",
     "data/tb-open-n3-2026-07-09/tb-open-n3-stats.md": "deb72d4ef4a5386cfaf8ccc2bf92a88b79d18c6ee47dbfa3ed03dabcd43aa4c3",
-    "docker/repair-sandbox/Dockerfile": "e42036d0a869017c6c144270e72b3feb8c1e323ed203eb14eddb0431cdb4bf9b",
+    "docker/repair-sandbox/Dockerfile": "27faaf9fbad05f6a93e84818f1b5e17f92cc5b36b4e960f7d8603658aef0e10d",
     "experiments/candidates/deepagents-code.toml": "ad995fc938a0daac98126d4b748a085993136697fde88c7457e1fbbe5d4d5da1",
     "experiments/candidates/omp.toml": "5cc8300c9743a1247a4d1ae63d57e1fac55592b270f9f4f22e847dbbc85c8597",
-    "obench/harbor_sandbox.py": "2431e8bd05516d563171c87b5edb6a6c8382e6a359a70c3071959f3c6d0b8455",
+    "obench/harbor_sandbox.py": "c4389bbe33a7c919ac7c8a55e969e6e845dd4298b78e303406ea0beabcdf7b39",
     "obench/tests/test_gateway_probe_publish.py": "5495e378c36d0000b9c49550854588f05c955213e51c3c7fa14795058d1d71ad",
     "obench/tests/test_gateway_publish.py": "35dc2b83ddabf9a71e73848eb98bbae01465fd5f271ab3b326c6256302c929fb",
     "obench/tests/test_harbor_sandbox.py": "90ee1ed3bdefb7e16d41562069a9cb9fe6a3b6265e310f4c1ecaa7162bbc9f1b",
@@ -229,6 +229,7 @@
     "benchmarks/imported/terminal-bench/count-call-stack/solution/output.txt": "0a9bd17fee118a8a211e5da7a895bd632fed84dbbf05e149ade4b4dad21f22f5",
     "benchmarks/imported/terminal-bench/count-call-stack/workspace/log.stack": "6f73619ff6956bc1ee1ae2a9c6813cfb792c4b058eeb42e54a26da6e4339ed40",
     "benchmarks/local/engram-batch-pr1/checker_data/upstream/internal/scope/scope_test.go": "557b5af0a25cd97a9ee83da67cbd40d74164f68c233d49d9c0f29de3d75bc2b4",
-    "benchmarks/local/engram-batch-pr1/checker_data/upstream/internal/slug/slug_test.go": "a33df31831af95d5ff9b8b1bb4ab9c515ad0f9b8bac538e5ec6b08a137d692d2"
+    "benchmarks/local/engram-batch-pr1/checker_data/upstream/internal/slug/slug_test.go": "a33df31831af95d5ff9b8b1bb4ab9c515ad0f9b8bac538e5ec6b08a137d692d2",
+    "scripts/local/build_repair_runtime.py": "5886afab2ca5d2efc5932dd84d2ffd6a375a4e79062888e3639b7b82d0fd1191"
   }
 }

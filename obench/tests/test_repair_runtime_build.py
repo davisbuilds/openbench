@@ -25,6 +25,9 @@ if args[0] == 'build':
     pathlib.Path(args[args.index('--iidfile') + 1]).write_text('sha256:' + 'a' * 64)
 elif args[-2:] == ['codex', '--version']:
     print('codex-cli 0.157.0')
+elif args[-2:] == ['obench.repair_devtools', 'check']:
+    assert '--read-only' in args and '--tmpfs' in args
+    print(json.dumps({'schema': 1, 'versions': {}, 'workflows': []}))
 else:
     assert 'obench.sandbox_gateway' in args and '--help' in args
     print('gateway help')
@@ -40,3 +43,4 @@ else:
             self.assertEqual(modes['obench'], 0o755)
             self.assertEqual(modes['obench/__init__.py'], 0o644)
             self.assertEqual(modes['obench/sandbox_gateway.py'], 0o644)
+            self.assertEqual(modes['obench/repair_devtools.py'], 0o644)

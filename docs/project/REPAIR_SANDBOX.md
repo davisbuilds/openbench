@@ -42,11 +42,52 @@ to the solver. The relay contains no credentials. Bypassing or replacing it
 still grants only the broker's restricted inference capability.
 
 The runtime build context contains the pinned dependencies, Codex 0.157.0, and
-public gateway/relay code. It contains no task, reference solution, grader,
+public gateway/relay and developer-bootstrap code. It contains no task, reference solution, grader,
 repository history, or personal configuration. The trusted environment copies
 only `environment/app/` into a fresh source volume before execution. Task-authored
 Dockerfiles, compose overrides, arbitrary mounts, and network overrides are not
 used by this lane.
+
+### Developer environment (default for new repairs)
+
+`build_repair_runtime.py` builds developer environment revision 1, tagged
+`dev-v1-codex-0.157.0` for convenience. Suites must use its immutable image ID.
+The build receipt records the context hashes, effective tool versions and passing
+nonroot, read-only-root, offline developer workflow checks. An image digest is
+the exact treatment identity; the label is a human-readable feature revision.
+
+- Shared tools: Git, ripgrep, Bash, jq, Python/pytest, Node, npm/npx, pnpm,
+  make, GCC/G++, curl and process inspection.
+- Backend profile: locked npm dependencies including TypeScript 6.0.3,
+  tsx 4.23.5, SQLite and relevant type declarations. Python supplies pinned
+  PyYAML and pytest. Packages are preinstalled; no runtime install or registry
+  access is needed. npm defaults offline and pip disables index lookup.
+- Every workspace gets one synthetic Git baseline, no remotes or original
+  history. Git objects live in private scratch space rather than the exported
+  source archive. A regular `.git` pointer supports status/diff and is excluded
+  from grading. Supplied `.git` history is rejected before candidate execution.
+- Solver scratch `/tmp` is writable, executable, bounded to 512 MiB and remains
+  private with `nosuid,nodev`; this permits compiling and running scratch probes.
+  The broker's scratch remains non-executable. Credentials, host files, hidden
+  oracles, original history and unrestricted networking remain inaccessible.
+- The public bootstrap module is checked against reviewed host bytes before use.
+  Admission now runs the real pinned Codex tool loop through edit, search, diff,
+  Python tests, TypeScript checking/execution, native compilation and cleanup.
+  Separate checkout controls run the commands documented by both current cases.
+  The harness may still reject force-removal commands; ordinary `rm -r` cleanup
+  is exercised successfully rather than changing Codex's policy.
+
+Use `am-benchmark-pr106-c2-o3` and `dojo-evidence-pr60-c3-o5` for new screens.
+Their case revisions advance because the model sees additional public pre-fix
+regression tests and development instructions. Historical source/aliases remain
+available and oracle behavior is unchanged. AgentMonitor remains a backend
+slice: its DEVELOPMENT.md names supported commands and the omitted full-app
+frontend/build scope. Public tests are development aids, not the hidden grader.
+
+Any image, bootstrap, adapter or admission-probe change requires new admission.
+Do not pool improved-environment runs with historical minimal-runtime scores.
+The richer image and case packaging can both affect outcomes; a fresh comparison
+measures their combined effect, not the causal effect of one missing tool.
 
 ### Model gateway
 

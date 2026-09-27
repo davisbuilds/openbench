@@ -194,6 +194,7 @@ class RevisionManifestTests(unittest.TestCase):
         self.stage('dojo-evidence-pr60-v5')
         historical = copy.deepcopy(suite_run.compile_suite(self.suite).manifest)
         del historical['sandbox']['implementation_sha256']['obench.repair_identity']
+        del historical['sandbox']['implementation_sha256']['obench.repair_devtools']
         del historical['task_sets'][0]['repair_revision']
         self.validate(historical)
 

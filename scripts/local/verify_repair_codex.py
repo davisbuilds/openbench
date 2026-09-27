@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import base64
 import asyncio
 import hashlib
 import json
@@ -18,6 +19,7 @@ import shlex
 import sys
 import tempfile
 import types
+import tomllib
 import uuid
 
 REPO = Path(__file__).resolve().parents[2]
@@ -33,7 +35,7 @@ from obench.harbor_sandbox import RepairSandbox, docker_bytes, validate_image
 MARKER = "OPENBENCH_OFFLINE_CODEX_TOOL_PROBE"
 FINAL = "Offline tool transport verified."
 FAKE = r'''
-import http.server,http.client,json,os,signal,threading,sys
+import base64,http.server,http.client,json,os,signal,threading,sys
 from pathlib import Path
 from obench.sandbox_gateway import BrokerServer,GatewayConfig,AuthCredentials,UpstreamStream
 import obench.sandbox_gateway as gateway
@@ -54,7 +56,7 @@ class Provider(http.server.BaseHTTPRequestHandler):
   else:
    namespaces=[tool for block in request['input'] if block.get('type')=='additional_tools' for tool in block.get('tools',[])]
    assert any(tool.get('name')=='functions' and any(child.get('name')=='exec' for child in tool.get('tools',[])) for tool in namespaces)
-   command="printf '\\n# OPENBENCH_OFFLINE_CODEX_TOOL_PROBE\\n' >> /app/scripts/profiles/__init__.py"
+   command=base64.b64decode(sys.argv[3]).decode()
    code='text(await tools.exec_command('+json.dumps({'cmd':command})+'));'
    # The real pinned provider returns the short tool name without namespace.
    item={'id':'tool_offline','type':'custom_tool_call','call_id':'call_offline','name':'exec','input':code,'status':'completed'}
@@ -96,6 +98,20 @@ async def run(args):
                "runtime_image": image, "codex_version": CLI_VERSION,
                "model_alias": args.model, "model": model, "effort": effort,
                "probe_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+    app = args.task / 'environment/app'
+    registered = 'src/import/benchmark.ts' if (app / 'src').is_dir() else None
+    target = registered or 'scripts/profiles/__init__.py'
+    prefix = '//' if registered else '#'
+    command = "set -eu\npython3 -m obench.repair_devtools check > /logs/agent/developer-workflow.json\n"
+    command += "test -z \"$(git status --porcelain)\"\ntest \"$(git rev-list --count HEAD)\" = 1\ntest -z \"$(git remote)\"\n"
+    if (app / 'tests').is_dir():
+        command += ('pnpm exec tsc --noEmit\nnode --import tsx --test tests/*.test.ts\n' if registered
+                    else 'python3 -m pytest -q\n')
+    command += "printf '\\n" + prefix + " " + MARKER + "\\n' >> " + shlex.quote('/app/' + target) + "\n"
+    command += "git diff -- " + shlex.quote(target) + " | rg " + shlex.quote(MARKER) + "\n"
+    command += "mkdir /tmp/codex-cleanup-check\nprintf disposable > /tmp/codex-cleanup-check/file\nrm -r /tmp/codex-cleanup-check\ntest ! -e /tmp/codex-cleanup-check\n"
+    encoded_command = base64.b64encode(command.encode()).decode()
+    oracle = tomllib.loads((args.task / 'task.toml').read_text()).get('metadata', {}).get('openbench_oracle')
     env = None
     temporary = tempfile.TemporaryDirectory(prefix="obench-codex-offline-")
     try:
@@ -107,7 +123,7 @@ async def run(args):
         env = RepairSandbox(environment_dir=(args.task / "environment").resolve(),
             environment_name="offline-codex", session_id="offline-codex-" + uuid.uuid4().hex[:12],
             trial_paths=paths, task_env_config=EnvironmentConfig(network_mode="no-network", cpus=1, memory_mb=1024),
-            network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), runtime_image=image)
+            network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), runtime_image=image, oracle_id=oracle)
 
         async def fake_start(self, actual_model, actual_effort, *_):
             if (actual_model, actual_effort) != (model, effort):
@@ -129,7 +145,7 @@ async def run(args):
             await docker_bytes("exec", "-i", self._containers["broker"], "python3", "-c",
                 "import sys;open('/run/private/fake.py','wb').write(sys.stdin.buffer.read())", data=FAKE.encode())
             await docker_bytes("exec", "--detach", self._containers["broker"], "sh", "-c",
-                "exec python3 /run/private/fake.py " + shlex.quote(model) + " " + shlex.quote(effort) + " > /run/private/fake.log 2>&1")
+                "exec python3 /run/private/fake.py " + shlex.quote(model) + " " + shlex.quote(effort) + " " + shlex.quote(encoded_command) + " > /run/private/fake.log 2>&1")
             for _ in range(100):
                 ready = await docker_bytes("exec", self._containers["broker"], "python3", "-c",
                     "import os;print(os.path.exists('/run/openbench-model/gateway.sock'))")
@@ -177,15 +193,38 @@ async def run(args):
                 "OPENBENCH_CODEX_AUTH_RETURN_PATH": str(root / "return.json")})
         await env.start()
         await agent.setup(env)
-        await asyncio.wait_for(agent.run("Add the requested harmless probe comment to scripts/profiles/__init__.py, then confirm completion.", env, AgentContext()), 90)
+        await asyncio.wait_for(agent.run("Run the requested developer workflow checks, add the harmless probe comment, then confirm completion.", env, AgentContext()), 90)
         await env.download_dir("/logs/agent", output / "agent")
         receipt["frozen_source"] = await env.freeze_source(output / "source")
         text = (output / "agent/codex.txt").read_text()
-        source = (output / "source/scripts/profiles/__init__.py").read_text()
+        source = (output / "source" / target).read_text()
         requests = [json.loads(line) for line in (output / "requests.jsonl").read_text().splitlines()]
         if FINAL not in text or MARKER not in source:
             raise RuntimeError("actual Codex tool execution or final response was not observed")
-        ast.parse(source)
+        if not registered:
+            ast.parse(source)
+        developer = json.loads((output / 'agent/developer-workflow.json').read_text())
+        required = {'git-baseline-diff', 'search', 'python-tests', 'typescript-check-run', 'native-build', 'json', 'processes', 'cleanup'}
+        if set(developer['workflows']) != required:
+            raise RuntimeError('developer workflow checks incomplete')
+        # Completion of the single command is independently observed in Codex's
+        # emitted command event, not inferred from the fake provider's final.
+        events = []
+        for line in text.splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict) and isinstance(event.get('item'), dict):
+                item = event['item']
+                if event.get('type') == 'item.completed' and item.get('type') == 'command_execution':
+                    events.append(item)
+        if (len(events) != 1 or events[0].get('exit_code') != 0
+                or events[0].get('status') != 'completed'
+                or MARKER not in events[0].get('aggregated_output', '')):
+            raise RuntimeError('developer workflow command did not finish successfully through Codex')
+        receipt['developer_workflows_passed'] = True
+        receipt['developer_environment'] = developer
         if f"Model metadata for `{model}` not found" in text:
             raise RuntimeError("pinned CLI lacks the selected model metadata")
         if len(requests) != 2 or not any(item.get("type") == "custom_tool_call_output" for item in requests[-1]["input"]):

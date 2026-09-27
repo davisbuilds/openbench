@@ -273,7 +273,7 @@ def compose_config(image: str, token: str, *, cpus: float = 2, memory_mb: int = 
                      "user": f"{UID}:{UID}", "network_mode": "none", "working_dir": "/app",
                      "entrypoint": ["/bin/sh", "-c"], "command": ["exec sleep infinity"],
                      "environment": {"HOME": "/home/solver", "PYTHONDONTWRITEBYTECODE": "1"},
-                     "tmpfs": [f"/tmp:rw,nosuid,nodev,size=256m,uid={UID},gid={UID},mode=1777",
+                     "tmpfs": [f"/tmp:rw,exec,nosuid,nodev,size=512m,uid={UID},gid={UID},mode=1777",
                                f"/home/solver:rw,nosuid,nodev,size=64m,uid={UID},gid={UID},mode=700"],
                      "volumes": [{"type": "volume", "source": "source", "target": "/app"},
                                  {"type": "volume", "source": "logs", "target": "/logs"},
@@ -494,6 +494,14 @@ os.chown('/run/openbench-model', 0, 10001)
                 for role in ("main", "broker"):
                     verify_inspection(await self._inspect(role), role=role, image_id=self._image_id, volume_names=self._volumes)
                 self._started = True
+                from . import repair_devtools
+                expected_tools = hashlib.sha256(Path(repair_devtools.__file__).read_bytes()).hexdigest()
+                actual_tools = await self.exec("python3 -c \"import hashlib,obench.repair_devtools as m; print(hashlib.sha256(open(m.__file__,'rb').read()).hexdigest())\"")
+                if actual_tools.return_code or actual_tools.stdout.strip() != expected_tools:
+                    raise SandboxError('runtime developer tools differ from reviewed host module')
+                baseline = await self.exec('python3 -m obench.repair_devtools init')
+                if baseline.return_code != 0:
+                    raise SandboxError('cannot initialize the synthetic workspace Git baseline: ' + baseline.stderr)
             except BaseException:
                 await self._cleanup()
                 raise

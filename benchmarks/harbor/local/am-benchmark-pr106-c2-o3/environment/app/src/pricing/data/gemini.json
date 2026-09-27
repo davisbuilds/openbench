@@ -1,0 +1,97 @@
+{
+  "provider": "google",
+  "lastUpdated": "2026-07-08T00:00:00Z",
+  "models": {
+    "gemini-3.5-flash": {
+      "aliases": [
+        "gemini-3-flash-a",
+        "Gemini 3.5 Flash (High)",
+        "Gemini 3.5 Flash (Medium)",
+        "Gemini 3.5 Flash (Low)"
+      ],
+      "inputCostPerMTok": 1.5,
+      "outputCostPerMTok": 9,
+      "cacheReadCostPerMTok": 0.15,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gemini-3.1-pro-preview": {
+      "aliases": [
+        "gemini-3.1-pro-preview-customtools",
+        "gemini-pro-default",
+        "Gemini 3.1 Pro (High)",
+        "Gemini 3.1 Pro (Medium)",
+        "Gemini 3.1 Pro (Low)"
+      ],
+      "inputCostPerMTok": 2,
+      "outputCostPerMTok": 12,
+      "cacheReadCostPerMTok": 0.2,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 200000,
+          "inputCostPerMTok": 4,
+          "outputCostPerMTok": 18,
+          "cacheReadCostPerMTok": 0.4,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
+    },
+    "gemini-3.1-flash-lite-preview": {
+      "aliases": [],
+      "inputCostPerMTok": 0.25,
+      "outputCostPerMTok": 1.5,
+      "cacheReadCostPerMTok": 0.025,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gemini-3-flash-preview": {
+      "aliases": [],
+      "inputCostPerMTok": 0.5,
+      "outputCostPerMTok": 3,
+      "cacheReadCostPerMTok": 0.05,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gemini-2.5-pro": {
+      "aliases": [
+        "gemini-2.5-pro-preview-05-06"
+      ],
+      "inputCostPerMTok": 1.25,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 0.125,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 200000,
+          "inputCostPerMTok": 2.5,
+          "outputCostPerMTok": 15,
+          "cacheReadCostPerMTok": 0.25,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
+    },
+    "gemini-2.5-flash": {
+      "aliases": [
+        "gemini-2.5-flash-preview-04-17"
+      ],
+      "inputCostPerMTok": 0.3,
+      "outputCostPerMTok": 2.5,
+      "cacheReadCostPerMTok": 0.03,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gemini-2.0-flash": {
+      "aliases": [
+        "gemini-2.0-flash-001"
+      ],
+      "inputCostPerMTok": 0.1,
+      "outputCostPerMTok": 0.4,
+      "cacheReadCostPerMTok": 0.025,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": true
+    }
+  }
+}

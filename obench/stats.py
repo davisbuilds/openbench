@@ -1170,6 +1170,8 @@ def _validate_suite_sandbox_policy(manifest):
         accepted += (base_modules, registered_modules)
     # New seals bind revision selection; historical seals remain readable.
     accepted += tuple(modules | {'obench.repair_identity'} for modules in accepted)
+    accepted += tuple(modules | {'obench.repair_devtools'} for modules in accepted
+                      if 'obench.repair_identity' in modules)
     if (not isinstance(hashes, dict) or set(hashes) not in accepted
             or not all(_sha256_hex(value) for value in hashes.values())):
         raise ValueError("suite manifest sandbox implementation hashes are invalid")

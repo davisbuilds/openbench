@@ -107,7 +107,7 @@ obench campaign status /path/printed/by/launch
 ```
 
 `qualify` is an explicit live-control operation. It runs the existing offline
-boundary, CLI, deadline, grading, export, trajectory and runtime socket controls
+boundary, CLI, developer workflow, deadline, grading, export, trajectory and runtime socket controls
 first, then a 180-second file-edit control for each selected model. It uses zero
 retries and at most 20 requests per arm. OAuth is copied read-only from the
 explicit local file into a private temporary HOME after offline checks pass;
