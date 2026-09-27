@@ -3,8 +3,8 @@
 This is a backend slice. Dependencies are already installed offline. Use:
 
 ```sh
-pnpm exec tsc --noEmit
-node --import tsx --test tests/*.test.ts
+pnpm run typecheck
+pnpm test
 # Additional scratch TypeScript tests can use the same runner:
 node --import tsx --test tests/my-check.test.ts
 git status --short
@@ -15,9 +15,10 @@ The supplied public regression tests cover usage separation and its HTTP route.
 They predate the repair. Add your own focused tests while investigating; passing
 these public tests does not imply passing the hidden behavioral grader.
 
-The original package.json and lockfile are retained for context. Its full-app
-build, frontend, lint and other scripts refer to files outside this backend
-slice; use the commands above. No dependency installation or network is needed.
+The package scripts expose the supported backend test and typecheck workflows.
+Full-app frontend, build and lint scripts are omitted because their inputs are
+outside this slice. Original dependency metadata and the lockfile are retained.
+No dependency installation or network is needed.
 The runtime provides TypeScript 6.0.3, tsx 4.23.5 and the backend packages/types.
 Git contains one synthetic initial snapshot and no original history or remotes.
 Only implementation under src/ is submitted. Test files, scratch artifacts and

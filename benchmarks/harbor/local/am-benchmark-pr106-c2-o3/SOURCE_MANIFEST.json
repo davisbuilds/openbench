@@ -10,7 +10,8 @@
     {
       "path": "package.json",
       "source_revision": "d33ef01584fe78f686ef921995f55e0ce70b9760",
-      "sha256": "79289e47e1daf027d33f7597d44425640f910930ca038903b32b0c92e82ca61b"
+      "sha256": "e2072c6d60cc42b85de96e322260987fda67014173a128b2368339d578cc80ac",
+      "modifications": "Replace full-app scripts with the supported backend slice test, watch and typecheck commands; dependencies and metadata unchanged."
     },
     {
       "path": "pnpm-lock.yaml",

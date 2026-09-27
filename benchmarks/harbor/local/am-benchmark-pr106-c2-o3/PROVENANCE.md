@@ -8,7 +8,9 @@ https://github.com/davisbuilds/agentmonitor. The original test is copied verbati
 its revision and checksum are in SOURCE_MANIFEST.json. It tests existing usage
 and HTTP behavior, without importing historical reference repairs or the hidden
 oracle. Other old tests that assert implementation-specific storage identifiers
-are deliberately not included. Package metadata and source stay unchanged.
+are deliberately not included. Package dependency metadata and source stay unchanged. The package scripts
+are narrowed to the supported backend test/watch/typecheck workflows; the
+source manifest records that derivation.
 
 Case revision advances for the additional model-visible tests/instructions.
 Oracle revision remains 3. Use the developer runtime and renew admission before

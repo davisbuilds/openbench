@@ -105,7 +105,7 @@ async def run(args):
     command = "set -eu\npython3 -m obench.repair_devtools check > /logs/agent/developer-workflow.json\n"
     command += "test -z \"$(git status --porcelain)\"\ntest \"$(git rev-list --count HEAD)\" = 1\ntest -z \"$(git remote)\"\n"
     if (app / 'tests').is_dir():
-        command += ('pnpm exec tsc --noEmit\nnode --import tsx --test tests/*.test.ts\n' if registered
+        command += ('pnpm run typecheck\npnpm test\n' if registered
                     else 'python3 -m pytest -q\n')
     command += "printf '\\n" + prefix + " " + MARKER + "\\n' >> " + shlex.quote('/app/' + target) + "\n"
     command += "git diff -- " + shlex.quote(target) + " | rg " + shlex.quote(MARKER) + "\n"
