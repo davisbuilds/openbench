@@ -84,6 +84,17 @@ the PR, not as a "resolved" note here).
 
 ### Benchmark discrimination
 
+#### Share case snapshots across oracle revisions
+- **What**: independent [case/oracle revisions](BENCHMARK_VERSIONING.md) now
+  describe identity, but Harbor task directories still duplicate a case's
+  source and environment when packaging multiple oracle revisions.
+- **Evidence**: Dojo v4/v5 and AM106 v3/v4 each have identical prompt/environment
+  fingerprints. Their directory copies are packaging overhead.
+- **Next**: materialize self-contained Harbor tasks from one immutable case
+  snapshot plus a selected oracle. Preserve historical packages and seals;
+  do not use symlinks that weaken task-tree validation.
+- **Revisit when**: packaging the next semantic case/oracle pair.
+
 #### Aggregate sandbox storage bounds
 - **What**: source/log named volumes still lack aggregate disk quotas. Export
   limits bound what the host accepts, not what a solver can write to its volume.

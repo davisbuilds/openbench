@@ -22,8 +22,11 @@ import time
 import tomllib
 import uuid
 
+from obench import repair_identity
+
 # Bind the implementation loaded by this process, not a later edit on disk.
 _LOADED_GRADER_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+_LOADED_REVISION_SHA256 = hashlib.sha256(Path(repair_identity.__file__).read_bytes()).hexdigest()
 
 MAX_SOURCE = 2 * 1024 * 1024
 MAX_OUTPUT = 128 * 1024
@@ -101,6 +104,8 @@ def task_manifest(task_root: Path) -> dict:
     """
     if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != _LOADED_GRADER_SHA256:
         raise GradingError('trusted grader changed after import')
+    if hashlib.sha256(Path(repair_identity.__file__).read_bytes()).hexdigest() != _LOADED_REVISION_SHA256:
+        raise GradingError('trusted revision implementation changed after import')
     root = Path(task_root)
     if root.is_symlink() or not root.is_dir():
         raise GradingError('invalid task root')
@@ -112,6 +117,11 @@ def task_manifest(task_root: Path) -> dict:
     if not isinstance(metadata, dict):
         raise GradingError('invalid task metadata')
     metadata.pop('openbench_task_content_digest', None)
+    if 'openbench_revision' in metadata:
+        try:
+            repair_identity.resolve(metadata)
+        except ValueError as exc:
+            raise GradingError(str(exc)) from exc
     files = {}
     for directory, dirs, names in os.walk(root, followlinks=False):
         for name in dirs + names:
@@ -127,6 +137,7 @@ def task_manifest(task_root: Path) -> dict:
         'task_config': config,
         'task_files_sha256': dict(sorted(files.items())),
         'grading_module_sha256': _LOADED_GRADER_SHA256,
+        'revision_module_sha256': _LOADED_REVISION_SHA256,
         'worker_entry_sha256': hashlib.sha256(WORKER.encode()).hexdigest(),
     }
 
@@ -428,11 +439,13 @@ async def freeze_submission(environment, destination):
 
 
 def dojo_oracle_version(metadata):
-    versions = {'dojo-evidence-pr60-v3': 3, 'dojo-evidence-pr60-v4': 4, 'dojo-evidence-pr60-v5': 5}
-    name = metadata.get('openbench_task')
-    if not isinstance(name, str) or name not in versions:
+    try:
+        revision = repair_identity.resolve(metadata)
+    except ValueError as exc:
+        raise GradingError(str(exc)) from exc
+    if revision['oracle'] != 'dojo-evidence':
         raise GradingError('unsupported Dojo task identity')
-    return versions[name]
+    return revision['oracle_revision']
 
 
 class _TrustedDojoVerifier:

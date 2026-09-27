@@ -19,9 +19,15 @@ tags = ["openbench"]
 openbench_task = "am-benchmark-pr106-v4"
 openbench_workspace_kind = "snapshot"
 
+[metadata.openbench_revision]
+case = "am-benchmark-pr106"
+case_revision = 1
+oracle = "agentmonitor-benchmark"
+oracle_revision = 3
+
 [metadata.openbench_task_content_digest]
 scheme = 4
-sha256 = "2637867bedd6baba2703b433db827eb3669b1c28668a40ab1750e69c409718d7"
+sha256 = "b22b5717900fb60c7c3165c9ad28fdcad42d971db10fd6377ee8020a3e4071a0"
 
 [metadata.openbench_harbor_export]
 schema_version = 1

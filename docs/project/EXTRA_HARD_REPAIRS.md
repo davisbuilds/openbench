@@ -5,6 +5,10 @@ on externally owned observations, 2026-09-26.
 Contract: [extra-hard repairs](../specs/2026-09-16-extra-hard-repairs-spec.md).
 No case is labeled extra-hard yet.
 
+Version changes follow [benchmark versioning](BENCHMARK_VERSIONING.md): separate
+case and oracle revisions, with execution settings bound by the suite seal.
+Historical `vN` task names remain fixed aliases.
+
 The first isolated repeated screen has finished and its sealed suites reverify.
 Captured artifacts also reproduce their original grading in fresh workers.
 Execution now defaults to 20 minutes with separately bounded sandbox sealing;

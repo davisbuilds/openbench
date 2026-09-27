@@ -7,12 +7,12 @@ import re
 import tomllib
 
 from ..sandbox_grading import GradingError, task_manifest as legacy_task_manifest
+from .. import repair_identity
 
 
 @dataclass(frozen=True)
 class Oracle:
     id: str
-    task: str
     module: str
     source_prefix: str
     protocol: str
@@ -20,13 +20,14 @@ class Oracle:
 
 ORACLES = {
     'agentmonitor-benchmark-v3': Oracle(
-        'agentmonitor-benchmark-v3', 'am-benchmark-pr106-v4',
+        'agentmonitor-benchmark-v3',
         'obench.repair_oracles.agentmonitor_v3', 'src/', 'am-benchmark-observations-v1'),
     'agentmonitor-benchmark-v2': Oracle(
-        'agentmonitor-benchmark-v2', 'am-benchmark-pr106-v3',
+        'agentmonitor-benchmark-v2',
         'obench.repair_oracles.agentmonitor', 'src/', 'am-benchmark-observations-v1'),
 }
 MODULES = ('obench.sandbox_grading', 'obench.harbor_sandbox', 'obench.repair_worker', 'obench.repair_grading',
+           'obench.repair_identity',
            'obench.repair_oracles.registry', 'obench.repair_oracles.agentmonitor',
            'obench.repair_oracles.agentmonitor_v3')
 PACKAGE = Path(__file__).resolve().parents[1]
@@ -46,8 +47,10 @@ def select(metadata):
     if not isinstance(key,str) or key not in ORACLES:
         raise GradingError('unknown trusted repair oracle')
     oracle=ORACLES[key]
-    if metadata.get('openbench_task') != oracle.task:
-        raise GradingError('oracle and task identity differ')
+    try:
+        repair_identity.resolve(metadata)
+    except ValueError as exc:
+        raise GradingError(str(exc)) from exc
     return oracle
 
 

@@ -1038,6 +1038,23 @@ def _validate_suite_manifest_shape(manifest, digest):
         or not isinstance(manifest.get("jobs"), list)
     ):
         raise ValueError("suite manifest structure is invalid")
+    from .repair_identity import validate_record
+    has_revision_code = 'obench.repair_identity' in manifest.get('sandbox', {}).get('implementation_sha256', {})
+    for task_set in manifest['task_sets']:
+        if not isinstance(task_set, dict):
+            continue
+        if has_revision_code != ('repair_revision' in task_set):
+            raise ValueError('suite manifest repair revision implementation binding is invalid')
+        if 'repair_revision' not in task_set:
+            continue
+        entries = task_set.get('tasks')
+        if ('sandbox' not in manifest or task_set.get('kind') != 'local'
+                or not isinstance(entries, list) or len(entries) != 1
+                or not isinstance(entries[0], dict)
+                or not isinstance(entries[0].get('directory'), str)
+                or entries[0].get('logical_name') != 'openbench/' + entries[0]['directory']):
+            raise ValueError('suite manifest repair revision task binding is invalid')
+        validate_record(task_set['repair_revision'], entries[0]['directory'])
     task_set_ids = [
         item.get("id") for item in manifest["task_sets"]
         if isinstance(item, dict)
@@ -1151,6 +1168,8 @@ def _validate_suite_sandbox_policy(manifest):
                 registered_modules | {"obench.codex_models", "obench.repair_oracles.agentmonitor_v3"})
     if not needs_registry:
         accepted += (base_modules, registered_modules)
+    # New seals bind revision selection; historical seals remain readable.
+    accepted += tuple(modules | {'obench.repair_identity'} for modules in accepted)
     if (not isinstance(hashes, dict) or set(hashes) not in accepted
             or not all(_sha256_hex(value) for value in hashes.values())):
         raise ValueError("suite manifest sandbox implementation hashes are invalid")
