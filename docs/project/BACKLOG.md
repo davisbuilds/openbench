@@ -84,6 +84,33 @@ the PR, not as a "resolved" note here).
 
 ### Benchmark discrimination
 
+#### Explicit verification intent and captured model instructions
+- **What**: make repair-task requests explicitly ask for relevant tests and
+  typechecks, and surface the captured Codex base-instruction hash in audit
+  summaries alongside model/effort and CLI version.
+- **Evidence** (*2026-09-28 developer-environment screen*, captured Codex
+  `session_meta.base_instructions` and command events): Luna's base instructions
+  condition testing on an explicit user request; four of its six trials skipped
+  tests. Terra and Sol tested in every trial. Available tools alone do not
+  establish equivalent verification behavior across native model treatments.
+- **Next**: state verification intent in new case revisions without replacing
+  native harness instructions. Preserve historical prompts/results; distinguish
+  observed workflow differences from proven causes of score differences.
+
+#### Repair developer-environment fidelity polish
+- **What**: reduce remaining package/layout noise before the next case revision.
+- **Evidence** (*2026-09-28 developer-environment screen*, terminal command
+  events): AgentMonitor's engine metadata requests Node 24.13.0 while the runtime
+  supplies 24.21.0; checks passed with warnings. One scratch script needed to
+  resolve a dependency under `/opt/repair-deps` instead of `/app/node_modules`.
+  Dojo agents searched omitted profile directories and cleaned bytecode produced
+  by explicit `compileall`. None of these observations explains the graded misses.
+- **Next**: align/document supported engine versions, evaluate conventional
+  dependency resolution for scratch scripts, and document the supplied checkout
+  inventory and explicit bytecode compilation. Investigate the Codex temporary
+  HOME helper-alias warning through admission controls before treating it as a
+  missing capability. Keep host/history/oracle isolation intact.
+
 #### Share case snapshots across oracle revisions
 - **What**: independent [case/oracle revisions](BENCHMARK_VERSIONING.md) now
   describe identity, but Harbor task directories still duplicate a case's
