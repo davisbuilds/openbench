@@ -364,6 +364,9 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
                     "import_path": "obench.harbor_sandbox:RepairSandbox",
                     "kwargs": {
                         "runtime_image": compiled.suite.sandbox.runtime_image,
+                        **({"context_archive": str(compiled.suite.sandbox.context_archive),
+                            "context_sha256": compiled.suite.sandbox.context_sha256}
+                           if compiled.suite.sandbox.context_archive else {}),
                         **({"oracle_id": oracle_id} if oracle_id else {}),
                         "max_requests": compiled.suite.sandbox.max_requests,
                         "request_timeout_seconds": min(compiled.suite.run.timeout_seconds, 3600),
@@ -1158,6 +1161,10 @@ def _semantic_manifest(
             "implementation_sha256": _sandbox_implementation_hashes(
                 registered=any(_registered_oracle_id(item) for item in task_sets)),
         }
+        if suite.sandbox.context_archive:
+            from .frozen_context import load_archive
+            load_archive(suite.sandbox.context_archive, suite.sandbox.context_sha256, kind='context')
+            value['sandbox']['context_sha256'] = suite.sandbox.context_sha256
     return value
 
 
@@ -1170,7 +1177,7 @@ def _registered_oracle_id(item):
 
 def _sandbox_implementation_hashes(*, registered=False) -> dict[str, str]:
     package = Path(__file__).resolve().parent
-    modules = ("codex_models", "repair_identity", "repair_devtools", "harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
+    modules = ("codex_models", "repair_identity", "repair_devtools", "frozen_context", "harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
     if registered:
         from .repair_oracles.registry import MODULES
         modules=tuple(sorted(set(modules)|{name.removeprefix("obench.") for name in MODULES}))

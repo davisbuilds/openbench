@@ -33,6 +33,7 @@ SCRIPTS = (
     'scripts/local/verify_registered_repair.py',
     'scripts/local/verify_registered_lifecycle.py',
     'scripts/local/verify_repair_developer.py',
+    'scripts/local/verify_frozen_context.py',
 )
 
 CONTROLS = (*SCRIPTS, "runtime-sockets")
@@ -70,7 +71,9 @@ def fingerprint(compiled, harbor_binary):
             'harbor':{'version':harbor.version,'commit':harbor.git_commit},
             'implementation':{str(p.relative_to(ROOT)):digest(p) for p in sorted(files)},
             'models':sorted({(arm.arm.model,arm.agent.model_name,arm.agent.kwargs['reasoning_effort']) for arm in compiled.arms}),
-            'concurrency':1}
+            'concurrency':1,
+            **({'context_sha256':compiled.suite.sandbox.context_sha256}
+               if compiled.suite.sandbox.context_archive else {})}
 
 
 def canonical(value):
@@ -118,6 +121,10 @@ def validate_model_controls(directory, expected, records, evidence=None):
         exact['developer_workflows_passed'] = True
         if any(type(receipt.get(key)) is not type(value) or receipt.get(key) != value for key, value in exact.items()):
             raise AdmissionError('model control used another or incomplete execution treatment')
+        context_sha = expected.get('context_sha256')
+        if context_sha and (receipt.get('context', {}).get('sha256') != context_sha
+                            or receipt.get('context', {}).get('global_loaded') is not True):
+            raise AdmissionError('model control did not load the captured context')
 
 
 def validate_admission(path, expected):
@@ -154,6 +161,7 @@ def validate_admission(path, expected):
     suite_run.verify_suite_run(manifest)
     treatment = json.loads(manifest.read_text())['suite_manifest']
     if (treatment.get('sandbox', {}).get('runtime_image') != expected['image']['requested']
+            or treatment.get('sandbox', {}).get('context_sha256') != expected.get('context_sha256')
             or sorted({arm['canonical_model'] for arm in treatment['arms']}) != sorted({m[0] for m in expected['models']})
             or treatment['run']['attempts'] != 1 or treatment['run']['max_retries'] != 0
             or treatment['run']['concurrency'] != 1 or treatment['run']['timeout_seconds'] != 180):
@@ -206,6 +214,9 @@ def prepare_control(compiled, directory):
     text=text[:start]+arms+text[end:]
     text=re.sub(r'^timeout_seconds = .*$', 'timeout_seconds = 180',text,flags=re.M)
     text+='\n[sandbox]\nkind="repair-v1"\nruntime_image='+json.dumps(compiled.suite.sandbox.runtime_image)+'\nmax_requests=20\n'
+    if compiled.suite.sandbox.context_archive:
+        text+='context_archive='+json.dumps(str(compiled.suite.sandbox.context_archive))+'\n'
+        text+='context_sha256='+json.dumps(compiled.suite.sandbox.context_sha256)+'\n'
     suite.write_text(text)
     control=suite_run.compile_suite(suite)
     return control, task
@@ -232,6 +243,11 @@ def verify_control(control, task, result_path):
         expected[target]+=marker
         if receipt['freeze'].get('workspace_files') != source_receipt(expected)['files']:
             raise AdmissionError('authenticated control changed workspace beyond the requested edit')
+        if control.suite.sandbox.context_archive:
+            from .frozen_context import load_archive, verify_session_context
+            captured = load_archive(control.suite.sandbox.context_archive,
+                                    control.suite.sandbox.context_sha256, kind='context')
+            verify_session_context(trial/'agent/sessions', captured)
         events=[json.loads(line) for line in (trial/'verifier/sandbox-gateway.jsonl').read_text().splitlines()]
         complete=[e for e in events if e.get('event')=='request' and e.get('outcome')=='complete']
         if not complete:
@@ -264,9 +280,15 @@ def qualify(compiled, directory, harbor_binary, auth_file):
         [python,SCRIPTS[6],'--runtime-image',image,'--output',str(directory/'registered-oracle')],
         [python,SCRIPTS[7],'--runtime-image',image,'--output',str(directory/'registered-lifecycle')],
         [python,SCRIPTS[8],'--runtime-image',image,'--output',str(directory/'developer-workflows')],
+        [python,SCRIPTS[9],'--runtime-image',image,'--output',str(directory/'frozen-context')],
         ['docker','run','--rm','--network','none','--cap-drop','ALL','--security-opt','no-new-privileges',
          '--user','10001:10001','-i',image,'python3','-','-v'],
     ]
+    context_args = []
+    if compiled.suite.sandbox.context_archive:
+        context_args = ['--context-archive', str(compiled.suite.sandbox.context_archive),
+                        '--context-sha256', compiled.suite.sandbox.context_sha256]
+        commands[1] += context_args
     for index, command in enumerate(commands):
         with (directory/f'offline-{index}.log').open('x') as log:
             if index == len(SCRIPTS):
@@ -277,7 +299,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     for alias, record in list(model_records.items())[1:]:
         with (directory/record['log']).open('x') as log:
             subprocess.run([python,SCRIPTS[1],'--runtime-image',image,'--task',str(task),
-                            '--model',alias,'--output-dir',str((directory/record['receipt']).parent)],
+                            '--model',alias,'--output-dir',str((directory/record['receipt']).parent), *context_args],
                            cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
     validate_model_controls(directory, before, model_records)
     if canonical(before) != canonical(fingerprint(compiled,harbor_binary)):

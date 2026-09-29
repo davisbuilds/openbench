@@ -97,6 +97,15 @@ class RuntimeAdmissionTests(unittest.TestCase):
         records = self.model_receipts(expected)
         evidence = {r[k]:'unused' for r in records.values() for k in ('log','receipt')}
         admission.validate_model_controls(self.root, expected, records, evidence)
+        captured = {**expected, 'context_sha256': 'd'*64}
+        with self.assertRaisesRegex(admission.AdmissionError, 'captured context'):
+            admission.validate_model_controls(self.root, captured, records, evidence)
+        for record in records.values():
+            path = self.root / record['receipt']
+            receipt = json.loads(path.read_text())
+            receipt['context'] = {'sha256': 'd'*64, 'global_loaded': True}
+            write_record(path, receipt)
+        admission.validate_model_controls(self.root, captured, records, evidence)
         with self.assertRaisesRegex(admission.AdmissionError, 'every selected model'):
             admission.validate_model_controls(self.root, expected, {}, evidence)
         missing = dict(evidence)
@@ -150,6 +159,29 @@ class RuntimeAdmissionTests(unittest.TestCase):
         changed['image']['requested']='sha256:'+'d'*64
         with self.assertRaisesRegex(admission.AdmissionError,'stale'):
             admission.validate_admission(path,changed)
+
+    def test_bare_authenticated_control_cannot_admit_captured_context(self):
+        path, expected, value = self.receipt()
+        expected['context_sha256'] = 'd'*64
+        value['fingerprint'] = expected
+        write_record(path, value)
+        with self.assertRaisesRegex(admission.AdmissionError, 'authenticated control used another'):
+            admission.validate_admission(path, expected)
+
+    def test_captured_archive_is_forwarded_to_control_suite(self):
+        from obench.frozen_context import freeze_context
+        root = self.root.resolve()
+        capture = root / 'capture'; (capture/'codex').mkdir(parents=True)
+        (capture/'codex/AGENTS.md').write_text('Check the change.\n')
+        archive = root / 'context.tar'
+        sha = freeze_context(capture, archive)
+        suite = self.compiled.suite.path
+        suite.write_text(suite.read_text() + 'context_archive=' + json.dumps(str(archive))
+                         + '\ncontext_sha256=' + json.dumps(sha) + '\n')
+        compiled = suite_run.compile_suite(suite)
+        control, _ = admission.prepare_control(compiled, self.root/'captured-control')
+        self.assertEqual(control.suite.sandbox.context_sha256, sha)
+        self.assertEqual(control.suite.sandbox.context_archive, archive)
 
     def test_missing_or_modified_control_evidence_is_refused(self):
         path,expected,_=self.receipt()

@@ -195,6 +195,7 @@ class RevisionManifestTests(unittest.TestCase):
         historical = copy.deepcopy(suite_run.compile_suite(self.suite).manifest)
         del historical['sandbox']['implementation_sha256']['obench.repair_identity']
         del historical['sandbox']['implementation_sha256']['obench.repair_devtools']
+        del historical['sandbox']['implementation_sha256']['obench.frozen_context']
         del historical['task_sets'][0]['repair_revision']
         self.validate(historical)
 

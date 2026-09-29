@@ -116,12 +116,14 @@ def read_tree(root: Path) -> dict[str, bytes]:
     return files
 
 
-def pack_files(files: dict[str, bytes]) -> bytes:
+def pack_files(files: dict[str, bytes], modes: dict[str, int] | None = None) -> bytes:
     out = io.BytesIO()
     with tarfile.open(fileobj=out, mode="w") as archive:
         for name, data in sorted(files.items()):
             item = tarfile.TarInfo(relative_path(name))
             item.size, item.mode, item.uid, item.gid = len(data), 0o644, UID, UID
+            if modes is not None:
+                item.mode = 0o755 if modes[name] & 0o111 else 0o644
             archive.addfile(item, io.BytesIO(data))
     return out.getvalue()
 
@@ -274,7 +276,7 @@ def compose_config(image: str, token: str, *, cpus: float = 2, memory_mb: int = 
                      "entrypoint": ["/bin/sh", "-c"], "command": ["exec sleep infinity"],
                      "environment": {"HOME": "/home/solver", "PYTHONDONTWRITEBYTECODE": "1"},
                      "tmpfs": [f"/tmp:rw,exec,nosuid,nodev,size=512m,uid={UID},gid={UID},mode=1777",
-                               f"/home/solver:rw,nosuid,nodev,size=64m,uid={UID},gid={UID},mode=700"],
+                               f"/home/solver:rw,exec,nosuid,nodev,size=64m,uid={UID},gid={UID},mode=700"],
                      "volumes": [{"type": "volume", "source": "source", "target": "/app"},
                                  {"type": "volume", "source": "logs", "target": "/logs"},
                                  {"type": "volume", "source": "gateway", "target": "/run/openbench-model", "read_only": True}]},
@@ -366,8 +368,15 @@ def _build_environment_class(DockerEnvironment, EnvironmentCapabilities, Network
 
         def __init__(self, *args, runtime_image: str, max_requests: int = 200,
                      source_paths: list[str] | None = None, oracle_id: str | None = None,
+                     context_archive: str | None = None, context_sha256: str | None = None,
                      request_timeout_seconds: float = 1200, **kwargs):
             self.runtime_image = validate_image(runtime_image)
+            if (context_archive is None) != (context_sha256 is None):
+                raise SandboxError('context archive requires its digest')
+            self._context = None
+            if context_archive is not None:
+                from .frozen_context import load_archive
+                self._context = load_archive(context_archive, context_sha256, kind='context')
             if type(max_requests) is not int or not 1 <= max_requests <= 10000:
                 raise SandboxError("invalid gateway request budget")
             self.max_requests = max_requests
@@ -409,6 +418,8 @@ def _build_environment_class(DockerEnvironment, EnvironmentCapabilities, Network
             kwargs["mounts"] = []
             super().__init__(*args, **kwargs)
             self._seed_files = read_tree(self.environment_dir / "app")
+            self._seed_modes = {name: (self.environment_dir / 'app' / name).stat().st_mode
+                                for name in self._seed_files}
             self._oracle = None
             if oracle_id is not None:
                 from .repair_oracles.registry import select, source_names, validate_task_binding
@@ -471,11 +482,12 @@ with tarfile.open(fileobj=sys.stdin.buffer, mode='r|') as archive:
         path = Path('/app') / member.name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(archive.extractfile(member).read())
+        path.chmod(0o755 if member.mode & 0o111 else 0o644)
 for name in ('agent', 'verifier', 'artifacts'):
     (Path('/logs') / name).mkdir(parents=True, exist_ok=True)
 for root in (Path('/app'), Path('/logs')):
     for path in [*root.rglob('*'), root]:
-        os.chmod(path, 0o755 if path.is_dir() else 0o644)
+        if path.is_dir(): os.chmod(path, 0o755)
         os.chown(path, 10001, 10001)
 os.chmod('/run/openbench-model', 0o750)
 os.chown('/run/openbench-model', 0, 10001)
@@ -489,11 +501,12 @@ os.chown('/run/openbench-model', 0, 10001)
                 await docker_bytes("run", "--rm", "--name", "obench-sandbox-" + self._token + "-seed", "-i", "--network", "none", "--cap-drop", "ALL",
                     "--cap-add", "CHOWN", "--security-opt", "no-new-privileges", "--user", "0:10001",
                     *mounts, "--entrypoint", "python3", self.runtime_image, "-c", seed_code,
-                    data=pack_files(self._seed_files))
+                    data=pack_files(self._seed_files, self._seed_modes))
                 await self._run_docker_compose_command(["up", "--detach", "--wait"], timeout_sec=60)
                 for role in ("main", "broker"):
                     verify_inspection(await self._inspect(role), role=role, image_id=self._image_id, volume_names=self._volumes)
                 self._started = True
+                await self._stage_context()
                 from . import repair_devtools
                 expected_tools = hashlib.sha256(Path(repair_devtools.__file__).read_bytes()).hexdigest()
                 actual_tools = await self.exec("python3 -c \"import hashlib,obench.repair_devtools as m; print(hashlib.sha256(open(m.__file__,'rb').read()).hexdigest())\"")
@@ -505,6 +518,39 @@ os.chown('/run/openbench-model', 0, 10001)
             except BaseException:
                 await self._cleanup()
                 raise
+
+        async def _stage_context(self):
+            if self._context is None:
+                return
+            # Validated host bytes only, staged before any solver command. No
+            # host mount, harness config, credential or arbitrary destination.
+            import base64
+            payload = {'sha256': self._context.sha256, 'files': {
+                name: {'data': base64.b64encode(data).decode(),
+                       **self._context.manifest['files'][name]}
+                for name, data in self._context.files.items()}}
+            program = r'''
+import base64, hashlib, json, os, sys
+from pathlib import Path
+p = json.load(sys.stdin)
+for name, info in p['files'].items():
+    parts = name.split('/')
+    root = Path('/tmp/codex-home') if parts[0] == 'codex' else Path('/home/solver/context/resources')
+    target = root.joinpath(*parts[1:])
+    if any(x.is_symlink() for x in (target, *target.parents)) or target.exists():
+        raise ValueError('context destination already exists or is a link')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = base64.b64decode(info['data'], validate=True)
+    if hashlib.sha256(data).hexdigest() != info['sha256']:
+        raise ValueError('context staging corruption')
+    with target.open('xb') as f: f.write(data)
+    target.chmod(info['mode'])
+Path('/logs/agent/context.json').write_text(json.dumps({
+    'schema': 1, 'sha256': p['sha256'], 'files': {
+        n: {k:v for k,v in i.items() if k != 'data'} for n,i in p['files'].items()}}))
+'''
+            await docker_bytes('exec', '-i', '--user', '10001:10001', self._containers['main'],
+                               'python3', '-c', program, data=json.dumps(payload).encode())
 
         async def start_gateway(self, model, effort, auth_path, max_requests=None):
             try:

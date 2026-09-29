@@ -1124,8 +1124,10 @@ def _validate_suite_sandbox_policy(manifest):
         raise ValueError("suite manifest sandbox requires local_only publication")
     required = {"kind", "runtime_image", "max_requests", "implementation_sha256"}
     if (not isinstance(policy, dict) or not required <= set(policy)
-            or set(policy) - required - {"request_timeout_seconds"}):
+            or set(policy) - required - {"request_timeout_seconds", "context_sha256"}):
         raise ValueError("suite manifest sandbox policy fields are invalid")
+    if 'context_sha256' in policy and not _sha256_hex(policy['context_sha256']):
+        raise ValueError('suite context digest is invalid')
     # Historical seals predate the explicit request budget and remain valid.
     # New seals bind it to the same execution policy used by the compiler.
     if "request_timeout_seconds" in policy:
@@ -1172,6 +1174,10 @@ def _validate_suite_sandbox_policy(manifest):
     accepted += tuple(modules | {'obench.repair_identity'} for modules in accepted)
     accepted += tuple(modules | {'obench.repair_devtools'} for modules in accepted
                       if 'obench.repair_identity' in modules)
+    accepted += tuple(modules | {'obench.frozen_context'} for modules in accepted
+                      if 'obench.repair_devtools' in modules)
+    if 'context_sha256' in policy and (not isinstance(hashes, dict) or 'obench.frozen_context' not in hashes):
+        raise ValueError('suite context implementation is not sealed')
     if (not isinstance(hashes, dict) or set(hashes) not in accepted
             or not all(_sha256_hex(value) for value in hashes.values())):
         raise ValueError("suite manifest sandbox implementation hashes are invalid")

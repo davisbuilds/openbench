@@ -1,5 +1,8 @@
 # Captured-context trials
 
+For canonical isolated repair suites, use [frozen repair context](project/FROZEN_CONTEXT.md).
+The configuration-variant route below remains a separate native legacy feature.
+
 Config variants can opt into a stricter native trial path with
 `captured_context = true`. It is intended for comparisons where a harness must
 receive a captured set of settings and skills, with complete local evidence.

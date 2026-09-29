@@ -91,6 +91,11 @@ jobs:
           .venv/bin/python scripts/local/verify_repair_developer.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/developer-workflows
+      - name: Check frozen instructions, skills, resources and executable checkout files
+        run: >-
+          .venv/bin/python scripts/local/verify_frozen_context.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --output results/ci/frozen-context
       - name: Check completion and timeout across real Harbor cleanup
         run: >-
           .venv/bin/python scripts/ci/verify_sandbox_timeouts.py
