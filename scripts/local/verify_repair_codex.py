@@ -57,7 +57,11 @@ class Provider(http.server.BaseHTTPRequestHandler):
    namespaces=[tool for block in request['input'] if block.get('type')=='additional_tools' for tool in block.get('tools',[])]
    assert any(tool.get('name')=='functions' and any(child.get('name')=='exec' for child in tool.get('tools',[])) for tool in namespaces)
    command=base64.b64decode(sys.argv[3]).decode()
-   code='text(await tools.exec_command('+json.dumps({'cmd':command})+'));'
+   # A yielded shell session is still running. Drain it inside the real tool
+   # invocation before the fake provider emits its final response; otherwise
+   # a slower CI host seals the sandbox in the middle of the checks.
+   code='// @exec: {"yield_time_ms": 60000}\nlet r = await tools.exec_command('+json.dumps({'cmd':command,'yield_time_ms':1000})+');\n'
+   code+='while (r.session_id) { r = await tools.write_stdin({session_id:r.session_id,chars:"",yield_time_ms:1000}); }\ntext(r);'
    # The real pinned provider returns the short tool name without namespace.
    item={'id':'tool_offline','type':'custom_tool_call','call_id':'call_offline','name':'exec','input':code,'status':'completed'}
   response={'id':'resp_offline_'+('final' if has_output else 'tool'),'object':'response','status':'completed','output':[item],'usage':{'input_tokens':10,'output_tokens':5,'total_tokens':15}}

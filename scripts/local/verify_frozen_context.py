@@ -30,7 +30,8 @@ def main():
     resources = source / 'resources'; resources.mkdir()
     (resources / 'guide.md').write_text('Run the local helper and relevant tests.\n')
     helper = resources / 'check.sh'
-    helper.write_text('#!/bin/sh\nset -eu\ntest -r /app/AGENTS.md\nprintf "context helper passed\\n"\n')
+    # Exceed exec_command's default initial wait to catch premature fake finals.
+    helper.write_text('#!/bin/sh\nset -eu\ntest -r /app/AGENTS.md\nsleep 12\nprintf "context helper passed\\n"\n')
     helper.chmod(0o755)
     archive = output / 'context.tar'
     digest = freeze_context(source, archive)
